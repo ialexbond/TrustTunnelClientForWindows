@@ -648,7 +648,7 @@ Result<SystemDnsServers, RetrieveSystemDnsError> retrieve_system_dns_servers() {
         });
     }
 
-    res_nclose(&res);
+    res_ndestroy(&res);
     return servers;
 }
 
