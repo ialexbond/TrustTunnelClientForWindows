@@ -1088,7 +1088,7 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
     SSL_set_connect_state(ssl.get());
 
     if (auto session = pop_session_from_cache(sni)) {
-        SSL_set_session(ssl.get(), session.release());
+        SSL_set_session(ssl.get(), session.get()); // Callee uprefs session.
     }
 
 #ifdef __mips__
