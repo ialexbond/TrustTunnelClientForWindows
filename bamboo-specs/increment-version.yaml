@@ -40,7 +40,8 @@ Increment version:
             fi
             ./scripts/increment_version.sh ${bamboo_custom_version} || exit 1
 
-            git remote set-url origin ${bamboo_planRepository_repositoryUrl}
+            . ../git-scripts/git_kit.sh
+            reconfigure_git_repo ${bamboo_planRepository_repositoryUrl}
             git pull
             git reset
             git add conandata.yml
