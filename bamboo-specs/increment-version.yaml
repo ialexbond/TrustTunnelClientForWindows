@@ -30,6 +30,8 @@ Increment version:
         interpreter: SHELL
         scripts:
           - |-
+            #!/bin/bash
+
             set -x -e
 
             git config user.name "Bamboo"
