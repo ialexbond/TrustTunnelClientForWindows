@@ -13,20 +13,19 @@ stages:
 Increment version:
   key: JOB1
   docker:
-    image: adguard/core-libs:latest
+    image: adguard/core-libs:2.4
     volumes:
       ${bamboo.working.directory}: ${bamboo.working.directory}
       ${bamboo.tmp.directory}: ${bamboo.tmp.directory}
-      ${bamboo.git.cache.directory}: ${bamboo.git.cache.directory}
-      ${system.HOME}/.ssh: /root/.ssh
     docker-run-arguments: [ ]
   tasks:
     - !include docker-clean.yaml
     - checkout:
         repository: core-libs/vpn-libs
         path: vpn-libs
-        force-clean-build: 'true'
-        description: Checkout
+    - checkout:
+        repository: git-scripts
+        path: git-scripts
     - script:
         interpreter: SHELL
         scripts:
@@ -66,6 +65,7 @@ variables:
 repositories:
   - core-libs/vpn-libs:
       scope: global
+  - git-scripts
 branches:
   create: manually
   delete: never
