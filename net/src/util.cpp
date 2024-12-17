@@ -1062,6 +1062,12 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
         return "Failed to set SSL versions";
     }
 
+    static constexpr uint16_t GROUPS[] = {
+            SSL_GROUP_X25519_MLKEM768, SSL_GROUP_X25519, SSL_GROUP_SECP256R1, SSL_GROUP_SECP384R1};
+    if (!SSL_set1_group_ids(ssl.get(), GROUPS, std::size(GROUPS))) {
+        return "Failed to set groups";
+    }
+
     if (!quic) {
         SSL_CTX_set_grease_enabled(ctx.get(), 1);
 
