@@ -37,6 +37,7 @@ fn fill_main_table(mut doc: Document, settings: &Settings) -> Document {
     doc["loglevel"] = value(&settings.loglevel);
     doc["vpn_mode"] = value(&settings.vpn_mode);
     doc["killswitch_enabled"] = value(settings.killswitch_enabled);
+    doc["post_quantum_group_enabled"] = value(settings.post_quantum_group_enabled);
     doc["exclusions"] = value(Array::from_iter(settings.exclusions.iter()));
     doc["dns_upstreams"] = value(Array::from_iter(settings.dns_upstreams.iter()));
 

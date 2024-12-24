@@ -100,6 +100,8 @@ int main(int argc, char **argv) {
     config.apply_config(parse_result.table());
     config.apply_cmd_args(result);
 
+    vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
+
     ag::Logger::set_log_level(config.loglevel);
     g_client = new ag::VpnStandaloneClient(std::move(config));
 

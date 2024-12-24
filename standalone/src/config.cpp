@@ -298,6 +298,7 @@ void VpnStandaloneConfig::apply_config(const toml::table &config) {
                    .unwrap_or(VPN_MODE_GENERAL);
 
     killswitch_enabled = Field<bool>(config, "killswitch_enabled").unwrap_or(false);
+    post_quantum_group_enabled = Field<bool>(config, "post_quantum_group_enabled").unwrap_or(false);
 
     ssl_session_storage_path = config["ssl_session_cache_path"].value<std::string_view>();
 

@@ -44,10 +44,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL Linux)
     list(APPEND SOURCE_FILES ${NET_SOURCE_DIR}/os_tunnel_linux.cpp)
 endif()
 
-if(NOT TARGET vpnlibs_common)
-    add_subdirectory(${VPN_LIB_DIR}/common ${CMAKE_BINARY_DIR}/common)
-endif(NOT TARGET vpnlibs_common)
-
 add_library(vpnlibs_net STATIC EXCLUDE_FROM_ALL ${SOURCE_FILES})
 set_target_properties(vpnlibs_net PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (NOT MSVC)
@@ -73,6 +69,10 @@ find_package(ngtcp2 REQUIRED)
 if (NOT DISABLE_HTTP3)
     find_package(quiche REQUIRED)
 endif()
+
+if(NOT TARGET vpnlibs_common)
+    add_subdirectory(${VPN_LIB_DIR}/common ${CMAKE_BINARY_DIR}/common)
+endif(NOT TARGET vpnlibs_common)
 
 target_link_libraries(vpnlibs_net vpnlibs_common)
 target_link_libraries(vpnlibs_net ZLIB::ZLIB brotli::brotli http_parser::http_parser)

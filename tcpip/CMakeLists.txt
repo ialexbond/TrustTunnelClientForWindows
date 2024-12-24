@@ -45,14 +45,6 @@ set(SOURCE_FILES
         ${TCPIP_SOURCE_DIR}/vpn_packet_pool.h
     )
 
-if(NOT TARGET vpnlibs_common)
-    add_subdirectory(${VPN_LIB_DIR}/common ${CMAKE_BINARY_DIR}/common)
-endif(NOT TARGET vpnlibs_common)
-
-if(NOT TARGET vpnlibs_net)
-    add_subdirectory(${VPN_LIB_DIR}/net ${CMAKE_BINARY_DIR}/net)
-endif(NOT TARGET vpnlibs_net)
-
 add_library(vpnlibs_tcpip STATIC EXCLUDE_FROM_ALL
     ${lwipcore_SRCS}
     ${lwipcore4_SRCS}
@@ -66,6 +58,14 @@ target_include_directories(vpnlibs_tcpip PRIVATE ${THIRD_PARTY_DIR}/pcap_savefil
 
 find_package(klib REQUIRED)
 find_package(libevent REQUIRED)
+
+if(NOT TARGET vpnlibs_common)
+    add_subdirectory(${VPN_LIB_DIR}/common ${CMAKE_BINARY_DIR}/common)
+endif(NOT TARGET vpnlibs_common)
+
+if(NOT TARGET vpnlibs_net)
+    add_subdirectory(${VPN_LIB_DIR}/net ${CMAKE_BINARY_DIR}/net)
+endif(NOT TARGET vpnlibs_net)
 
 target_link_libraries(vpnlibs_tcpip vpnlibs_common vpnlibs_net)
 target_link_libraries(vpnlibs_tcpip klib::klib libevent::libevent)

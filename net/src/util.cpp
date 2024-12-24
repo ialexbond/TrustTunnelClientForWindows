@@ -1071,7 +1071,7 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
 
     static constexpr uint16_t GROUPS[] = {
             SSL_GROUP_X25519_MLKEM768, SSL_GROUP_X25519, SSL_GROUP_SECP256R1, SSL_GROUP_SECP384R1};
-    if (!SSL_set1_group_ids(ssl.get(), GROUPS, std::size(GROUPS))) {
+    if (vpn_post_quantum_group_enabled() && !SSL_set1_group_ids(ssl.get(), GROUPS, std::size(GROUPS))) {
         return "Failed to set groups";
     }
 

@@ -25,10 +25,6 @@ using namespace std::chrono;
 
 static std::atomic_int g_next_id = 0;
 
-static constexpr uint32_t DEFAULT_HANDLER_PROFILING_THRESHOLD_NS = 5'000'000; // 5 milliseconds
-
-static std::atomic_bool g_handler_profiling_enabled = false;
-
 struct ProfilingVpnHandlerCtx {
     VpnHandler handler;
     Vpn *vpn;
@@ -872,18 +868,6 @@ sockaddr_storage vpn_get_socks_listener_address(Vpn *vpn) {
         ret = vpn->client.socks_listener_address;
     });
     return ret;
-}
-
-void vpn_handler_profiling_set_enabled(bool enabled) {
-    g_handler_profiling_enabled.store(enabled, std::memory_order_relaxed);
-}
-
-bool vpn_handler_profiling_enabled() {
-    return g_handler_profiling_enabled.load(std::memory_order_relaxed);
-}
-
-uint32_t vpn_handler_profiling_threshold_ns() {
-    return DEFAULT_HANDLER_PROFILING_THRESHOLD_NS;
 }
 
 void profiling_vpn_handler(void *arg, VpnEvent what, void *data) {

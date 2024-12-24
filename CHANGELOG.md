@@ -1,5 +1,8 @@
 # CHANGELOG
 
+* [Feature] Add an option to use a post-quantum group for key exchange in TLS handshakes.
+    * See `vpn_post_quantum_group_set_enabled`. 
+
 ## 0.93.28
 
 * Handler profiling is now disabled by default.

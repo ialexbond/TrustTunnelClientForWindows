@@ -68,6 +68,10 @@ When enabled, incoming connection requests which should be routed through
 an endpoint will not be routed directly in that case."#)}
         #[serde(default = "Settings::default_killswitch_enabled")]
         pub killswitch_enabled: bool,
+        #{doc(r#"When enabled, a post-quantum group may be used for key exchange
+in TLS handshakes initiated by the VPN client."#)}
+        #[serde(default = "Settings::default_post_quantum_group_enabled")]
+        pub post_quantum_group_enabled: bool,
         #{doc(r#"Domains and addresses which should be routed in a special manner.
 Supported syntax:
   * domain name
@@ -204,6 +208,10 @@ impl Settings {
     pub fn default_killswitch_enabled() -> bool {
         true
     }
+
+    pub fn default_post_quantum_group_enabled() -> bool {
+        false
+    }
 }
 
 impl Endpoint {
@@ -286,6 +294,8 @@ pub fn build(template: Option<&Settings>) -> Settings {
         ).into(),
         killswitch_enabled: opt_field!(template, killswitch_enabled).cloned()
             .unwrap_or_else(Settings::default_killswitch_enabled),
+        post_quantum_group_enabled: opt_field!(template, post_quantum_group_enabled).cloned()
+            .unwrap_or_else(Settings::default_post_quantum_group_enabled),
         exclusions: opt_field!(template, exclusions).cloned()
             .unwrap_or_default(),
         dns_upstreams: opt_field!(template, dns_upstreams).cloned()

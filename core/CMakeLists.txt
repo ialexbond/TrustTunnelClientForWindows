@@ -40,14 +40,6 @@ if (NOT DISABLE_HTTP3)
     list(APPEND SOURCE_FILES ${VPNCORE_SRC_DIR}/http3_upstream.cpp)
 endif()
 
-if(NOT TARGET vpnlibs_common)
-    add_subdirectory(${VPN_LIB_DIR}/common ${CMAKE_BINARY_DIR}/common)
-endif(NOT TARGET vpnlibs_common)
-
-if(NOT TARGET vpnlibs_net)
-    add_subdirectory(${VPN_LIB_DIR}/net ${CMAKE_BINARY_DIR}/net)
-endif(NOT TARGET vpnlibs_net)
-
 add_library(vpnlibs_core STATIC EXCLUDE_FROM_ALL ${SOURCE_FILES})
 set_target_properties(vpnlibs_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (MSVC)
@@ -63,6 +55,14 @@ find_package(dns-libs REQUIRED)
 if (NOT DISABLE_HTTP3)
 find_package(quiche REQUIRED)
 endif()
+
+if(NOT TARGET vpnlibs_common)
+    add_subdirectory(${VPN_LIB_DIR}/common ${CMAKE_BINARY_DIR}/common)
+endif(NOT TARGET vpnlibs_common)
+
+if(NOT TARGET vpnlibs_net)
+    add_subdirectory(${VPN_LIB_DIR}/net ${CMAKE_BINARY_DIR}/net)
+endif(NOT TARGET vpnlibs_net)
 
 target_link_libraries(vpnlibs_core vpnlibs_common vpnlibs_net)
 target_link_libraries(vpnlibs_core klib::klib magic_enum::magic_enum libevent::libevent)

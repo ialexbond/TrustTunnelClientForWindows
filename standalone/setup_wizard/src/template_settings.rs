@@ -37,6 +37,9 @@ vpn_mode = "{}"
 killswitch_enabled = {}
 
 {}
+post_quantum_group_enabled = {}
+
+{}
 exclusions = []
 
 {}
@@ -48,6 +51,8 @@ dns_upstreams = []
     Settings::default_vpn_mode(),
     Settings::doc_killswitch_enabled().to_toml_comment(),
     Settings::default_killswitch_enabled(),
+    Settings::doc_post_quantum_group_enabled().to_toml_comment(),
+    Settings::default_post_quantum_group_enabled(),
     Settings::doc_exclusions().to_toml_comment(),
     Settings::doc_dns_upstreams().to_toml_comment(),
 ));

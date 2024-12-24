@@ -443,5 +443,23 @@ WIN_EXPORT const char *vpn_dns_stamp_prettier_url(VpnDnsStamp *stamp);
  */
 WIN_EXPORT void vpn_string_free(const char *s);
 
+/**
+ * Enable or disable profiling of VPN handlers.
+ * This function should be called before any VPN instances have been created.
+ */
+WIN_EXPORT void vpn_handler_profiling_set_enabled(bool enabled);
+
+/** Return `true` if handler profiling is enabled, `false` otherwise. */
+WIN_EXPORT bool vpn_handler_profiling_enabled();
+
+/** Return the handler profiling threshold in nanoseconds. */
+WIN_EXPORT uint32_t vpn_handler_profiling_threshold_ns();
+
+/** Enable or disable the use of a post-quantum group for key exchange in TLS handshakes initiated by the library. */
+WIN_EXPORT void vpn_post_quantum_group_set_enabled(bool enabled);
+
+/** Return `true` if a post-quantum group can be used in TLS handshakes initiated by the library, `false` otherwise. */
+WIN_EXPORT bool vpn_post_quantum_group_enabled();
+
 } // extern "C"
 } // namespace ag

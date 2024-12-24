@@ -11,6 +11,11 @@
 
 namespace ag {
 
+static std::atomic_bool g_handler_profiling_enabled = false;
+static std::atomic_bool g_post_quantum_group_enabled = false;
+
+static constexpr uint32_t DEFAULT_HANDLER_PROFILING_THRESHOLD_NS = 5'000'000; // 5 milliseconds
+
 #ifndef IN6_IS_ADDR_UNIQUE_LOCAL
 inline bool IN6_IS_ADDR_UNIQUE_LOCAL(const struct in6_addr *addr) {
     return ((addr->s6_addr[0] == 0xfc) || (addr->s6_addr[0] == 0xfd));
@@ -461,6 +466,26 @@ void vpn_string_free(const char *s) {
 uint32_t ntoh_24(uint32_t x) {
     const auto *b = (uint8_t *)&x;
     return (b[0] << 16) | (b[1] << 8) | b[2]; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+}
+
+void vpn_handler_profiling_set_enabled(bool enabled) {
+    g_handler_profiling_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool vpn_handler_profiling_enabled() {
+    return g_handler_profiling_enabled.load(std::memory_order_relaxed);
+}
+
+uint32_t vpn_handler_profiling_threshold_ns() {
+    return DEFAULT_HANDLER_PROFILING_THRESHOLD_NS;
+}
+
+void vpn_post_quantum_group_set_enabled(bool enabled) {
+    g_post_quantum_group_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool vpn_post_quantum_group_enabled() {
+    return g_post_quantum_group_enabled.load(std::memory_order_relaxed);
 }
 
 } // namespace ag
