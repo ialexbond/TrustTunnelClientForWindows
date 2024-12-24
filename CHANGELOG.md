@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.94.7
+
 * [Feature] Add an option to use a post-quantum group for key exchange in TLS handshakes.
     * See `vpn_post_quantum_group_set_enabled`. 
 
