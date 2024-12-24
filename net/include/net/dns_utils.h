@@ -6,10 +6,15 @@
 #include <variant>
 #include <vector>
 
+#include <ldns/ldns.h>
+
 #include "vpn/utils.h"
 
 namespace ag {
 namespace dns_utils {
+
+using LdnsPktPtr = DeclPtr<ldns_pkt, &ldns_pkt_free>;
+using LdnsBufferPtr = DeclPtr<ldns_buffer, &ldns_buffer_free>;
 
 static constexpr uint32_t PLAIN_DNS_PORT_NUMBER = 53;
 
@@ -43,12 +48,15 @@ struct DecodedRequest {
 struct DecodedReply {
     /// ID of the reply
     uint16_t id;
-    /// Record type of the question section
-    RecordType question_type;
+    /// Record type of the question section.
+    /// std::nullopt if not one of `ag::dns_utils::RecordType`.
+    std::optional<RecordType> question_type;
     /// Domain name + CNAMEs (if some)
     std::vector<std::string> names;
     /// Resolved addresses info
     std::vector<AnswerAddress> addresses;
+    /// Message object model
+    LdnsPktPtr pkt;
 };
 
 struct Request {
@@ -85,6 +93,12 @@ DecodeResult decode_packet(U8View packet);
  * @return non-nullopt if it's successfully encoded
  */
 EncodeResult encode_request(const Request &request);
+
+/** Convert DNS message from wire format to an object model. Return nullptr on error. */
+LdnsPktPtr decode_pkt(U8View message);
+
+/** Convert DNS message from an object model to wire format. Return nullptr on error. */
+LdnsBufferPtr encode_pkt(const ldns_pkt *pkt);
 
 } // namespace dns_utils
 } // namespace ag

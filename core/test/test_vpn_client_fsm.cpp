@@ -4,7 +4,6 @@
 
 #include "connection_statistics.h"
 #include "direct_upstream.h"
-#include "plain_dns_manager.h"
 #include "socks_listener.h"
 #include "upstream_multiplexer.h"
 #include "vpn/internal/vpn_client.h"
@@ -268,7 +267,9 @@ void Tunnel::on_after_endpoint_disconnect(ServerUpstream *) {
 void Tunnel::on_exclusions_updated() {
 }
 bool Tunnel::should_complete_immediately(uint64_t) const { return false; }
+bool Tunnel::update_dns_handler_parameters() { return true; }
 } // namespace ag
+
 
 // Check that client raises error event on an error
 TEST_F(VpnClientTest, Error) {

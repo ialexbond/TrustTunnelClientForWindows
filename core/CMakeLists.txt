@@ -30,11 +30,11 @@ set(SOURCE_FILES
         ${VPNCORE_SRC_DIR}/single_upstream_connector.cpp
         ${VPNCORE_SRC_DIR}/fallbackable_upstream_connector.cpp
         ${VPNCORE_SRC_DIR}/icmp_manager.cpp
-        ${VPNCORE_SRC_DIR}/plain_dns_message_handler.cpp
-        ${VPNCORE_SRC_DIR}/plain_dns_manager.cpp
         ${VPNCORE_SRC_DIR}/vpn_dns_resolver.cpp
         ${VPNCORE_SRC_DIR}/vpn_connection.cpp
         ${VPNCORE_SRC_DIR}/connection_statistics.cpp
+        ${VPNCORE_SRC_DIR}/dns_handler.cpp
+        ${VPNCORE_SRC_DIR}/dns_client.cpp
 )
 if (NOT DISABLE_HTTP3)
     list(APPEND SOURCE_FILES ${VPNCORE_SRC_DIR}/http3_upstream.cpp)
@@ -84,6 +84,9 @@ set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 
 enable_testing()
 
+add_library(mock_dns_server STATIC EXCLUDE_FROM_ALL test/mock_dns_server.cpp)
+target_link_libraries(mock_dns_server vpnlibs_core)
+
 link_libraries(gtest::gtest)
 include(${VPN_LIB_DIR}/cmake/add_unit_test.cmake)
 set(TEST_EXTRA_INCLUDES ${VPNCORE_SRC_DIR} ${THIRD_PARTY_DIR}/klib)
@@ -94,7 +97,7 @@ target_link_libraries(test_vpn_client_fsm PRIVATE vpnlibs_core)
 add_unit_test(test_vpn_client_live "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 target_link_libraries(test_vpn_client_live PRIVATE vpnlibs_core)
 add_unit_test(test_dns_routing "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
-target_link_libraries(test_dns_routing PRIVATE vpnlibs_core)
+target_link_libraries(test_dns_routing PRIVATE vpnlibs_core mock_dns_server)
 
 set(MOCKED_SOURCE_FILES
         ${SOURCE_FILES}
@@ -132,6 +135,10 @@ endif()
 target_include_directories(vpnlibs_core_mocked PUBLIC include)
 
 link_libraries(vpnlibs_core_mocked)
+add_library(mock_dns_server_2 STATIC EXCLUDE_FROM_ALL test/mock_dns_server.cpp)
+target_link_libraries(mock_dns_server_2 vpnlibs_core_mocked)
+link_libraries(mock_dns_server_2)
+
 target_include_directories(vpnlibs_core_mocked PUBLIC ${TEST_EXTRA_INCLUDES})
 
 add_unit_test(test_domain_filter "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE FALSE)

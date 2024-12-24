@@ -1,0 +1,277 @@
+#pragma once
+
+#include <cstdint>
+#include <list>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "net/dns_manager.h"
+#include "net/tcp_socket.h"
+#include "vpn/event_loop.h"
+#include "vpn/internal/client_listener.h"
+#include "vpn/internal/dns_proxy_accessor.h"
+#include "vpn/internal/server_upstream.h"
+
+#include "dns_client.h"
+
+/*
+                                 DNS traffic flow
+
+   +-------------+
+   | Application |
+   +------|------+
+          |
+          |1
+          v
+   +--------------+      4      +----------------+     4      +----------------+
+   |ClientListener|------1----->|     Tunnel     |-----3----->| ServerUpstream |
+   +--------------+             +----------------+            +----------------+
+          ^                         |        ^                        |
+          |4                        |1       |3                      3|4
+          |                         v        |                        v
+    +-----------+               +----------------+              +------------+
+    | DNS proxy |<------4-------|   DnsHandler   |              |  Internet  |
+    +-----------+               +----------------+              +------------+
+                                         |                            ^
+                                         |2                           |
+                                         v                           2|
+                               +------------------+                   |
+                               | System DNS proxy |-------------------+
+                               +------------------+
+
+  An INCLUDED domain name is one NOT present in domain exclusions in GENERAL mode,
+  or one PRESENT in domain exclusions in SELECTIVE mode.
+
+  An EXCLUDED domain name is one PRESENT in domain exclusions in GENERAL mode,
+  or one NOT present in domain exclusions in SELECTIVE mode.
+
+  In the diagram above, ServerUpstream represents the `ServerUpstream` that is connected to a VPN endpoint.
+  ClientListener represents both the `ClientListener` that handles application traffic and the SOCKS5
+  listener that is configured as the DNS proxy's outbound proxy: `VpnClient::dns_proxy_listener`.
+
+  User-configured DNS upstreams are specified by `VpnListenerConfig::dns_upstreams`.
+
+  In general:
+
+  1. An application sends a DNS message over UDP or TCP on port 53. These connections are always routed through a
+     special upstream, implemented by DnsHandler, which parses and decides where to forward the DNS messages.
+
+  2. If the queried domain name is EXCLUDED, the DNS message is forwarded to the "system" DNS proxy,
+     configured with the system DNS servers as upstreams, and then sent over the Internet directly.
+
+  3. If the queried domain name is INCLUDED, and there aren't any user-configured DNS upstreams,
+     the DNS message is sent to its original destination. To achieve this, DnsHandler acts as a `ClientListener`:
+     for each connection that it accepts as `ServerUpstream`, it opens a connection with the same protocol, source
+     and destination addresses, app name, etc., as `ClientListener`. Tunnel knows to route this connection
+     through ServerUpstream.
+
+  4. If the queried domain name is INCLUDED, and there are user-configured DNS upstreams, the message is forwarded
+     to the DNS proxy, which in turn forwards it over a SOCKS5 outbound proxy that is connected to
+     `VpnClient::dns_proxy_listener`. Tunnel knows to route the connections coming from that listener through
+     ServerUpstream.
+
+  If the system DNS servers can't be determined, the public AdGuard DNS unfiltered servers are used as upstreams
+  for the "system" DNS proxy.
+
+  If ServerUpstream is not connected to a VPN endpoint, and the kill switch setting is off, then all DNS queries are
+  forwarded to the "system" DNS proxy. If the kill switch setting is on, DNS queries are dropped, except those for
+  which `vpn_network_manager_check_app_request_domain` returns `true`, which are forwarded to the "system" DNS proxy.
+
+  DnsHandler is also responsible for parsing DNS responses and performing actions based on their content,
+  such as adding exclusion suspects (see `DomainFilter::add_exclusion_suspect()`) or removing ECH parameters
+  from HTTPS/SVCB RRs if the domain is in the domain exclusions list.
+*/
+
+namespace ag {
+
+class DnsManagerServerUpstreamBase : public ServerUpstream {
+public:
+    ~DnsManagerServerUpstreamBase() override;
+
+    DnsManagerServerUpstreamBase(const DnsManagerServerUpstreamBase &) = delete;
+    DnsManagerServerUpstreamBase &operator=(const DnsManagerServerUpstreamBase &) = delete;
+
+    DnsManagerServerUpstreamBase(DnsManagerServerUpstreamBase &&) = delete;
+    DnsManagerServerUpstreamBase &operator=(DnsManagerServerUpstreamBase &&) = delete;
+
+    /** Notify that connection with ID `upstream_conn_id` was generated by `VpnDnsResolver`. */
+    void notify_vpn_resolver_connection(uint64_t upstream_conn_id);
+
+    /** Return `true` if `upstream_conn_id` is the ID of a connection generated by `VpnDnsResolver`. */
+    bool is_vpn_resolver_connection(uint64_t upstream_conn_id);
+
+protected:
+    struct ConnectionInfo;
+    friend class DnsManagerClientListenerBase;
+
+    explicit DnsManagerServerUpstreamBase(int id);
+
+    void deinit() final;
+
+    virtual void on_upstream_connection_closed(uint64_t id) = 0;
+    virtual void on_dns_request(const ConnectionInfo &info, U8View message) = 0;
+
+    void send_response(uint64_t upstream_conn_id, U8View message);
+
+private:
+    bool open_session(std::optional<Millis> timeout) final;
+    void close_session() final;
+    uint64_t open_connection(const TunnelAddressPair *addr, int proto, std::string_view app_name) final;
+    void close_connection(uint64_t upstream_conn_id, bool graceful, bool async) final;
+    ssize_t send(uint64_t upstream_conn_id, const uint8_t *data, size_t length) final;
+    void consume(uint64_t upstream_conn_id, size_t length) final;
+    size_t available_to_send(uint64_t upstream_conn_id) final;
+    void update_flow_control(uint64_t upstream_conn_id, TcpFlowCtrlInfo info) final;
+    VpnError do_health_check() final;
+    VpnConnectionStats get_connection_stats() const final;
+    void on_icmp_request(IcmpEchoRequestEvent &event) final;
+
+    struct Connection {
+        uint64_t id;
+        int proto;
+        TunnelAddressPair addrs;
+        std::string app_name;
+        bool read_enabled;
+        bool vpn_resolver_connection;
+
+        std::vector<uint8_t> snd_buf; // TCP connections only.
+        std::vector<uint8_t> rcv_buf; // TCP connections only.
+
+        Connection(uint64_t id, int proto, TunnelAddressPair addrs, std::string app_name);
+    };
+
+    std::vector<uint64_t> m_new_connections;
+    std::vector<uint64_t> m_closed_connections;
+    std::unordered_map<uint64_t, Connection> m_connections;
+
+    event_loop::AutoTaskId m_task;
+
+    static void on_async_task(void *arg, TaskId task_id);
+
+    // Return `false` on fatal error.
+    bool raise_read(Connection &conn);
+};
+
+class DnsManagerClientListenerBase : public ClientListener {
+public:
+    ~DnsManagerClientListenerBase() override;
+
+    DnsManagerClientListenerBase(const DnsManagerClientListenerBase &) = delete;
+    DnsManagerClientListenerBase &operator=(const DnsManagerClientListenerBase &) = delete;
+
+    DnsManagerClientListenerBase(DnsManagerClientListenerBase &&) = delete;
+    DnsManagerClientListenerBase &operator=(DnsManagerClientListenerBase &&) = delete;
+
+protected:
+    DnsManagerClientListenerBase();
+
+    void deinit() final;
+
+    virtual void on_dns_response(uint64_t upstream_conn_id, U8View message) = 0;
+
+    // Return an existing or new `listener_conn_id`.
+    uint64_t send_as_listener(const DnsManagerServerUpstreamBase::ConnectionInfo &info, U8View message);
+
+    void close_listener_connection_by_upstream_conn_id(uint64_t listener_conn_id);
+
+private:
+    void complete_connect_request(uint64_t id, ClientConnectResult result) final;
+    void close_connection(uint64_t listener_conn_id, bool graceful, bool async) final;
+    ssize_t send(uint64_t listener_conn_id, const uint8_t *data, size_t length) final;
+    void consume(uint64_t listener_conn_id, size_t n) final;
+    TcpFlowCtrlInfo flow_control_info(uint64_t listener_conn_id) final;
+    void turn_read(uint64_t id, bool read_enabled) final;
+
+    struct Connection {
+        uint64_t listener_conn_id;
+        uint64_t upstream_conn_id;
+        int proto;
+        bool read_enabled;
+        std::vector<uint8_t> rcv_buf;                // TCP connections only.
+        std::vector<uint8_t> snd_buf;                // TCP connections only.
+        std::list<std::vector<uint8_t>> udp_pending; // UDP payloads waiting for connect request completion.
+
+        Connection(uint64_t listener_conn_id, uint64_t upstream_conn_id, int proto);
+    };
+
+    std::vector<uint64_t> m_closed_connections;
+    std::vector<uint64_t> m_connections_to_send;            // Connection IDs to raise buffered data on.
+    std::unordered_map<uint64_t, Connection> m_connections; // Listener connection ID > Connection.
+    std::unordered_map<uint64_t, uint64_t> m_conn_id_by_upstream_conn_id;
+
+    event_loop::AutoTaskId m_task;
+
+    static void on_async_task(void *arg, TaskId task_id);
+
+    // Return `false` on fatal error.
+    bool raise_read(Connection &conn);
+};
+
+struct DnsHandlerParameters {
+    /** Address of the SOCKS5 listener to be used as outbound proxy for the DNS proxy. */
+    sockaddr_storage dns_proxy_listener_address;
+    /** User-provided DNS server addresses specified in `ag::VpnListenerConfig::dns_upstreams`. */
+    std::vector<DnsProxyAccessor::Upstream> dns_upstreams;
+    /** Cert verify callback for the DNS proxy. */
+    CertVerifyHandler cert_verify_handler;
+};
+
+class DnsHandler : public DnsManagerServerUpstreamBase, public DnsManagerClientListenerBase {
+public:
+    explicit DnsHandler(int id, DnsHandlerParameters parameters);
+    ~DnsHandler() override;
+
+    DnsHandler(const DnsHandler &) = delete;
+    DnsHandler &operator=(const DnsHandler &) = delete;
+
+    DnsHandler(DnsHandler &&) = delete;
+    DnsHandler &operator=(DnsHandler &&) = delete;
+
+    bool initialize(VpnClient *vpn, ServerHandler upstream_handler, ClientHandler listener_handler);
+
+    bool update_parameters(DnsHandlerParameters parameters);
+
+private:
+    DnsHandlerParameters m_parameters;
+
+    std::optional<DnsChangeSubscriptionId> m_dns_change_subscription_id;
+
+    std::unique_ptr<DnsProxyAccessor> m_dns_proxy;
+    std::unique_ptr<DnsClient> m_client;
+
+    std::unique_ptr<DnsProxyAccessor> m_system_dns_proxy;
+    std::unique_ptr<DnsClient> m_system_client;
+
+    std::unique_ptr<DnsProxyAccessor> m_system_dns_proxy_ipv6;
+    std::unique_ptr<DnsClient> m_system_client_ipv6;
+
+    std::unordered_map<uint16_t, uint64_t> m_upstream_conn_id_by_client_id;
+    std::unordered_map<uint16_t, uint64_t> m_upstream_conn_id_by_system_client_id;
+    std::unordered_map<uint16_t, uint64_t> m_upstream_conn_id_by_system_client_ipv6_id;
+
+    bool start_dns_proxy();
+    bool start_system_dns_proxy();
+
+    static void client_handler(void *arg, DnsClientEvent what, void *data);
+    static void system_client_handler(void *arg, DnsClientEvent what, void *data);
+    static void system_client_ipv6_handler(void *arg, DnsClientEvent what, void *data);
+
+    void client_handler(std::unordered_map<uint16_t, uint64_t> &map, DnsClientEvent what, void *data);
+
+    static void on_dns_change(void *arg);
+
+    void on_upstream_connection_closed(uint64_t upstream_conn_id) override;
+
+    void send_request(bool system_proxy, bool ipv6, bool tcp, uint64_t upstream_conn_id, U8View message);
+    void send_request_as_listener(const ConnectionInfo &info, U8View message);
+
+    void shutdown();
+
+    void on_dns_request(const ConnectionInfo &info, U8View message) override;
+    void on_dns_response(uint64_t upstream_conn_id, U8View message) override;
+};
+
+} // namespace ag

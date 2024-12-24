@@ -39,7 +39,7 @@ SystemDnsServers dns_manager_get_system_servers(const DnsManager *manager);
 /**
  * Subscribe to DNS servers change event.
  * The `notification` is raised through the `event_loop`.
- * @return Subscription ID in case subscribed successfully
+ * @return Subscription ID
  */
 DnsChangeSubscriptionId dns_manager_subscribe_servers_change(
         DnsManager *manager, VpnEventLoop *event_loop, DnsChangeNotification notification, void *notification_arg);

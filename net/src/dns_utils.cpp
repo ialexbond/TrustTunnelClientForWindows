@@ -7,8 +7,6 @@
 
 namespace ag {
 
-using LdnsPktPtr = DeclPtr<ldns_pkt, &ldns_pkt_free>;
-
 static std::atomic<uint16_t> g_next_request_id = 1;
 
 static std::string rdf_to_string(const ldns_rdf *rdf) {
@@ -58,21 +56,21 @@ static dns_utils::DecodeResult decode_request(ldns_pkt *pkt) {
     };
 }
 
-static dns_utils::DecodeResult decode_reply(ldns_pkt *pkt) {
-    if (ldns_pkt_get_rcode(pkt) != LDNS_RCODE_NOERROR) {
-        return dns_utils::InapplicablePacket{ldns_pkt_id(pkt)};
+static dns_utils::DecodeResult decode_reply(dns_utils::LdnsPktPtr pkt) {
+    if (ldns_pkt_get_rcode(pkt.get()) != LDNS_RCODE_NOERROR) {
+        return dns_utils::InapplicablePacket{ldns_pkt_id(pkt.get())};
     }
 
-    ldns_rr_type question_type = ldns_rr_get_type(ldns_rr_list_rr(ldns_pkt_question(pkt), 0));
-    if (question_type != LDNS_RR_TYPE_A && question_type != LDNS_RR_TYPE_AAAA) {
-        return dns_utils::InapplicablePacket{ldns_pkt_id(pkt)};
+    const ldns_rr_list *question = ldns_pkt_question(pkt.get());
+    if (ldns_rr_list_rr_count(question) == 0) {
+        return dns_utils::InapplicablePacket{ldns_pkt_id(pkt.get())};
     }
 
     dns_utils::DecodedReply decoded_answer = {
-            .id = ldns_pkt_id(pkt),
-            .question_type = (question_type == LDNS_RR_TYPE_A) ? dns_utils::RT_A : dns_utils::RT_AAAA,
+            .id = ldns_pkt_id(pkt.get()),
+            .question_type = ldns_to_utils_rr_type(ldns_rr_get_type(ldns_rr_list_rr(question, 0))),
     };
-    const ldns_rr_list *answer = ldns_pkt_answer(pkt);
+    const ldns_rr_list *answer = ldns_pkt_answer(pkt.get());
     for (size_t i = 0; i < ldns_rr_list_rr_count(answer); ++i) {
         switch (const ldns_rr *a = ldns_rr_list_rr(answer, i); ldns_rr_get_type(a)) {
         case LDNS_RR_TYPE_A:
@@ -99,7 +97,7 @@ static dns_utils::DecodeResult decode_reply(ldns_pkt *pkt) {
             continue;
         }
     }
-
+    decoded_answer.pkt = std::move(pkt);
     return decoded_answer;
 }
 
@@ -114,7 +112,7 @@ dns_utils::DecodeResult dns_utils::decode_packet(U8View packet) {
     }
 
     if (ldns_pkt_qr(pkt.get())) {
-        return decode_reply(pkt.get());
+        return decode_reply(std::move(pkt));
     }
     return decode_request(pkt.get());
 }
@@ -138,6 +136,22 @@ dns_utils::EncodeResult dns_utils::encode_request(const dns_utils::Request &requ
     std::vector<uint8_t> raw = {buffer, buffer + pkt_size};
     free(buffer);
     return EncodedRequest{ldns_pkt_id(pkt.get()), std::move(raw)};
+}
+
+dns_utils::LdnsPktPtr dns_utils::decode_pkt(U8View message) {
+    ldns_pkt *pkt;
+    if (ldns_status status = ldns_wire2pkt(&pkt, message.data(), message.size()); status == LDNS_STATUS_OK) {
+        return LdnsPktPtr{pkt};
+    }
+    return nullptr;
+}
+
+dns_utils::LdnsBufferPtr dns_utils::encode_pkt(const ldns_pkt *pkt) {
+    LdnsBufferPtr buffer{ldns_buffer_new(ldns_pkt_size(pkt))};
+    if (ldns_status status = ldns_pkt2buffer_wire(buffer.get(), pkt); status == LDNS_STATUS_OK) {
+        return buffer;
+    }
+    return nullptr;
 }
 
 } // namespace ag

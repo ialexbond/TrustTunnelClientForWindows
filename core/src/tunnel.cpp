@@ -12,11 +12,12 @@
 
 #include "common/net_utils.h"
 #include "connection_statistics.h"
+#include "dns_handler.h"
 #include "fake_upstream.h"
 #include "net/dns_utils.h"
 #include "net/quic_utils.h"
 #include "net/utils.h"
-#include "plain_dns_manager.h"
+#include "socks_listener.h"
 #include "vpn/internal/utils.h"
 #include "vpn/internal/vpn_client.h"
 #include "vpn/utils.h"
@@ -465,8 +466,8 @@ static VpnFinalConnectionAction get_final_action(VpnMode mode, VpnConnectAction 
 static void report_connection_info(const Tunnel *self, VpnConnection *conn, const char *domain) {
     // Don't report connection info for loopback, DNS, or already reported connections. Also don't report if we are
     // looking up the domain.
-    if (conn->flags.test(CONNF_PLAIN_DNS_CONNECTION) || conn->flags.test(CONNF_ROUTE_TO_DNS_PROXY)
-            || conn->flags.test(CONNF_LOOKINGUP_DOMAIN) || conn->flags.test(CONNF_CONN_INFO_SENT)) {
+    if (conn->flags.test(CONNF_PLAIN_DNS_CONNECTION) || conn->flags.test(CONNF_LOOKINGUP_DOMAIN)
+            || conn->flags.test(CONNF_CONN_INFO_SENT)) {
         return;
     }
 
@@ -493,6 +494,24 @@ static void report_connection_info(const Tunnel *self, VpnConnection *conn, cons
     }
 
     self->vpn->parameters.handler.func(self->vpn->parameters.handler.arg, vpn_client::EVENT_CONNECTION_INFO, &info);
+}
+
+static std::optional<DnsHandlerParameters> make_dns_handler_parameters(Tunnel *self) {
+    DnsHandlerParameters parameters{};
+    if (self->vpn->listener_config.dns_upstreams.size) {
+        if (!self->vpn->dns_proxy_listener) {
+            log_tun(self, warn, "There are user-provided DNS upstreams, but the DNS proxy listener is not initialized");
+            return std::nullopt;
+        }
+        for (size_t i = 0; i < self->vpn->listener_config.dns_upstreams.size; ++i) {
+            parameters.dns_upstreams.emplace_back(
+                    DnsProxyAccessor::Upstream{.address = self->vpn->listener_config.dns_upstreams.data[i]});
+        }
+        parameters.dns_proxy_listener_address =
+                ((SocksListener *) self->vpn->dns_proxy_listener.get())->get_listen_address();
+        parameters.cert_verify_handler = self->vpn->parameters.cert_verify_handler;
+    }
+    return parameters;
 }
 
 void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, ServerEvent what, void *data) {
@@ -777,10 +796,6 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
             if (src_conn == nullptr) {
                 // do nothing
             } else {
-                if (upstream.get() != src_conn->upstream.lock().get()) {
-                    log_conn(this, src_conn, warn, "Upstream mismatch");
-                    assert(0);
-                }
                 upstream->close_connection(src_conn->server_id, false, true);
             }
 
@@ -854,59 +869,33 @@ constexpr VpnConnectAction invert_action(VpnConnectAction action) {
 
 static std::shared_ptr<ServerUpstream> select_upstream(
         const Tunnel *self, VpnConnectAction action, VpnConnection *conn) {
-    bool is_plain_dns_connection = conn != nullptr && conn->flags.test(CONNF_PLAIN_DNS_CONNECTION);
     switch (action) {
     case VPN_CA_DEFAULT:
+        if (conn != nullptr) {
+            if (conn->listener.lock().get() == self->dns_handler.get()) {
+                return select_upstream(self, VPN_CA_FORCE_REDIRECT, nullptr);
+            }
+            if (conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
+                return self->dns_handler;
+            }
+        }
         if (const sockaddr_storage * dst; // NOLINT(cppcoreguidelines-init-variables)
                 conn != nullptr && conn->flags.test(CONNF_LOOKINGUP_DOMAIN) && conn->flags.test(CONNF_SUSPECT_EXCLUSION)
                 && nullptr != (dst = std::get_if<sockaddr_storage>(&conn->addr.dst))
                 && is_domain_scannable_port(sockaddr_get_port((sockaddr *) dst))) {
             return self->fake_upstream;
         }
-
-        if (conn != nullptr && !conn->listener.expired()
-                && conn->listener.lock().get() == self->plain_dns_manager.get()) {
-            switch (self->plain_dns_manager->get_routing_policy(conn->client_id)
-                            .value_or(PlainDnsMessageHandler::RP_DEFAULT)) {
-            case PlainDnsMessageHandler::RP_DEFAULT:
-                return select_upstream(self, VPN_CA_DEFAULT, nullptr);
-            case PlainDnsMessageHandler::RP_EXCEPTIONAL:
-                return select_upstream(
-                        self, invert_action(vpn_mode_to_action(self->vpn->domain_filter.get_mode())), nullptr);
-            case PlainDnsMessageHandler::RP_THROUGH_DNS_PROXY:
-                conn->flags.set(CONNF_ROUTE_TO_DNS_PROXY);
-                [[fallthrough]];
-            case PlainDnsMessageHandler::RP_FORCE_BYPASS:
-                return select_upstream(self, VPN_CA_FORCE_BYPASS, nullptr);
-            case PlainDnsMessageHandler::RP_DROP:
-                assert(0);
-                return nullptr;
-            }
-        }
-
-        if (!is_plain_dns_connection) {
-            return select_upstream(self, vpn_mode_to_action(self->vpn->domain_filter.get_mode()), nullptr);
-        }
-        break;
+        return select_upstream(self, vpn_mode_to_action(self->vpn->domain_filter.get_mode()), nullptr);
     case VPN_CA_FORCE_BYPASS:
-        if (!is_plain_dns_connection) {
-            return self->vpn->bypass_upstream;
-        }
+        return self->vpn->bypass_upstream;
         break;
     case VPN_CA_FORCE_REDIRECT:
-        if (!is_plain_dns_connection) {
-            return self->vpn->endpoint_upstream;
-        }
+        return self->vpn->endpoint_upstream;
         break;
     case VPN_CA_REJECT:
         assert(0);
         break;
     }
-
-    if (is_plain_dns_connection) {
-        return self->plain_dns_manager;
-    }
-
     return nullptr;
 }
 
@@ -1197,7 +1186,7 @@ static bool need_resolve_hostname(const Tunnel *self, VpnConnectAction action, c
     case VPN_CA_FORCE_BYPASS:
         return true;
     case VPN_CA_FORCE_REDIRECT:
-        return self->vpn->dns_proxy != nullptr;
+        return self->vpn->dns_proxy_listener != nullptr;
     }
 }
 
@@ -1306,13 +1295,6 @@ void Tunnel::complete_connect_request(uint64_t id, std::optional<VpnConnectActio
     }
 
     if (upstream != nullptr) {
-        if (conn->flags.test(CONNF_ROUTE_TO_DNS_PROXY)) {
-            conn->addr.dst =
-                    this->vpn->dns_proxy->get_listen_address(ipproto_to_transport_protocol(conn->proto).value());
-            log_conn(this, conn, trace, "Changing destination to DNS proxy listener: {}",
-                    sockaddr_to_str((sockaddr *) &conn->addr.dst));
-        }
-
         conn->flags.set(CONNF_FAKE_CONNECTION, this->fake_upstream.get() == upstream.get());
         conn->server_id = upstream->open_connection(&conn->addr, conn->proto, conn->app_name);
         if (conn->server_id == NON_ID) {
@@ -1328,9 +1310,7 @@ void Tunnel::complete_connect_request(uint64_t id, std::optional<VpnConnectActio
         add_connection(this, conn);
         if (conn->flags.test(CONNF_PLAIN_DNS_CONNECTION)) {
             if (conn->listener.lock().get() == this->dns_resolver.get()) {
-                this->plain_dns_manager->notify_library_request(conn->server_id);
-            } else if (action != VPN_CA_DEFAULT) {
-                this->plain_dns_manager->notify_connect_action(conn->server_id, action.value());
+                this->dns_handler->notify_vpn_resolver_connection(conn->server_id);
             }
         }
     } else {
@@ -1350,8 +1330,8 @@ void Tunnel::reset_connections(int uid) {
     vpn_connections_foreach(table, [&](VpnConnection *conn) {
         std::shared_ptr<ClientListener> listener = conn->listener.lock();
         if ((uid == -1 || conn->uid == uid) && listener.get() != this->dns_resolver.get()
-                && (listener.get() != this->plain_dns_manager.get()
-                        || !this->plain_dns_manager->is_library_request(conn->client_id))) {
+                && (listener.get() != this->dns_handler.get()
+                        || !this->dns_handler->is_vpn_resolver_connection(conn->client_id))) {
             ids.push_back(conn->client_id);
         }
     });
@@ -1401,9 +1381,7 @@ void Tunnel::on_before_endpoint_disconnect(ServerUpstream *upstream) {
 
     std::vector<uint64_t> ids;
     vpn_connections_foreach(this->connections.by_client_id, [&ids](VpnConnection *conn) {
-        if (conn->flags.test(CONNF_ROUTE_TO_DNS_PROXY)) {
-            ids.push_back(conn->client_id);
-        }
+        ids.push_back(conn->client_id);
     });
 
     for (uint64_t id : ids) {
@@ -1531,12 +1509,12 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
 
         add_connection(this, conn);
 
-        if (listener.get() == this->dns_resolver.get() || listener.get() == this->plain_dns_manager.get()) {
+        if (listener.get() == this->dns_resolver.get()) {
             this->complete_connect_request(conn->client_id, std::nullopt);
             return;
         }
 
-        if (listener.get() == this->vpn->dns_proxy_listener.get()) {
+        if (listener.get() == this->vpn->dns_proxy_listener.get() || listener.get() == this->dns_handler.get()) {
             this->complete_connect_request(conn->client_id, VPN_CA_FORCE_REDIRECT);
             return;
         }
@@ -1835,19 +1813,27 @@ void Tunnel::on_icmp_reply_ready(void *arg, const IcmpEchoReply &reply) {
     self->vpn->client_listener->process_icmp_reply(reply);
 }
 
+bool Tunnel::update_dns_handler_parameters() {
+    auto parameters = make_dns_handler_parameters(this);
+    if (!parameters.has_value()) {
+        return false;
+    }
+    return this->dns_handler->update_parameters(std::move(*parameters));
+}
+
 static void fake_upstream_handler(void *arg, ServerEvent what, void *data) {
     auto *self = (Tunnel *) arg;
     self->upstream_handler(self->fake_upstream, what, data);
 }
 
-static void plain_dns_upstream_handler(void *arg, ServerEvent what, void *data) {
+static void dns_upstream_upstream_handler(void *arg, ServerEvent what, void *data) {
     auto *self = (Tunnel *) arg;
-    self->upstream_handler(self->plain_dns_manager, what, data);
+    self->upstream_handler(self->dns_handler, what, data);
 }
 
-static void plain_dns_listener_handler(void *arg, ClientEvent what, void *data) {
+static void dns_upstream_listener_handler(void *arg, ClientEvent what, void *data) {
     auto *self = (Tunnel *) arg;
-    self->listener_handler(self->plain_dns_manager, what, data);
+    self->listener_handler(self->dns_handler, what, data);
 }
 
 static void raise_statistics(Tunnel *self, const ConnectionStatistics &stats) {
@@ -1882,10 +1868,16 @@ bool Tunnel::init(VpnClient *vpn) {
         return false;
     }
 
-    this->plain_dns_manager = std::make_unique<PlainDnsManager>(VpnClient::next_upstream_id());
-    if (!this->plain_dns_manager->init(this->vpn, {plain_dns_listener_handler, this},
-                {plain_dns_upstream_handler, this}, this->dns_resolver.get())) {
-        log_tun(this, warn, "Failed to initialize plain DNS upstream");
+    auto dns_handler_parameters = make_dns_handler_parameters(this);
+    if (!dns_handler_parameters.has_value()) {
+        this->deinit();
+        assert(0);
+        return false;
+    }
+    this->dns_handler = std::make_shared<DnsHandler>(VpnClient::next_upstream_id(), std::move(*dns_handler_parameters));
+    if (!this->dns_handler->initialize(
+                this->vpn, {dns_upstream_upstream_handler, this}, {dns_upstream_listener_handler, this})) {
+        log_tun(this, warn, "Failed to initialize the DNS handler");
         this->deinit();
         assert(0);
         return false;
@@ -1923,10 +1915,7 @@ void Tunnel::deinit() {
         this->fake_upstream.reset();
     }
     this->icmp_manager.deinit();
-    if (this->plain_dns_manager != nullptr) {
-        this->plain_dns_manager->deinit();
-        this->plain_dns_manager.reset();
-    }
+    this->dns_handler.reset();
     this->statistics_monitor.reset();
 
     log_tun(this, dbg, "Done");

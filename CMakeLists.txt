@@ -18,17 +18,6 @@ endif ()
 
 if (MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
-    set(CompilerFlags CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO
-            CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_RELWITHDEBINFO)
-    foreach (CompilerFlag ${CompilerFlags})
-        string(REPLACE "/MDd" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        string(REPLACE "-MDd" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        string(REPLACE "/MTd" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        string(REPLACE "-MTd" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        string(REPLACE "/MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        string(REPLACE "-MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        string(REPLACE "/RTC1" "" ${CompilerFlag} "${${CompilerFlag}}")
-    endforeach ()
 
     add_compile_definitions(_WIN32_WINNT=0x0601)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)

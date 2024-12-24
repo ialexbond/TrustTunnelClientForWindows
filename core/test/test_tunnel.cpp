@@ -2,9 +2,11 @@
 #include <thread>
 
 #include <gtest/gtest.h>
+#include <openssl/rand.h>
 
 #include "common/net_utils.h"
 #include "fake_upstream.h"
+#include "mock_dns_server.h"
 #include "net/dns_utils.h"
 #include "vpn/internal/tunnel.h"
 #include "vpn/internal/vpn_client.h"
@@ -392,9 +394,28 @@ public:
     uint64_t redirect_id = NON_ID;
     uint64_t bypass_id = NON_ID;
     TestFakeUpstream *fake_upstream = nullptr;
+    std::unique_ptr<MockDnsServer> dns_server = std::make_unique<MockDnsServer>();
+    int mock_dns_server_completed = 0;
+    int mock_dns_server_unexpected = 0;
 
     void SetUp() override {
         TunnelTest::SetUp();
+
+        auto address = dns_server->start(
+                sockaddr_from_str("127.0.0.1"), this->ev_loop.get(), this->network_manager->socket,
+                [this] {
+                    vpn_event_loop_exit(this->ev_loop.get(), Millis{100});
+                    ++this->mock_dns_server_completed;
+                },
+                [this](std::optional<MockDnsServer::Request> /*expected*/, MockDnsServer::Request /*actual*/) {
+                    vpn_event_loop_exit(this->ev_loop.get(), Millis{100});
+                    ++this->mock_dns_server_unexpected;
+                    return std::nullopt;
+                });
+        ASSERT_TRUE(address.has_value());
+
+        vpn_network_manager_update_system_dns({.main = {{.address = sockaddr_to_str((sockaddr *) &*address)}}});
+        run_event_loop_once();
 
         tun.fake_upstream = std::make_shared<TestFakeUpstream>(std::move(tun.fake_upstream));
         ASSERT_TRUE(tun.fake_upstream->open_session());
@@ -430,6 +451,7 @@ public:
     void TearDown() override {
         tun.fake_upstream->close_session();
         tun.fake_upstream->deinit();
+        dns_server.reset();
         TunnelTest::TearDown();
     }
 
@@ -439,39 +461,35 @@ public:
         ClientConnectRequest event = {client_conn_id, IPPROTO_UDP, (sockaddr *) &src, &resolver_address};
         tun.listener_handler(client_listener, CLIENT_EVENT_CONNECT_REQUEST, &event);
 
-        size_t size_before = bypass_upstream->connections.size();
-        std::optional<VpnConnectAction> action = tun.finalize_connect_action({client_conn_id, VPN_CA_DEFAULT, "some", 1});
+        std::optional<VpnConnectAction> action =
+                tun.finalize_connect_action({client_conn_id, VPN_CA_DEFAULT, "some", 1});
         ASSERT_FALSE(!action.has_value());
         tun.complete_connect_request(client_conn_id, action);
         run_event_loop_once();
 
         tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &client_conn_id);
 
-        static constexpr uint8_t DNS_QUERY[] = {0x21, 0xfd, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-                0x09, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-                0x29, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x0a, 0x00, 0x08, 0x45, 0x0a, 0xff, 0x02,
-                0xb9, 0x8b, 0xb4, 0x10};
+        auto result = dns_utils::encode_request({.type = dns_utils::RT_A, .name = "localhost."});
+        ASSERT_TRUE(std::holds_alternative<dns_utils::EncodedRequest>(result));
+        auto &encoded = std::get<dns_utils::EncodedRequest>(result);
+        ASSERT_GT(encoded.data.size(), 2);
+        RAND_bytes(encoded.data.data(), 2);
 
-        ClientRead client_read_event = {client_conn_id, DNS_QUERY, std::size(DNS_QUERY), 0};
+        ClientRead client_read_event = {client_conn_id, encoded.data.data(), encoded.data.size(), 0};
         tun.listener_handler(client_listener, CLIENT_EVENT_READ, &client_read_event);
-        ASSERT_EQ(client_read_event.result, int(std::size(DNS_QUERY)));
+        ASSERT_EQ(client_read_event.result, int(encoded.data.size()));
 
-        ASSERT_GT(bypass_upstream->connections.size(), size_before);
-        uint64_t upstream_conn_id = bypass_upstream->connections.back();
-        tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &upstream_conn_id);
-        ASSERT_EQ(client_listener->connections[client_conn_id].state, TestListener::CS_COMPLETED);
-        ASSERT_EQ(client_listener->connections[client_conn_id].result, CCR_PASS);
+        this->dns_server->expect({
+                .request = MockDnsServer::Request{.tcp = false, .qtype = 1, .qname = "localhost."},
+                .response = MockDnsServer::Response{.rcode = 0,
+                        .answer = {AG_FMT("localhost. {} IN A 1.1.1.2", ANSWER_TTL_SEC)}},
+        });
 
-        static constexpr uint8_t DNS_REPLY[] = {0x21, 0xfd, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-                0x09, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74, 0x00, 0x00, 0x01, 0x00, 0x01, 0xc0, 0x0c,
-                0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, ANSWER_TTL_SEC, 0x00, 0x04, 0x01, 0x01, 0x01, 0x02, 0x00,
-                0x00, 0x29, 0xff, 0xd6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        vpn_event_loop_exit(this->ev_loop.get(), Millis{30000});
+        vpn_event_loop_run(this->ev_loop.get());
 
-        ServerReadEvent upstream_read_event = {upstream_conn_id, DNS_REPLY, std::size(DNS_REPLY), 0};
-        tun.upstream_handler(bypass_upstream, SERVER_EVENT_READ, &upstream_read_event);
-        ASSERT_EQ(upstream_read_event.result, int(std::size(DNS_REPLY)));
-
-        run_event_loop_once();
+        ASSERT_EQ(1, this->mock_dns_server_completed);
+        ASSERT_EQ(0, this->mock_dns_server_unexpected);
     }
 };
 

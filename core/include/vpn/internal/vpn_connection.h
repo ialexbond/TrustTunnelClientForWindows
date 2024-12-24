@@ -52,8 +52,6 @@ enum VpnConnectionFlags {
     CONNF_FAKE_CONNECTION,
     /// Connection traffic is plain DNS data
     CONNF_PLAIN_DNS_CONNECTION,
-    /// Connection is routed through the local DNS proxy
-    CONNF_ROUTE_TO_DNS_PROXY,
     /// Connection's statistics is being monitored
     CONNF_MONITOR_STATS,
     /// Connection info is being reported to the client

@@ -54,6 +54,11 @@ Checks: '
   -readability-duplicate-include,
   -cert-err33-c,
   -misc-use-anonymous-namespace,
+  
+  -misc-include-cleaner,
+  -*-use-nodiscard,
+
+  -performance-enum-size
   '
 
 WarningsAsErrors: '*'
@@ -84,4 +89,6 @@ CheckOptions: [
 
   { key: cppcoreguidelines-avoid-do-while.IgnoreMacros, value: true },
   { key: misc-const-correctness.AnalyzeValues, value: false },
+
+  { key: performance-move-const-arg.CheckTriviallyCopyableMove, value: false },
 ]

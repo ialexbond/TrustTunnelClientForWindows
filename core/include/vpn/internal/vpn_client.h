@@ -152,7 +152,6 @@ public:
     std::shared_ptr<ClientListener> dns_proxy_listener; // client listener
     IdGenerator listener_conn_id_generator{};           // connection id generator for client-side connections
     IdGenerator upstream_conn_id_generator{};           // connection id generator for server-side connections
-    std::unique_ptr<DnsProxyAccessor> dns_proxy;        // DNS proxy wrapper
     std::optional<VpnDnsResolveId> dns_health_check_id; // ID of the resolve for a DNS upstream health check
     DomainFilter domain_filter;                         // decides if connection should be bypassed over VPN
     std::set<event_loop::AutoTaskId> deferred_tasks;

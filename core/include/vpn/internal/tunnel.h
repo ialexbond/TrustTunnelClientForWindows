@@ -21,7 +21,7 @@
 
 namespace ag {
 
-class PlainDnsManager;
+class DnsHandler;
 class ConnectionStatisticsMonitor;
 
 KHASH_MAP_INIT_INT64(connections_by_id, VpnConnection *);
@@ -48,7 +48,7 @@ struct Tunnel {
     std::unordered_map<VpnDnsResolveId, DnsResolveWaiter> dns_resolve_waiters;
     event_loop::AutoTaskId repeat_exclusions_resolve_task;
     std::shared_ptr<ServerUpstream> fake_upstream;
-    std::shared_ptr<PlainDnsManager> plain_dns_manager;
+    std::shared_ptr<DnsHandler> dns_handler;
     std::unique_ptr<ConnectionStatisticsMonitor> statistics_monitor;
     std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>> udp_close_wait_hostname_cache;
 
@@ -92,6 +92,8 @@ struct Tunnel {
     std::optional<VpnConnectAction> finalize_connect_action(ConnectRequestResult request_result) const;
 
     static void on_icmp_reply_ready(void *arg, const IcmpEchoReply &reply);
+
+    bool update_dns_handler_parameters();
 };
 
 } // namespace ag

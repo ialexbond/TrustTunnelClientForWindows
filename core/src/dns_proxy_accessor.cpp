@@ -64,6 +64,8 @@ static dns::DnsProxySettings make_dns_proxy_settings(const DnsProxyAccessor::Par
         settings.listeners.push_back({
                 .address = "127.0.0.1",
                 .protocol = protocol,
+                .persistent = true,
+                .idle_timeout = Millis{VPN_DEFAULT_TCP_TIMEOUT_MS},
         });
     }
 
