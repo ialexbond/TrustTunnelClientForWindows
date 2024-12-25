@@ -78,6 +78,7 @@ static dns::DnsProxySettings make_dns_proxy_settings(const DnsProxyAccessor::Par
     }
 
     settings.enable_route_resolver = false;
+    settings.enable_servfail_on_upstreams_failure = false;
 
     return settings;
 }
