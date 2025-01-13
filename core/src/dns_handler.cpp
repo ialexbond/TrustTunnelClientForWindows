@@ -15,7 +15,7 @@
 static ag::Logger g_logger{"DNS_HANDLER"};
 
 static constexpr auto DNS_CLIENT_TIMEOUT = ag::Secs{30};
-static constexpr size_t CONN_MAX_BUFFERED = 8 * 1024 * 1024;
+static constexpr size_t CONN_MAX_BUFFERED = 128 * 1024;
 
 #define log_upstream(ups_, lvl_, fmt_, ...) lvl_##log(g_logger, "[upstream] " fmt_, ##__VA_ARGS__)
 #define log_listener(ups_, lvl_, fmt_, ...) lvl_##log(g_logger, "[listener] " fmt_, ##__VA_ARGS__)
@@ -27,7 +27,7 @@ static constexpr size_t CONN_MAX_BUFFERED = 8 * 1024 * 1024;
 #define assert_use(x) assert(x)
 #endif
 
-struct ag::DnsManagerServerUpstreamBase::ConnectionInfo {
+struct ag::DnsHandlerServerUpstreamBase::ConnectionInfo {
     uint64_t upstream_conn_id;
     int proto;
     const TunnelAddressPair *addrs;
@@ -47,7 +47,7 @@ static void write_dns_message_to(std::vector<uint8_t> &out, ag::U8View message) 
     out.insert(out.end(), message.data(), message.data() + ntohs(size));
 }
 
-void ag::DnsManagerServerUpstreamBase::notify_vpn_resolver_connection(uint64_t upstream_conn_id) {
+void ag::DnsHandlerServerUpstreamBase::notify_vpn_resolver_connection(uint64_t upstream_conn_id) {
     auto it = m_connections.find(upstream_conn_id);
     if (it == m_connections.end()) {
         log_upstream(this, warn, "Connection R:{} does not exist", upstream_conn_id);
@@ -56,7 +56,7 @@ void ag::DnsManagerServerUpstreamBase::notify_vpn_resolver_connection(uint64_t u
     it->second.vpn_resolver_connection = true;
 }
 
-bool ag::DnsManagerServerUpstreamBase::is_vpn_resolver_connection(uint64_t upstream_conn_id) {
+bool ag::DnsHandlerServerUpstreamBase::is_vpn_resolver_connection(uint64_t upstream_conn_id) {
     auto it = m_connections.find(upstream_conn_id);
     if (it == m_connections.end()) {
         log_upstream(this, warn, "Connection R:{} does not exist", upstream_conn_id);
@@ -65,16 +65,16 @@ bool ag::DnsManagerServerUpstreamBase::is_vpn_resolver_connection(uint64_t upstr
     return it->second.vpn_resolver_connection;
 }
 
-ag::DnsManagerServerUpstreamBase::DnsManagerServerUpstreamBase(int id)
+ag::DnsHandlerServerUpstreamBase::DnsHandlerServerUpstreamBase(int id)
         : ServerUpstream(id) {
 }
 
-ag::DnsManagerServerUpstreamBase::~DnsManagerServerUpstreamBase() = default;
+ag::DnsHandlerServerUpstreamBase::~DnsHandlerServerUpstreamBase() = default;
 
-void ag::DnsManagerServerUpstreamBase::deinit() {
+void ag::DnsHandlerServerUpstreamBase::deinit() {
 }
 
-void ag::DnsManagerServerUpstreamBase::send_response(uint64_t upstream_conn_id, U8View message) {
+void ag::DnsHandlerServerUpstreamBase::send_response(uint64_t upstream_conn_id, U8View message) {
     auto it = m_connections.find(upstream_conn_id);
     if (it == m_connections.end()) {
         log_upstream(this, dbg, "Connection R:{} does not exist", upstream_conn_id);
@@ -106,14 +106,14 @@ void ag::DnsManagerServerUpstreamBase::send_response(uint64_t upstream_conn_id, 
     }
 }
 
-bool ag::DnsManagerServerUpstreamBase::open_session(std::optional<Millis> /*timeout*/) {
+bool ag::DnsHandlerServerUpstreamBase::open_session(std::optional<Millis> /*timeout*/) {
     return true;
 }
 
-void ag::DnsManagerServerUpstreamBase::close_session() {
+void ag::DnsHandlerServerUpstreamBase::close_session() {
 }
 
-uint64_t ag::DnsManagerServerUpstreamBase::open_connection(
+uint64_t ag::DnsHandlerServerUpstreamBase::open_connection(
         const TunnelAddressPair *addr, int proto, std::string_view app_name) {
     if (addr->dstport() != dns_utils::PLAIN_DNS_PORT_NUMBER) {
         assert(0);
@@ -130,7 +130,7 @@ uint64_t ag::DnsManagerServerUpstreamBase::open_connection(
     return it->second.id;
 }
 
-void ag::DnsManagerServerUpstreamBase::close_connection(uint64_t upstream_conn_id, bool /*graceful*/, bool async) {
+void ag::DnsHandlerServerUpstreamBase::close_connection(uint64_t upstream_conn_id, bool /*graceful*/, bool async) {
     auto it = m_connections.find(upstream_conn_id);
     if (it == m_connections.end()) {
         log_upstream(this, warn, "Connection R:{} does not exist", upstream_conn_id);
@@ -155,7 +155,7 @@ void ag::DnsManagerServerUpstreamBase::close_connection(uint64_t upstream_conn_i
     }
 }
 
-ssize_t ag::DnsManagerServerUpstreamBase::send(uint64_t upstream_conn_id, const uint8_t *data, size_t length) {
+ssize_t ag::DnsHandlerServerUpstreamBase::send(uint64_t upstream_conn_id, const uint8_t *data, size_t length) {
     auto it = m_connections.find(upstream_conn_id);
     if (it == m_connections.end()) {
         log_upstream(this, warn, "Connection R:{} does not exist", upstream_conn_id);
@@ -194,32 +194,32 @@ ssize_t ag::DnsManagerServerUpstreamBase::send(uint64_t upstream_conn_id, const 
     return length;
 }
 
-void ag::DnsManagerServerUpstreamBase::consume(uint64_t /*upstream_conn_id*/, size_t /*length*/) {
+void ag::DnsHandlerServerUpstreamBase::consume(uint64_t /*upstream_conn_id*/, size_t /*length*/) {
     // No op
 }
 
-size_t ag::DnsManagerServerUpstreamBase::available_to_send(uint64_t /*upstream_conn_id*/) {
+size_t ag::DnsHandlerServerUpstreamBase::available_to_send(uint64_t /*upstream_conn_id*/) {
     return SIZE_MAX;
 }
 
-void ag::DnsManagerServerUpstreamBase::update_flow_control(uint64_t upstream_conn_id, TcpFlowCtrlInfo info) {
+void ag::DnsHandlerServerUpstreamBase::update_flow_control(uint64_t upstream_conn_id, TcpFlowCtrlInfo info) {
 }
 
-ag::VpnError ag::DnsManagerServerUpstreamBase::do_health_check() {
+ag::VpnError ag::DnsHandlerServerUpstreamBase::do_health_check() {
     assert(0);
     return {.code = -1, .text = "Health checks must not be performed on this upstream."};
 }
 
-ag::VpnConnectionStats ag::DnsManagerServerUpstreamBase::get_connection_stats() const {
+ag::VpnConnectionStats ag::DnsHandlerServerUpstreamBase::get_connection_stats() const {
     assert(0);
     return {};
 }
 
-void ag::DnsManagerServerUpstreamBase::on_icmp_request(IcmpEchoRequestEvent & /*event*/) {
+void ag::DnsHandlerServerUpstreamBase::on_icmp_request(IcmpEchoRequestEvent & /*event*/) {
     assert(0);
 }
 
-ag::DnsManagerServerUpstreamBase::Connection::Connection(
+ag::DnsHandlerServerUpstreamBase::Connection::Connection(
         uint64_t id, int proto, TunnelAddressPair addrs, std::string app_name)
         : id(id)
         , proto{proto}
@@ -229,8 +229,8 @@ ag::DnsManagerServerUpstreamBase::Connection::Connection(
         , vpn_resolver_connection{false} {
 }
 
-void ag::DnsManagerServerUpstreamBase::on_async_task(void *arg, TaskId /*task_id*/) {
-    auto *self = (DnsManagerServerUpstreamBase *) arg;
+void ag::DnsHandlerServerUpstreamBase::on_async_task(void *arg, TaskId /*task_id*/) {
+    auto *self = (DnsHandlerServerUpstreamBase *) arg;
     self->m_task.release();
 
     std::vector<uint64_t> to_open;
@@ -246,7 +246,7 @@ void ag::DnsManagerServerUpstreamBase::on_async_task(void *arg, TaskId /*task_id
     }
 }
 
-bool ag::DnsManagerServerUpstreamBase::raise_read(Connection &conn) {
+bool ag::DnsHandlerServerUpstreamBase::raise_read(Connection &conn) {
     if (!conn.read_enabled) {
         return true;
     }
@@ -270,15 +270,15 @@ bool ag::DnsManagerServerUpstreamBase::raise_read(Connection &conn) {
     return true;
 }
 
-ag::DnsManagerClientListenerBase::DnsManagerClientListenerBase() = default;
+ag::DnsHandlerClientListenerBase::DnsHandlerClientListenerBase() = default;
 
-ag::DnsManagerClientListenerBase::~DnsManagerClientListenerBase() = default;
+ag::DnsHandlerClientListenerBase::~DnsHandlerClientListenerBase() = default;
 
-void ag::DnsManagerClientListenerBase::deinit() {
+void ag::DnsHandlerClientListenerBase::deinit() {
 }
 
-uint64_t ag::DnsManagerClientListenerBase::send_as_listener(
-        const DnsManagerServerUpstreamBase::ConnectionInfo &info, U8View message) {
+uint64_t ag::DnsHandlerClientListenerBase::send_as_listener(
+        const DnsHandlerServerUpstreamBase::ConnectionInfo &info, U8View message) {
     auto id_it = m_conn_id_by_upstream_conn_id.find(info.upstream_conn_id);
     if (id_it == m_conn_id_by_upstream_conn_id.end()) {
         uint64_t listener_conn_id = vpn->listener_conn_id_generator.get();
@@ -339,7 +339,7 @@ uint64_t ag::DnsManagerClientListenerBase::send_as_listener(
     return it->second.listener_conn_id;
 }
 
-void ag::DnsManagerClientListenerBase::complete_connect_request(uint64_t id, ClientConnectResult result) {
+void ag::DnsHandlerClientListenerBase::complete_connect_request(uint64_t id, ClientConnectResult result) {
     auto it = m_connections.find(id);
     if (it == m_connections.end()) {
         log_listener(this, warn, "Connection L:{} does not exist", id);
@@ -360,7 +360,7 @@ void ag::DnsManagerClientListenerBase::complete_connect_request(uint64_t id, Cli
     }
 }
 
-void ag::DnsManagerClientListenerBase::close_listener_connection_by_upstream_conn_id(uint64_t upstream_conn_id) {
+void ag::DnsHandlerClientListenerBase::close_listener_connection_by_upstream_conn_id(uint64_t upstream_conn_id) {
     auto id_it = m_conn_id_by_upstream_conn_id.find(upstream_conn_id);
     if (id_it == m_conn_id_by_upstream_conn_id.end()) {
         // We might not have a connection as listener if we've never opened it.
@@ -370,7 +370,7 @@ void ag::DnsManagerClientListenerBase::close_listener_connection_by_upstream_con
     close_connection(id_it->second, /*graceful*/ false, /*async*/ false);
 }
 
-void ag::DnsManagerClientListenerBase::close_connection(uint64_t listener_conn_id, bool /*graceful*/, bool async) {
+void ag::DnsHandlerClientListenerBase::close_connection(uint64_t listener_conn_id, bool /*graceful*/, bool async) {
     auto it = m_connections.find(listener_conn_id);
     if (it == m_connections.end()) {
         log_listener(this, warn, "Connection L:{} does not exist", listener_conn_id);
@@ -388,7 +388,7 @@ void ag::DnsManagerClientListenerBase::close_connection(uint64_t listener_conn_i
     }
 }
 
-ssize_t ag::DnsManagerClientListenerBase::send(uint64_t listener_conn_id, const uint8_t *data, size_t length) {
+ssize_t ag::DnsHandlerClientListenerBase::send(uint64_t listener_conn_id, const uint8_t *data, size_t length) {
     auto it = m_connections.find(listener_conn_id);
     if (it == m_connections.end()) {
         log_listener(this, warn, "Connection L:{} does not exist", listener_conn_id);
@@ -420,15 +420,15 @@ ssize_t ag::DnsManagerClientListenerBase::send(uint64_t listener_conn_id, const 
     return length;
 }
 
-void ag::DnsManagerClientListenerBase::consume(uint64_t /*listener_conn_id*/, size_t /*n*/) {
+void ag::DnsHandlerClientListenerBase::consume(uint64_t /*listener_conn_id*/, size_t /*n*/) {
     // No op
 }
 
-ag::TcpFlowCtrlInfo ag::DnsManagerClientListenerBase::flow_control_info(uint64_t /*listener_conn_id*/) {
+ag::TcpFlowCtrlInfo ag::DnsHandlerClientListenerBase::flow_control_info(uint64_t /*listener_conn_id*/) {
     return TcpFlowCtrlInfo{DEFAULT_SEND_BUFFER_SIZE, DEFAULT_SEND_WINDOW_SIZE};
 }
 
-void ag::DnsManagerClientListenerBase::turn_read(uint64_t id, bool read_enabled) {
+void ag::DnsHandlerClientListenerBase::turn_read(uint64_t id, bool read_enabled) {
     auto it = m_connections.find(id);
     if (it == m_connections.end()) {
         log_listener(this, warn, "Connectin L:{} does not exist", id);
@@ -443,7 +443,7 @@ void ag::DnsManagerClientListenerBase::turn_read(uint64_t id, bool read_enabled)
     it->second.read_enabled = read_enabled;
 }
 
-ag::DnsManagerClientListenerBase::Connection::Connection(
+ag::DnsHandlerClientListenerBase::Connection::Connection(
         uint64_t listener_conn_id, uint64_t upstream_conn_id, int proto)
         : listener_conn_id(listener_conn_id)
         , upstream_conn_id{upstream_conn_id}
@@ -451,8 +451,8 @@ ag::DnsManagerClientListenerBase::Connection::Connection(
         , read_enabled{false} {
 }
 
-void ag::DnsManagerClientListenerBase::on_async_task(void *arg, TaskId /*task_id*/) {
-    auto *self = (DnsManagerClientListenerBase *) arg;
+void ag::DnsHandlerClientListenerBase::on_async_task(void *arg, TaskId /*task_id*/) {
+    auto *self = (DnsHandlerClientListenerBase *) arg;
     self->m_task.release();
 
     std::vector<uint64_t> to_close;
@@ -474,7 +474,7 @@ void ag::DnsManagerClientListenerBase::on_async_task(void *arg, TaskId /*task_id
     }
 }
 
-bool ag::DnsManagerClientListenerBase::raise_read(Connection &conn) {
+bool ag::DnsHandlerClientListenerBase::raise_read(Connection &conn) {
     if (!conn.read_enabled) {
         return true;
     }
@@ -524,7 +524,7 @@ bool ag::DnsManagerClientListenerBase::raise_read(Connection &conn) {
 }
 
 ag::DnsHandler::DnsHandler(int id, DnsHandlerParameters parameters)
-        : DnsManagerServerUpstreamBase(id)
+        : DnsHandlerServerUpstreamBase(id)
         , m_parameters{std::move(parameters)} {
 }
 
@@ -533,11 +533,11 @@ ag::DnsHandler::~DnsHandler() {
 }
 
 bool ag::DnsHandler::initialize(VpnClient *vpn, ServerHandler upstream_handler, ClientHandler listener_handler) {
-    if (!DnsManagerServerUpstreamBase::init(vpn, upstream_handler)) {
+    if (!DnsHandlerServerUpstreamBase::init(vpn, upstream_handler)) {
         assert(0);
     }
 
-    if (InitResult::SUCCESS != DnsManagerClientListenerBase::init(vpn, listener_handler)) {
+    if (InitResult::SUCCESS != DnsHandlerClientListenerBase::init(vpn, listener_handler)) {
         assert(0);
     }
 
@@ -793,8 +793,8 @@ void ag::DnsHandler::shutdown() {
         dns_manager_unsubscribe_servers_change(
                 ServerUpstream::vpn->parameters.network_manager->dns, *m_dns_change_subscription_id);
     }
-    DnsManagerServerUpstreamBase::deinit();
-    DnsManagerClientListenerBase::deinit();
+    DnsHandlerServerUpstreamBase::deinit();
+    DnsHandlerClientListenerBase::deinit();
     m_client.reset();
     m_system_client.reset();
     m_system_client_ipv6.reset();

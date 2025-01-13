@@ -198,6 +198,9 @@ void Http2Upstream::http_handler(void *arg, HttpEventId what, void *data) {
                     }
                 }
 
+                // FIXME: this buffer grows too large for comfort:
+                // 2..3 MB on a connection through which a high-speed download is happening.
+                // Maybe we could do something about it?
                 std::optional<std::string> err = pending->push({unread, size});
                 if (err.has_value()) {
                     log_conn(upstream, found.first, err, "Failed to put data (size={}) in buffer: {}", size, *err);
@@ -256,13 +259,13 @@ void Http2Upstream::http_handler(void *arg, HttpEventId what, void *data) {
 
             if (err_event.has_value()) {
                 upstream->handler.func(upstream->handler.arg, SERVER_EVENT_ERROR, &err_event.value());
-                upstream->clean_tcp_connection_data(found.first);
-            } else if (conn->unread_data == nullptr || conn->unread_data->size() == 0) {
-                upstream->handler.func(upstream->handler.arg, SERVER_EVENT_CONNECTION_CLOSED, &found.first);
-                upstream->clean_tcp_connection_data(found.first);
             } else {
-                // postpone until all data is sent to client
+                upstream->handler.func(upstream->handler.arg, SERVER_EVENT_CONNECTION_CLOSED, &found.first);
             }
+
+            // Note: see a comment in `close_tcp_connection()` about unsupported half-closed TCP connections.
+            // Waiting for the client to receive unread data is currently counter-productive.
+            upstream->clean_tcp_connection_data(found.first);
         }
 
         break;
@@ -599,6 +602,13 @@ void Http2Upstream::on_icmp_request(IcmpEchoRequestEvent &event) {
 
 void Http2Upstream::close_tcp_connection(uint64_t id, bool graceful) {
     log_conn(this, id, dbg, "Closing, graceful: {}", (int) graceful);
+
+    // FIXME: We don't currently support the notion of a half-closed TCP connection
+    // (see https://datatracker.ietf.org/doc/html/rfc9293#section-3.6.1).
+    // When a FIN is received from a client, the TCP/IP module immediately sends a FIN back.
+    // Supporting half-closed TCP connections would entail significant changes to the
+    // ClientListener, Tunnel, ServerUpstream and the VPN endpoint, but might potentially
+    // unbreak some obscure applications relying on half-closed connections.
 
     auto i = m_tcp_connections.find(id);
     if (m_session != nullptr && i != m_tcp_connections.end()) {

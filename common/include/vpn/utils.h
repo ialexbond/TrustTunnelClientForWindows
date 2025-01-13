@@ -36,8 +36,8 @@ struct TcpFlowCtrlInfo {
 };
 
 // Default values for `TcpFlowCtrlInfo` if there is no way to get real values
-#define DEFAULT_SEND_BUFFER_SIZE (8 * 1024 * 1024)
-#define DEFAULT_SEND_WINDOW_SIZE (8 * 1024 * 1024)
+#define DEFAULT_SEND_BUFFER_SIZE (128 * 1024)
+#define DEFAULT_SEND_WINDOW_SIZE (128 * 1024)
 
 // For use in C interfaces. `uint32_t` to make it easier for C# bindings.
 #define AG_ARRAY_OF(T)                                                                                                 \
