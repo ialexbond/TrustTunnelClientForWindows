@@ -19,6 +19,21 @@ void ag::tunnel_utils::sys_cmd(std::string cmd) {
     }
 }
 
+static bool sys_cmd(std::string cmd) {
+    cmd += " 2>&1";
+    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
+    auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
+    if (result.has_value()) {
+        dbglog(logger, "{}", result.value());
+        if (result.value().empty()) {
+            return true;
+        }
+    } else {
+        dbglog(logger, "{}", result.error()->str());
+    }
+    return false;
+}
+
 ag::VpnError ag::VpnMacTunnel::init(const ag::VpnOsTunnelSettings *settings) {
     init_settings(settings);
     if (tun_open() == -1) {
@@ -26,7 +41,9 @@ ag::VpnError ag::VpnMacTunnel::init(const ag::VpnOsTunnelSettings *settings) {
     }
     setup_if();
     setup_dns();
-    setup_routes();
+    if (!setup_routes()) {
+        return {-1, "Unable to setup routes for mactun session"};
+    }
 
     return {};
 }
@@ -100,18 +117,33 @@ void ag::VpnMacTunnel::setup_if() {
             ipv6_address.get_address_as_string(), ipv6_address.get_prefix_len());
 }
 
-void ag::VpnMacTunnel::setup_routes() {
+bool ag::VpnMacTunnel::setup_routes() {
     std::vector<ag::CidrRange> ipv4_routes;
     std::vector<ag::CidrRange> ipv6_routes;
     ag::tunnel_utils::get_setup_routes(
             ipv4_routes, ipv6_routes, m_settings->included_routes, m_settings->excluded_routes);
 
     for (auto &route : ipv4_routes) {
-        ag::tunnel_utils::fsystem("route add {} -iface {}", route.to_string(), m_tun_name);
+        if (!sys_cmd(AG_FMT("route add {} -iface {}", route.to_string(), m_tun_name))) {
+            auto splitted = route.split();
+            if (!splitted
+                    || !sys_cmd(AG_FMT("route add {} -iface {}", splitted->first.to_string(), m_tun_name))
+                    || !sys_cmd(AG_FMT("route add {} -iface {}", splitted->second.to_string(), m_tun_name))) {
+                return false;
+            }
+        }
     }
     for (auto &route : ipv6_routes) {
-        ag::tunnel_utils::fsystem("route add -inet6 {} -iface {}", route.to_string(), m_tun_name);
+        if (!sys_cmd(AG_FMT("route add -inet6 {} -iface {}", route.to_string(), m_tun_name))) {
+            auto splitted = route.split();
+            if (!splitted
+                    || !sys_cmd(AG_FMT("route add -inet6 {} -iface {}", splitted->first.to_string(), m_tun_name))
+                    || !sys_cmd(AG_FMT("route add -inet6 {} -iface {}", splitted->second.to_string(), m_tun_name))) {
+                return false;
+            }
+        }
     }
+    return true;
 }
 
 [[clang::optnone]]

@@ -178,7 +178,7 @@ private:
     void setup_if();
     void setup_dns();
     bool check_sport_rule_support();
-    void setup_routes(int16_t table_id);
+    bool setup_routes(int16_t table_id);
     void teardown_routes(int16_t table_id);
 
     evutil_socket_t m_tun_fd{-1};
@@ -202,7 +202,7 @@ protected:
     evutil_socket_t tun_open();
     void setup_if();
     void setup_dns();
-    void setup_routes();
+    bool setup_routes();
 
 private:
     evutil_socket_t m_tun_fd{-1};

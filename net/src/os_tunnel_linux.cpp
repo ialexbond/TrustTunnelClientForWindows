@@ -21,6 +21,21 @@ void ag::tunnel_utils::sys_cmd(std::string cmd) {
     }
 }
 
+static bool sys_cmd(std::string cmd) {
+    cmd += " 2>&1";
+    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
+    auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
+    if (result.has_value()) {
+        dbglog(logger, "{}", result.value());
+        if (result.value().empty()) {
+            return true;
+        }
+    } else {
+        dbglog(logger, "{}", result.error()->str());
+    }
+    return false;
+}
+
 ag::VpnError ag::VpnLinuxTunnel::init(const ag::VpnOsTunnelSettings *settings) {
     init_settings(settings);
     if (tun_open() == -1) {
@@ -28,7 +43,9 @@ ag::VpnError ag::VpnLinuxTunnel::init(const ag::VpnOsTunnelSettings *settings) {
     }
     setup_if();
     setup_dns();
-    setup_routes(TABLE_ID);
+    if (!setup_routes(TABLE_ID)) {
+        return {-1, "Unable to setup routes for linuxtun session"};
+    }
 
     return {};
 }
@@ -87,7 +104,7 @@ bool ag::VpnLinuxTunnel::check_sport_rule_support() {
     return true;
 }
 
-void ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
+bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
     std::vector<ag::CidrRange> ipv4_routes;
     std::vector<ag::CidrRange> ipv6_routes;
     ag::tunnel_utils::get_setup_routes(
@@ -97,22 +114,45 @@ void ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
     std::string table_name = m_sport_supported ? std::to_string(table_id) : "main";
 
     for (auto &route : ipv4_routes) {
-        ag::tunnel_utils::fsystem("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name);
+        if (!sys_cmd(AG_FMT("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
+            auto splitted = route.split();
+            if (!splitted
+                    || !sys_cmd(AG_FMT("ip ro add {} dev {} table {}",
+                            splitted->first.to_string(), m_tun_name, table_name))
+                    || !sys_cmd(AG_FMT("ip ro add {} dev {} table {}",
+                            splitted->second.to_string(), m_tun_name, table_name))) {
+                return false;
+            }
+        }
     }
     for (auto &route : ipv6_routes) {
-        ag::tunnel_utils::fsystem("ip -6 ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name);
+        if (!sys_cmd(AG_FMT("ip -6 ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
+            auto splitted = route.split();
+            if (!splitted
+                    || !sys_cmd(AG_FMT("ip -6 ro add {} dev {} table {}",
+                            splitted->first.to_string(), m_tun_name, table_name))
+                    || !sys_cmd(AG_FMT("ip -6 ro add {} dev {} table {}",
+                            splitted->second.to_string(), m_tun_name, table_name))) {
+                return false;
+            }
+        }
     }
 
     if (m_sport_supported) {
         if (!ipv4_routes.empty()) {
-            ag::tunnel_utils::fsystem("ip rule add prio 30800 sport 1-1024 lookup main");
-            ag::tunnel_utils::fsystem("ip rule add prio 30801 lookup {}", table_id);
+            if (!sys_cmd("ip rule add prio 30800 sport 1-1024 lookup main")
+                    || !sys_cmd(AG_FMT("ip rule add prio 30801 lookup {}", table_id))) {
+                return false;
+            }
         }
         if (!ipv6_routes.empty()) {
-            ag::tunnel_utils::fsystem("ip -6 rule add prio 30800 sport 1-1024 lookup main");
-            ag::tunnel_utils::fsystem("ip -6 rule add prio 30801 lookup {}", table_id);
+            if (!sys_cmd("ip -6 rule add prio 30800 sport 1-1024 lookup main")
+                    || !sys_cmd(AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))) {
+                return false;
+            }
         }
     }
+    return true;
 }
 
 void ag::VpnLinuxTunnel::setup_dns() {
