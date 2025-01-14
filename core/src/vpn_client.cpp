@@ -794,6 +794,9 @@ static void vpn_client::run_disconnect(void *ctx, void *data) {
         vpn->dns_proxy_listener = nullptr;
     }
 
+    vpn->tcp_socket.reset();
+    vpn->quic_connector.reset();
+
     log_client(vpn, trace, "Done");
 }
 

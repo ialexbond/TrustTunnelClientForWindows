@@ -163,6 +163,8 @@ static void pinger_handler(void *arg, const LocationsPingerResult *result) {
     auto *vpn = (Vpn *) arg;
     assert(!vpn->selected_endpoint.has_value());
     vpn->selected_endpoint.reset();
+    vpn->client.tcp_socket.reset();
+    vpn->client.quic_connector.reset();
     bool failure_induces_location_unavailable = std::exchange(vpn->ping_failure_induces_location_unavailable, false);
     if (result->ping_ms < 0) {
         VpnError error = failure_induces_location_unavailable
@@ -325,7 +327,10 @@ static void complete_connect(void *ctx, void *data) {
     }
 
     vpn->recovery = {};
-    vpn->client.do_health_check();
+
+    if (!vpn->pending_error.has_value()) {
+        vpn->client.do_health_check();
+    }
 
     log_vpn(vpn, trace, "Done");
 }
