@@ -105,7 +105,6 @@ struct Ping {
     event_loop::AutoTaskId prepare_task_id;
     event_loop::AutoTaskId connect_task_id;
     event_loop::AutoTaskId connect_shortcut_task_id;
-    event_loop::AutoTaskId hello_task_id;
     event_loop::AutoTaskId report_task_id;
 
     std::vector<sockaddr_storage> relay_addresses; // These are in reverse order compared to the ones in `PingInfo`.
@@ -159,7 +158,8 @@ static void on_timer(evutil_socket_t, short, void *arg) {
 
     self->connect_task_id.reset();
     self->connect_shortcut_task_id.reset();
-    self->prepare_task_id = event_loop::submit(self->loop,
+    if (!self->prepare_task_id.has_value()) {
+        self->prepare_task_id = event_loop::submit(self->loop,
             {
                     .arg = self,
                     .action =
@@ -167,6 +167,7 @@ static void on_timer(evutil_socket_t, short, void *arg) {
                                 do_prepare(arg);
                             },
             });
+    }
 }
 
 // Relay shortcut.
@@ -425,6 +426,7 @@ static void do_prepare(void *arg) {
 
     if (!relay_snis.empty()) { // Consume relay address.
         self->relay_addresses.pop_back();
+        self->relay_shortcut_timer.reset();
     }
 
     self->pending.splice(self->pending.end(), self->done);
@@ -440,6 +442,7 @@ static void do_prepare(void *arg) {
     if (self->pending.empty()) {
         log_ping(self, dbg, "Pinging done, reporting results");
         self->timer.reset();
+        self->relay_shortcut_timer.reset();
         self->report_task_id = event_loop::submit(self->loop,
                 {
                         .arg = self,
