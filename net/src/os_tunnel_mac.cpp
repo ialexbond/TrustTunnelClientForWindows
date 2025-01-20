@@ -23,15 +23,22 @@ static bool sys_cmd(std::string cmd) {
     cmd += " 2>&1";
     dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
     auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
-    if (result.has_value()) {
-        dbglog(logger, "{}", result.value());
-        if (result.value().empty()) {
-            return true;
-        }
-    } else {
+    if (result.has_error()) {
         dbglog(logger, "{}", result.error()->str());
+        return false;
     }
-    return false;
+    std::string_view output = result.value();
+    if (!output.empty() && output.ends_with('\n')) {
+        output.remove_suffix(1);
+    }
+    dbglog(logger, "{}", output);
+    // It is expected for "route" on macOS to write an error and return 0
+    // So we need to check if the output contains "route: "
+    if (output.find("route: ") != std::string_view::npos) {
+        dbglog(logger, "Route error detected in command output");
+        return false;
+    }
+    return true;
 }
 
 ag::VpnError ag::VpnMacTunnel::init(const ag::VpnOsTunnelSettings *settings) {
