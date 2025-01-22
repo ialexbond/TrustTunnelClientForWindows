@@ -127,17 +127,6 @@ int VpnStandaloneClient::set_outbound_interface() {
             errlog(m_logger, "Unknown interface name: {}. Use 'ifconfig' to see possible values", config.bound_if);
             return -1;
         }
-    } else {
-#ifdef _WIN32
-        if_index = vpn_win_detect_active_if();
-        if (if_index == 0) {
-            errlog(m_logger, "Couldn't detect active network interface");
-            return -1;
-        }
-        char if_name[IF_NAMESIZE]{};
-        if_indextoname(if_index, if_name);
-        infolog(m_logger, "Using network interface: {} ({})", if_name, if_index);
-#endif
     }
     vpn_network_manager_set_outbound_interface(if_index);
     return 0;
@@ -296,31 +285,6 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
 
 VpnListener *VpnStandaloneClient::make_tun_listener() {
     auto &config = std::get<VpnStandaloneConfig::TunListener>(m_config.listener);
-#ifdef __linux__
-    if (config.bound_if.empty()) {
-        infolog(m_logger, "Outbound interface is not specified, trying to detect it automatically");
-        constexpr std::string_view CMD = "ip -o route show to default";
-        infolog(m_logger, "{} {}", (geteuid() == 0) ? '#' : '$', CMD);
-        Result result = tunnel_utils::fsystem_with_output(CMD);
-        if (result.has_error()) {
-            errlog(m_logger,
-                    "Couldn't detect the outbound interface automatically. Please specify it manually. Error: {}",
-                    result.error()->str());
-            return nullptr;
-        }
-
-        dbglog(m_logger, "Command output: {}", result.value());
-        std::vector parts = utils::split_by(result.value(), ' ');
-        auto found = std::find(parts.begin(), parts.end(), "dev");
-        if (found == parts.end() || std::next(found) == parts.end()) {
-            errlog(m_logger, "Couldn't find the outbound interface name automatically. Please specify it manually.");
-            return nullptr;
-        }
-
-        config.bound_if = *std::next(found);
-        infolog(m_logger, "Using automatically detected outbound interface: {}", config.bound_if);
-    }
-#endif
 
     std::vector<const char *> included_routes;
     included_routes.reserve(config.included_routes.size());

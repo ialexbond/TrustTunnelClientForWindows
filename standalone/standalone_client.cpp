@@ -99,6 +99,7 @@ int main(int argc, char **argv) {
     VpnStandaloneConfig config;
     config.apply_config(parse_result.table());
     config.apply_cmd_args(result);
+    config.detect_bound_if();
 
     vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
 

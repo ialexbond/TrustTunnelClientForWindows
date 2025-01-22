@@ -58,7 +58,7 @@ struct VpnStandaloneConfig {
     Listener listener;
 
     void apply_config(const toml::table &config);
-
     void apply_cmd_args(const cxxopts::ParseResult &result);
+    void detect_bound_if();
 };
 } // namespace ag

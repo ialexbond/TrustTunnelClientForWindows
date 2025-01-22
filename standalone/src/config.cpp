@@ -12,6 +12,11 @@
 #include "net/tls.h"
 #include "vpn/standalone/config.h"
 
+#ifndef _WIN32
+#include <unistd.h>
+#include <sys/types.h>
+#endif
+
 using namespace ag; // NOLINT(google-build-using-namespace)
 
 static constexpr uint32_t DEFAULT_MTU = 1500;
@@ -344,4 +349,43 @@ void VpnStandaloneConfig::apply_cmd_args(const cxxopts::ParseResult &args) {
     if (args.count("loglevel") > 0) {
         set_loglevel(this, args["loglevel"].as<std::string>());
     }
+}
+
+void VpnStandaloneConfig::detect_bound_if() {
+    if (!std::holds_alternative<TunListener>(this->listener)) {
+        return;
+    }
+    TunListener &config = std::get<TunListener>(this->listener);
+    if (!config.bound_if.empty()) {
+        return;
+    }
+#ifdef __linux__
+    constexpr std::string_view CMD = "ip -o route show to default";
+    infolog(g_logger, "{} {}", (geteuid() == 0) ? '#' : '$', CMD);
+    Result result = tunnel_utils::fsystem_with_output(CMD);
+    if (result.has_error()) {
+        errlog(g_logger, "Failed to detect outbound interface automatically: {}", result.error()->str());
+        return;
+    }
+
+    dbglog(g_logger, "Detect command output: {}", result.value());
+    std::vector parts = utils::split_by(result.value(), ' ');
+    auto found = std::find(parts.begin(), parts.end(), "dev");
+    if (found == parts.end() || std::next(found) == parts.end()) {
+        warnlog(g_logger, "Failed to detect outbound interface name");
+        return;
+    }
+    config.bound_if = *std::next(found);
+#endif
+#ifdef _WIN32
+    uint32_t if_index = vpn_win_detect_active_if();
+    if (if_index == 0) {
+        warnlog(g_logger, "Failed to detect active network interface");
+        return;
+    }
+    char if_name[IF_NAMESIZE]{};
+    if_indextoname(if_index, if_name);
+    config.bound_if = if_name;
+#endif // _WIN32
+    infolog(g_logger, "Using automatically detected outbound interface: {}", config.bound_if);
 }
