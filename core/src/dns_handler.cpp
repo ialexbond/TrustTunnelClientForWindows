@@ -131,16 +131,19 @@ uint64_t ag::DnsHandlerServerUpstreamBase::open_connection(
 }
 
 void ag::DnsHandlerServerUpstreamBase::close_connection(uint64_t upstream_conn_id, bool /*graceful*/, bool async) {
+    if (std::erase_if(m_new_connections, [needle = upstream_conn_id](uint64_t id_) {
+        return id_ == needle;
+    })) {
+        return;
+    }
+
     auto it = m_connections.find(upstream_conn_id);
     if (it == m_connections.end()) {
         log_upstream(this, warn, "Connection R:{} does not exist", upstream_conn_id);
         return;
     }
 
-    m_connections.erase(upstream_conn_id);
-    erase_if(m_new_connections, [needle = upstream_conn_id](uint64_t id_) {
-        return id_ == needle;
-    });
+    m_connections.erase(it);
 
     on_upstream_connection_closed(upstream_conn_id);
 
