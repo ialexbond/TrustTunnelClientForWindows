@@ -81,7 +81,14 @@ with open("conandata.yml", "r") as file:
 
 for v in [k for k in items.keys() if k >= min_nlc_version]:
     subprocess.run(["git", "checkout", "master"], check=True)
-    subprocess.run(["python", os.path.join(nlc_dir, "scripts", "export_conan.py"), v], check=True)
+    try:
+        subprocess.run(["python", os.path.join(nlc_dir, "scripts", "export_conan.py"), v], check=True)
+    except:
+        if v in nlc_versions:
+            raise
+        else:
+            # Some native_libs_common versions have broken Conan recipes: ignore them.
+            continue
 
 # Not leaving directory causes used-by-another-process error
 os.chdir("..")
