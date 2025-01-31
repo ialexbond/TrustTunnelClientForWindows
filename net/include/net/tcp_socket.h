@@ -48,7 +48,8 @@ typedef struct {
     TcpSocketHandler handler;      // socket events handler
     Millis timeout;                // operations timeout
     SocketManager *socket_manager; // socket manager
-    size_t read_threshold; // reaching this read buffer size causes stop reads from network (if 0, takes no effect)
+    size_t read_threshold;  // reaching this read buffer size causes stop reads from network (if 0, takes no effect)
+    std::string log_prefix; // prefix to the main log message
 #ifdef _WIN32
     bool record_estats; // if true, extended statistics will be enabled for the socket
 #endif                  // _WIN32
@@ -56,11 +57,11 @@ typedef struct {
 
 typedef struct {
     const sockaddr *peer; // should be null if `tcp_socket_acquire_fd` was called before
-    SSL *ssl; // SSL context in case of the traffic needs to be encrypted
-    bool anti_dpi; // Enable anti-DPI protection
-    bool pause_tls; // Pause the TLS handshake and raise `TCP_SOCKET_EVENT_CONNECTED` after receiving the
-                    // first bytes from server. Continue the handshake by calling `tcp_socket_connect_continue`.
-                    // `TCP_SOCKET_EVENT_CONNECTED` will be raised one more time when the handshake is complete.
+    SSL *ssl;             // SSL context in case of the traffic needs to be encrypted
+    bool anti_dpi;        // Enable anti-DPI protection
+    bool pause_tls;       // Pause the TLS handshake and raise `TCP_SOCKET_EVENT_CONNECTED` after receiving the
+                          // first bytes from server. Continue the handshake by calling `tcp_socket_connect_continue`.
+                          // `TCP_SOCKET_EVENT_CONNECTED` will be raised one more time when the handshake is complete.
 } TcpSocketConnectParameters;
 
 /**
@@ -216,5 +217,10 @@ bool tcp_socket_drain(TcpSocket *socket, size_t n);
  * @return nullptr if no alpn is selected
  */
 std::string_view tcp_socket_get_selected_alpn(TcpSocket *socket);
+
+/**
+ * Get socket id
+ */
+int tcp_socket_get_id(const TcpSocket *socket);
 
 } // namespace ag

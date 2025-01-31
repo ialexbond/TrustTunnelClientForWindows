@@ -452,6 +452,7 @@ bool Http2Upstream::open_session(std::optional<Millis> timeout) {
             timeout.value_or(config->timeout),
             this->vpn->parameters.network_manager->socket,
             TCP_READ_THRESHOLD,
+            fmt::format("h2-upstream-{}", m_id),
 #ifdef _WIN32
             TCP_RECORD_ESTATS,
 #endif // _WIN32

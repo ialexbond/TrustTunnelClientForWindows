@@ -27,7 +27,8 @@ namespace ag {
 
 static Logger g_logger{"TCP_SOCKET"};
 
-#define log_sock(s_, lvl_, fmt_, ...) lvl_##log(g_logger, "[{}] " fmt_, (s_)->log_id, ##__VA_ARGS__)
+#define log_sock(s_, lvl_, fmt_, ...)                                                                                  \
+    lvl_##log(g_logger, "[{}] [{}] " fmt_, (s_)->parameters.log_prefix, (s_)->log_id, ##__VA_ARGS__)
 
 // TCP_NODELAY has the same value on all platforms
 #undef TCP_NODELAY
@@ -277,6 +278,7 @@ static void on_read(struct bufferevent *bev, void *ctx) {
 
         // Handshake finished, report "connected".
         tcp_socket_set_read_enabled(socket, false);
+        log_sock(socket, dbg, "Socket connected, TLS handshake completed");
 
         for (;;) {
             SslBuf &buf = socket->ssl_pending.emplace_back();
@@ -424,6 +426,7 @@ static void on_connect_event(struct bufferevent *, short what, TcpSocket *ctx) {
 #endif // _WIN32
 
         if (socket->ssl) {
+            log_sock(socket, dbg, "Starting TLS handshake...");
             SSL_set_connect_state(socket->ssl.get());
             SSL_set0_rbio(socket->ssl.get(), BIO_new(BIO_s_mem()));
             SSL_set0_wbio(socket->ssl.get(), BIO_new(BIO_s_mem()));
@@ -441,6 +444,7 @@ static void on_connect_event(struct bufferevent *, short what, TcpSocket *ctx) {
 
     if (e.code == 0) {
         if (!socket->ssl) {
+            log_sock(socket, dbg, "Socket connected"); // without TLS
             callbacks->handler(callbacks->arg, TCP_SOCKET_EVENT_CONNECTED, nullptr);
         }
     } else if (socket->flags & SF_CONNECT_CALLED) {
@@ -1101,6 +1105,14 @@ done:
 #endif // _WIN32
 
 VpnError do_handshake(TcpSocket *socket) {
+    auto err_log_wrapper = [socket](const int code, const char* text) -> VpnError {
+        if (code != 0) {
+            log_sock(socket, dbg, "SSL handshake completed with error: {}", text);
+        }
+
+        return {.code=code, .text=text};
+    };
+
     size_t bio_written = 0;
     for (;;) {
         tcp_socket::PeekResult result = tcp_socket_peek(socket);
@@ -1108,14 +1120,14 @@ VpnError do_handshake(TcpSocket *socket) {
             break;
         }
         if (std::holds_alternative<tcp_socket::Eof>(result)) {
-            return {.code = -1, .text = "Unexpected EOF during TLS handshake"};
+            return err_log_wrapper(-1, "Unexpected EOF during TLS handshake");
         }
         assert(std::holds_alternative<tcp_socket::Chunk>(result));
         auto chunk = std::get<tcp_socket::Chunk>(result);
 
         int ret = BIO_write(SSL_get_rbio(socket->ssl.get()), chunk.data(), chunk.size());
         if (ret < 0) {
-            return {.code = -1, .text = "BIO_write failed"};
+            return err_log_wrapper(-1, "BIO_write failed");
         }
         bio_written += ret;
         tcp_socket_drain(socket, ret);
@@ -1135,13 +1147,14 @@ VpnError do_handshake(TcpSocket *socket) {
         const TcpSocketHandler &handler = socket->parameters.handler;
         handler.handler(handler.arg, TCP_SOCKET_EVENT_CONNECTED, nullptr);
 
-        return {};
+        // Let's pass zero code here explicitly
+        return err_log_wrapper(0, "");
     }
 
     if (int ret = SSL_do_handshake(socket->ssl.get()); ret <= 0) {
         int error = SSL_get_error(socket->ssl.get(), ret);
         if ((error != SSL_ERROR_WANT_READ) && (error != SSL_ERROR_WANT_WRITE)) {
-            return {.code = error, .text = ERR_error_string(error, nullptr)};
+            return err_log_wrapper(error, ERR_error_string(error, nullptr));
         }
     }
 
@@ -1152,18 +1165,18 @@ VpnError do_handshake(TcpSocket *socket) {
             if (BIO_should_retry(SSL_get_wbio(socket->ssl.get()))) {
                 break;
             }
-            return {.code = -1, .text = "BIO_read failed"};
+            return err_log_wrapper(-1,"BIO_read failed");
         }
         if (ret == 0) {
             break;
         }
         VpnError e = tcp_socket_write(socket, buf, ret);
         if (e.code != 0) {
-            return e;
+            return err_log_wrapper(e.code, e.text);
         }
     }
 
-    return {};
+    return err_log_wrapper(0, "");
 }
 
 VpnError tcp_socket_connect_continue(TcpSocket *socket, const TcpSocketParameters *params) {
@@ -1205,6 +1218,10 @@ SSL *tcp_socket_get_ssl(TcpSocket *socket) {
 
 std::string_view tcp_socket_get_selected_alpn(TcpSocket *socket) {
     return socket->alpn;
+}
+
+int tcp_socket_get_id(const TcpSocket *socket) {
+    return socket->id;
 }
 
 } // namespace ag
