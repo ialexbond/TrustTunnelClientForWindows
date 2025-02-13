@@ -181,6 +181,11 @@ TcpFlowCtrlInfo tcp_socket_flow_control_info(const TcpSocket *socket);
  */
 VpnConnectionStats tcp_socket_get_stats(const TcpSocket *socket);
 
+/**
+ * Get NID of the group function used for key exchange
+ */
+int tcp_socket_get_kex_group_nid(const TcpSocket *socket);
+
 namespace tcp_socket {
 
 /** Retrieved data chunk */

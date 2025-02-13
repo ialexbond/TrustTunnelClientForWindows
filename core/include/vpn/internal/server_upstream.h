@@ -191,6 +191,13 @@ public:
     }
 
     /**
+     * Get endpoints group function used for key exchange
+     */
+    virtual int kex_group_nid() const {
+        return NID_undef;
+    }
+
+    /**
      * Handle a system sleep event. The system is going to sleep after this function returns.
      */
     virtual void handle_sleep() {

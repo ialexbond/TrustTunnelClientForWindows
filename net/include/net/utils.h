@@ -241,6 +241,12 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
         ag::U8View alpn_protos, const char *sni, bool quic);
 
 /**
+ * Return name of the group function used in key exchange from OpenSSL NID
+ * @param kex_group OpenSSL NID of the group
+ */
+std::string kex_group_name_by_nid(int kex_group_nid);
+
+/**
  * Check if the specified IPv4 address is a private address as defined by RFC 1918
  * and link-local address as defined by RFC 3927
  */

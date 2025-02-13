@@ -95,6 +95,8 @@ private:
     bool m_closed = false; // @todo: seems like it can be replaced by a separate state
     ag::Logger m_log{"H3_UPSTREAM"};
     DeclPtr<QuicConnector, &quic_connector_destroy> m_quic_connector;
+    void *m_ssl_for_kex_group_nid = nullptr; // invalid after handshake completed / in case of handshake error
+    int m_kex_group_nid = NID_undef;
 
     /**
      * A point in time when our idle timer expires.
@@ -124,6 +126,7 @@ private:
     void on_icmp_request(IcmpEchoRequestEvent &event) override;
     void handle_sleep() override;
     void handle_wake() override;
+    int kex_group_nid() const override;
 
     static void quic_timer_callback(evutil_socket_t, short, void *arg);
     static void socket_handler(void *arg, UdpSocketEvent what, void *data);

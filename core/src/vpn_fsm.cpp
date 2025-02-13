@@ -459,16 +459,20 @@ static void raise_state(void *ctx, void *) {
                 .time_to_next_ms = uint32_t(vpn->recovery.to_next.count()),
         };
         break;
-    case VPN_SS_CONNECTED:
+    case VPN_SS_CONNECTED: {
         vpn->connected_once = true;
+        int kex_group_nid = vpn->client.endpoint_upstream->kex_group_nid();
+        std::string kex_group_name = kex_group_name_by_nid(kex_group_nid);
         event.connected_info = {
                 .endpoint = vpn->selected_endpoint->endpoint.get(),
                 .relay_address = vpn->selected_endpoint->relay_address.has_value()
                         ? (sockaddr *) &*vpn->selected_endpoint->relay_address
                         : nullptr,
                 .protocol = vpn->client.endpoint_upstream->get_protocol(),
+                .kex_group = kex_group_name.c_str(),
         };
         break;
+    }
     case VPN_SS_DISCONNECTED:
     case VPN_SS_CONNECTING:
     case VPN_SS_RECOVERING:

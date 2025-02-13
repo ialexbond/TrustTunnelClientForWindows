@@ -580,4 +580,12 @@ void UpstreamMultiplexer::timer_stop() {
     }
 }
 
+int UpstreamMultiplexer::kex_group_nid() const {
+    if (!m_upstreams_pool.empty()) {
+        const auto &info = m_upstreams_pool.begin()->second;
+        return info->upstream->kex_group_nid();
+    }
+    return NID_undef;
+}
+
 } // namespace ag

@@ -207,6 +207,9 @@ void UpstreamMultiplexer::handle_sleep() {
 }
 void UpstreamMultiplexer::handle_wake() {
 }
+int UpstreamMultiplexer::kex_group_nid() const {
+    return 0;
+}
 
 SocksListener::SocksListener(const VpnSocksListenerConfig *) {
 }

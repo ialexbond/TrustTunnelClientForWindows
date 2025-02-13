@@ -893,4 +893,8 @@ void Http2Upstream::timer_update() {
             this->vpn->upstream_config.timeout - this->vpn->upstream_config.health_check_timeout);
 }
 
+int Http2Upstream::kex_group_nid() const {
+    return tcp_socket_get_kex_group_nid(m_socket.get());
+}
+
 } // namespace ag

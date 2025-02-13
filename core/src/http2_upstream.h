@@ -81,6 +81,7 @@ private:
     void handle_sleep() override;
     void handle_wake() override;
     void timer_update();
+    int kex_group_nid() const override;
 
     static void http_handler(void *arg, HttpEventId what, void *data);
     static void net_handler(void *arg, TcpSocketEvent what, void *data);

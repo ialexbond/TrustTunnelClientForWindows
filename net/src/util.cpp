@@ -1017,6 +1017,26 @@ static int DecompressBrotliCert(SSL *ssl, CRYPTO_BUFFER **out, size_t uncompress
 }
 #endif
 
+/* Converts group NID in library-independent way */
+std::string kex_group_name_by_nid(int kex_group_nid) {
+    switch (kex_group_nid) {
+    case NID_secp224r1:
+        return "P-224";
+    case NID_X9_62_prime256v1:
+        return "P-256";
+    case NID_secp384r1:
+        return "P-384";
+    case NID_secp521r1:
+        return "P-521";
+    case NID_X25519:
+        return "X25519";
+    case NID_X25519MLKEM768:
+        return "X25519MLKEM768";
+    default:
+        return AG_FMT("Unknown {:04x}", kex_group_nid);
+    }
+}
+
 std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STORE_CTX *, void *), void *arg,
         U8View alpn_protos, const char *sni, bool quic) {
     DeclPtr<SSL_CTX, SSL_CTX_free> ctx{SSL_CTX_new(TLS_client_method())};

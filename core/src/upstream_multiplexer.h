@@ -83,6 +83,7 @@ private:
     void close_upstream(int upstream_id);
     void handle_sleep() override;
     void handle_wake() override;
+    int kex_group_nid() const override;
 
     void timer_update();
     void timer_stop();

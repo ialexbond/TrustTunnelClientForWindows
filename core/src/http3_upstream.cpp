@@ -182,6 +182,7 @@ void Http3Upstream::close_session() {
         }
     }
 
+    m_ssl_for_kex_group_nid = nullptr;
     m_udp_mux.close({});
     m_icmp_mux.close();
     m_h3_conn.reset();
@@ -674,6 +675,9 @@ void Http3Upstream::on_udp_packet() {
         assert(this->vpn->upstream_config.timeout >= this->vpn->upstream_config.health_check_timeout);
         udp_socket_set_timeout(
                 m_socket.get(), this->vpn->upstream_config.timeout - this->vpn->upstream_config.health_check_timeout);
+        if (m_ssl_for_kex_group_nid) {
+            m_kex_group_nid = SSL_get_negotiated_group((SSL *) std::exchange(m_ssl_for_kex_group_nid, nullptr));
+        }
         this->handler.func(this->handler.arg, SERVER_EVENT_SESSION_OPENED, nullptr);
         break;
     }
@@ -1318,6 +1322,7 @@ bool ag::Http3Upstream::continue_connecting() {
 
     SSL_CTX_set_verify(SSL_get_SSL_CTX(result->ssl), SSL_VERIFY_PEER, nullptr);
     SSL_CTX_set_cert_verify_callback(SSL_get_SSL_CTX(result->ssl), verify_callback, this);
+    m_ssl_for_kex_group_nid = result->ssl;
 
     UdpSocketParameters params = {
             .ev_loop = this->vpn->parameters.ev_loop,
@@ -1351,4 +1356,8 @@ bool ag::Http3Upstream::continue_connecting() {
     m_quic_connector.reset();
 
     return true;
+}
+
+int Http3Upstream::kex_group_nid() const {
+    return m_kex_group_nid;
 }

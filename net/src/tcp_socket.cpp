@@ -84,6 +84,7 @@ struct TcpSocket {
     timeval timeout_ts{};
     std::optional<int> subscribe_id;
     std::string_view alpn;
+    int kex_group_nid = NID_undef; // NID of group function used for key exchange
 };
 
 extern "C" bool socket_manager_complete_write(SocketManager *manager, struct bufferevent *bev);
@@ -300,6 +301,9 @@ static void on_read(struct bufferevent *bev, void *ctx) {
         uint32_t out_len;
         SSL_get0_alpn_selected(socket->ssl.get(), &out, &out_len);
         socket->alpn = {(const char *) out, out_len};
+
+        socket->kex_group_nid = SSL_get_negotiated_group(socket->ssl.get());
+
         bufferevent *bev_ssl =
                 bufferevent_openssl_filter_new(vpn_event_loop_get_base(socket->parameters.ev_loop), socket->bev,
                         socket->ssl.release(), BUFFEREVENT_SSL_OPEN, BEV_OPT_DEFER_CALLBACKS | BEV_OPT_CLOSE_ON_FREE);
@@ -1222,6 +1226,10 @@ std::string_view tcp_socket_get_selected_alpn(TcpSocket *socket) {
 
 int tcp_socket_get_id(const TcpSocket *socket) {
     return socket->id;
+}
+
+int tcp_socket_get_kex_group_nid(const TcpSocket *socket) {
+    return socket->kex_group_nid;
 }
 
 } // namespace ag
