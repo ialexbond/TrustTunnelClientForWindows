@@ -319,7 +319,7 @@ void ag::DnsClient::connect_socket() {
     TcpSocketParameters socket_parameters{
             .ev_loop = m_parameters.ev_loop,
             .handler = {.handler = tcp_socket_handler, .arg = this},
-            .timeout = m_parameters.request_timeout,
+            .timeout = Millis::max(),
             .socket_manager = m_parameters.socket_manager,
     };
 
@@ -354,7 +354,7 @@ bool ag::DnsClient::init() {
     UdpSocketParameters udp_param{
             .ev_loop = m_parameters.ev_loop,
             .handler = {.func = udp_socket_handler, .arg = this},
-            .timeout = m_parameters.request_timeout,
+            .timeout = Millis::max(),
             .peer = m_parameters.udp_server_address,
             .socket_manager = m_parameters.socket_manager,
     };
