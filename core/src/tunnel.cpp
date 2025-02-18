@@ -1820,6 +1820,12 @@ bool Tunnel::update_dns_handler_parameters() {
     return this->dns_handler->update_parameters(std::move(*parameters));
 }
 
+void Tunnel::on_network_change() {
+    if (this->dns_handler) {
+        this->dns_handler->on_network_change();
+    }
+}
+
 static void fake_upstream_handler(void *arg, ServerEvent what, void *data) {
     auto *self = (Tunnel *) arg;
     self->upstream_handler(self->fake_upstream, what, data);

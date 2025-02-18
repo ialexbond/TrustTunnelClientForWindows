@@ -140,6 +140,8 @@ public:
 
     void update_bypass_ip_availability(IpVersionSet x);
 
+    void on_network_change();
+
     Fsm fsm;
     std::unique_ptr<Tunnel> tunnel = std::make_unique<Tunnel>(); // tunnel connections manager
     vpn_client::Parameters parameters = {};

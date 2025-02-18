@@ -277,6 +277,8 @@ void Tunnel::on_exclusions_updated() {
 }
 bool Tunnel::should_complete_immediately(uint64_t) const { return false; }
 bool Tunnel::update_dns_handler_parameters() { return true; }
+void Tunnel::on_network_change() {
+}
 } // namespace ag
 
 

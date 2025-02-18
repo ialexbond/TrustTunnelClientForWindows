@@ -768,6 +768,13 @@ void ag::DnsHandler::on_dns_change(void *arg) {
     self->start_system_dns_proxy();
 }
 
+void ag::DnsHandler::on_network_change() {
+    // System proxy has to be restarted with a new `outbound_interface`.
+    // Assume `vpn_network_manager_set_outbound_interface` has been called before `vpn_notify_network_change`.
+    log_handler(this, info, "Restarting system DNS proxy");
+    start_system_dns_proxy();
+}
+
 void ag::DnsHandler::on_upstream_connection_closed(uint64_t upstream_conn_id) {
     close_listener_connection_by_upstream_conn_id(upstream_conn_id);
 }

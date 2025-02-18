@@ -640,6 +640,12 @@ void VpnClient::update_bypass_ip_availability(IpVersionSet x) {
     this->bypass_upstream->update_ip_availability(x);
 }
 
+void VpnClient::on_network_change() {
+    if (this->tunnel) {
+        this->tunnel->on_network_change();
+    }
+}
+
 bool VpnClient::may_send_icmp_request() const {
     return this->fsm.get_state() == vpn_client::S_CONNECTED;
 }

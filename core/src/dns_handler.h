@@ -233,6 +233,8 @@ public:
 
     bool update_parameters(DnsHandlerParameters parameters);
 
+    void on_network_change();
+
 private:
     DnsHandlerParameters m_parameters;
 

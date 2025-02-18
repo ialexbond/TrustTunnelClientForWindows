@@ -94,6 +94,8 @@ struct Tunnel {
     static void on_icmp_reply_ready(void *arg, const IcmpEchoReply &reply);
 
     bool update_dns_handler_parameters();
+
+    void on_network_change();
 };
 
 } // namespace ag

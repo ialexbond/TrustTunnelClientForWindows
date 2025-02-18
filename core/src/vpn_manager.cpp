@@ -570,6 +570,7 @@ void vpn_notify_network_change(Vpn *vpn, VpnNetworkState state) {
     }
 
     vpn->submit([vpn, state] {
+        vpn->client.on_network_change();
         vpn->network_changed_before_recovery = true;
         vpn->fsm.perform_transition(vpn_fsm::CE_NETWORK_CHANGE, (void *) &state);
     });
