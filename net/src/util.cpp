@@ -1030,8 +1030,10 @@ std::string kex_group_name_by_nid(int kex_group_nid) {
         return "P-521";
     case NID_X25519:
         return "X25519";
+#ifdef NID_X25519MLKEM768
     case NID_X25519MLKEM768:
         return "X25519MLKEM768";
+#endif
     default:
         return AG_FMT("Unknown {:04x}", kex_group_nid);
     }
