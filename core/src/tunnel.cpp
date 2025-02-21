@@ -555,7 +555,11 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
 
         switch (conn->state) {
         case CONNS_WAITING_RESPONSE: {
-            log_conn(this, conn, dbg, "Successfully made tunnel");
+            log_conn(this, conn, dbg, "Successfully made tunnel ({})",
+                    upstream.get() == this->vpn->endpoint_upstream.get()         ? "endpoint upstream"
+                            : upstream.get() == this->vpn->bypass_upstream.get() ? "bypass upstream"
+                            : upstream.get() == this->fake_upstream.get()        ? "fake upstream"
+                                                                                 : "unknown upstream");
             report_connection_info(this, conn, conn->domain_lookuper_result.domain.c_str());
             conn->state = CONNS_WAITING_ACCEPT;
             listener->complete_connect_request(conn->client_id, CCR_PASS);

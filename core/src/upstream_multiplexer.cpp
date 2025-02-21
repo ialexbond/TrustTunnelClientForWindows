@@ -203,8 +203,7 @@ void UpstreamMultiplexer::update_flow_control(uint64_t id, TcpFlowCtrlInfo info)
 
 VpnError UpstreamMultiplexer::do_health_check() {
     if (m_health_check_upstream_id.has_value()) {
-        log_ups(this, *m_health_check_upstream_id, dbg,
-                "Another health check is already in progress, ignoring this one");
+        log_ups(this, *m_health_check_upstream_id, info, "Another health check is already in progress");
         return {};
     }
 
@@ -219,11 +218,15 @@ VpnError UpstreamMultiplexer::do_health_check() {
     }
 
     if (info == nullptr) {
+        log_ups(this, *m_health_check_upstream_id, info, "There are no open sessions");
         return {VPN_EC_ERROR, "There are no open sessions"};
     }
 
     VpnError error = info->upstream->do_health_check();
-    if (error.code == VPN_EC_NOERROR) {
+    if (error.code != VPN_EC_NOERROR) {
+        log_ups(this, *m_health_check_upstream_id, warn, "Failed to start health check: ({}) {}", error.code,
+                error.text);
+    } else {
         m_health_check_upstream_id = upstream_id;
     }
 
