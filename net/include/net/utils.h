@@ -45,6 +45,8 @@ struct VpnEndpoint {
     sockaddr_storage address; // endpoint address
     const char *name;         // endpoint host name (used, for example, for TLS handshake)
     const char *remote_id;    // if not NULL or empty, used for server TLS certificate verification instead of `name`
+    uint8_t *additional_data; // additional data about the endpoint
+    size_t additional_data_len;  // length of the additional data
 };
 
 typedef AG_ARRAY_OF(VpnEndpoint) VpnEndpoints;
@@ -238,7 +240,7 @@ void dump_session_cache(const std::string &path);
 void load_session_cache(const std::string &path);
 
 std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STORE_CTX *, void *), void *arg,
-        ag::U8View alpn_protos, const char *sni, bool quic);
+        ag::U8View alpn_protos, const char *sni, bool quic, ag::U8View endpoint_data = ag::U8View{});
 
 /**
  * Return name of the group function used in key exchange from OpenSSL NID

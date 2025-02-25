@@ -162,6 +162,11 @@ AutoVpnEndpoint vpn_endpoint_clone(const VpnEndpoint *src) {
     std::memcpy(dst.get(), src, sizeof(*src));
     dst->name = safe_strdup(src->name);
     dst->remote_id = safe_strdup(src->remote_id);
+
+    auto data_len = src->additional_data_len;
+    dst->additional_data = static_cast<uint8_t *>(std::malloc(data_len));
+    std::memcpy(dst->additional_data, src->additional_data, data_len);
+    dst->additional_data_len = data_len;
     return dst;
 }
 
@@ -172,6 +177,7 @@ void vpn_endpoint_destroy(VpnEndpoint *endpoint) {
 
     free((char *) endpoint->name);
     free((char *) endpoint->remote_id);
+    free(endpoint->additional_data);
     std::memset(endpoint, 0, sizeof(*endpoint));
 }
 
@@ -1040,7 +1046,7 @@ std::string kex_group_name_by_nid(int kex_group_nid) {
 }
 
 std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STORE_CTX *, void *), void *arg,
-        U8View alpn_protos, const char *sni, bool quic) {
+        U8View alpn_protos, const char *sni, bool quic, U8View endpoint_data) {
     DeclPtr<SSL_CTX, SSL_CTX_free> ctx{SSL_CTX_new(TLS_client_method())};
     if (verification_callback && arg) {
         SSL_CTX_set_verify(ctx.get(), SSL_VERIFY_PEER, nullptr);
@@ -1072,6 +1078,12 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
             return "Failed to set SNI";
         }
     }
+
+#ifdef SSL_set_user_data
+    if (endpoint_data.data()) {
+        SSL_set_user_data(ssl.get(), endpoint_data.data(), endpoint_data.size());
+    }
+#endif
 
 // Mimic Chrome's ClientHello if we are using BoringSSL.
 #ifdef OPENSSL_IS_BORINGSSL
