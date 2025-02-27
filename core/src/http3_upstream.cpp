@@ -107,7 +107,8 @@ bool Http3Upstream::open_session(std::optional<Millis>) {
         log_upstream(this, dbg, "Failed to continue handed-off connection");
     }
 
-    U8View endpoint_data = {upstream_config.endpoint->additional_data, upstream_config.endpoint->additional_data_len};
+    U8View endpoint_data{
+            upstream_config.endpoint->additional_data.data, upstream_config.endpoint->additional_data.size};
     SslPtr ssl;
     if (auto r = make_ssl(verify_callback, this, {QUIC_H3_ALPN_PROTOS, std::size(QUIC_H3_ALPN_PROTOS)},
                 upstream_config.endpoint->name, /*quic*/ true, endpoint_data);

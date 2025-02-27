@@ -45,8 +45,7 @@ struct VpnEndpoint {
     sockaddr_storage address; // endpoint address
     const char *name;         // endpoint host name (used, for example, for TLS handshake)
     const char *remote_id;    // if not NULL or empty, used for server TLS certificate verification instead of `name`
-    uint8_t *additional_data; // additional data about the endpoint
-    size_t additional_data_len;  // length of the additional data
+    AG_ARRAY_OF(uint8_t) additional_data; // additional data about the endpoint
 };
 
 typedef AG_ARRAY_OF(VpnEndpoint) VpnEndpoints;

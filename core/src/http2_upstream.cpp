@@ -480,7 +480,7 @@ bool Http2Upstream::open_session(std::optional<Millis> timeout) {
         return false;
     }
 
-    ag::U8View endpoint_data = {config->endpoint->additional_data, config->endpoint->additional_data_len};
+    ag::U8View endpoint_data{config->endpoint->additional_data.data, config->endpoint->additional_data.size};
     SslPtr ssl;
     if (auto r = make_ssl(verify_callback, this, {TCP_TLS_ALPN_PROTOS, std::size(TCP_TLS_ALPN_PROTOS)},
                 config->endpoint->name, /*quic*/ false, endpoint_data);

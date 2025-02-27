@@ -662,7 +662,7 @@ bool conn_prepare(Ping *ping, PingConn *conn) {
     }
     Uint8View alpn_protos = conn->use_quic ? Uint8View{QUIC_H3_ALPN_PROTOS, std::size(QUIC_H3_ALPN_PROTOS)}
                                            : Uint8View{TCP_TLS_ALPN_PROTOS, std::size(TCP_TLS_ALPN_PROTOS)};
-    U8View endpoint_data = {conn->endpoint->additional_data, conn->endpoint->additional_data_len};
+    U8View endpoint_data{conn->endpoint->additional_data.data, conn->endpoint->additional_data.size};
     auto ssl_result = make_ssl(nullptr, nullptr, alpn_protos, conn->endpoint->name, conn->use_quic, endpoint_data);
     if (!std::holds_alternative<SslPtr>(ssl_result)) {
         assert(std::holds_alternative<std::string>(ssl_result));
