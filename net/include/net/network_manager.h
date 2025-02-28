@@ -45,10 +45,17 @@ extern "C" WIN_EXPORT void vpn_network_manager_notify_app_request_domain(const c
 bool vpn_network_manager_check_app_request_domain(const char *domain);
 
 /**
- * Set the outbound interface that will be used for outgoing connections.
- * [Windows] The currently active interface may be found with `vpn_win_detect_active_if()`.
- * @param idx if >0, the library sets it as is
- *            if =0, the library uses the default one
+ * Set the outbound interface that will be used for outgoing connections. This is required to prevent
+ * the VPN's own traffic from being routed into the VPN. The argument should normally be the index of
+ * the default interface that the system would use for Internet connections.
+ *
+ * [Windows] The current default interface used for Internet connections can be found with `vpn_win_detect_active_if()`.
+ * This function must be called with the correct interface index before creating a VPN instance with `vpn_open`.
+ * If the outbound interface changes when a VPN instance is already running, this function must be called with
+ * the new outbound interface _before_ notifying the running VPN instance about the network change with
+ * `vpn_notify_network_change`.
+ *
+ * @param idx The outbound interface index. If zero, the system default routing will be used.
  */
 extern "C" WIN_EXPORT void vpn_network_manager_set_outbound_interface(uint32_t idx);
 

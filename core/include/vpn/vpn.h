@@ -671,6 +671,10 @@ WIN_EXPORT void vpn_reset_connections(Vpn *vpn, int uid);
  * This function should be called with `VPN_NS_CONNECTED` when the active network changes
  * but the internet is still available, and with `VPN_NS_NOT_CONNECTED` when the internet
  * connection is lost. It should not be called if the active network isn't changed.
+ *
+ * [Windows] When the network changes, `vpn_network_manager_set_outbound_interface` must
+ * be called with the updated outbound interface index _before_ calling this function.
+ *
  * @param vpn VPN client
  * @param state the new network state
  */
