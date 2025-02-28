@@ -36,16 +36,28 @@ static bool sys_cmd(std::string cmd) {
     return false;
 }
 
+ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output(std::string cmd) {
+    cmd += " 2>&1";
+    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
+    auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
+    if (result.has_value()) {
+        dbglog(logger, "{}", result.value());
+    } else {
+        dbglog(logger, "{}", result.error()->str());
+    }
+    return result;
+}
+
 ag::VpnError ag::VpnLinuxTunnel::init(const ag::VpnOsTunnelSettings *settings) {
     init_settings(settings);
     if (tun_open() == -1) {
         return {-1, "Failed to init tunnel"};
     }
     setup_if();
-    setup_dns();
     if (!setup_routes(TABLE_ID)) {
         return {-1, "Unable to setup routes for linuxtun session"};
     }
+    setup_dns();
 
     return {};
 }
@@ -169,8 +181,40 @@ void ag::VpnLinuxTunnel::setup_dns() {
     std::vector<std::string_view> dns_servers{
             m_settings->dns_servers.data, m_settings->dns_servers.data + m_settings->dns_servers.size};
 
-    m_system_dns_setup_success = sys_cmd(AG_FMT("resolvectl dns {} {}", m_tun_name, fmt::join(dns_servers, " ")))
-                    && sys_cmd(AG_FMT("resolvectl domain {} '~.'", m_tun_name));
+    m_system_dns_setup_success = false;
+    constexpr int TRIES = 5;
+    for (int i = 0; i < TRIES; i++) {
+        auto result = sys_cmd_with_output(AG_FMT("resolvectl dns {} {}", m_tun_name, fmt::join(dns_servers, " ")).c_str());
+        if (result.has_error()) {
+            warnlog(logger, "System DNS servers are not set");
+            return;
+        }
+        result = sys_cmd_with_output(AG_FMT("resolvectl dns {}", m_tun_name).c_str());
+        if (result.has_error()) {
+            warnlog(logger, "Can't get the list of system DNS servers set");
+            return;
+        }
+        auto output = result.value();
+        bool found = std::find_if(dns_servers.begin(), dns_servers.end(), [&output](auto &&server){
+            return output.find(server) != output.npos;
+        }) != dns_servers.end();
+        if (found) {
+            result = sys_cmd_with_output(AG_FMT("resolvectl domain {} '~.'", m_tun_name).c_str());
+            if (result.has_error()) {
+                warnlog(logger, "Can't enable DNS leak protection settings on the interface");
+                return;
+            }
+            m_system_dns_setup_success = result.has_value();
+            infolog(logger, "System DNS servers are successfully set");
+            return;
+        }
+        if (i == TRIES - 1) {
+            warnlog(logger, "System DNS servers are not set after {} tries", TRIES);
+            return;
+        }
+        warnlog(logger, "System DNS servers are set but not applied, retrying");
+        std::this_thread::sleep_for(Secs{1});
+    }
 }
 
 void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
