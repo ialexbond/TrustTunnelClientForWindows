@@ -1680,6 +1680,12 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
                                                                                                   : "unknown upstream");
                 event->result = initiate_connection_migration(
                         this, conn, std::move(upstream_to_migrate), {event->data, event->length});
+                if (event->result < 0) {
+                    listener->turn_read(conn->client_id, false);
+                    close_client_side_connection(this, conn, utils::AG_ECONNRESET, /*async*/ true);
+                    break;
+                }
+                conn->flags.reset(CONNF_FAKE_CONNECTION);
                 break;
             }
         }
@@ -1695,8 +1701,8 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
             event->result = initiate_connection_migration(
                     this, conn, select_upstream(this, VPN_CA_DEFAULT, conn), {event->data, event->length});
             if (event->result < 0) {
-                close_client_side_connection(this, conn, utils::AG_ECONNREFUSED, /*async*/ true);
                 listener->turn_read(conn->client_id, false);
+                close_client_side_connection(this, conn, utils::AG_ECONNRESET, /*async*/ true);
             }
             break;
         }

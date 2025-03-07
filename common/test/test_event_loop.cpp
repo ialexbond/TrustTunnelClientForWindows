@@ -224,6 +224,7 @@ TEST_F(EventLoopTest, StopSubmitDestroy) {
     ASSERT_TRUE(id.has_value());
     ASSERT_FALSE(ctx.finalized);
 
+    m_loop_thread.join();
     id.reset();
     m_ev_loop.reset();
     ASSERT_FALSE(ctx.ran);

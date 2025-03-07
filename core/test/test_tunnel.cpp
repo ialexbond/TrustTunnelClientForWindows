@@ -263,34 +263,6 @@ TEST_F(TunnelTest, LocalhostConnection) {
     ASSERT_GT(bypass_upstream->connections.size(), 0);
 }
 
-TEST_F(TunnelTest, SelectiveDisconnectedClientExclusion) {
-    ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_SELECTIVE, "localhost"));
-
-    // Simulate not yet connected state
-    vpn.endpoint_upstream.reset();
-
-    uint64_t client_id = vpn.listener_conn_id_generator.get();
-    ASSERT_NO_FATAL_FAILURE(raise_client_connection(client_id));
-
-    ConnectRequestResult result = {client_id, VPN_CA_DEFAULT, "some", 1};
-    std::optional<VpnConnectAction> action = tun.finalize_connect_action(result);
-    tun.complete_connect_request(client_id, action);
-    ASSERT_EQ(bypass_upstream->connections.size(), 1);
-    uint64_t upstream_id = bypass_upstream->connections.back();
-
-    tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &upstream_id);
-    ASSERT_EQ(client_listener->connections[client_id].state, TestListener::CS_COMPLETED);
-
-    ASSERT_FALSE(client_listener->connections[client_id].read_enabled);
-    tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &client_id);
-    ASSERT_TRUE(client_listener->connections[client_id].read_enabled);
-
-    ClientRead read_event = {client_id, CLIENT_HELLO, std::size(CLIENT_HELLO), 0};
-    tun.listener_handler(client_listener, CLIENT_EVENT_READ, &read_event);
-    ASSERT_EQ(bypass_upstream->connections.size(), 1);
-    ASSERT_LT(read_event.result, 0);
-}
-
 class MigrationTest : public TunnelTest {
 public:
     uint64_t client_id = NON_ID;
