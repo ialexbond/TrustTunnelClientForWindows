@@ -175,9 +175,10 @@ docgen! {
 docgen! {
     #[derive(Deserialize, Serialize)]
     pub struct TunListener {
-        #{doc(r#"Outbound interface for outgoing connections.
-Defaults to `en0` on macOS.
-On Linux and Windows, it is detected automatically if not specified."#)}
+        #{doc(r#"Name of the interface used for connections made by the VPN client.
+On Linux and Windows, it is detected automatically if not specified.
+On macOS, it defaults to `en0` if not specified.
+On Windows, an interface index as shown by `route print`, written as a string, may be used instead of a name."#)}
         #[serde(default = "TunListener::default_bound_if")]
         pub bound_if: String,
         #{doc("Routes in CIDR notation to set to the virtual interface")}

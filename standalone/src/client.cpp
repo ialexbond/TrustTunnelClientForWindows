@@ -124,6 +124,11 @@ int VpnStandaloneClient::set_outbound_interface() {
     if (!config.bound_if.empty()) {
         if_index = if_nametoindex(config.bound_if.c_str());
         if (if_index == 0) {
+            if (auto idx = ag::utils::to_integer<uint32_t>(config.bound_if)) {
+                if_index = idx.value();
+            }
+        }
+        if (if_index == 0) {
             errlog(m_logger, "Unknown interface name: {}. Use 'ifconfig' to see possible values", config.bound_if);
             return -1;
         }
