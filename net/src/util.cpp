@@ -1041,7 +1041,7 @@ std::string kex_group_name_by_nid(int kex_group_nid) {
         return "X25519MLKEM768";
 #endif
     case NID_undef:
-        return "None (TLS session ticket)";
+        return "None (TLS session ticket used)";
     default:
         return AG_FMT("Unknown {:04x}", kex_group_nid);
     }
