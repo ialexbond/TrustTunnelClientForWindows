@@ -162,6 +162,7 @@ protected:
     // Interface index
     uint32_t m_if_index = 0;
     bool m_system_dns_setup_success = false;
+    bool m_ipv6_available = false;
 };
 
 #ifdef __linux__

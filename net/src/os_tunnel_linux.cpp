@@ -107,8 +107,13 @@ evutil_socket_t ag::VpnLinuxTunnel::tun_open() {
 void ag::VpnLinuxTunnel::setup_if() {
     ag::tunnel_utils::fsystem("ip addr add {} dev {}",
             tunnel_utils::get_address_for_index(m_settings->ipv4_address, m_if_index).to_string(), m_tun_name);
-    ag::tunnel_utils::fsystem("ip -6 addr add {} dev {}",
-            tunnel_utils::get_address_for_index(m_settings->ipv6_address, m_if_index).to_string(), m_tun_name);
+    auto result = sys_cmd_with_output(AG_FMT("ip -6 addr add {} dev {}",
+            tunnel_utils::get_address_for_index(m_settings->ipv6_address, m_if_index).to_string(), m_tun_name));
+    if (result.has_error()) {
+        warnlog(logger, "Failed to set IPv6 address: {}", result.error()->str());
+    } else {
+        m_ipv6_available = true;
+    }
     ag::tunnel_utils::fsystem("ip link set dev {} mtu {} up", m_tun_name, m_settings->mtu);
 }
 
@@ -129,6 +134,10 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
 
     m_sport_supported = check_sport_rule_support();
     std::string table_name = m_sport_supported ? std::to_string(table_id) : "main";
+
+    if (!m_ipv6_available) {
+        ipv6_routes.clear();
+    }
 
     for (auto &route : ipv4_routes) {
         if (!sys_cmd(AG_FMT("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
