@@ -39,7 +39,7 @@ private:
     }
     bool setup_mtu();
     bool setup_dns();
-    bool setup_routes();
+    bool setup_routes(std::span<const CidrRange> v4, std::span<const CidrRange> v6);
     DeclPtr<VpnWinTunnelSettings, &vpn_win_tunnel_settings_destroy> m_win_settings;
 
     WINTUN_ADAPTER_HANDLE m_wintun_adapter{nullptr};

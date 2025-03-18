@@ -88,6 +88,7 @@ struct ConnectingVpnManagerTest : MockedTest {
                 .retry_info = {.policy = VPN_CRP_SEVERAL_ATTEMPTS, .attempts_num = 1},
         };
         vpn_connect(vpn, &parameters);
+        vpn_event_loop_hijack(vpn->ev_loop.get());
         ASSERT_TRUE(await_state_change(VPN_SS_CONNECTING));
     }
 

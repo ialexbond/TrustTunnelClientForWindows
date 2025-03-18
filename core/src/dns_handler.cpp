@@ -131,8 +131,8 @@ uint64_t ag::DnsHandlerServerUpstreamBase::open_connection(
 }
 
 void ag::DnsHandlerServerUpstreamBase::close_connection(uint64_t upstream_conn_id, bool /*graceful*/, bool async) {
-    if (std::erase_if(m_new_connections, [needle = upstream_conn_id](uint64_t id_) {
-        return id_ == needle;
+    if (std::erase_if(m_new_connections, [&](uint64_t id_) {
+        return id_ == upstream_conn_id;
     })) {
         return;
     }

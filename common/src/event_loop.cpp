@@ -382,6 +382,24 @@ bool vpn_event_loop_is_active(const VpnEventLoop *loop) {
             && !event_base_got_break(loop->ev_base.get());
 }
 
+void vpn_event_loop_hijack(VpnEventLoop *loop) {
+    log_loop(loop, dbg, "...");
+    vpn_event_loop_exit(loop, {});
+
+    std::unique_lock l(loop->guard);
+    log_loop(loop, dbg, "Waiting until run finished (current state={})", magic_enum::enum_name(loop->state));
+    loop->stopping_externally = true;
+    loop->stop_barrier.wait(l, [loop]() -> bool {
+        return loop->state != ELS_RUNNING;
+    });
+    log_loop(loop, dbg, "Run finish waited");
+
+    loop->state = ELS_STOPPED;
+    loop->stopping_externally = false;
+
+    log_loop(loop, dbg, "Done");
+}
+
 namespace event_loop {
 
 AutoTaskId make_auto_id(TaskId id) {

@@ -116,6 +116,12 @@ struct event_base *vpn_event_loop_get_base(const VpnEventLoop *loop);
  */
 bool vpn_event_loop_is_active(const VpnEventLoop *loop);
 
+/**
+ * Ask the loop to exit as soon as possible without cancelling any pending tasks and wait for it to exit.
+ * Useful for hijacking the event loop in tests.
+ */
+void vpn_event_loop_hijack(VpnEventLoop *loop);
+
 namespace event_loop {
 
 class [[nodiscard]] AutoTaskId {

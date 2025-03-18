@@ -612,6 +612,12 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
             upstream->update_flow_control(conn->server_id, listener->flow_control_info(conn->client_id));
             break;
         }
+        case CONNS_REJECTED: {
+            log_conn(this, conn, dbg, "Connection was rejected while waiting for upstream response, state={}, event={}",
+                    magic_enum::enum_name(conn->state), magic_enum::enum_name(what));
+            upstream->close_connection(id, false, true);
+            break;
+        }
         default:
             log_conn(this, conn, err, "Connection has invalid state: {} (event={})", magic_enum::enum_name(conn->state),
                     magic_enum::enum_name(what));

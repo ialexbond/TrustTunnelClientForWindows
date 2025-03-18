@@ -50,6 +50,15 @@ public:
     /** Block all inbound/outbound IPv6 traffic. */
     WfpFirewallError block_ipv6();
 
+    /**
+     * Block incoming traffic from any address in `from_v4` or `from_v6`
+     * to any address not in `allow_to_v4` or `allow_to_v6`.
+     *
+     * Note: traffic destined to the loopback interface is never blocked.
+     */
+    WfpFirewallError block_inbound(const CidrRange &allow_to_v4, const CidrRange &allow_to_v6,
+            std::span<const CidrRange> from_v4, std::span<const CidrRange> from_v6);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

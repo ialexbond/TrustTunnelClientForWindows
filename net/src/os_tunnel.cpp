@@ -102,16 +102,16 @@ ag::Result<std::string, ag::tunnel_utils::ExecError> ag::tunnel_utils::exec_with
     return result;
 }
 
-ag::CidrRange ag::tunnel_utils::get_address_for_index(const char *ipv4_address, uint32_t index) {
-    ag::CidrRange range{ipv4_address};
-    ag::Uint8Vector addr = range.get_address();
-    if (addr.empty()) {
+// This function is called to convert the interface address string from the settings.
+// There used to be some sort of auto-correction of an invalid argument, using the interface index, now we
+// simply check for nullptr and convert to CidrRange. An invalid setting will lead to an error down the line.
+ag::CidrRange ag::tunnel_utils::get_address_for_index(const char *address, uint32_t /*index*/) {
+    CidrRange range{safe_to_string_view(address)};
+    if (!range.valid()) {
         return range;
     }
-    if (addr.back() == 0) {
-        addr.back() = index + 2;
-    }
-    return {ag::as_u8v(addr), addr.size() * 8};
+    const Uint8Vector &addr = range.get_address();
+    return {as_u8v(addr), addr.size() * 8};
 }
 
 ag::VpnOsTunnelSettings *ag::vpn_os_tunnel_settings_clone(const ag::VpnOsTunnelSettings *settings) {
@@ -181,6 +181,7 @@ const ag::VpnWinTunnelSettings *ag::vpn_win_tunnel_settings_defaults() {
             .tunnel_type = "wintun",
             .wintun_lib = nullptr,
             .block_ipv6 = false,
+            .block_inbound = false,
             .zerocopy = false,
     };
     return &win_settings;

@@ -15,6 +15,7 @@
 #include <netioapi.h>
 
 #include "common/utils.h"
+#include "common/socket_address.h"
 #include "net/network_manager.h"
 #include "net/os_tunnel.h"
 #include "vpn/guid_utils.h"
@@ -172,16 +173,18 @@ static uint32_t get_wintun_adapter_index(WINTUN_ADAPTER_HANDLE Adapter) {
     return if_idx;
 }
 
-static WINTUN_SESSION_HANDLE create_wintun_session(std::string_view ipv4Address, std::string_view ipv6Address,
+static WINTUN_SESSION_HANDLE create_wintun_session(const ag::CidrRange &addr_v4, const ag::CidrRange &addr_v6,
         WINTUN_ADAPTER_HANDLE adapter, DWORD ring_capacity) {
+    if (!addr_v4.valid()) {
+        errlog(logger, "ipv4 address not specified");
+        return nullptr;
+    }
+    ag::SocketAddress saddr_v4{{addr_v4.get_address().begin(), addr_v4.get_address().end()}, 0};
     MIB_UNICASTIPADDRESS_ROW address_v4_row;
     InitializeUnicastIpAddressEntry(&address_v4_row);
     WintunGetAdapterLUID(adapter, &address_v4_row.InterfaceLuid);
     address_v4_row.Address.Ipv4.sin_family = AF_INET;
-    struct sockaddr_in sa {};
-    // store this IP address in sa:
-    inet_pton(AF_INET, ipv4Address.data(), &(sa.sin_addr));
-    address_v4_row.Address.Ipv4.sin_addr = sa.sin_addr;
+    address_v4_row.Address.Ipv4.sin_addr = ((sockaddr_in *) saddr_v4.c_sockaddr())->sin_addr;
     address_v4_row.DadState = IpDadStatePreferred;
     auto last_error = CreateUnicastIpAddressEntry(&address_v4_row);
     if (last_error != ERROR_SUCCESS && last_error != ERROR_OBJECT_ALREADY_EXISTS) {
@@ -189,15 +192,13 @@ static WINTUN_SESSION_HANDLE create_wintun_session(std::string_view ipv4Address,
         errlog(logger, "Set ipv4: {}", ag::sys::strerror(ag::sys::last_error()));
         return nullptr;
     }
-    if (ipv6Address.data() != nullptr) {
+    if (addr_v6.valid()) {
+        ag::SocketAddress saddr_v6{{addr_v6.get_address().begin(), addr_v6.get_address().end()}, 0};
         MIB_UNICASTIPADDRESS_ROW address_v6_row;
         InitializeUnicastIpAddressEntry(&address_v6_row);
         WintunGetAdapterLUID(adapter, &address_v6_row.InterfaceLuid);
         address_v6_row.Address.Ipv6.sin6_family = AF_INET6;
-        struct sockaddr_in6 sa6 {};
-        // store this IP address in sa:
-        inet_pton(AF_INET6, ipv6Address.data(), &(sa6.sin6_addr));
-        address_v6_row.Address.Ipv6.sin6_addr = sa6.sin6_addr;
+        address_v6_row.Address.Ipv6.sin6_addr = ((sockaddr_in6 *) saddr_v6.c_sockaddr())->sin6_addr;
         address_v6_row.DadState = IpDadStatePreferred;
         last_error = CreateUnicastIpAddressEntry(&address_v6_row);
         if (last_error != ERROR_SUCCESS && last_error != ERROR_OBJECT_ALREADY_EXISTS) {
@@ -240,8 +241,8 @@ ag::VpnError ag::VpnWinTunnel::init(
         return {-1, "Unable to create wintun quit event"};
     }
     m_if_index = get_wintun_adapter_index(m_wintun_adapter);
-    std::string ipv4_address = tunnel_utils::get_address_for_index(settings->ipv4_address, m_if_index).to_string();
-    std::string ipv6_address = tunnel_utils::get_address_for_index(settings->ipv6_address, m_if_index).to_string();
+    CidrRange ipv4_address = tunnel_utils::get_address_for_index(settings->ipv4_address, m_if_index);
+    CidrRange ipv6_address = tunnel_utils::get_address_for_index(settings->ipv6_address, m_if_index);
     m_wintun_session = create_wintun_session(ipv4_address, ipv6_address, m_wintun_adapter,
             win_settings->zerocopy ? WINTUN_RING_CAPACITY_ZEROCOPY : WINTUN_RING_CAPACITY);
     if (m_wintun_session == nullptr) {
@@ -262,9 +263,19 @@ ag::VpnError ag::VpnWinTunnel::init(
             return {-1, "Failed to block IPv6"};
         }
     }
-    if (!setup_routes()) {
+    std::vector<ag::CidrRange> ipv4_routes;
+    std::vector<ag::CidrRange> ipv6_routes;
+    ag::tunnel_utils::get_setup_routes(
+            ipv4_routes, ipv6_routes, m_settings->included_routes, m_settings->excluded_routes);
+    if (!setup_routes(ipv4_routes, ipv6_routes)) {
         errlog(logger, "{}", ag::sys::strerror(ag::sys::last_error()));
         return {-1, "Unable to setup routes for wintun session"};
+    }
+    if (win_settings->block_inbound) {
+        if (auto error = m_firewall.block_inbound(ipv4_address, ipv6_address, ipv4_routes, ipv6_routes)) {
+            errlog(logger, "Failed to block incoming: {}", error->str());
+            return {-1, "Failed to block incoming"};
+        }
     }
     return {};
 }
@@ -405,12 +416,7 @@ bool ag::VpnWinTunnel::setup_dns() {
     return true;
 }
 
-bool ag::VpnWinTunnel::setup_routes() {
-    std::vector<ag::CidrRange> ipv4_routes;
-    std::vector<ag::CidrRange> ipv6_routes;
-    ag::tunnel_utils::get_setup_routes(
-            ipv4_routes, ipv6_routes, m_settings->included_routes, m_settings->excluded_routes);
-
+bool ag::VpnWinTunnel::setup_routes(std::span<const CidrRange> ipv4_routes, std::span<const CidrRange> ipv6_routes) {
     for (auto &route : ipv4_routes) {
         if (!add_adapter_route(route, m_if_index)) {
             auto splitted = route.split();

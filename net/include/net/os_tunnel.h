@@ -11,10 +11,11 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 
+#include "common/cidr_range.h"
+#include "common/error.h"
+#include "common/socket_address.h"
 #include "vpn/platform.h"
-#include <common/cidr_range.h>
-#include <common/error.h>
-#include <vpn/utils.h>
+#include "vpn/utils.h"
 
 #ifdef _WIN32
 #include <BaseTsd.h>
@@ -56,6 +57,11 @@ struct VpnWinTunnelSettings {
     HMODULE wintun_lib;
     /** Block all inbound/outbound IPv6 traffic */
     bool block_ipv6;
+    /**
+     * If `true`, block all inbound traffic from VPN-included addresses to non-VPN interfaces.
+     * This setting should be enabled if the kill switch is enabled, and disabled if the kill switch is disabled.
+     */
+    bool block_inbound;
     /**
      * Defer releasing Wintun packet's memory until the packet is processed.
      * If enabled, Wintun's ring buffer will be larger.
@@ -252,7 +258,7 @@ void get_setup_dns(std::string &dns_list_v4, std::string &dns_list_v6, ag::VpnAd
 void get_setup_routes(std::vector<ag::CidrRange> &ipv4_routes, std::vector<ag::CidrRange> &ipv6_routes,
         ag::VpnAddressArray &included_routes, ag::VpnAddressArray &excluded_routes);
 void split_default_route(std::vector<ag::CidrRange> &routes, ag::CidrRange route);
-ag::CidrRange get_address_for_index(const char *ipv4_address, uint32_t index);
+ag::CidrRange get_address_for_index(const char *address, uint32_t index);
 } // namespace tunnel_utils
 
 template <>

@@ -12,10 +12,14 @@
 
 static ag::Logger g_log{"FIREWALL"}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-static constexpr uint8_t DNS_RESTRICT_DENY_WEIGHT = 13;
-static constexpr uint8_t DNS_RESTRICT_ALLOW_WEIGHT = 14;
-static constexpr uint8_t IPV6_BLOCK_DENY_WEIGHT = 15;
+static constexpr uint8_t DNS_RESTRICT_DENY_WEIGHT = 12;
+static constexpr uint8_t DNS_RESTRICT_ALLOW_WEIGHT = 13;
+static constexpr uint8_t IPV6_BLOCK_DENY_WEIGHT = 14;
+static constexpr uint8_t INBOUND_BLOCK_DENY_WEIGHT = 14;
+static constexpr uint8_t INBOUND_BLOCK_ALLOW_WEIGHT = 15;
 
+static_assert(INBOUND_BLOCK_ALLOW_WEIGHT > INBOUND_BLOCK_DENY_WEIGHT);
+static_assert(INBOUND_BLOCK_DENY_WEIGHT > DNS_RESTRICT_ALLOW_WEIGHT);
 static_assert(IPV6_BLOCK_DENY_WEIGHT > DNS_RESTRICT_ALLOW_WEIGHT);
 static_assert(DNS_RESTRICT_ALLOW_WEIGHT > DNS_RESTRICT_DENY_WEIGHT);
 
@@ -190,8 +194,7 @@ ag::WfpFirewallError ag::WfpFirewall::restrict_dns_to(std::span<const CidrRange>
         std::vector<FWPM_FILTER_CONDITION0> allow_v4_conditions;
         allow_v4_conditions.reserve(std::size(dns_conditions) + allowed_v4.size());
         allow_v4_conditions.insert(allow_v4_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
-        std::vector<FWP_V4_ADDR_AND_MASK> allow_v4_ranges;
-        allow_v4_ranges.reserve(allowed_v4.size());
+        std::list<FWP_V4_ADDR_AND_MASK> allow_v4_ranges;
         for (const CidrRange &range : allowed_v4) {
             if (range.get_address().size() != IPV4_ADDRESS_SIZE) {
                 continue;
@@ -222,8 +225,7 @@ ag::WfpFirewallError ag::WfpFirewall::restrict_dns_to(std::span<const CidrRange>
         std::vector<FWPM_FILTER_CONDITION0> allow_v6_conditions;
         allow_v6_conditions.reserve(std::size(dns_conditions) + allowed_v6.size());
         allow_v6_conditions.insert(allow_v6_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
-        std::vector<FWP_V6_ADDR_AND_MASK> allow_v6_ranges;
-        allow_v6_ranges.reserve(allowed_v6.size());
+        std::list<FWP_V6_ADDR_AND_MASK> allow_v6_ranges;
         for (const auto &range : allowed_v6) {
             if (range.get_address().size() != IPV6_ADDRESS_SIZE) {
                 continue;
@@ -327,4 +329,171 @@ ag::WfpFirewallError ag::WfpFirewall::block_ipv6() {
 
         return nullptr;
     });
+}
+
+ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4, const CidrRange &allow_to_v6,
+        std::span<const CidrRange> from_v4, std::span<const CidrRange> from_v6) {
+    if (m_impl->engine_handle == INVALID_HANDLE_VALUE) {
+        return make_error(FE_NOT_INITIALIZED);
+    }
+    return run_transaction(m_impl->engine_handle,
+            [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
+                // Deny inbound traffic from addresses in `from_v4`, except that destined for `not_to_v4` or loopback.
+                if (allow_to_v4.get_address().size() == IPV4_ADDRESS_SIZE && !from_v4.empty()) {
+                    std::vector<FWPM_FILTER_CONDITION0> v4_conditions;
+                    std::list<FWP_V4_ADDR_AND_MASK> v4_ranges;
+                    v4_conditions.reserve(from_v4.size() + 2);
+
+                    // Remote address in any of `from_v4`.
+                    for (const CidrRange &range : from_v4) {
+                        if (range.get_address().size() != IPV4_ADDRESS_SIZE) {
+                            continue;
+                        }
+                        v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                                .fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                                .matchType = FWP_MATCH_EQUAL,
+                                .conditionValue =
+                                        {
+                                                .type = FWP_V4_ADDR_MASK,
+                                                .v4AddrMask =
+                                                        &v4_ranges.emplace_back(fwp_v4_range_from_cidr_range(range)),
+                                        },
+                        });
+                    }
+
+                    std::wstring name = L"AdGuard VPN block inbound IPv4";
+                    FWPM_FILTER0 filter{
+                            .displayData = {.name = name.data()},
+                            .providerKey = &m_impl->provider_key,
+                            .layerKey = FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                            .subLayerKey = m_impl->sublayer_key,
+                            .weight =
+                                    {
+                                            .type = FWP_UINT8,
+                                            .uint8 = INBOUND_BLOCK_DENY_WEIGHT,
+                                    },
+                            .numFilterConditions = (UINT32) v4_conditions.size(),
+                            .filterCondition = &v4_conditions[0],
+                            .action = {.type = FWP_ACTION_BLOCK},
+                    };
+
+                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                            error != ERROR_SUCCESS) {
+                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    }
+
+                    // Allow inbound traffic to addresses not in `not_to_v4` or loopback.
+                    v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                            .fieldKey = FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            .matchType = FWP_MATCH_EQUAL,
+                            .conditionValue =
+                                    {
+                                            .type = FWP_V4_ADDR_MASK,
+                                            .v4AddrMask =
+                                                    &v4_ranges.emplace_back(fwp_v4_range_from_cidr_range(allow_to_v4)),
+                                    },
+                    });
+                    v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                            .fieldKey = FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            .matchType = FWP_MATCH_EQUAL,
+                            .conditionValue =
+                                    {
+                                            .type = FWP_V4_ADDR_MASK,
+                                            .v4AddrMask = &v4_ranges.emplace_back(
+                                                    fwp_v4_range_from_cidr_range(CidrRange{"127.0.0.1/32"})),
+                                    },
+                    });
+
+                    name = L"AdGuard VPN block inbound IPv4 (allow VPN and loopback)";
+                    filter.displayData = {.name = name.data()};
+                    filter.action = {.type = FWP_ACTION_PERMIT};
+                    filter.numFilterConditions = v4_conditions.size();
+                    filter.filterCondition = &v4_conditions[0];
+
+                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                            error != ERROR_SUCCESS) {
+                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    }
+                }
+
+                // Deny inbound traffic from addresses in `from_v6`, except that destined for `not_to_v6` or loopback.
+                if (allow_to_v6.get_address().size() == IPV6_ADDRESS_SIZE && !from_v6.empty()) {
+                    std::vector<FWPM_FILTER_CONDITION0> v6_conditions;
+                    std::list<FWP_V6_ADDR_AND_MASK> v6_ranges;
+                    v6_conditions.reserve(from_v6.size() + 2);
+
+                    // Remote address in any of `from_v6`.
+                    for (const CidrRange &range : from_v6) {
+                        if (range.get_address().size() != IPV6_ADDRESS_SIZE) {
+                            continue;
+                        }
+                        v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                                .fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                                .matchType = FWP_MATCH_EQUAL,
+                                .conditionValue =
+                                        {
+                                                .type = FWP_V6_ADDR_MASK,
+                                                .v6AddrMask =
+                                                        &v6_ranges.emplace_back(fwp_v6_range_from_cidr_range(range)),
+                                        },
+                        });
+                    }
+
+                    std::wstring name = L"AdGuard VPN block inbound IPv6";
+                    FWPM_FILTER0 filter{
+                            .displayData = {.name = name.data()},
+                            .providerKey = &m_impl->provider_key,
+                            .layerKey = FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+                            .subLayerKey = m_impl->sublayer_key,
+                            .weight =
+                                    {
+                                            .type = FWP_UINT8,
+                                            .uint8 = INBOUND_BLOCK_DENY_WEIGHT,
+                                    },
+                            .numFilterConditions = (UINT32) v6_conditions.size(),
+                            .filterCondition = &v6_conditions[0],
+                            .action = {.type = FWP_ACTION_BLOCK},
+                    };
+
+                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                            error != ERROR_SUCCESS) {
+                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    }
+
+                    // Allow inbound traffic to addresses not in `not_to_v6` or loopback.
+                    v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                            .fieldKey = FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            .matchType = FWP_MATCH_EQUAL,
+                            .conditionValue =
+                                    {
+                                            .type = FWP_V6_ADDR_MASK,
+                                            .v6AddrMask =
+                                                    &v6_ranges.emplace_back(fwp_v6_range_from_cidr_range(allow_to_v6)),
+                                    },
+                    });
+                    v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                            .fieldKey = FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            .matchType = FWP_MATCH_EQUAL,
+                            .conditionValue =
+                                    {
+                                            .type = FWP_V6_ADDR_MASK,
+                                            .v6AddrMask = &v6_ranges.emplace_back(
+                                                    fwp_v6_range_from_cidr_range(CidrRange{"::1/128"})),
+                                    },
+                    });
+
+                    name = L"AdGuard VPN block inbound IPv6 (allow VPN and loopback)";
+                    filter.displayData = {.name = name.data()};
+                    filter.action = {.type = FWP_ACTION_PERMIT};
+                    filter.numFilterConditions = v6_conditions.size();
+                    filter.filterCondition = &v6_conditions[0];
+
+                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                            error != ERROR_SUCCESS) {
+                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    }
+                }
+
+                return nullptr;
+            });
 }
