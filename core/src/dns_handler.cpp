@@ -89,9 +89,15 @@ void ag::DnsHandlerServerUpstreamBase::send_response(uint64_t upstream_conn_id, 
             };
             this->handler.func(this->handler.arg, SERVER_EVENT_READ, &event);
             if (event.result <= 0) {
-                log_upstream(this, info, "Failed to send UDP {} ({}) <- {}: handler returned {}",
+                it = m_connections.find(upstream_conn_id);
+                if (it == m_connections.end()) {
+                    log_upstream(this, info, "Failed to send UDP: handler returned {}, connection R:{} is gone",
+                            event.result, upstream_conn_id);
+                } else {
+                    log_upstream(this, info, "Failed to send UDP {} ({}) <- {}: handler returned {}",
                         sockaddr_to_str((sockaddr *) &it->second.addrs.src), it->second.app_name,
                         tunnel_addr_to_str(&it->second.addrs.dst), event.result);
+                }
             }
         } else {
             log_upstream(this, info, "Failed to send UDP {} ({}) <- {}: read disabled",
