@@ -99,6 +99,31 @@ static VpnError do_handshake(TcpSocket *socket);
 
 static ULONG turn_on_estats(const TcpSocket *socket);
 
+static int workaround_sndbuf(evutil_socket_t fd) {
+    // This is a workaround for slow upload speeds on high-RTT connections.
+    //
+    // Source for some of the statements below:
+    // https://learn.microsoft.com/en-us/windows/win32/winsock/sio-ideal-send-backlog-query
+    //
+    // 1. When RTT is high, TCP send performance is capped by the amount of unacked data that can be
+    //    buffered on the sender's size.
+    // 2. The optimal size for this buffer is called the Ideal Send Backlog (ISB), and is calculated from the
+    //    receiver's window, congestion window, and the bandwidth-delay product.
+    // 3. Windows _should_, by default, calculate ISB and adjust SO_SNDBUF automatically, but apparently,
+    //    it either doesn't, or the the default upper limit on SO_SNDBUF is too low.
+    // 4. According to source, the maximum value for ISB is 16 MB.
+    // 5. Microsoft proposes applications use this call:
+    //    https://learn.microsoft.com/en-us/windows/win32/winsock/sio-ideal-send-backlog-change
+    //    to receive notifications about ISB changes, and set SO_SNDBUF accordingly.
+    // 6. Since we don't use Overlapped IO, we can't use that strategy (we'd have to start a separate thread
+    //    per socket to call the blocking version of that function).
+    // 7. Verdict: let's set SO_SNDBUF to 16 MB (allegedly the maximum ISB value) and hope that this doesn't mean
+    //    that Windows will always allocate 16 MB of real memory per socket. (It doesn't seem to, as
+    //    memory consumption as reported by Task Manager is not higher than before this change).
+    DWORD sndbuf = 16 * 1024 * 1024;
+    return setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *) &sndbuf, sizeof(sndbuf));
+}
+
 #endif // _WIN32
 
 static int set_nodelay(evutil_socket_t fd) {
@@ -451,6 +476,11 @@ static void on_connect_event(struct bufferevent *, short what, TcpSocket *ctx) {
             log_sock(socket, dbg, "Socket connected"); // without TLS
             callbacks->handler(callbacks->arg, TCP_SOCKET_EVENT_CONNECTED, nullptr);
         }
+#ifdef _WIN32
+        if (int ret = workaround_sndbuf(bufferevent_getfd(socket->bev))) {
+            log_sock(socket, warn, "Failed to set SO_SNBBUF: {}", ret);
+        }
+#endif
     } else if (socket->flags & SF_CONNECT_CALLED) {
         socket->pending_connect_error = e;
     } else {
