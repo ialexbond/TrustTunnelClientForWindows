@@ -30,7 +30,7 @@ class VpnLibsConan(ConanFile):
 
     def requirements(self):
         self.requires("dns-libs/2.5.69@adguard_team/native_libs_common", transitive_headers=True)
-        self.requires("native_libs_common/7.0.17@adguard_team/native_libs_common", force=True, transitive_headers=True)
+        self.requires("native_libs_common/7.0.18@adguard_team/native_libs_common", force=True, transitive_headers=True)
 
         self.requires("brotli/1.1.0", transitive_headers=True)
         self.requires("cxxopts/3.1.1", transitive_headers=True)
@@ -42,7 +42,7 @@ class VpnLibsConan(ConanFile):
         self.requires("nghttp2/1.56.0@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("nlohmann_json/3.10.5")
         self.requires("tomlplusplus/3.3.0")
-        self.requires("zlib/1.2.11", transitive_headers=True)
+        self.requires("zlib/1.3.1", transitive_headers=True)
 
         if "mips" not in str(self.settings.arch):
             self.requires("quiche/0.17.1@adguard_team/native_libs_common", transitive_headers=True)

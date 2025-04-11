@@ -21,6 +21,8 @@
 #include <openssl/sha.h>
 #include <fmt/format.h>
 
+#include "common/defs.h"
+
 enum TlsReaderState {
     I_REC,
     I_HSHAKE,
@@ -30,7 +32,7 @@ enum TlsReaderState {
     I_CERTS,
 };
 
-using U8View = std::basic_string_view<uint8_t>;
+using U8View = ag::Uint8View;
 
 static uint32_t ntoh_24(uint32_t x) {
     const auto *b = (uint8_t *) &x;

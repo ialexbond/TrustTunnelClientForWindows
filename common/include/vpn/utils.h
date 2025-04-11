@@ -333,7 +333,7 @@ int64_t get_time_monotonic_nanos();
 template <typename T, auto FUNC>
 using DeclPtr = std::unique_ptr<T, Ftor<FUNC>>;
 
-using U8View = std::basic_string_view<uint8_t>;
+using U8View = ag::Uint8View;
 
 std::string sockaddr_ip_to_str(const struct sockaddr *addr);
 std::string sockaddr_to_str(const struct sockaddr *addr);
