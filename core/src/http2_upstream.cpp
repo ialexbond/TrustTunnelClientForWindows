@@ -25,6 +25,7 @@ static constexpr size_t HTTP2_STREAM_INITIAL_WINDOW_SIZE = 131072; // Chrome con
 enum Http2Upstream::TcpConnection::Flag : int {
     TCF_READ_ENABLED,  // `SERVER_EVENT_READ` can be raised
     TCF_STREAM_CLOSED, // stream closed gracefully, but we're waiting until all data is sent
+    TCF_CLIENT_CLOSED, // the client closed its side of the connection
 };
 
 struct CloseCtx {
@@ -259,13 +260,12 @@ void Http2Upstream::http_handler(void *arg, HttpEventId what, void *data) {
 
             if (err_event.has_value()) {
                 upstream->handler.func(upstream->handler.arg, SERVER_EVENT_ERROR, &err_event.value());
-            } else {
+                upstream->clean_tcp_connection_data(found.first);
+            } else if (conn->flags.test(TcpConnection::TCF_CLIENT_CLOSED) || conn->unread_data == nullptr
+                    || conn->unread_data->size() == 0) {
                 upstream->handler.func(upstream->handler.arg, SERVER_EVENT_CONNECTION_CLOSED, &found.first);
-            }
-
-            // Note: see a comment in `close_tcp_connection()` about unsupported half-closed TCP connections.
-            // Waiting for the client to receive unread data is currently counter-productive.
-            upstream->clean_tcp_connection_data(found.first);
+                upstream->clean_tcp_connection_data(found.first);
+            } // else postpone until all data is sent to client
         }
 
         break;
@@ -618,6 +618,7 @@ void Http2Upstream::close_tcp_connection(uint64_t id, bool graceful) {
         if (!conn->flags.test(TcpConnection::TCF_STREAM_CLOSED)) {
             int err = graceful ? NGHTTP2_NO_ERROR : NGHTTP2_CANCEL;
             http_session_reset_stream(m_session.get(), (int32_t) i->second.stream_id, err);
+            conn->flags.set(TcpConnection::TCF_CLIENT_CLOSED);
             return; // will be cleaned up in the stream processed event
         }
         // resetting stream again won't have any effect
