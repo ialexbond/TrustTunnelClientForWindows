@@ -616,9 +616,9 @@ void Http2Upstream::close_tcp_connection(uint64_t id, bool graceful) {
     if (m_session != nullptr && i != m_tcp_connections.end()) {
         TcpConnection *conn = &i->second;
         if (!conn->flags.test(TcpConnection::TCF_STREAM_CLOSED)) {
+            conn->flags.set(TcpConnection::TCF_CLIENT_CLOSED);
             int err = graceful ? NGHTTP2_NO_ERROR : NGHTTP2_CANCEL;
             http_session_reset_stream(m_session.get(), (int32_t) i->second.stream_id, err);
-            conn->flags.set(TcpConnection::TCF_CLIENT_CLOSED);
             return; // will be cleaned up in the stream processed event
         }
         // resetting stream again won't have any effect

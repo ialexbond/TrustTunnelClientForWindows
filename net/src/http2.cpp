@@ -203,6 +203,13 @@ static int on_frame_recv_callback(nghttp2_session *ngsession, const nghttp2_fram
         if (stream != nullptr && (frame->hd.flags & NGHTTP2_FLAG_END_HEADERS)) {
             on_end_headers(frame, session, stream);
         }
+
+        // on_end_headers might have modified h2_session
+        iter = kh_get(h2_streams_ht, h2_session->streams, (khint32_t) stream_id);
+        stream = (iter != kh_end(h2_session->streams))
+                ? kh_value(h2_session->streams, iter)
+                : nullptr;
+
         // fall-through
     case NGHTTP2_DATA:
         if (stream != nullptr && (frame->hd.flags & NGHTTP2_FLAG_END_STREAM)) {

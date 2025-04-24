@@ -559,6 +559,7 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
                     upstream.get() == this->vpn->endpoint_upstream.get()         ? "endpoint upstream"
                             : upstream.get() == this->vpn->bypass_upstream.get() ? "bypass upstream"
                             : upstream.get() == this->fake_upstream.get()        ? "fake upstream"
+                            : upstream.get() == this->dns_handler.get()          ? "DNS handler upstream"
                                                                                  : "unknown upstream");
             report_connection_info(this, conn, conn->domain_lookuper_result.domain.c_str());
             conn->state = CONNS_WAITING_ACCEPT;
