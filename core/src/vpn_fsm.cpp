@@ -449,6 +449,7 @@ static void raise_state(void *ctx, void *) {
     Vpn *vpn = (Vpn *) ctx;
     auto state = (VpnSessionState) vpn->fsm.get_state();
     VpnStateChangedEvent event = {vpn->upstream_config->location.id, state};
+    std::string kex_group_name;
 
     log_vpn(vpn, info, "{}", magic_enum::enum_name((VpnSessionState) vpn->fsm.get_state()));
 
@@ -462,7 +463,7 @@ static void raise_state(void *ctx, void *) {
     case VPN_SS_CONNECTED: {
         vpn->connected_once = true;
         int kex_group_nid = vpn->client.endpoint_upstream->kex_group_nid();
-        std::string kex_group_name = kex_group_name_by_nid(kex_group_nid);
+        kex_group_name = kex_group_name_by_nid(kex_group_nid);
         event.connected_info = {
                 .endpoint = vpn->selected_endpoint->endpoint.get(),
                 .relay_address = vpn->selected_endpoint->relay_address.has_value()
