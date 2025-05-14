@@ -1978,13 +1978,15 @@ void Tunnel::deinit() {
     log_tun(this, dbg, "...");
 
     this->endpoint_upstream_connected = false;
+
+    clean_connection_table(this, this->connections.by_client_id);
+    clean_connection_table(this, this->connections.by_server_id);
+
     if (this->dns_resolver != nullptr) {
         this->dns_resolver->deinit();
         this->dns_resolver.reset();
     }
     this->repeat_exclusions_resolve_task.reset();
-    clean_connection_table(this, this->connections.by_client_id);
-    clean_connection_table(this, this->connections.by_server_id);
     if (this->fake_upstream != nullptr) {
         this->fake_upstream->deinit();
         this->fake_upstream.reset();
