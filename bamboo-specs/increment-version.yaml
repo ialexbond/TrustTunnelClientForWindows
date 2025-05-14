@@ -13,7 +13,7 @@ stages:
 Increment version:
   key: JOB1
   docker:
-    image: adguard/core-libs:2.4
+    image: adguard/core-libs:2.6
     volumes:
       ${bamboo.working.directory}: ${bamboo.working.directory}
       ${bamboo.tmp.directory}: ${bamboo.tmp.directory}

@@ -33,8 +33,7 @@ set(SOURCE_FILES
         ${NET_SOURCE_DIR}/quic_connector.cpp
     )
 
-string(TOLOWER "${CMAKE_OSX_SYSROOT}" OSX_SYSROOT_LC)
-if(APPLE AND OSX_SYSROOT_LC MATCHES "/macosx([0-9]+\.)+sdk$")
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL iOS)
     list(APPEND SOURCE_FILES ${NET_SOURCE_DIR}/os_tunnel_mac.cpp)
     list(APPEND SOURCE_FILES ${NET_SOURCE_DIR}/mac_dns_settings_manager.mm)
 elseif(WIN32)
@@ -47,7 +46,7 @@ endif()
 add_library(vpnlibs_net STATIC EXCLUDE_FROM_ALL ${SOURCE_FILES})
 set_target_properties(vpnlibs_net PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (NOT MSVC)
-    if(APPLE AND OSX_SYSROOT_LC MATCHES "/macosx([0-9]+\.)+sdk$")
+    if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL iOS)
         target_compile_options(vpnlibs_net PRIVATE -fobjc-arc)
         target_link_libraries(vpnlibs_net "-framework Foundation" "-framework SystemConfiguration")
     endif()

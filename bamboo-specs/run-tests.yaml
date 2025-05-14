@@ -18,7 +18,7 @@ stages:
 Run tests on Linux:
   key: RTL
   docker:
-    image: adguard/core-libs:2.1
+    image: adguard/core-libs:2.6
     volumes:
       ${bamboo.working.directory}: ${bamboo.working.directory}
       ${bamboo.tmp.directory}: ${bamboo.tmp.directory}
@@ -237,7 +237,7 @@ Run tests on macOS:
             rm -rf venv
   requirements:
     - ephemeral
-    - image: registry.int.agrd.dev/macos/sequoia-build-agent-xcode16.1:latest
+    - image: registry.int.agrd.dev/macos/sequoia-build-agent-xcode16.3:latest
   artifact-subscriptions: [ ]
 
 repositories:
