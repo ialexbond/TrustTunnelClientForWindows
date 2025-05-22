@@ -103,7 +103,7 @@ void Http2Upstream::handle_response(const HttpHeadersEvent *http_event) {
 
         if (found.second == nullptr) {
             log_upstream(this, dbg, "No connection for stream id={}", stream_id);
-            http_session_reset_stream(m_session.get(), stream_id, NGHTTP2_CANCEL);
+            m_streams_to_reset.push_back(stream_id);
             return;
         }
 
@@ -386,11 +386,17 @@ void Http2Upstream::net_handler(void *arg, TcpSocketEvent what, void *data) {
             log_upstream(upstream, trace, "Got {} bytes from endpoint", chunk.size());
             int r = http_session_input(upstream->m_session.get(), chunk.data(), chunk.size());
             if (r <= 0) {
+                upstream->m_streams_to_reset.clear();
                 log_upstream(
                         upstream, warn, "Failed to process HTTP data from server: {} ({})", nghttp2_strerror(r), r);
                 upstream->close_session_inner(VpnError{VPN_EC_ERROR, nghttp2_strerror(r)});
                 break;
             }
+
+            for (uint32_t stream_id : upstream->m_streams_to_reset) {
+                http_session_reset_stream(upstream->m_session.get(), (int32_t) stream_id, NGHTTP2_CANCEL);
+            }
+            upstream->m_streams_to_reset.clear();
 
             if (!tcp_socket_drain(socket, r)) {
                 VpnError err = {VPN_EC_ERROR, "Couldn't drain data from socket buffer"};

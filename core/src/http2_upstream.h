@@ -61,6 +61,9 @@ private:
     HttpIcmpMultiplexer m_icmp_mux;
     std::string m_credentials;
     std::optional<HealthCheckInfo> m_health_check_info;
+    // It is not safe to reset the stream inside http_session_input() callback,
+    // because it may still be used by nghttp2 internals, so collect them here.
+    std::vector<uint32_t> m_streams_to_reset;
     // For client initiated streams ids are odd numbers
     // https://tools.ietf.org/html/rfc7540#section-5.1.1
     IdGenerator m_stream_id_generator{2};
