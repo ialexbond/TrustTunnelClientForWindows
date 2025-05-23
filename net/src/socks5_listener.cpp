@@ -1239,6 +1239,10 @@ static void sock_handler(void *arg, TcpSocketEvent what, void *data) {
             break;
         }
         if (std::holds_alternative<tcp_socket::Eof>(result)) {
+            if (is_udp_association_tcp_connection(listener, conn)) {
+                terminate_udp_association(listener, conn, {-1, "EOF on TCP socket of UDP association session"});
+                break;
+            }
             goto close;
         }
         if (is_udp_association_tcp_connection(listener, conn)) {
