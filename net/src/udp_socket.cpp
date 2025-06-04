@@ -134,6 +134,12 @@ static UdpSocket *udp_socket_create_inner(const UdpSocketParameters *parameters,
             goto fail;
         }
 
+        if (0 != evutil_make_socket_closeonexec(fd)) {
+            int err = evutil_socket_geterror(fd);
+            log_sock(sock, warn, "Failed to make socket close-on-exec: {} ({})", evutil_socket_error_to_string(err),
+                     err);
+        }
+
 #ifdef __MACH__
         int enabled = 1;
         if (0 != setsockopt(fd, SOL_SOCKET, SO_TIMESTAMP, &enabled, sizeof(enabled))) {

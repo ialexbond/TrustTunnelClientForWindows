@@ -6,6 +6,8 @@
 #include <sys/kern_control.h>
 #include <sys/kern_event.h>
 
+extern "C" int evutil_make_socket_closeonexec(evutil_socket_t sock);
+
 static const ag::Logger logger("OS_TUNNEL_MAC");
 
 void ag::tunnel_utils::sys_cmd(std::string cmd) {
@@ -76,8 +78,12 @@ evutil_socket_t ag::VpnMacTunnel::tun_open() {
     int fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
 
     if (fd < 0) {
-        errlog(logger, "Failed to create socket: {}", strerror(errno));
+        errlog(logger, "Failed to create socket: ({}) {}", errno, strerror(errno));
         return -1;
+    }
+
+    if (0 != evutil_make_socket_closeonexec(fd)) {
+        warnlog(logger, "Failed to make socket close on exec: ({}) {}", errno, strerror(errno));
     }
 
     struct ctl_info info{
@@ -85,8 +91,8 @@ evutil_socket_t ag::VpnMacTunnel::tun_open() {
     };
 
     if (ioctl(fd, CTLIOCGINFO, &info) < 0) {
+        errlog(logger, "IOCTL system call failed: ({}) {}", errno, strerror(errno));
         close(fd);
-        errlog(logger, "IOCTL system call failed: {}", strerror(errno));
         return -1;
     }
 
@@ -98,15 +104,15 @@ evutil_socket_t ag::VpnMacTunnel::tun_open() {
     addr.sc_unit = 0;
 
     if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
+        errlog(logger, "Failed to connect: ({}) {}", errno, strerror(errno));
         close(fd);
-        errlog(logger, "Failed to connect: {}", strerror(errno));
         return -1;
     }
 
     socklen_t addr_len = sizeof(struct sockaddr_ctl);
     if (getpeername(fd, (sockaddr *) &addr, &addr_len) != 0) {
+        errlog(logger, "Failed to get tun number: ({}) {}", errno, strerror(errno));
         close(fd);
-        errlog(logger, "Failed to get tun number: {}", strerror(errno));
         return -1;
     }
 

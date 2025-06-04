@@ -544,7 +544,6 @@ static struct bufferevent *create_bufferevent(TcpSocket *sock, const struct sock
     const TcpSocketHandler *callbacks = &sock->parameters.handler;
     int options;
     struct event_base *base;
-    int err;
 
     evutil_socket_t fd = socket(dst->sa_family, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -562,15 +561,20 @@ static struct bufferevent *create_bufferevent(TcpSocket *sock, const struct sock
     }
 
     if (0 != set_nodelay(fd)) {
-        err = evutil_socket_geterror(fd);
+        int err = evutil_socket_geterror(fd);
         log_sock(sock, err, "Failed to set no delay: {} ({})", evutil_socket_error_to_string(err), err);
         goto fail;
     }
 
     if (0 != evutil_make_socket_nonblocking(fd)) {
-        err = evutil_socket_geterror(fd);
+        int err = evutil_socket_geterror(fd);
         log_sock(sock, err, "Failed to make socket non-blocking: {} ({})", evutil_socket_error_to_string(err), err);
         goto fail;
+    }
+
+    if (0 != evutil_make_socket_closeonexec(fd)) {
+        int err = evutil_socket_geterror(fd);
+        log_sock(sock, warn, "Failed to make socket close-on-exec: {} ({})", evutil_socket_error_to_string(err), err);
     }
 
     base = vpn_event_loop_get_base(sock->parameters.ev_loop);
@@ -668,8 +672,23 @@ VpnError tcp_socket_acquire_fd(TcpSocket *socket, evutil_socket_t fd) {
         return {-1, "Failed to wrap fd in bufferevent"};
     }
 
-    set_nodelay(fd);
-    evutil_make_socket_nonblocking(fd);
+    if (0 != set_nodelay(fd)) {
+        int error = evutil_socket_geterror(fd);
+        log_sock(socket, warn, "Failed to set TCP_NODELAY: ({}) {}", error,
+                 evutil_socket_error_to_string(error));
+    }
+    if (0 != evutil_make_socket_nonblocking(fd)) {
+        int error = evutil_socket_geterror(fd);
+        log_sock(socket, err, "Failed to make socket non-blocking: ({}) {}", error,
+                 evutil_socket_error_to_string(error));
+        return {-1, "Failed to make socket non-blocking"};
+    }
+    if (0 != evutil_make_socket_closeonexec(fd)) {
+        int error = evutil_socket_geterror(fd);
+        log_sock(socket, warn, "Failed to make socket close-on-exec: ({}) {}", error,
+                 evutil_socket_error_to_string(error));
+    }
+
     bufferevent_enable(socket->bev, EV_WRITE);
     bufferevent_setcb(socket->bev, on_read, (bufferevent_data_cb) on_write_flush, on_event, socket);
     evbuffer_add_cb(bufferevent_get_output(socket->bev), &on_sent_event, socket);

@@ -281,9 +281,14 @@ Socks5ListenerStartResult socks5_listener_start(Socks5Listener *listener) {
 
         if (0 != evutil_make_socket_nonblocking(fd)) {
             int err = evutil_socket_geterror(fd);
-            errlog(g_logger, "Failed to make non-blocking: {} ({})", evutil_socket_error_to_string(err), err);
+            errlog(g_logger, "Failed to make socket non-blocking: {} ({})", evutil_socket_error_to_string(err), err);
             evutil_closesocket(fd);
             return SOCKS5L_START_FAILURE;
+        }
+
+        if (0 != evutil_make_socket_closeonexec(fd)) {
+            int err = evutil_socket_geterror(fd);
+            warnlog(g_logger, "Failed to make socket close-on-exec: {} ({})", evutil_socket_error_to_string(err), err);
         }
 
         if (evutil_make_listen_socket_reuseable(fd) != 0) {
@@ -896,6 +901,13 @@ static EventPtr create_udp_event(Socks5Listener *listener, Connection *conn) {
         errlog(g_logger, "Failed to make socket for UDP traffic non-blocking: {} ({})",
                 evutil_socket_error_to_string(err), err);
         goto fail;
+    }
+
+    r = evutil_make_socket_closeonexec(fd);
+    if (r != 0) {
+        int err = evutil_socket_geterror(fd);
+        warnlog(g_logger, "Failed to make socket for UDP traffic close-on-exec: {} ({})",
+                evutil_socket_error_to_string(err), err);
     }
 
     if (evutil_make_listen_socket_reuseable(fd) != 0) {
