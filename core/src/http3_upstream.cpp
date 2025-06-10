@@ -514,6 +514,9 @@ void Http3Upstream::socket_handler(void *arg, UdpSocketEvent what, void *data) {
                 || !upstream->m_h3_conn) {
             log_upstream(upstream, dbg, "UDP socket timed out, closing session");
             upstream->close_session_inner();
+        } else {
+            quiche_conn_send_ack_eliciting(upstream->m_quic_conn.get());
+            upstream->flush_pending_quic_data();
         }
         break;
     }
@@ -702,7 +705,10 @@ void Http3Upstream::on_udp_packet() {
 
         m_state = H3US_ESTABLISHED;
         assert(this->vpn->upstream_config.timeout >= this->vpn->upstream_config.health_check_timeout);
-        udp_socket_set_timeout(m_socket.get(), Millis{}); // Disable timeout after connecting.
+
+        // Prevent idle connection close by sending an ACK-eliciting packet on idle.
+        udp_socket_set_timeout(m_socket.get(), this->vpn->upstream_config.timeout);
+
         if (m_ssl_object) {
             m_kex_group_nid = SSL_get_negotiated_group((SSL *) m_ssl_object);
         }
