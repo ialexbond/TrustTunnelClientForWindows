@@ -864,10 +864,10 @@ static DeclPtr<SSL_SESSION, &SSL_SESSION_free> pop_session_from_cache(const std:
     std::lock_guard l{g_session_cache_mutex};
     if (auto it = g_session_cache.get(key)) {
         auto session = it->pop();
+        dbglog(g_logger, "{} sessions remaining for SNI: {}, QUIC: {}", it->list().size(), sni, quic);
         if (it->size() == 0) {
             g_session_cache.erase(key);
         }
-        dbglog(g_logger, "{} sessions remaining for SNI: {}, QUIC: {}", it->list().size(), sni, quic);
         return session;
     }
     return nullptr;
