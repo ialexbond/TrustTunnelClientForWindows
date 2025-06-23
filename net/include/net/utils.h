@@ -50,10 +50,17 @@ struct VpnEndpoint {
 
 typedef AG_ARRAY_OF(VpnEndpoint) VpnEndpoints;
 
+struct VpnRelay {
+    sockaddr_storage address; // relay address
+    AG_ARRAY_OF(uint8_t) additional_data; // additional data about the relay
+};
+
+typedef AG_ARRAY_OF(VpnRelay) VpnRelays;
+
 struct VpnLocation {
     const char *id;         // location id
     VpnEndpoints endpoints; // location endpoints
-    AG_ARRAY_OF(sockaddr_storage) relay_addresses; // location's relay addresses
+    VpnRelays relays; // location relays
 };
 
 struct NameValue {
@@ -197,6 +204,18 @@ bool vpn_endpoint_equals(const VpnEndpoint *lh, const VpnEndpoint *rh);
  * Destroy endpoints inner resources
  */
 void vpn_endpoints_destroy(VpnEndpoints *endpoints);
+
+/**
+ * Destroy relay's inner resources
+ */
+void vpn_relay_destroy(VpnRelay *relay);
+
+using AutoVpnRelay = AutoPod<VpnRelay, vpn_relay_destroy>;
+
+/**
+ * Make a deep copy of the relay
+ */
+AutoVpnRelay vpn_relay_clone(const VpnRelay *src);
 
 /**
  * Destroy location's inner resources
