@@ -308,7 +308,7 @@ typedef struct {
 
 typedef struct {
     const VpnEndpoint *endpoint;          // the endpoint to which the library is connected
-    const struct sockaddr *relay_address; // if connected through a relay, the relay's address
+    const VpnRelay *relay;                // non-null if connected through a relay
     VpnUpstreamProtocol protocol;         // the protocol used for this connection
     const char *kex_group;                // name of group function used for key exchange
 } VpnConnectedInfo;

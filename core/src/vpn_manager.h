@@ -61,11 +61,11 @@ using ConnectRetryInfo = std::variant<
 
 struct SelectedEndpoint {
     AutoVpnEndpoint endpoint;
-    std::optional<sockaddr_storage> relay_address;
+    std::optional<AutoVpnRelay> relay;
 
-    SelectedEndpoint(AutoVpnEndpoint endpoint, const std::optional<sockaddr_storage> &relay_address)
+    SelectedEndpoint(AutoVpnEndpoint endpoint, std::optional<AutoVpnRelay> relay)
             : endpoint{std::move(endpoint)}
-            , relay_address{relay_address} {
+            , relay{std::move(relay)} {
     }
 };
 
