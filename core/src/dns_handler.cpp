@@ -677,14 +677,18 @@ bool ag::DnsHandler::start_system_dns_proxy() {
     assert(!servers.main.empty() || !servers_v6.main.empty());
 
     using P = std::tuple<SystemDnsServers *, std::unique_ptr<DnsProxyAccessor> &, std::unique_ptr<DnsClient> &,
-            std::string>;
-    for (auto &[servers, proxy, client, tag] : {P{&servers, m_system_dns_proxy, m_system_client, "system-dns-proxy"},
-                 P{&servers_v6, m_system_dns_proxy_ipv6, m_system_client_ipv6, "system-dns-proxy-ipv6"}}) {
+            std::string, std::unordered_map<uint16_t, uint64_t> &>;
+    for (auto &[servers, proxy, client, tag, map] :
+            {P{&servers, m_system_dns_proxy, m_system_client, "system-dns-proxy",
+                     m_upstream_conn_id_by_system_client_id},
+                    P{&servers_v6, m_system_dns_proxy_ipv6, m_system_client_ipv6, "system-dns-proxy-ipv6",
+                            m_upstream_conn_id_by_system_client_ipv6_id}}) {
         client.reset();
         if (proxy) {
             proxy->stop();
             proxy.reset();
         }
+        map.clear();
 
         if (servers->main.empty()) {
             continue;
