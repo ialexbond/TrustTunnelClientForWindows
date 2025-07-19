@@ -177,7 +177,7 @@ void Http3Upstream::close_session() {
     }
 
     if (m_quic_conn != nullptr) {
-        if (int r = quiche_conn_close(m_quic_conn.get(), true, 0, nullptr, 0); r < 0 && r != QUICHE_ERR_DONE) {
+        if (int r = quiche_conn_close(m_quic_conn.get(), true, 0, RUST_EMPTY, 0); r < 0 && r != QUICHE_ERR_DONE) {
             log_upstream(this, err, "Failed to close QUIC connection: {}", magic_enum::enum_name((quiche_error) r));
         } else {
             this->flush_pending_quic_data();

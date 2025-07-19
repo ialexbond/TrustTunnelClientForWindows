@@ -133,7 +133,7 @@ ag::VpnError ag::quic_connector_connect(
 
     connector->ssl = ssl.get();
     sockaddr_storage local_address = local_sockaddr_from_fd(udp_socket_get_fd(connector->socket.get()));
-    connector->conn.reset(quiche_conn_new_with_tls(scid, sizeof(scid), nullptr, 0, (sockaddr *) &local_address,
+    connector->conn.reset(quiche_conn_new_with_tls(scid, sizeof(scid), RUST_EMPTY, 0, (sockaddr *) &local_address,
             sockaddr_get_size((sockaddr *) &local_address), parameters->peer, sockaddr_get_size(parameters->peer),
             config.get(), ssl.release(), /*is_server*/ false));
     if (connector->conn == nullptr) {

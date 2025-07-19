@@ -187,6 +187,7 @@ void TunListener::tcpip_handler(void *arg, TcpipEvent what, void *data) {
 
         std::queue<std::vector<uint8_t>> &pending = conn->unread_data;
         std::span<evbuffer_iovec> iov = {(evbuffer_iovec *)tcp_event->iov, tcp_event->iovlen};
+        int conn_proto = conn->proto; // conn may be freed in the callback
         if ((conn->flags & CF_READ_ENABLED) && pending.empty()) {
             ClientRead event = {tcp_event->id, nullptr, 0, 0};
             while (!iov.empty()) {
@@ -195,7 +196,7 @@ void TunListener::tcpip_handler(void *arg, TcpipEvent what, void *data) {
                     event.data = (uint8_t *) v->iov_base;
                     event.length = v->iov_len;
                     listener->handler.func(listener->handler.arg, CLIENT_EVENT_READ, &event);
-                    if (conn->proto == IPPROTO_UDP && event.result >= 0 && event.length != size_t(event.result)) {
+                    if (conn_proto == IPPROTO_UDP && event.result >= 0 && event.length != size_t(event.result)) {
                         goto loop_exit;
                     }
                     if (event.result >= 0) {
@@ -217,7 +218,7 @@ void TunListener::tcpip_handler(void *arg, TcpipEvent what, void *data) {
     loop_exit:
         if (iov.empty()) {
             // do nothing
-        } else if (conn->proto == IPPROTO_UDP) {
+        } else if (conn_proto == IPPROTO_UDP) {
             size_t total_length = std::accumulate(
                     tcp_event->iov, tcp_event->iov + tcp_event->iovlen, 0, [](size_t acc, evbuffer_iovec v) {
                         return acc + v.iov_len;

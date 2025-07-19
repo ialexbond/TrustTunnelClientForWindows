@@ -110,7 +110,7 @@ std::list<std::vector<uint8_t>> prepare_quic_initials(const char *sni) {
     quiche_config_set_max_send_udp_payload_size(config.get(), UINT16_MAX);
     // clang-format off
     ag::DeclPtr<quiche_conn, &quiche_conn_free> qconn{quiche_conn_new_with_tls(
-            scid, sizeof(scid), nullptr, 0,
+            scid, sizeof(scid), RUST_EMPTY, 0,
             (sockaddr *) &dummy_address, ag::sockaddr_get_size((sockaddr *) &dummy_address),
             (sockaddr *) &dummy_address, ag::sockaddr_get_size((sockaddr *) &dummy_address),
             config.get(), ssl.release(), false)};

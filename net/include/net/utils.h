@@ -23,6 +23,10 @@
 
 namespace ag {
 
+// This is a pointer to an empty buffer for Rust, to be used in pair on zero length.
+// Needed to avoid passing nullptr to Rust FFI functions, which expect non-null pointers to construct slices.
+#define RUST_EMPTY ((const uint8_t *) "")
+
 struct SocketProtectEvent {
     evutil_socket_t fd;   // file descriptor
     const sockaddr *peer; // destination address

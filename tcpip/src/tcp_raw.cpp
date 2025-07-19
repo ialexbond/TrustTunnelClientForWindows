@@ -126,7 +126,8 @@ static err_t process_data(TcpConnDescriptor *conn, const struct pbuf *buffer) {
 
     int recv_result = tcp_cm_receive(conn, iov.size(), iov.data());
     if (0 > recv_result) {
-        return ERR_BUF;
+        // Negative result means connection is closed during receive
+        return ERR_ABRT;
     }
 
     return ERR_OK;
