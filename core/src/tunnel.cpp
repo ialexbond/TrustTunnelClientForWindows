@@ -521,7 +521,7 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
             this->endpoint_upstream_connected = true;
         }
         break;
-    case SERVER_EVENT_HEALTH_CHECK_RESULT:
+    case SERVER_EVENT_HEALTH_CHECK_ERROR:
         // Health check results are handled by `VpnClient`.
         break;
     case SERVER_EVENT_SESSION_CLOSED:

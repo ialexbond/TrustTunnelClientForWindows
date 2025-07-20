@@ -47,6 +47,7 @@ private:
         uint32_t stream_id = 0;
         event_loop::AutoTaskId timeout_task_id;
         VpnError error = {};
+        bool need_result = true;
     };
 
     DeclPtr<HttpSession, &http_session_close> m_session;
@@ -77,7 +78,7 @@ private:
     void consume(uint64_t id, size_t length) override;
     size_t available_to_send(uint64_t id) override;
     void update_flow_control(uint64_t id, TcpFlowCtrlInfo info) override;
-    void do_health_check() override;
+    void do_health_check(bool need_result) override;
     void cancel_health_check() override;
     [[nodiscard]] VpnConnectionStats get_connection_stats() const override;
     [[nodiscard]] size_t connections_num() const override;
@@ -115,6 +116,7 @@ private:
             ServerUpstream *upstream, const TunnelAddress *dst_addr, std::string_view app_name);
     static int send_data_callback(ServerUpstream *upstream, uint64_t stream_id, U8View data);
     static void consume_callback(ServerUpstream *upstream, uint64_t stream_id, size_t size);
+    void report_health_check_error(bool need_result, VpnError error);
 };
 
 } // namespace ag

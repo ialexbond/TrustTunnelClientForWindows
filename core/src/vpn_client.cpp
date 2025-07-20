@@ -48,7 +48,7 @@ enum SessionEvent {
     E_SESSION_OPENED,
     E_SESSION_CLOSED,
     E_SESSION_ERROR,
-    E_HEALTH_CHECK_READY,
+    E_HEALTH_CHECK_ERROR,
 };
 
 static constexpr auto STATE_NAMES = make_enum_names_array<State>();
@@ -72,7 +72,7 @@ static constexpr FsmTransitionEntry TRANSITION_TABLE[] = {
         {S_CONNECTED,           E_SESSION_CLOSED,       Fsm::ANYWAY,    Fsm::DO_NOTHING,       S_DISCONNECTED,         raise_disconnected},
         {S_CONNECTED,           E_SESSION_ERROR,        Fsm::ANYWAY,    submit_disconnect,     S_DISCONNECTING,        Fsm::DO_NOTHING},
         {S_CONNECTED,           E_RUN_PREPARATION_FAIL, Fsm::ANYWAY,    submit_disconnect,     S_DISCONNECTING,        Fsm::DO_NOTHING},
-        {S_CONNECTED,           E_HEALTH_CHECK_READY,   Fsm::OTHERWISE, submit_disconnect,     S_DISCONNECTING,        Fsm::DO_NOTHING},
+        {S_CONNECTED,           E_HEALTH_CHECK_ERROR,   Fsm::OTHERWISE, submit_disconnect,     S_DISCONNECTING,        Fsm::DO_NOTHING},
 
         {S_DISCONNECTING,       E_SESSION_CLOSED,       Fsm::ANYWAY,    Fsm::DO_NOTHING,       S_DISCONNECTED,         raise_disconnected},
         {S_DISCONNECTING,       E_DEFERRED_DISCONNECT,  Fsm::ANYWAY,    run_disconnect,        S_DISCONNECTED,         raise_disconnected},
@@ -161,11 +161,11 @@ static void vpn_upstream_handler(void *arg, ServerEvent what, void *data) {
         vpn->fsm.perform_transition(vpn_client::E_SESSION_CLOSED, nullptr);
         break;
     }
-    case SERVER_EVENT_HEALTH_CHECK_RESULT: {
+    case SERVER_EVENT_HEALTH_CHECK_ERROR: {
         const VpnError *error = (VpnError *) data;
         assert(error);
         log_client(vpn, info, "Health check error: {} ({})", error->text, error->code);
-        vpn->fsm.perform_transition(vpn_client::E_HEALTH_CHECK_READY, data);
+        vpn->fsm.perform_transition(vpn_client::E_HEALTH_CHECK_ERROR, data);
         break;
     }
     case SERVER_EVENT_ERROR: {

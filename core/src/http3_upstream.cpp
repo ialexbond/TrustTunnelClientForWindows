@@ -384,7 +384,7 @@ void Http3Upstream::do_health_check() {
                                     self->close_stream(*self->m_health_check_info->stream_id, H3_REQUEST_CANCELLED);
                                     self->m_health_check_info.reset();
                                     VpnError e = {VPN_EC_ERROR, "No HTTP3 session"};
-                                    self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &e);
+                                    self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_ERROR, &e);
                                 },
                         },
                         {}),
@@ -404,7 +404,7 @@ void Http3Upstream::do_health_check() {
                                     self->close_stream(*self->m_health_check_info->stream_id, H3_REQUEST_CANCELLED);
                                     self->m_health_check_info.reset();
                                     VpnError e = {VPN_EC_ERROR, "Health check has timed out"};
-                                    self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &e);
+                                    self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_ERROR, &e);
                                 },
                         },
                         this->vpn->upstream_config.health_check_timeout),
@@ -437,7 +437,7 @@ void Http3Upstream::do_health_check() {
                                 self->close_stream(*self->m_health_check_info->stream_id, H3_REQUEST_CANCELLED);
                                 self->m_health_check_info.reset();
                                 VpnError e = {VPN_EC_ERROR, "Failed to send health check request"};
-                                self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &e);
+                                self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_ERROR, &e);
                             },
                     },
                     {}),
@@ -842,7 +842,7 @@ void Http3Upstream::handle_h3_event(quiche_h3_event *h3_event, uint64_t stream_i
                 stream_close_code = H3_NO_ERROR;
             } else {
                 stream_close_code = H3_REQUEST_CANCELLED;
-                this->handler.func(this->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &m_health_check_info->error);
+                this->handler.func(this->handler.arg, SERVER_EVENT_HEALTH_CHECK_ERROR, &m_health_check_info->error);
             }
             m_health_check_info.reset();
         } else if (auto [conn_id, conn] = this->get_tcp_conn_by_stream_id(stream_id); conn == nullptr) {

@@ -47,6 +47,12 @@ public:
         return m_id;
     }
 
+    virtual void do_health_check() override {
+        do_health_check(true);
+    }
+
+    virtual void do_health_check(bool need_result) = 0;
+
 protected:
     int m_id = 0;
 

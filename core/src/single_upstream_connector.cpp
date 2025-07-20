@@ -27,7 +27,7 @@ enum Event {
     E_SESSION_OPENED,
     E_SESSION_CLOSED,
     E_SESSION_ERROR,
-    E_HEALTH_CHECK_READY,
+    E_HEALTH_CHECK_ERROR,
 };
 
 static constexpr auto STATE_NAMES = make_enum_names_array<State>();
@@ -69,14 +69,14 @@ struct SingleUpstreamConnector::Impl {
             self->fsm.perform_transition(E_SESSION_CLOSED, nullptr);
             break;
         }
-        case SERVER_EVENT_HEALTH_CHECK_RESULT: {
+        case SERVER_EVENT_HEALTH_CHECK_ERROR: {
             const auto *error = (VpnError *) data;
             if (error == nullptr || error->code == VPN_EC_NOERROR) {
                 log_connector(self, dbg, "Health check succeeded");
             } else {
                 log_connector(self, dbg, "Health check error: {} ({})", error->text, error->code);
             }
-            self->fsm.perform_transition(E_HEALTH_CHECK_READY, data);
+            self->fsm.perform_transition(E_HEALTH_CHECK_ERROR, data);
             break;
         }
         case SERVER_EVENT_ERROR: {

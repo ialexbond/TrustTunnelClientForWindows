@@ -238,6 +238,7 @@ void Http2Upstream::http_handler(void *arg, HttpEventId what, void *data) {
 
             // Save the error and reset health_check_info now: handler may request a new health check.
             VpnError hc_error = upstream->m_health_check_info->error;
+            bool need_hc_result = upstream->m_health_check_info->need_result;
             upstream->m_health_check_info.reset(); // Also resets the health check timeout task.
 
             if (hc_error.code == 0 && http_event->error_code != NGHTTP2_NO_ERROR) {
@@ -245,7 +246,7 @@ void Http2Upstream::http_handler(void *arg, HttpEventId what, void *data) {
             }
 
             if (hc_error.code != 0) {
-                upstream->handler.func(upstream->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &hc_error);
+                upstream->report_health_check_error(need_hc_result, hc_error);
             }
         } else {
             auto found = upstream->get_conn_by_stream_id(stream_id);
@@ -835,7 +836,7 @@ size_t Http2Upstream::connections_num() const {
     return m_tcp_connections.size() + m_udp_mux.connections_num();
 }
 
-void Http2Upstream::do_health_check() {
+void Http2Upstream::do_health_check(bool need_result) {
     m_health_check_info.reset(); // Forget about the current health check.
 
     std::optional<uint32_t> stream_id = send_connect_request(NON_ID, &HEALTH_CHECK_HOST, "");
@@ -847,12 +848,15 @@ void Http2Upstream::do_health_check() {
                                 this,
                                 [](void *arg, TaskId) {
                                     auto *self = (Http2Upstream *) arg;
+                                    bool need_result = self->m_health_check_info.has_value()
+                                            ? self->m_health_check_info->need_result : true;
                                     self->m_health_check_info.reset();
                                     VpnError e = {VPN_EC_ERROR, "Failed to send health check request"};
-                                    self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &e);
+                                    self->report_health_check_error(need_result, e);
                                 },
                         },
                         {}),
+                .need_result = need_result,
         };
         return;
     }
@@ -864,9 +868,11 @@ void Http2Upstream::do_health_check() {
                             this,
                             [](void *arg, TaskId) {
                                 auto *self = (Http2Upstream *) arg;
+                                bool need_result = self->m_health_check_info.has_value()
+                                        ? self->m_health_check_info->need_result : true;
                                 self->m_health_check_info.reset();
                                 VpnError e = {VPN_EC_ERROR, "Health check has timed out"};
-                                self->handler.func(self->handler.arg, SERVER_EVENT_HEALTH_CHECK_RESULT, &e);
+                                self->report_health_check_error(need_result, e);
                             },
                     },
                     this->vpn->upstream_config.health_check_timeout),
@@ -914,6 +920,15 @@ void Http2Upstream::handle_wake() {
 
 int Http2Upstream::kex_group_nid() const {
     return tcp_socket_get_kex_group_nid(m_socket.get());
+}
+
+void Http2Upstream::report_health_check_error(bool need_result, ag::VpnError error) {
+    if (need_result) {
+        this->handler.func(this->handler.arg, SERVER_EVENT_HEALTH_CHECK_ERROR, &error);
+    } else {
+        ServerError err_event = {NON_ID, error};
+        this->handler.func(this->handler.arg, SERVER_EVENT_ERROR, &err_event);
+    }
 }
 
 } // namespace ag

@@ -200,8 +200,8 @@ void UpstreamMultiplexer::do_health_check() {
     UpstreamInfo *info = nullptr;
     for (auto &[id, i] : m_upstreams_pool) {
         if (i->state == US_SESSION_OPENED) {
+            i->upstream->do_health_check(/*need_result=*/(info == nullptr));
             info = i.get();
-            break;
         }
     }
 
@@ -209,8 +209,6 @@ void UpstreamMultiplexer::do_health_check() {
         log_mux(this, warn, "No health check has been started: there are no open sessions");
         return;
     }
-
-    info->upstream->do_health_check();
 }
 
 void UpstreamMultiplexer::cancel_health_check() {
@@ -350,7 +348,7 @@ void UpstreamMultiplexer::child_upstream_handler(void *arg, ServerEvent what, vo
     case SERVER_EVENT_DATA_SENT:
     case SERVER_EVENT_GET_AVAILABLE_TO_SEND:
     case SERVER_EVENT_ECHO_REPLY:
-    case SERVER_EVENT_HEALTH_CHECK_RESULT:
+    case SERVER_EVENT_HEALTH_CHECK_ERROR:
         mux->handler.func(mux->handler.arg, what, data);
         break;
     case SERVER_EVENT_ERROR: {
