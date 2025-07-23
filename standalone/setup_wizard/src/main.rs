@@ -17,6 +17,7 @@ const HOSTNAME_PARAM_NAME: &str = "host";
 const CREDENTIALS_PARAM_NAME: &str = "creds";
 const CERTIFICATE_FILE_PARAM_NAME: &str = "cert";
 const SETTINGS_FILE_PARAM_NAME: &str = "settings";
+const ENDPOINT_CONFIG_PARAM_NAME: &str = "endpoint_config";
 
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum Mode {
@@ -36,7 +37,26 @@ pub struct PredefinedParameters {
     hostname: Option<String>,
     credentials: Option<(String, String)>,
     certificate: Option<String>,
+    endpoint_config: Option<String>,
     settings_file: Option<String>,
+}
+
+impl PredefinedParameters {
+    pub fn new(args: &clap::ArgMatches) -> PredefinedParameters {
+        PredefinedParameters {
+            endpoint_addresses: args.get_many::<String>(ENDPOINT_ADDRESS_PARAM_NAME)
+                .map(Iterator::cloned)
+                .map(Iterator::collect),
+            hostname: args.get_one::<String>(HOSTNAME_PARAM_NAME).cloned(),
+            credentials: args.get_one::<String>(CREDENTIALS_PARAM_NAME)
+                .map(|x| x.splitn(2, ':'))
+                .and_then(|mut x| x.next().zip(x.next()))
+                .map(|(a, b)| (a.to_string(), b.to_string())),
+            certificate: args.get_one::<String>(CERTIFICATE_FILE_PARAM_NAME).cloned(),
+            endpoint_config: args.get_one::<String>(ENDPOINT_CONFIG_PARAM_NAME).cloned(),
+            settings_file: args.get_one::<String>(SETTINGS_FILE_PARAM_NAME).cloned(),
+        }
+    }
 }
 
 lazy_static::lazy_static! {
@@ -48,7 +68,7 @@ pub fn get_predefined_params() -> MutexGuard<'static, PredefinedParameters> {
 }
 
 fn main() {
-    let args = clap::Command::new("VPN client setup wizard")
+    let mut command = clap::Command::new("VPN client setup wizard")
         .args(&[
             clap::Arg::new(MODE_PARAM_NAME)
                 .short('m')
@@ -66,31 +86,26 @@ fn main() {
                 .long("address")
                 .action(clap::ArgAction::Append)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .required_if_eq(MODE_PARAM_NAME, MODE_NON_INTERACTIVE)
                 .help(format!(r#"{}.
-Values of each parameter occurence are gathered into a list.
-Required in non-interactive mode."#,
+Values of each parameter occurence are gathered into a list."#,
                               Endpoint::doc_addresses())),
             clap::Arg::new(HOSTNAME_PARAM_NAME)
                 .short('n')
                 .long("hostname")
                 .action(clap::ArgAction::Set)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .required_if_eq(MODE_PARAM_NAME, MODE_NON_INTERACTIVE)
-                .help(format!("{}.\nRequired in non-interactive mode.", Endpoint::doc_hostname())),
+                .help(format!("{}.", Endpoint::doc_hostname())),
             clap::Arg::new(CREDENTIALS_PARAM_NAME)
                 .short('c')
                 .long("creds")
                 .action(clap::ArgAction::Set)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .required_if_eq(MODE_PARAM_NAME, MODE_NON_INTERACTIVE)
-                .help(r#"A user credentials formatted as: <username>:<password>.
-Required in non-interactive mode."#),
+                .help("A user credentials formatted as: <username>:<password>."),
             clap::Arg::new(CERTIFICATE_FILE_PARAM_NAME)
                 .long("cert")
                 .action(clap::ArgAction::Set)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .help(Endpoint::doc_certificate()),
+                .help(format!("Path to a endpoint's certificate file. If `{}` is specified, certificate will be written to this path", ENDPOINT_CONFIG_PARAM_NAME)),
             clap::Arg::new(SETTINGS_FILE_PARAM_NAME)
                 .long("settings")
                 .action(clap::ArgAction::Set)
@@ -98,8 +113,21 @@ Required in non-interactive mode."#),
                 .required_if_eq(MODE_PARAM_NAME, MODE_NON_INTERACTIVE)
                 .help(r#"Path to store the library settings file.
 Required in non-interactive mode."#),
+            clap::Arg::new(ENDPOINT_CONFIG_PARAM_NAME)
+                .long("endpoint_config")
+                .short('e')
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .conflicts_with("separate_options")
+                .help(format!("Path to the client config that was generated on endpoint\nConflicts with --{}, --{}, --{}", HOSTNAME_PARAM_NAME, CREDENTIALS_PARAM_NAME, ENDPOINT_ADDRESS_PARAM_NAME)),
         ])
-        .get_matches();
+        .group(
+            clap::ArgGroup::new("separate_options")
+                .args([HOSTNAME_PARAM_NAME, CREDENTIALS_PARAM_NAME, ENDPOINT_ADDRESS_PARAM_NAME])
+                .multiple(true)
+                .requires_all([HOSTNAME_PARAM_NAME, CREDENTIALS_PARAM_NAME, ENDPOINT_ADDRESS_PARAM_NAME])
+        );
+    let args = command.clone().get_matches();
+
 
     *MODE.lock().unwrap() = match args.get_one::<String>(MODE_PARAM_NAME)
         .map(String::as_str)
@@ -110,20 +138,33 @@ Required in non-interactive mode."#),
         _ => unreachable!(),
     };
 
-    *PREDEFINED_PARAMS.lock().unwrap() = PredefinedParameters {
-        endpoint_addresses: args.get_many::<String>(ENDPOINT_ADDRESS_PARAM_NAME)
-            .map(Iterator::cloned)
-            .map(Iterator::collect),
-        hostname: args.get_one::<String>(HOSTNAME_PARAM_NAME).cloned(),
-        credentials: args.get_one::<String>(CREDENTIALS_PARAM_NAME)
-            .map(|x| x.splitn(2, ':'))
-            .and_then(|mut x| x.next().zip(x.next()))
-            .map(|(a, b)| (a.to_string(), b.to_string())),
-        certificate: args.get_one::<String>(CERTIFICATE_FILE_PARAM_NAME).cloned(),
-        settings_file: args.get_one::<String>(SETTINGS_FILE_PARAM_NAME).cloned(),
-    };
+    if get_mode() == Mode::NonInteractive {
+        if !(args.contains_id(ENDPOINT_CONFIG_PARAM_NAME)
+            || args.contains_id(HOSTNAME_PARAM_NAME)) {
+            command.error(clap::error::ErrorKind::MissingRequiredArgument, 
+r#"Additional arguments required for non-interactive mode
 
-    println!("Welcome to the setup wizard");
+Must be provided either:
+1. All required options separatelly:
+   --address <address> --hostname <host> --creds <username>:<password>
+
+OR
+2. A configuration file generated on endpoint:
+   --endpoint_config <endpoint_config>
+
+Note: Cannot mix both variants"#).exit();
+        }
+        if args.contains_id(ENDPOINT_CONFIG_PARAM_NAME) && !args.contains_id(CERTIFICATE_FILE_PARAM_NAME) {
+            command.error(clap::error::ErrorKind::MissingRequiredArgument,
+r#"Using endpoint config requires <cert> argument to be provided:
+    --cert <cert>"#).exit()
+        }
+    }
+
+    *PREDEFINED_PARAMS.lock().unwrap() = PredefinedParameters::new(&args);
+
+    (get_mode() == Mode::Interactive)
+        .then(|| { println!("Welcome to the setup wizard")});
 
     let settings_path = {
         #[allow(clippy::large_enum_variant)]
@@ -155,7 +196,8 @@ Required in non-interactive mode."#),
         match action {
             Action::UseExisting { path } => path,
             Action::ModifyAndOverwrite { path, settings } => {
-                println!("Let's build the settings");
+                (get_mode() == Mode::Interactive)
+                    .then(|| { println!("Let's build the settings") });
                 let settings = settings::build(Some(&settings));
                 println!("The settings are successfully built\n");
 
@@ -166,7 +208,8 @@ Required in non-interactive mode."#),
                 path
             }
             Action::MakeFromScratch => {
-                println!("Let's build the settings");
+                (get_mode() == Mode::Interactive)
+                    .then(|| { println!("Let's build the settings") });
                 let settings = settings::build(None);
                 println!("The settings are successfully built\n");
 

@@ -1,11 +1,11 @@
-use std::fs;
+use std::{fs, path};
 use std::fs::File;
 use std::io::BufReader;
 use std::ops::Not;
 use serde::{Deserialize, Serialize};
 use x509_parser::extensions::GeneralName;
 use crate::Mode;
-use crate::user_interaction::{ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_password, select_variant};
+use crate::user_interaction::{ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_password, checked_overwrite, select_variant};
 
 macro_rules! docgen {
     (
@@ -226,6 +226,14 @@ impl Endpoint {
     pub fn default_has_ipv6() -> bool {
         true
     }
+
+    pub fn default_anti_dpi() -> bool {
+        false
+    }
+
+    pub fn default_skip_verification() -> bool {
+        false
+    }
 }
 
 impl Listener {
@@ -315,72 +323,143 @@ pub fn build(template: Option<&Settings>) -> Settings {
 
 fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
     let predefined_params = crate::get_predefined_params().clone();
+    let endpoint_config: Option<EndpointConfig> = empty_to_none(ask_for_input("Path to endpoint config, empty if no", predefined_params.endpoint_config.or(Some("".to_string()))))
+        .and_then(|x| {
+            fs::read_to_string(&x)
+                .map_err(|e| { panic!("Failed to read endpoint config file:\n{}", e.to_string()) })
+                .ok()
+        })
+        .and_then(|x| {
+            toml::de::from_str(x.as_str())
+                .map_err(|e| { panic!("Failed to parse endpoint config:\n{}", e.to_string()) })
+                .ok()
+        });
     let mut x = Endpoint {
-        addresses: ask_for_input::<String>(
-            &format!("{}\nMust be delimited by whitespace.\n", Endpoint::doc_addresses()),
-            predefined_params.endpoint_addresses
-                .or(opt_field!(template, addresses).cloned())
-                .map(|x| x.join(" ")),
-        )
-            .split_whitespace()
-            .map(String::from)
-            .collect(),
-        has_ipv6: opt_field!(template, has_ipv6).cloned()
+        addresses: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.addresses.clone().into()
+            })
+            .or_else(|| {
+                ask_for_input::<String>(
+                    &format!("{}\nMust be delimited by whitespace.\n", Endpoint::doc_addresses()),
+                    predefined_params.endpoint_addresses
+                        .or(opt_field!(template, addresses).cloned())
+                        .map(|x| x.join(" ")),
+                    )
+                    .split_whitespace()
+                    .map(String::from)
+                    .collect::<Vec<String>>().into()
+            })
+            .unwrap(),
+        has_ipv6: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.has_ipv6.into()
+            })
+            .or(opt_field!(template, has_ipv6).cloned())
             .unwrap_or_else(Endpoint::default_has_ipv6),
-        username: ask_for_input(
-            Endpoint::doc_username(),
-            predefined_params.credentials.clone().unzip().0
-                .or(opt_field!(template, username).cloned()),
-        ),
-        password: predefined_params.credentials.unzip().1
-            .unwrap_or_else(|| opt_field!(template, password).cloned()
-                .and_then(empty_to_none)
-                .and_then(|x| ask_for_agreement("Overwrite password?").not().then_some(x))
-                .unwrap_or_else(|| ask_for_password(Endpoint::doc_password()))
-            ),
-        upstream_protocol: opt_field!(template, upstream_protocol).cloned()
+        username: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.username.clone().into()
+            })
+            .or_else(|| {
+                ask_for_input(
+                    Endpoint::doc_username(),
+                    predefined_params.credentials.clone().unzip().0
+                        .or(opt_field!(template, username).cloned())
+                    )
+                    .into()
+            })
+            .unwrap(),
+        password: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.password.clone().into()
+            })
+            .or_else(|| {
+                predefined_params.credentials.unzip().1
+                    .unwrap_or_else(|| opt_field!(template, password).cloned()
+                        .and_then(empty_to_none)
+                        .and_then(|x| ask_for_agreement("Overwrite password?").not().then_some(x))
+                        .unwrap_or_else(|| ask_for_password(Endpoint::doc_password()))
+                    )
+                    .into()
+            })
+            .unwrap(),
+        skip_verification: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.skip_verification.into()
+            })
+            .or(opt_field!(template, skip_verification).cloned())
+            .unwrap_or_else(Endpoint::default_skip_verification),
+        upstream_protocol: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.upstream_protocol.clone().into()
+            })
+            .or(opt_field!(template, upstream_protocol).cloned())
             .unwrap_or_else(Endpoint::default_upstream_protocol),
-        upstream_fallback_protocol: opt_field!(template, upstream_fallback_protocol).cloned()
-            .unwrap_or_default(),
-        anti_dpi: opt_field!(template, anti_dpi).cloned().unwrap_or(false),
+        upstream_fallback_protocol: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.upstream_fallback_protocol.clone().into()
+            })
+            .or(opt_field!(template, upstream_fallback_protocol).cloned().flatten()),
+        anti_dpi: endpoint_config.as_ref()
+            .and_then(|x| {
+                x.anti_dpi.into()
+            })
+            .or(opt_field!(template, anti_dpi).cloned())
+            .unwrap_or_else(Endpoint::default_anti_dpi),
         ..Default::default()
     };
 
-    let (hostname, certificate) = if crate::get_mode() == Mode::NonInteractive {
-        (predefined_params.hostname.clone(), predefined_params.certificate)
-    } else if let Some(cert) = opt_field!(template, certificate).cloned().flatten()
-        .and_then(parse_cert)
-        .or_else(lookup_existent_cert)
-        .and_then(|x|
-            ask_for_agreement(&format!("Use an existent certificate? {:?}", x))
-                .then_some(x)
-        )
-    {
-        (Some(cert.common_name), Some(cert.cert_path))
-    } else if let Some(cert) = empty_to_none(ask_for_input::<String>(
-        &format!("{}\n", Endpoint::doc_certificate()),
-        Some(opt_field!(template, certificate).cloned().flatten().unwrap_or_default()),
-    )) {
-        match parse_cert(cert.clone()) {
-            Some(cert) => {
-                (Some(cert.common_name), Some(cert.cert_path))
-            }
-            None => {
-                println!("Couldn't parse certificate from the file");
-                (None, Some(cert))
-            }
+    if endpoint_config.is_some() {
+        let config = endpoint_config.as_ref().unwrap();
+        let cert = ask_for_input("Path to save endpoint certificate", predefined_params.certificate.or(opt_field!(template, certificate).cloned().flatten()));
+        if path::Path::new(&cert).exists()
+                && fs::read_to_string(&cert).unwrap().trim() != config.certificate.as_str().trim()
+                && !checked_overwrite(&cert, "Overwrite existent certificate?") {
+            panic!("Can't save the certificate, the file already exists");
         }
-    } else {
-        (None, None)
-    };
+        fs::write(&cert, &config.certificate)
+            .expect("Failed to write certificate to file");
 
-    x.hostname = ask_for_input(
-        Endpoint::doc_hostname(),
-        predefined_params.hostname
-            .or(opt_field!(template, hostname).cloned())
-            .or(hostname),
-    );
-    x.certificate = certificate;
+        x.hostname = config.hostname.clone();
+        x.certificate = Some(cert);
+    } else {
+        let (hostname, certificate) = if crate::get_mode() == Mode::NonInteractive {
+            (predefined_params.hostname.clone(), predefined_params.certificate)
+        } else if let Some(cert) = opt_field!(template, certificate).cloned().flatten()
+            .and_then(parse_cert)
+            .or_else(lookup_existent_cert)
+            .and_then(|x|
+                ask_for_agreement(&format!("Use an existent certificate? {:?}", x))
+                    .then_some(x)
+            )
+        {
+            (Some(cert.common_name), Some(cert.cert_path))
+        } else if let Some(cert) = empty_to_none(ask_for_input::<String>(
+            &format!("{}\n", Endpoint::doc_certificate()),
+            Some(opt_field!(template, certificate).cloned().flatten().unwrap_or_default()),
+        )) {
+            match parse_cert(cert.clone()) {
+                Some(cert) => {
+                    (Some(cert.common_name), Some(cert.cert_path))
+                }
+                None => {
+                    println!("Couldn't parse certificate from the file");
+                    (None, Some(cert))
+                }
+            }
+        } else {
+            (None, None)
+        };
+
+        x.hostname = ask_for_input(
+            Endpoint::doc_hostname(),
+            predefined_params.hostname
+                .or(opt_field!(template, hostname).cloned())
+                .or(hostname),
+        );
+        x.certificate = certificate;
+    }
 
     x.skip_verification = x.certificate.is_none()
         && ask_for_agreement_with_default(
@@ -453,6 +532,30 @@ fn build_listener(template: Option<&Listener>) -> Listener {
 
 fn empty_to_none(str: String) -> Option<String> {
     str.is_empty().not().then_some(str)
+}
+
+#[derive(Deserialize, Debug)]
+pub struct EndpointConfig {
+    #[serde(default)]
+    hostname: String,
+    #[serde(default)]
+    addresses: Vec<String>,
+    #[serde(default)]
+    has_ipv6: bool,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: String,
+    #[serde(default)]
+    skip_verification: bool,
+    #[serde(default)]
+    certificate: String,
+    #[serde(default)]
+    upstream_protocol: String,
+    #[serde(default)]
+    upstream_fallback_protocol: String,
+    #[serde(default)]
+    anti_dpi: bool,
 }
 
 #[derive(Debug)]
