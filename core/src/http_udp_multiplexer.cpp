@@ -104,6 +104,7 @@ void HttpUdpMultiplexer::complete_udp_connection(void *arg, TaskId) {
             Connection *conn = &i->second;
             conn->open_task_id.release();
             mux->m_addr_to_id[conn->addr] = ctx->id;
+            log_conn(mux, i->first, dbg, "Started handling UDP connection");
             upstream->handler.func(upstream->handler.arg, SERVER_EVENT_CONNECTION_OPENED, &ctx->id);
         }
     }
