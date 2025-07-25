@@ -242,17 +242,15 @@ VpnConnectionStats UpstreamMultiplexer::get_connection_stats() const {
 }
 
 void UpstreamMultiplexer::on_icmp_request(IcmpEchoRequestEvent &event) {
-    auto it = std::find_if(m_upstreams_pool.begin(), m_upstreams_pool.end(), [](const auto &i) {
-        return i.second->state == US_SESSION_OPENED;
-    });
-    if (it == m_upstreams_pool.end()) {
-        log_mux(this, dbg, "Failed to find a connected upstream");
-        assert(0);
-        event.result = -1;
-        return;
+    for (const auto &[_, info] : m_upstreams_pool) {
+        if (info->state == US_SESSION_OPENED) {
+            info->upstream->on_icmp_request(event);
+            return;
+        }
     }
-
-    it->second->upstream->on_icmp_request(event);
+    log_mux(this, dbg, "Failed to find a connected upstream");
+    assert(0);
+    event.result = -1;
 }
 
 void UpstreamMultiplexer::close_upstream(int upstream_id) {
@@ -531,9 +529,10 @@ void UpstreamMultiplexer::handle_wake() {
 }
 
 int UpstreamMultiplexer::kex_group_nid() const {
-    if (!m_upstreams_pool.empty()) {
-        const auto &info = m_upstreams_pool.begin()->second;
-        return info->upstream->kex_group_nid();
+    for (const auto &[_, info] : m_upstreams_pool) {
+        if (info->state == US_SESSION_OPENED) {
+            return info->upstream->kex_group_nid();
+        }
     }
     return NID_undef;
 }
