@@ -280,6 +280,7 @@ static void run_ping(void *ctx, void *) {
             .timeout_ms = vpn->upstream_config->location_ping_timeout_ms,
             .locations = {&vpn->upstream_config->location, 1},
             .rounds = 1,
+            .main_protocol = vpn->upstream_config->main_protocol,
             .anti_dpi = vpn->upstream_config->anti_dpi,
             .handoff = true,
             .quic_max_idle_timeout_ms = quic_max_idle_timeout,
