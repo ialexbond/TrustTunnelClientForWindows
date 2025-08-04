@@ -5,24 +5,32 @@ plan:
   key: VLIT
   name: VpnLibs - Run Integration Test
 stages:
-  - Default Stage:
+  - Build stage:
+      manual: false
+      final: false
+      jobs:
+        - Build binaries
+  - Tests stage:
       manual: false
       final: false
       jobs:
         - Run integration test
         - Run live test
-Run integration test:
-  key: JOB1
-  description: Runs integration tests
+Build binaries:
+  key: BB
+  description: Build client and endpoint binaries
+  docker:
+    image: adguard/core-libs:2.6
   tasks:
+    - !include docker-clean.yaml
     - checkout:
         repository: core-libs/vpn-libs
-        path: test/client/vpn-libs
+        path: vpn-libs
         force-clean-build: 'true'
         description: Checkout client
     - checkout:
         repository: core-libs/vpn-libs-endpoint
-        path: test/endpoint/vpn-libs-endpoint
+        path: vpn-libs-endpoint
         force-clean-build: 'true'
         description: Checkout endpoint
     - script:
@@ -33,12 +41,45 @@ Run integration test:
 
             set -x -e
 
-            cp -RT client/vpn-libs/integration-tests/ ./
+            pwd
+            ls -l
+            mkdir -p output
+            export OUTPUT_DIR=${PWD}/output
+            export SOURCE_DIR=${PWD}
 
-            ./integration_test.sh clean
-            ./integration_test.sh run socks ${bamboo.conanRepoUrl}; exit $?
-        description: Run integration SOCKS tests
-        working-dir: test
+            export CONAN_REPO_URL=${bamboo.conanRepoUrl}
+            vpn-libs/integration-tests/build_client.sh
+            vpn-libs/integration-tests/build_endpoint.sh
+  requirements:
+    - adg-privileged-docker
+  artifacts:
+    - name: standalone_client
+      location: output
+      pattern: standalone_client
+      shared: true
+    - name: vpn_endpoint
+      location: output
+      pattern: vpn_endpoint
+      shared: true
+  artifact-subscriptions: [ ]
+Run integration test:
+  key: JOB1
+  description: Runs integration tests
+  docker:
+    image: adguard/core-libs-testing:2.6.0
+    docker-run-arguments: [ --privileged, --device=/dev/net/tun ]
+  artifact-subscriptions:
+    - artifact: standalone_client
+      destination: output
+    - artifact: vpn_endpoint
+      destination: output
+  tasks:
+    - !include docker-clean.yaml
+    - checkout:
+        repository: core-libs/vpn-libs
+        path: vpn-libs
+        force-clean-build: 'true'
+        description: Checkout client
     - script:
         interpreter: SHELL
         scripts:
@@ -47,9 +88,17 @@ Run integration test:
 
             set -x -e
 
-            ./integration_test.sh run tun ${bamboo.conanRepoUrl}; exit $?
-        description: Run integration TUN tests
-        working-dir: test
+            export OUTPUT_DIR=${PWD}/output
+            export TEST_DIR=${PWD}/vpn-libs/integration-tests/tests
+
+            # Nameserver with global routable IP is required here.
+            # 94.140.14.140 is AdGuard Unfiltered DNS
+            echo nameserver 94.140.14.140 > /etc/resolv.conf
+
+            ${TEST_DIR}/main/run.sh http2 socks
+            ${TEST_DIR}/main/run.sh http3 socks
+            ${TEST_DIR}/main/run.sh http2 tun
+            ${TEST_DIR}/main/run.sh http3 tun
   final-tasks:
     - script:
         interpreter: SHELL
@@ -59,7 +108,7 @@ Run integration test:
 
             set -x
 
-            pushd logs
+            pushd output
 
             for log_file in vpn_tun_http2.log vpn_tun_http3.log vpn_socks_http2.log vpn_socks_http3.log; do
             timeout 10s gzip -f $log_file
@@ -70,32 +119,27 @@ Run integration test:
             done
 
             popd
-
-            ./integration_test.sh clean
         description: Gzip logs
-        working-dir: test
     - script:
         interpreter: SHELL
         scripts:
           - |-
             #!/bin/bash
 
-            pushd logs
+            pushd output
             rm -f vpn_tun_http2.log
             rm -f vpn_tun_http3.log
             rm -f vpn_socks_http2.log
             rm -f vpn_socks_http3.log
             popd
         description: Cleanup
-        working-dir: test
   requirements:
     - adg-privileged-docker
   artifacts:
     - name: Vpn-Libs Log
-      location: test/logs
+      location: output
       pattern: '*.gz'
       shared: false
-  artifact-subscriptions: [ ]
 Run live test:
   key: JOB2
   description: Runs C++ live tests
@@ -136,7 +180,8 @@ Run live test:
 
             set -x -e
 
-            mkdir -p build_no_asan && cd build_no_asan
+            SRC_ROOT=${PWD}
+            mkdir -p /build_no_asan && cd /build_no_asan
 
             # Using DNS proxy in VPN libs leads to false-positive address sanitizer errors
             export LDFLAGS=-fuse-ld=lld
@@ -144,7 +189,7 @@ Run live test:
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_CXX_FLAGS='-stdlib=libc++ -DI_DO_WANT_TO_RUN_LIVE_TESTS' \
-            ..
+            ${SRC_ROOT}
 
             make -j 4 test_vpn_client_live
         description: Build vpn-libs without address sanitizer
@@ -154,7 +199,7 @@ Run live test:
         scripts:
           - |-
             #!/bin/bash
-            
+
             set -x -e
 
             ENDPOINT_HOSTNAME="localhost"
@@ -185,7 +230,7 @@ Run live test:
             echo "Start endpoint"
             sleep 3
 
-            $SRC_ROOT/vpn-libs/build_no_asan/core/test_vpn_client_live
+            /build_no_asan/core/test_vpn_client_live
   final-tasks:
     - script:
         interpreter: SHELL

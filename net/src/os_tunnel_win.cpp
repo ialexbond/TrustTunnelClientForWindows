@@ -58,23 +58,6 @@ struct WintunThreadParams {
     void *read_callback_arg;
 };
 
-void ag::tunnel_utils::sys_cmd(std::string cmd) {
-    cmd += " 2>&1";
-    char buffer[UNLEN + 1] = {0};
-    DWORD buffer_len = UNLEN + 1;
-    if (::GetUserNameA(buffer, &buffer_len)) {
-        dbglog(logger, "{}: {}", buffer, cmd);
-    } else {
-        dbglog(logger, "{}", cmd);
-    }
-    auto result = exec_with_output(cmd.c_str());
-    if (result.has_value()) {
-        dbglog(logger, "{}", result.value());
-    } else {
-        dbglog(logger, "{}", result.error()->str());
-    }
-}
-
 static void CALLBACK log_wintun(WINTUN_LOGGER_LEVEL level, DWORD64 /*timestamp*/, LPCWSTR log_line)
 {
     switch (level) {

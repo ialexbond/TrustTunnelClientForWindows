@@ -26,7 +26,8 @@ OUTPUT_FILE: ${OUTPUT_FILE}`);
   const browser = await puppeteer.launch({
     headless: 'new',
     defaultViewport: null,
-    timeout: 0,
+    dumpio: true,
+    timeout: 30000,
     args: [
       '--disable-gpu',
       '--disable-dev-shm-usage',

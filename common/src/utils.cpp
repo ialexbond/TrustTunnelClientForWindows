@@ -488,4 +488,19 @@ bool vpn_post_quantum_group_enabled() {
     return g_post_quantum_group_enabled.load(std::memory_order_relaxed);
 }
 
+std::string escape_argument_for_shell(std::string_view arg) {
+    std::string out;
+    out.reserve(arg.size() + 10);
+    out += '\'';
+    for (char ch : arg) {
+        if (ch != '\'') {
+            out += ch;
+        } else {
+            out += "'\\''";
+        }
+    }
+    out += '\'';
+    return out;
+}
+
 } // namespace ag

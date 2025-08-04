@@ -50,6 +50,9 @@ Run tests on Linux:
           - |-
             set -x -e
 
+            export VL_ROOT=${PWD}
+            trap "git clean -d -x -f ${VL_ROOT} --exclude '**/Testing/*/*.xml'" EXIT
+
             mkdir -p build
             cd build
 

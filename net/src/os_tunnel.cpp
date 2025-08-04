@@ -16,6 +16,8 @@
 #include "os_tunnel_win.h"
 #endif
 
+static ag::Logger g_logger("OS_TUNNEL");
+
 static constexpr std::string_view DEFAULT_IPV4_ROUTE = "0.0.0.0/0";
 static constexpr std::string_view DEFAULT_IPV6_ROUTE = "::/0";
 static constexpr std::string_view DEFAULT_IPV6_ROUTE_UNICAST = "2000::/3";
@@ -77,30 +79,63 @@ void ag::tunnel_utils::get_setup_routes(std::vector<ag::CidrRange> &ipv4_routes,
     split_default_route(ipv6_routes, ag::CidrRange(DEFAULT_IPV6_ROUTE_UNICAST));
 }
 
-ag::Result<std::string, ag::tunnel_utils::ExecError> ag::tunnel_utils::exec_with_output(const char *cmd) {
-    FILE *pipe = POPEN(cmd, "r");
-    if (!pipe) {
-        int err = sys::last_error();
-        return make_error(ExecError::AE_POPEN, AG_FMT("{} ({})", sys::strerror(err), err));
-    }
-
-    std::array<char, 128> buffer;
-    std::string result;
-    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-        result += buffer.data();
-    }
-
-    int r = PCLOSE(pipe);
-    if (-1 == r) {
-        int err = sys::last_error();
-        return make_error(ExecError::AE_PCLOSE, AG_FMT("{} ({})", sys::strerror(err), err));
-    }
-    if (r != 0) {
-        return make_error(ExecError::AE_CMD_FAILURE, AG_FMT("Error code: {}", r));
-    }
-
-    return result;
+#ifndef _WIN32
+static std::string prompt() {
+    return (geteuid() == 0) ? "#" : "$";
 }
+#else
+static std::string prompt() {
+    // Must check user name
+    char username[256];
+    DWORD username_len = sizeof(username);
+    if (GetUserNameA(username, &username_len)) {
+        return AG_FMT("{}@> ", username);
+    } else {
+        return "> ";
+    }
+}
+#endif
+
+#ifndef _WIN32
+void ag::tunnel_utils::sys_cmd(std::string cmd) {
+    dbglog(g_logger, "{} {}", prompt(), cmd);
+    auto result = ag::exec_with_output(cmd);
+    if (result.has_value()) {
+        auto &output = result.value().output;
+        if (!output.empty()) {
+            dbglog(g_logger, "{}", ag::utils::rtrim(result.value().output));
+        }
+        if (result.value().status != 0) {
+            dbglog(g_logger, "Exit code: {}", result.value().status);
+        }
+        return;
+    }
+    dbglog(g_logger, "{}", result.error()->str());
+}
+
+ag::Result<std::string, ag::tunnel_utils::ExecError> ag::tunnel_utils::sys_cmd_with_output(std::string cmd) {
+    dbglog(g_logger, "{} {}", prompt(), cmd);
+    auto result = ag::exec_with_output(cmd);
+    if (result.has_value()) {
+        auto &output = result.value().output;
+        if (!output.empty()) {
+            dbglog(g_logger, "{}", ag::utils::rtrim(result.value().output));
+        }
+        if (result.value().status != 0) {
+            dbglog(g_logger, "Exit code: {}", result.value().status);
+            return make_error(ag::tunnel_utils::ExecError::AE_CMD_FAILURE, AG_FMT("Command failed: Non-zero exit code: {}", result.value().status));
+        }
+        return output;
+    }
+    dbglog(g_logger, "{}", result.error()->str());
+    switch (result.error()->value()) {
+        case ag::EE_POPEN:
+            return make_error(ag::tunnel_utils::ExecError::AE_POPEN, AG_FMT("popen() failed: {}", result.error()->str()));
+        case ag::EE_PCLOSE:
+            return make_error(ag::tunnel_utils::ExecError::AE_PCLOSE, AG_FMT("pclose() failed: {}", result.error()->str()));
+    }
+}
+#endif // defined _WIN32
 
 // This function is called to convert the interface address string from the settings.
 // There used to be some sort of auto-correction of an invalid argument, using the interface index, now we
@@ -134,6 +169,7 @@ ag::VpnOsTunnelSettings *ag::vpn_os_tunnel_settings_clone(const ag::VpnOsTunnelS
     for (size_t i = 0; i != dst->dns_servers.size; i++) {
         dst->dns_servers.data[i] = safe_strdup(settings->dns_servers.data[i]);
     }
+    dst->netns = safe_strdup(settings->netns);
     return dst;
 }
 
@@ -155,6 +191,7 @@ void ag::vpn_os_tunnel_settings_destroy(ag::VpnOsTunnelSettings *settings) {
         free((void *) settings->dns_servers.data[i]);
     }
     delete[] settings->dns_servers.data;
+    free((void *) settings->netns);
     delete settings;
 }
 
@@ -169,6 +206,7 @@ const ag::VpnOsTunnelSettings *ag::vpn_os_tunnel_settings_defaults() {
             .excluded_routes = {.data = excluded_routes, .size = std::size(excluded_routes)},
             .mtu = 9000,
             .dns_servers = {.data = dns_servers, .size = std::size(dns_servers)},
+            .netns = nullptr,
     };
     return &settings;
 }

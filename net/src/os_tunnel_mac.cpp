@@ -10,30 +10,22 @@ extern "C" int evutil_make_socket_closeonexec(evutil_socket_t sock);
 
 static const ag::Logger logger("OS_TUNNEL_MAC");
 
-void ag::tunnel_utils::sys_cmd(std::string cmd) {
+static bool sys_cmd_bool(std::string cmd) {
     cmd += " 2>&1";
     dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
-    auto result = exec_with_output(cmd.c_str());
-    if (result.has_value()) {
-        dbglog(logger, "{}", result.value());
-    } else {
-        dbglog(logger, "{}", result.error()->str());
-    }
-}
-
-static bool sys_cmd(std::string cmd) {
-    cmd += " 2>&1";
-    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
-    auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
+    auto result = ag::exec_with_output(cmd.c_str());
     if (result.has_error()) {
         dbglog(logger, "{}", result.error()->str());
         return false;
     }
-    std::string_view output = result.value();
-    if (!output.empty() && output.ends_with('\n')) {
-        output.remove_suffix(1);
+    std::string_view output = result.value().output;
+    if (!output.empty()) {
+        dbglog(logger, "{}", ag::utils::rtrim(output));
     }
-    dbglog(logger, "{}", output);
+    if (result.value().status != 0) {
+        dbglog(logger, "Exit code: {}", result.value().status);
+        return false;
+    }
     // It is expected for "route" on macOS to write an error and return 0
     // So we need to check if the output contains "route: "
     if (output.find("route: ") != std::string_view::npos) {
@@ -142,21 +134,21 @@ bool ag::VpnMacTunnel::setup_routes() {
             ipv4_routes, ipv6_routes, m_settings->included_routes, m_settings->excluded_routes);
 
     for (auto &route : ipv4_routes) {
-        if (!sys_cmd(AG_FMT("route add {} -iface {}", route.to_string(), m_tun_name))) {
+        if (!sys_cmd_bool(AG_FMT("route add {} -iface {}", route.to_string(), m_tun_name))) {
             auto splitted = route.split();
             if (!splitted
-                    || !sys_cmd(AG_FMT("route add {} -iface {}", splitted->first.to_string(), m_tun_name))
-                    || !sys_cmd(AG_FMT("route add {} -iface {}", splitted->second.to_string(), m_tun_name))) {
+                    || !sys_cmd_bool(AG_FMT("route add {} -iface {}", splitted->first.to_string(), m_tun_name))
+                    || !sys_cmd_bool(AG_FMT("route add {} -iface {}", splitted->second.to_string(), m_tun_name))) {
                 return false;
             }
         }
     }
     for (auto &route : ipv6_routes) {
-        if (!sys_cmd(AG_FMT("route add -inet6 {} -iface {}", route.to_string(), m_tun_name))) {
+        if (!sys_cmd_bool(AG_FMT("route add -inet6 {} -iface {}", route.to_string(), m_tun_name))) {
             auto splitted = route.split();
             if (!splitted
-                    || !sys_cmd(AG_FMT("route add -inet6 {} -iface {}", splitted->first.to_string(), m_tun_name))
-                    || !sys_cmd(AG_FMT("route add -inet6 {} -iface {}", splitted->second.to_string(), m_tun_name))) {
+                    || !sys_cmd_bool(AG_FMT("route add -inet6 {} -iface {}", splitted->first.to_string(), m_tun_name))
+                    || !sys_cmd_bool(AG_FMT("route add -inet6 {} -iface {}", splitted->second.to_string(), m_tun_name))) {
                 return false;
             }
         }

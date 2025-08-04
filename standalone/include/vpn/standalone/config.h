@@ -42,6 +42,7 @@ struct VpnStandaloneConfig {
         std::vector<std::string> excluded_routes;
         uint32_t mtu_size = 0;
         std::string bound_if;
+        std::optional<std::string> netns;
     };
 
     using Listener = std::variant<SocksListener, TunListener>;

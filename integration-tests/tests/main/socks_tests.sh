@@ -29,13 +29,12 @@ expected_error() {
   fi
 }
 
-check_dump() {
-  wait $1
-  if [ -s tcp.log ]; then
-      echo "...tcpdump isn't empty, passed"
-    else
-      has_error=`expr $has_error + 1`
-      echo "...tcpdump is empty, failed"
+check_iptables() {
+  if [ $1 "$(iptables -L OUTPUT -vn | grep $2 | grep $3 | awk '$1 ~ /^[0-9]+$/ && $1 > 0')" ]; then
+    echo "...iptables packet count from $2 to $3 matches, passed"
+  else
+    has_error=`expr $has_error + 1`
+    echo "...iptables packet count from $2 to $3 does not match, failed"
   fi
 }
 
@@ -50,11 +49,11 @@ curl -sS -x socks5://127.0.0.1:$SOCKS_PORT 1.1.1.1 >/dev/null
 check_error
 
 echo "HTTP request to exclusion -> example.org,  ipv4..."
-timeout 10 tcpdump -i eth0 host example.org -c 1 > tcp.log &
-TCPDUMP_PID=$!
-curl -sS -x socks5://127.0.0.1:$SOCKS_PORT example.org -4 --max-time 10 >/dev/null
+iptables -Z OUTPUT
+curl -sS -x socks5://127.0.0.1:$SOCKS_PORT httpbin.agrd.dev -4 --max-time 10 >/dev/null
 check_error
-check_dump $TCPDUMP_PID
+check_iptables -n /client httpbin.agrd.dev
+check_iptables -z /endpoint httpbin.agrd.dev
 
 # The case when we get a domain name from server hello.
 # The first request should be terminated, and an exclusion is applied when the request is repeated
@@ -63,11 +62,11 @@ curl -sS -x socks5h://127.0.0.1:$SOCKS_PORT --tlsv1.2 --tls-max 1.2 --max-time 1
 expected_error $CURL_SSL_CONNECT_ERRCODE
 
 echo "HTTPS request to exclusion -> https://1.1.1.1 (cloudflare-dns.com)... (directly)"
-timeout 10 tcpdump -i eth0 host 1.1.1.1 -c 1 > tcp.log &
-TCPDUMP_PID=$!
+iptables -Z OUTPUT
 curl -sS -x socks5h://127.0.0.1:$SOCKS_PORT --tlsv1.2 --tls-max 1.2 --max-time 10 https://1.1.1.1 >/dev/null
 check_error
-check_dump $TCPDUMP_PID
+check_iptables -n /client 1.1.1.1
+check_iptables -z /endpoint 1.1.1.1
 
 echo "HTTPS request -> cloudflare.com, ipv4..."
 curl -sS -x socks5://127.0.0.1:$SOCKS_PORT -4 https://www.cloudflare.com >/dev/null

@@ -139,6 +139,7 @@ static std::optional<VpnStandaloneConfig::TunListener> parse_tun_listener_config
     VpnStandaloneConfig::TunListener tun = {
         .mtu_size = (*tun_config)["mtu_size"].value<uint32_t>().value_or(DEFAULT_MTU),
         .bound_if = std::move(bound_if),
+        .netns = (*tun_config)["netns"].value<std::string>(),
     };
 
     if (const auto *x = (*tun_config)["included_routes"].as_array(); x != nullptr) {

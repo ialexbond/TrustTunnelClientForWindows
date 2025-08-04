@@ -14,6 +14,7 @@
 #include "common/cidr_range.h"
 #include "common/error.h"
 #include "common/socket_address.h"
+#include "common/utils.h"
 #include "vpn/platform.h"
 #include "vpn/utils.h"
 
@@ -45,6 +46,8 @@ struct VpnOsTunnelSettings {
     int mtu;
     /** DNS servers addresses */
     VpnAddressArray dns_servers;
+    /** Network namespace name. Specify NULL if not needed */
+    const char *netns;
 };
 
 #ifdef _WIN32
@@ -197,6 +200,7 @@ private:
     evutil_socket_t m_tun_fd{-1};
     std::string m_tun_name{};
     bool m_sport_supported{false};
+    std::string m_netns{};
 };
 #elif __APPLE__ && !TARGET_OS_IPHONE
 class VpnMacTunnel : public VpnOsTunnel {
@@ -238,9 +242,7 @@ enum ExecError {
     AE_CMD_FAILURE,
 };
 
-/** Execute command in shell and return output as string */
-Result<std::string, ExecError> exec_with_output(const char *cmd);
-
+#ifndef _WIN32
 /**
  * Needed because using `__func__` (which is used in `tracelog()`) inside variadic
  * template function causes a compiler error inside fmtlib's headers
@@ -250,10 +252,13 @@ template <typename... Ts>
 void fsystem(std::string_view fmt, Ts &&...args) { // NOLINT(*-missing-std-forward)
     sys_cmd(fmt::vformat(fmt, fmt::make_format_args(args...)));
 }
+Result<std::string, ExecError> sys_cmd_with_output(std::string cmd);
 template <typename... Ts>
 Result<std::string, ExecError> fsystem_with_output(std::string_view fmt, Ts &&...args) { // NOLINT(*-missing-std-forward)
-    return exec_with_output(fmt::vformat(fmt, fmt::make_format_args(args...)).c_str());
+    return sys_cmd_with_output(fmt::vformat(fmt, fmt::make_format_args(args...)).c_str());
 }
+#endif // defined _WIN32
+
 void get_setup_dns(std::string &dns_list_v4, std::string &dns_list_v6, ag::VpnAddressArray &dns_servers);
 void get_setup_routes(std::vector<ag::CidrRange> &ipv4_routes, std::vector<ag::CidrRange> &ipv6_routes,
         ag::VpnAddressArray &included_routes, ag::VpnAddressArray &excluded_routes);

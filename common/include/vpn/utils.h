@@ -397,6 +397,11 @@ Iterator swap_remove_if(Iterator begin, Iterator end, Predicate p) {
     return begin;
 }
 
+/**
+ * Escape a string for use as a shell argument.
+ */
+std::string escape_argument_for_shell(std::string_view arg);
+
 extern "C" {
 
 /**

@@ -125,6 +125,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     StandaloneUtils::detect_bound_if(config);
+    ag::Logger::set_log_level(config.loglevel);
 
     vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
 
@@ -211,7 +212,8 @@ static std::optional<VpnStandaloneClient::ListenerHelper> make_tun_listener_help
             .included_routes = {.data = included_routes.data(), .size = uint32_t(included_routes.size())},
             .excluded_routes = {.data = excluded_routes.data(), .size = uint32_t(excluded_routes.size())},
             .mtu = int(config.mtu_size),
-            .dns_servers = defaults->dns_servers};
+            .dns_servers = defaults->dns_servers,
+            .netns = config.netns.has_value() ? config.netns->c_str() : nullptr};
 
     g_tunnel = ag::make_vpn_tunnel();
     if (g_tunnel == nullptr) {

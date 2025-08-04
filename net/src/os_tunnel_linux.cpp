@@ -1,4 +1,6 @@
 #include "net/os_tunnel.h"
+#include "vpn/utils.h"
+#include "common/utils.h"
 
 #include <net/if.h> // should be included before linux/if.h
 
@@ -10,46 +12,43 @@ static const ag::Logger logger("OS_TUNNEL_LINUX");
 
 static constexpr auto TABLE_ID = 880;
 
-void ag::tunnel_utils::sys_cmd(std::string cmd) {
+static bool sys_cmd_bool(std::string cmd) {
     cmd += " 2>&1";
     dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
-    auto result = exec_with_output(cmd.c_str());
+    auto result = ag::exec_with_output(cmd);
     if (result.has_value()) {
-        dbglog(logger, "{}", result.value());
-    } else {
-        dbglog(logger, "{}", result.error()->str());
-    }
-}
-
-static bool sys_cmd(std::string cmd) {
-    cmd += " 2>&1";
-    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
-    auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
-    if (result.has_value()) {
-        dbglog(logger, "{}", result.value());
-        if (result.value().empty()) {
-            return true;
+        auto &output = result.value().output;
+        if (!output.empty()) {
+            dbglog(logger, "{}", ag::utils::rtrim(result.value().output));
         }
-    } else {
-        dbglog(logger, "{}", result.error()->str());
+        if (result.value().status != 0) {
+            dbglog(logger, "Exit code: {}", result.value().status);
+        }
+        return output.empty();
     }
+    dbglog(logger, "{}", result.error()->str());
     return false;
 }
 
-ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output(std::string cmd) {
-    cmd += " 2>&1";
-    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
-    auto result = ag::tunnel_utils::exec_with_output(cmd.c_str());
-    if (result.has_value()) {
-        dbglog(logger, "{}", result.value());
-    } else {
-        dbglog(logger, "{}", result.error()->str());
+static bool sys_cmd_netns(const std::string& netns, std::string cmd) {
+    if (!netns.empty()) {
+        cmd = AG_FMT("ip netns exec {} {}", ag::escape_argument_for_shell(netns), cmd);
     }
-    return result;
+    return sys_cmd_bool(cmd);
+}
+
+static ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output_netns(const std::string& netns, std::string cmd) {
+    if (!netns.empty()) {
+        cmd = AG_FMT("ip netns exec {} {}", ag::escape_argument_for_shell(netns), cmd);
+    }
+    return ag::tunnel_utils::sys_cmd_with_output(cmd);
 }
 
 ag::VpnError ag::VpnLinuxTunnel::init(const ag::VpnOsTunnelSettings *settings) {
     init_settings(settings);
+    if (settings->netns != nullptr) {
+        m_netns = settings->netns;
+    }
     if (tun_open() == -1) {
         return {-1, "Failed to init tunnel"};
     }
@@ -105,16 +104,38 @@ evutil_socket_t ag::VpnLinuxTunnel::tun_open() {
 }
 
 void ag::VpnLinuxTunnel::setup_if() {
-    ag::tunnel_utils::fsystem("ip addr add {} dev {}",
-            tunnel_utils::get_address_for_index(m_settings->ipv4_address, m_if_index).to_string(), m_tun_name);
-    auto result = sys_cmd_with_output(AG_FMT("ip -6 addr add {} dev {}",
-            tunnel_utils::get_address_for_index(m_settings->ipv6_address, m_if_index).to_string(), m_tun_name));
+    // Move interface to network namespace if specified
+    if (!m_netns.empty()) {
+        if (!sys_cmd_bool(AG_FMT("ip link set {} netns {}", m_tun_name, m_netns))) {
+            errlog(logger, "Failed to move tunnel interface to network namespace {}", m_netns);
+            return;
+        }
+        infolog(logger, "Moved tunnel interface {} to network namespace {}", m_tun_name, m_netns);
+    }
+
+    // Set the interface address (in netns if specified)
+    if (!sys_cmd_netns(m_netns, AG_FMT("ip addr add {} dev {}",
+            tunnel_utils::get_address_for_index(m_settings->ipv4_address, m_if_index).to_string(),
+            m_tun_name))) {
+        errlog(logger, "Failed to set IPv4 address");
+        return;
+    }
+
+    // Try to set IPv6 address (in netns if specified)
+    auto result = sys_cmd_with_output_netns(m_netns, AG_FMT("ip -6 addr add {} dev {}",
+            tunnel_utils::get_address_for_index(m_settings->ipv6_address, m_if_index).to_string(),
+            m_tun_name));
     if (result.has_error()) {
         warnlog(logger, "Failed to set IPv6 address: {}", result.error()->str());
     } else {
         m_ipv6_available = true;
     }
-    ag::tunnel_utils::fsystem("ip link set dev {} mtu {} up", m_tun_name, m_settings->mtu);
+
+    // Bring the interface up (in netns if specified)
+    if (!sys_cmd_netns(m_netns, AG_FMT("ip link set dev {} mtu {} up", m_tun_name, m_settings->mtu))) {
+        errlog(logger, "Failed to bring up tunnel interface");
+        return;
+    }
 }
 
 bool ag::VpnLinuxTunnel::check_sport_rule_support() {
@@ -140,40 +161,41 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
     }
 
     for (auto &route : ipv4_routes) {
-        if (!sys_cmd(AG_FMT("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
+        if (!sys_cmd_netns(m_netns, AG_FMT("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
             auto splitted = route.split();
             if (!splitted
-                    || !sys_cmd(AG_FMT("ip ro add {} dev {} table {}",
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip ro add {} dev {} table {}",
                             splitted->first.to_string(), m_tun_name, table_name))
-                    || !sys_cmd(AG_FMT("ip ro add {} dev {} table {}",
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip ro add {} dev {} table {}",
                             splitted->second.to_string(), m_tun_name, table_name))) {
                 return false;
             }
         }
     }
     for (auto &route : ipv6_routes) {
-        if (!sys_cmd(AG_FMT("ip -6 ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
+        if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
             auto splitted = route.split();
             if (!splitted
-                    || !sys_cmd(AG_FMT("ip -6 ro add {} dev {} table {}",
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 ro add {} dev {} table {}",
                             splitted->first.to_string(), m_tun_name, table_name))
-                    || !sys_cmd(AG_FMT("ip -6 ro add {} dev {} table {}",
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 ro add {} dev {} table {}",
                             splitted->second.to_string(), m_tun_name, table_name))) {
                 return false;
             }
         }
     }
 
+    // Apply routing rules (in netns if specified)
     if (m_sport_supported) {
         if (!ipv4_routes.empty()) {
-            if (!sys_cmd("ip rule add prio 30800 sport 1-1024 lookup main")
-                    || !sys_cmd(AG_FMT("ip rule add prio 30801 lookup {}", table_id))) {
+            if (!sys_cmd_netns(m_netns, "ip rule add prio 30800 sport 1-1024 lookup main")
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))) {
                 return false;
             }
         }
         if (!ipv6_routes.empty()) {
-            if (!sys_cmd("ip -6 rule add prio 30800 sport 1-1024 lookup main")
-                    || !sys_cmd(AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))) {
+            if (!sys_cmd_netns(m_netns, "ip -6 rule add prio 30800 sport 1-1024 lookup main")
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))) {
                 return false;
             }
         }
@@ -187,18 +209,24 @@ void ag::VpnLinuxTunnel::setup_dns() {
         m_system_dns_setup_success = true;
         return;
     }
+
     std::vector<std::string_view> dns_servers{
             m_settings->dns_servers.data, m_settings->dns_servers.data + m_settings->dns_servers.size};
+
+    std::vector<std::string> escaped_servers;
+    for (const auto& dns_server : dns_servers) {
+        escaped_servers.push_back(ag::escape_argument_for_shell(dns_server));
+    }
 
     m_system_dns_setup_success = false;
     constexpr int TRIES = 5;
     for (int i = 0; i < TRIES; i++) {
-        auto result = sys_cmd_with_output(AG_FMT("resolvectl dns {} {}", m_tun_name, fmt::join(dns_servers, " ")).c_str());
+        auto result = sys_cmd_with_output_netns(m_netns, AG_FMT("resolvectl dns {} {}", m_tun_name, fmt::join(escaped_servers, " ")));
         if (result.has_error()) {
             warnlog(logger, "System DNS servers are not set");
             return;
         }
-        result = sys_cmd_with_output(AG_FMT("resolvectl dns {}", m_tun_name).c_str());
+        result = sys_cmd_with_output_netns(m_netns, AG_FMT("resolvectl dns {}", m_tun_name));
         if (result.has_error()) {
             warnlog(logger, "Can't get the list of system DNS servers set");
             return;
@@ -208,7 +236,7 @@ void ag::VpnLinuxTunnel::setup_dns() {
             return output.find(server) != output.npos;
         }) != dns_servers.end();
         if (found) {
-            result = sys_cmd_with_output(AG_FMT("resolvectl domain {} '~.'", m_tun_name).c_str());
+            result = sys_cmd_with_output_netns(m_netns, AG_FMT("resolvectl domain {} '~.'", m_tun_name));
             if (result.has_error()) {
                 warnlog(logger, "Can't enable DNS leak protection settings on the interface");
                 return;
@@ -229,9 +257,9 @@ void ag::VpnLinuxTunnel::setup_dns() {
 void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
     if (m_sport_supported) {
         // It is safe to leave these rules but it is better to remove them.
-        ag::tunnel_utils::fsystem("ip rule del prio 30801 lookup {}", table_id);
-        ag::tunnel_utils::fsystem("ip rule del prio 30800 sport 1-1024 lookup main");
-        ag::tunnel_utils::fsystem("ip -6 rule del prio 30801 lookup {}", table_id);
-        ag::tunnel_utils::fsystem("ip -6 rule del prio 30800 sport 1-1024 lookup main");
+        sys_cmd_netns(m_netns, AG_FMT("ip rule del prio 30801 lookup {}", table_id));
+        sys_cmd_netns(m_netns, "ip rule del prio 30800 sport 1-1024 lookup main");
+        sys_cmd_netns(m_netns, AG_FMT("ip -6 rule del prio 30801 lookup {}", table_id));
+        sys_cmd_netns(m_netns, "ip -6 rule del prio 30800 sport 1-1024 lookup main");
     }
 }
