@@ -7,4 +7,4 @@
 ---
   !include 'upload-conan-recipes.yaml'
 ---
-  !include 'run-instrumented-test.yaml'
+  !include 'run-browser-integration-test.yaml'

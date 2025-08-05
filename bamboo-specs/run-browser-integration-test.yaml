@@ -3,7 +3,7 @@ version: 2
 plan:
   project-key: CL
   key: VLRIT
-  name: VpnLibs - Run Browser Integrated Test
+  name: VpnLibs - Run Browser Integration Test
 stages:
   - Build stage:
       manual: false
