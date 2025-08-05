@@ -106,7 +106,7 @@ evutil_socket_t ag::VpnLinuxTunnel::tun_open() {
 void ag::VpnLinuxTunnel::setup_if() {
     // Move interface to network namespace if specified
     if (!m_netns.empty()) {
-        if (!sys_cmd_bool(AG_FMT("ip link set {} netns {}", m_tun_name, m_netns))) {
+        if (!sys_cmd_bool(AG_FMT("ip link set {} netns {}", m_tun_name, ag::escape_argument_for_shell(m_netns)))) {
             errlog(logger, "Failed to move tunnel interface to network namespace {}", m_netns);
             return;
         }
