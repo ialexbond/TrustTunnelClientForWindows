@@ -12,5 +12,5 @@ RUN apt update --allow-releaseinfo-change && \
 RUN go install github.com/ameshkov/gocurl@latest
 
 # Download Chrome
-COPY package.json /puppeteer/
-RUN cd /puppeteer && yarn install && [ -e /root/.cache/puppeteer/chrome ] && rm -rf /puppeteer
+COPY package.json yarn.lock /puppeteer/
+RUN cd /puppeteer && yarn install --frozen-lockfile && [ -e /root/.cache/puppeteer/chrome ] && rm -rf /puppeteer/node_modules

@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "description": "Image for running corelibs integrated tests",
   "dependencies": {
-    "puppeteer": "^24.15.0"
+    "puppeteer": "24.15.0"
   }
 }
