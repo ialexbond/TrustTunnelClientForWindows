@@ -424,6 +424,7 @@ static bool send_buffered_data(const Tunnel *self, uint64_t conn_client_id) {
         return false;
     }
 
+    bool sent_zero_bytes = false;
     for (auto it = conn->buffered_packets.begin(); it != conn->buffered_packets.end();) {
         auto &packet = *it;
         log_conn(self, conn, trace, "Sending {} bytes from buffered packets", packet.size());
@@ -442,14 +443,20 @@ static bool send_buffered_data(const Tunnel *self, uint64_t conn_client_id) {
             return false;
         }
 
+        if (r == 0) {
+            log_conn(self, conn, dbg, "Sent partially: 0 bytes out of {}, turning off client reads", packet.size());
+            sent_zero_bytes = true;
+            break;
+        }
+
         log_conn(self, conn, dbg, "Sent partially: {} bytes out of {}", r, packet.size());
         packet.erase(packet.begin(), packet.begin() + r);
         break;
     }
 
     size_t server_can_send = upstream->available_to_send(conn->server_id);
-    log_conn(self, conn, trace, "Server side can send {} bytes", server_can_send);
-    listener->turn_read(conn->client_id, server_can_send > 0);
+    log_conn(self, conn, trace, "Can send to server side: {} bytes, upstream sent zero bytes: {}", server_can_send, sent_zero_bytes);
+    listener->turn_read(conn->client_id, server_can_send > 0 && !sent_zero_bytes);
     upstream->update_flow_control(conn->server_id, listener->flow_control_info(conn_client_id));
     return true;
 }
@@ -729,7 +736,7 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
                 this->statistics_monitor->update_download(conn->client_id, event->result);
             }
             TcpFlowCtrlInfo info = listener->flow_control_info(conn->client_id);
-            log_conn(this, conn, trace, "Client side can send {} bytes", info.send_buffer_size);
+            log_conn(this, conn, trace, "Can send to client side: {} bytes", info.send_buffer_size);
             upstream->update_flow_control(conn->server_id, info);
         } else {
             log_conn(this, conn, dbg, "Failed to send data from server");
@@ -768,7 +775,7 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
             listener->turn_read(conn->client_id, server_can_send > 0);
 
             if (event->length > 0) {
-                log_conn(this, conn, trace, "{} bytes sent to server (server side can send {} bytes)", event->length,
+                log_conn(this, conn, trace, "{} bytes sent to server (can send to server side: {} bytes)", event->length,
                         server_can_send);
             }
 
@@ -1763,7 +1770,7 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
                     this->statistics_monitor->update_upload(conn->client_id, event->result);
                 }
                 size_t server_can_send = upstream->available_to_send(conn->server_id);
-                log_conn(this, conn, trace, "Server side can send {} bytes", server_can_send);
+                log_conn(this, conn, trace, "Can send to server side: {} bytes", server_can_send);
                 listener->turn_read(conn->client_id, server_can_send > 0);
             } else if (event->result == 0) {
                 listener->turn_read(conn->client_id, false);
@@ -1817,7 +1824,7 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
         do_health_check(upstream);
 
         if (event->length > 0) {
-            log_conn(this, conn, trace, "{} bytes sent to client (client side can send {} bytes)", event->length,
+            log_conn(this, conn, trace, "{} bytes sent to client (can send to client side: {} bytes)", event->length,
                     info.send_buffer_size);
         }
         break;
