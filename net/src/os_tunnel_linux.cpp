@@ -32,14 +32,14 @@ static bool sys_cmd_bool(std::string cmd) {
 
 static bool sys_cmd_netns(const std::string& netns, std::string cmd) {
     if (!netns.empty()) {
-        cmd = AG_FMT("ip netns exec {} {}", ag::escape_argument_for_shell(netns), cmd);
+        cmd = AG_FMT("ip netns exec {} {}", ag::utils::escape_argument_for_shell(netns), cmd);
     }
     return sys_cmd_bool(cmd);
 }
 
 static ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output_netns(const std::string& netns, std::string cmd) {
     if (!netns.empty()) {
-        cmd = AG_FMT("ip netns exec {} {}", ag::escape_argument_for_shell(netns), cmd);
+        cmd = AG_FMT("ip netns exec {} {}", ag::utils::escape_argument_for_shell(netns), cmd);
     }
     return ag::tunnel_utils::sys_cmd_with_output(cmd);
 }
@@ -104,7 +104,7 @@ evutil_socket_t ag::VpnLinuxTunnel::tun_open() {
 void ag::VpnLinuxTunnel::setup_if() {
     // Move interface to network namespace if specified
     if (!m_netns.empty()) {
-        if (!sys_cmd_bool(AG_FMT("ip link set {} netns {}", m_tun_name, ag::escape_argument_for_shell(m_netns)))) {
+        if (!sys_cmd_bool(AG_FMT("ip link set {} netns {}", m_tun_name, ag::utils::escape_argument_for_shell(m_netns)))) {
             errlog(logger, "Failed to move tunnel interface to network namespace {}", m_netns);
             return;
         }
@@ -213,7 +213,7 @@ void ag::VpnLinuxTunnel::setup_dns() {
 
     std::vector<std::string> escaped_servers;
     for (const auto& dns_server : dns_servers) {
-        escaped_servers.push_back(ag::escape_argument_for_shell(dns_server));
+        escaped_servers.push_back(ag::utils::escape_argument_for_shell(dns_server));
     }
 
     m_system_dns_setup_success = false;
