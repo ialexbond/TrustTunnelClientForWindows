@@ -73,7 +73,7 @@ Run integration test:
     - artifact: vpn_endpoint
       destination: output
   tasks:
-    - !include docker-clean.yaml
+    - script: rm -rf vpn-libs
     - checkout:
         repository: core-libs/vpn-libs
         path: vpn-libs
