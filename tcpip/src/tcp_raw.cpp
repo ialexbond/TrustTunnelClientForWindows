@@ -309,7 +309,7 @@ void tcp_raw_close(struct tcp_pcb *pcb, bool graceful) {
 
 void tcp_raw_slide_window(struct tcp_pcb *pcb, size_t sent) {
     while (sent > 0) {
-        u16_t to_slide = std::min(u16_t(sent), std::numeric_limits<u16_t>::max());
+        auto to_slide = (u16_t) std::min(sent, (size_t) std::numeric_limits<u16_t>::max());
         tcp_recved(pcb, to_slide);
         sent -= to_slide;
     }
