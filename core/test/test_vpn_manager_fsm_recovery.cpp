@@ -70,10 +70,6 @@ struct ConnectingVpnManagerTest : MockedTest {
         vpn = vpn_open(&settings);
         ASSERT_TRUE(vpn);
 
-        vpn_event_loop_exit(vpn->ev_loop.get(), Millis{0});
-        vpn_event_loop_finalize_exit(vpn->ev_loop.get());
-        vpn_event_loop_hijack(vpn->ev_loop.get());
-
         VpnConnectParameters parameters = {
                 .upstream_config =
                         {
@@ -90,7 +86,8 @@ struct ConnectingVpnManagerTest : MockedTest {
                 .retry_info = {.policy = VPN_CRP_SEVERAL_ATTEMPTS, .attempts_num = 1},
         };
         vpn_connect(vpn, &parameters);
-        ASSERT_TRUE(await_state_change(VPN_SS_CONNECTING));
+        vpn_event_loop_hijack(vpn->ev_loop.get());
+        ASSERT_EQ(VPN_SS_CONNECTING, session_state);
     }
 
     void TearDown() override {

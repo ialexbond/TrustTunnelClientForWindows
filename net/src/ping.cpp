@@ -119,6 +119,8 @@ struct Ping {
 
     uint32_t quic_max_idle_timeout_ms;
     uint32_t quic_version;
+
+    int minimum_round_timeout_ms;
 };
 
 // clang-format off
@@ -608,6 +610,12 @@ Ping *ping_start(const PingInfo *info, PingHandler handler) {
             }
         }
     }
+    self->minimum_round_timeout_ms = MIN_SHORT_TIMEOUT_MS;
+#ifdef _WIN32
+    static constexpr int MINIMUM_SELECT_TIME_MS = 20;
+    self->minimum_round_timeout_ms =
+            std::max(self->minimum_round_timeout_ms, int(MINIMUM_SELECT_TIME_MS * info->endpoints.size()));
+#endif
 
     if (self->pending.empty()) {
         self->report_task_id = event_loop::submit(self->loop,
@@ -791,7 +799,7 @@ void conn_process_result(PingConn *conn, VpnError *error) {
         conn->best_result_ms = std::min(dt_ms, conn->best_result_ms.value_or(INT_MAX));
 
         if (!std::exchange(ping->have_round_winner, true)) {
-            uint32_t to_ms = std::min(2 * dt_ms + MIN_SHORT_TIMEOUT_MS, MAX_SHORT_TIMEOUT_MS);
+            uint32_t to_ms = std::min(2 * dt_ms + ping->minimum_round_timeout_ms, MAX_SHORT_TIMEOUT_MS);
             auto to_tv = ms_to_timeval(to_ms);
             evtimer_add(ping->timer.get(), &to_tv);
             log_ping(ping, dbg, "Round {}: timeout reduced to {} ms", ping->rounds_started, to_ms);
