@@ -89,6 +89,12 @@ void VpnStandaloneClient::notify_wake() {
     }
 }
 
+bool VpnStandaloneClient::process_client_packets(VpnPackets packets) {
+    return m_vpn
+        ? vpn_process_client_packets(m_vpn, packets)
+        : false;
+}
+
 void VpnStandaloneClient::vpn_protect_socket(SocketProtectEvent *event) {
     const auto *tun = std::get_if<VpnStandaloneConfig::TunListener>(&m_config.listener);
     if (tun == nullptr) {
@@ -194,7 +200,12 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl
         return make_error(ConnectResultError{}, "Failed on create VPN instance");
     }
 
-    return vpn_runner(std::move(listener));
+    auto r = vpn_runner(std::move(listener));
+
+    if (r) {
+        disconnect();
+    }
+    return r;
 }
 
 Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::vpn_runner(ListenerHelper &&listener) {
@@ -269,11 +280,15 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
     };
 
     {
-        std::unique_lock l(m_guard);
         VpnError err = vpn_connect(m_vpn, &parameters);
-        auto res = m_connect_waiter.wait_for(l, m_connect_timeout);
-        if (m_connect_result != VPN_SS_CONNECTED || res == std::cv_status::timeout) {
-            disconnect();
+        bool connected;
+        {
+            std::unique_lock l(m_connect_result_mtx);
+            connected = m_connect_waiter.wait_for(l, m_connect_timeout, [this] {
+                return m_connect_result == VPN_SS_CONNECTED;
+            });
+        }
+        if (!connected) {
             return make_error(ConnectResultError{}, "Connect timed out");
         }
         if (err.code != 0) {
@@ -301,7 +316,13 @@ void VpnStandaloneClient::vpn_handler(void *, VpnEvent what, void *data) {
         m_callbacks.protect_handler(event);
         break;
     }
-    case VPN_EVENT_CLIENT_OUTPUT:
+    case VPN_EVENT_CLIENT_OUTPUT: {
+        auto *event = (VpnClientOutputEvent *) data;
+        if (m_callbacks.client_output_handler) {
+            m_callbacks.client_output_handler(event);
+        }
+        break;
+    }
     case VPN_EVENT_ENDPOINT_CONNECTION_STATS:
     case VPN_EVENT_DNS_UPSTREAM_UNAVAILABLE:
     case VPN_EVENT_TUNNEL_CONNECTION_STATS:
@@ -320,7 +341,7 @@ void VpnStandaloneClient::vpn_handler(void *, VpnEvent what, void *data) {
     case VPN_EVENT_STATE_CHANGED: {
         auto *event = (VpnStateChangedEvent *) data;
         if (event->state == VPN_SS_CONNECTED || event->state == VPN_SS_DISCONNECTED) {
-            std::unique_lock l(m_guard);
+            std::unique_lock l(m_connect_result_mtx);
             m_connect_result = event->state;
             m_connect_waiter.notify_one();
         }

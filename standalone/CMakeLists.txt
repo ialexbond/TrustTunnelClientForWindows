@@ -99,6 +99,7 @@ ExternalProject_Add(setup_wizard
 add_custom_target(run_setup_wizard)
 add_custom_command(
         TARGET run_setup_wizard
+        POST_BUILD
         COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${WIZARD_EXE_NAME}
         USES_TERMINAL TRUE
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

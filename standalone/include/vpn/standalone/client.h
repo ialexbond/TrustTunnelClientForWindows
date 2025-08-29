@@ -24,6 +24,7 @@ struct VpnCallbacks {
     std::function<void(SocketProtectEvent *)> protect_handler;
     std::function<void(VpnVerifyCertificateEvent *)> verify_handler;
     std::function<void(VpnStateChangedEvent *)> state_changed_handler;
+    std::function<void(VpnClientOutputEvent *)> client_output_handler;
 };
 
 class VpnStandaloneClient {
@@ -113,6 +114,8 @@ public:
     void notify_sleep();
     void notify_wake();
 
+    bool process_client_packets(VpnPackets packets);
+
     ~VpnStandaloneClient();
 
 private:
@@ -126,7 +129,7 @@ private:
     static void static_vpn_handler(void *arg, VpnEvent what, void *data);
     void vpn_handler(void *, VpnEvent what, void *data);
 
-    std::mutex m_guard;
+    std::mutex m_connect_result_mtx;
     std::condition_variable m_connect_waiter;
     VpnSessionState m_connect_result = VPN_SS_DISCONNECTED;
     const ag::Logger m_logger{"STANDALONE_CLIENT"};
