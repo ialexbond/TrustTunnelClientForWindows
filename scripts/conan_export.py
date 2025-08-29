@@ -42,7 +42,7 @@ elif sys.argv[1] == "local":
 for version in versions:
     if re.match(r'\d+\.\d+\.\d+', version) is not None:
         hash1 = yaml_data["commit_hash"][version]["hash"]
-        result = subprocess.run(["git", "log", "--reverse", "--ancestry-path", hash1 + "..master", "--pretty=%h"],
+        result = subprocess.run(["git", "log", "--reverse", "--ancestry-path", hash1 + "..HEAD", "--pretty=%h"],
                                 check=True, capture_output=True)
         the_hash = result.stdout.decode().splitlines()[0]
         print("HASH is ", the_hash)
