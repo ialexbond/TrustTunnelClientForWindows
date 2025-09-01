@@ -123,6 +123,7 @@ bool Http3Upstream::open_session(std::optional<Millis>) {
             .ev_loop = this->vpn->parameters.ev_loop,
             .handler = {.handler = quic_connector_handler, .arg = this},
             .socket_manager = this->vpn->parameters.network_manager->socket,
+            .log_prefix = AG_FMT("h3-upstream-{}", this->id),
     };
     m_quic_connector.reset(quic_connector_create(&quic_connector_prm));
     if (!m_quic_connector) {
@@ -1367,6 +1368,7 @@ bool ag::Http3Upstream::continue_connecting() {
             .timeout = this->vpn->upstream_config.timeout,
             .peer = this->vpn->upstream_config.endpoint->address,
             .socket_manager = this->vpn->parameters.network_manager->socket,
+            .log_prefix = quic_connector_get_log_prefix(m_quic_connector.get()),
     };
     m_socket.reset(udp_socket_acquire_fd(&params, result->fd));
     if (!m_socket) {

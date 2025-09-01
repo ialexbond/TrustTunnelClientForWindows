@@ -29,6 +29,7 @@ typedef struct {
     Millis timeout;                // socket timeout, set 0 to disable
     sockaddr_storage peer;         // destination peer (must be set)
     SocketManager *socket_manager; // socket manager
+    std::string log_prefix;        // prefix to the main log message
 } UdpSocketParameters;
 
 /**
