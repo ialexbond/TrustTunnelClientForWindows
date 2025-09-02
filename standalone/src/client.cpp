@@ -247,6 +247,18 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
     hostnames.reserve(m_config.location.endpoints.size());
     remote_ids.reserve(m_config.location.endpoints.size());
     endpoints.reserve(m_config.location.endpoints.size());
+
+    auto copy_to_c_buffer = [](auto &dst, std::string_view src) {
+        auto decoded = utils::decode_hex(src);
+        size_t data_len = decoded.size();
+        dst.size = data_len;
+        if (data_len == 0) {
+            return;
+        }
+        dst.data = static_cast<uint8_t *>(std::malloc(data_len));
+        std::memcpy(dst.data, decoded.data(), data_len);
+    };
+
     for (const auto &endpoint : m_config.location.endpoints) {
         if (auto pos = endpoint.hostname.find('|'); pos != std::string::npos) {
             hostnames.emplace_back(endpoint.hostname.substr(0, pos));
@@ -256,15 +268,21 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
             remote_ids.emplace_back("");
         }
         if (endpoint.address.starts_with("|")) {
-            relays.emplace_back(sockaddr_from_str(endpoint.address.substr(1).c_str()));
+            auto &relay = relays.emplace_back(sockaddr_from_str(endpoint.address.substr(1).c_str()));
+            if (!m_config.location.client_random.empty()) {
+                copy_to_c_buffer(relay.tls_client_random, m_config.location.client_random);
+            }
             continue;
         }
-        endpoints.emplace_back(VpnEndpoint{
+        auto &last_el = endpoints.emplace_back(VpnEndpoint{
                 .address = sockaddr_from_str(endpoint.address.c_str()),
                 .name = hostnames.back().c_str(),
                 .remote_id = remote_ids.back().c_str(),
                 .has_ipv6 = m_config.location.has_ipv6,
         });
+        if (!m_config.location.client_random.empty()) {
+            copy_to_c_buffer(last_el.tls_client_random, m_config.location.client_random);
+        }
     }
     VpnConnectParameters parameters = {
             .upstream_config =

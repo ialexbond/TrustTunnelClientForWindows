@@ -3,15 +3,16 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <openssl/rand.h>
+#include <set>
 #include <span>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
-#include <chrono>
-#include <filesystem>
-#include <set>
 
 #ifndef _WIN32
 #include <ifaddrs.h>
@@ -170,9 +171,25 @@ AutoVpnEndpoint vpn_endpoint_clone(const VpnEndpoint *src) {
     dst->remote_id = safe_strdup(src->remote_id);
 
     auto data_len = src->additional_data.size;
-    dst->additional_data.data = static_cast<uint8_t *>(std::malloc(data_len));
-    std::memcpy(dst->additional_data.data, src->additional_data.data, data_len);
-    dst->additional_data.size = data_len;
+    if (data_len > 0 && src->additional_data.data != nullptr) {
+        dst->additional_data.data = static_cast<uint8_t *>(std::malloc(data_len));
+        std::memcpy(dst->additional_data.data, src->additional_data.data, data_len);
+        dst->additional_data.size = data_len;
+    } else {
+        dst->additional_data.data = nullptr;
+        dst->additional_data.size = 0;
+    }
+
+    data_len = src->tls_client_random.size;
+    if (data_len > 0 && src->tls_client_random.data != nullptr) {
+        dst->tls_client_random.data = static_cast<uint8_t *>(std::malloc(data_len));
+        std::memcpy(dst->tls_client_random.data, src->tls_client_random.data, data_len);
+        dst->tls_client_random.size = data_len;
+    } else {
+        dst->tls_client_random.data = nullptr;
+        dst->tls_client_random.size = 0;
+    }
+
     return dst;
 }
 
@@ -184,6 +201,7 @@ void vpn_endpoint_destroy(VpnEndpoint *endpoint) {
     free((char *) endpoint->name);
     free((char *) endpoint->remote_id);
     free(endpoint->additional_data.data);
+    free(endpoint->tls_client_random.data);
     std::memset(endpoint, 0, sizeof(*endpoint));
 }
 
@@ -200,6 +218,9 @@ void vpn_relay_destroy(VpnRelay *relay) {
     free(relay->additional_data.data);
     relay->additional_data.data = nullptr;
     relay->additional_data.size = 0;
+    free(relay->tls_client_random.data);
+    relay->tls_client_random.data = nullptr;
+    relay->tls_client_random.size = 0;
     std::memset(&relay->address, 0, sizeof(relay->address));
 }
 
@@ -208,10 +229,27 @@ using AutoVpnRelay = AutoPod<VpnRelay, vpn_relay_destroy>;
 AutoVpnRelay vpn_relay_clone(const VpnRelay *src) {
     AutoVpnRelay dst;
     std::memcpy(&dst.get()->address, &src->address, sizeof(sockaddr_storage));
+
     size_t data_len = src->additional_data.size;
-    dst->additional_data.data = (uint8_t *) malloc(data_len);
-    std::memcpy(dst->additional_data.data, src->additional_data.data, data_len);
-    dst->additional_data.size = data_len;
+    if (data_len > 0 && src->additional_data.data != nullptr) {
+        dst->additional_data.data = (uint8_t *) std::malloc(data_len);
+        std::memcpy(dst->additional_data.data, src->additional_data.data, data_len);
+        dst->additional_data.size = data_len;
+    } else {
+        dst->additional_data.data = nullptr;
+        dst->additional_data.size = 0;
+    }
+
+    data_len = src->tls_client_random.size;
+    if (data_len > 0 && src->tls_client_random.data != nullptr) {
+        dst->tls_client_random.data = (uint8_t *) std::malloc(data_len);
+        std::memcpy(dst->tls_client_random.data, src->tls_client_random.data, data_len);
+        dst->tls_client_random.size = data_len;
+    } else {
+        dst->tls_client_random.data = nullptr;
+        dst->tls_client_random.size = 0;
+    }
+
     return dst;
 }
 
@@ -1106,7 +1144,7 @@ std::string kex_group_name_by_nid(int kex_group_nid) {
 }
 
 std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STORE_CTX *, void *), void *arg,
-        U8View alpn_protos, const char *sni, MakeSslProtocolType type, U8View endpoint_data) {
+        U8View alpn_protos, const char *sni, MakeSslProtocolType type, U8View endpoint_data, U8View tls_client_random) {
     bool quic = type == MSPT_QUICHE || type == MSPT_NGTCP2;
     DeclPtr<SSL_CTX, SSL_CTX_free> ctx{SSL_CTX_new(TLS_client_method())};
     if (verification_callback && arg) {
@@ -1154,6 +1192,12 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
 #ifdef SSL_set_user_data
     if (!endpoint_data.empty()) {
         SSL_set_user_data(ssl.get(), endpoint_data.data(), endpoint_data.size());
+    }
+#endif
+
+#ifdef SSL_set_custom_client_random
+    if (!tls_client_random.empty()) {
+        SSL_set_custom_client_random(ssl.get(), tls_client_random.data(), tls_client_random.size());
     }
 #endif
 

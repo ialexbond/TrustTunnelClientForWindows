@@ -100,6 +100,11 @@ static std::optional<VpnStandaloneConfig::Location> build_endpoint(const toml::t
         }
     }
 
+    // Parse client random
+    if (auto client_random = config["client_random"].value<std::string>()) {
+        location.client_random = *client_random;
+    }
+
     return location;
 }
 
@@ -250,7 +255,7 @@ std::optional<VpnStandaloneConfig> VpnStandaloneConfig::build_config(const toml:
     if (auto listener = build_listener_config(*listener_config)) {
         result.listener = std::move(*listener);
     } else {
-        errlog(g_logger, "Faild to parse listener part of the config");
+        errlog(g_logger, "Failed to parse listener part of the config");
         return std::nullopt;
     }
 

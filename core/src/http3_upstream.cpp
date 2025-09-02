@@ -109,9 +109,11 @@ bool Http3Upstream::open_session(std::optional<Millis>) {
 
     U8View endpoint_data{
             upstream_config.endpoint->additional_data.data, upstream_config.endpoint->additional_data.size};
+    U8View client_random_data{
+            upstream_config.endpoint->tls_client_random.data, upstream_config.endpoint->tls_client_random.size};
     SslPtr ssl;
     if (auto r = make_ssl(verify_callback, this, {QUIC_H3_ALPN_PROTOS, std::size(QUIC_H3_ALPN_PROTOS)},
-                upstream_config.endpoint->name, /*quic*/ MSPT_QUICHE, endpoint_data);
+                upstream_config.endpoint->name, /*quic*/ MSPT_QUICHE, endpoint_data, client_random_data);
             std::holds_alternative<SslPtr>(r)) {
         ssl = std::move(std::get<SslPtr>(r));
     } else {
@@ -1383,6 +1385,7 @@ bool ag::Http3Upstream::continue_connecting() {
             .to = (sockaddr *) &local_address,
             .to_len = socklen_t(sockaddr_get_size((sockaddr *) &local_address)),
     };
+
     ssize_t ret = quiche_conn_recv(m_quic_conn.get(), result->data.data(), result->data.size(), &info);
     if (ret < 0) {
         log_upstream(this, dbg, "quiche_conn_recv: ({}) {}", ret, magic_enum::enum_name((quiche_error) ret));
