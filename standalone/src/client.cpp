@@ -57,9 +57,10 @@ VpnStandaloneClient::~VpnStandaloneClient() {
     }
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect(std::chrono::milliseconds timeout, ListenerHelper &&listener) {
+Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect(
+        std::chrono::milliseconds timeout, ListenerSettings listener_settings) {
     m_connect_timeout = timeout;
-    return connect_impl(std::move(listener));
+    return connect_impl(std::move(listener_settings));
 }
 
 int VpnStandaloneClient::disconnect() {
@@ -177,7 +178,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::set_system_d
     return {};
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl(ListenerHelper &&listener) {
+Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl(ListenerSettings listener_settings) {
     VpnSettings settings = {
             .handler = {static_vpn_handler, this},
             .mode = m_config.mode,
@@ -200,7 +201,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl
         return make_error(ConnectResultError{}, "Failed on create VPN instance");
     }
 
-    auto r = vpn_runner(std::move(listener));
+    auto r = vpn_runner(std::move(listener_settings));
 
     if (r) {
         disconnect();
@@ -208,14 +209,16 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl
     return r;
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::vpn_runner(ListenerHelper &&listener) {
+Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::vpn_runner(ListenerSettings listener_settings) {
     if (auto r = connect_to_server(); r) {
         return r;
     }
+    VpnListener *listener = std::holds_alternative<VpnStandaloneConfig::TunListener>(m_config.listener)
+            ? make_tun_listener(std::move(listener_settings))
+            : make_socks_listener(std::move(listener_settings));
 
-    VpnListener *vpn_listener = listener.release();
-    if (vpn_listener == nullptr) {
-        return make_error(ConnectResultError{}, "The provided listener is mallformed");
+    if (listener == nullptr) {
+        return make_error(ConnectResultError{}, "Failed to create listener");
     }
 
     std::vector<const char *> dns_upstreams;
@@ -227,7 +230,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::vpn_runner(L
     VpnListenerConfig listener_config = {
             .dns_upstreams = {.data = dns_upstreams.data(), .size = uint32_t(dns_upstreams.size())},
     };
-    VpnError error = vpn_listen(m_vpn, vpn_listener, &listener_config);
+    VpnError error = vpn_listen(m_vpn, listener, &listener_config);
     if (error.code != 0) {
         return make_error(ConnectResultError{},
                 AG_FMT("Failed to start listening: {} ({})", safe_to_string_view(error.text),
@@ -299,6 +302,122 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
     }
 
     return {};
+}
+
+VpnListener *VpnStandaloneClient::make_tun_listener(ListenerSettings listener_settings) {
+    auto &config = std::get<VpnStandaloneConfig::TunListener>(m_config.listener);
+
+    if (auto *use_fd = std::get_if<UseTunnelFd>(&listener_settings)) {
+        VpnTunListenerConfig listener_config = {
+                .fd = use_fd->fd.release(),
+                .mtu_size = config.mtu_size,
+        };
+
+        return vpn_create_tun_listener(m_vpn, &listener_config);
+    }
+
+    if (std::holds_alternative<UseProcessPackets>(listener_settings)) {
+        VpnTunListenerConfig listener_config = {
+                .fd = -1,
+                .mtu_size = config.mtu_size,
+        };
+
+        return vpn_create_tun_listener(m_vpn, &listener_config);
+    }
+
+    assert(std::holds_alternative<AutoSetup>(listener_settings));
+
+#if defined(ANDROID) || defined(TARGET_OS_IPHONE)
+    errlog(m_logger, "Current platform doesn't support automatic tunnel creation");
+    return nullptr;
+#else
+
+    std::vector<const char *> included_routes;
+    included_routes.reserve(config.included_routes.size());
+    for (const auto &route : config.included_routes) {
+        included_routes.emplace_back(route.c_str());
+    }
+
+    std::vector<std::string> complete_excluded_routes = config.excluded_routes;
+    for (const auto &endpoint : m_config.location.endpoints) {
+        auto result = ag::utils::split_host_port(endpoint.address);
+        if (result.has_error()) {
+            errlog(m_logger, "Failed to parse endpoint address: address={}, error={}", endpoint.address,
+                    result.error()->str());
+            return nullptr;
+        }
+        auto [host_view, port_view] = result.value();
+        complete_excluded_routes.emplace_back(host_view.data(), host_view.size());
+    }
+
+    std::vector<const char *> excluded_routes;
+    excluded_routes.reserve(complete_excluded_routes.size());
+    for (const auto &route : complete_excluded_routes) {
+        excluded_routes.emplace_back(route.c_str());
+    }
+
+    const VpnOsTunnelSettings *defaults = vpn_os_tunnel_settings_defaults();
+    VpnOsTunnelSettings tunnel_settings = {.ipv4_address = defaults->ipv4_address,
+            .ipv6_address = defaults->ipv6_address,
+            .included_routes = {.data = included_routes.data(), .size = uint32_t(included_routes.size())},
+            .excluded_routes = {.data = excluded_routes.data(), .size = uint32_t(excluded_routes.size())},
+            .mtu = int(config.mtu_size),
+            .dns_servers = defaults->dns_servers};
+
+    m_tunnel = ag::make_vpn_tunnel();
+    if (m_tunnel == nullptr) {
+        errlog(m_logger, "Tunnel create error");
+        return nullptr;
+    }
+
+#ifdef _WIN32
+    m_wintun = LoadLibraryExA(
+            WINTUN_DLL_NAME.data(), nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (m_wintun == nullptr) {
+        errlog(m_logger, "Failed to load wintun: {}", ag::sys::strerror(GetLastError()));
+        return nullptr;
+    }
+    VpnWinTunnelSettings win_settings = *vpn_win_tunnel_settings_defaults();
+    win_settings.wintun_lib = m_wintun;
+    win_settings.block_inbound = m_config.killswitch_enabled;
+    VpnError res = m_tunnel->init(&tunnel_settings, &win_settings);
+#else
+# ifdef __linux__
+    VpnError res = m_tunnel->init(&tunnel_settings, config.netns);
+# else
+    VpnError res = m_tunnel->init(&tunnel_settings);
+# endif
+#endif
+    if (res.code != 0) {
+        errlog(m_logger, "Failed to initialize tunnel: {}", res.text);
+        std::exchange(m_tunnel, nullptr)->deinit();
+        return nullptr;
+    }
+
+    VpnTunListenerConfig listener_config = {
+            .fd = m_tunnel->get_fd(),
+#ifdef _WIN32
+            .tunnel = m_tunnel.get(),
+#endif
+            .mtu_size = config.mtu_size,
+    };
+
+    return vpn_create_tun_listener(m_vpn, &listener_config);
+#endif // ANDROID
+}
+
+VpnListener *VpnStandaloneClient::make_socks_listener(ListenerSettings listener_settings) {
+    if (!std::holds_alternative<AutoSetup>(listener_settings)) {
+        errlog(m_logger, "Socks listener can only be created with `AutoSetup` setting!");
+        return nullptr;
+    }
+    const auto &cfg = std::get<VpnStandaloneConfig::SocksListener>(m_config.listener);
+    VpnSocksListenerConfig config = {
+            .listen_address = sockaddr_from_str(cfg.address.c_str()),
+            .username = cfg.username.c_str(),
+            .password = cfg.password.c_str(),
+    };
+    return vpn_create_socks_listener(m_vpn, &config);
 }
 
 void VpnStandaloneClient::static_vpn_handler(void *arg, VpnEvent what, void *data) {

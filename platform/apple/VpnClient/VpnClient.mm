@@ -313,12 +313,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
     _tunnelFlow = tunnelFlow;
     __weak typeof(self) weakSelf = self;
 
-    ag::VpnTunListenerConfig listener_config = {
-            .fd = -1,
-            .mtu_size = 1200, // TODO (ayakushin): fill from config
-    };
-    auto listener = ag::VpnStandaloneClient::ListenerHelper(std::move(listener_config));
-    auto error = _native_client->connect(std::chrono::seconds(30), std::move(listener));
+    auto error = _native_client->connect(std::chrono::seconds(30), ag::VpnStandaloneClient::UseProcessPackets{});
     if (error) {
         errlog(g_logger, "Failed to connect: {}", error->pretty_str());
         return  false;

@@ -158,7 +158,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         vpnClient = VpnClient(configStr, this)
 
         networkCallback.startNotifying(vpnClient)
-        if (vpnClient?.start(vpnTunInterface, config.tunConfig.mtuSize) != true) {
+        if (vpnClient?.start(vpnTunInterface) != true) {
             LOG.error("Failed to start Vpn client");
             close();
         }
