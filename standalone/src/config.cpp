@@ -41,6 +41,25 @@ static std::string streamable_to_string(const T &obj) {
     return stream.str();
 }
 
+static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view pem_certificate) {
+    UniquePtr<BIO, &BIO_free> bio {BIO_new_mem_buf(pem_certificate.data(), (long) pem_certificate.size())};
+
+    UniquePtr<X509, &X509_free> cert{PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr)};
+    if (cert == nullptr) {
+        warnlog(g_logger, "Failed to parse certificate, ensure it is in PEM format");
+        return nullptr;
+    }
+
+    UniquePtr<X509_STORE, &X509_STORE_free> store{tls_create_ca_store()};
+    if (store == nullptr) {
+        warnlog(g_logger, "Failed to create CA store");
+        return nullptr;
+    }
+
+    X509_STORE_add_cert(store.get(), cert.get());
+
+    return store;
+}
 
 static std::optional<VpnStandaloneConfig::Location> build_endpoint(const toml::table &config) {
     VpnStandaloneConfig::Location location;
@@ -80,7 +99,10 @@ static std::optional<VpnStandaloneConfig::Location> build_endpoint(const toml::t
     location.skip_verification = config["skip_verification"].value_or(false);
     location.anti_dpi = config["anti_dpi"].value_or(false);
     location.has_ipv6 = config["has_ipv6"].value_or(true);
-    location.certificate = config["certificate"].value<std::string>();
+    if (std::optional x = config["certificate"].value<std::string>();
+            !location.skip_verification && x.has_value() && !x->empty()) {
+        location.ca_store = load_certificate(*x);
+    }
 
     if (auto upstream_protocol = config["upstream_protocol"].value<std::string_view>(); upstream_protocol && UPSTREAM_PROTO_MAP.contains(*upstream_protocol)) {
         location.upstream_protocol = UPSTREAM_PROTO_MAP.at(*upstream_protocol);

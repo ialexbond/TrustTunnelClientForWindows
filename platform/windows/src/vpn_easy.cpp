@@ -17,10 +17,8 @@
 
 static ag::Logger g_logger{"VPN_SIMPLE"};
 
-static ag::UniquePtr<X509_STORE, &X509_STORE_free> g_store;
-
-static void vpn_windows_verify_certificate(ag::VpnVerifyCertificateEvent *event, bool skip_verification) {
-    event->result = skip_verification ? 0 : !!ag::tls_verify_cert(event->cert, event->chain, g_store.get());
+static void vpn_windows_verify_certificate(ag::VpnVerifyCertificateEvent *event) {
+    event->result = !!ag::tls_verify_cert(event->cert, event->chain, nullptr);
 }
 
 static constexpr auto CONNECT_TIMEOUT = ag::Secs{5};
@@ -85,24 +83,6 @@ struct vpn_easy_s {
     std::unique_ptr<ag::VpnStandaloneClient> client;
 };
 
-static ag::UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view pem_certificate) {
-    ag::UniquePtr<BIO, &BIO_free> bio {BIO_new_mem_buf(pem_certificate.data(), (long) pem_certificate.size())};
-
-    ag::UniquePtr<X509, &X509_free> cert{PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr)};
-    if (cert == nullptr) {
-        return nullptr;
-    }
-
-    ag::UniquePtr<X509_STORE, &X509_STORE_free> store{ag::tls_create_ca_store()};
-    if (store == nullptr) {
-        return nullptr;
-    }
-
-    X509_STORE_add_cert(store.get(), cert.get());
-
-    return store;
-}
-
 static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_changed_t state_changed_cb, void *state_changed_cb_arg) {
     toml::parse_result parsed_config = toml::parse(toml_config);
     if (!parsed_config) {
@@ -116,12 +96,6 @@ static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_cha
         return nullptr;
     }
 
-
-    bool skip_verification = standalone_config->location.skip_verification;
-    if (!skip_verification && standalone_config->location.certificate.has_value()) {
-        g_store = load_certificate(*standalone_config->location.certificate);
-    }
-
     ag::VpnCallbacks callbacks;
     if (std::holds_alternative<ag::VpnStandaloneConfig::TunListener>(standalone_config->listener)) {
         callbacks.protect_handler = [](ag::SocketProtectEvent *event) {
@@ -132,8 +106,8 @@ static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_cha
             event->result = 0;
         };
     }
-    callbacks.verify_handler = [skip_verification](ag::VpnVerifyCertificateEvent *event) {
-        vpn_windows_verify_certificate(event, skip_verification);
+    callbacks.verify_handler = [](ag::VpnVerifyCertificateEvent *event) {
+        vpn_windows_verify_certificate(event);
     };
     callbacks.state_changed_handler = [state_changed_cb, state_changed_cb_arg](ag::VpnStateChangedEvent *event) {
         infolog(g_logger, "VPN state changed: {}", magic_enum::enum_name(event->state));

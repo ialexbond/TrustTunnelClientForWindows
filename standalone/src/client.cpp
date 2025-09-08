@@ -469,7 +469,17 @@ void VpnStandaloneClient::vpn_handler(void *, VpnEvent what, void *data) {
     case VPN_EVENT_VERIFY_CERTIFICATE: {
         auto *event = (VpnVerifyCertificateEvent *) data;
         if (m_config.location.skip_verification) {
+            dbglog(m_logger, "Skipping certificate verification");
             event->result = VPN_SKIP_VERIFICATION_FLAG;
+        } else if (m_config.location.ca_store) {
+            const char *err = tls_verify_cert(event->cert, event->chain, m_config.location.ca_store.get());
+            if (err != nullptr) {
+                errlog(m_logger, "Failed to verify certificate: {}", err);
+                event->result = -1;
+            } else {
+                dbglog(m_logger, "Certificate verified successfully");
+                event->result = 0;
+            }
         } else {
             m_callbacks.verify_handler(event);
         }

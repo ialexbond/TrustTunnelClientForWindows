@@ -46,7 +46,7 @@ static ag::SocketAddress get_interface_address(const char *if_name, int family) 
 }
 #endif
 
-bool protectSocket(ag::SocketProtectEvent *event) {
+static bool protectSocket(ag::SocketProtectEvent *event) {
     char if_name[IF_NAMESIZE] = "not set";
     uint32_t idx = ag::vpn_network_manager_get_outbound_interface();
     if_indextoname(idx, if_name);
@@ -91,112 +91,59 @@ bool protectSocket(ag::SocketProtectEvent *event) {
     return true;
 }
 
-class CertificateVerifier {
-public:
-    CertificateVerifier(std::string_view ca_cert) {
-        NSString *pemString = [[NSString alloc] initWithBytes:ca_cert.data()
-                                                   length:ca_cert.size()
-                                                 encoding:NSUTF8StringEncoding];
-        NSRange headerRange = [pemString rangeOfString:@"-----BEGIN CERTIFICATE-----"];
-        NSRange footerRange = [pemString rangeOfString:@"-----END CERTIFICATE-----"];
-        if (headerRange.location == NSNotFound || footerRange.location == NSNotFound) {
-            errlog(g_logger, "Failed to parse certificate: it is not in PEM format");
-            return;
-        }
-        
-        NSUInteger start = headerRange.location + headerRange.length;
-        NSUInteger length = footerRange.location - start;
-        NSString *base64Body = [[pemString substringWithRange:NSMakeRange(start, length)]
-                                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        
-        // 3. Base64 decode
-        NSData *derData = [[NSData alloc] initWithBase64EncodedString:base64Body options:NSDataBase64DecodingIgnoreUnknownCharacters];
-        if (!derData) {
-            errlog(g_logger, "Failed to parse certificate: base64 decoding failed");
-        };
-        
-        // 4. Create SecCertificateRef
-        m_ca_cert = (SecCertificateRef)CFRetain(SecCertificateCreateWithData(NULL, (__bridge CFDataRef)derData));
-        if (!m_ca_cert) {
-            errlog(g_logger, "Failed to parse certificate: incorrect data");
-        }
+static _Nullable SecCertificateRef convertCertificate(X509 *cert) {
+    unsigned char *buffer = NULL;
+    int len = i2d_X509(cert, &buffer);
+    if (len < 0) {
+        return NULL;
     }
-    ~CertificateVerifier() {
-        if (m_ca_cert) {
-            CFRelease(m_ca_cert);
-        }
-    }
+    NSData *data = [[NSData alloc] initWithBytesNoCopy:(void *)buffer
+                                                length:len
+                                        deallocator:^void(void *bytes, NSUInteger length) {
+                                            OPENSSL_free(bytes);
+                                        }];
+    return SecCertificateCreateWithData(NULL, (__bridge CFDataRef)data);
+}
 
-    bool verify_certificate(const ag::VpnVerifyCertificateEvent *event) {
-        SecCertificateRef cert = convertCertificate(event->cert);
-        if (!cert) {
-            /* log @"Failed to create certificate object"; */
+static bool verify_certificate(const ag::VpnVerifyCertificateEvent *event) {
+    SecCertificateRef cert = convertCertificate(event->cert);
+    if (!cert) {
+        /* log @"Failed to create certificate object"; */
+        return false;
+    }
+    STACK_OF(X509) *chain = event->chain;
+    size_t chainLength = sk_X509_num(chain);
+    if (chainLength < 0) {
+        CFRelease(cert);
+        /* return @"Untrusted certificate chain is null"; */
+        return false;
+    }
+    NSMutableArray *trustArray = [[NSMutableArray alloc] initWithCapacity:chainLength + 1];
+    [trustArray addObject:(__bridge_transfer id) cert];
+    for (size_t i = 0; i < chainLength; ++i) {
+        SecCertificateRef chainedCert = convertCertificate(sk_X509_value(chain, i));
+        if (!chainedCert) {
+            /* return @"Failed to create chained certificate object"; */
             return false;
         }
-        STACK_OF(X509) *chain = event->chain;
-        size_t chainLength = sk_X509_num(chain);
-        if (chainLength < 0) {
-            CFRelease(cert);
-            /* return @"Untrusted certificate chain is null"; */
-            return false;
-        }
-        NSMutableArray *trustArray = [[NSMutableArray alloc] initWithCapacity:chainLength + 1];
-        [trustArray addObject:(__bridge_transfer id) cert];
-        for (size_t i = 0; i < chainLength; ++i) {
-            SecCertificateRef chainedCert = convertCertificate(sk_X509_value(chain, i));
-            if (!chainedCert) {
-                /* return @"Failed to create chained certificate object"; */
-                return false;
-            }
-            [trustArray addObject:(__bridge_transfer id) chainedCert];
-        }
-        SecPolicyRef policy = SecPolicyCreateBasicX509();
-        SecTrustRef trust = NULL;
-        OSStatus status = SecTrustCreateWithCertificates((__bridge CFTypeRef)trustArray, policy, &trust);
-        if (policy) {
-            CFRelease(policy);
-        }
-        if (status != errSecSuccess) {
-            CFRelease(trust);
-            /* return getTrustCreationErrorStr(status); */
-            return false;
-        }
-        if (m_ca_cert) {
-            const void *values[] = { m_ca_cert };
-            CFArrayRef anchors = CFArrayCreate(NULL, values, 1, &kCFTypeArrayCallBacks);
-            SecTrustSetAnchorCertificates(trust, anchors);
-            CFRelease(anchors);
-        } else {
-            SecTrustSetAnchorCertificates(trust, NULL);
-        }
-        /* SecTrustSetAnchorCertificates(trust, m_ca_cert ? (__bridge CFArrayRef)@[(__bridge id)m_ca_cert] : NULL); */
-        SecTrustSetAnchorCertificatesOnly(trust, false);
-        bool res = SecTrustEvaluateWithError(trust, NULL); // TODO deprecated, use SecTrustEvaluateWithError since macOS 10.14
-        // https://developer.apple.com/documentation/security/sectrustresulttype/ksectrustresultunspecified?language=objc
-        // This value indicates that evaluation reached an (implicitly trusted) anchor certificate without
-        // any evaluation failures, but never encountered any explicitly stated user-trust preference.
+        [trustArray addObject:(__bridge_transfer id) chainedCert];
+    }
+    SecPolicyRef policy = SecPolicyCreateBasicX509();
+    SecTrustRef trust = NULL;
+    OSStatus status = SecTrustCreateWithCertificates((__bridge CFTypeRef)trustArray, policy, &trust);
+    if (policy) {
+        CFRelease(policy);
+    }
+    if (status != errSecSuccess) {
         CFRelease(trust);
-        /* return getTrustResultErrorStr(trustResult); */
-        return res;
+        /* return getTrustCreationErrorStr(status); */
+        return false;
     }
-
-private:
-    SecCertificateRef m_ca_cert = nullptr;
-
-    static _Nullable SecCertificateRef convertCertificate(X509 *cert) {
-        unsigned char *buffer = NULL;
-        int len = i2d_X509(cert, &buffer);
-        if (len < 0) {
-            return NULL;
-        }
-        NSData *data = [[NSData alloc] initWithBytesNoCopy:(void *)buffer
-                                                    length:len
-                                            deallocator:^void(void *bytes, NSUInteger length) {
-                                                OPENSSL_free(bytes);
-                                            }];
-        return SecCertificateCreateWithData(NULL, (__bridge CFDataRef)data);
-    }
-};
+    SecTrustSetAnchorCertificatesOnly(trust, false);
+    bool res = SecTrustEvaluateWithError(trust, NULL);
+    CFRelease(trust);
+    return res;
+}
 
 static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
     @autoreleasepool {
@@ -207,7 +154,6 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
 
 @interface VpnClient () {
     std::unique_ptr<ag::VpnStandaloneClient> _native_client;
-    std::optional<CertificateVerifier> _cert_verifier;
     std::unique_ptr<ag::NetworkMonitor> _network_monitor;
     NEPacketTunnelFlow *_tunnelFlow;
     id _readPacketsHandler;
@@ -254,17 +200,14 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
         if (!standalone_config) {
             return nil;
         }
-        if (!standalone_config->location.skip_verification && standalone_config->location.certificate.has_value()) {
-            self->_cert_verifier = CertificateVerifier(*standalone_config->location.certificate);
-        }
         ag::VpnCallbacks callbacks = {
             .protect_handler = [](ag::SocketProtectEvent *event) {
                 event->result = protectSocket(event)
                     ? 0
                     : -1;
             },
-            .verify_handler = [self](ag::VpnVerifyCertificateEvent *event) {
-                event->result = self->_cert_verifier.has_value() && self->_cert_verifier->verify_certificate(event)
+            .verify_handler = [](ag::VpnVerifyCertificateEvent *event) {
+                event->result = verify_certificate(event)
                     ? 0
                     : -1;
             },

@@ -136,10 +136,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         }
 
         try {
-            if (!config.certificateConfig.skipVerification) {
-                certificateVerificator =
-                    CertificateVerificator(config.certificateConfig.certificate)
-            }
+            certificateVerificator = CertificateVerificator()
         } catch (e: Exception) {
             LOG.error("Failed to create certificate verifier: $e")
             return run {
@@ -148,7 +145,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         }
 
         LOG.info("VPN is starting...")
-        val vpnTunInterface = createTunInterface(config.tunConfig) ?: return run {
+        val vpnTunInterface = createTunInterface(config) ?: return run {
             close()
         }
 
@@ -171,7 +168,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         close()
     }
 
-    private fun createTunInterface(config: VpnServiceConfig.TunConfig): ParcelFileDescriptor? {
+    private fun createTunInterface(config: VpnServiceConfig): ParcelFileDescriptor? {
         LOG.info("Request 'create tun interface' received")
         try {
             val builder = Builder().setSession("Trust Tunnel")

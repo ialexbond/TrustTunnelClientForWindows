@@ -33,10 +33,9 @@ static std::atomic_bool keep_running{true};
 static std::condition_variable g_waiter;
 static std::mutex g_waiter_mutex;
 static VpnStandaloneClient *g_client;
-static DeclPtr<X509_STORE, &X509_STORE_free> g_ca_store;
 
 static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const VpnStandaloneConfig &config);
-static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback(const VpnStandaloneConfig &config);
+static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback();
 static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback();
 
 static void sighandler(int sig) {
@@ -125,7 +124,7 @@ int main(int argc, char **argv) {
 
     VpnCallbacks callbacks = {
         .protect_handler = get_protect_socket_callback(config),
-        .verify_handler = get_verify_certificate_callback(config),
+        .verify_handler = get_verify_certificate_callback(),
         .state_changed_handler = get_state_changed_callback()
     };
 
@@ -204,36 +203,9 @@ std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const VpnS
     };
 }
 
-static DeclPtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view pem_certificate) {
-    DeclPtr<BIO, &BIO_free> bio {BIO_new_mem_buf(pem_certificate.data(), (long) pem_certificate.size())};
-
-    DeclPtr<X509, &X509_free> cert{PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr)};
-    if (cert == nullptr) {
-        return nullptr;
-    }
-
-    DeclPtr<X509_STORE, &X509_STORE_free> store{tls_create_ca_store()};
-    if (store == nullptr) {
-        return nullptr;
-    }
-
-    X509_STORE_add_cert(store.get(), cert.get());
-
-    return store;
-}
-
-static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback(const VpnStandaloneConfig &config) {
-    if (config.location.skip_verification) {
-        return [](VpnVerifyCertificateEvent *event) {
-            event->result = VPN_SKIP_VERIFICATION_FLAG;
-        };
-    }
-
-    g_ca_store = config.location.certificate
-                            ? load_certificate(config.location.certificate.value())
-                            : nullptr;
+static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback() {
     return [](VpnVerifyCertificateEvent *event) {
-        const char *err = tls_verify_cert(event->cert, event->chain, g_ca_store.get());
+        const char *err = tls_verify_cert(event->cert, event->chain, nullptr);
         if (err == nullptr) {
             tracelog(g_logger, "Certificate verified successfully");
             event->result = 0;
