@@ -570,48 +570,59 @@ Result<SystemDnsServers, RetrieveInterfaceDnsError> retrieve_interface_dns_serve
     return servers;
 }
 
+static bool is_physical_adapter(const IP_ADAPTER_ADDRESSES *aa) {
+    if (!aa)
+        return false;
+
+    switch (aa->IfType) {
+    case IF_TYPE_ETHERNET_CSMACD: // 6
+    case IF_TYPE_IEEE80211:       // 71 (Wi-Fi)
+    case IF_TYPE_WWANPP:          // 243
+    case IF_TYPE_WWANPP2:         // 244
+        break;
+    default:
+        return false;
+    }
+
+    // Should be online
+    if (aa->OperStatus != IfOperStatusUp && aa->OperStatus != IfOperStatusDormant) {
+        return false;
+    }
+
+    return aa->FirstUnicastAddress != nullptr;
+}
+
 DWORD get_physical_interfaces(std::unordered_set<NET_IFINDEX> &physical_ifs) {
-    static constexpr const char *WINREG_NETWORK_CARDS_PATH =
-            R"(SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkCards)";
+    ULONG flags =
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_GATEWAYS;
 
-    HKEY current_key{};
-    if (DWORD error = RegOpenKeyExA(
-                HKEY_LOCAL_MACHINE, WINREG_NETWORK_CARDS_PATH, 0, KEY_READ | KEY_ENUMERATE_SUB_KEYS, &current_key);
-            error != ERROR_SUCCESS) {
-        dbglog(g_logger, "RegOpenKeyExA failed with result: {}", error);
-        return error;
+    ULONG size = 0;
+    ULONG ret = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, nullptr, &size);
+    if (ret != ERROR_BUFFER_OVERFLOW) {
+        if (ret == NO_ERROR)
+            return ERROR_SUCCESS;
+        errlog(g_logger, "GetAdaptersAddresses(size probe) failed: {}", sys::strerror(ret));
+        return ret;
     }
 
-    DWORD key_index = 0;
-    char subkey[BUFSIZ];
-    DWORD name_length;
-    while (RegEnumKeyExA(current_key, key_index++, subkey, &(name_length = std::size(subkey)), nullptr, nullptr,
-                   nullptr, nullptr)
-            != ERROR_NO_MORE_ITEMS) {
-        DWORD data_size = 0;
-        // get buffer size
-        RegGetValueA(current_key, subkey, "ServiceName", RRF_RT_REG_SZ, nullptr, nullptr, &data_size);
-        std::string buffer;
-        buffer.resize(data_size);
-        auto get_value_result =
-                RegGetValueA(current_key, subkey, "ServiceName", RRF_RT_REG_SZ, nullptr, buffer.data(), &data_size);
-        if (get_value_result == ERROR_SUCCESS) {
-            buffer.resize(data_size - 1);
-            if (auto guid = string_to_guid(buffer); guid.has_value()) {
-                NET_LUID luid{};
-                NET_IFINDEX index = 0;
-                ConvertInterfaceGuidToLuid(&guid.value(), &luid);
-                ConvertInterfaceLuidToIndex(&luid, &index);
-                physical_ifs.insert(index);
-            }
-        } else {
-            // Single error in previous operation is not critical for obtaining list of interfaces
-            dbglog(g_logger, "RegGetValueA failed for key index {} with result: {}", key_index - 1,
-                    sys::strerror(get_value_result));
-        }
+    std::vector<uint8_t> buf(size);
+    ret = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, (IP_ADAPTER_ADDRESSES *) buf.data(), &size);
+    if (ret != NO_ERROR) {
+        errlog(g_logger, "GetAdaptersAddresses() failed: {}", sys::strerror(ret));
+        return ret;
     }
 
-    RegCloseKey(current_key);
+    for (auto *p = (IP_ADAPTER_ADDRESSES *) buf.data(); p != nullptr; p = p->Next) {
+
+        if (!is_physical_adapter(p))
+            continue;
+
+        if (p->IfIndex != 0)
+            physical_ifs.insert(p->IfIndex);
+        if (p->Ipv6IfIndex != 0)
+            physical_ifs.insert(p->Ipv6IfIndex);
+    }
+
     dbglog(g_logger, "Physical interfaces: {}", physical_ifs);
     return ERROR_SUCCESS;
 }
