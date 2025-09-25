@@ -216,7 +216,7 @@ const ag::VpnWinTunnelSettings *ag::vpn_win_tunnel_settings_defaults() {
             .tunnel_type = "wintun",
             .wintun_lib = nullptr,
             .block_ipv6 = false,
-            .block_inbound = false,
+            .block_untunneled = false,
             .zerocopy = false,
     };
     return &win_settings;

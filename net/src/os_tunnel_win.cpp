@@ -254,8 +254,8 @@ ag::VpnError ag::VpnWinTunnel::init(
         errlog(logger, "{}", ag::sys::strerror(ag::sys::last_error()));
         return {-1, "Unable to setup routes for wintun session"};
     }
-    if (win_settings->block_inbound) {
-        if (auto error = m_firewall.block_inbound(ipv4_address, ipv6_address, ipv4_routes, ipv6_routes)) {
+    if (win_settings->block_untunneled) {
+        if (auto error = m_firewall.block_untunneled(ipv4_address, ipv6_address, ipv4_routes, ipv6_routes)) {
             errlog(logger, "Failed to block incoming: {}", error->str());
             return {-1, "Failed to block incoming"};
         }

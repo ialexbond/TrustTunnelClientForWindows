@@ -12,14 +12,15 @@
 
 static ag::Logger g_log{"FIREWALL"}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-static constexpr uint8_t DNS_RESTRICT_DENY_WEIGHT = 12;
-static constexpr uint8_t DNS_RESTRICT_ALLOW_WEIGHT = 13;
-static constexpr uint8_t IPV6_BLOCK_DENY_WEIGHT = 14;
-static constexpr uint8_t INBOUND_BLOCK_DENY_WEIGHT = 14;
-static constexpr uint8_t INBOUND_BLOCK_ALLOW_WEIGHT = 15;
+static constexpr uint8_t DNS_RESTRICT_DENY_WEIGHT = 1;
+static constexpr uint8_t DNS_RESTRICT_ALLOW_WEIGHT = 2;
+static constexpr uint8_t IPV6_BLOCK_DENY_WEIGHT = 3;
+static constexpr uint8_t UNTUNNELED_BLOCK_DENY_WEIGHT = 3;
+static constexpr uint8_t UNTUNNELED_BLOCK_ALLOW_WEIGHT = 4;
+static constexpr uint8_t SELF_ALLOW_WEIGHT = 15; // Must be the highest weight.
 
-static_assert(INBOUND_BLOCK_ALLOW_WEIGHT > INBOUND_BLOCK_DENY_WEIGHT);
-static_assert(INBOUND_BLOCK_DENY_WEIGHT > DNS_RESTRICT_ALLOW_WEIGHT);
+static_assert(UNTUNNELED_BLOCK_ALLOW_WEIGHT > UNTUNNELED_BLOCK_DENY_WEIGHT);
+static_assert(UNTUNNELED_BLOCK_DENY_WEIGHT > DNS_RESTRICT_ALLOW_WEIGHT);
 static_assert(IPV6_BLOCK_DENY_WEIGHT > DNS_RESTRICT_ALLOW_WEIGHT);
 static_assert(DNS_RESTRICT_ALLOW_WEIGHT > DNS_RESTRICT_DENY_WEIGHT);
 
@@ -94,8 +95,68 @@ ag::WfpFirewall::WfpFirewall()
         return nullptr;
     };
 
+    auto allow_self = [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
+        // Allow any DNS traffic for our process. Required for, e.g., resolving exclusions through the system DNS.
+        wchar_t module_name[4096]{}; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        if (!GetModuleFileNameW(nullptr, &module_name[0], std::size(module_name))) {
+            return make_error(FE_WINAPI_ERROR, AG_FMT("GetModuleFileNameW failed with code {:#x}", GetLastError()));
+        }
+        FWP_BYTE_BLOB *app_id_blob = nullptr;
+        if (DWORD error = FwpmGetAppIdFromFileName(&module_name[0], &app_id_blob); error != ERROR_SUCCESS) {
+            return make_error(FE_WFP_ERROR, AG_FMT("FwpmGetAppIdFromFileName failed with code {:#x}", error));
+        }
+        std::shared_ptr<FWP_BYTE_BLOB> app_id_blob_guard(app_id_blob, [](FWP_BYTE_BLOB *blob) {
+            FwpmFreeMemory((void **) &blob);
+        });
+        std::vector<FWPM_FILTER_CONDITION0> allow_self_conditions;
+        allow_self_conditions.reserve(1);
+        allow_self_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                .fieldKey = FWPM_CONDITION_ALE_APP_ID,
+                .matchType = FWP_MATCH_EQUAL,
+                .conditionValue =
+                        {
+                                .type = FWP_BYTE_BLOB_TYPE,
+                                .byteBlob = app_id_blob,
+                        },
+        });
+        FWPM_FILTER0 filter{
+                .displayData =
+                        {
+                                .name = name.data(),
+                        },
+                .providerKey = &m_impl->provider_key,
+                .subLayerKey = m_impl->sublayer_key,
+                .weight =
+                        {
+                                .type = FWP_UINT8,
+                                .uint8 = SELF_ALLOW_WEIGHT,
+                        },
+                .numFilterConditions = (UINT32) allow_self_conditions.size(),
+                .filterCondition = allow_self_conditions.data(),
+                .action =
+                        {
+                                .type = FWP_ACTION_PERMIT,
+                        },
+        };
+        for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                     FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
+            filter.layerKey = layer_key;
+            if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                    error != ERROR_SUCCESS) {
+                return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+            }
+        }
+        return nullptr;
+    };
+
     if (auto error = run_transaction(m_impl->engine_handle, std::move(register_base_objects))) {
         errlog(g_log, "Failed to register base objects: {}", error->str());
+        FwpmEngineClose0(m_impl->engine_handle);
+        m_impl->engine_handle = INVALID_HANDLE_VALUE;
+    }
+
+    if (auto error = run_transaction(m_impl->engine_handle, std::move(allow_self))) {
+        errlog(g_log, "Failed to allow self through firewall: {}", error->str());
         FwpmEngineClose0(m_impl->engine_handle);
         m_impl->engine_handle = INVALID_HANDLE_VALUE;
     }
@@ -169,7 +230,7 @@ ag::WfpFirewallError ag::WfpFirewall::restrict_dns_to(std::span<const CidrRange>
                                 .type = FWP_UINT8,
                                 .uint8 = DNS_RESTRICT_DENY_WEIGHT,
                         },
-                .numFilterConditions = std::size(dns_conditions),
+                .numFilterConditions = (UINT32) std::size(dns_conditions),
                 .filterCondition = &dns_conditions[0],
                 .action =
                         {
@@ -252,42 +313,6 @@ ag::WfpFirewallError ag::WfpFirewall::restrict_dns_to(std::span<const CidrRange>
             }
         }
 
-        // Allow any DNS traffic for our process. Required for, e.g., resolving exclusions through the system DNS.
-        wchar_t module_name[4096]{}; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-        if (!GetModuleFileNameW(nullptr, &module_name[0], std::size(module_name))) {
-            return make_error(FE_WINAPI_ERROR, AG_FMT("GetModuleFileNameW failed with code {:#x}", GetLastError()));
-        }
-        FWP_BYTE_BLOB *app_id_blob = nullptr;
-        if (DWORD error = FwpmGetAppIdFromFileName(&module_name[0], &app_id_blob); error != ERROR_SUCCESS) {
-            return make_error(FE_WFP_ERROR, AG_FMT("FwpmGetAppIdFromFileName failed with code {:#x}", error));
-        }
-        std::shared_ptr<FWP_BYTE_BLOB> app_id_blob_guard(app_id_blob, [](FWP_BYTE_BLOB *blob) {
-            FwpmFreeMemory((void **) &blob);
-        });
-        std::vector<FWPM_FILTER_CONDITION0> allow_self_conditions;
-        allow_self_conditions.reserve(std::size(dns_conditions) + 1);
-        allow_self_conditions.insert(
-                allow_self_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
-        allow_self_conditions.emplace_back(FWPM_FILTER_CONDITION0{
-                .fieldKey = FWPM_CONDITION_ALE_APP_ID,
-                .matchType = FWP_MATCH_EQUAL,
-                .conditionValue =
-                        {
-                                .type = FWP_BYTE_BLOB_TYPE,
-                                .byteBlob = app_id_blob,
-                        },
-        });
-        filter.numFilterConditions = allow_self_conditions.size();
-        filter.filterCondition = allow_self_conditions.data();
-        for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
-                     FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
-            filter.layerKey = layer_key;
-            if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                    error != ERROR_SUCCESS) {
-                return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
-            }
-        }
-
         return nullptr;
     });
 }
@@ -331,21 +356,21 @@ ag::WfpFirewallError ag::WfpFirewall::block_ipv6() {
     });
 }
 
-ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4, const CidrRange &allow_to_v6,
-        std::span<const CidrRange> from_v4, std::span<const CidrRange> from_v6) {
+ag::WfpFirewallError ag::WfpFirewall::block_untunneled(const CidrRange &tunaddr4, const CidrRange &tunaddr6,
+        std::span<const CidrRange> incl4, std::span<const CidrRange> incl6) {
     if (m_impl->engine_handle == INVALID_HANDLE_VALUE) {
         return make_error(FE_NOT_INITIALIZED);
     }
     return run_transaction(m_impl->engine_handle,
             [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
-                // Deny inbound traffic from addresses in `from_v4`, except that destined for `not_to_v4` or loopback.
-                if (allow_to_v4.get_address().size() == IPV4_ADDRESS_SIZE && !from_v4.empty()) {
+                // Deny IPv4 traffic to/from addresses in `incl4`, except from/to `tunaddr4` or loopback.
+                if (tunaddr4.get_address().size() == IPV4_ADDRESS_SIZE && !incl4.empty()) {
                     std::vector<FWPM_FILTER_CONDITION0> v4_conditions;
                     std::list<FWP_V4_ADDR_AND_MASK> v4_ranges;
-                    v4_conditions.reserve(from_v4.size() + 2);
+                    v4_conditions.reserve(incl4.size() + 2);
 
-                    // Remote address in any of `from_v4`.
-                    for (const CidrRange &range : from_v4) {
+                    // Remote address in any of `incl4`.
+                    for (const CidrRange &range : incl4) {
                         if (range.get_address().size() != IPV4_ADDRESS_SIZE) {
                             continue;
                         }
@@ -361,7 +386,7 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                         });
                     }
 
-                    std::wstring name = L"AdGuard VPN block inbound IPv4";
+                    std::wstring name = L"AdGuard VPN block untunneled IPv4";
                     FWPM_FILTER0 filter{
                             .displayData = {.name = name.data()},
                             .providerKey = &m_impl->provider_key,
@@ -370,19 +395,22 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                             .weight =
                                     {
                                             .type = FWP_UINT8,
-                                            .uint8 = INBOUND_BLOCK_DENY_WEIGHT,
+                                            .uint8 = UNTUNNELED_BLOCK_DENY_WEIGHT,
                                     },
                             .numFilterConditions = (UINT32) v4_conditions.size(),
                             .filterCondition = &v4_conditions[0],
                             .action = {.type = FWP_ACTION_BLOCK},
                     };
 
-                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                            error != ERROR_SUCCESS) {
-                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4}) {
+                        filter.layerKey = layer_key;
+                        if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                                error != ERROR_SUCCESS) {
+                            return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                        }
                     }
 
-                    // Allow inbound traffic to addresses not in `not_to_v4` or loopback.
+                    // Allow traffic to/from `tunaddr4` and loopback.
                     v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
                             .fieldKey = FWPM_CONDITION_IP_LOCAL_ADDRESS,
                             .matchType = FWP_MATCH_EQUAL,
@@ -390,7 +418,7 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                                     {
                                             .type = FWP_V4_ADDR_MASK,
                                             .v4AddrMask =
-                                                    &v4_ranges.emplace_back(fwp_v4_range_from_cidr_range(allow_to_v4)),
+                                                    &v4_ranges.emplace_back(fwp_v4_range_from_cidr_range(tunaddr4)),
                                     },
                     });
                     v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
@@ -404,26 +432,30 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                                     },
                     });
 
-                    name = L"AdGuard VPN block inbound IPv4 (allow VPN and loopback)";
+                    name = L"AdGuard VPN block untunneled IPv4 (allow tunneled and loopback)";
                     filter.displayData = {.name = name.data()};
                     filter.action = {.type = FWP_ACTION_PERMIT};
+                    filter.weight.uint8 = UNTUNNELED_BLOCK_ALLOW_WEIGHT;
                     filter.numFilterConditions = v4_conditions.size();
                     filter.filterCondition = &v4_conditions[0];
 
-                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                            error != ERROR_SUCCESS) {
-                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4}) {
+                        filter.layerKey = layer_key;
+                        if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                                error != ERROR_SUCCESS) {
+                            return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                        }
                     }
                 }
 
-                // Deny inbound traffic from addresses in `from_v6`, except that destined for `not_to_v6` or loopback.
-                if (allow_to_v6.get_address().size() == IPV6_ADDRESS_SIZE && !from_v6.empty()) {
+                // Deny IPv6 traffic to/from addresses in `incl6`, except from/to `tunnaddr6` or loopback.
+                if (tunaddr6.get_address().size() == IPV6_ADDRESS_SIZE && !incl6.empty()) {
                     std::vector<FWPM_FILTER_CONDITION0> v6_conditions;
                     std::list<FWP_V6_ADDR_AND_MASK> v6_ranges;
-                    v6_conditions.reserve(from_v6.size() + 2);
+                    v6_conditions.reserve(incl6.size() + 2);
 
-                    // Remote address in any of `from_v6`.
-                    for (const CidrRange &range : from_v6) {
+                    // Remote address in any of `incl6`.
+                    for (const CidrRange &range : incl6) {
                         if (range.get_address().size() != IPV6_ADDRESS_SIZE) {
                             continue;
                         }
@@ -439,7 +471,7 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                         });
                     }
 
-                    std::wstring name = L"AdGuard VPN block inbound IPv6";
+                    std::wstring name = L"AdGuard VPN block untunneled IPv6";
                     FWPM_FILTER0 filter{
                             .displayData = {.name = name.data()},
                             .providerKey = &m_impl->provider_key,
@@ -448,19 +480,22 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                             .weight =
                                     {
                                             .type = FWP_UINT8,
-                                            .uint8 = INBOUND_BLOCK_DENY_WEIGHT,
+                                            .uint8 = UNTUNNELED_BLOCK_DENY_WEIGHT,
                                     },
                             .numFilterConditions = (UINT32) v6_conditions.size(),
                             .filterCondition = &v6_conditions[0],
                             .action = {.type = FWP_ACTION_BLOCK},
                     };
 
-                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                            error != ERROR_SUCCESS) {
-                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
+                        filter.layerKey = layer_key;
+                        if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                                error != ERROR_SUCCESS) {
+                            return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                        }
                     }
 
-                    // Allow inbound traffic to addresses not in `not_to_v6` or loopback.
+                    // Allow traffic to/from `tunaddr6` and loopback.
                     v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
                             .fieldKey = FWPM_CONDITION_IP_LOCAL_ADDRESS,
                             .matchType = FWP_MATCH_EQUAL,
@@ -468,7 +503,7 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                                     {
                                             .type = FWP_V6_ADDR_MASK,
                                             .v6AddrMask =
-                                                    &v6_ranges.emplace_back(fwp_v6_range_from_cidr_range(allow_to_v6)),
+                                                    &v6_ranges.emplace_back(fwp_v6_range_from_cidr_range(tunaddr6)),
                                     },
                     });
                     v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
@@ -482,15 +517,19 @@ ag::WfpFirewallError ag::WfpFirewall::block_inbound(const CidrRange &allow_to_v4
                                     },
                     });
 
-                    name = L"AdGuard VPN block inbound IPv6 (allow VPN and loopback)";
+                    name = L"AdGuard VPN block untunneled IPv6 (allow tunneled and loopback)";
                     filter.displayData = {.name = name.data()};
                     filter.action = {.type = FWP_ACTION_PERMIT};
+                    filter.weight.uint8 = UNTUNNELED_BLOCK_ALLOW_WEIGHT;
                     filter.numFilterConditions = v6_conditions.size();
                     filter.filterCondition = &v6_conditions[0];
 
-                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                            error != ERROR_SUCCESS) {
-                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
+                        filter.layerKey = layer_key;
+                        if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                                error != ERROR_SUCCESS) {
+                            return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                        }
                     }
                 }
 

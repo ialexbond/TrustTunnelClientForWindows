@@ -59,10 +59,10 @@ struct VpnWinTunnelSettings {
     /** Block all inbound/outbound IPv6 traffic */
     bool block_ipv6;
     /**
-     * If `true`, block all inbound traffic from VPN-included addresses to non-VPN interfaces.
+     * If `true`, block all untunneled traffic to/from VPN-included addresses.
      * This setting should be enabled if the kill switch is enabled, and disabled if the kill switch is disabled.
      */
-    bool block_inbound;
+    bool block_untunneled;
     /**
      * Defer releasing Wintun packet's memory until the packet is processed.
      * If enabled, Wintun's ring buffer will be larger.

@@ -397,7 +397,7 @@ VpnListener *VpnStandaloneClient::make_tun_listener(ListenerSettings listener_se
     }
     VpnWinTunnelSettings win_settings = *vpn_win_tunnel_settings_defaults();
     win_settings.wintun_lib = m_wintun;
-    win_settings.block_inbound = m_config.killswitch_enabled;
+    win_settings.block_untunneled = m_config.killswitch_enabled;
     VpnError res = m_tunnel->init(&tunnel_settings, &win_settings);
 #else
 # ifdef __linux__

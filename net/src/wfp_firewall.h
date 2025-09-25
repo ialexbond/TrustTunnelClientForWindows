@@ -51,13 +51,13 @@ public:
     WfpFirewallError block_ipv6();
 
     /**
-     * Block incoming traffic from any address in `from_v4` or `from_v6`
-     * to any address not in `allow_to_v4` or `allow_to_v6`.
-     *
-     * Note: traffic destined to the loopback interface is never blocked.
+     * Block untunneled traffic, i.e. traffic to/from `incl4`/`incl6` and not from/to `tunnadr4`/`tunaddr6`.
+     * `tunaddr4` and `tunaddr6` are the tun interface's IPv4 and IPv6 addresses.
+     * `incl4` and `incl6` are included (i.e. routed through the tunnel) prefixes.
+     * Traffic to/from loopback is never blocked.
      */
-    WfpFirewallError block_inbound(const CidrRange &allow_to_v4, const CidrRange &allow_to_v6,
-            std::span<const CidrRange> from_v4, std::span<const CidrRange> from_v6);
+    WfpFirewallError block_untunneled(const CidrRange &tunaddr4, const CidrRange &tunaddr6,
+            std::span<const CidrRange> incl4, std::span<const CidrRange> incl6);
 
 private:
     struct Impl;
