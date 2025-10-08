@@ -145,7 +145,7 @@ Run tests on Windows:
         description: Conan upload and cleanup
   requirements:
     - ephemeral-windows
-    - image: registry.int.agrd.dev/windows/windows11-bamboo:18
+    - image: registry.int.agrd.dev/windows/windows11-bamboo:19
   artifact-subscriptions: [ ]
 
 Run tests on macOS:
