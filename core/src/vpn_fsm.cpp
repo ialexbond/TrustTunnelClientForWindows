@@ -398,6 +398,7 @@ static void finalize_recovery(void *ctx, void *) {
     Vpn *vpn = (Vpn *) ctx;
     log_vpn(vpn, trace, "...");
 
+    vpn->client.update_bypass_ip_availability();
     vpn->recovery = {};
     vpn->stop_pinging();
     vpn->postponement_window_timer.reset();
