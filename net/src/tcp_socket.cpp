@@ -552,7 +552,7 @@ static struct bufferevent *create_bufferevent(TcpSocket *sock, const SocketAddre
         goto fail;
     }
 
-    if (dst.valid() && dst.is_loopback()) {
+    if (dst.valid() && !dst.is_loopback()) {
         event = {fd, dst.c_sockaddr(), 0};
         callbacks->handler(callbacks->arg, TCP_SOCKET_EVENT_PROTECT, &event);
         if (event.result != 0) {
