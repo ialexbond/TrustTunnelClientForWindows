@@ -1,10 +1,51 @@
 #!/bin/bash
 
+# Version increment script for VPN Libraries
+#
+# Usage:
+#   ./increment_version.sh                    # Auto-increment patch version
+#   ./increment_version.sh 1.2.3             # Set specific version
+#   ./increment_version.sh --help             # Show this help
+#
+# This script updates:
+#   - conandata.yml (adds new version with current git hash)
+#   - platform/android/lib/build.gradle.kts (updates version line)
+#   - CHANGELOG.md (adds new version header)
+
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+  echo "Version increment script for VPN Libraries"
+  echo ""
+  echo "Usage:"
+  echo "  $0                    # Auto-increment patch version"
+  echo "  $0 1.2.3             # Set specific version"
+  echo "  $0 --help            # Show this help"
+  echo ""
+  echo "This script updates:"
+  echo "  - conandata.yml (adds new version with current git hash)"
+  echo "  - platform/android/lib/build.gradle.kts (updates version line)"
+  echo "  - CHANGELOG.md (adds new version header)"
+  exit 0
+fi
+
 increment_version() {
   major=${1%%.*}
   minor=$(echo ${1#*.} | sed -e "s/\.[0-9]*//")
   revision=${1##*.}
   echo ${major}.${minor}.$((revision+1))
+}
+
+update_android_version() {
+  local new_version=$1
+  local gradle_file="platform/android/lib/build.gradle.kts"
+
+  if [ -f "$gradle_file" ]; then
+    echo "Updating Android library version to ${new_version}"
+    # Update the version line in build.gradle.kts
+    sed -i -e "s/^version = \".*\"/version = \"${new_version}\"/" "$gradle_file"
+    echo "Updated ${gradle_file}"
+  else
+    echo "Warning: Android gradle file not found at ${gradle_file}"
+  fi
 }
 
 argument_version=$1
@@ -21,13 +62,29 @@ else
     echo "New version is ${NEW_VERSION}"
   else
     echo "INVALID VERSION FORMAT"
+    exit 1
   fi
+fi
+
+if [ -z "$NEW_VERSION" ]; then
+  echo "No version to update"
+  exit 1
 fi
 
 COMMIT_HASH=$(git rev-parse HEAD)
 echo "Last commit hash is ${COMMIT_HASH}"
 
-[[ ! -z "$NEW_VERSION" ]] && (printf "  \"${NEW_VERSION}\":\n    hash: \"${COMMIT_HASH}\"\n" | tee -a conandata.yml)
+# Update conandata.yml
+printf "  \"${NEW_VERSION}\":\n    hash: \"${COMMIT_HASH}\"\n" | tee -a conandata.yml
+
+# Update Android library version
+update_android_version "${NEW_VERSION}"
 
 # Update changelog
 sed -i -e '3{s/##/##/;t;s/^/## '${NEW_VERSION}'\n\n/}' CHANGELOG.md
+
+echo "Version increment completed successfully!"
+echo "Updated files:"
+echo "  - conandata.yml"
+echo "  - platform/android/lib/build.gradle.kts"
+echo "  - CHANGELOG.md"
