@@ -44,6 +44,7 @@ Increment version:
             git reset
             git add conandata.yml
             git add CHANGELOG.md
+            git add platform/android/lib/build.gradle.kts
             git commit -m "skipci: Automatic version increment by Bamboo"
             git push
 
