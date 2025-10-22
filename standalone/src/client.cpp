@@ -345,7 +345,7 @@ VpnListener *VpnStandaloneClient::make_tun_listener(ListenerSettings listener_se
 
     assert(std::holds_alternative<AutoSetup>(listener_settings));
 
-#if defined(ANDROID) || defined(TARGET_OS_IPHONE)
+#if defined(ANDROID) || TARGET_OS_IPHONE
     errlog(m_logger, "Current platform doesn't support automatic tunnel creation");
     return nullptr;
 #else
