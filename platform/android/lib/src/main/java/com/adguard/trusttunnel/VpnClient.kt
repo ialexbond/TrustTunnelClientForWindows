@@ -3,6 +3,7 @@ package com.adguard.trusttunnel
 import android.os.ParcelFileDescriptor
 import com.adguard.trusttunnel.log.LoggerManager
 import com.adguard.trusttunnel.log.NativeLogger
+import com.adguard.trusttunnel.log.NativeLoggerLevel
 import java.io.Closeable
 
 class VpnClient (
@@ -14,7 +15,7 @@ class VpnClient (
             System.loadLibrary("trusttunnel_android")
             // Kotlin objects are lazy initialized so call here to
             // ensure it is initialized.
-            NativeLogger
+            NativeLogger.defaultLogLevel = NativeLoggerLevel.INFO
         }
         private val LOG = LoggerManager.getLogger("VpnClient")
     }

@@ -4,6 +4,8 @@
 
 #include "common/logger.h"
 
+static ag::Logger g_logger("JNI.NativeLogger");
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_adguard_trusttunnel_log_NativeLogger_setDefaultLogLevel(JNIEnv *env, jclass clazz, jint level) {
@@ -29,4 +31,5 @@ Java_com_adguard_trusttunnel_log_NativeLogger_setupSlf4j(JNIEnv *env, jclass cla
                 LocalRef<jstring> message_str = jni_safe_new_string_utf(env.get(), message);
                 env->CallStaticVoidMethod(gtype.get(), log_method, (jint) log_level, message_str.get());
             });
+    infolog(g_logger, "Native logging initialized");
 }

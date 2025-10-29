@@ -12,6 +12,7 @@ class NativeLogger {
 
         init {
             setupSlf4j()
+            LOG.info("Logging initialized")
         }
 
         var defaultLogLevel: NativeLoggerLevel

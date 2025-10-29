@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
@@ -39,7 +40,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
                 config?.apply {
                     intent.putExtra(PARAM_CONFIG, config)
                 }
-                context.startService(intent)
+                context.startForegroundService(intent)
             } catch (e: Exception) {
                 LOG.error("Error occurred while service starting", e)
             }
@@ -99,18 +100,30 @@ class VpnService : android.net.VpnService(), VpnClientListener {
             return START_NOT_STICKY
         }
 
+        // Foreground service must spawn its notification in the first 5 seconds of the service lifetime
+        val notification = createNotification(this.applicationContext)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
         // We run all payload in another thread (not main) to minimize UI lags
         singleThread.execute {
-            val action = intent.action
-            val config = intent.getStringExtra(PARAM_CONFIG)
-            LOG.info("Start executing action=$action flags=$flags startId=$startId")
-            when (action) {
-                ACTION_START    -> processStarting(config)
-                ACTION_STOP     -> close()
-                else            -> LOG.info("Unknown command $action")
-            }
+            try {
+                val action = intent.action
+                val config = intent.getStringExtra(PARAM_CONFIG)
+                LOG.info("Start executing action=$action flags=$flags startId=$startId")
+                when (action) {
+                    ACTION_START    -> processStarting(config)
+                    ACTION_STOP     -> close()
+                    else            -> LOG.info("Unknown command $action")
+                }
 
-            LOG.info("Command $action for the VPN has been executed")
+                LOG.info("Command $action for the VPN has been executed")
+            } catch (e: Exception) {
+                LOG.error("Error while executing command", e)
+            }
         }
 
         return START_NOT_STICKY
@@ -148,9 +161,6 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         val vpnTunInterface = createTunInterface(config) ?: return run {
             close()
         }
-
-        val notification = createNotification(this.applicationContext)
-        startForeground(NOTIFICATION_ID, notification)
 
         vpnClient = VpnClient(configStr, this)
 
@@ -256,7 +266,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
     }
 
     override fun onStateChanged(state: Int) {
-        LOG.info("OnStateChanged: $state")
+        LOG.info("VpnService onStateChanged: $state")
         stateNotifier?.onStateChanged(state)
     }
 
@@ -275,7 +285,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         notificationManager.createNotificationChannel(channel)
         return NotificationCompat.Builder(context, name)
             .setContentTitle("TrustTunnel") // Main title of the notification
-            .setContentText("Vpn is running in foreground") // Content text of the notification
+            .setContentText("VPN is running in foreground") // Content text of the notification
             // Use a small icon that represents your VPN service.
             .setSmallIcon(android.R.drawable.ic_dialog_info) // Placeholder icon (replace with your app's icon)
             .setPriority(NotificationCompat.PRIORITY_LOW) // Set priority for older Android versions
