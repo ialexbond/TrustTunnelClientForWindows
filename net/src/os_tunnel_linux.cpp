@@ -37,6 +37,26 @@ static bool sys_cmd_netns(const std::string& netns, std::string cmd) {
     return sys_cmd_bool(cmd);
 }
 
+static void sys_cmd_netns_ignore_errors(const std::string &netns, std::string cmd) {
+    if (!netns.empty()) {
+        cmd = AG_FMT("ip netns exec {} {}", ag::utils::escape_argument_for_shell(netns), cmd);
+    }
+    cmd += " 2>&1";
+    dbglog(logger, "{} {}", (geteuid() == 0) ? '#' : '$', cmd);
+    auto result = ag::exec_with_output(cmd);
+    if (result.has_value()) {
+        auto &output = result.value().output;
+        if (!output.empty()) {
+            dbglog(logger, "{}", ag::utils::rtrim(result.value().output));
+        }
+        if (result.value().status != 0) {
+            dbglog(logger, "Exit code: {} (ignored)", result.value().status);
+        }
+    } else {
+        dbglog(logger, "{} (ignored)", result.error()->str());
+    }
+}
+
 static ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output_netns(const std::string& netns, std::string cmd) {
     if (!netns.empty()) {
         cmd = AG_FMT("ip netns exec {} {}", ag::utils::escape_argument_for_shell(netns), cmd);
@@ -51,6 +71,8 @@ ag::VpnError ag::VpnLinuxTunnel::init(const ag::VpnOsTunnelSettings *settings, s
         return {-1, "Failed to init tunnel"};
     }
     setup_if();
+    m_sport_supported = check_sport_rule_support();
+    teardown_routes(TABLE_ID); // Remove stale rules from previous sessions
     if (!setup_routes(TABLE_ID)) {
         return {-1, "Unable to setup routes for linuxtun session"};
     }
@@ -151,7 +173,6 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
     ag::tunnel_utils::get_setup_routes(
             ipv4_routes, ipv6_routes, m_settings->included_routes, m_settings->excluded_routes);
 
-    m_sport_supported = check_sport_rule_support();
     std::string table_name = m_sport_supported ? std::to_string(table_id) : "main";
 
     if (!m_ipv6_available) {
@@ -253,11 +274,9 @@ void ag::VpnLinuxTunnel::setup_dns() {
 }
 
 void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
-    if (m_sport_supported) {
-        // It is safe to leave these rules but it is better to remove them.
-        sys_cmd_netns(m_netns, AG_FMT("ip rule del prio 30801 lookup {}", table_id));
-        sys_cmd_netns(m_netns, "ip rule del prio 30800 sport 1-1024 lookup main");
-        sys_cmd_netns(m_netns, AG_FMT("ip -6 rule del prio 30801 lookup {}", table_id));
-        sys_cmd_netns(m_netns, "ip -6 rule del prio 30800 sport 1-1024 lookup main");
-    }
+    // Try to remove rules regardless of m_sport_supported (may exist from previous session)
+    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30801 lookup {}", table_id));
+    sys_cmd_netns_ignore_errors(m_netns, "ip rule del prio 30800 sport 1-1024 lookup main");
+    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30801 lookup {}", table_id));
+    sys_cmd_netns_ignore_errors(m_netns, "ip -6 rule del prio 30800 sport 1-1024 lookup main");
 }
