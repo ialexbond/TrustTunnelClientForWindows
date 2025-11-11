@@ -1,10 +1,3 @@
-//
-//  VpnManager.swift
-//  trusttunnel-client
-//
-//  Created by Andrey Yakushin on 24.07.2025.
-//
-
 import Foundation
 import NetworkExtension
 

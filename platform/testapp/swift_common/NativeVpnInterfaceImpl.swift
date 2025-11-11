@@ -1,10 +1,3 @@
-//
-//  NativeVpnInterfaceImpl.swift
-//  Runner
-//
-//  Created by Andrey Yakushin on 28.07.2025.
-//
-
 import TrustTunnelClient
 import Foundation
 

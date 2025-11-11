@@ -1,10 +1,3 @@
-//
-//  VpnClient.m
-//  Network Extension MacOS
-//
-//  Created by Andrey Yakushin on 31.07.2025.
-//
-
 #import "VpnClient.h"
 #import "vpn/standalone/client.h"
 #import "net/network_manager.h"

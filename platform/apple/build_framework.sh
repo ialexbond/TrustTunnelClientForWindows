@@ -1,10 +1,3 @@
-#
-//  build_framework.sh
-//  trusttunnel-client
-//
-//  Created by Andrey Yakushin on 08.08.2025.
-//
-
 set -xe
 
 CONFIGURATION="Release"

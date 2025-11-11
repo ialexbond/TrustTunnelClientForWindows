@@ -1,10 +1,3 @@
-//
-//  Utils.swift
-//  trusttunnel-client
-//
-//  Created by Andrey Yakushin on 13.08.2025.
-//
-
 import NetworkExtension
 
 func configureIPv4AndIPv6Settings(from config: TunConfig) -> (NEIPv4Settings, NEIPv6Settings) {

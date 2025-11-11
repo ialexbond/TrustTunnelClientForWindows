@@ -1,12 +1,3 @@
-//
-//  VpnClient.h
-//  Network Extension MacOS
-//
-//  Created by Andrey Yakushin on 31.07.2025.
-//
-
-//#import <vpn/standalone/client.h>
-
 #import <Foundation/Foundation.h>
 #import <NetworkExtension/NetworkExtension.h>
 

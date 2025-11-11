@@ -1,10 +1,3 @@
-//
-//  PacketTunnelProvider.swift
-//  Network Extension MacOS
-//
-//  Created by Andrey Yakushin on 28.07.2025.
-//
-
 import NetworkExtension
 import VpnClientFramework
 
