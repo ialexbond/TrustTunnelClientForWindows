@@ -9,7 +9,7 @@ Pod::Spec.new do |s|
                    DESC
   s.homepage     = "https://adguard.com"
   s.license      = { :type => "Apache", :file => "LICENSE" }
-  s.authors      = { "TODO" => "todo@adguard.com" }
+  s.authors      = { "AdGuard Dev Team" => "devteam@adguard.com" }
   s.ios.deployment_target = '14.0'
   s.osx.deployment_target = '10.15'
   s.source       = { :http => "http://localhost:8000/TrustTunnelClient-apple-#{s.version.to_s}.zip" }
