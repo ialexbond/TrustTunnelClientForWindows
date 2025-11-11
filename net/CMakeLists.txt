@@ -18,7 +18,7 @@ set(SOURCE_FILES
         ${NET_SOURCE_DIR}/http_stream.cpp
         ${NET_SOURCE_DIR}/http1.cpp
         ${NET_SOURCE_DIR}/http2.cpp
-        ${NET_SOURCE_DIR}/util.cpp
+        ${NET_SOURCE_DIR}/utils.cpp
         ${NET_SOURCE_DIR}/socks5_listener.cpp
         ${NET_SOURCE_DIR}/dns_manager.cpp
         ${NET_SOURCE_DIR}/socket_manager.cpp

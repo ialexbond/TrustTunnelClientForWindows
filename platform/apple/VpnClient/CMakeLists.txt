@@ -41,8 +41,6 @@ add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/standalone)
 add_library(${PROJECT_NAME} SHARED
     VpnClient.h
     VpnClient.mm
-    network_monitor.h
-    network_monitor.cpp
     module.modulemap
 )
 

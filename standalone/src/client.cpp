@@ -167,7 +167,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::set_system_d
         return make_error(ConnectResultError{}, "Failed to update DNS servers");
     }
 #elif !defined(__ANDROID__)
-    Result<SystemDnsServers, RetrieveSystemDnsError> result = retrieve_system_dns_servers();
+    Result<SystemDnsServers, RetrieveSystemDnsError> result = utils::retrieve_system_dns_servers();
     if (result.has_error()) {
         return make_error(ConnectResultError{}, AG_FMT("Failed to collect DNS servers: {}", result.error()->str()));
     }

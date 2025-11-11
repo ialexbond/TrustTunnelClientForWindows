@@ -15,6 +15,7 @@
 #include <openssl/x509.h>
 
 #include "common/error.h"
+#include <common/net_utils.h>
 #include "common/socket_address.h"
 #include "common/utils.h"
 #include "net/http_header.h"
@@ -129,26 +130,6 @@ struct IcmpEchoReply {
 struct IcmpEchoRequestEvent {
     IcmpEchoRequest request;
     int result; /**< operation result - filled by caller: 0 if successful, non-zero otherwise */
-};
-
-/**
- * A system DNS server descriptor. Based on Windows 11 model as the most comprehensive among
- * the supported platforms.
- */
-struct SystemDnsServer {
-    /** URL of the DNS server. The syntax corresponds to the one used in the DNS proxy. */
-    std::string address;
-    /**
-     * The network address of the hostname from the URL in `address` field.
-     * @note The library does not check whether the address matches the hostname.
-     */
-    std::optional<SocketAddress> resolved_host;
-};
-
-struct SystemDnsServers {
-    std::vector<SystemDnsServer> main;
-    std::vector<std::string> fallback;
-    std::vector<std::string> bootstrap;
 };
 
 enum MakeSslProtocolType {
@@ -325,40 +306,12 @@ struct ErrorCodeToString<RetrieveInterfaceDnsError> {
 Result<SystemDnsServers, RetrieveInterfaceDnsError> retrieve_interface_dns_servers(uint32_t if_index);
 
 /**
- * Populate `physical_ifs` with the interface indices of physical network adapters.
- * @return An error code, or `ERROR_SUCCESS`.
- */
-DWORD get_physical_interfaces(std::unordered_set<NET_IFINDEX> &physical_ifs);
-
-/**
  * Return the network interface which is currently active.
  * May return 0 in case it is not found.
  */
 extern "C" WIN_EXPORT uint32_t vpn_win_detect_active_if();
 
-#elif !defined(__ANDROID__)
-
-enum RetrieveSystemDnsError {
-    AE_INIT,
-};
-
-template <>
-struct ErrorCodeToString<RetrieveSystemDnsError> {
-    std::string operator()(RetrieveSystemDnsError code) {
-        // clang-format off
-        switch (code) {
-        case AE_INIT: return "res_ninit()";
-        }
-        // clang-format on
-    }
-};
-
-/**
- * Retrieve DNS servers
- */
-Result<SystemDnsServers, RetrieveSystemDnsError> retrieve_system_dns_servers();
-
-#endif // ifdef __ANDROID__
+#endif // #ifdef _WIN32
 
 enum IpVersion {
     IPV4,
