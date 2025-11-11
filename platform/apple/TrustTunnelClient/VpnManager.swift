@@ -1,6 +1,6 @@
 //
-//  trusttunnel.swift
-//  trusttunnel
+//  VpnManager.swift
+//  trusttunnel-client
 //
 //  Created by Andrey Yakushin on 24.07.2025.
 //

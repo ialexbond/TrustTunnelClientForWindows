@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "8A3B11252E4D1F0E00996E80"
-               BuildableName = "TrustTunnel.framework"
-               BlueprintName = "TrustTunnel-iOS"
-               ReferencedContainer = "container:trusttunnel.xcodeproj">
+               BuildableName = "TrustTunnelClient.framework"
+               BlueprintName = "TrustTunnelClient-iOS"
+               ReferencedContainer = "container:TrustTunnelClient.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -51,9 +51,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "8A3B11252E4D1F0E00996E80"
-            BuildableName = "TrustTunnel.framework"
-            BlueprintName = "TrustTunnel-iOS"
-            ReferencedContainer = "container:trusttunnel.xcodeproj">
+            BuildableName = "TrustTunnelClient.framework"
+            BlueprintName = "TrustTunnelClient-iOS"
+            ReferencedContainer = "container:TrustTunnelClient.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
    </ProfileAction>

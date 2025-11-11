@@ -17,7 +17,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven {
-            url = uri("https://maven.pkg.github.com/AdguardTeam/VpnLibs")
+            url = uri("https://maven.pkg.github.com/TrustTunnel/TrustTunnelClient")
             credentials {
                 username = providers.gradleProperty("gpr.user")
                     .orElse(providers.environmentVariable("USERNAME"))

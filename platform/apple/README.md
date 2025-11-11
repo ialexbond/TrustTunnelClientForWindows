@@ -1,4 +1,4 @@
-# Apple framework adapter for TrustTunnel
+# Apple framework adapter for TrustTunnelClient
 
 ## Building
 

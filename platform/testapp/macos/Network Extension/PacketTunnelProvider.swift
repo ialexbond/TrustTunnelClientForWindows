@@ -6,6 +6,6 @@
 //
 
 import NetworkExtension
-import TrustTunnel
+import TrustTunnelClient
 
 class PacketTunnelProvider : AGPacketTunnelProvider {}

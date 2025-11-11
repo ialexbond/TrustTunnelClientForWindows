@@ -1,21 +1,21 @@
 PODS:
   - FlutterMacOS (1.0.0)
-  - TrustTunnel (1.0.0)
+  - TrustTunnelClient (0.99.20)
 
 DEPENDENCIES:
   - FlutterMacOS (from `Flutter/ephemeral`)
-  - TrustTunnel (from `../../apple`)
+  - TrustTunnelClient (from `../../apple/TrustTunnelClient.podspec`)
 
 EXTERNAL SOURCES:
   FlutterMacOS:
     :path: Flutter/ephemeral
-  TrustTunnel:
-    :path: "../../apple"
+  TrustTunnelClient:
+    :podspec: "../../apple/TrustTunnelClient.podspec"
 
 SPEC CHECKSUMS:
   FlutterMacOS: 8f6f14fa908a6fb3fba0cd85dbd81ec4b251fb24
-  TrustTunnel: 3c5b39a7e794ef552fb84cddd5cab54162567eb8
+  TrustTunnelClient: dd4a12bc6306ddc3db6af43ac26b7eb8793c42c2
 
-PODFILE CHECKSUM: db0496beddc3debbf845f172a85d9f238dc11a72
+PODFILE CHECKSUM: b32837fea4ef3cc0d2ad521d8c1d94c97b7a6966
 
 COCOAPODS: 1.16.2

@@ -48,10 +48,32 @@ update_android_version() {
   fi
 }
 
+update_apple_version() {
+  local new_version=$1
+  local old_version=$2
+
+  pushd platform/apple/
+    local pbxproj_file="TrustTunnel.xcodeproj/project.pbxproj"
+    sed -i -e "s/CURRENT_PROJECT_VERSION = ${old_version}/CURRENT_PROJECT_VERSION = ${new_version}/" ${pbxproj_file}
+    sed -i -e "s/DYLIB_CURRENT_VERSION = ${old_version}/DYLIB_CURRENT_VERSION = ${new_version}/" ${pbxproj_file}
+    sed -i -e "s/MARKETING_VERSION = ${old_version}/MARKETING_VERSION = ${new_version}/" ${pbxproj_file}
+
+    local vpn_client_cmake="VpnClient/CMakeLists.txt"
+    local old_part="VERSION ${old_version}"
+    local new_part="VERSION ${new_version}"
+    sed -i -e "s/${old_part}/${new_part}/" "${vpn_client_cmake}"
+
+    local spec_file=TrustTunnel.podspec
+    local old_part="s.version      = \"${old_version}\""
+    local new_part="s.version      = \"${new_version}\""
+    sed -i -e "s/${old_part}/${new_part}/" "${spec_file}"
+  popd
+}
+
 argument_version=$1
 if [ -z "$argument_version" ]
 then
-  VERSION=$(cat conandata.yml | grep "[0-9]*\.[0-9]*." | tail -1 | sed "s/\"//" | sed "s/\"\://")
+  VERSION=$(cat conandata.yml | grep "[0-9]*\.[0-9]*." | tail -1 | sed "s/\"//" | sed "s/\"\://" | sed "s/ //g")
   echo "Last version was ${VERSION}"
   NEW_VERSION=$(increment_version ${VERSION})
   echo "New version is ${NEW_VERSION}"
@@ -79,6 +101,8 @@ printf "  \"${NEW_VERSION}\":\n    hash: \"${COMMIT_HASH}\"\n" | tee -a conandat
 
 # Update Android library version
 update_android_version "${NEW_VERSION}"
+
+update_apple_version "${NEW_VERSION}" "${VERSION}"
 
 # Update changelog
 sed -i -e '3{s/##/##/;t;s/^/## '${NEW_VERSION}'\n\n/}' CHANGELOG.md

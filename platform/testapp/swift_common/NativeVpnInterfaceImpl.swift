@@ -5,7 +5,7 @@
 //  Created by Andrey Yakushin on 28.07.2025.
 //
 
-import TrustTunnel
+import TrustTunnelClient
 import Foundation
 
 class NativeVpnInterfaceImpl : NativeVpnInterface {

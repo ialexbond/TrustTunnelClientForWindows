@@ -5,7 +5,7 @@
     <key>CFBundleExecutable</key>
     <string>VpnClientFramework</string>
     <key>CFBundleIdentifier</key>
-    <string>com.adguard.trusttunnel.framework</string>
+    <string>com.adguard.TrustTunnel.VpnClientFramework</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>

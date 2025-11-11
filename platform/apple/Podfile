@@ -1,10 +1,10 @@
 use_frameworks! :linkage => :static
 abstract_target 'CommonPods' do
-  target 'TrustTunnel-iOS' do
+  target 'TrustTunnelClient-iOS' do
     platform :ios, '14.0'
     pod 'TOMLDecoder'
   end
-  target 'TrustTunnel-MacOS' do
+  target 'TrustTunnelClient-MacOS' do
     platform :osx, '10.15'
     pod 'TOMLDecoder'
   end
@@ -21,4 +21,4 @@ post_install do |installer|
   end
 end
 
-workspace 'TrustTunnel.xcworkspace'
+workspace 'TrustTunnelClient.xcworkspace'

@@ -1,6 +1,6 @@
 #
 //  build_framework.sh
-//  trusttunnel
+//  trusttunnel-client
 //
 //  Created by Andrey Yakushin on 08.08.2025.
 //
@@ -17,7 +17,7 @@ rm -rf build
 pod install
 
 # Build VpnClientFramework
-xcodebuild -project TrustTunnel.xcodeproj \
+xcodebuild -project TrustTunnelClient.xcodeproj \
   -scheme VpnClientFramework \
   -configuration $CONFIGURATION
 
@@ -26,16 +26,16 @@ mkdir -p Framework
 mv build/framework/VpnClientFramework.xcframework Framework/
 
 # Build VpnManager framework
-xcodebuild -workspace TrustTunnel.xcworkspace \
-  -scheme TrustTunnel-iOS \
+xcodebuild -workspace TrustTunnelClient.xcworkspace \
+  -scheme TrustTunnelClient-iOS \
   -configuration $CONFIGURATION \
   -sdk iphoneos \
   -archivePath ./build/ios.xcarchive \
   archive
 
 # Build VpnManager framework
-xcodebuild -workspace TrustTunnel.xcworkspace \
-  -scheme TrustTunnel-iOS \
+xcodebuild -workspace TrustTunnelClient.xcworkspace \
+  -scheme TrustTunnelClient-iOS \
   -configuration $CONFIGURATION \
   -sdk iphonesimulator \
   -archivePath ./build/iphonesimulator.xcarchive \
@@ -44,8 +44,8 @@ xcodebuild -workspace TrustTunnel.xcworkspace \
   archive
 
 # Build VpnManager framework
-xcodebuild -workspace TrustTunnel.xcworkspace \
-  -scheme TrustTunnel-MacOS \
+xcodebuild -workspace TrustTunnelClient.xcworkspace \
+  -scheme TrustTunnelClient-MacOS \
   -configuration $CONFIGURATION \
   -archivePath ./build/macos.xcarchive \
   ARCHS="x86_64 arm64" \
@@ -54,7 +54,7 @@ xcodebuild -workspace TrustTunnel.xcworkspace \
 
 
 xcodebuild -create-xcframework \
-  -framework ./build/ios.xcarchive/Products/Library/Frameworks/TrustTunnel.framework \
-  -framework ./build/iphonesimulator.xcarchive/Products/Library/Frameworks/TrustTunnel.framework \
-  -framework ./build/macos.xcarchive/Products/Library/Frameworks/TrustTunnel.framework \
-  -output Framework/TrustTunnel.xcframework
+  -framework ./build/ios.xcarchive/Products/Library/Frameworks/TrustTunnelClient.framework \
+  -framework ./build/iphonesimulator.xcarchive/Products/Library/Frameworks/TrustTunnelClient.framework \
+  -framework ./build/macos.xcarchive/Products/Library/Frameworks/TrustTunnelClient.framework \
+  -output Framework/TrustTunnelClient.xcframework

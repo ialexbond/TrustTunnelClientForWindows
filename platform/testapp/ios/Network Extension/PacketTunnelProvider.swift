@@ -5,6 +5,6 @@
 //  Created by Andrey Yakushin on 20.08.2025.
 //
 
-import TrustTunnel
+import TrustTunnelClient
 
 class PacketTunnelProvider: AGPacketTunnelProvider {}

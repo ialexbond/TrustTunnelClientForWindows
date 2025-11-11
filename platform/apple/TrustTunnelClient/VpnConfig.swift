@@ -1,6 +1,6 @@
 //
 //  VpnConfig.swift
-//  trusttunnel
+//  trusttunnel-client
 //
 //  Created by Andrey Yakushin on 13.08.2025.
 //
