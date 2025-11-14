@@ -2,7 +2,7 @@
 Pod::Spec.new do |s|
   s.name         = "TrustTunnelClient"
   s.module_name  = "TrustTunnelClient"
-  s.version      = "0.99.28"
+  s.version      = "0.99.29"
   s.summary      = "TrustTunnelClient Apple adapter"
   s.description  = <<-DESC
                   TrustTunnelClient adapter for macOS and iOS
