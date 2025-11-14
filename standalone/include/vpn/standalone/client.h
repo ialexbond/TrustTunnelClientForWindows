@@ -72,7 +72,7 @@ public:
      *                          If set to `UseProcessPackets`, use `processClientPackets` and `VPN_EVENT_CLIENT_OUTPUT`
      *                              to process packets.
      */
-    Error<ConnectResultError> connect(std::chrono::milliseconds timeout, ListenerSettings listener_settings);
+    Error<ConnectResultError> connect(ListenerSettings listener_settings);
     Error<ConnectResultError> set_system_dns();
 
     int disconnect();
@@ -100,8 +100,6 @@ private:
     static void static_vpn_handler(void *arg, VpnEvent what, void *data);
     void vpn_handler(void *, VpnEvent what, void *data);
 
-    std::mutex m_connect_result_mtx;
-    std::condition_variable m_connect_waiter;
     VpnSessionState m_connect_result = VPN_SS_DISCONNECTED;
     const ag::Logger m_logger{"STANDALONE_CLIENT"};
     std::atomic<Vpn *> m_vpn = nullptr;
@@ -111,7 +109,6 @@ private:
     std::unique_ptr<ag::VpnOsTunnel> m_tunnel = nullptr;
     std::optional<FileHandler> m_logfile_handler;
     std::optional<Logger::LogToFile> m_logtofile;
-    std::chrono::milliseconds m_connect_timeout {};
     VpnCallbacks m_callbacks;
 #ifdef _WIN32
     HMODULE m_wintun;

@@ -250,7 +250,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
     _tunnelFlow = tunnelFlow;
     __weak typeof(self) weakSelf = self;
 
-    auto error = _native_client->connect(std::chrono::seconds(30), ag::VpnStandaloneClient::UseProcessPackets{});
+    auto error = _native_client->connect(ag::VpnStandaloneClient::UseProcessPackets{});
     if (error) {
         errlog(g_logger, "Failed to connect: {}", error->pretty_str());
         return  false;

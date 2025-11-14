@@ -39,6 +39,11 @@ static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(con
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback();
 static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback();
 
+static void stop_standalone_client() {
+    keep_running = false;
+    g_waiter.notify_all();
+}
+
 static void sighandler(int sig) {
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
@@ -55,8 +60,7 @@ static void sighandler(int sig) {
             return;
         }
 #endif
-        keep_running = false;
-        g_waiter.notify_all();
+        stop_standalone_client();
     } else {
         exit(1);
     }
@@ -136,7 +140,7 @@ int main(int argc, char **argv) {
         errlog(g_logger, "{}", res->str());
         return 1;
     }
-    res = g_client->connect(std::chrono::seconds(30), VpnStandaloneClient::AutoSetup{});
+    res = g_client->connect(VpnStandaloneClient::AutoSetup{});
     if (res) {
         errlog(g_logger, "{}", res->str());
         return 1;
@@ -222,6 +226,7 @@ static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback() 
         switch (event->state) {
         case VPN_SS_DISCONNECTED:
             errlog(g_logger, "Error: {} {}", event->error.code, safe_to_string_view(event->error.text));
+            stop_standalone_client();
             break;
         case VPN_SS_WAITING_RECOVERY:
             infolog(g_logger, "Waiting recovery: to next={}ms error={} {}",

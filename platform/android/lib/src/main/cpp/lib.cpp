@@ -162,8 +162,7 @@ Java_com_adguard_trusttunnel_VpnClient_startNative(JNIEnv *env, jobject thiz, jl
     }
     auto ctx = (VpnCtx *) native_ptr;
 
-    auto error = ctx->get_standalone().connect(std::chrono::seconds(10),
-                                                ag::VpnStandaloneClient::UseTunnelFd{ag::AutoFd::adopt_fd(tun_fd)});
+    auto error = ctx->get_standalone().connect(ag::VpnStandaloneClient::UseTunnelFd{ag::AutoFd::adopt_fd(tun_fd)});
     if (error) {
         errlog(g_logger, "Failed to connect: {}", error->pretty_str());
         return (jboolean) false;

@@ -21,8 +21,6 @@ static void vpn_windows_verify_certificate(ag::VpnVerifyCertificateEvent *event)
     event->result = !!ag::tls_verify_cert(event->cert, event->chain, nullptr);
 }
 
-static constexpr auto CONNECT_TIMEOUT = ag::Secs{5};
-
 static INIT_ONCE g_init_once = INIT_ONCE_STATIC_INIT;
 static HMODULE g_wintun_handle;
 
@@ -119,7 +117,7 @@ static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_cha
     auto vpn = std::make_unique<vpn_easy_t>();
 
     vpn->client = std::make_unique<ag::VpnStandaloneClient>(std::move(*standalone_config), std::move(callbacks));
-    if (auto connect_error = vpn->client->connect(CONNECT_TIMEOUT, ag::VpnStandaloneClient::AutoSetup{})) {
+    if (auto connect_error = vpn->client->connect(ag::VpnStandaloneClient::AutoSetup{})) {
         errlog(g_logger, "Failed to connect: {}", connect_error->pretty_str());
         return nullptr;
     }

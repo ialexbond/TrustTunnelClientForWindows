@@ -57,9 +57,7 @@ VpnStandaloneClient::~VpnStandaloneClient() {
     }
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect(
-        std::chrono::milliseconds timeout, ListenerSettings listener_settings) {
-    m_connect_timeout = timeout;
+Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect(ListenerSettings listener_settings) {
     return connect_impl(std::move(listener_settings));
 }
 
@@ -302,16 +300,6 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
 
     {
         VpnError err = vpn_connect(m_vpn, &parameters);
-        bool connected;
-        {
-            std::unique_lock l(m_connect_result_mtx);
-            connected = m_connect_waiter.wait_for(l, m_connect_timeout, [this] {
-                return m_connect_result == VPN_SS_CONNECTED;
-            });
-        }
-        if (!connected) {
-            return make_error(ConnectResultError{}, "Connect timed out");
-        }
         if (err.code != 0) {
             return make_error(ConnectResultError{},
                     AG_FMT("Failed to initiate endpoint connection: {} ({})", safe_to_string_view(err.text),
@@ -487,11 +475,6 @@ void VpnStandaloneClient::vpn_handler(void *, VpnEvent what, void *data) {
     }
     case VPN_EVENT_STATE_CHANGED: {
         auto *event = (VpnStateChangedEvent *) data;
-        if (event->state == VPN_SS_CONNECTED || event->state == VPN_SS_DISCONNECTED) {
-            std::unique_lock l(m_connect_result_mtx);
-            m_connect_result = event->state;
-            m_connect_waiter.notify_one();
-        }
         m_callbacks.state_changed_handler(event);
         break;
     }
