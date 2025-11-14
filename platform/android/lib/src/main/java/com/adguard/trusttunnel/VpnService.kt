@@ -83,7 +83,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         }
     }
 
-    private var state = State.Ready
+    private var state = State.Stopped
     private val singleThread = ThreadManager.create("vpn-service", 1)
     private var certificateVerificator: CertificateVerificator? = null
 
@@ -111,7 +111,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
                 LOG.info("Start executing action=$action flags=$flags startId=$startId")
                 when (action) {
                     ACTION_START    -> processStarting(config)
-                    ACTION_STOP     -> close()
+                    ACTION_STOP     -> close(startId)
                     else            -> LOG.info("Unknown command $action")
                 }
 
@@ -125,10 +125,6 @@ class VpnService : android.net.VpnService(), VpnClientListener {
     }
 
     private fun processStarting(configStr: String?): Unit = synchronized(SYNC) {
-        if (state == State.Stopped) {
-            LOG.info("VPN service has already been stopped, do nothing")
-            return
-        }
         if (state == State.Started) {
             LOG.info("VPN service has already been started, do nothing")
             return
@@ -216,11 +212,11 @@ class VpnService : android.net.VpnService(), VpnClientListener {
 
     /**
      * Closes the VPN TUN interface and stops itself
-     *
+     * @param startId current start id of the service to forward to `stopSelf`
      * @return true if the service has been closed successfully
      *         false if something is wrong with closing or the service has already been closed
      */
-    private fun close(): Boolean = synchronized(SYNC) {
+    private fun close(startId: Int? = null): Boolean = synchronized(SYNC) {
         if (state != State.Started) return false.also { LOG.info("VPN service is not running, do nothing") }
 
         LOG.info("Closing VPN service")
@@ -229,8 +225,11 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         vpnClient?.stop()
         vpnClient?.close()
         vpnClient = null
-        singleThread.shutdown()
-        stopSelf()
+        if (startId != null) {
+            stopSelf(startId)
+        } else {
+            stopSelf()
+        }
         state = State.Stopped
 
         LOG.info("VPN service closed!")
@@ -239,7 +238,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
 
     /** An enum to represent the VPN service states */
     enum class State {
-        Ready, Started, Stopped
+        Started, Stopped
     }
 
     /**

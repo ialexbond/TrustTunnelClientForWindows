@@ -99,6 +99,13 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void _reconnect() {
+    setState(() {
+      _nativeVpnInterface.stop();
+      _nativeVpnInterface.start(_config.text);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -157,6 +164,12 @@ class _MyHomePageState extends State<MyHomePage> {
               child: ElevatedButton(
                 onPressed: _processButton,
                 child: Text(_buttonSwitch ? 'Disconnect' : 'Connect'),
+              ),
+            ),
+            Center(
+              child: ElevatedButton(
+                onPressed: _reconnect,
+                child: Text('Reconnect'),
               ),
             ),
             const SizedBox(height: 10.0),
