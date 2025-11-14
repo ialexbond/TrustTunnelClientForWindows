@@ -84,7 +84,7 @@ fi
 
 # Parse location data
 ENDPOINT_HOSTNAME=$(echo "$location" | jq -r '.endpoints[0].server_name // empty')
-ENDPOINT_IP=$(echo "$location" | jq -r '.relays[0].relay_ipv4 // empty' | cut -d: -f1)
+ENDPOINT_IP=$(echo "$location" | jq -r '.relays[0].relay_ipv4 // .endpoints[0].ipv4 // empty' | cut -d: -f1)
 ENDPOINT_PORT="443"
 
 # Check that we got location data successfully
