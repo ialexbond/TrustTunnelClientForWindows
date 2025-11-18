@@ -275,10 +275,10 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
 }
 
 - (void)notify_sleep {
-    
+    _native_client->notify_sleep();
 }
 - (void)notify_wake {
-    
+    _native_client->notify_wake();
 }
 
 
