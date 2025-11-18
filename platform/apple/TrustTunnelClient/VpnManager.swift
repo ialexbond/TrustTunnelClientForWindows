@@ -26,7 +26,9 @@ func convertVpnState(_ status: NEVPNStatus) -> Int {
 }
 
 public final class VpnManager {
+    private var apiQueue: DispatchQueue
     private var queue: DispatchQueue
+    private var stopTimer: DispatchSourceTimer?
     private var vpnManager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
     private let stateChangeCallback: (Int) -> Void
@@ -34,11 +36,12 @@ public final class VpnManager {
     private var bundleIdentifier: String
 
     public init(bundleIdentifier: String, stateChangeCallback: @escaping (Int) -> Void) {
-        self.queue = DispatchQueue(label: "com.adguard.TrustTunnel.TrustTunnelClient.VpnManager");
+        self.apiQueue = DispatchQueue(label: "com.adguard.TrustTunnel.TrustTunnelClient.VpnManager.api", qos: .userInitiated)
+        self.queue = DispatchQueue(label: "com.adguard.TrustTunnel.TrustTunnelClient.VpnManager", qos: .userInitiated);
         self.bundleIdentifier = bundleIdentifier
         self.stateChangeCallback = stateChangeCallback
-        Task {
-            startObservingStatus(manager: await self.getManager())
+        self.apiQueue.async {
+            self.startObservingStatus(manager: self.getManager())
         }
     }
     
@@ -46,25 +49,45 @@ public final class VpnManager {
         stopObservingStatus()
     }
     
-    func getManager() async -> NETunnelProviderManager {
+    func getManager() -> NETunnelProviderManager {
         if let manager = (queue.sync { self.vpnManager }) {
             return manager
         }
-
-        let managers = try! await NETunnelProviderManager.loadAllFromPreferences()
-
-        // Try to find an existing configuration
-        let existingManager = managers.first {
-            ($0.protocolConfiguration as? NETunnelProviderProtocol)?
-                .providerBundleIdentifier == bundleIdentifier
+        
+        let group = DispatchGroup()
+        group.enter()
+        let timerSource = DispatchSource.makeTimerSource(flags: [], queue: self.queue)
+        timerSource.setCancelHandler {
+            self.stopTimer = nil
+            group.leave()
         }
+        timerSource.setEventHandler {
+            timerSource.cancel()
+        }
+        let timeout = DispatchTime.now() + .seconds(5)
+        timerSource.schedule(deadline: timeout)
+        timerSource.resume()
+        
 
-        return queue.sync {
-            if let manager = self.vpnManager {
-                return manager
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+            guard let managers else {return}
+            // Try to find an existing configuration
+            let existingManager = managers.first {
+                ($0.protocolConfiguration as? NETunnelProviderProtocol)?
+                    .providerBundleIdentifier == self.bundleIdentifier
             }
-            self.vpnManager = existingManager ?? NETunnelProviderManager()
-            return self.vpnManager!
+
+            self.queue.sync {
+                if self.vpnManager != nil {
+                    return
+                }
+                self.vpnManager = existingManager
+            }
+            timerSource.cancel()
+        }
+        group.wait()
+        return self.queue.sync {
+            return self.vpnManager ?? NETunnelProviderManager()
         }
     }
 
@@ -77,6 +100,11 @@ public final class VpnManager {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            self.queue.sync {
+                if self.stopTimer != nil && (manager.connection.status == .disconnected || manager.connection.status == .invalid) {
+                    self.cancelStopTimer()
+                }
+            }
             self.logCurrentStatus(prefix: "status change", manager: manager)
         }
         // Log initial status immediately
@@ -109,52 +137,87 @@ public final class VpnManager {
         @unknown default: return "unknown(\(status.rawValue))"
         }
     }
+    
+    private func cancelStopTimer() {
+        self.stopTimer?.cancel()
+        self.stopTimer = nil
+    }
 
     public func start(config: (String)) {
-        Task {
-            let manager = await getManager()
-            do {
-                try await manager.loadFromPreferences()
-            } catch {
-                NSLog("Failed to load preferences: \(error)")
-                return
-            }
+        apiQueue.async {
+            let manager = self.getManager()
+            let group = DispatchGroup()
+            group.enter()
 
-            var configuration = (manager.protocolConfiguration as? NETunnelProviderProtocol) ??
-                        NETunnelProviderProtocol()
-            configuration.providerBundleIdentifier = bundleIdentifier
-            configuration.providerConfiguration = ["config": config as NSObject]
-            configuration.serverAddress = "Trust Tunnel"
-            manager.protocolConfiguration = configuration
-            manager.localizedDescription = "TrustTunnel VPN"
-            manager.isEnabled = true
-            do {
-                try await manager.saveToPreferences()
-            } catch {
-                NSLog("Failed to save preferences: \(error)")
-                return
+            manager.loadFromPreferences { error in
+                if let error = error {
+                    NSLog("Failed to load preferences: \(error)")
+                    group.leave()
+                    return
+                }
+                let configuration = (manager.protocolConfiguration as? NETunnelProviderProtocol) ??
+                NETunnelProviderProtocol()
+                configuration.providerBundleIdentifier = self.bundleIdentifier
+                configuration.providerConfiguration = ["config": config as NSObject]
+                configuration.serverAddress = "Trust Tunnel"
+                manager.protocolConfiguration = configuration
+                manager.localizedDescription = "TrustTunnel VPN"
+                manager.isEnabled = true
+                manager.saveToPreferences { error in
+                    if let error = error {
+                        NSLog("Failed to save preferences: \(error)")
+                        group.leave()
+                        return
+                    }
+                    manager.loadFromPreferences { error in
+                        if let error = error {
+                            NSLog("Failed to reload preferences: \(error)")
+                            group.leave()
+                            return
+                        }
+                        group.leave()
+                    }
+                }
             }
+            group.wait()
 
-            // Reload fresh preferences
             do {
-                try await manager.loadFromPreferences()
+                try manager.connection.startVPNTunnel()
+                NSLog("VPN started")
             } catch {
-                NSLog("Failed to load preferences: \(error)")
-                return
+                NSLog("Failed to start VPN tunnel: \(error)")
             }
-
-            try manager.connection.startVPNTunnel()
-            NSLog("VPN started")
         }
     }
 
     public func stop() {
-        Task {
-            let manager = await getManager()
-            // Log current status before stopping
-            logCurrentStatus(prefix: "pre-stop", manager: manager)
-            
+        apiQueue.async {
+            let group = DispatchGroup()
+            let timerSource = DispatchSource.makeTimerSource(flags: [], queue: self.queue)
+            timerSource.setCancelHandler {
+                self.stopTimer = nil
+                group.leave()
+            }
+            timerSource.setEventHandler {
+                timerSource.cancel()
+            }
+            group.enter()
+            let timeout = DispatchTime.now() + .seconds(15)
+            timerSource.schedule(deadline: timeout)
+            timerSource.resume()
+            let manager = self.getManager()
+            self.queue.sync {
+                self.stopTimer = timerSource
+                if manager.connection.status == .disconnected || manager.connection.status == .invalid {
+                    self.cancelStopTimer()
+                    return
+                }
+                // Log current status before stopping
+                self.logCurrentStatus(prefix: "pre-stop", manager: manager)
+            }
             manager.connection.stopVPNTunnel()
+            group.wait()
+            NSLog("Finished!")
         }
     }
 }
