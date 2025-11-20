@@ -40,10 +40,10 @@ else
 endif
 	cmake --build $(BUILD_DIR) --target vpnlibs_core
 
-.PHONY: build_standalone_client
+.PHONY: build_trusttunnel_client
 ## Build the VPN client binary
-build_standalone_client: build_libs
-	cmake --build $(BUILD_DIR) --target standalone_client
+build_trusttunnel_client: build_libs
+	cmake --build $(BUILD_DIR) --target trusttunnel_client
 
 .PHONY: build_wizard
 ## Build the setup wizard binary for the VPN client
@@ -51,14 +51,14 @@ build_wizard:
 	cmake --build $(BUILD_DIR) --target setup_wizard
 .PHONY: all
 ## Build all binaries
-all: build_standalone_client build_wizard
+all: build_trusttunnel_client build_wizard
 
 .PHONY: build_and_export_bin
 ## Build and copy all binaries in the specified directory
-build_and_export_bin: build_standalone_client build_wizard
+build_and_export_bin: build_trusttunnel_client build_wizard
 	mkdir -p $(EXPORT_DIR)
-	cp $(BUILD_DIR)/standalone/standalone_client \
-		$(BUILD_DIR)/standalone/setup_wizard \
+	cp $(BUILD_DIR)/trusttunnel/trusttunnel_client \
+		$(BUILD_DIR)/trusttunnel/setup_wizard \
 		$(EXPORT_DIR)
 	@echo "Binaries are stored in $(EXPORT_DIR)"
 

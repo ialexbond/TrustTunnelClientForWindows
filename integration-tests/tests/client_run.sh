@@ -3,7 +3,7 @@
 set -e -x
 
 # Client run script for VPN client
-# This script runs the standalone VPN client
+# This script runs the trusttunnel VPN client
 # Parameters: LOG_FILE_NAME
 
 LOG_FILE_NAME="${1:-vpn_client.log}"
@@ -16,23 +16,23 @@ cd "$OUTPUT_DIR"
 echo "Starting VPN client..."
 echo "Log file: ${OUTPUT_DIR}/$LOG_FILE_NAME"
 
-# Check if standalone_client exists
-if [ ! -f "./standalone_client" ]; then
-    echo "Error: standalone_client binary not found in current directory"
+# Check if trusttunnel_client exists
+if [ ! -f "./trusttunnel_client" ]; then
+    echo "Error: trusttunnel_client binary not found in current directory"
     exit 1
 fi
 
 # Check if configuration exists
-if [ ! -f "./standalone_client.toml" ]; then
-    echo "Error: standalone_client.toml configuration not found in current directory"
+if [ ! -f "./trusttunnel_client.toml" ]; then
+    echo "Error: trusttunnel_client.toml configuration not found in current directory"
     exit 1
 fi
 
-echo "Running standalone client..."
+echo "Running trusttunnel client..."
 mkdir -p /sys/fs/cgroup/client
 (
 echo $BASHPID > /sys/fs/cgroup/client/cgroup.procs
-exec ./standalone_client >>"${OUTPUT_DIR}/$LOG_FILE_NAME" 2>&1
+exec ./trusttunnel_client >>"${OUTPUT_DIR}/$LOG_FILE_NAME" 2>&1
 ) &
 CLIENT_PID=$!
 

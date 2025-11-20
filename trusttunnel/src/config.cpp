@@ -10,7 +10,7 @@
 #include <openssl/pem.h>
 
 #include "net/tls.h"
-#include "vpn/standalone/config.h"
+#include "vpn/trusttunnel/config.h"
 #include "utils.h"
 
 #ifndef _WIN32
@@ -21,7 +21,7 @@
 using namespace ag; // NOLINT(google-build-using-namespace)
 
 static constexpr uint32_t DEFAULT_MTU = 1500;
-static const Logger g_logger("STANDALONE_CLIENT"); // NOLINT(readability-identifier-naming)
+static const Logger g_logger("TRUSTTUNNEL_CLIENT"); // NOLINT(readability-identifier-naming)
 
 static const std::unordered_map<std::string_view, VpnUpstreamProtocol> UPSTREAM_PROTO_MAP = {
         {"auto", VPN_UP_AUTO},
@@ -61,9 +61,9 @@ static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view
     return store;
 }
 
-static std::optional<VpnStandaloneConfig::Location> build_endpoint(const toml::table &config) {
-    VpnStandaloneConfig::Location location;
-    std::vector<VpnStandaloneConfig::Endpoint> endpoint;
+static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::table &config) {
+    TrustTunnelConfig::Location location;
+    std::vector<TrustTunnelConfig::Endpoint> endpoint;
 
     auto hostname = config["hostname"].value<std::string>();
     if (!hostname) {
@@ -74,7 +74,7 @@ static std::optional<VpnStandaloneConfig::Location> build_endpoint(const toml::t
         for (const auto &a : *x) {
             if (std::optional addr = a.value<std::string_view>(); addr.has_value() && !addr->empty()) {
                 location.endpoints.emplace_back(
-                        VpnStandaloneConfig::Endpoint{.hostname = *hostname, .address = std::string(addr.value())});
+                        TrustTunnelConfig::Endpoint{.hostname = *hostname, .address = std::string(addr.value())});
             }
         }
     }
@@ -130,7 +130,7 @@ static std::optional<VpnStandaloneConfig::Location> build_endpoint(const toml::t
     return location;
 }
 
-static std::optional<VpnStandaloneConfig::SocksListener> parse_socks_listener_config(const toml::table &config) {
+static std::optional<TrustTunnelConfig::SocksListener> parse_socks_listener_config(const toml::table &config) {
     const toml::table *socks_config = config["socks"].as_table();
     if (socks_config == nullptr) {
         return std::nullopt;
@@ -140,14 +140,14 @@ static std::optional<VpnStandaloneConfig::SocksListener> parse_socks_listener_co
         return std::nullopt;
     }
 
-    return VpnStandaloneConfig::SocksListener{
+    return TrustTunnelConfig::SocksListener{
             .username = (*socks_config)["username"].value_or<std::string>({}),
             .password = (*socks_config)["password"].value_or<std::string>({}),
             .address = std::move(*address),
     };
 }
 
-static std::optional<VpnStandaloneConfig::TunListener> parse_tun_listener_config(const toml::table &config) {
+static std::optional<TrustTunnelConfig::TunListener> parse_tun_listener_config(const toml::table &config) {
     const toml::table *tun_config = config["tun"].as_table();
     if (tun_config == nullptr) {
         return std::nullopt;
@@ -166,7 +166,7 @@ static std::optional<VpnStandaloneConfig::TunListener> parse_tun_listener_config
     return std::nullopt;
 #endif
 
-    VpnStandaloneConfig::TunListener tun = {
+    TrustTunnelConfig::TunListener tun = {
         .mtu_size = (*tun_config)["mtu_size"].value<uint32_t>().value_or(DEFAULT_MTU),
         .bound_if = std::move(bound_if),
         .netns = (*tun_config)["netns"].value<std::string>(),
@@ -193,7 +193,7 @@ static std::optional<VpnStandaloneConfig::TunListener> parse_tun_listener_config
     return tun;
 }
 
-static std::optional<VpnStandaloneConfig::Listener> build_listener_config(const toml::table &config) {
+static std::optional<TrustTunnelConfig::Listener> build_listener_config(const toml::table &config) {
     std::optional socks = parse_socks_listener_config(config);
     std::optional tun = parse_tun_listener_config(config);
 
@@ -214,11 +214,11 @@ static std::optional<VpnStandaloneConfig::Listener> build_listener_config(const 
     return tun;
 }
 
-std::optional<VpnStandaloneConfig> VpnStandaloneConfig::build_config(const toml::table &config) {
-    VpnStandaloneConfig result;
+std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::table &config) {
+    TrustTunnelConfig result;
 
     if (std::optional lvl = config["loglevel"].value<std::string_view>(); lvl.has_value()) {
-        if (auto loglevel = StandaloneUtils::parse_loglevel(lvl.value())) {
+        if (auto loglevel = TrustTunnelCliUtils::parse_loglevel(lvl.value())) {
             result.loglevel = loglevel.value();
         } else {
             errlog(g_logger, "Unexpected log level: {}", lvl.value());

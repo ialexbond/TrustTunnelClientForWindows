@@ -4,9 +4,9 @@
 
 namespace ag {
 
-static Logger g_logger("StandaloneUtils");
+static Logger g_logger("TrustTunnelCliUtils");
 
-std::optional<ag::LogLevel> StandaloneUtils::parse_loglevel(std::string_view level) {
+std::optional<ag::LogLevel> TrustTunnelCliUtils::parse_loglevel(std::string_view level) {
     static const std::unordered_map<std::string_view, ag::LogLevel> LOG_LEVEL_MAP = {
             {"error", ag::LOG_LEVEL_ERROR},
             {"warn", ag::LOG_LEVEL_WARN},
@@ -21,7 +21,7 @@ std::optional<ag::LogLevel> StandaloneUtils::parse_loglevel(std::string_view lev
     return std::nullopt;
 }
 
-bool StandaloneUtils::apply_cmd_args(VpnStandaloneConfig &config, const cxxopts::ParseResult &args) {
+bool TrustTunnelCliUtils::apply_cmd_args(TrustTunnelConfig &config, const cxxopts::ParseResult &args) {
     if (args.count("s") > 0) {
         bool x = args["s"].as<bool>();
         if (x != config.location.skip_verification) {
@@ -43,11 +43,11 @@ bool StandaloneUtils::apply_cmd_args(VpnStandaloneConfig &config, const cxxopts:
     return true;
 }
 
-void StandaloneUtils::detect_bound_if(VpnStandaloneConfig &config) {
-    if (!std::holds_alternative<VpnStandaloneConfig::TunListener>(config.listener)) {
+void TrustTunnelCliUtils::detect_bound_if(TrustTunnelConfig &config) {
+    if (!std::holds_alternative<TrustTunnelConfig::TunListener>(config.listener)) {
         return;
     }
-    auto &tun = std::get<VpnStandaloneConfig::TunListener>(config.listener);
+    auto &tun = std::get<TrustTunnelConfig::TunListener>(config.listener);
     if (!tun.bound_if.empty()) {
         return;
     }

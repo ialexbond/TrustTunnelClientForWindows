@@ -88,7 +88,7 @@ class VpnLibsConan(ConanFile):
         cmake.build(target="vpnlibs_core")
         cmake.build(target="vpnlibs_net")
         cmake.build(target="vpnlibs_tcpip")
-        cmake.build(target="vpnlibs_standalone")
+        cmake.build(target="vpnlibs_trusttunnel")
 
     def package(self):
         MODULES = [
@@ -96,7 +96,7 @@ class VpnLibsConan(ConanFile):
             "core",
             "net",
             "tcpip",
-            "standalone",
+            "trusttunnel",
         ]
 
         for m in MODULES:
@@ -118,7 +118,7 @@ class VpnLibsConan(ConanFile):
             "vpnlibs_net",
             "vpnlibs_tcpip",
             "vpnlibs_common",
-            "vpnlibs_standalone",
+            "vpnlibs_trusttunnel",
         ]
         if self.settings.os == "Windows":
             self.cpp_info.system_libs = ["ws2_32", "crypt32", "userenv", "version", "Fwpuclnt"]

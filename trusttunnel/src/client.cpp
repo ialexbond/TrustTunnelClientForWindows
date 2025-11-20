@@ -29,13 +29,13 @@
 #include "net/os_tunnel.h"
 #include "net/tls.h"
 #include "net/utils.h"
-#include "vpn/standalone/client.h"
-#include "vpn/standalone/config.h"
+#include "vpn/trusttunnel/client.h"
+#include "vpn/trusttunnel/config.h"
 #include "vpn/vpn.h"
 
 namespace ag {
 
-VpnStandaloneClient::VpnStandaloneClient(VpnStandaloneConfig &&config, VpnCallbacks &&callbacks)
+TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&callbacks)
         : m_config(std::move(config))
         , m_extra_loop(vpn_event_loop_create())
         , m_callbacks(std::move(callbacks)) {
@@ -50,18 +50,18 @@ VpnStandaloneClient::VpnStandaloneClient(VpnStandaloneConfig &&config, VpnCallba
     });
 };
 
-VpnStandaloneClient::~VpnStandaloneClient() {
+TrustTunnelClient::~TrustTunnelClient() {
     vpn_event_loop_stop(m_extra_loop.get());
     if (m_loop_thread.joinable()) {
         m_loop_thread.join();
     }
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect(ListenerSettings listener_settings) {
+Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect(ListenerSettings listener_settings) {
     return connect_impl(std::move(listener_settings));
 }
 
-int VpnStandaloneClient::disconnect() {
+int TrustTunnelClient::disconnect() {
     if (Vpn *vpn = m_vpn.exchange(nullptr)) {
         vpn_stop(vpn);
         vpn_close(vpn);
@@ -70,32 +70,32 @@ int VpnStandaloneClient::disconnect() {
     return 0;
 }
 
-void VpnStandaloneClient::notify_network_change(VpnNetworkState state) {
+void TrustTunnelClient::notify_network_change(VpnNetworkState state) {
     if (m_vpn) {
         vpn_notify_network_change(m_vpn, state);
     }
 }
 
-void VpnStandaloneClient::notify_sleep() {
+void TrustTunnelClient::notify_sleep() {
     if (m_vpn) {
         vpn_notify_sleep(m_vpn, [](void *){}, nullptr);
     }
 }
 
-void VpnStandaloneClient::notify_wake() {
+void TrustTunnelClient::notify_wake() {
     if (m_vpn) {
         vpn_notify_wake(m_vpn);
     }
 }
 
-bool VpnStandaloneClient::process_client_packets(VpnPackets packets) {
+bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
     return m_vpn
         ? vpn_process_client_packets(m_vpn, packets)
         : false;
 }
 
-void VpnStandaloneClient::vpn_protect_socket(SocketProtectEvent *event) {
-    const auto *tun = std::get_if<VpnStandaloneConfig::TunListener>(&m_config.listener);
+void TrustTunnelClient::vpn_protect_socket(SocketProtectEvent *event) {
+    const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&m_config.listener);
     if (tun == nullptr) {
         return;
     }
@@ -132,8 +132,8 @@ void VpnStandaloneClient::vpn_protect_socket(SocketProtectEvent *event) {
 #endif
 }
 
-int VpnStandaloneClient::set_outbound_interface() {
-    auto &config = std::get<VpnStandaloneConfig::TunListener>(m_config.listener);
+int TrustTunnelClient::set_outbound_interface() {
+    auto &config = std::get<TrustTunnelConfig::TunListener>(m_config.listener);
     uint32_t if_index = 0;
     if (!config.bound_if.empty()) {
         if_index = if_nametoindex(config.bound_if.c_str());
@@ -151,7 +151,7 @@ int VpnStandaloneClient::set_outbound_interface() {
     return 0;
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::set_system_dns() {
+Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::set_system_dns() {
 #ifdef _WIN32
     uint32_t if_index = vpn_win_detect_active_if();
     if (if_index == 0) {
@@ -176,7 +176,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::set_system_d
     return {};
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl(ListenerSettings listener_settings) {
+Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_impl(ListenerSettings listener_settings) {
     VpnSettings settings = {
             .handler = {static_vpn_handler, this},
             .mode = m_config.mode,
@@ -188,7 +188,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl
         settings.ssl_sessions_storage_path = m_config.ssl_session_storage_path->c_str();
     }
 
-    if (std::holds_alternative<VpnStandaloneConfig::TunListener>(m_config.listener)) {
+    if (std::holds_alternative<TrustTunnelConfig::TunListener>(m_config.listener)) {
         if (int r = set_outbound_interface(); r < 0) {
             return make_error(ConnectResultError{}, "Failed to set outbound interface");
         }
@@ -207,11 +207,11 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_impl
     return r;
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::vpn_runner(ListenerSettings listener_settings) {
+Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::vpn_runner(ListenerSettings listener_settings) {
     if (auto r = connect_to_server(); r) {
         return r;
     }
-    VpnListener *listener = std::holds_alternative<VpnStandaloneConfig::TunListener>(m_config.listener)
+    VpnListener *listener = std::holds_alternative<TrustTunnelConfig::TunListener>(m_config.listener)
             ? make_tun_listener(std::move(listener_settings))
             : make_socks_listener(std::move(listener_settings));
 
@@ -237,7 +237,7 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::vpn_runner(L
     return {};
 }
 
-Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_server() {
+Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_server() {
     std::vector<VpnEndpoint> endpoints;
     std::vector<VpnRelay> relays;
     std::vector<std::string> hostnames;
@@ -310,8 +310,8 @@ Error<VpnStandaloneClient::ConnectResultError> VpnStandaloneClient::connect_to_s
     return {};
 }
 
-VpnListener *VpnStandaloneClient::make_tun_listener(ListenerSettings listener_settings) {
-    auto &config = std::get<VpnStandaloneConfig::TunListener>(m_config.listener);
+VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_settings) {
+    auto &config = std::get<TrustTunnelConfig::TunListener>(m_config.listener);
 
     if (auto *use_fd = std::get_if<UseTunnelFd>(&listener_settings)) {
         VpnTunListenerConfig listener_config = {
@@ -412,12 +412,12 @@ VpnListener *VpnStandaloneClient::make_tun_listener(ListenerSettings listener_se
 #endif // ANDROID
 }
 
-VpnListener *VpnStandaloneClient::make_socks_listener(ListenerSettings listener_settings) {
+VpnListener *TrustTunnelClient::make_socks_listener(ListenerSettings listener_settings) {
     if (!std::holds_alternative<AutoSetup>(listener_settings)) {
         errlog(m_logger, "Socks listener can only be created with `AutoSetup` setting!");
         return nullptr;
     }
-    const auto &cfg = std::get<VpnStandaloneConfig::SocksListener>(m_config.listener);
+    const auto &cfg = std::get<TrustTunnelConfig::SocksListener>(m_config.listener);
     VpnSocksListenerConfig config = {
             .listen_address = sockaddr_from_str(cfg.address.c_str()),
             .username = cfg.username.c_str(),
@@ -426,14 +426,14 @@ VpnListener *VpnStandaloneClient::make_socks_listener(ListenerSettings listener_
     return vpn_create_socks_listener(m_vpn, &config);
 }
 
-void VpnStandaloneClient::static_vpn_handler(void *arg, VpnEvent what, void *data) {
-    auto *client = (VpnStandaloneClient *) (arg);
+void TrustTunnelClient::static_vpn_handler(void *arg, VpnEvent what, void *data) {
+    auto *client = (TrustTunnelClient *) (arg);
     if (client) {
         client->vpn_handler(nullptr, what, data);
     }
 }
 
-void VpnStandaloneClient::vpn_handler(void *, VpnEvent what, void *data) {
+void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
     switch (what) {
     case VPN_EVENT_PROTECT_SOCKET: {
         // protect socket to avoid route loop
@@ -487,7 +487,7 @@ void VpnStandaloneClient::vpn_handler(void *, VpnEvent what, void *data) {
         const VpnConnectRequestEvent *event = (VpnConnectRequestEvent *) data;
         auto *info = new VpnConnectionInfo{event->id};
         info->action = VPN_CA_DEFAULT;
-        info->appname = safe_to_string_view(event->app_name).empty() ? "standalone_client" : event->app_name;
+        info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
         task_context->info = info;
         task_context->vpn = m_vpn;
         vpn_event_loop_submit(m_extra_loop.get(),

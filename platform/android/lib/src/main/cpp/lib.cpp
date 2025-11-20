@@ -1,4 +1,4 @@
-#include "vpn/standalone/client.h"
+#include "vpn/trusttunnel/client.h"
 #include "net/network_manager.h"
 
 #include "jni_utils.h"
@@ -8,17 +8,17 @@ static ag::Logger g_logger("TrustTunnelJni");
 
 class VpnCtx {
 public:
-    VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback, jmethodID verify_callback, jmethodID state_changed_callback, ag::VpnStandaloneConfig &&config)
+    VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback, jmethodID verify_callback, jmethodID state_changed_callback, ag::TrustTunnelConfig &&config)
         : m_protect_socket_callback(protect_socket_callback)
         , m_verify_callback(verify_callback)
         , m_state_changed_callback(state_changed_callback)
-        , m_standalone_client(std::move(config), create_callbacks()) {
+        , m_native_client(std::move(config), create_callbacks()) {
             env->GetJavaVM(&m_vm);
             this->m_callback_object = {m_vm, callback_object};
         }
 
-    ag::VpnStandaloneClient &get_standalone() {
-        return m_standalone_client;
+    ag::TrustTunnelClient &get_native_client() {
+        return m_native_client;
     }
 private:
     GlobalRef<jobject> m_callback_object;
@@ -27,7 +27,7 @@ private:
     jmethodID m_verify_callback = nullptr;
     jmethodID m_state_changed_callback = nullptr;
 
-    ag::VpnStandaloneClient m_standalone_client;
+    ag::TrustTunnelClient m_native_client;
 
     void protectSocket(ag::SocketProtectEvent *event) {
         if (!this->m_protect_socket_callback || !m_callback_object) {
@@ -138,8 +138,8 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
         errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description());
         return 1;
     }
-    auto standalone_config = ag::VpnStandaloneConfig::build_config(parse_result);
-    if (!standalone_config) {
+    auto trusttunnel_config = ag::TrustTunnelConfig::build_config(parse_result);
+    if (!trusttunnel_config) {
         errlog(g_logger, "Failed to process configuration");
         return 0;
     }
@@ -147,7 +147,7 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
     auto ctx = std::make_unique<VpnCtx>(
             env, thiz,
             protect_socket_method_id, verify_certificate_method_id, state_changed_method_id,
-            std::move(*standalone_config)
+            std::move(*trusttunnel_config)
     );
 
     return (jlong) ctx.release();
@@ -162,7 +162,7 @@ Java_com_adguard_trusttunnel_VpnClient_startNative(JNIEnv *env, jobject thiz, jl
     }
     auto ctx = (VpnCtx *) native_ptr;
 
-    auto error = ctx->get_standalone().connect(ag::VpnStandaloneClient::UseTunnelFd{ag::AutoFd::adopt_fd(tun_fd)});
+    auto error = ctx->get_native_client().connect(ag::TrustTunnelClient::UseTunnelFd{ag::AutoFd::adopt_fd(tun_fd)});
     if (error) {
         errlog(g_logger, "Failed to connect: {}", error->pretty_str());
         return (jboolean) false;
@@ -179,7 +179,7 @@ Java_com_adguard_trusttunnel_VpnClient_stopNative(JNIEnv *env, jobject thiz, jlo
     }
     auto *ctx = (VpnCtx *) native_ptr;
 
-    ctx->get_standalone().disconnect();
+    ctx->get_native_client().disconnect();
 }
 
 extern "C"
@@ -201,7 +201,7 @@ Java_com_adguard_trusttunnel_VpnClient_notifyNetworkChangeNative(JNIEnv *env, jo
     }
     auto *ctx = (VpnCtx *) native_ptr;
 
-    ctx->get_standalone().notify_network_change(available ? ag::VpnNetworkState::VPN_NS_CONNECTED : ag::VpnNetworkState::VPN_NS_NOT_CONNECTED);
+    ctx->get_native_client().notify_network_change(available ? ag::VpnNetworkState::VPN_NS_CONNECTED : ag::VpnNetworkState::VPN_NS_NOT_CONNECTED);
 }
 extern "C"
 JNIEXPORT jboolean JNICALL

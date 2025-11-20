@@ -36,7 +36,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_compile_options(-fno-strict-aliasing -fno-exceptions -fobjc-abi-version=2 -fno-omit-frame-pointer)
 
-add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/standalone)
+add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/trusttunnel)
 
 add_library(${PROJECT_NAME} SHARED
     VpnClient.h
@@ -58,7 +58,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 target_link_options(${PROJECT_NAME} PRIVATE "-ObjC")
 
-target_link_libraries(${PROJECT_NAME} vpnlibs_standalone)
+target_link_libraries(${PROJECT_NAME} vpnlibs_trusttunnel)
 
 target_link_libraries(${PROJECT_NAME} "-framework Foundation" "-framework NetworkExtension")
 

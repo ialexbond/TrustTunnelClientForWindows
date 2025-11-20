@@ -20,7 +20,7 @@ set(SOURCE_FILES
         src/utils.cpp
         )
 
-add_library(vpnlibs_standalone EXCLUDE_FROM_ALL ${SOURCE_FILES})
+add_library(vpnlibs_trusttunnel EXCLUDE_FROM_ALL ${SOURCE_FILES})
 target_include_directories(vpnlibs_common PUBLIC include)
 
 find_package(cxxopts REQUIRED)
@@ -29,20 +29,20 @@ find_package(magic_enum REQUIRED)
 find_package(native_libs_common REQUIRED)
 find_package(tomlplusplus REQUIRED)
 
-target_link_libraries(vpnlibs_standalone vpnlibs_core cxxopts::cxxopts)
-target_link_libraries(vpnlibs_standalone magic_enum::magic_enum)
-target_link_libraries(vpnlibs_standalone native_libs_common::native_libs_common)
-target_link_libraries(vpnlibs_standalone tomlplusplus::tomlplusplus)
+target_link_libraries(vpnlibs_trusttunnel vpnlibs_core cxxopts::cxxopts)
+target_link_libraries(vpnlibs_trusttunnel magic_enum::magic_enum)
+target_link_libraries(vpnlibs_trusttunnel native_libs_common::native_libs_common)
+target_link_libraries(vpnlibs_trusttunnel tomlplusplus::tomlplusplus)
 if (NOT MSVC)
-    target_compile_options(vpnlibs_standalone PRIVATE "-fno-exceptions")
+    target_compile_options(vpnlibs_trusttunnel PRIVATE "-fno-exceptions")
 endif (NOT MSVC)
 
-target_compile_definitions(vpnlibs_standalone PUBLIC TOML_EXCEPTIONS=0)
-target_compile_definitions(vpnlibs_standalone PUBLIC _HAS_EXCEPTIONS=0)
-target_compile_definitions(vpnlibs_standalone PUBLIC CXXOPTS_NO_RTTI=1 CXXOPTS_NO_EXCEPTIONS=1)
+target_compile_definitions(vpnlibs_trusttunnel PUBLIC TOML_EXCEPTIONS=0)
+target_compile_definitions(vpnlibs_trusttunnel PUBLIC _HAS_EXCEPTIONS=0)
+target_compile_definitions(vpnlibs_trusttunnel PUBLIC CXXOPTS_NO_RTTI=1 CXXOPTS_NO_EXCEPTIONS=1)
 
 set(EXE_SOURCE_FILES
-        src/standalone_client.cpp
+        src/trusttunnel_client.cpp
 )
 
 if (APPLE)
@@ -51,14 +51,14 @@ if (APPLE)
     )
 endif ()
 
-add_executable(standalone_client EXCLUDE_FROM_ALL ${EXE_SOURCE_FILES})
-target_link_libraries(standalone_client vpnlibs_standalone)
+add_executable(trusttunnel_client EXCLUDE_FROM_ALL ${EXE_SOURCE_FILES})
+target_link_libraries(trusttunnel_client vpnlibs_trusttunnel)
 if (NOT MSVC)
-    target_compile_options(standalone_client PRIVATE "-fno-exceptions")
+    target_compile_options(trusttunnel_client PRIVATE "-fno-exceptions")
 endif (NOT MSVC)
 
 if (APPLE)
-    target_link_libraries(standalone_client "-framework IOKit")
+    target_link_libraries(trusttunnel_client "-framework IOKit")
 endif ()
 
 if (WIN32)
@@ -109,7 +109,7 @@ add_dependencies(run_setup_wizard setup_wizard)
 
 enable_testing()
 add_dependencies(tests
-        standalone_client
-        vpnlibs_standalone
+        trusttunnel_client
+        vpnlibs_trusttunnel
         setup_wizard
         )

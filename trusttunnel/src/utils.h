@@ -1,6 +1,6 @@
 #pragma once
 
-#include "vpn/standalone/config.h"
+#include "vpn/trusttunnel/config.h"
 
 #include <common/logger.h>
 #include <cxxopts.hpp>
@@ -10,12 +10,12 @@
 
 namespace ag {
 
-class StandaloneUtils {
+class TrustTunnelCliUtils {
 public:
     static std::optional<ag::LogLevel> parse_loglevel(std::string_view level);
 
-    static bool apply_cmd_args(VpnStandaloneConfig &config, const cxxopts::ParseResult &args);
+    static bool apply_cmd_args(TrustTunnelConfig &config, const cxxopts::ParseResult &args);
 
-    static void detect_bound_if(VpnStandaloneConfig &config);
+    static void detect_bound_if(TrustTunnelConfig &config);
 };
 } // namespace ag

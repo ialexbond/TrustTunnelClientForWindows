@@ -211,7 +211,7 @@ Note: Cannot mix both variants"#).exit();
                 let path = ask_for_input::<String>(
                     "Path to a file to store the settings",
                     get_predefined_params().settings_file.clone()
-                        .or(Some("standalone_client.toml".into())),
+                        .or(Some("trusttunnel_client.toml".into())),
                 );
                 if checked_overwrite(&path, "Overwrite the existing settings file?") {
                     let doc = composer::compose_document(None, &settings);
@@ -224,9 +224,9 @@ Note: Cannot mix both variants"#).exit();
     };
 
     println!("To start client, run the following command:");
-    println!("\tstandalone_client -c {settings_path}");
+    println!("\ttrusttunnel_client -c {settings_path}");
     println!("To see full set of the available options, run the following command:");
-    println!("\tstandalone_client -h");
+    println!("\ttrusttunnel_client -h");
 }
 
 fn find_existent_settings<T: serde::de::DeserializeOwned>(path: &str) -> Option<(String, T)> {

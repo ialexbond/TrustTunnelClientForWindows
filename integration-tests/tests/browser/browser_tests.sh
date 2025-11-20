@@ -24,7 +24,7 @@ PUPPETEER_SKIP_DOWNLOAD=true yarn install
 # Check that VPN client is running
 echo "Checking if VPN client is running..."
 sleep 5
-if ! pgrep standalone > /dev/null; then
+if ! pgrep trusttunnel > /dev/null; then
     echo "VPN client is not running"
     exit 1
 fi
@@ -47,7 +47,7 @@ iptables -A INPUT -j DROP
 sleep 1
 
 # Send SIGHUP to client to trigger reconnection
-PIDS=$(pgrep standalone)
+PIDS=$(pgrep trusttunnel)
 echo "PIDS: $PIDS"
 for pid in $PIDS; do
     kill -SIGHUP $pid || true

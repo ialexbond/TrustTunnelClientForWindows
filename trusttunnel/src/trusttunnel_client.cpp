@@ -17,29 +17,29 @@
 #include "common/socket_address.h"
 #include "net/tls.h"
 #include "net/network_manager.h"
-#include "vpn/standalone/client.h"
-#include "vpn/standalone/config.h"
+#include "vpn/trusttunnel/client.h"
+#include "vpn/trusttunnel/config.h"
 #include "utils.h"
 
 #ifdef __APPLE__
 #include "AppleSleepNotifier.h"
 #endif
 
-static constexpr std::string_view DEFAULT_CONFIG_FILE = "standalone_client.toml";
+static constexpr std::string_view DEFAULT_CONFIG_FILE = "trusttunnel_client.toml";
 
 using namespace ag;
 
-static const ag::Logger g_logger("STANDALONE_CLIENT_APP");
+static const ag::Logger g_logger("TRUSTTUNNEL_CLIENT_APP");
 static std::atomic_bool keep_running{true};
 static std::condition_variable g_waiter;
 static std::mutex g_waiter_mutex;
-static VpnStandaloneClient *g_client;
+static TrustTunnelClient *g_client;
 
-static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const VpnStandaloneConfig &config);
+static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const TrustTunnelConfig &config);
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback();
 static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback();
 
-static void stop_standalone_client() {
+static void stop_trusttunnel_client() {
     keep_running = false;
     g_waiter.notify_all();
 }
@@ -60,7 +60,7 @@ static void sighandler(int sig) {
             return;
         }
 #endif
-        stop_standalone_client();
+        stop_trusttunnel_client();
     } else {
         exit(1);
     }
@@ -92,7 +92,7 @@ static void setup_sighandler() {
 int main(int argc, char **argv) {
     setup_sighandler();
 
-    cxxopts::Options args("Standalone client", "Simple console client");
+    cxxopts::Options args("TrustTunnel client", "Simple console client");
     // clang-format off
     args.add_options()
             ("s", "Skip verify certificate", cxxopts::value<bool>()->default_value("false"))
@@ -113,16 +113,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    std::optional config_res = VpnStandaloneConfig::build_config(parse_result.table());
+    std::optional config_res = TrustTunnelConfig::build_config(parse_result.table());
     if (!config_res) {
         errlog(g_logger, "Failed to parse config");
         return 1;
     }
     auto& config = *config_res;
-    if (!StandaloneUtils::apply_cmd_args(config, result)) {
+    if (!TrustTunnelCliUtils::apply_cmd_args(config, result)) {
         return 1;
     }
-    StandaloneUtils::detect_bound_if(config);
+    TrustTunnelCliUtils::detect_bound_if(config);
     ag::Logger::set_log_level(config.loglevel);
 
     vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
@@ -133,14 +133,14 @@ int main(int argc, char **argv) {
         .state_changed_handler = get_state_changed_callback()
     };
 
-    g_client = new VpnStandaloneClient(std::move(config), std::move(callbacks));
+    g_client = new TrustTunnelClient(std::move(config), std::move(callbacks));
 
     auto res = g_client->set_system_dns();
     if (res) {
         errlog(g_logger, "{}", res->str());
         return 1;
     }
-    res = g_client->connect(VpnStandaloneClient::AutoSetup{});
+    res = g_client->connect(TrustTunnelClient::AutoSetup{});
     if (res) {
         errlog(g_logger, "{}", res->str());
         return 1;
@@ -167,8 +167,8 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const VpnStandaloneConfig &config) {
-    const auto *tun = std::get_if<VpnStandaloneConfig::TunListener>(&config.listener);
+std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const TrustTunnelConfig &config) {
+    const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&config.listener);
     if (!tun) {
         return [](auto){};
     }
@@ -226,7 +226,7 @@ static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback() 
         switch (event->state) {
         case VPN_SS_DISCONNECTED:
             errlog(g_logger, "Error: {} {}", event->error.code, safe_to_string_view(event->error.text));
-            stop_standalone_client();
+            stop_trusttunnel_client();
             break;
         case VPN_SS_WAITING_RECOVERY:
             infolog(g_logger, "Waiting recovery: to next={}ms error={} {}",

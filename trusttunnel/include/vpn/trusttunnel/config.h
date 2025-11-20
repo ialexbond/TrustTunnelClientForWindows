@@ -13,7 +13,7 @@
 
 namespace ag {
 
-struct VpnStandaloneConfig {
+struct TrustTunnelConfig {
     struct Endpoint {
         std::string hostname;
         std::string address;
@@ -59,6 +59,6 @@ struct VpnStandaloneConfig {
     Location location;
     Listener listener;
 
-    static std::optional<VpnStandaloneConfig> build_config(const toml::table &config);
+    static std::optional<TrustTunnelConfig> build_config(const toml::table &config);
 };
 } // namespace ag

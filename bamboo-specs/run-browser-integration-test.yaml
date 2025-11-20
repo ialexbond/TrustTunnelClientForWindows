@@ -52,9 +52,9 @@ Build binaries:
   requirements:
     - adg-privileged-docker
   artifacts:
-    - name: standalone_client
+    - name: trusttunnel_client
       location: output
-      pattern: standalone_client
+      pattern: trusttunnel_client
       shared: true
     - name: vpn_endpoint
       location: output
@@ -68,7 +68,7 @@ Run integration test:
     image: adguard/core-libs-testing:2.6.0
     docker-run-arguments: [ --privileged, --device=/dev/net/tun ]
   artifact-subscriptions:
-    - artifact: standalone_client
+    - artifact: trusttunnel_client
       destination: output
     - artifact: vpn_endpoint
       destination: output

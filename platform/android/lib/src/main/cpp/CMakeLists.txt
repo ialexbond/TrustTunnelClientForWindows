@@ -16,6 +16,6 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     jni_utils.cpp)
 
 
-add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/standalone)
+add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/trusttunnel)
 
-target_link_libraries(${CMAKE_PROJECT_NAME} android log vpnlibs_standalone)
+target_link_libraries(${CMAKE_PROJECT_NAME} android log vpnlibs_trusttunnel)

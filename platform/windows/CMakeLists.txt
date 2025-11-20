@@ -24,13 +24,13 @@ else ()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif ()
 
-if (NOT TARGET vpnlibs_standalone)
-    add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/standalone)
+if (NOT TARGET vpnlibs_trusttunnel)
+    add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/trusttunnel)
 endif ()
 
 add_library(vpn_easy_a STATIC EXCLUDE_FROM_ALL src/vpn_easy.cpp)
 target_include_directories(vpn_easy_a PUBLIC include)
-target_link_libraries(vpn_easy_a vpnlibs_standalone)
+target_link_libraries(vpn_easy_a vpnlibs_trusttunnel)
 
 add_library(vpn_easy SHARED src/vpn_easy.cpp)
 target_link_libraries(vpn_easy vpn_easy_a)

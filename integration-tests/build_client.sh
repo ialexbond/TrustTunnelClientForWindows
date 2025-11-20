@@ -3,7 +3,7 @@
 set -e -x
 
 # Build script for VPN client in integrated tests
-# This script builds the standalone client and copies output to the output volume
+# This script builds the trusttunnel client and copies output to the output volume
 
 # Variables
 SOURCE_DIR="${SOURCE_DIR:-/source}"
@@ -43,11 +43,11 @@ cmake ${VPN_LIBS_DIR} \
     -DCMAKE_CXX_COMPILER="clang++" \
     -DCMAKE_CXX_FLAGS="-stdlib=libc++"
 
-echo "Building standalone_client..."
-ninja standalone_client
+echo "Building trusttunnel_client..."
+ninja trusttunnel_client
 
 echo "Copying built client to output directory..."
-cp ./standalone/standalone_client "$OUTPUT_DIR/"
+cp ./trusttunnel/trusttunnel_client "$OUTPUT_DIR/"
 
 # Copy any additional test scripts if they exist
 if [ -d "$SOURCE_DIR/integrated-tests/client" ]; then

@@ -28,7 +28,7 @@ struct VpnCallbacks {
     std::function<void(VpnClientOutputEvent *)> client_output_handler;
 };
 
-class VpnStandaloneClient {
+class TrustTunnelClient {
 private:
     class FileHandler {
     public:
@@ -51,12 +51,12 @@ private:
 public:
     enum ConnectResultError {};
 
-    VpnStandaloneClient(VpnStandaloneConfig &&config, VpnCallbacks &&callbacks);
+    TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&callbacks);
 
-    VpnStandaloneClient(const VpnStandaloneClient &c) = delete;
-    VpnStandaloneClient(VpnStandaloneClient &&c) = delete;
-    VpnStandaloneClient &operator=(const VpnStandaloneClient &c) = delete;
-    VpnStandaloneClient &operator=(VpnStandaloneClient &&c) = delete;
+    TrustTunnelClient(const TrustTunnelClient &c) = delete;
+    TrustTunnelClient(TrustTunnelClient &&c) = delete;
+    TrustTunnelClient &operator=(const TrustTunnelClient &c) = delete;
+    TrustTunnelClient &operator=(TrustTunnelClient &&c) = delete;
 
     struct AutoSetup {};
     struct UseTunnelFd { AutoFd fd; };
@@ -84,7 +84,7 @@ public:
 
     bool process_client_packets(VpnPackets packets);
 
-    ~VpnStandaloneClient();
+    ~TrustTunnelClient();
 
 private:
     Error<ConnectResultError> connect_impl(ListenerSettings listener_settings);
@@ -101,9 +101,9 @@ private:
     void vpn_handler(void *, VpnEvent what, void *data);
 
     VpnSessionState m_connect_result = VPN_SS_DISCONNECTED;
-    const ag::Logger m_logger{"STANDALONE_CLIENT"};
+    const ag::Logger m_logger{"TRUSTTUNNEL_CLIENT"};
     std::atomic<Vpn *> m_vpn = nullptr;
-    VpnStandaloneConfig m_config;
+    TrustTunnelConfig m_config;
     std::thread m_loop_thread;
     DeclPtr<VpnEventLoop, &vpn_event_loop_destroy> m_extra_loop = nullptr;
     std::unique_ptr<ag::VpnOsTunnel> m_tunnel = nullptr;
@@ -116,8 +116,8 @@ private:
 };
 
 template <>
-struct ErrorCodeToString<VpnStandaloneClient::ConnectResultError> {
-    std::string operator()(VpnStandaloneClient::ConnectResultError) {
+struct ErrorCodeToString<TrustTunnelClient::ConnectResultError> {
+    std::string operator()(TrustTunnelClient::ConnectResultError) {
         return {};
     }
 };

@@ -1,5 +1,5 @@
 #import "VpnClient.h"
-#import "vpn/standalone/client.h"
+#import "vpn/trusttunnel/client.h"
 #import "net/network_manager.h"
 #import "common/socket_address.h"
 
@@ -147,7 +147,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
 }
 
 @interface VpnClient () {
-    std::unique_ptr<ag::VpnStandaloneClient> _native_client;
+    std::unique_ptr<ag::TrustTunnelClient> _native_client;
     std::unique_ptr<ag::utils::NetworkMonitor> _network_monitor;
     NEPacketTunnelFlow *_tunnelFlow;
     id _readPacketsHandler;
@@ -191,8 +191,8 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
             /* errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description()); */
             return nil;
         }
-        auto standalone_config = ag::VpnStandaloneConfig::build_config(parse_result);
-        if (!standalone_config) {
+        auto trusttunnel_config = ag::TrustTunnelConfig::build_config(parse_result);
+        if (!trusttunnel_config) {
             return nil;
         }
         ag::VpnCallbacks callbacks = {
@@ -223,7 +223,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
                 stateChangeHandler((int)event->state);
             }
         };
-        self->_native_client = std::make_unique<ag::VpnStandaloneClient>(std::move(*standalone_config), std::move(callbacks));
+        self->_native_client = std::make_unique<ag::TrustTunnelClient>(std::move(*trusttunnel_config), std::move(callbacks));
         __weak typeof(self) weakSelf = self;
         self->_network_monitor = ag::utils::create_network_monitor(
             [weakSelf](const std::string &if_name, bool is_connected) {
@@ -251,7 +251,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
     _tunnelFlow = tunnelFlow;
     __weak typeof(self) weakSelf = self;
 
-    auto error = _native_client->connect(ag::VpnStandaloneClient::UseProcessPackets{});
+    auto error = _native_client->connect(ag::TrustTunnelClient::UseProcessPackets{});
     if (error) {
         errlog(g_logger, "Failed to connect: {}", error->pretty_str());
         return  false;

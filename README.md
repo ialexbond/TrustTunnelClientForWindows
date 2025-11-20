@@ -14,7 +14,7 @@ It supports Linux, macOS, and Windows platforms.
 - [Build Instructions](#build-instructions)
     - [Prerequisites](#prerequisites)
     - [Building](#building)
-- [Quick Start the Standalone VPN Client](#quick-start-the-standalone-vpn-client)
+- [Quick Start the TrustTunnel VPN Client](#quick-start-the-trusttunnel-vpn-client)
 - [Testing Changes as a Conan Dependency](#testing-changes-as-a-conan-dependency)
 - [Companion Endpoint Repository](#companion-endpoint-repository)
 - [Roadmap](#roadmap)
@@ -143,10 +143,10 @@ To run tests:
 cmake --build . --target tests && ctest
 ```
 
-To build the standalone client application, run:
+To build the trusttunnel client application, run:
 
 ```shell
-cmake --build . --target standalone_client
+cmake --build . --target trusttunnel_client
 ```
 
 To build the setup wizard tool, run:
@@ -155,11 +155,11 @@ To build the setup wizard tool, run:
 cmake --build . --target setup_wizard
 ```
 
-For more information, refer to the [client's README](./standalone/README.md) file.
+For more information, refer to the [client's README](./trusttunnel/README.md) file.
 
 ---
 
-## Quick Start the Standalone VPN Client
+## Quick Start the TrustTunnel VPN Client
 
 To quickly configure and launch the VPN client, follow these steps:
 
@@ -173,7 +173,7 @@ To quickly configure and launch the VPN client, follow these steps:
      --hostname example.org \
      --creds premium:premium \
      --cert cert.pem \
-     --settings standalone_client.toml
+     --settings trusttunnel_client.toml
    ```
 
    This results in the following configuration:
@@ -184,16 +184,16 @@ To quickly configure and launch the VPN client, follow these steps:
     * `cert.pem` certificate is used to verify endpoint's TLS certificate during the handshake.
       It can be obtained after the [endpoint](#companion-endpoint-repository) setup procedure.
     * Implicitly, the outbound traffic listener method is set to the TUN device.
-    * The configuration file is named `standalone_client.toml`.
+    * The configuration file is named `trusttunnel_client.toml`.
 
 3. Start the client:
 
    ```shell
    # sudo is required because TUN device is used by default
-   sudo ./standalone_client --config standalone_client.toml
+   sudo ./trusttunnel_client --config trusttunnel_client.toml
    ```
 
-For detailed explanations, see the [client README](./standalone/README.md).
+For detailed explanations, see the [client README](./trusttunnel/README.md).
 
 ---
 

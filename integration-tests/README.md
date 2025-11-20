@@ -157,7 +157,7 @@ Each browser test run automatically:
 10. Collects test results in `/output/output1part.json` and `/output/output2part.json`
 11. Stops processes using PID files and cleans up
 
-**Note**: The test container has access to built binaries (`standalone_client`, `vpn_endpoint`) via the mounted `/output` directory.
+**Note**: The test container has access to built binaries (`trusttunnel_client`, `vpn_endpoint`) via the mounted `/output` directory.
 
 ### Test Parameters
 The test runners (`tests/main/run.sh` and `tests/browser/run.sh`) accept optional parameters:
@@ -188,7 +188,7 @@ ENDPOINT_HOSTNAME="test.local" ./docker_run_tests.sh main
 Build artifacts will be placed in the `output` directory (or the directory specified by `OUTPUT_VOLUME`):
 
 ### Client Build Output
-- `standalone_client` - The built VPN client executable
+- `trusttunnel_client` - The built VPN client executable
 - Additional test scripts (if present in source)
 
 ### Endpoint Build Output

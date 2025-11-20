@@ -12,8 +12,8 @@
 #include "net/tls.h"
 #include "vpn/platform.h"
 #include "vpn/event_loop.h"
-#include "vpn/standalone/client.h"
-#include "vpn/standalone/config.h"
+#include "vpn/trusttunnel/client.h"
+#include "vpn/trusttunnel/config.h"
 
 static ag::Logger g_logger{"VPN_SIMPLE"};
 
@@ -78,7 +78,7 @@ private:
 };
 
 struct vpn_easy_s {
-    std::unique_ptr<ag::VpnStandaloneClient> client;
+    std::unique_ptr<ag::TrustTunnelClient> client;
 };
 
 static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_changed_t state_changed_cb, void *state_changed_cb_arg) {
@@ -88,14 +88,14 @@ static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_cha
         return nullptr;
     }
 
-    auto standalone_config = ag::VpnStandaloneConfig::build_config(parsed_config);
-    if (!standalone_config) {
-        warnlog(g_logger, "Failed to build a standalone client config");
+    auto trusttunnel_config = ag::TrustTunnelConfig::build_config(parsed_config);
+    if (!trusttunnel_config) {
+        warnlog(g_logger, "Failed to build a trusttunnel client config");
         return nullptr;
     }
 
     ag::VpnCallbacks callbacks;
-    if (std::holds_alternative<ag::VpnStandaloneConfig::TunListener>(standalone_config->listener)) {
+    if (std::holds_alternative<ag::TrustTunnelConfig::TunListener>(trusttunnel_config->listener)) {
         callbacks.protect_handler = [](ag::SocketProtectEvent *event) {
             event->result = !ag::vpn_win_socket_protect(event->fd, event->peer);
         };
@@ -116,8 +116,8 @@ static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_cha
 
     auto vpn = std::make_unique<vpn_easy_t>();
 
-    vpn->client = std::make_unique<ag::VpnStandaloneClient>(std::move(*standalone_config), std::move(callbacks));
-    if (auto connect_error = vpn->client->connect(ag::VpnStandaloneClient::AutoSetup{})) {
+    vpn->client = std::make_unique<ag::TrustTunnelClient>(std::move(*trusttunnel_config), std::move(callbacks));
+    if (auto connect_error = vpn->client->connect(ag::TrustTunnelClient::AutoSetup{})) {
         errlog(g_logger, "Failed to connect: {}", connect_error->pretty_str());
         return nullptr;
     }

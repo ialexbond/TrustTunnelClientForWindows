@@ -3,7 +3,7 @@
 set -e -x
 
 # Client setup script for VPN client
-# This script configures iptables, creates client configuration, and runs the standalone client
+# This script configures iptables, creates client configuration, and runs the trusttunnel client
 # Parameters: ENDPOINT_HOSTNAME ENDPOINT_IP ENDPOINT_IPV6 ENDPOINT_PORT PROTOCOL MODE LOG_FILE_NAME [SOCKS_PORT] [USERNAME] [PASSWORD]
 
 ENDPOINT_HOSTNAME="$1"
@@ -101,7 +101,7 @@ echo "Creating client configuration..."
 
 # Create mode-specific configuration
 if [[ "$MODE" == "tun" ]]; then
-  cat >standalone_client.toml <<EOF
+  cat >trusttunnel_client.toml <<EOF
 $COMMON_CONFIG
 
 [listener.tun]
@@ -122,7 +122,7 @@ mtu_size = 1500
 EOF
   echo "TUN mode configuration created"
 else
-  cat >standalone_client.toml <<EOF
+  cat >trusttunnel_client.toml <<EOF
 $COMMON_CONFIG
 
 [listener.socks]
