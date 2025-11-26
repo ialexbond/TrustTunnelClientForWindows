@@ -1,5 +1,6 @@
 import NetworkExtension
 import VpnClientFramework
+import Darwin.C
 
 enum TunnelError : Error {
     case parse_config_failed;
@@ -10,6 +11,8 @@ enum TunnelError : Error {
 open class AGPacketTunnelProvider: NEPacketTunnelProvider {
     private let clientQueue = DispatchQueue(label: "packet.tunnel.queue", qos: .userInitiated)
     private var vpnClient: VpnClient? = nil
+    private var bundleIdentifier = ""
+    private var appGroup: String = ""
     private var startProcessed = false
 
     open override func startTunnel(options: [String : NSObject]? = nil, completionHandler: @escaping ((any Error)?) -> Void) {
@@ -18,6 +21,14 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
         if let configuration = protocolConfiguration as? NETunnelProviderProtocol {
             if let conf = configuration.providerConfiguration?["config"] as? String {
                 config = conf
+            }
+            let appGroup = configuration.providerConfiguration?["appGroup"] as? String
+            let bundleIdentifier = configuration.providerConfiguration?["bundleIdentifier"] as? String
+            if (appGroup != nil && bundleIdentifier != nil && !appGroup!.isEmpty && !bundleIdentifier!.isEmpty) {
+                self.appGroup = appGroup!
+                self.bundleIdentifier = bundleIdentifier!
+            } else {
+                NSLog("Warn: query log processing is disabled because either application group or bundle identifier are not provided")
             }
         }
         if (config == nil) {
@@ -50,35 +61,43 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             }
 
             self.clientQueue.async {
-                self.vpnClient = VpnClient(config: config!) { state in
-                    switch (VpnState(rawValue: Int(state))) {
-                    case .disconnected:
-                        self.clientQueue.async {
-                            self.stopVpnClient()
-                            if (!self.startProcessed) {
-                                completionHandler(TunnelError.start_failed)
-                                self.startProcessed = true
-                            } else {
-                                self.cancelTunnelWithError(nil)
+                self.vpnClient = VpnClient(
+                    config: config!,
+                    connectionInfoHandler: { [weak self] info in
+                        if self != nil && !self!.appGroup.isEmpty && !self!.bundleIdentifier.isEmpty {
+                            self!.processConnectionInfo(json: info)
+                        }
+                    },
+                    stateChangeHandler: { state in
+                        switch (VpnState(rawValue: Int(state))) {
+                        case .disconnected:
+                            self.clientQueue.async {
+                                self.stopVpnClient()
+                                if (!self.startProcessed) {
+                                    completionHandler(TunnelError.start_failed)
+                                    self.startProcessed = true
+                                } else {
+                                    self.cancelTunnelWithError(nil)
+                                }
                             }
+                            break
+                        case .connected:
+                            if (!self.startProcessed) {
+                                completionHandler(nil)
+                                self.startProcessed = true
+                            }
+                            self.reasserting = false
+                            break
+                        case .waiting_for_recovery:
+                            fallthrough
+                        case .recovering:
+                            self.reasserting = true
+                            break
+                        default:
+                            break
                         }
-                        break
-                    case .connected:
-                        if (!self.startProcessed) {
-                            completionHandler(nil)
-                            self.startProcessed = true
-                        }
-                        self.reasserting = false
-                        break
-                    case .waiting_for_recovery:
-                        fallthrough
-                    case .recovering:
-                        self.reasserting = true
-                        break
-                    default:
-                        break
                     }
-                }
+                )
                 if (self.vpnClient == nil) {
                     completionHandler(TunnelError.create_failed)
                     return
@@ -125,5 +144,46 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             self.vpnClient!.stop()
             self.vpnClient = nil
         }
+    }
+
+    private func processConnectionInfo(json: String) {
+        NSLog("Connection info is being processed!: (\(json))")
+        var fileURL: URL? {
+                return FileManager.default.containerURL(
+                    forSecurityApplicationGroupIdentifier: appGroup
+                )?.appendingPathComponent(ConnectionInfoParams.fileName)
+            }
+        guard let fileURL else {
+            NSLog("Failed to get an url for connection info file")
+            return
+        }
+        let fileCoordinator = NSFileCoordinator()
+        var coordinatorError: NSError?
+        var result = true
+        fileCoordinator.coordinate(writingItemAt: fileURL, options: .forReplacing, error: &coordinatorError) { (writeUrl) in
+            guard PrefixedLenProto.append(fileUrl: writeUrl, record: json) else {
+                NSLog("Error: failed to append connection info to file")
+                result = false
+                return
+            }
+        }
+        if let coordinatorError = coordinatorError {
+            NSLog("Failed to coordinate file access: \(coordinatorError)")
+            return
+        }
+        if result {
+            self.notifyAppOnConnectionInfo()
+        }
+    }
+    func notifyAppOnConnectionInfo() {
+        let notification_title = "\(bundleIdentifier).\(ConnectionInfoParams.notificationName)"
+        let notificationName = CFNotificationName(notification_title as CFString)
+
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            notificationName,
+            nil, nil, true
+        )
+        NSLog("notifyAppOnConnectionInfo done")
     }
 }

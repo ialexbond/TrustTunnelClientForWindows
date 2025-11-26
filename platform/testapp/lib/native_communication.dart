@@ -112,6 +112,8 @@ abstract class FlutterCallbacks {
 
   void onStateChanged(int state);
 
+  void onConnectionInfo(String info);
+
   static void setUp(FlutterCallbacks? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
     messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
     {
@@ -130,6 +132,31 @@ abstract class FlutterCallbacks {
               'Argument for dev.flutter.pigeon.com_adguard_testapp.FlutterCallbacks.onStateChanged was null, expected non-null int.');
           try {
             api.onStateChanged(arg_state!);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.com_adguard_testapp.FlutterCallbacks.onConnectionInfo$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          assert(message != null,
+          'Argument for dev.flutter.pigeon.com_adguard_testapp.FlutterCallbacks.onConnectionInfo was null.');
+          final List<Object?> args = (message as List<Object?>?)!;
+          final String? arg_info = (args[0] as String?);
+          assert(arg_info != null,
+              'Argument for dev.flutter.pigeon.com_adguard_testapp.FlutterCallbacks.onConnectionInfo was null, expected non-null String.');
+          try {
+            api.onConnectionInfo(arg_info!);
             return wrapResponse(empty: true);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);

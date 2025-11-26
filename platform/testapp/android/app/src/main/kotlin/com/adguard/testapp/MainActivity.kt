@@ -14,7 +14,7 @@ class MainActivity : FlutterActivity() {
 
         // Register implementation for native vpn interface
         NativeVpnInterface.setUp(binaryMessenger, NativeVpnImpl(activity))
-        VpnService.setStateNotifier(StateNotifierImpl(FlutterCallbacks(binaryMessenger), this))
+        VpnService.setAppNotifier(AppNotifierImpl(FlutterCallbacks(binaryMessenger), this))
         VpnService.startNetworkManager(activity)
     }
 }

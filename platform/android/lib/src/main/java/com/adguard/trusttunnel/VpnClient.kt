@@ -69,6 +69,10 @@ class VpnClient (
         callbacks?.onStateChanged(state)
     }
 
+    fun onConnectionInfo(info: String) {
+        callbacks?.onConnectionInfo(info)
+    }
+
     // Native methods
     private external fun createNative(config: String): Long;
     private external fun startNative(nativePtr: Long, tunFd: Int): Boolean;

@@ -1,4 +1,5 @@
 #include "vpn/trusttunnel/client.h"
+#include "vpn/trusttunnel/connection_info.h"
 #include "net/network_manager.h"
 
 #include "jni_utils.h"
@@ -8,10 +9,13 @@ static ag::Logger g_logger("TrustTunnelJni");
 
 class VpnCtx {
 public:
-    VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback, jmethodID verify_callback, jmethodID state_changed_callback, ag::TrustTunnelConfig &&config)
+    VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback,
+           jmethodID verify_callback, jmethodID state_changed_callback, jmethodID connection_info_callback,
+           ag::TrustTunnelConfig &&config)
         : m_protect_socket_callback(protect_socket_callback)
         , m_verify_callback(verify_callback)
         , m_state_changed_callback(state_changed_callback)
+        , m_connection_info_callback(connection_info_callback)
         , m_native_client(std::move(config), create_callbacks()) {
             env->GetJavaVM(&m_vm);
             this->m_callback_object = {m_vm, callback_object};
@@ -26,6 +30,7 @@ private:
     jmethodID m_protect_socket_callback = nullptr;
     jmethodID m_verify_callback = nullptr;
     jmethodID m_state_changed_callback = nullptr;
+    jmethodID m_connection_info_callback = nullptr;
 
     ag::TrustTunnelClient m_native_client;
 
@@ -90,6 +95,18 @@ private:
         env->CallVoidMethod(m_callback_object.get(), m_state_changed_callback, (int) event->state);
     }
 
+    void onConnectionInfo(ag::VpnConnectionInfoEvent *info) {
+        if (!this->m_connection_info_callback || !m_callback_object) {
+            errlog(g_logger, "`onConnectionInfo` called but there is no handler provided on Java side");
+            assert(0);
+            return;
+        }
+        ScopedJniEnv env{m_vm, 1};
+        std::string json = ag::ConnectionInfo::to_json(info);
+        LocalRef<jstring> str(env.get(), env->NewStringUTF(json.data()));
+        env->CallVoidMethod(m_callback_object.get(), m_connection_info_callback, str.get());
+    }
+
     ag::VpnCallbacks create_callbacks() {
         return {
                 .protect_handler = [this] (auto event) {
@@ -100,6 +117,9 @@ private:
                 },
                 .state_changed_handler = [this] (auto event) {
                     onStateChanged(event);
+                },
+                .connection_info_handler = [this] (auto event) {
+                    onConnectionInfo(event);
                 },
         };
     }
@@ -132,6 +152,13 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
         return 0;
     }
 
+    jmethodID connection_info_method_id = env->GetMethodID(callback_class, "onConnectionInfo",
+                                                           "(Ljava/lang/String;)V");
+    if (!connection_info_method_id) {
+        errlog(g_logger, "There is no `onConnectionInfo` method in the Callback object");
+        return 0;
+    }
+
     std::string_view conf = env->GetStringUTFChars(config, nullptr);
     toml::parse_result parse_result = toml::parse(conf);
     if (!parse_result) {
@@ -146,7 +173,7 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
 
     auto ctx = std::make_unique<VpnCtx>(
             env, thiz,
-            protect_socket_method_id, verify_certificate_method_id, state_changed_method_id,
+            protect_socket_method_id, verify_certificate_method_id, state_changed_method_id, connection_info_method_id,
             std::move(*trusttunnel_config)
     );
 

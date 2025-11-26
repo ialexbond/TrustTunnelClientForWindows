@@ -25,6 +25,16 @@ func convertVpnState(_ status: NEVPNStatus) -> Int {
     }
 }
 
+public struct AppSettings {
+    public let bundleIdentifier: String
+    public let applicationGroup: String?
+
+    public init(bundleIdentifier: String, applicationGroup: String?) {
+        self.bundleIdentifier = bundleIdentifier
+        self.applicationGroup = applicationGroup
+    }
+}
+
 public final class VpnManager {
     private var apiQueue: DispatchQueue
     private var queue: DispatchQueue
@@ -32,21 +42,32 @@ public final class VpnManager {
     private var vpnManager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
     private let stateChangeCallback: (Int) -> Void
+    private let connectionInfoCallback: (String) -> Void
     private var readyContinuation: CheckedContinuation<NETunnelProviderManager, Never>?
     private var bundleIdentifier: String
+    private var appGroup: String
 
-    public init(bundleIdentifier: String, stateChangeCallback: @escaping (Int) -> Void) {
+    public init(bundleIdentifier: String, appGroup: String, stateChangeCallback: @escaping (Int) -> Void, connectionInfoCallback: @escaping (String) -> Void) {
         self.apiQueue = DispatchQueue(label: "com.adguard.TrustTunnel.TrustTunnelClient.VpnManager.api", qos: .userInitiated)
         self.queue = DispatchQueue(label: "com.adguard.TrustTunnel.TrustTunnelClient.VpnManager", qos: .userInitiated);
         self.bundleIdentifier = bundleIdentifier
+        self.appGroup = appGroup
         self.stateChangeCallback = stateChangeCallback
+        self.connectionInfoCallback = connectionInfoCallback
         self.apiQueue.async {
             self.startObservingStatus(manager: self.getManager())
+            if !self.appGroup.isEmpty {
+                self.setupConnectionInfoListener()
+                self.processConnectionInfo()
+            } else {
+                NSLog("Warn: query log processing is disabled because application group is not set")
+            }
         }
     }
     
     deinit {
         stopObservingStatus()
+        stopConnectionInfoListener()
     }
     
     func getManager() -> NETunnelProviderManager {
@@ -143,6 +164,63 @@ public final class VpnManager {
         self.stopTimer = nil
     }
 
+    private func setupConnectionInfoListener() {
+        let notificationName = "\(self.bundleIdentifier).\(ConnectionInfoParams.notificationName)" as CFString
+
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let processor = Unmanaged<VpnManager>.fromOpaque(observer).takeUnretainedValue()
+                processor.processConnectionInfo()
+            },
+            notificationName,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    private func stopConnectionInfoListener() {
+        let notificationName = CFNotificationName("\(self.bundleIdentifier).\(ConnectionInfoParams.notificationName)" as CFString)
+        CFNotificationCenterRemoveObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            notificationName,
+            nil
+        )
+    }
+
+    private func processConnectionInfo() {
+        var fileURL: URL? {
+                return FileManager.default.containerURL(
+                    forSecurityApplicationGroupIdentifier: appGroup
+                )?.appendingPathComponent(ConnectionInfoParams.fileName)
+            }
+        guard let fileURL else {
+            NSLog("Failed to get an url for connection info file")
+            return
+        }
+        let fileCoordinator = NSFileCoordinator()
+        var coordinatorError: NSError?
+        var result: [String] = []
+        fileCoordinator.coordinate(
+            writingItemAt: fileURL, options: .forDeleting, error: &coordinatorError) { fileUrl in
+                if let records = PrefixedLenProto.read_all(fileUrl: fileUrl) {
+                    result = records
+                }
+                PrefixedLenProto.clear(fileUrl: fileUrl)
+            }
+
+        if let error = coordinatorError {
+            NSLog("Error: failed to process connection info file: \(error)")
+            return
+        }
+        for string in result {
+            self.connectionInfoCallback(string)
+        }
+    }
+
     public func start(config: (String)) {
         apiQueue.async {
             let manager = self.getManager()
@@ -158,7 +236,11 @@ public final class VpnManager {
                 let configuration = (manager.protocolConfiguration as? NETunnelProviderProtocol) ??
                 NETunnelProviderProtocol()
                 configuration.providerBundleIdentifier = self.bundleIdentifier
-                configuration.providerConfiguration = ["config": config as NSObject]
+                configuration.providerConfiguration = [
+                    "config": config as NSObject,
+                    "appGroup": self.appGroup as NSObject,
+                    "bundleIdentifier": self.bundleIdentifier as NSObject
+                ]
                 configuration.serverAddress = "Trust Tunnel"
                 manager.protocolConfiguration = configuration
                 manager.localizedDescription = "TrustTunnel VPN"

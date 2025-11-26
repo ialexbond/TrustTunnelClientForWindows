@@ -24,4 +24,5 @@ abstract class NativeVpnInterface {
 @FlutterApi()
 abstract class FlutterCallbacks {
   void onStateChanged(int state);
+  void onConnectionInfo(String info);
 }

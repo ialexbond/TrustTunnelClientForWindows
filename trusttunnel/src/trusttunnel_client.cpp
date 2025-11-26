@@ -11,6 +11,7 @@
 
 #include <cxxopts.hpp>
 #include <toml++/toml.h>
+#include <magic_enum/magic_enum.hpp>
 
 #include "common/logger.h"
 #include "common/net_utils.h"
@@ -38,6 +39,7 @@ static TrustTunnelClient *g_client;
 static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const TrustTunnelConfig &config);
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback();
 static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback();
+static std::function<void(VpnConnectionInfoEvent *)> get_connection_info_callback();
 
 static void stop_trusttunnel_client() {
     keep_running = false;
@@ -130,7 +132,8 @@ int main(int argc, char **argv) {
     VpnCallbacks callbacks = {
         .protect_handler = get_protect_socket_callback(config),
         .verify_handler = get_verify_certificate_callback(),
-        .state_changed_handler = get_state_changed_callback()
+        .state_changed_handler = get_state_changed_callback(),
+        .connection_info_handler = get_connection_info_callback(),
     };
 
     g_client = new TrustTunnelClient(std::move(config), std::move(callbacks));
@@ -242,5 +245,26 @@ static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback() 
         case VPN_SS_WAITING_FOR_NETWORK:
             break;
         }
+    };
+}
+
+static std::function<void(VpnConnectionInfoEvent *)> get_connection_info_callback() {
+    return [](VpnConnectionInfoEvent *event) {
+        std::string src = SocketAddress(*event->src).host_str(/*ipv6_brackets=*/true);
+        std::string proto = event->proto == IPPROTO_TCP ? "TCP" : "UDP";
+        std::string dst;
+        if (event->domain) {
+            dst = event->domain;
+        }
+        if (event->dst) {
+            dst = AG_FMT("{}({})", dst, src);
+        }
+        auto action = magic_enum::enum_name(event->action);
+
+        std::string log_message;
+
+        log_message = fmt::format("{}, {} -> {}. Action: {}", proto, src, dst, action);
+
+        dbglog(g_logger, "{}", log_message);
     };
 }

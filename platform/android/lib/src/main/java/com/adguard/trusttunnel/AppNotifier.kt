@@ -1,5 +1,6 @@
 package com.adguard.trusttunnel
 
-interface StateNotifier {
+interface AppNotifier {
     fun onStateChanged(state: Int);
+    fun onConnectionInfo(info: String);
 }

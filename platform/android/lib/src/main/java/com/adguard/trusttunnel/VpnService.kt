@@ -77,9 +77,9 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         /** Gets an intent instance with [action] */
         private fun getIntent(context: Context, action: String): Intent = Intent(context, VpnService::class.java).setAction(action)
 
-        private var stateNotifier: StateNotifier? = null;
-        fun setStateNotifier(notifier: StateNotifier) {
-            stateNotifier = notifier;
+        private var appNotifier: AppNotifier? = null;
+        fun setAppNotifier(notifier: AppNotifier) {
+            appNotifier = notifier;
         }
     }
 
@@ -261,7 +261,12 @@ class VpnService : android.net.VpnService(), VpnClientListener {
 
     override fun onStateChanged(state: Int) {
         LOG.info("VpnService onStateChanged: $state")
-        stateNotifier?.onStateChanged(state)
+        appNotifier?.onStateChanged(state)
+    }
+
+    override fun onConnectionInfo(info: String) {
+        LOG.debug("VpnService onConnectionInfo event")
+        appNotifier?.onConnectionInfo(info)
     }
 
     private fun createNotification(context: Context): Notification {

@@ -1,5 +1,10 @@
 import NetworkExtension
 
+internal struct ConnectionInfoParams {
+    static let fileName = "connection_info.dat"
+    static let notificationName = "connection_info"
+}
+
 func configureIPv4AndIPv6Settings(from config: TunConfig) -> (NEIPv4Settings, NEIPv6Settings) {
     let ipv4Settings = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
     let ipv6Settings = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [64])

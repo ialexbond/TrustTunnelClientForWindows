@@ -134,4 +134,21 @@ class FlutterCallbacks(private val binaryMessenger: BinaryMessenger, private val
       } 
     }
   }
+  fun onConnectionInfo(infoArg: String, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.com_adguard_testapp.FlutterCallbacks.onConnectionInfo$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(infoArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(NativeCommunicationPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
 }

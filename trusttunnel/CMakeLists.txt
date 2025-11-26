@@ -18,6 +18,7 @@ set(SOURCE_FILES
         src/config.cpp
         src/client.cpp
         src/utils.cpp
+        src/connection_info.cpp
         )
 
 add_library(vpnlibs_trusttunnel EXCLUDE_FROM_ALL ${SOURCE_FILES})
@@ -28,11 +29,13 @@ find_package(native_libs_common REQUIRED)
 find_package(magic_enum REQUIRED)
 find_package(native_libs_common REQUIRED)
 find_package(tomlplusplus REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 target_link_libraries(vpnlibs_trusttunnel vpnlibs_core cxxopts::cxxopts)
 target_link_libraries(vpnlibs_trusttunnel magic_enum::magic_enum)
 target_link_libraries(vpnlibs_trusttunnel native_libs_common::native_libs_common)
 target_link_libraries(vpnlibs_trusttunnel tomlplusplus::tomlplusplus)
+target_link_libraries(vpnlibs_trusttunnel nlohmann_json::nlohmann_json)
 if (NOT MSVC)
     target_compile_options(vpnlibs_trusttunnel PRIVATE "-fno-exceptions")
 endif (NOT MSVC)

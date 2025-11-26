@@ -1,5 +1,6 @@
 #import "VpnClient.h"
 #import "vpn/trusttunnel/client.h"
+#import "vpn/trusttunnel/connection_info.h"
 #import "net/network_manager.h"
 #import "common/socket_address.h"
 
@@ -174,6 +175,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
 }
 
 - (instancetype)initWithConfig:(NSString *)config
+            connectionInfoHandler:(ConnectionInfoHandler)connectionInfoHandler
             stateChangeHandler:(StateChangeHandler)stateChangeHandler {
     self = [super init];
     if (self) {
@@ -221,6 +223,11 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
             },
             .state_changed_handler = [stateChangeHandler](ag::VpnStateChangedEvent *event) {
                 stateChangeHandler((int)event->state);
+            },
+            .connection_info_handler = [connectionInfoHandler](ag::VpnConnectionInfoEvent *info) {
+                std::string json = ag::ConnectionInfo::to_json(info);
+                NSString * str = [NSString stringWithUTF8String: json.c_str()];
+                connectionInfoHandler(str);
             }
         };
         self->_native_client = std::make_unique<ag::TrustTunnelClient>(std::move(*trusttunnel_config), std::move(callbacks));

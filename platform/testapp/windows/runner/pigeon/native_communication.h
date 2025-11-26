@@ -110,6 +110,10 @@ class FlutterCallbacks {
     int64_t state,
     std::function<void(void)>&& on_success,
     std::function<void(const FlutterError&)>&& on_error);
+  void OnConnectionInfo(
+    const std::string& info,
+    std::function<void(void)>&& on_success,
+    std::function<void(const FlutterError&)>&& on_error);
  private:
   flutter::BinaryMessenger* binary_messenger_;
   std::string message_channel_suffix_;

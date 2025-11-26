@@ -33,4 +33,9 @@ class FlutterCallbacksImpl extends FlutterCallbacks {
     }
     _notifier.onStateChanged(VpnState.values[state]);
   }
+
+  @override
+  void onConnectionInfo(String json) {
+    print(json);
+  }
 }

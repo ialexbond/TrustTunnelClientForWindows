@@ -511,23 +511,10 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         break;
     }
     case VPN_EVENT_CONNECTION_INFO:
-        const VpnConnectionInfoEvent *info = (VpnConnectionInfoEvent *) data;
-        std::string src = SocketAddress(*info->src).host_str(/*ipv6_brackets=*/true);
-        std::string proto = info->proto == IPPROTO_TCP ? "TCP" : "UDP";
-        std::string dst;
-        if (info->domain) {
-            dst = info->domain;
+        auto *info = (VpnConnectionInfoEvent *) data;
+        if (m_callbacks.connection_info_handler) {
+            m_callbacks.connection_info_handler(info);
         }
-        if (info->dst) {
-            dst = AG_FMT("{}({})", dst, src);
-        }
-        auto action = magic_enum::enum_name(info->action);
-
-        std::string log_message;
-
-        log_message = fmt::format("{}, {} -> {}. Action: {}", proto, src, dst, action);
-
-        dbglog(m_logger, "{}", log_message);
         break;
     }
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
