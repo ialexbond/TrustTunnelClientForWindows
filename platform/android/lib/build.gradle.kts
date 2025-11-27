@@ -5,7 +5,7 @@ plugins {
     id("maven-publish")
 }
 
-version = "0.99.38"
+version = "0.99.39"
 
 android {
     namespace = "com.adguard.trusttunnel"
