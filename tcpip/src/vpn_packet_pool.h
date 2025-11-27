@@ -17,6 +17,8 @@ public:
      */
     VpnPacketPool(size_t size, int mtu);
 
+    ~VpnPacketPool();
+
     /**
      * Return VpnPacket with pointer to data from pool.
      * If there are no unused data block, create the new one.
@@ -35,9 +37,12 @@ public:
     int get_size();
 
 private:
+    struct VpnPacketPoolState;
+
     size_t m_capacity;
     int m_mtu;
     std::list<std::unique_ptr<uint8_t[]>> m_packets;
+    VpnPacketPoolState *m_state;
 };
 
 } // namespace ag
