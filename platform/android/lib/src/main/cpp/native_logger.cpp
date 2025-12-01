@@ -25,6 +25,10 @@ Java_com_adguard_trusttunnel_log_NativeLogger_setupSlf4j(JNIEnv *env, jclass cla
     env->GetJavaVM(&vm);
     GlobalRef<jclass> gtype{vm, clazz};
     jmethodID log_method = env->GetStaticMethodID(gtype.get(), "log", "(ILjava/lang/String;)V");
+    if (log_method == nullptr) {
+        warnlog(g_logger, "Failed to setup native logger");
+        return;
+    }
     ag::Logger::set_callback(
             [vm, log_method, gtype = std::move(gtype)](ag::LogLevel log_level, std::string_view message) {
                 ScopedJniEnv env(vm, 8);
