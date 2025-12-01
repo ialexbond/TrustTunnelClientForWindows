@@ -16,6 +16,7 @@ static ag::Logger g_logger{"DNS_HANDLER"};
 
 static constexpr auto DNS_CLIENT_TIMEOUT = ag::Secs{30};
 static constexpr size_t CONN_MAX_BUFFERED = 128 * 1024;
+static constexpr size_t MAX_UDP_QUEUE_SIZE = 10;
 
 #define log_upstream(ups_, lvl_, fmt_, ...) lvl_##log(g_logger, "[upstream] " fmt_, ##__VA_ARGS__)
 #define log_listener(ups_, lvl_, fmt_, ...) lvl_##log(g_logger, "[listener] " fmt_, ##__VA_ARGS__)
@@ -348,7 +349,7 @@ uint64_t ag::DnsHandlerClientListenerBase::send_as_listener(
                         info.addrs->src, info.app_name,
                         tunnel_addr_to_str(&info.addrs->dst), event.result);
             }
-        } else if (it->second.udp_pending.empty()) {
+        } else if (it->second.udp_pending.size() < MAX_UDP_QUEUE_SIZE) {
             it->second.udp_pending.emplace_back(message.begin(), message.end());
         } else {
             log_upstream(this, info, "Failed to send UDP {} ({}) -> {}: read disabled",
