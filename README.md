@@ -56,6 +56,7 @@ It supports Linux, macOS, and Windows platforms.
 - [Conan](https://github.com/conan-io/conan/releases) 2.0.5 or higher
 - [Rust](https://www.rust-lang.org/tools/install) 1.66 or higher
 - [Go](https://go.dev/dl/) 1.18.3 or higher
+- [Ninja](https://formulae.brew.sh/formula/ninja) 1.13 or higher
 - Windows-specific
     - A recent version of Perl,
       either [Active State Perl](https://www.activestate.com/products/perl/)
@@ -75,8 +76,12 @@ You might get an error where Python will report some missing modules such as
 ModuleNotFoundError: No module named 'yaml'
 ```
 
-Some Python installations don't support global modules anymore. 
-In this case it is recommended to use Python virtual environment for building. To do so, follow instructions from the [official python documentation](https://docs.python.org/3/library/venv.html). You'll need to install missing modules inside this virtual environment.
+Please use following commands:
+```
+python3 -m venv env
+source env/bin/activate
+pip3 install -r requirements.txt
+```
 
 #### Using Makefile
 
