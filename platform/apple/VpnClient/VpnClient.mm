@@ -104,14 +104,14 @@ static _Nullable SecCertificateRef convertCertificate(X509 *cert) {
 static bool verify_certificate(const ag::VpnVerifyCertificateEvent *event) {
     SecCertificateRef cert = convertCertificate(event->cert);
     if (!cert) {
-        /* log @"Failed to create certificate object"; */
+        errlog(g_logger, "Failed to create certificate object");
         return false;
     }
     STACK_OF(X509) *chain = event->chain;
     size_t chainLength = sk_X509_num(chain);
     if (chainLength < 0) {
         CFRelease(cert);
-        /* return @"Untrusted certificate chain is null"; */
+        errlog(g_logger, "Untrusted certificate chain is null");
         return false;
     }
     NSMutableArray *trustArray = [[NSMutableArray alloc] initWithCapacity:chainLength + 1];
@@ -119,7 +119,7 @@ static bool verify_certificate(const ag::VpnVerifyCertificateEvent *event) {
     for (size_t i = 0; i < chainLength; ++i) {
         SecCertificateRef chainedCert = convertCertificate(sk_X509_value(chain, i));
         if (!chainedCert) {
-            /* return @"Failed to create chained certificate object"; */
+            errlog(g_logger, "Failed to create chained certificate object");
             return false;
         }
         [trustArray addObject:(__bridge_transfer id) chainedCert];
@@ -192,7 +192,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
 
         toml::parse_result parse_result = toml::parse(config.UTF8String);
         if (!parse_result) {
-            /* errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description()); */
+            errlog(g_logger, "Failed to parse configuration: {}", parse_result.error().description());
             return nil;
         }
         auto trusttunnel_config = ag::TrustTunnelConfig::build_config(parse_result);
