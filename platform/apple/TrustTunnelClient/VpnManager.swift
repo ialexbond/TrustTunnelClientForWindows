@@ -264,6 +264,10 @@ public final class VpnManager {
             }
             group.wait()
 
+            // Recreate observer to update newly loaded connection object
+            self.stopObservingStatus()
+            self.startObservingStatus(manager: manager)
+
             do {
                 try manager.connection.startVPNTunnel()
                 self.logger.info("VPN has been started!")
