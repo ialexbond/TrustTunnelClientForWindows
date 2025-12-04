@@ -4,16 +4,12 @@ build/
 .DS_Store
 CmakeUserPresets.json
 pyvenv.cfg
+.clangd/
 
-# Conan
-# fixme: Remove when the repo will be adapted to out-of-tree build model.
-#        As for now, the vpn-libs build is adapted to in-tree building model, so Conan
-#        stores these files in the project root directory instead of the build folder.
+# Conan and conan-cmake create some files in-tree by design
 conan.lock
 conanbuildinfo.*
 conaninfo.txt
 graph_info.json
 conan/
 cmake/conan_provider.cmake
-lib/
-bin/
