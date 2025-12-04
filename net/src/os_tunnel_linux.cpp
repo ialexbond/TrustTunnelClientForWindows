@@ -11,6 +11,8 @@
 static const ag::Logger logger("OS_TUNNEL_LINUX");
 
 static constexpr auto TABLE_ID = 880;
+static constexpr std::string_view PRIVILEGED_PORTS = "1-1024";
+static constexpr std::string_view VNC_PORTS = "5900-5920";
 
 static bool sys_cmd_bool(std::string cmd) {
     cmd += " 2>&1";
@@ -207,13 +209,15 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
     // Apply routing rules (in netns if specified)
     if (m_sport_supported) {
         if (!ipv4_routes.empty()) {
-            if (!sys_cmd_netns(m_netns, "ip rule add prio 30800 sport 1-1024 lookup main")
+            if (!sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30800 sport {} lookup main", VNC_PORTS))
                     || !sys_cmd_netns(m_netns, AG_FMT("ip rule add prio 30801 lookup {}", table_id))) {
                 return false;
             }
         }
         if (!ipv6_routes.empty()) {
-            if (!sys_cmd_netns(m_netns, "ip -6 rule add prio 30800 sport 1-1024 lookup main")
+            if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", PRIVILEGED_PORTS))
+                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30800 sport {} lookup main", VNC_PORTS))
                     || !sys_cmd_netns(m_netns, AG_FMT("ip -6 rule add prio 30801 lookup {}", table_id))) {
                 return false;
             }
@@ -276,7 +280,9 @@ void ag::VpnLinuxTunnel::setup_dns() {
 void ag::VpnLinuxTunnel::teardown_routes(int16_t table_id) {
     // Try to remove rules regardless of m_sport_supported (may exist from previous session)
     sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30801 lookup {}", table_id));
-    sys_cmd_netns_ignore_errors(m_netns, "ip rule del prio 30800 sport 1-1024 lookup main");
+    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30800 sport {} lookup main", PRIVILEGED_PORTS));
+    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip rule del prio 30800 sport {} lookup main", VNC_PORTS));
     sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30801 lookup {}", table_id));
-    sys_cmd_netns_ignore_errors(m_netns, "ip -6 rule del prio 30800 sport 1-1024 lookup main");
+    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30800 sport {} lookup main", PRIVILEGED_PORTS));
+    sys_cmd_netns_ignore_errors(m_netns, AG_FMT("ip -6 rule del prio 30800 sport {} lookup main", VNC_PORTS));
 }
