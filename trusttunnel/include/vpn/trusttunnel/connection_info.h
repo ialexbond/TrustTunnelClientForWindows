@@ -8,7 +8,7 @@ namespace ag {
 
 class ConnectionInfo {
 public:
-    static std::string to_json(VpnConnectionInfoEvent *info);
+    static std::string to_json(VpnConnectionInfoEvent *info, bool include_current_time = true);
 };
 
 } // namespace ag
