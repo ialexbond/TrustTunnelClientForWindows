@@ -32,7 +32,8 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         private var currentStartId: Int = -1
 
         private var vpnClient: VpnClient? = null
-
+        // The last VpnState observed by `onStateChanged`
+        private var lastState: Int = 0
         private const val ACTION_START = "Start"
         private const val ACTION_STOP  = "Stop"
         private const val PARAM_CONFIG = "Config Extra"
@@ -84,12 +85,15 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         /** Gets an intent instance with [action] */
         private fun getIntent(context: Context, action: String): Intent = Intent(context, VpnService::class.java).setAction(action)
 
-        private val connectionInfoSync = ThreadManager.create("file-sync", 1)
+        private val eventsSync = ThreadManager.create("events-sync", 1)
         private var appNotifier: AppNotifier? = null;
         fun setAppNotifier(file: File, notifier: AppNotifier) {
             connectionInfoFile = PrefixedLenRingProto(file)
             appNotifier = notifier
-            connectionInfoSync.execute {
+            eventsSync.execute {
+                // Notify current state
+                appNotifier?.onStateChanged(lastState)
+                // Notify all query logs
                 connectionInfoFile?.apply {
                     val records = read_all()
                     if (records == null) {
@@ -313,11 +317,12 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         return certificateVerificator?.verifyCertificate(certificate, rawChain) ?: false;
     }
 
-    override fun onStateChanged(state: Int) {
+    override fun onStateChanged(state: Int) = eventsSync.execute {
+        lastState = state
         appNotifier?.onStateChanged(state)
     }
 
-    override fun onConnectionInfo(info: String) = connectionInfoSync.execute {
+    override fun onConnectionInfo(info: String) = eventsSync.execute {
         LOG.debug("VpnService onConnectionInfo event")
         connectionInfoFile?.apply {
             if (!append(info)) {
