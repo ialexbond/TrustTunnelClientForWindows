@@ -12,6 +12,7 @@ LOG_FILE_NAME="${1:-vpn_endpoint.log}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 CONFIG_FILE="vpn.conf"
 TLS_HOSTS_SETTINGS_FILE="tls_hosts.conf"
+RULES_FILE="rules.conf"
 OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 LOG_FILE="${OUTPUT_DIR}/$LOG_FILE_NAME"
 PID_FILE="${OUTPUT_DIR}/vpn_endpoint.pid"
@@ -23,6 +24,7 @@ echo "Starting VPN endpoint..."
 echo "Log level: $LOG_LEVEL"
 echo "Config file: $CONFIG_FILE"
 echo "TLS hosts file: $TLS_HOSTS_SETTINGS_FILE"
+echo "Rules file: $RULES_FILE"
 echo "Log file: $LOG_FILE"
 
 # Change to output directory where the executable and config files are located
@@ -44,6 +46,11 @@ fi
 
 if [ ! -f "$TLS_HOSTS_SETTINGS_FILE" ]; then
     echo "Error: TLS hosts settings file $TLS_HOSTS_SETTINGS_FILE not found"
+    exit 1
+fi
+
+if [ ! -f "$RULES_FILE" ]; then
+    echo "Error: Rules file $RULES_FILE not found"
     exit 1
 fi
 

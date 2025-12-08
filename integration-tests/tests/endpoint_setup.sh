@@ -10,6 +10,8 @@ OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 ENDPOINT_HOSTNAME="${ENDPOINT_HOSTNAME:-endpoint.test}"
 CONFIG_FILE="vpn.conf"
 TLS_HOSTS_SETTINGS_FILE="tls_hosts.conf"
+RULES_FILE="rules.conf"
+TLS_CLIENT_RANDOM="${TLS_CLIENT_RANDOM:-160200085c112870/9622006c5f112b73}"
 
 echo "Starting endpoint setup process..."
 
@@ -33,6 +35,7 @@ echo "Creating VPN configuration file..."
 cat > "$CONFIG_FILE" << EOF
 listen_address = "[::]:4433"
 allow_private_network_connections = true
+rules_file = "$RULES_FILE"
 [listen_protocols.http1]
 [listen_protocols.http2]
 [listen_protocols.quic]
@@ -46,6 +49,15 @@ cat > "$TLS_HOSTS_SETTINGS_FILE" << EOF
 hostname = "$ENDPOINT_HOSTNAME"
 cert_chain_path = "cert.pem"
 private_key_path = "key.pem"
+EOF
+
+echo "Creating connection rules file..."
+cat > "$RULES_FILE" << EOF
+[[rule]]
+tls_client_random = "$TLS_CLIENT_RANDOM"
+action = "allow"
+[[rule]]
+action = "deny"
 EOF
 
 echo "Endpoint setup completed successfully!"

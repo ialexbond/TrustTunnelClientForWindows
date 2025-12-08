@@ -967,13 +967,13 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
                 client_random_data.begin());
 
         const size_t mask_size = std::min<size_t>(tls_client_random_mask.size(), mask_data.size());
-        if (!tls_client_random_mask.empty()) {
+        if (mask_size > 0) {
             std::copy_n(tls_client_random_mask.data(), mask_size, mask_data.begin());
         }
 
         // Generate random bytes for the parts not covered by the mask
         std::vector<uint8_t> rand_bytes(mask_size);
-        if (1 != RAND_bytes(rand_bytes.data(), 32)) {
+        if (1 != RAND_bytes(rand_bytes.data(), mask_size)) {
             return "Failed to generate random bytes for SSL";
         }
 

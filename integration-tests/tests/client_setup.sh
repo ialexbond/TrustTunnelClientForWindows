@@ -19,6 +19,7 @@ USERNAME="${9:-premium}"
 PASSWORD="${10:-premium}"
 
 OUTPUT_DIR="${OUTPUT_DIR:-/output}"
+CLIENT_RANDOM="${CLIENT_RANDOM:-160200085c112870/9622006c5f112b73}"
 
 # Change to output directory where the executable and config files are located
 cd "$OUTPUT_DIR"
@@ -57,6 +58,7 @@ password = "$PASSWORD"
 skip_verification = true
 upstream_protocol = "$PROTOCOL"
 upstream_fallback_protocol = "$PROTOCOL"
+client_random = "$CLIENT_RANDOM"
 END
 )
 
