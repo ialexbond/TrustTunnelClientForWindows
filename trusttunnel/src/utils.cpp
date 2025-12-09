@@ -79,6 +79,9 @@ void TrustTunnelCliUtils::detect_bound_if(TrustTunnelConfig &config) {
     if_indextoname(if_index, if_name);
     tun.bound_if = if_name;
 #endif // _WIN32
+#ifdef __APPLE__
+    tun.bound_if = "en0";
+#endif // __APPLE__
     infolog(g_logger, "Using automatically detected outbound interface: {}", tun.bound_if);
 }
 

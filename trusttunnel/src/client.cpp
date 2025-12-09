@@ -134,18 +134,18 @@ void TrustTunnelClient::vpn_protect_socket(SocketProtectEvent *event) {
 
 int TrustTunnelClient::set_outbound_interface() {
     auto &config = std::get<TrustTunnelConfig::TunListener>(m_config.listener);
-    uint32_t if_index = 0;
-    if (!config.bound_if.empty()) {
-        if_index = if_nametoindex(config.bound_if.c_str());
-        if (if_index == 0) {
-            if (auto idx = ag::utils::to_integer<uint32_t>(config.bound_if)) {
-                if_index = idx.value();
-            }
+    if (config.bound_if.empty()) {
+        return 0;
+    }
+    uint32_t if_index = if_nametoindex(config.bound_if.c_str());
+    if (if_index == 0) {
+        if (auto idx = ag::utils::to_integer<uint32_t>(config.bound_if)) {
+            if_index = idx.value();
         }
-        if (if_index == 0) {
-            errlog(m_logger, "Unknown interface name: {}. Use 'ifconfig' to see possible values", config.bound_if);
-            return -1;
-        }
+    }
+    if (if_index == 0) {
+        errlog(m_logger, "Unknown interface name: {}. Use 'ifconfig' to see possible values", config.bound_if);
+        return -1;
     }
     vpn_network_manager_set_outbound_interface(if_index);
     return 0;

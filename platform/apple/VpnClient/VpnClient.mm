@@ -17,6 +17,13 @@ static ag::Logger g_logger("VPN_CLIENT");
 
 NS_ASSUME_NONNULL_BEGIN
 
+static void update_interface(const std::string &if_name) {
+    uint32_t if_index = if_nametoindex(if_name.c_str());
+    if (if_index != 0) {
+        ag::vpn_network_manager_set_outbound_interface(if_index);
+    }
+}
+
 #if TARGET_OS_IPHONE
 static ag::SocketAddress get_interface_address(const char *if_name, int family) {
     struct ifaddrs *ifaddr, *ifa;
@@ -236,17 +243,16 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
         __weak typeof(self) weakSelf = self;
         self->_network_monitor = ag::utils::create_network_monitor(
             [weakSelf](const std::string &if_name, bool is_connected) {
+                update_interface(if_name);
                 __strong typeof(self) strongSelf = weakSelf;
-                uint32_t if_index = if_nametoindex(if_name.c_str());
-                if (if_index != 0) {
-                    ag::vpn_network_manager_set_outbound_interface(if_index);
-                }
                 if (strongSelf->_native_client) {
                     strongSelf->_native_client->notify_network_change(is_connected ? ag::VPN_NS_CONNECTED : ag::VPN_NS_NOT_CONNECTED);
                 }
             }
         );
         self->_network_monitor->start(nullptr);
+        std::string if_name = self->_network_monitor->get_default_interface();
+        update_interface(if_name);
     }
     return self;
 }

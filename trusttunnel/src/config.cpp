@@ -163,13 +163,8 @@ static std::optional<TrustTunnelConfig::TunListener> parse_tun_listener_config(c
     }
 
     std::string bound_if;
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
     bound_if = (*tun_config)["bound_if"].value_or<std::string>({});
-#elif defined(__APPLE__)
-    bound_if = (*tun_config)["bound_if"].value_or<std::string>({});
-    if (bound_if.empty()) {
-        bound_if = "en0";
-    }
 #else
     errlog(g_logger, "Outbound interface is not specified");
     return std::nullopt;
