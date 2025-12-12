@@ -38,6 +38,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         private const val ACTION_STOP  = "Stop"
         private const val PARAM_CONFIG = "Config Extra"
         private const val NOTIFICATION_ID = 1
+        private val IPV4_NON_ROUTABLE = listOf("0.0.0.0/8", "224.0.0.0/3")
 
         private fun start(context: Context, intent: Intent, config: String?) {
             try {
@@ -223,7 +224,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
                 .addDnsServer("94.140.14.141")
                 .addDisallowedApplication(applicationContext.packageName)
 
-            val routes = VpnClient.excludeCidr(config.includedRoutes, config.excludedRoutes)
+            val routes = VpnClient.excludeCidr(config.includedRoutes, config.excludedRoutes + IPV4_NON_ROUTABLE)
                 ?: throw Exception("Failed to process routes")
             routes.forEach { route ->
                 val r = NetworkUtils.convertCidrToAddressPrefixPair(route)

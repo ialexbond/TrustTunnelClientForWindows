@@ -10,6 +10,7 @@ func configureIPv4AndIPv6Settings(from config: TunConfig) -> (NEIPv4Settings, NE
     let ipv4Settings = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
     let ipv6Settings = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [64])
 
+    let IPV4_NON_ROUTABLE: [String] = ["0.0.0.0/8", "224.0.0.0/3"]
     
     func parseCIDR(_ cidr: String) -> (ip: String, prefixLength: Int)? {
         let parts = cidr.split(separator: "/")
@@ -25,7 +26,9 @@ func configureIPv4AndIPv6Settings(from config: TunConfig) -> (NEIPv4Settings, NE
     var v4Included: [NEIPv4Route] = []
     var v6Included: [NEIPv6Route] = []
     
-    let include_routes = VpnClient.excludeCidr(config.included_routes, excludeRoutes: config.excluded_routes)
+    let excluded_routes = config.excluded_routes + IPV4_NON_ROUTABLE
+
+    let include_routes = VpnClient.excludeCidr(config.included_routes, excludeRoutes: excluded_routes)
 
     for route in include_routes {
         guard let (ip, prefix) = parseCIDR(route) else { continue }
