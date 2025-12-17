@@ -6,14 +6,15 @@ internal struct TunConfig: Codable {
     let excluded_routes: [String]
 }
 
-private struct TunnelConfig: Codable {
+internal struct VpnConfig: Codable {
     struct Listener: Codable {
         let tun: TunConfig
     }
     let listener: Listener
+    let dns_upstreams: [String]
 }
 
-internal func parseTunnelConfig(from config: String) throws -> TunConfig {
+internal func parseVpnConfig(from config: String) throws -> VpnConfig {
     let decoder = TOMLDecoder()
-    return try decoder.decode(TunnelConfig.self, from: config).listener.tun
+    return try decoder.decode(VpnConfig.self, from: config)
 }

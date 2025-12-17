@@ -39,6 +39,8 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         private const val PARAM_CONFIG = "Config Extra"
         private const val NOTIFICATION_ID = 1
         private val IPV4_NON_ROUTABLE = listOf("0.0.0.0/8", "224.0.0.0/3")
+        private val ADGUARD_DNS_SERVERS = listOf("46.243.231.30", "46.243.231.31", "2a10:50c0::2:ff", "2a10:50c0::1:ff")
+        private val FAKE_DNS_SERVER = listOf("198.18.53.53")
 
         private fun start(context: Context, intent: Intent, config: String?) {
             try {
@@ -215,16 +217,23 @@ class VpnService : android.net.VpnService(), VpnClientListener {
 
     private fun createTunInterface(config: VpnServiceConfig): ParcelFileDescriptor? {
         LOG.info("Request 'create tun interface' received")
+        val tunConfig = config.listener.tun
         try {
             val builder = Builder().setSession("Trust Tunnel")
-                .setMtu(config.mtuSize.toInt())
+                .setMtu(tunConfig.mtuSize.toInt())
                 .addAddress("172.20.2.13", 32)
                 .addAddress("fdfd:29::2", 64)
-                .addDnsServer("94.140.14.140")
-                .addDnsServer("94.140.14.141")
                 .addDisallowedApplication(applicationContext.packageName)
+            val dnsServers = if (config.dnsUpstreams.isEmpty()) {
+                ADGUARD_DNS_SERVERS
+            } else {
+                FAKE_DNS_SERVER
+            }
+            dnsServers.forEach { server ->
+                builder.addDnsServer(server)
+            }
 
-            val routes = VpnClient.excludeCidr(config.includedRoutes, config.excludedRoutes + IPV4_NON_ROUTABLE)
+            val routes = VpnClient.excludeCidr(tunConfig.includedRoutes, tunConfig.excludedRoutes + IPV4_NON_ROUTABLE)
                 ?: throw Exception("Failed to process routes")
             routes.forEach { route ->
                 val r = NetworkUtils.convertCidrToAddressPrefixPair(route)

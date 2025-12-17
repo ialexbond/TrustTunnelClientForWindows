@@ -16,6 +16,9 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
     private var startProcessed = false
     private let logger = Logger(category: "PacketTunnel")
 
+    private let ADGUARD_DNS_SERVERS = ["46.243.231.30", "46.243.231.31", "2a10:50c0::2:ff", "2a10:50c0::1:ff"]
+    private let FAKE_DNS_SERVER = ["198.18.53.53"]
+
     open override func startTunnel(options: [String : NSObject]? = nil, completionHandler: @escaping ((any Error)?) -> Void) {
         self.startProcessed = false
         var config: String?
@@ -36,23 +39,30 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(TunnelError.parse_config_failed)
             return
         }
-        var tunConfig: TunConfig!
+        var vpnConfig: VpnConfig!
         
         do {
-            tunConfig = try parseTunnelConfig(from: config!)
+            vpnConfig = try parseVpnConfig(from: config!)
         } catch {
             completionHandler(TunnelError.parse_config_failed)
             return
         }
         
+        let tunConfig = vpnConfig.listener.tun
+
         let (ipv4Settings, ipv6Settings) = configureIPv4AndIPv6Settings(from: tunConfig)
         // Set `tunnelRemoteAddress` to a placeholder because it is not principal
         // and there could be multiple endpoint addresses in a real config
         let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         networkSettings.ipv4Settings = ipv4Settings
         networkSettings.ipv6Settings = ipv6Settings
-        let dnsSettings =
-                NEDNSSettings(servers: ["94.140.14.140", "94.140.14.141"])
+        let dnsServers = vpnConfig.dns_upstreams.isEmpty
+            ? ADGUARD_DNS_SERVERS
+            : FAKE_DNS_SERVER
+        let dnsSettings = NEDNSSettings(servers: dnsServers)
+        // Long story short: it provides a tunnel to filter DNS traffic in the "split" mode.
+        // Read more here: https://developer.apple.com/forums/thread/35027
+        dnsSettings.matchDomains = [""]
         networkSettings.dnsSettings = dnsSettings
         networkSettings.mtu = NSNumber(value: tunConfig.mtu_size)
         setTunnelNetworkSettings(networkSettings) { error in
