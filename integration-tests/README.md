@@ -57,8 +57,8 @@ The build script automatically handles repository cloning:
 - `VPN_LIBS_ROOT` - VPN libs source directory (default: ./vpn-libs)
 - `VPN_ENDPOINT_ROOT` - VPN endpoint source directory (default: ./vpn-libs-endpoint)
 - `OUTPUT_VOLUME` - Output directory for build artifacts (default: ./output)
-- `VPN_LIBS_GIT_URL` - Git URL for VPN libs (default: https://github.com/AdguardTeam/VpnLibs)
-- `VPN_ENDPOINT_GIT_URL` - Git URL for VPN endpoint (default: https://github.com/AdguardTeam/VpnLibsEndpoint)
+- `VPN_LIBS_GIT_URL` - Git URL for VPN libs (default: https://github.com/TrustTunnel/TrustTunnelClient)
+- `VPN_ENDPOINT_GIT_URL` - Git URL for VPN endpoint (default: https://github.com/TrustTunnel/TrustTunnel)
 
 ### For Client Builds
 - `CONAN_REPO_URL` - Conan repository URL for dependencies (**required**)
@@ -96,8 +96,8 @@ OUTPUT_VOLUME="/tmp/build-output" ./docker_build.sh client
 
 ### Build with custom Git repositories
 ```bash
-VPN_LIBS_GIT_URL="https://github.com/yourfork/VpnLibs" ./docker_build.sh client
-VPN_ENDPOINT_GIT_URL="https://github.com/yourfork/VpnLibsEndpoint" ./docker_build.sh endpoint
+VPN_LIBS_GIT_URL="https://github.com/yourfork/TrustTunnelClient" ./docker_build.sh client
+VPN_ENDPOINT_GIT_URL="https://github.com/yourfork/TrustTunnel" ./docker_build.sh endpoint
 ```
 
 ## Endpoint Workflow
@@ -157,7 +157,7 @@ Each browser test run automatically:
 10. Collects test results in `/output/output1part.json` and `/output/output2part.json`
 11. Stops processes using PID files and cleans up
 
-**Note**: The test container has access to built binaries (`trusttunnel_client`, `vpn_endpoint`) via the mounted `/output` directory.
+**Note**: The test container has access to built binaries (`trusttunnel_client`, `trusttunnel_endpoint`) via the mounted `/output` directory.
 
 ### Test Parameters
 The test runners (`tests/main/run.sh` and `tests/browser/run.sh`) accept optional parameters:
@@ -192,7 +192,7 @@ Build artifacts will be placed in the `output` directory (or the directory speci
 - Additional test scripts (if present in source)
 
 ### Endpoint Build Output
-- `vpn_endpoint` - The built VPN endpoint executable (from `build_endpoint.sh`)
+- `trusttunnel_endpoint` - The built VPN endpoint executable (from `build_endpoint.sh`)
 
 ### Endpoint Setup Output (from `endpoint_setup.sh`)
 - `cert.pem` - SSL certificate

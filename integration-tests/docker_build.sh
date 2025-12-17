@@ -10,8 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_IMAGE="adguard/core-libs:2.6"
 
 # Default Git URLs
-VPN_LIBS_GIT_URL="${VPN_LIBS_GIT_URL:-https://github.com/AdguardTeam/VpnLibs}"
-VPN_ENDPOINT_GIT_URL="${VPN_ENDPOINT_GIT_URL:-https://github.com/AdguardTeam/VpnLibsEndpoint}"
+VPN_LIBS_GIT_URL="${VPN_LIBS_GIT_URL:-https://github.com/TrustTunnel/TrustTunnelClient}"
+VPN_ENDPOINT_GIT_URL="${VPN_ENDPOINT_GIT_URL:-https://github.com/TrustTunnel/TrustTunnel}"
 
 # Default root directories
 VPN_LIBS_ROOT="${VPN_LIBS_ROOT:-$SCRIPT_DIR/repos/vpn-libs}"

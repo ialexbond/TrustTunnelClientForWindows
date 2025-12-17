@@ -30,9 +30,9 @@ echo "Log file: $LOG_FILE"
 # Change to output directory where the executable and config files are located
 cd "$OUTPUT_DIR"
 
-# Check if vpn_endpoint executable exists
-if [ ! -f "./vpn_endpoint" ]; then
-    echo "Error: vpn_endpoint executable not found in $OUTPUT_DIR"
+# Check if trusttunnel_endpoint executable exists
+if [ ! -f "./trusttunnel_endpoint" ]; then
+    echo "Error: trusttunnel_endpoint executable not found in $OUTPUT_DIR"
     echo "Available files:"
     ls -la
     exit 1
@@ -58,11 +58,11 @@ echo "Starting VPN endpoint..."
 echo "Log file: $LOG_FILE"
 
 # Run the VPN endpoint in background
-echo "Executing: ./vpn_endpoint -l \"$LOG_LEVEL\" \"$CONFIG_FILE\" \"$TLS_HOSTS_SETTINGS_FILE\""
+echo "Executing: ./trusttunnel_endpoint -l \"$LOG_LEVEL\" \"$CONFIG_FILE\" \"$TLS_HOSTS_SETTINGS_FILE\""
 mkdir -p /sys/fs/cgroup/endpoint
 (
 echo $BASHPID > /sys/fs/cgroup/endpoint/cgroup.procs
-exec ./vpn_endpoint -l "$LOG_LEVEL" "$CONFIG_FILE" "$TLS_HOSTS_SETTINGS_FILE" >> "$LOG_FILE" 2>&1
+exec ./trusttunnel_endpoint -l "$LOG_LEVEL" "$CONFIG_FILE" "$TLS_HOSTS_SETTINGS_FILE" >> "$LOG_FILE" 2>&1
 ) &
 ENDPOINT_PID=$!
 

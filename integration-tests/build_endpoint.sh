@@ -26,10 +26,10 @@ fi
 
 echo "Building VPN endpoint with Cargo..."
 cd "$ENDPOINT_DIR"
-cargo build --config net.git-fetch-with-cli=true --release --bin vpn_endpoint
+cargo build --config net.git-fetch-with-cli=true --release --bin trusttunnel_endpoint
 
 echo "Copying built endpoint to output directory..."
-cp ${CARGO_TARGET_DIR}/release/vpn_endpoint "$OUTPUT_DIR/"
+cp ${CARGO_TARGET_DIR}/release/trusttunnel_endpoint "$OUTPUT_DIR/"
 
 echo "Endpoint build completed successfully!"
 echo "Output files:"

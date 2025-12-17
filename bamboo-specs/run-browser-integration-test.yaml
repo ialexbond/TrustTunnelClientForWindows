@@ -58,7 +58,7 @@ Build binaries:
       shared: true
     - name: vpn_endpoint
       location: output
-      pattern: vpn_endpoint
+      pattern: trusttunnel_endpoint
       shared: true
   artifact-subscriptions: [ ]
 Run integration test:

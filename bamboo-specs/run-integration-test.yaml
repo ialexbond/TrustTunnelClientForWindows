@@ -61,7 +61,7 @@ Build binaries:
       shared: true
     - name: vpn_endpoint
       location: output
-      pattern: vpn_endpoint
+      pattern: trusttunnel_endpoint
       shared: true
   artifact-subscriptions: [ ]
 Run integration test:
@@ -205,7 +205,7 @@ Run live test:
               --lib-settings vpn.toml  \
               --hosts-settings tls_hosts.toml
 
-            cargo build --config net.git-fetch-with-cli=true --release --bin vpn_endpoint
+            cargo build --config net.git-fetch-with-cli=true --release --bin trusttunnel_endpoint
         description: Build vpn-libs-endpoint
         working-dir: vpn-libs-endpoint
     - script:
@@ -220,7 +220,7 @@ Run live test:
             export SRC_ROOT=${PWD}
 
             cd vpn-libs-endpoint
-            ./target/release/vpn_endpoint vpn.toml tls_hosts.toml > /dev/null 2>&1 &
+            ./target/release/trusttunnel_endpoint vpn.toml tls_hosts.toml > /dev/null 2>&1 &
             echo "Start endpoint"
             sleep 3
 
