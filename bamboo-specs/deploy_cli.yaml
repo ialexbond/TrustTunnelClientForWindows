@@ -192,15 +192,24 @@ Deploy artifacts:
           - |-
             #!/bin/bash
             set -x -e
+
+            printf "%b\n" "${bamboo_sshSecretKey}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+
             VERSION=$(cat conandata.yml | grep "[0-9]*\.[0-9]*." | tail -1 | sed "s/\"//" | sed "s/\"\://" | sed "s/ //g")
+            TAG=v${VERSION}
+            git tag -d ${TAG} || true
+            git tag ${TAG}
+            git remote set-url origin "${bamboo_planRepository_1_repositoryUrl}"
+            git push origin ${TAG}
+
             # TODO: change to bamboo_githubPublicRepoPassword when repo become public
             git clone https://${bamboo_githubPrivateRepoPassword}:@github.com/TrustTunnel/TrustTunnelClient/
             cd TrustTunnelClient
-            TAG=v${VERSION}-CLI
             CHANGELOG_URL="https://github.com/TrustTunnel/TrustTunnelClient/blob/${TAG}/CHANGELOG.md"
             # TODO: change to bamboo_githubPublicRepoPassword when repo become public
             gh config set -h github.com oauth_token "${bamboo_githubPrivateRepoPassword}" || exit 1
-            gh release delete -y --cleanup-tag ${TAG} || true
+            gh release delete -y ${TAG} || true
             gh release create ${TAG} -t "${TAG}" -n "See [CHANGELOG.md](${CHANGELOG_URL}) for the list of changes."
 
             LINUX_ARCHES=${LINUX_ARCHES:-x86_64 aarch64 armv7 mips mipsel}
