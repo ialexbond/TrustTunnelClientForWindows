@@ -207,6 +207,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
         if (!trusttunnel_config) {
             return nil;
         }
+        ag::vpn_post_quantum_group_set_enabled(trusttunnel_config->post_quantum_group_enabled);
         ag::VpnCallbacks callbacks = {
             .protect_handler = [](ag::SocketProtectEvent *event) {
                 event->result = protectSocket(event)

@@ -78,6 +78,7 @@ static dns::DnsProxySettings make_dns_proxy_settings(const DnsProxyAccessor::Par
 
     settings.enable_route_resolver = false;
     settings.enable_servfail_on_upstreams_failure = false;
+    settings.enable_post_quantum_cryptography = ag::vpn_post_quantum_group_enabled();
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     settings.qos_settings = {

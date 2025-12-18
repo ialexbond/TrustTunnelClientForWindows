@@ -94,6 +94,8 @@ static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_cha
         return nullptr;
     }
 
+    ag::vpn_post_quantum_group_set_enabled(trusttunnel_config->post_quantum_group_enabled);
+
     ag::VpnCallbacks callbacks;
     if (std::holds_alternative<ag::TrustTunnelConfig::TunListener>(trusttunnel_config->listener)) {
         callbacks.protect_handler = [](ag::SocketProtectEvent *event) {

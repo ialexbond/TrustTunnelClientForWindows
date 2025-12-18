@@ -172,6 +172,8 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
         return 0;
     }
 
+    ag::vpn_post_quantum_group_set_enabled(trusttunnel_config->post_quantum_group_enabled);
+
     auto ctx = std::make_unique<VpnCtx>(
             env, thiz,
             protect_socket_method_id, verify_certificate_method_id, state_changed_method_id, connection_info_method_id,
