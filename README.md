@@ -6,6 +6,7 @@
 </p>
 
 # <p align="center">TrustTunnel Client</p>
+
 <p align="center">Free, fast, open-source and secure client for the TrustTunnel VPN</p>
 
 <p align="center"><a href="https://github.com/TrustTunnel/TrustTunnel">Endpoint</a>
@@ -14,21 +15,21 @@
   · <a href="https://agrd.io/android_trusttunnel">Play store</a>
 </p>
 
-TrustTunnel Client Libraris are a collection of C++ libraries that provide client network traffic
-tunneling through an TrustTunnel endpoint.
+TrustTunnel Client Libraries are a collection of C++ libraries that provide client network traffic
+tunneling through a TrustTunnel endpoint.
 It supports Linux, macOS, and Windows platforms.
 
-If you are looking for a TrustTunnel CLI Client, please refer to the [trusttunnel/README.md](./trusttunnel/README.md)
+If you are looking for a TrustTunnel CLI Client, please refer to the [Quick Start](#quick-start-the-trusttunnel-cli-client)
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
+- [Quick Start the TrustTunnel CLI Client](#quick-start-the-trusttunnel-cli-client)
 - [Build Instructions](#build-instructions)
     - [Prerequisites](#prerequisites)
     - [Building](#building)
-- [Quick Start the TrustTunnel VPN Client](#quick-start-the-trusttunnel-vpn-client)
 - [Testing Changes as a Conan Dependency](#testing-changes-as-a-conan-dependency)
 - [Companion Endpoint Repository](#companion-endpoint-repository)
 - [Platform adapters](#platform-adapters)
@@ -62,38 +63,67 @@ If you are looking for a TrustTunnel CLI Client, please refer to the [trusttunne
 
 ---
 
+## Quick Start the TrustTunnel CLI Client
+
+If you haven't yet set up the endpoint, refer to the [Endpoint setup](https://github.com/TrustTunnel/TrustTunnel/blob/master/README.md#endpoint-setup) documentation.
+
+Once you have obtained the exported endpoint configuration for the client, refer to the [Client setup](https://github.com/TrustTunnel/TrustTunnel/blob/master/README.md#client-setup) documentation.
+
+---
+
 ## Build Instructions
 
 ### Prerequisites
 
-- [Python 3](https://www.python.org/downloads/) 3.13 or higher
-- [CMake](https://cmake.org/download/) 3.24 or higher
-- [LLVM](https://releases.llvm.org/) 17 or higher
-- [Conan](https://github.com/conan-io/conan/releases) 2.0.5 or higher
-- [Rust](https://www.rust-lang.org/tools/install) 1.85 or higher
-- [Go](https://go.dev/dl/) 1.18.3 or higher
-- [Ninja](https://formulae.brew.sh/formula/ninja) 1.13 or higher
+- Python 3.13 or higher
+    - macOS: `brew install python`
+    - Linux (Debian/Ubuntu): `apt install python3`
+    - Windows (Chocolatey): `choco install python`
+- CMake 3.24 or higher
+    - macOS: `brew install cmake`
+    - Linux (Debian/Ubuntu): `apt install cmake`
+    - Windows (Chocolatey): `choco install cmake`
+- LLVM 17 or higher
+    - macOS: `brew install llvm`
+    - Linux (Debian/Ubuntu): `apt install llvm clang libc++-dev`
+    - Windows (Chocolatey): `choco install llvm`
+- Conan 2.0.5 or higher
+    - macOS: `brew install conan`
+    - Linux (Debian/Ubuntu): Refer to the [official documentation](https://conan.io/downloads)
+    - Windows (Chocolatey): `choco install conan`
+- Rust 1.85 or higher
+    - macOS/Linux: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.85 -y`
+    - Windows: Refer to the official [documentation](https://rust-lang.org/tools/install/)
+- Go 1.18.3 or higher
+    - macOS: `brew install go`
+    - Linux (Debian/Ubuntu): `apt install golang`
+    - Windows (Chocolatey): `choco install golang`
+- Ninja 1.13 or higher
+    - macOS: `brew install ninja`
+    - Linux (Debian/Ubuntu): `apt install ninja-build`
+    - Windows (Chocolatey): `choco install ninja`
 - Windows-specific
-    - A recent version of Perl,
-      either [Active State Perl](https://www.activestate.com/products/perl/)
-      or [Strawberry Perl](https://strawberryperl.com/).
-      But the latter one adds GCC to `PATH`, which can confuse some build tools when identifying
-      the compiler (removing `C:\Strawberry\c\bin` from `PATH` should resolve any problems).
-    - [NASM](https://www.nasm.us/)
-    - [Visual Studio](https://visualstudio.microsoft.com/vs/older-downloads/) 2019
+    - Perl
+        - Windows (Chocolatey): `choco install strawberryperl`
+      > Note: Strawberry Perl adds `GCC` to your `PATH`, which can conflict with other build tools. If you encounter compiler identification issues, remove `C:\Strawberry\c\bin` from your system `PATH`.
+    - NASM
+        - Windows (Chocolatey): `choco install nasm`
+    - Visual Studio 2022
+        - Windows (Chocolatey): `choco install visualstudio2022buildtools`
 
 ### Building
 
-#### For python externally managed environments 
+#### For python externally managed environments
 
-You might get an error where Python will report some missing modules such as 
+You might get an error where Python will report some missing modules such as
 
 ```shell
 ModuleNotFoundError: No module named 'yaml'
 ```
 
 Please use following commands:
-```
+
+```shell
 python3 -m venv env
 source env/bin/activate
 pip3 install -r ./scripts/requirements.txt
@@ -122,19 +152,19 @@ or run the helper script:
 
 To build the main library:
 
-* Windows:
+- Windows:
 
     ```shell
     mkdir build && cd build
     cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
       -DCMAKE_C_FLAGS_DEBUG=/MT ^
       -DCMAKE_CXX_FLAGS_DEBUG=/MT ^
-      -G "Visual Studio 16 2019" ^
+      -G "Visual Studio 17 2022" ^
       ..
     cmake --build . --target vpnlibs_core
     ```
 
-* macOS:
+- macOS:
 
     ```shell
     mkdir build && cd build
@@ -146,7 +176,7 @@ To build the main library:
     cmake --build . --target vpnlibs_core
     ```
 
-* Others:
+- Others:
 
     ```shell
     mkdir build && cd build
@@ -157,6 +187,8 @@ To build the main library:
       ..
     cmake --build . --target vpnlibs_core
     ```
+
+> Alternatively, you could replace `-DCMAKE_BUILD_TYPE=RelWithDebInfo` with `-DCMAKE_BUILD_TYPE=Debug` to build the debug executables.
 
 To run tests:
 
@@ -180,52 +212,6 @@ For more information, refer to the [client's README](./trusttunnel/README.md) fi
 
 ---
 
-## Quick Start the TrustTunnel VPN Client
-
-To quickly configure and launch the VPN client, follow these steps:
-
-1. [Build](#building) the wizard and client libraries.
-
-2. Generate the minimal working configuration file using the setup wizard tool:
-
-   ```shell
-   ./setup_wizard --mode non-interactive \
-     --address "127.0.0.1:443" --address "[::]:443" \
-     --hostname example.org \
-     --creds premium:premium \
-     --cert cert.pem \
-     --settings trusttunnel_client.toml
-   ```
-
-   or using config generated by the endpoint:
-
-   ```shell
-   ./setup_wizard --mode non-interactive \
-     --endpoint_config premium.toml
-     --settings trusttunnel_client.toml
-   ```
-
-   This results in the following configuration:
-
-    * The endpoint is expected to listen to the port number 443 on the local host.
-    * `example.com` is used as the hostname during TLS handshakes.
-    * `premium` and `premium` are used as the username and password correspondingly.
-    * `cert.pem` certificate is used to verify endpoint's TLS certificate during the handshake.
-      It can be obtained after the [endpoint](#companion-endpoint-repository) setup procedure.
-    * Implicitly, the outbound traffic listener method is set to the TUN device.
-    * The configuration file is named `trusttunnel_client.toml`.
-
-3. Start the client:
-
-   ```shell
-   # sudo is required because TUN device is used by default
-   sudo ./trusttunnel_client --config trusttunnel_client.toml
-   ```
-
-For detailed explanations, see the [client README](./trusttunnel/README.md).
-
----
-
 ## Testing Changes as a Conan Dependency
 
 To test local changes in the library when used as a Conan package dependency, follow these steps:
@@ -237,7 +223,7 @@ To test local changes in the library when used as a Conan package dependency, fo
    Replace `vpn-libs/1.0.0@adguard/oss` with `vpn-libs/<commit_hash>@adguard/oss`.
 5) Re-run the cmake command.
    Note:
-    * If you have already exported the library in this way, the cached version must be purged: `conan remove -c vpn-libs/<commit_hash>`.
+    - If you have already exported the library in this way, the cached version must be purged: `conan remove -c vpn-libs/<commit_hash>`.
 
 ## Companion Endpoint Repository
 

@@ -1,4 +1,5 @@
 # <p align="center">TrustTunnel CLI Client</p>
+
 <p align="center">Simple, fast and secure CLI client for the TrustTunnel VPN</p>
 
 TrustTunnel CLI Client is an application built on top of the TrustTunnel Client Libraries.
@@ -23,7 +24,7 @@ You can use the setup wizard tool to generate a basic configuration file.
 
 #### Usage
 
-For quick setup, please follow [here](../README.md#quick-start-the-trusttunnel-vpn-client).
+For quick setup, please follow [Quick Start instructions for the TrustTunnel CLI Client](../README.md#quick-start-the-trusttunnel-cli-client).
 
 For a more customized configuration experience, follow the steps below:
 
@@ -45,6 +46,8 @@ For a more customized configuration experience, follow the steps below:
 ---
 
 ## Usage
+
+> Windows specific: For tunnel listener to work, `wintun.dll` must be in the DLL search path. Basically, you could [download it](https://www.wintun.net/), extract the file (from the folder matching your architecture, like `amd64`) and place it into the same directory as `trusttunnel_client` executable.
 
 To run the TrustTunnel CLI Client, execute the following command:
 

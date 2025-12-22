@@ -4,7 +4,7 @@ ifeq ($(BUILD_TYPE), release)
 else
 	CMAKE_BUILD_TYPE = Debug
 endif
-MSVC_VER ?= 16
+MSVC_VER ?= 17
 ifeq ($(origin MSVC_YEAR), undefined)
 	ifeq ($(MSVC_VER), 16)
 		MSVC_YEAR = 2019
@@ -61,6 +61,14 @@ build_and_export_bin: build_trusttunnel_client build_wizard
 		$(BUILD_DIR)/trusttunnel/setup_wizard \
 		$(EXPORT_DIR)
 	@echo "Binaries are stored in $(EXPORT_DIR)"
+
+.PHONY: lint-md
+## Lint markdown files.
+## `markdownlint-cli` should be installed:
+##    macOS: `brew install markdownlint-cli`
+##    Linux: `npm install -g markdownlint-cli`
+lint-md:
+	markdownlint README.md trusttunnel/README.md
 
 .PHONY: clean
 ## Clean the project
