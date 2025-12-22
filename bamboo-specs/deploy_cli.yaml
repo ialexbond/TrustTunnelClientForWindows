@@ -205,11 +205,12 @@ Deploy artifacts:
             # Update version in install script and push tag
             sed -i -e "s/^version='[0-9\.]*'$/version='${VERSION}'/" scripts/install.sh
             git add scripts/install.sh
-            git commit -m "Automatic increment version for install script"
+            git commit -m "skipci: Automatic increment version for install script"
             TAG=v${VERSION}
             git tag -d ${TAG} || true
             git tag ${TAG}
             git remote set-url origin "${bamboo_planRepository_1_repositoryUrl}"
+            git push origin HEAD
             git push origin ${TAG}
 
             # TODO: change to bamboo_githubPublicRepoPassword when repo become public
