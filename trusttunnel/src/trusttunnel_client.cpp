@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
             ("s", "Skip verify certificate", cxxopts::value<bool>()->default_value("false"))
             ("c,config", "Config file name.", cxxopts::value<std::string>()->default_value(std::string(DEFAULT_CONFIG_FILE)))
             ("l,loglevel", "Logging level. Possible values: error, warn, info, debug, trace.", cxxopts::value<std::string>()->default_value("info"))
-            ("help", "Print usage");
+            ("h,help", "Print usage");
     // clang-format on
 
     auto result = args.parse(argc, argv);

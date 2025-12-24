@@ -68,7 +68,33 @@ pub fn get_predefined_params() -> MutexGuard<'static, PredefinedParameters> {
 }
 
 fn main() {
-    let mut command = clap::Command::new("VPN client setup wizard")
+    let mut command = clap::Command::new("TrustTunnel CLI Client Setup Wizard")
+        .about("Generate configuration files for TrustTunnel CLI Client")
+        .long_about(r#"Generate configuration files for TrustTunnel CLI Client.
+
+TYPICAL WORKFLOW:
+1. Get the endpoint config file from your TrustTunnel endpoint server
+   (generated via: ./trusttunnel_endpoint vpn.toml hosts.toml -c <user> -a <ip>)
+2. Run: ./setup_wizard --mode non-interactive --endpoint_config <config> --settings trusttunnel_client.toml
+3. Start client: ./trusttunnel_client -c trusttunnel_client.toml
+
+For advanced settings (vpn_mode, killswitch, DNS upstreams, exclusions),
+edit the generated TOML file directly. See README.md for all options."#)
+        .after_help(r#"EXAMPLES:
+    # Interactive mode (guided setup):
+    ./setup_wizard
+
+    # Non-interactive with endpoint config:
+    ./setup_wizard -m non-interactive -e endpoint_config.toml --settings client.toml
+
+    # Non-interactive with manual parameters:
+    ./setup_wizard -m non-interactive \
+        -a 192.168.1.100:443 \
+        -n vpn.example.com \
+        -c myuser:mypassword \
+        --cert server.pem \
+        --settings client.toml
+"#)
         .args(&[
             clap::Arg::new(MODE_PARAM_NAME)
                 .short('m')
