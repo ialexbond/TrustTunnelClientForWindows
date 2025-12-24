@@ -108,7 +108,7 @@ private:
         std::string text;
         MatchFlagsSet flags;
     };
-    struct DomainEntryMalformed{};
+    struct DomainEntryMalformed {};
     using ParseResult = std::variant<SocketAddress, CidrRange, DomainEntryInfo, DomainEntryMalformed>;
 
     VpnMode m_mode = VPN_MODE_GENERAL;

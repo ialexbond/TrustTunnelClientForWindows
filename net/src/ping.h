@@ -2,9 +2,9 @@
 
 #include <span>
 
+#include "net/network_manager.h"
 #include "net/utils.h"
 #include "vpn/event_loop.h"
-#include "net/network_manager.h"
 
 namespace ag {
 
@@ -18,20 +18,20 @@ enum PingStatus {
 };
 
 struct PingResult {
-    Ping *ping;                    // ping pointer (don't delete from callback unless PING_FINISHED is reported)
-    PingStatus status;             // ping status
-    int socket_error;              // has sense if `status` == `PING_SOCKET_ERROR`
-    const VpnEndpoint *endpoint;   // pinged endpoint
-    int ms;                        // RTT value
-    const VpnRelay *relay;         // non-null if the endpoint was pinged through a relay
-    bool is_quic;                  // Whether the established connection is QUIC
-    void *conn_state;              // Connection object, non-NULL if connection hand-off is enabled
+    Ping *ping;                  // ping pointer (don't delete from callback unless PING_FINISHED is reported)
+    PingStatus status;           // ping status
+    int socket_error;            // has sense if `status` == `PING_SOCKET_ERROR`
+    const VpnEndpoint *endpoint; // pinged endpoint
+    int ms;                      // RTT value
+    const VpnRelay *relay;       // non-null if the endpoint was pinged through a relay
+    bool is_quic;                // Whether the established connection is QUIC
+    void *conn_state;            // Connection object, non-NULL if connection hand-off is enabled
 };
 
 struct PingInfo {
     const char *id = ""; ///< An ID string for correlating log messages
 
-    VpnEventLoop *loop = nullptr;           ///< Event loop
+    VpnEventLoop *loop = nullptr; ///< Event loop
     VpnNetworkManager *network_manager = nullptr;
     std::span<const VpnEndpoint> endpoints; ///< List of endpoints to ping
 

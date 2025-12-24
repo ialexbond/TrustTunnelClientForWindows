@@ -8,11 +8,11 @@ import re
 
 class VpnLibsConan(ConanFile):
     name = "vpn-libs"
-    license = "GPL-3.0-or-later"
-    author = "AdguardTeam"
-    url = "https://github.com/AdguardTeam/VpnLibs"
-    vcs_url = "https://github.com/AdguardTeam/VpnLibs.git"
-    description = "A VPN client library that provides client network traffic tunnelling to an AdGuard VPN server"
+    license = "Apache-2.0"
+    author = "TrustTunnel"
+    url = "https://github.com/TrustTunnel/TrustTunnelClient"
+    vcs_url = "https://github.com/TrustTunnel/TrustTunnelClient.git"
+    description = "TrustTunnel client implementation"
     settings = "os", "compiler", "build_type", "arch"
     options = {
         "with_ghc": [True, False],

@@ -13,7 +13,7 @@
   },
   "no-inline-html": {
     "allowed_elements": [
-      "a"
+      "a", "p", "picture", "source", "img"
     ]
   },
   "no-trailing-spaces": {

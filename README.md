@@ -1,11 +1,10 @@
+<!-- markdownlint-disable MD041 -->
 <p align="center">
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="https://cdn.adguardcdn.com/website/github.com/TrustTunnel/logo_dark.svg" width="300px" alt="TrustTunnel" />
 <img src="https://cdn.adguardcdn.com/website/github.com/TrustTunnel/logo_light.svg" width="300px" alt="TrustTunnel" />
 </picture>
 </p>
-
-# <p align="center">TrustTunnel Client</p>
 
 <p align="center">Free, fast, open-source and secure client for the TrustTunnel VPN</p>
 
@@ -85,6 +84,14 @@ Once you have obtained the exported endpoint configuration for the client, refer
     - Windows (Chocolatey): `choco install cmake`
 - LLVM 17 or higher
     - macOS: `brew install llvm`
+        - Add `clang-format` and `clang-tidy` to PATH:
+
+        ```shell
+        ln -s /opt/homebrew/opt/llvm/bin/clang-format /opt/homebrew/bin/clang-format
+        ln -s /opt/homebrew/opt/llvm/bin/clang-tidy /opt/homebrew/bin/clang-tidy
+        ln -s /opt/homebrew/opt/llvm/bin/run-clang-tidy /opt/homebrew/bin/run-clang-tidy
+        ```
+
     - Linux (Debian/Ubuntu): `apt install llvm clang libc++-dev`
     - Windows (Chocolatey): `choco install llvm`
 - Conan 2.0.5 or higher
@@ -113,21 +120,9 @@ Once you have obtained the exported endpoint configuration for the client, refer
 
 ### Building
 
-#### For python externally managed environments
+#### Prepare developer environment
 
-You might get an error where Python will report some missing modules such as
-
-```shell
-ModuleNotFoundError: No module named 'yaml'
-```
-
-Please use following commands:
-
-```shell
-python3 -m venv env
-source env/bin/activate
-pip3 install -r ./scripts/requirements.txt
-```
+Run `make init` to prepare the developer environment and set up git hooks.
 
 #### Using Makefile
 

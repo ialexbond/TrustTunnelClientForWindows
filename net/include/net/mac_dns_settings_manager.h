@@ -1,8 +1,8 @@
 #pragma once
 
 #include <memory>
-#include <string_view>
 #include <span>
+#include <string_view>
 
 namespace ag {
 
@@ -15,6 +15,7 @@ using VpnMacDnsSettingsManagerImplPtr = std::unique_ptr<VpnMacDnsSettingsManager
 class VpnMacDnsSettingsManager {
     VpnMacDnsSettingsManagerImplPtr m_pimpl;
     struct ConstructorAccess {};
+
 public:
     VpnMacDnsSettingsManager(ConstructorAccess access, std::span<const std::string_view> dns_servers);
     ~VpnMacDnsSettingsManager();

@@ -15,11 +15,11 @@
 #include <openssl/x509.h>
 
 #include "common/error.h"
-#include <common/net_utils.h>
 #include "common/socket_address.h"
 #include "common/utils.h"
 #include "net/http_header.h"
 #include "vpn/utils.h"
+#include <common/net_utils.h>
 #include <openssl/ssl.h>
 
 namespace ag {
@@ -48,22 +48,22 @@ struct CertVerifyHandler {
 
 struct VpnEndpoint {
     SocketAddressStorage address; // endpoint address
-    const char *name;         // endpoint host name (used, for example, for TLS handshake)
-    const char *remote_id;    // if not NULL or empty, used for server TLS certificate verification instead of `name`
-    AG_ARRAY_OF(uint8_t) additional_data; // additional data about the endpoint
-    AG_ARRAY_OF(uint8_t) tls_client_random; // custom client random
+    const char *name;             // endpoint host name (used, for example, for TLS handshake)
+    const char *remote_id; // if not NULL or empty, used for server TLS certificate verification instead of `name`
+    AG_ARRAY_OF(uint8_t) additional_data;        // additional data about the endpoint
+    AG_ARRAY_OF(uint8_t) tls_client_random;      // custom client random
     AG_ARRAY_OF(uint8_t) tls_client_random_mask; // mask for custom client random
-    bool has_ipv6; // Whether IPv6 traffic can be routed through the endpoint
-    VpnUpstreamProtocol preferred_protocol; // Protocol to use for the endpoint connection.
-                                            // @see `VpnUpstreamConfig.main_protocol` for full description.
+    bool has_ipv6;                               // Whether IPv6 traffic can be routed through the endpoint
+    VpnUpstreamProtocol preferred_protocol;      // Protocol to use for the endpoint connection.
+                                                 // @see `VpnUpstreamConfig.main_protocol` for full description.
 };
 
 typedef AG_ARRAY_OF(VpnEndpoint) VpnEndpoints;
 
 struct VpnRelay {
-    SocketAddressStorage address; // relay address
-    AG_ARRAY_OF(uint8_t) additional_data; // additional data about the relay
-    AG_ARRAY_OF(uint8_t) tls_client_random; // custom client random
+    SocketAddressStorage address;                // relay address
+    AG_ARRAY_OF(uint8_t) additional_data;        // additional data about the relay
+    AG_ARRAY_OF(uint8_t) tls_client_random;      // custom client random
     AG_ARRAY_OF(uint8_t) tls_client_random_mask; // mask for custom client random
 };
 
@@ -72,7 +72,7 @@ typedef AG_ARRAY_OF(VpnRelay) VpnRelays;
 struct VpnLocation {
     const char *id;         // location id
     VpnEndpoints endpoints; // location endpoints
-    VpnRelays relays; // location relays
+    VpnRelays relays;       // location relays
 };
 
 struct NameValue {
@@ -122,7 +122,7 @@ struct IcmpEchoRequest {
 
 struct IcmpEchoReply {
     /** source address of the reply (essentially equals to `dst` in corresponding `tcpip_icmp_echo_t`) */
-    SocketAddress  peer;
+    SocketAddress peer;
     uint16_t id;    /**< an identifier to aid in matching echos and replies */
     uint16_t seqno; /**< a sequence number to aid in matching echos and replies */
     uint8_t type;   /**< a type of the reply message */
@@ -165,7 +165,7 @@ constexpr std::string_view AG_UNFILTERED_DNS_IPS_V6[] = {
 };
 
 constexpr auto DPI_COOLDOWN_TIME = Millis{25}; // Time after the first part of the ClientHello is sent
-constexpr size_t DPI_SPLIT_SIZE = 1; // Size of the first part of the ClientHello
+constexpr size_t DPI_SPLIT_SIZE = 1;           // Size of the first part of the ClientHello
 
 /**
  * Serializes HTTP headers structure to valid HTTP/1.1 message (request or response)
@@ -393,8 +393,7 @@ struct fmt::formatter<ag::VpnEndpoint> {
 
     template <typename FormatContext>
     auto format(const ag::VpnEndpoint &endpoint, FormatContext &ctx) {
-        return fmt::format_to(
-                ctx.out(), "name={}, address={}", endpoint.name, ag::SocketAddress(endpoint.address));
+        return fmt::format_to(ctx.out(), "name={}, address={}", endpoint.name, ag::SocketAddress(endpoint.address));
     }
 };
 

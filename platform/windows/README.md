@@ -1,4 +1,5 @@
 # Easy wrapper for AdGuard VPI API
+
 - Basically, the `trusttunnel_client` command line application in the form of a library.
 - Only two buttons: `start` and `stop`. The first one accepts the configuration in TOML format.
 - For tunnel listener to work, `wintun.dll` (architecture matching the `vpn_easy` binary)

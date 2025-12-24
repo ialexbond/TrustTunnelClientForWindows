@@ -63,10 +63,10 @@ typedef enum {
 } TcpipEvent;
 
 typedef struct {
-    uint64_t id;                /**< generated identifier of request for connection */
-    int proto;                  /**< connection protocol */
-    const SocketAddress *src;   /**< source address of connection */
-    const SocketAddress *dst;   /**< destination address of connection */
+    uint64_t id;              /**< generated identifier of request for connection */
+    int proto;                /**< connection protocol */
+    const SocketAddress *src; /**< source address of connection */
+    const SocketAddress *dst; /**< destination address of connection */
 } TcpipConnectRequestEvent;
 
 typedef struct {

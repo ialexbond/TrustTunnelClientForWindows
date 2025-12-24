@@ -1,8 +1,8 @@
+use crate::settings::{Endpoint, Settings};
+use crate::user_interaction::{ask_for_input, checked_overwrite, select_index};
 use std::fs;
 use std::ops::Not;
 use std::sync::{Mutex, MutexGuard};
-use crate::settings::{Endpoint, Settings};
-use crate::user_interaction::{ask_for_input, checked_overwrite, select_index};
 
 mod composer;
 mod settings;
@@ -44,11 +44,13 @@ pub struct PredefinedParameters {
 impl PredefinedParameters {
     pub fn new(args: &clap::ArgMatches) -> PredefinedParameters {
         PredefinedParameters {
-            endpoint_addresses: args.get_many::<String>(ENDPOINT_ADDRESS_PARAM_NAME)
+            endpoint_addresses: args
+                .get_many::<String>(ENDPOINT_ADDRESS_PARAM_NAME)
                 .map(Iterator::cloned)
                 .map(Iterator::collect),
             hostname: args.get_one::<String>(HOSTNAME_PARAM_NAME).cloned(),
-            credentials: args.get_one::<String>(CREDENTIALS_PARAM_NAME)
+            credentials: args
+                .get_one::<String>(CREDENTIALS_PARAM_NAME)
                 .map(|x| x.splitn(2, ':'))
                 .and_then(|mut x| x.next().zip(x.next()))
                 .map(|(a, b)| (a.to_string(), b.to_string())),
@@ -154,8 +156,8 @@ Required in non-interactive mode."#),
         );
     let args = command.clone().get_matches();
 
-
-    *MODE.lock().unwrap() = match args.get_one::<String>(MODE_PARAM_NAME)
+    *MODE.lock().unwrap() = match args
+        .get_one::<String>(MODE_PARAM_NAME)
         .map(String::as_str)
         .unwrap_or(MODE_INTERACTIVE)
     {
@@ -165,10 +167,12 @@ Required in non-interactive mode."#),
     };
 
     if get_mode() == Mode::NonInteractive {
-        if !(args.contains_id(ENDPOINT_CONFIG_PARAM_NAME)
-            || args.contains_id(HOSTNAME_PARAM_NAME)) {
-            command.error(clap::error::ErrorKind::MissingRequiredArgument, 
-r#"Additional arguments required for non-interactive mode
+        if !(args.contains_id(ENDPOINT_CONFIG_PARAM_NAME) || args.contains_id(HOSTNAME_PARAM_NAME))
+        {
+            command
+                .error(
+                    clap::error::ErrorKind::MissingRequiredArgument,
+                    r#"Additional arguments required for non-interactive mode
 
 Must be provided either:
 1. All required options separatelly:
@@ -178,14 +182,15 @@ OR
 2. A configuration file generated on endpoint:
    --endpoint_config <endpoint_config>
 
-Note: Cannot mix both variants"#).exit();
+Note: Cannot mix both variants"#,
+                )
+                .exit();
         }
     }
 
     *PREDEFINED_PARAMS.lock().unwrap() = PredefinedParameters::new(&args);
 
-    (get_mode() == Mode::Interactive)
-        .then(|| { println!("Welcome to the setup wizard")});
+    (get_mode() == Mode::Interactive).then(|| println!("Welcome to the setup wizard"));
 
     let settings_path = {
         #[allow(clippy::large_enum_variant)]
@@ -195,48 +200,48 @@ Note: Cannot mix both variants"#).exit();
             MakeFromScratch,
         }
 
-        let action =
-            if let Some((path, settings)) = get_mode().eq(&Mode::NonInteractive).not()
-                .then(|| find_existent_settings::<Settings>("."))
-                .flatten()
-            {
-                let selection = select_index(
-                    format!("Found existing settings: {path}."),
-                    &["Use it", "Modify and overwrite", "Make new from scratch"],
-                    Some(0),
-                );
-                match selection {
-                    0 => Action::UseExisting { path },
-                    1 => Action::ModifyAndOverwrite { path, settings },
-                    2 => Action::MakeFromScratch,
-                    _ => unreachable!("{:?}", selection),
-                }
-            } else {
-                Action::MakeFromScratch
-            };
+        let action = if let Some((path, settings)) = get_mode()
+            .eq(&Mode::NonInteractive)
+            .not()
+            .then(|| find_existent_settings::<Settings>("."))
+            .flatten()
+        {
+            let selection = select_index(
+                format!("Found existing settings: {path}."),
+                &["Use it", "Modify and overwrite", "Make new from scratch"],
+                Some(0),
+            );
+            match selection {
+                0 => Action::UseExisting { path },
+                1 => Action::ModifyAndOverwrite { path, settings },
+                2 => Action::MakeFromScratch,
+                _ => unreachable!("{:?}", selection),
+            }
+        } else {
+            Action::MakeFromScratch
+        };
         match action {
             Action::UseExisting { path } => path,
             Action::ModifyAndOverwrite { path, settings } => {
-                (get_mode() == Mode::Interactive)
-                    .then(|| { println!("Let's build the settings") });
+                (get_mode() == Mode::Interactive).then(|| println!("Let's build the settings"));
                 let settings = settings::build(Some(&settings));
                 println!("The settings are successfully built\n");
 
                 let doc = composer::compose_document(Some(&path), &settings);
-                fs::write(&path, doc.to_string())
-                    .expect("Couldn't write the settings to a file");
+                fs::write(&path, doc.to_string()).expect("Couldn't write the settings to a file");
 
                 path
             }
             Action::MakeFromScratch => {
-                (get_mode() == Mode::Interactive)
-                    .then(|| { println!("Let's build the settings") });
+                (get_mode() == Mode::Interactive).then(|| println!("Let's build the settings"));
                 let settings = settings::build(None);
                 println!("The settings are successfully built\n");
 
                 let path = ask_for_input::<String>(
                     "Path to a file to store the settings",
-                    get_predefined_params().settings_file.clone()
+                    get_predefined_params()
+                        .settings_file
+                        .clone()
                         .or(Some("trusttunnel_client.toml".into())),
                 );
                 if checked_overwrite(&path, "Overwrite the existing settings file?") {
@@ -256,10 +261,15 @@ Note: Cannot mix both variants"#).exit();
 }
 
 fn find_existent_settings<T: serde::de::DeserializeOwned>(path: &str) -> Option<(String, T)> {
-    fs::read_dir(path).ok()?
+    fs::read_dir(path)
+        .ok()?
         .filter_map(Result::ok)
-        .filter(|entry| entry.metadata()
-            .map(|meta| meta.is_file()).unwrap_or_default())
+        .filter(|entry| {
+            entry
+                .metadata()
+                .map(|meta| meta.is_file())
+                .unwrap_or_default()
+        })
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter_map(|fname| fs::read_to_string(&fname).ok().zip(Some(fname)))
         .find_map(|(content, fname)| Some(fname).zip(toml::from_str::<T>(&content).ok()))

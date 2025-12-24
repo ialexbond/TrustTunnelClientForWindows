@@ -5,6 +5,7 @@ This directory contains the new build system for VPN client and endpoint integra
 ## Files
 
 ### Build Scripts
+
 - `docker_build.sh` - Main orchestration script that handles Docker builds and image creation
 - `docker_run_tests.sh` - Test runner script (parameters: main or browser)
 - `build_client.sh` - Script to build the VPN client (runs inside Docker container)
@@ -13,6 +14,7 @@ This directory contains the new build system for VPN client and endpoint integra
 - `endpoint_run.sh` - Script to run the VPN endpoint (saves PID to /output/vpn_endpoint.pid)
 
 ### Test Scripts
+
 - `tests/client_setup.sh` - Script to configure the VPN client with iptables rules and create configuration (port as 4th parameter, supports custom credentials for browser tests)
 - `tests/client_run.sh` - Script to run the VPN client (saves PID to /output/vpn_client.pid)
 - `tests/main/run.sh` - Main test orchestrator (setup → run endpoint → client → test → cleanup with PID management)
@@ -26,18 +28,21 @@ This directory contains the new build system for VPN client and endpoint integra
 ## Usage
 
 ### Build Docker Image
+
 ```bash
 # Build the Docker image for testing
 ./docker_build.sh image
 ```
 
 ### Build VPN Client
+
 ```bash
 # CONAN_REPO_URL is required for client builds
 CONAN_REPO_URL="https://your-conan-repo.com" ./docker_build.sh client
 ```
 
 ### Build VPN Endpoint
+
 ```bash
 ./docker_build.sh endpoint
 ```
@@ -54,6 +59,7 @@ The build script automatically handles repository cloning:
 ## Environment Variables
 
 ### For All Builds
+
 - `VPN_LIBS_ROOT` - VPN libs source directory (default: ./vpn-libs)
 - `VPN_ENDPOINT_ROOT` - VPN endpoint source directory (default: ./vpn-libs-endpoint)
 - `OUTPUT_VOLUME` - Output directory for build artifacts (default: ./output)
@@ -61,13 +67,16 @@ The build script automatically handles repository cloning:
 - `VPN_ENDPOINT_GIT_URL` - Git URL for VPN endpoint (default: https://github.com/TrustTunnel/TrustTunnel)
 
 ### For Client Builds
+
 - `CONAN_REPO_URL` - Conan repository URL for dependencies (**required**)
 
 ### For Endpoint Setup (endpoint_setup.sh)
+
 - `ENDPOINT_HOSTNAME` - Hostname for SSL certificate generation (default: endpoint.test)
 - `OUTPUT_DIR` - Directory for setup files (default: /output)
 
 ### For Browser Tests
+
 - `BAMBOO_VPN_APP_ID` - Required for browser tests - VPN app ID for backend authentication
 - `BAMBOO_VPN_TOKEN` - Required for browser tests - VPN token for backend authentication
 - `AGVPN_HELPER_URL` - Optional URL to download agvpn_helper if not present in output directory
@@ -75,26 +84,31 @@ The build script automatically handles repository cloning:
 ## Examples
 
 ### Build Docker image
+
 ```bash
 ./docker_build.sh image
 ```
 
 ### Build client with custom Conan repository
+
 ```bash
 CONAN_REPO_URL="https://your-conan-repo.com" ./docker_build.sh client
 ```
 
 ### Build endpoint (hostname is set during setup phase)
+
 ```bash
 ./docker_build.sh endpoint
 ```
 
 ### Build with custom output directory
+
 ```bash
 OUTPUT_VOLUME="/tmp/build-output" ./docker_build.sh client
 ```
 
 ### Build with custom Git repositories
+
 ```bash
 VPN_LIBS_GIT_URL="https://github.com/yourfork/TrustTunnelClient" ./docker_build.sh client
 VPN_ENDPOINT_GIT_URL="https://github.com/yourfork/TrustTunnel" ./docker_build.sh endpoint
@@ -109,6 +123,7 @@ For the endpoint, the build process is now separated into distinct phases:
 3. **Run**: `./endpoint_run.sh` - Starts the VPN endpoint server
 
 ### Running endpoint setup and execution separately
+
 ```bash
 # Build the endpoint
 ./docker_build.sh endpoint
@@ -125,13 +140,16 @@ OUTPUT_DIR="./output" LOG_LEVEL="debug" ./endpoint_run.sh
 The test system provides automated test execution with endpoint management:
 
 ### Test Types
+
 - **Main tests**: `./docker_run_tests.sh main`
 - **Browser tests**: `./docker_run_tests.sh browser`
 
 ### Test Workflow
 
 #### Main Tests
+
 Each main test run automatically:
+
 1. Sets up the VPN endpoint (certificates, configuration)
 2. Starts the endpoint in the background (saves PID to `/output/vpn_endpoint.pid`)
 3. Determines endpoint IP addresses
@@ -144,7 +162,9 @@ Each main test run automatically:
 7. Stops processes using PID files and cleans up (including network namespace)
 
 #### Browser Tests
+
 Each browser test run automatically:
+
 1. Downloads `agvpn_helper` if not present (using `AGVPN_HELPER_URL` if provided)
 2. Fetches real backend location and credentials using `agvpn_helper`
 3. Sets up the VPN client with real backend configuration
@@ -160,7 +180,9 @@ Each browser test run automatically:
 **Note**: The test container has access to built binaries (`trusttunnel_client`, `trusttunnel_endpoint`) via the mounted `/output` directory.
 
 ### Test Parameters
+
 The test runners (`tests/main/run.sh` and `tests/browser/run.sh`) accept optional parameters:
+
 - `protocol` - Protocol to test (default: https)
 - `mode` - Test mode: tun or socks (default: tun)
 - `socks_port` - SOCKS port when mode=socks (default: 7777)
@@ -169,6 +191,7 @@ The test runners (`tests/main/run.sh` and `tests/browser/run.sh`) accept optiona
 These parameters are automatically passed to the underlying `run_tests.sh` scripts along with endpoint connection details.
 
 ### Examples
+
 ```bash
 # Run main tests
 ./docker_run_tests.sh main
@@ -188,13 +211,16 @@ ENDPOINT_HOSTNAME="test.local" ./docker_run_tests.sh main
 Build artifacts will be placed in the `output` directory (or the directory specified by `OUTPUT_VOLUME`):
 
 ### Client Build Output
+
 - `trusttunnel_client` - The built VPN client executable
 - Additional test scripts (if present in source)
 
 ### Endpoint Build Output
+
 - `trusttunnel_endpoint` - The built VPN endpoint executable (from `build_endpoint.sh`)
 
 ### Endpoint Setup Output (from `endpoint_setup.sh`)
+
 - `cert.pem` - SSL certificate
 - `key.pem` - SSL private key
 - `vpn.conf` - VPN configuration file
@@ -228,6 +254,7 @@ The test framework uses PID files for robust process lifecycle management:
 The browser tests provide comprehensive network load simulation:
 
 ### Features
+
 - **Puppeteer-based**: Uses headless Chrome to simulate real browser traffic
 - **Multiple URLs**: Tests against BBC, Google, Guardian, and AdGuard websites
 - **Network Disruption**: Simulates network problems and tests VPN reconnection
@@ -236,6 +263,7 @@ The browser tests provide comprehensive network load simulation:
 - **Real Backend**: Uses `agvpn_helper` to connect to actual VPN backend infrastructure
 
 ### Browser Test Output
+
 - `output1part.json` - Test results from the first 30-minute phase
 - `output2part.json` - Test results after network disruption and recovery
 - Detailed statistics including request timing, error counts, and reload frequencies

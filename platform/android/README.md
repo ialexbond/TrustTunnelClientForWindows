@@ -1,4 +1,4 @@
-# <p align="center">TrustTunnel Client Android adapter</p>
+# TrustTunnel Client Android adapter
 
 ## Build Instructions
 
@@ -13,7 +13,6 @@
 - [Android NDK](https://developer.android.com/ndk/downloads) 28.1.13356709 or higher
 
 You can also download SDK and NDK using Android Studio SDK Manager.
-
 
 ### Building
 

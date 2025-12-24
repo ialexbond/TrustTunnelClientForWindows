@@ -14,15 +14,24 @@ ifeq ($(origin MSVC_YEAR), undefined)
 endif
 BUILD_DIR = build
 EXPORT_DIR ?= bin
+SETUP_WIZARD_DIR = trusttunnel/setup_wizard
+
+.PHONY: init
+## Initialize the development environment (git hooks, etc.)
+init:
+	git config core.hooksPath ./scripts/hooks
 
 .PHONY: bootstrap_deps
 ## Export all the required conan packages to the local cache
 bootstrap_deps:
+	python3 -m venv env && \
+	. env/bin/activate && \
+	pip install -r requirements.txt && \
 	./scripts/bootstrap_conan_deps.py
 
-.PHONY: build_libs
-## Build the libraries
-build_libs: bootstrap_deps
+.PHONY: setup_cmake
+## Setup CMake
+setup_cmake: bootstrap_deps
 ifeq ($(OS), Windows_NT)
 	cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
 		-DCMAKE_C_FLAGS_DEBUG=/MT ^
@@ -32,12 +41,16 @@ ifeq ($(OS), Windows_NT)
 else
 	mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) && \
 	cmake -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
-		-DCMAKE_C_COMPILER="clang" \
-		-DCMAKE_CXX_COMPILER="clang++" \
-		-DCMAKE_CXX_FLAGS="-stdlib=libc++" \
-		-GNinja \
-		..
+	-DCMAKE_C_COMPILER="clang" \
+	-DCMAKE_CXX_COMPILER="clang++" \
+	-DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+	-GNinja \
+	..
 endif
+
+.PHONY: build_libs
+## Build the libraries
+build_libs: setup_cmake
 	cmake --build $(BUILD_DIR) --target vpnlibs_core
 
 .PHONY: build_trusttunnel_client
@@ -62,15 +75,78 @@ build_and_export_bin: build_trusttunnel_client build_wizard
 		$(EXPORT_DIR)
 	@echo "Binaries are stored in $(EXPORT_DIR)"
 
-.PHONY: lint-md
-## Lint markdown files.
-## `markdownlint-cli` should be installed:
-##    macOS: `brew install markdownlint-cli`
-##    Linux: `npm install -g markdownlint-cli`
-lint-md:
-	markdownlint README.md trusttunnel/README.md
-
 .PHONY: clean
 ## Clean the project
 clean:
 	cmake --build $(BUILD_DIR) --target clean
+
+.PHONY: lint
+lint: lint-md lint-rust lint-cpp
+
+## Lint c++ files.
+## TODO: enable clang-tidy
+.PHONY: lint-cpp
+lint-cpp: clang-format
+
+## Check c++ code formatting with clang-format.
+.PHONY: clang-format
+clang-format:
+	find . \
+	-path './third-party' -prune -o \
+	-name '*.c' -o -name '*.cpp' -o -name '*.h' \
+	-print | xargs clang-format -n -Werror
+
+## Check c++ code formatting with clang-tidy.
+.PHONY: clang-tidy
+clang-tidy:
+	cmake -S . -B $(BUILD_DIR) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	run-clang-tidy -p $(BUILD_DIR) '^(?!.*(/third-party/)).*\.cpp$$'
+
+## Lint markdown files.
+## `markdownlint-cli` should be installed:
+##    macOS: `brew install markdownlint-cli`
+##    Linux: `npm install -g markdownlint-cli`
+.PHONY: lint-md
+lint-md:
+	markdownlint .
+
+## Check Rust code formatting with rustfmt.
+## `rustfmt` should be installed:
+##    rustup component add rustfmt
+.PHONY: lint-rust
+lint-rust:
+	cargo fmt --all --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml -- --check
+
+## Fix linter issues that are auto-fixable.
+.PHONY: lint-fix
+lint-fix: lint-fix-rust lint-fix-md lint-fix-cpp
+
+## Auto-fix c++ formatting with clang-format.
+.PHONY: lint-fix-cpp
+lint-fix-cpp:
+	find . \
+		-path './third-party' -prune -o \
+		-name '*.c' -o -name '*.cpp' -o -name '*.h' \
+		-print | xargs clang-format -i
+
+## Auto-fix Rust code formatting issues with rustfmt.
+.PHONY: lint-fix-rust
+lint-fix-rust:
+	cargo fmt --all --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml
+
+## Auto-fix markdown files.
+.PHONY: lint-fix-md
+lint-fix-md:
+	markdownlint --fix .
+
+.PHONY: test
+test: test-cpp test-rust
+
+.PHONY: test-cpp
+test-cpp: build_libs
+	cmake --build $(BUILD_DIR) --target tests
+	ctest --test-dir $(BUILD_DIR)
+
+.PHONY: test-rust
+test-rust:
+	cargo test --workspace --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml

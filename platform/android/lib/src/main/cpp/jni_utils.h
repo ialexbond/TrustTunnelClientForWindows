@@ -1,11 +1,11 @@
 #pragma once
 
-#include <memory>
 #include <cassert>
+#include <memory>
 
-#include <pthread.h>
 #include <jni.h>
 #include <openssl/x509.h>
+#include <pthread.h>
 
 /**
  * Attaches the current thread, if necessary, and pushes a local reference frame. Reverses that in dtor.

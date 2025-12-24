@@ -1,18 +1,18 @@
 #pragma once
 
-#include <mach/mach_port.h>
-#include <mach/mach_interface.h>
 #include <mach/mach_init.h>
+#include <mach/mach_interface.h>
+#include <mach/mach_port.h>
 
-#include <IOKit/pwr_mgt/IOPMLib.h>
 #include <IOKit/IOMessage.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
+#include <condition_variable>
 #include <functional>
 #include <mutex>
 #include <thread>
-#include <condition_variable>
 
 class AppleSleepNotifier {
 public:

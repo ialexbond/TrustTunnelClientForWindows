@@ -100,7 +100,7 @@ bool tls_verify_cert_ip(X509 *cert, const char *ip);
  * @param store trusted CA store (if NULL, `tls_create_ca_store` will be used)
  * @return NULL if verified successfully, error message otherwise
  */
-const char *tls_verify_cert(X509 *cert, STACK_OF(X509) *chain, X509_STORE *store);
+const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store);
 
 /**
  * Create trusted CA store from system's one
@@ -112,8 +112,7 @@ X509_STORE *tls_create_ca_store();
 #define tls_input(t, d, s) (t)->in = {(uint8_t *) (d), size_t(s)}
 
 /** Setup to parse a handshake record. */
-#define tls_input_hshake(t, d, s) \
-    (t)->rec = {(uint8_t *) (d), size_t(s)}, (t)->state = 1
+#define tls_input_hshake(t, d, s) (t)->rec = {(uint8_t *) (d), size_t(s)}, (t)->state = 1
 
 /**
  * Parse TLS record

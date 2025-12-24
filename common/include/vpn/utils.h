@@ -29,7 +29,7 @@ struct VpnError {
 typedef enum {
     VPN_UP_HTTP2, // HTTP/2 only.
     VPN_UP_HTTP3, // HTTP/3, with mandatory fallback to HTTP/2.
-    VPN_UP_AUTO, // VpnEndpoint: Try HTTP/2 and HTTP/3 simultaneously, use the first successful connection.
+    VPN_UP_AUTO,  // VpnEndpoint: Try HTTP/2 and HTTP/3 simultaneously, use the first successful connection.
                   // VpnUpstreamConfig: Use endpoints' preferred protocol.
 } VpnUpstreamProtocol;
 
@@ -59,8 +59,7 @@ struct TcpFlowCtrlInfo {
 
 // May be owning or non-owning depending on context
 typedef AG_ARRAY_OF(const char) VpnStr;
-#define VPNSTR_INIT(c_string)                                                                                          \
-    { c_string, (c_string) ? uint32_t(strlen(c_string)) : 0 }
+#define VPNSTR_INIT(c_string) {c_string, (c_string) ? uint32_t(strlen(c_string)) : 0}
 
 // QUIC defaults
 static constexpr size_t QUIC_LOCAL_CONN_ID_LEN = 16;
@@ -135,8 +134,8 @@ class VpnPacketsHolder {
 public:
     VpnPacketsHolder() = default;
     explicit VpnPacketsHolder(VpnPackets packets)
-            : m_packets(packets.data, packets.data + packets.size)
-    {}
+            : m_packets(packets.data, packets.data + packets.size) {
+    }
     ~VpnPacketsHolder() {
         for (auto p : m_packets) {
             if (p.destructor) {
@@ -164,6 +163,7 @@ public:
         std::swap(m_packets, other.m_packets);
         return *this;
     }
+
 private:
     std::vector<VpnPacket> m_packets;
 };
@@ -172,7 +172,7 @@ private:
  * Convert milliseconds to timeval structure
  */
 static inline struct timeval ms_to_timeval(uint32_t ms) {
-    struct timeval tv {}; // NOLINT(cppcoreguidelines-pro-type-member-init)
+    struct timeval tv{}; // NOLINT(cppcoreguidelines-pro-type-member-init)
     tv.tv_sec = ms / 1000;
     tv.tv_usec = (ms % 1000) * 1000;
     return tv;
@@ -304,7 +304,7 @@ uint32_t ntoh_24(uint32_t x);
 /**
  * Just like `std::remove_if()`, but swaps elements to the tail instead of moving them
  */
-template<typename Iterator, typename Predicate>
+template <typename Iterator, typename Predicate>
 Iterator swap_remove_if(Iterator begin, Iterator end, Predicate p) {
     begin = std::find_if(begin, end, p);
     if (begin != end) {

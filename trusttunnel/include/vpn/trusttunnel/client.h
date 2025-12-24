@@ -4,8 +4,8 @@
 #include <memory>
 #include <thread>
 
-#include "common/logger.h"
 #include "common/autofd.h"
+#include "common/logger.h"
 #include "config.h"
 #include "net/os_tunnel.h"
 #include "net/utils.h"
@@ -60,7 +60,9 @@ public:
     TrustTunnelClient &operator=(TrustTunnelClient &&c) = delete;
 
     struct AutoSetup {};
-    struct UseTunnelFd { AutoFd fd; };
+    struct UseTunnelFd {
+        AutoFd fd;
+    };
     struct UseProcessPackets {};
 
     using ListenerSettings = std::variant<AutoSetup, UseTunnelFd, UseProcessPackets>;

@@ -48,18 +48,18 @@ typedef enum {
     VPN_EC_NOERROR, // Depending on context may mean successful operation status (if returned from `vpn_connect`)
                     // or an endpoint session is closed without any error (if raised with `VPN_EVENT_STATE_CHANGED`)
     VPN_EC_ERROR,   // General code for the errors not described below
-    VPN_EC_INVALID_SETTINGS,       // Settings passed for an operation are invalid
-    VPN_EC_ADDR_IN_USE,            // Operation failed because the specified address was in use
-    VPN_EC_INVALID_STATE,          // VPN client instance is in invalid state for the requested operation
+    VPN_EC_INVALID_SETTINGS, // Settings passed for an operation are invalid
+    VPN_EC_ADDR_IN_USE,      // Operation failed because the specified address was in use
+    VPN_EC_INVALID_STATE,    // VPN client instance is in invalid state for the requested operation
     // Recoverable runtime errors. Client may update data from backend and reconnect.
-    VPN_EC_AUTH_REQUIRED,          // Authorization error (in case user credentials are invalid or expired)
-    VPN_EC_LOCATION_UNAVAILABLE,   // None of the endpoints in a location are available
+    VPN_EC_AUTH_REQUIRED,        // Authorization error (in case user credentials are invalid or expired)
+    VPN_EC_LOCATION_UNAVAILABLE, // None of the endpoints in a location are available
     // Unrecoverable runtime errors. Client should NOT reconnect automatically.
-    VPN_EC_EVENT_LOOP_FAILURE,     // Failed to start the IO event loop, or it unexpectedly terminated
-    VPN_EC_INITIAL_CONNECT_FAILED, // No connection attempts left after initial connect() call
-    VPN_EC_FATAL_CONNECTIVITY_ERROR, // Fired after ConnectivityError callback with fatal error code (e.g. too many devices)
-                                     // In this case client should not reconnect automatically, and instead show user an error
-                                     // And properly tear down both tunnel and VPN client.
+    VPN_EC_EVENT_LOOP_FAILURE,       // Failed to start the IO event loop, or it unexpectedly terminated
+    VPN_EC_INITIAL_CONNECT_FAILED,   // No connection attempts left after initial connect() call
+    VPN_EC_FATAL_CONNECTIVITY_ERROR, // Fired after ConnectivityError callback with fatal error code (e.g. too many
+                                     // devices) In this case client should not reconnect automatically, and instead
+                                     // show user an error And properly tear down both tunnel and VPN client.
 } VpnErrorCode;
 
 typedef struct Vpn Vpn;
@@ -78,7 +78,8 @@ typedef struct {
      */
     evutil_socket_t fd;
     /**
-     * For non-fd mode, if specified, then `VPN_EVENT_CLIENT_OUTPUT is not needed - it will be automatically passed to this tunnel.
+     * For non-fd mode, if specified, then `VPN_EVENT_CLIENT_OUTPUT is not needed - it will be automatically passed to
+     * this tunnel.
      */
     VpnOsTunnel *tunnel;
     /** Maximum transfer unit for TCP protocol (if 0, `DEFAULT_MTU_SIZE` will be used) */
@@ -262,8 +263,8 @@ typedef enum {
 } VpnEvent;
 
 typedef struct {
-    X509 *cert; // Certificate to verify
-    STACK_OF(X509) *chain; // Untrusted chain
+    X509 *cert;             // Certificate to verify
+    STACK_OF(X509) * chain; // Untrusted chain
     /**
      * SET BY HANDLER: Outcome of the operation (0 if successful, `VPN_SKIP_VERIFICATION_FLAG` to indicate that
      * hostname verification should be skipped)
@@ -315,10 +316,10 @@ typedef struct {
 } VpnWaitingRecoveryInfo;
 
 typedef struct {
-    const VpnEndpoint *endpoint;          // the endpoint to which the library is connected
-    const VpnRelay *relay;                // non-null if connected through a relay
-    VpnUpstreamProtocol protocol;         // the protocol used for this connection
-    const char *kex_group;                // name of group function used for key exchange
+    const VpnEndpoint *endpoint;  // the endpoint to which the library is connected
+    const VpnRelay *relay;        // non-null if connected through a relay
+    VpnUpstreamProtocol protocol; // the protocol used for this connection
+    const char *kex_group;        // name of group function used for key exchange
 } VpnConnectedInfo;
 
 typedef struct {
@@ -385,20 +386,20 @@ typedef struct {
 } VpnTunnelConnectionClosedEvent;
 
 typedef enum {
-    VPN_FCA_BYPASS,  // Route the connection directly to the destination host
-    VPN_FCA_TUNNEL,  // Route the connection through the VPN endpoint
-    VPN_FCA_REJECT,   // Reject the connection
+    VPN_FCA_BYPASS, // Route the connection directly to the destination host
+    VPN_FCA_TUNNEL, // Route the connection through the VPN endpoint
+    VPN_FCA_REJECT, // Reject the connection
 } VpnFinalConnectionAction;
 
 /**
  * VPN client connection information
  */
 typedef struct {
-    const SocketAddressStorage *src;           // source address of connection
-    const SocketAddressStorage *dst;           // destination address of connection
-    const char *domain;                 // destination domain
-    int proto;                          // connection protocol
-    VpnFinalConnectionAction action;    // final action
+    const SocketAddressStorage *src; // source address of connection
+    const SocketAddressStorage *dst; // destination address of connection
+    const char *domain;              // destination domain
+    int proto;                       // connection protocol
+    VpnFinalConnectionAction action; // final action
 } VpnConnectionInfoEvent;
 
 typedef struct {
@@ -523,7 +524,7 @@ typedef struct {
     /**
      * QoS class and relative priority for threads on iOS platform
      */
-     VpnQosSettings qos_settings;
+    VpnQosSettings qos_settings;
 #endif // __APPLE__ && TARGET_OS_IPHONE
 } VpnSettings;
 

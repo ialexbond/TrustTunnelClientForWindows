@@ -1,6 +1,4 @@
-# <p align="center">TrustTunnel CLI Client</p>
-
-<p align="center">Simple, fast and secure CLI client for the TrustTunnel VPN</p>
+# TrustTunnel CLI Client
 
 TrustTunnel CLI Client is an application built on top of the TrustTunnel Client Libraries.
 It provides an easy-to-use interface to configure and connect to an TrustTunnel endpoint.
@@ -45,7 +43,7 @@ For a more customized configuration experience, follow the steps below:
 
 #### Setup Wizard CLI Options
 
-```
+```text
 Usage: setup_wizard [OPTIONS]
 
 Options:
@@ -65,11 +63,13 @@ Options:
 #### Examples
 
 **Interactive mode** (guided setup):
+
 ```shell
 ./setup_wizard
 ```
 
 **Non-interactive with endpoint config** (recommended):
+
 ```shell
 ./setup_wizard --mode non-interactive \
     --endpoint_config <endpoint_config.toml> \
@@ -77,6 +77,7 @@ Options:
 ```
 
 **Non-interactive with manual parameters**:
+
 ```shell
 ./setup_wizard --mode non-interactive \
     --address 192.168.1.100:443 \
@@ -95,7 +96,7 @@ The configuration file uses TOML format. Below are all available settings.
 ### Top-Level Settings
 
 | Variable | Type | Default | Description |
-|----------|------|---------|-------------|
+| -------- | ---- | ------- | ----------- |
 | `loglevel` | string | `"info"` | Logging level: `info`, `debug`, `trace` |
 | `vpn_mode` | string | `"general"` | Routing policy: `general` (route all except exclusions) or `selective` (route only exclusions) |
 | `killswitch_enabled` | bool | `true` | Block traffic when VPN connection is lost |
@@ -107,7 +108,7 @@ The configuration file uses TOML format. Below are all available settings.
 ### Endpoint Settings (`[endpoint]`)
 
 | Variable | Type | Default | Description |
-|----------|------|---------|-------------|
+| -------- | ---- | ------- | ----------- |
 | `hostname` | string | *required* | Endpoint hostname for TLS session establishment |
 | `addresses` | array[string] | *required* | Endpoint IP:port addresses (pinger selects best) |
 | `has_ipv6` | bool | `true` | Whether IPv6 traffic can be routed through endpoint |
@@ -123,7 +124,7 @@ The configuration file uses TOML format. Below are all available settings.
 ### TUN Listener Settings (`[listener.tun]`)
 
 | Variable | Type | Default | Description |
-|----------|------|---------|-------------|
+| -------- | ---- | ------- | ----------- |
 | `bound_if` | string | auto-detected | Network interface for VPN client connections (Linux/Windows: auto, macOS: `en0`) |
 | `included_routes` | array[string] | `["0.0.0.0/0", "2000::/3"]` | Routes in CIDR notation to set to the virtual interface |
 | `excluded_routes` | array[string] | `["0.0.0.0/8", "10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"]` | Routes in CIDR notation to exclude from VPN routing |
@@ -132,7 +133,7 @@ The configuration file uses TOML format. Below are all available settings.
 ### SOCKS Listener Settings (`[listener.socks]`)
 
 | Variable | Type | Default | Description |
-|----------|------|---------|-------------|
+| -------- | ---- | ------- | ----------- |
 | `address` | string | `"127.0.0.1:1080"` | IP address and port to bind the SOCKS5 proxy |
 | `username` | string | `null` | Username for SOCKS authentication (optional) |
 | `password` | string | `null` | Password for SOCKS authentication (optional) |

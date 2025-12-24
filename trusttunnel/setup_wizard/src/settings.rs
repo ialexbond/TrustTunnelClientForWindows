@@ -1,11 +1,14 @@
-use std::{fs, path};
+use crate::user_interaction::{
+    ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_password,
+    checked_overwrite, select_variant,
+};
+use crate::Mode;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::ops::Not;
-use serde::{Deserialize, Serialize};
+use std::{fs, path};
 use x509_parser::extensions::GeneralName;
-use crate::Mode;
-use crate::user_interaction::{ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_password, checked_overwrite, select_variant};
 
 macro_rules! docgen {
     (
@@ -260,7 +263,8 @@ impl Listener {
         match self {
             Listener::Socks(_) => "socks",
             Listener::Tun(_) => "tun",
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -272,18 +276,11 @@ impl SocksListener {
 
 impl TunListener {
     pub fn default_bound_if() -> String {
-        if cfg!(target_os = "macos") {
-            "en0"
-        } else {
-            ""
-        }.into()
+        if cfg!(target_os = "macos") { "en0" } else { "" }.into()
     }
 
     pub fn default_included_routes() -> Vec<String> {
-        vec![
-            "0.0.0.0/0".into(),
-            "2000::/3".into(),
-        ]
+        vec!["0.0.0.0/0".into(), "2000::/3".into()]
     }
 
     pub fn default_excluded_routes() -> Vec<String> {
@@ -304,30 +301,39 @@ impl TunListener {
 macro_rules! opt_field {
     ($x:expr, $field:ident) => {
         $x.map(|x| &x.$field)
-    }
+    };
 }
 
 pub fn build(template: Option<&Settings>) -> Settings {
     Settings {
-        loglevel: opt_field!(template, loglevel).cloned()
+        loglevel: opt_field!(template, loglevel)
+            .cloned()
             .unwrap_or_else(Settings::default_loglevel),
         vpn_mode: select_variant(
             format!("{}\n", Settings::doc_vpn_mode()),
             Settings::available_vpn_modes(),
-            Settings::available_vpn_modes().iter()
-                .position(|x| *x == opt_field!(template, vpn_mode).cloned()
+            Settings::available_vpn_modes().iter().position(|x| {
+                *x == opt_field!(template, vpn_mode)
+                    .cloned()
                     .unwrap_or_else(Settings::default_vpn_mode)
-                    .as_str()),
-        ).into(),
-        killswitch_enabled: opt_field!(template, killswitch_enabled).cloned()
+                    .as_str()
+            }),
+        )
+        .into(),
+        killswitch_enabled: opt_field!(template, killswitch_enabled)
+            .cloned()
             .unwrap_or_else(Settings::default_killswitch_enabled),
-        killswitch_allow_ports: opt_field!(template, killswitch_allow_ports).cloned()
+        killswitch_allow_ports: opt_field!(template, killswitch_allow_ports)
+            .cloned()
             .unwrap_or_else(Settings::default_killswitch_allow_ports),
-        post_quantum_group_enabled: opt_field!(template, post_quantum_group_enabled).cloned()
+        post_quantum_group_enabled: opt_field!(template, post_quantum_group_enabled)
+            .cloned()
             .unwrap_or_else(Settings::default_post_quantum_group_enabled),
-        exclusions: opt_field!(template, exclusions).cloned()
+        exclusions: opt_field!(template, exclusions)
+            .cloned()
             .unwrap_or_default(),
-        dns_upstreams: opt_field!(template, dns_upstreams).cloned()
+        dns_upstreams: opt_field!(template, dns_upstreams)
+            .cloned()
             .unwrap_or_default(),
         endpoint: build_endpoint(opt_field!(template, endpoint)),
         listener: build_listener(opt_field!(template, listener)),
@@ -336,94 +342,106 @@ pub fn build(template: Option<&Settings>) -> Settings {
 
 fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
     let predefined_params = crate::get_predefined_params().clone();
-    let endpoint_config: Option<EndpointConfig> = empty_to_none(ask_for_input("Path to endpoint config, empty if no", predefined_params.endpoint_config.or(Some("".to_string()))))
-        .and_then(|x| {
-            fs::read_to_string(&x)
-                .map_err(|e| { panic!("Failed to read endpoint config file:\n{}", e.to_string()) })
-                .ok()
-        })
-        .and_then(|x| {
-            toml::de::from_str(x.as_str())
-                .map_err(|e| { panic!("Failed to parse endpoint config:\n{}", e.to_string()) })
-                .ok()
-        });
+    let endpoint_config: Option<EndpointConfig> = empty_to_none(ask_for_input(
+        "Path to endpoint config, empty if no",
+        predefined_params.endpoint_config.or(Some("".to_string())),
+    ))
+    .and_then(|x| {
+        fs::read_to_string(&x)
+            .map_err(|e| panic!("Failed to read endpoint config file:\n{}", e.to_string()))
+            .ok()
+    })
+    .and_then(|x| {
+        toml::de::from_str(x.as_str())
+            .map_err(|e| panic!("Failed to parse endpoint config:\n{}", e.to_string()))
+            .ok()
+    });
     let mut x = Endpoint {
-        addresses: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.addresses.clone().into()
-            })
+        addresses: endpoint_config
+            .as_ref()
+            .and_then(|x| x.addresses.clone().into())
             .or_else(|| {
                 ask_for_input::<String>(
-                    &format!("{}\nMust be delimited by whitespace.\n", Endpoint::doc_addresses()),
-                    predefined_params.endpoint_addresses
+                    &format!(
+                        "{}\nMust be delimited by whitespace.\n",
+                        Endpoint::doc_addresses()
+                    ),
+                    predefined_params
+                        .endpoint_addresses
                         .or(opt_field!(template, addresses).cloned())
                         .map(|x| x.join(" ")),
-                    )
-                    .split_whitespace()
-                    .map(String::from)
-                    .collect::<Vec<String>>().into()
+                )
+                .split_whitespace()
+                .map(String::from)
+                .collect::<Vec<String>>()
+                .into()
             })
             .unwrap(),
-        has_ipv6: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.has_ipv6.into()
-            })
+        has_ipv6: endpoint_config
+            .as_ref()
+            .and_then(|x| x.has_ipv6.into())
             .or(opt_field!(template, has_ipv6).cloned())
             .unwrap_or_else(Endpoint::default_has_ipv6),
-        username: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.username.clone().into()
-            })
+        username: endpoint_config
+            .as_ref()
+            .and_then(|x| x.username.clone().into())
             .or_else(|| {
                 ask_for_input(
                     Endpoint::doc_username(),
-                    predefined_params.credentials.clone().unzip().0
-                        .or(opt_field!(template, username).cloned())
-                    )
-                    .into()
+                    predefined_params
+                        .credentials
+                        .clone()
+                        .unzip()
+                        .0
+                        .or(opt_field!(template, username).cloned()),
+                )
+                .into()
             })
             .unwrap(),
-        password: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.password.clone().into()
-            })
+        password: endpoint_config
+            .as_ref()
+            .and_then(|x| x.password.clone().into())
             .or_else(|| {
-                predefined_params.credentials.unzip().1
-                    .unwrap_or_else(|| opt_field!(template, password).cloned()
-                        .and_then(empty_to_none)
-                        .and_then(|x| ask_for_agreement("Overwrite password?").not().then_some(x))
-                        .unwrap_or_else(|| ask_for_password(Endpoint::doc_password()))
-                    )
+                predefined_params
+                    .credentials
+                    .unzip()
+                    .1
+                    .unwrap_or_else(|| {
+                        opt_field!(template, password)
+                            .cloned()
+                            .and_then(empty_to_none)
+                            .and_then(|x| {
+                                ask_for_agreement("Overwrite password?").not().then_some(x)
+                            })
+                            .unwrap_or_else(|| ask_for_password(Endpoint::doc_password()))
+                    })
                     .into()
             })
             .unwrap(),
-        client_random: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.client_random.clone().into()
-            })
+        client_random: endpoint_config
+            .as_ref()
+            .and_then(|x| x.client_random.clone().into())
             .or(opt_field!(template, client_random).cloned())
             .unwrap_or_default(),
-        skip_verification: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.skip_verification.into()
-            })
+        skip_verification: endpoint_config
+            .as_ref()
+            .and_then(|x| x.skip_verification.into())
             .or(opt_field!(template, skip_verification).cloned())
             .unwrap_or_else(Endpoint::default_skip_verification),
-        upstream_protocol: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.upstream_protocol.clone().into()
-            })
+        upstream_protocol: endpoint_config
+            .as_ref()
+            .and_then(|x| x.upstream_protocol.clone().into())
             .or(opt_field!(template, upstream_protocol).cloned())
             .unwrap_or_else(Endpoint::default_upstream_protocol),
-        upstream_fallback_protocol: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.upstream_fallback_protocol.clone().into()
-            })
-            .or(opt_field!(template, upstream_fallback_protocol).cloned().flatten()),
-        anti_dpi: endpoint_config.as_ref()
-            .and_then(|x| {
-                x.anti_dpi.into()
-            })
+        upstream_fallback_protocol: endpoint_config
+            .as_ref()
+            .and_then(|x| x.upstream_fallback_protocol.clone().into())
+            .or(opt_field!(template, upstream_fallback_protocol)
+                .cloned()
+                .flatten()),
+        anti_dpi: endpoint_config
+            .as_ref()
+            .and_then(|x| x.anti_dpi.into())
             .or(opt_field!(template, anti_dpi).cloned())
             .unwrap_or_else(Endpoint::default_anti_dpi),
         ..Default::default()
@@ -435,27 +453,36 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
         x.certificate = config.certificate.clone().into();
     } else {
         let (hostname, certificate) = if crate::get_mode() == Mode::NonInteractive {
-            (predefined_params.hostname.clone(), predefined_params.certificate
-                                                    .and_then(|x| {
-                                                        fs::read_to_string(&x).expect("Failed to read certificate").into()
-                                                    }))
-        } else if let Some(cert) = opt_field!(template, certificate).cloned().flatten()
-            .and_then(parse_cert)
-            .and_then(|x|
-                ask_for_agreement(&format!("Use an existent certificate? {:?}", x))
-                    .then_some(x)
+            (
+                predefined_params.hostname.clone(),
+                predefined_params.certificate.and_then(|x| {
+                    fs::read_to_string(&x)
+                        .expect("Failed to read certificate")
+                        .into()
+                }),
             )
+        } else if let Some(cert) = opt_field!(template, certificate)
+            .cloned()
+            .flatten()
+            .and_then(parse_cert)
+            .and_then(|x| {
+                ask_for_agreement(&format!("Use an existent certificate? {:?}", x)).then_some(x)
+            })
         {
-            (Some(cert.common_name), opt_field!(template, certificate).cloned().flatten())
+            (
+                Some(cert.common_name),
+                opt_field!(template, certificate).cloned().flatten(),
+            )
         } else if let Some(cert) = empty_to_none(ask_for_input::<String>(
-            &format!("{}\nEnter a path to certificate:", Endpoint::doc_certificate()),
+            &format!(
+                "{}\nEnter a path to certificate:",
+                Endpoint::doc_certificate()
+            ),
             Some("".into()),
         )) {
-            let contents = fs::read_to_string(& cert).expect("Failed to read certificate");
+            let contents = fs::read_to_string(&cert).expect("Failed to read certificate");
             match parse_cert(contents.clone()) {
-                Some(parsed) => {
-                    (Some(parsed.common_name), Some(contents))
-                }
+                Some(parsed) => (Some(parsed.common_name), Some(contents)),
                 None => {
                     panic!("Couldn't parse provided certificate");
                 }
@@ -466,7 +493,8 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
 
         x.hostname = ask_for_input(
             Endpoint::doc_hostname(),
-            predefined_params.hostname
+            predefined_params
+                .hostname
                 .or(opt_field!(template, hostname).cloned())
                 .or(hostname),
         );
@@ -479,9 +507,11 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
 
     x.skip_verification = x.certificate.is_none()
         && ask_for_agreement_with_default(
-        &format!("{}\n", Endpoint::doc_skip_verification()),
-        opt_field!(template, skip_verification).cloned().unwrap_or_default(),
-    );
+            &format!("{}\n", Endpoint::doc_skip_verification()),
+            opt_field!(template, skip_verification)
+                .cloned()
+                .unwrap_or_default(),
+        );
 
     x
 }
@@ -493,10 +523,12 @@ fn build_listener(template: Option<&Listener>) -> Listener {
     * tun: TUN device.
 "#,
         Listener::available_kinds(),
-        Listener::available_kinds().iter()
-            .position(|x| *x == template.map(Listener::to_kind_string)
+        Listener::available_kinds().iter().position(|x| {
+            *x == template
+                .map(Listener::to_kind_string)
                 .unwrap_or_else(Listener::default_kind)
-                .as_str()),
+                .as_str()
+        }),
     ) {
         "socks" => {
             let template = template.and_then(|x| match x {
@@ -506,16 +538,29 @@ fn build_listener(template: Option<&Listener>) -> Listener {
             Listener::Socks(SocksListener {
                 address: ask_for_input(
                     SocksListener::doc_address(),
-                    Some(opt_field!(template, address).cloned()
-                        .unwrap_or_else(SocksListener::default_address)),
+                    Some(
+                        opt_field!(template, address)
+                            .cloned()
+                            .unwrap_or_else(SocksListener::default_address),
+                    ),
                 ),
                 username: empty_to_none(ask_for_input(
                     SocksListener::doc_username(),
-                    Some(opt_field!(template, username).cloned().flatten().unwrap_or_default()),
+                    Some(
+                        opt_field!(template, username)
+                            .cloned()
+                            .flatten()
+                            .unwrap_or_default(),
+                    ),
                 )),
                 password: empty_to_none(ask_for_input(
                     SocksListener::doc_password(),
-                    Some(opt_field!(template, password).cloned().flatten().unwrap_or_default()),
+                    Some(
+                        opt_field!(template, password)
+                            .cloned()
+                            .flatten()
+                            .unwrap_or_default(),
+                    ),
                 )),
             })
         }
@@ -530,15 +575,21 @@ fn build_listener(template: Option<&Listener>) -> Listener {
                 } else {
                     ask_for_input(
                         TunListener::doc_bound_if(),
-                        Some(opt_field!(template, bound_if).cloned()
-                            .unwrap_or_else(TunListener::default_bound_if)),
+                        Some(
+                            opt_field!(template, bound_if)
+                                .cloned()
+                                .unwrap_or_else(TunListener::default_bound_if),
+                        ),
                     )
                 },
-                included_routes: opt_field!(template, included_routes).cloned()
+                included_routes: opt_field!(template, included_routes)
+                    .cloned()
                     .unwrap_or_else(TunListener::default_included_routes),
-                excluded_routes: opt_field!(template, excluded_routes).cloned()
+                excluded_routes: opt_field!(template, excluded_routes)
+                    .cloned()
                     .unwrap_or_else(TunListener::default_excluded_routes),
-                mtu_size: opt_field!(template, mtu_size).cloned()
+                mtu_size: opt_field!(template, mtu_size)
+                    .cloned()
                     .unwrap_or_else(TunListener::default_mtu_size),
             })
         }
@@ -586,9 +637,15 @@ struct Cert {
 }
 
 fn lookup_existent_cert() -> Option<Cert> {
-    fs::read_dir(".").ok()?
+    fs::read_dir(".")
+        .ok()?
         .filter_map(Result::ok)
-        .filter(|entry| entry.metadata().map(|meta| meta.is_file()).unwrap_or_default())
+        .filter(|entry| {
+            entry
+                .metadata()
+                .map(|meta| meta.is_file())
+                .unwrap_or_default()
+        })
         .filter_map(|entry| entry.path().to_str().map(String::from))
         .find_map(parse_cert)
 }
@@ -601,16 +658,24 @@ fn parse_cert(contents: String) -> Option<Cert> {
         .next()?;
     let cert = x509_parser::parse_x509_certificate(&cert.0).ok()?.1;
     Some(Cert {
-        common_name: cert.validity.is_valid()
-            .then(|| {
-                let x = cert.subject.to_string();
-                x.as_str()
-                    .strip_prefix("CN=")
-                    .map(String::from)
-                    .unwrap_or(x)
-            })?,
-        alt_names: cert.subject_alternative_name().ok().flatten()
-            .map(|x| x.value.general_names.iter().map(GeneralName::to_string).collect())
+        common_name: cert.validity.is_valid().then(|| {
+            let x = cert.subject.to_string();
+            x.as_str()
+                .strip_prefix("CN=")
+                .map(String::from)
+                .unwrap_or(x)
+        })?,
+        alt_names: cert
+            .subject_alternative_name()
+            .ok()
+            .flatten()
+            .map(|x| {
+                x.value
+                    .general_names
+                    .iter()
+                    .map(GeneralName::to_string)
+                    .collect()
+            })
             .unwrap_or_default(),
         expiration_date: cert.validity.not_after.to_string(),
     })

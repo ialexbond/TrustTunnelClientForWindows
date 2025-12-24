@@ -260,7 +260,8 @@ void fsystem(std::string_view fmt, Ts &&...args) { // NOLINT(*-missing-std-forwa
 }
 Result<std::string, ExecError> sys_cmd_with_output(std::string cmd);
 template <typename... Ts>
-Result<std::string, ExecError> fsystem_with_output(std::string_view fmt, Ts &&...args) { // NOLINT(*-missing-std-forward)
+Result<std::string, ExecError> fsystem_with_output(
+        std::string_view fmt, Ts &&...args) { // NOLINT(*-missing-std-forward)
     return sys_cmd_with_output(fmt::vformat(fmt, fmt::make_format_args(args...)).c_str());
 }
 #endif // defined _WIN32

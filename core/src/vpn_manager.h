@@ -34,10 +34,10 @@ enum ClientConnectionState {
 };
 
 struct RecoveryInfo {
-    std::chrono::time_point<std::chrono::steady_clock> start_ts;             // session recovery start timestamp
-    std::chrono::time_point<std::chrono::steady_clock> attempt_start_ts;     // last recovery attempt start timestamp
+    std::chrono::time_point<std::chrono::steady_clock> start_ts;           // session recovery start timestamp
+    std::chrono::time_point<std::chrono::steady_clock> attempt_start_ts;   // last recovery attempt start timestamp
     Millis attempt_interval{ag::VPN_DEFAULT_INITIAL_RECOVERY_INTERVAL_MS}; // last interval between recovery attempts
-    Millis to_next{};                                                        // left to next attempt
+    Millis to_next{};                                                      // left to next attempt
 };
 
 struct SelectedEndpointInfo {

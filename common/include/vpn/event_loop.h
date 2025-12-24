@@ -1,14 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <type_traits>
 #include <utility>
-#include <functional>
 
 #ifdef __APPLE__
-#include <sys/qos.h>
 #include <TargetConditionals.h>
+#include <sys/qos.h>
 #endif // __APPLE__
 
 #include <event2/event.h>

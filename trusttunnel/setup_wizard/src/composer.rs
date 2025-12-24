@@ -1,8 +1,8 @@
-use std::fs;
-use toml_edit::{Array, Document, Item, Table, value};
 use crate::settings::{Listener, Settings};
 use crate::template_settings;
 use crate::template_settings::ToTomlComment;
+use std::fs;
+use toml_edit::{value, Array, Document, Item, Table};
 
 pub fn compose_document(file: Option<&str>, settings: &Settings) -> Document {
     let doc = match file {
@@ -29,8 +29,8 @@ fn fabricate_template_document() -> Document {
         template_settings::ENDPOINT.as_str(),
         template_settings::COMMON_LISTENER_TABLE,
     )
-        .parse()
-        .expect("Couldn't parse fabricated document")
+    .parse()
+    .expect("Couldn't parse fabricated document")
 }
 
 fn fill_main_table(mut doc: Document, settings: &Settings) -> Document {
@@ -45,7 +45,8 @@ fn fill_main_table(mut doc: Document, settings: &Settings) -> Document {
 }
 
 fn fill_endpoint_table(mut doc: Document, settings: &Settings) -> Document {
-    let endpoint = doc.get_mut("endpoint")
+    let endpoint = doc
+        .get_mut("endpoint")
         .and_then(Item::as_table_mut)
         .expect("Endpoint table not found");
 
@@ -57,19 +58,22 @@ fn fill_endpoint_table(mut doc: Document, settings: &Settings) -> Document {
     endpoint["client_random"] = value(&settings.endpoint.client_random);
     endpoint["skip_verification"] = value(settings.endpoint.skip_verification);
     endpoint["anti_dpi"] = value(settings.endpoint.anti_dpi);
-    endpoint["certificate"] = value(
-        settings.endpoint.certificate.as_deref().unwrap_or_default()
-    );
+    endpoint["certificate"] = value(settings.endpoint.certificate.as_deref().unwrap_or_default());
     endpoint["upstream_protocol"] = value(&settings.endpoint.upstream_protocol);
     endpoint["upstream_fallback_protocol"] = value(
-        settings.endpoint.upstream_fallback_protocol.as_deref().unwrap_or_default()
+        settings
+            .endpoint
+            .upstream_fallback_protocol
+            .as_deref()
+            .unwrap_or_default(),
     );
 
     doc
 }
 
 fn fill_listener_table(mut doc: Document, settings: &Settings) -> Document {
-    let mut listener = doc.get_mut("listener")
+    let mut listener = doc
+        .get_mut("listener")
         .and_then(Item::as_table_mut)
         .expect("Listener table not found");
 
@@ -92,9 +96,10 @@ fn fill_listener_table(mut doc: Document, settings: &Settings) -> Document {
                 _ => unreachable!(),
             },
         )
-            .parse()
-            .expect("Couldn't parse rebuilt document");
-        listener = doc.get_mut("listener")
+        .parse()
+        .expect("Couldn't parse rebuilt document");
+        listener = doc
+            .get_mut("listener")
             .and_then(Item::as_table_mut)
             .unwrap();
     }
@@ -109,7 +114,8 @@ fn fill_listener_table(mut doc: Document, settings: &Settings) -> Document {
 }
 
 fn fill_socks_listener_table(table: &mut Table, settings: &Settings) {
-    let table = table["socks"].as_table_mut()
+    let table = table["socks"]
+        .as_table_mut()
         .expect("SOCKS listener table not found");
     let settings = match &settings.listener {
         Listener::Socks(x) => x,
@@ -122,7 +128,8 @@ fn fill_socks_listener_table(table: &mut Table, settings: &Settings) {
 }
 
 fn fill_tun_listener_table(table: &mut Table, settings: &Settings) {
-    let table = table["tun"].as_table_mut()
+    let table = table["tun"]
+        .as_table_mut()
         .expect("TUN listener table not found");
     let settings = match &settings.listener {
         Listener::Tun(x) => x,

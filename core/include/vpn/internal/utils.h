@@ -12,8 +12,8 @@
 #include <magic_enum/magic_enum.hpp>
 
 #include "common/net_utils.h"
-#include "common/utils.h"
 #include "common/socket_address.h"
+#include "common/utils.h"
 #include "net/tcp_socket.h"
 #include "net/udp_socket.h"
 #include "vpn/platform.h"
@@ -105,8 +105,7 @@ inline bool operator==(const TunnelAddressPair &lh, const TunnelAddressPair &rh)
     if (lh.dst.index() != rh.dst.index()) {
         return false;
     }
-    if (const SocketAddress *ld = std::get_if<SocketAddress>(&lh.dst),
-            *rd = std::get_if<SocketAddress>(&rh.dst);
+    if (const SocketAddress *ld = std::get_if<SocketAddress>(&lh.dst), *rd = std::get_if<SocketAddress>(&rh.dst);
             ld && rd) {
         return *ld == *rd;
     }
@@ -228,16 +227,14 @@ struct hash<ag::TunnelAddress> {
 template <>
 struct hash<ag::TunnelAddressPair> {
     size_t operator()(const ag::TunnelAddressPair &addr) const {
-        return size_t(
-                ag::hash_pair_combine(ag::socket_address_hash(addr.src), hash<ag::TunnelAddress>{}(addr.dst)));
+        return size_t(ag::hash_pair_combine(ag::socket_address_hash(addr.src), hash<ag::TunnelAddress>{}(addr.dst)));
     }
 };
 
 template <>
 struct hash<ag::SockAddrTag> {
     size_t operator()(const ag::SockAddrTag &k) const {
-        return size_t(
-                ag::hash_pair_combine(ag::socket_address_hash(k.addr), std::hash<std::string>()(k.appname)));
+        return size_t(ag::hash_pair_combine(ag::socket_address_hash(k.addr), std::hash<std::string>()(k.appname)));
     }
 };
 
