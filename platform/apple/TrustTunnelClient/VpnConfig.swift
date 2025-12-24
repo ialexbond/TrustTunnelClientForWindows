@@ -12,6 +12,7 @@ internal struct VpnConfig: Codable {
     }
     let listener: Listener
     let dns_upstreams: [String]
+    let killswitch_enabled: Bool
 }
 
 internal func parseVpnConfig(from config: String) throws -> VpnConfig {

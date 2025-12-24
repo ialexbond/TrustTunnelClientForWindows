@@ -237,6 +237,22 @@ public final class VpnManager {
         }
     }
 
+    private func reloadManager(manager: NETunnelProviderManager, completionHandler: @escaping ((any Error)?) -> Void) {
+        manager.saveToPreferences { error in
+            if let error = error {
+                completionHandler(error)
+                return
+            }
+            manager.loadFromPreferences { error in
+                if let error = error {
+                    completionHandler(error)
+                    return
+                }
+                completionHandler(nil)
+            }
+        }
+    }
+
     public func start(config: (String)) {
         apiQueue.async {
             let manager = self.getManager()
@@ -261,20 +277,24 @@ public final class VpnManager {
                 manager.protocolConfiguration = configuration
                 manager.localizedDescription = "TrustTunnel"
                 manager.isEnabled = true
-                manager.saveToPreferences { error in
+
+                var vpnConfig: VpnConfig!
+                do {
+                    vpnConfig = try parseVpnConfig(from: config)
+                } catch {
+                    self.logger.error("Failed to parse config: \(error)")
+                    group.leave()
+                    return
+                }
+                if (vpnConfig.killswitch_enabled) {
+                    manager.isOnDemandEnabled = true
+                    manager.onDemandRules = [NEOnDemandRuleConnect()]
+                }
+                self.reloadManager(manager: manager) { error in
                     if let error = error {
-                        self.logger.error("Failed to save preferences: \(error)")
-                        group.leave()
-                        return
+                        self.logger.error("Failed to reload manager: \(error)")
                     }
-                    manager.loadFromPreferences { error in
-                        if let error = error {
-                            self.logger.error("Failed to reload preferences: \(error)")
-                            group.leave()
-                            return
-                        }
-                        group.leave()
-                    }
+                    group.leave()
                 }
             }
             group.wait()
@@ -310,14 +330,27 @@ public final class VpnManager {
             let manager = self.getManager()
             self.queue.sync {
                 self.stopTimer = timerSource
-                if manager.connection.status == .disconnected || manager.connection.status == .invalid {
-                    self.cancelStopTimer()
+            }
+            manager.isOnDemandEnabled = false
+            manager.onDemandRules = nil
+            self.reloadManager(manager: manager) { error in
+                if let error = error {
+                    self.logger.error("Failed to stop VPN: \(error)")
+                    self.queue.sync {
+                        self.cancelStopTimer()
+                    }
                     return
+                }
+                self.queue.sync {
+                    if manager.connection.status == .disconnected || manager.connection.status == .invalid {
+                        self.cancelStopTimer()
+                        return
+                    }
                 }
                 // Log current status before stopping
                 self.logCurrentStatus(prefix: "pre-stop", manager: manager)
+                manager.connection.stopVPNTunnel()
             }
-            manager.connection.stopVPNTunnel()
             group.wait()
             self.logger.info("VPN has been stopped!")
         }
