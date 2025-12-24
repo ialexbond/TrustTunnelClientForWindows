@@ -6,12 +6,17 @@ internal struct TunConfig: Codable {
     let excluded_routes: [String]
 }
 
+internal struct Endpoint: Codable {
+    let addresses: [String]
+}
+
 internal struct VpnConfig: Codable {
     struct Listener: Codable {
         let tun: TunConfig
     }
     let listener: Listener
     let dns_upstreams: [String]
+    let endpoint: Endpoint
     let killswitch_enabled: Bool
 }
 

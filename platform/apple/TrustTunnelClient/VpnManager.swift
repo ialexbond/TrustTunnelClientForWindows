@@ -253,7 +253,7 @@ public final class VpnManager {
         }
     }
 
-    public func start(config: (String)) {
+    public func start(serverName: String, config: (String)) {
         apiQueue.async {
             let manager = self.getManager()
             let group = DispatchGroup()
@@ -273,7 +273,7 @@ public final class VpnManager {
                     "appGroup": self.appGroup as NSObject,
                     "bundleIdentifier": self.bundleIdentifier as NSObject
                 ]
-                configuration.serverAddress = "Trust Tunnel"
+                configuration.serverAddress = serverName
                 manager.protocolConfiguration = configuration
                 manager.localizedDescription = "TrustTunnel"
                 manager.isEnabled = true

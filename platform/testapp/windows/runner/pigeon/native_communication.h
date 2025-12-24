@@ -80,7 +80,9 @@ class NativeVpnInterface {
   NativeVpnInterface(const NativeVpnInterface&) = delete;
   NativeVpnInterface& operator=(const NativeVpnInterface&) = delete;
   virtual ~NativeVpnInterface() {}
-  virtual std::optional<FlutterError> Start(const std::string& config) = 0;
+  virtual std::optional<FlutterError> Start(
+    const std::string& server_name,
+    const std::string& config) = 0;
   virtual std::optional<FlutterError> Stop() = 0;
 
   // The codec used by NativeVpnInterface.

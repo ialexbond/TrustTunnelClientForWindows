@@ -51,9 +51,15 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
         let tunConfig = vpnConfig.listener.tun
 
         let (ipv4Settings, ipv6Settings) = configureIPv4AndIPv6Settings(from: tunConfig)
-        // Set `tunnelRemoteAddress` to a placeholder because it is not principal
-        // and there could be multiple endpoint addresses in a real config
-        let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
+
+        var tunnelAddress = vpnConfig.endpoint.addresses.first ?? "127.0.0.1"
+        if let lastColonIndex = tunnelAddress.lastIndex(of: ":") {
+            let ipPart = String(tunnelAddress[..<lastColonIndex])
+            // Clean up brackets if they exist (e.g., "[2001:db8::1]" -> "2001:db8::1")
+            tunnelAddress = ipPart.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        }
+        logger.debug("Trying to set tunnel address to \(tunnelAddress)")
+        let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelAddress)
         networkSettings.ipv4Settings = ipv4Settings
         networkSettings.ipv6Settings = ipv6Settings
         let dnsServers = vpnConfig.dns_upstreams.isEmpty

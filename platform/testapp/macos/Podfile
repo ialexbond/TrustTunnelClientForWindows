@@ -36,7 +36,7 @@ target 'Runner' do
   target 'Network Extension' do
       inherit! :search_paths
   end
-  pod 'TrustTunnelClient', :podspec => '../../apple/TrustTunnelClient.podspec'
+  pod 'TrustTunnelClient', :path => '../../apple/'
 end
 
 post_install do |installer|

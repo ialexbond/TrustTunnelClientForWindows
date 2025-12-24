@@ -91,7 +91,7 @@ class NativeCommunicationPigeonCodec: FlutterStandardMessageCodec, @unchecked Se
 
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol NativeVpnInterface {
-  func start(config: String) throws
+  func start(serverName: String, config: String) throws
   func stop() throws
 }
 
@@ -105,9 +105,10 @@ class NativeVpnInterfaceSetup {
     if let api = api {
       startChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
-        let configArg = args[0] as! String
+        let serverNameArg = args[0] as! String
+        let configArg = args[1] as! String
         do {
-          try api.start(config: configArg)
+          try api.start(serverName: serverNameArg, config: configArg)
           reply(wrapResult(nil))
         } catch {
           reply(wrapError(error))
