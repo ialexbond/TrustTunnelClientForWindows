@@ -161,11 +161,22 @@ void ag::VpnLinuxTunnel::setup_if() {
 }
 
 bool ag::VpnLinuxTunnel::check_sport_rule_support() {
+    // Check IPv4 sport rule support
     auto result = ag::tunnel_utils::fsystem_with_output("ip rule show sport 65535");
     if (!result.has_value()) {
-        dbglog(logger, "sport rule not supported: {}", result.error()->str());
+        dbglog(logger, "IPv4 sport rule not supported: {}", result.error()->str());
         return false;
     }
+
+    // If IPv6 is available, also check IPv6 sport rule support
+    if (m_ipv6_available) {
+        auto result_v6 = ag::tunnel_utils::fsystem_with_output("ip -6 rule show sport 65535");
+        if (!result_v6.has_value()) {
+            dbglog(logger, "IPv6 sport rule not supported: {}", result_v6.error()->str());
+            return false;
+        }
+    }
+
     return true;
 }
 
