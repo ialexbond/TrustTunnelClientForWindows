@@ -1,15 +1,17 @@
 # TrustTunnel CLI Client
 
-TrustTunnel CLI Client is an application built on top of the TrustTunnel Client Libraries.
-It provides an easy-to-use interface to configure and connect to an TrustTunnel endpoint.
-The client supports Linux, macOS, and Windows platforms.
+TrustTunnel CLI Client is an application built on top of the TrustTunnel Client
+Libraries. It provides an easy-to-use interface to configure and connect to a
+TrustTunnel endpoint. The client supports Linux, macOS, and Windows platforms.
 
 ---
 
 ## Building
 
-To build the TrustTunnel CLI Client, follow [these steps](../README.md#build-instructions)
-The built executable will be available in the `<project_root>/build/trusttunnel_client` directory.
+To build the TrustTunnel CLI Client, follow
+[development instructions](../DEVELOPMENT.md#building).
+The built executable will be available in the
+`<project_root>/build/trusttunnel_client` directory.
 
 ---
 
@@ -22,11 +24,11 @@ You can use the setup wizard tool to generate a basic configuration file.
 
 #### Usage
 
-For quick setup, please follow [Quick Start instructions for the TrustTunnel CLI Client](../README.md#quick-start-the-trusttunnel-cli-client).
+For quick setup, please follow [Getting Started instructions](../README.md#getting-started).
 
 For a more customized configuration experience, follow the steps below:
 
-1. [Build](../README.md#building) the setup wizard tool.
+1. [Build](../DEVELOPMENT.md#building) the setup wizard tool.
 
 2. Launch the setup wizard:
 
@@ -34,12 +36,12 @@ For a more customized configuration experience, follow the steps below:
    ./setup_wizard
    ```
 
-   The setup wizard will guide you through the configuration process, allowing you to customize the
-   settings according to your preferences.
+   The setup wizard will guide you through the configuration process,
+   allowing you to customize the settings according to your preferences.
 
-> Note: The configuration file created by the setup wizard contains all available settings,
-> including descriptions. Feel free to modify them if you have a good understanding of the
-> configuration.
+> Note: The configuration file created by the setup wizard contains all
+> available settings, including descriptions. Feel free to modify them if
+> you have a good understanding of the configuration.
 
 #### Setup Wizard CLI Options
 
@@ -143,7 +145,8 @@ The configuration file uses TOML format. Below are all available settings.
 The `exclusions` array supports the following formats:
 
 - **Domain name**: `example.com` — matches `example.com` and `www.example.com`
-- **Wildcard domain**: `*.example.com` — matches any subdomain (e.g., `sub.example.com`), but not the domain itself
+- **Wildcard domain**: `*.example.com` — matches any subdomain
+  (e.g., `sub.example.com`), but not the domain itself
 - **IPv4 address**: `192.168.1.1` or `192.168.1.1:443` (port optional)
 - **IPv6 address**: `[::1]` or `[::1]:443` or `2001:db8::1`
 - **CIDR range**: `192.168.0.0/16` or `2001:db8::/32`
@@ -157,7 +160,8 @@ The `dns_upstreams` array supports the following formats:
 - **DNS over TLS**: `tls://1.1.1.1`
 - **DNS over HTTPS**: `https://dns.adguard.com/dns-query`
 - **DNS over QUIC**: `quic://dns.adguard.com:8853`
-- **DNS Stamp**: `sdns://...` (see [DNS Stamps specification](https://dnscrypt.info/stamps-specifications))
+- **DNS Stamp**: `sdns://...`
+  (see [DNS Stamps specification](https://dnscrypt.info/stamps-specifications))
 
 ### Example Configuration
 
@@ -194,7 +198,10 @@ mtu_size = 1500
 
 ## Usage
 
-> Windows specific: For tunnel listener to work, `wintun.dll` must be in the DLL search path. Basically, you could [download it](https://www.wintun.net/), extract the file (from the folder matching your architecture, like `amd64`) and place it into the same directory as `trusttunnel_client` executable.
+> Windows specific: For tunnel listener to work, `wintun.dll` must be in the
+> DLL search path. Basically, you could [download it](https://www.wintun.net/),
+> extract the file (from the folder matching your architecture, like `amd64`)
+> and place it into the same directory as `trusttunnel_client` executable.
 
 To run the TrustTunnel CLI Client, execute the following command:
 
@@ -202,5 +209,6 @@ To run the TrustTunnel CLI Client, execute the following command:
 ./trusttunnel_client --config <path/to/configuration/file.toml>
 ```
 
-Replace `<path/to/configuration/file.toml>` with the actual path to your configuration file.
-You may need to run the command with superuser privileges if a TUN device is selected.
+Replace `<path/to/configuration/file.toml>` with the actual path to your
+configuration file. You may need to run the command with superuser privileges
+if a TUN device is selected.

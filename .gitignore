@@ -1,6 +1,7 @@
 cmake-build-*/
 build/
 .idea/
+.vscode/
 .DS_Store
 CmakeUserPresets.json
 pyvenv.cfg

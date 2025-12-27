@@ -24,14 +24,23 @@ init:
 .PHONY: bootstrap_deps
 ## Export all the required conan packages to the local cache
 bootstrap_deps:
+ifeq ($(SKIP_VENV),1)
+	./scripts/bootstrap_conan_deps.py
+else
 	python3 -m venv env && \
 	. env/bin/activate && \
 	pip install -r requirements.txt && \
 	./scripts/bootstrap_conan_deps.py
+endif
 
 .PHONY: setup_cmake
 ## Setup CMake
+## Set SKIP_BOOTSTRAP=1 to skip bootstrapping dependencies
+ifeq ($(SKIP_BOOTSTRAP),1)
+setup_cmake:
+else
 setup_cmake: bootstrap_deps
+endif
 ifeq ($(OS), Windows_NT)
 	cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
 		-DCMAKE_C_FLAGS_DEBUG=/MT ^
@@ -47,8 +56,11 @@ else
 	-GNinja \
 	..
 endif
-# Prepare compile_commands.json
-cmake -S . -B $(BUILD_DIR) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+.PHONY: compile_commands
+## Generate compile_commands.json
+compile_commands:
+	mkdir -p $(BUILD_DIR) && cmake -S . -B $(BUILD_DIR) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 .PHONY: build_libs
 ## Build the libraries
@@ -100,7 +112,7 @@ clang-format:
 
 ## Check c++ code formatting with clang-tidy.
 .PHONY: clang-tidy
-clang-tidy: setup_cmake
+clang-tidy: compile_commands
 	run-clang-tidy -p $(BUILD_DIR) '^(?!.*(/third-party/)).*\.cpp$$'
 
 ## Lint markdown files.
