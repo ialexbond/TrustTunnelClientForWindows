@@ -186,7 +186,7 @@ void TunListener::tcpip_handler(void *arg, TcpipEvent what, void *data) {
         }
 
         std::queue<std::vector<uint8_t>> &pending = conn->unread_data;
-        std::span<evbuffer_iovec> iov = {(evbuffer_iovec *)tcp_event->iov, tcp_event->iovlen};
+        std::span<evbuffer_iovec> iov = {(evbuffer_iovec *) tcp_event->iov, tcp_event->iovlen};
         int conn_proto = conn->proto; // conn may be freed in the callback
         if ((conn->flags & CF_READ_ENABLED) && pending.empty()) {
             ClientRead event = {tcp_event->id, nullptr, 0, 0};
@@ -297,10 +297,11 @@ void TunListener::tcpip_handler(void *arg, TcpipEvent what, void *data) {
 
         VpnClientOutputEvent vpn_event = {
                 .family = tcpip_event->family,
-                .packet = {
-                        .chunks_num = tcpip_event->packet.chunks_num,
-                        .chunks = (iovec *) tcpip_event->packet.chunks,
-                },
+                .packet =
+                        {
+                                .chunks_num = tcpip_event->packet.chunks_num,
+                                .chunks = (iovec *) tcpip_event->packet.chunks,
+                        },
         };
         listener->handler.func(listener->handler.arg, CLIENT_EVENT_OUTPUT, &vpn_event);
         break;
@@ -411,10 +412,10 @@ void TunListener::turn_read(uint64_t id, bool on) {
 
     if (on && !conn->complete_read_task_id.has_value() && !conn->unread_data.empty()) {
         // we have some unread data on the connection - complete it
-        conn->complete_read_task_id =
-                event_loop::submit(this->vpn->parameters.ev_loop, {new CompleteCtx{this, id}, complete_read, [](void *arg) {
-                                                               delete (CompleteCtx *) arg;
-                                                           }});
+        conn->complete_read_task_id = event_loop::submit(
+                this->vpn->parameters.ev_loop, {new CompleteCtx{this, id}, complete_read, [](void *arg) {
+                                                    delete (CompleteCtx *) arg;
+                                                }});
     }
 }
 
@@ -431,7 +432,7 @@ void TunListener::process_icmp_reply(const IcmpEchoReply &reply) {
 void TunListener::recv_packets_task(void *arg, ag::TaskId) {
     auto *listener = (TunListener *) arg;
 
-    while (auto packet = listener->m_config.tunnel->recv_packet())  {
+    while (auto packet = listener->m_config.tunnel->recv_packet()) {
         listener->m_recv_packets_queue.emplace_back(std::move(*packet));
     }
 

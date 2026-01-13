@@ -6,8 +6,8 @@
 #ifndef _WIN32
 #include <netinet/in.h>
 #else
-#include <winsock2.h>
 #include "wincrypt_helper.h"
+#include <winsock2.h>
 #endif
 
 #if defined __APPLE__ && defined __MACH__
@@ -226,7 +226,7 @@ bool tls_verify_cert_ip(X509 *cert, const char *ip) {
     return 1 == X509_check_ip_asc(cert, ip, X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT);
 }
 
-static const char *tls_verify_cert_0(X509 *cert, STACK_OF(X509) *chain, X509_STORE *orig_store) {
+static const char *tls_verify_cert_0(X509 *cert, STACK_OF(X509) * chain, X509_STORE *orig_store) {
     const char *err = nullptr;
 
     X509_STORE *store = orig_store;
@@ -258,13 +258,13 @@ finish:
 
 #ifndef _WIN32
 
-const char *tls_verify_cert(X509 *cert, STACK_OF(X509) *chain, X509_STORE *store) {
+const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
     return tls_verify_cert_0(cert, chain, store);
 }
 
 #else // _WIN32
 
-const char *tls_verify_cert(X509 *cert, STACK_OF(X509) *chain, X509_STORE *store) {
+const char *tls_verify_cert(X509 *cert, STACK_OF(X509) * chain, X509_STORE *store) {
     if (store) {
         return tls_verify_cert_0(cert, chain, store);
     }
@@ -419,7 +419,7 @@ static int hshake_parse(TlsReader *reader, U8View data) {
     const auto *h = (Hshake *) data.data();
     uint32_t x = 0;
     static_assert(sizeof(std::declval<decltype(h)>()->len) == 3);
-    std::memcpy(&x, (void *)h->len, 3);
+    std::memcpy(&x, (void *) h->len, 3);
     uint32_t n = ntoh_24(x);
     if (n > data.size() - 1) {
         return 0;

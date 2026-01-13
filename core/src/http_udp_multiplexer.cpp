@@ -29,9 +29,8 @@ struct CompleteCtx {
 static std::atomic_int g_next_mux_id = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr Secs TIMER_PERIOD{15};
 
-static std::vector<uint8_t> compose_udp_packet(
-        const SocketAddress *src, const SocketAddress *dst, std::string_view app_name,
-        const uint8_t *data, size_t length) {
+static std::vector<uint8_t> compose_udp_packet(const SocketAddress *src, const SocketAddress *dst,
+        std::string_view app_name, const uint8_t *data, size_t length) {
     size_t full_length = UDPPKT_IN_PREFIX_SIZE + UDPPKT_APPLEN_SIZE + app_name.size() + length;
 
     std::vector<uint8_t> packet_buffer(full_length);

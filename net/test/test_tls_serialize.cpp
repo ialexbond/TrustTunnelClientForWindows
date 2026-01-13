@@ -6,8 +6,7 @@
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-static RSA *gen_rsa(int bits)
-{
+static RSA *gen_rsa(int bits) {
     RSA *rsa = RSA_new();
     if (!rsa) {
         return nullptr;
@@ -39,17 +38,15 @@ X509 *make_cert() {
     ag::DeclPtr<EVP_PKEY, &EVP_PKEY_free> pkey{EVP_PKEY_new()};
     EVP_PKEY_assign_RSA(pkey.get(), rsa);
 
-    if (!cert ||  //
-            !X509_set_version(cert.get(), X509_VERSION_3) ||
-            !X509_NAME_add_entry_by_txt(
-                    X509_get_issuer_name(cert.get()), "CN", MBSTRING_UTF8,
-                    reinterpret_cast<const uint8_t *>("Self-signed cert"), -1, -1, 0) ||
-            !X509_NAME_add_entry_by_txt(
-                    X509_get_subject_name(cert.get()), "CN", MBSTRING_UTF8,
-                    reinterpret_cast<const uint8_t *>("Self-signed cert"), -1, -1, 0) ||
-            !X509_set_pubkey(cert.get(), pkey.get()) ||
-            !ASN1_TIME_adj(X509_getm_notBefore(cert.get()), 1474934400, -1, 0) ||
-            !ASN1_TIME_adj(X509_getm_notAfter(cert.get()), 1474934400, 1, 0)) {
+    if (!cert || //
+            !X509_set_version(cert.get(), X509_VERSION_3)
+            || !X509_NAME_add_entry_by_txt(X509_get_issuer_name(cert.get()), "CN", MBSTRING_UTF8,
+                    reinterpret_cast<const uint8_t *>("Self-signed cert"), -1, -1, 0)
+            || !X509_NAME_add_entry_by_txt(X509_get_subject_name(cert.get()), "CN", MBSTRING_UTF8,
+                    reinterpret_cast<const uint8_t *>("Self-signed cert"), -1, -1, 0)
+            || !X509_set_pubkey(cert.get(), pkey.get())
+            || !ASN1_TIME_adj(X509_getm_notBefore(cert.get()), 1474934400, -1, 0)
+            || !ASN1_TIME_adj(X509_getm_notAfter(cert.get()), 1474934400, 1, 0)) {
         return nullptr;
     }
     ag::DeclPtr<BASIC_CONSTRAINTS, &BASIC_CONSTRAINTS_free> bc(BASIC_CONSTRAINTS_new());

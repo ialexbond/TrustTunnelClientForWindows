@@ -10,8 +10,8 @@
 #include "common/logger.h"
 #include "common/net_utils.h"
 #include "net/tls.h"
-#include "vpn/platform.h"
 #include "vpn/event_loop.h"
+#include "vpn/platform.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
 
@@ -31,7 +31,7 @@ public:
             m_ev_loop.reset(ag::vpn_event_loop_create());
         }
 
-        if (!m_ev_loop)  {
+        if (!m_ev_loop) {
             errlog(g_logger, "Failed to create event loop");
             return false;
         }
@@ -72,6 +72,7 @@ public:
             m_executor_thread.join();
         }
     }
+
 private:
     ag::UniquePtr<ag::VpnEventLoop, &ag::vpn_event_loop_destroy> m_ev_loop{ag::vpn_event_loop_create()};
     std::thread m_executor_thread;
@@ -81,7 +82,8 @@ struct vpn_easy_s {
     std::unique_ptr<ag::TrustTunnelClient> client;
 };
 
-static vpn_easy_t *vpn_easy_start_internal(const char *toml_config, on_state_changed_t state_changed_cb, void *state_changed_cb_arg) {
+static vpn_easy_t *vpn_easy_start_internal(
+        const char *toml_config, on_state_changed_t state_changed_cb, void *state_changed_cb_arg) {
     toml::parse_result parsed_config = toml::parse(toml_config);
     if (!parsed_config) {
         warnlog(g_logger, "Failed to parse the TOML config: {}", parsed_config.error().description());
@@ -139,12 +141,12 @@ static void vpn_easy_stop_internal(vpn_easy_t *vpn) {
 
 class VpnEasyManager {
 public:
-    static VpnEasyManager& instance() {
+    static VpnEasyManager &instance() {
         static VpnEasyManager inst;
         return inst;
     }
 
-    void start_async(const std::string& config, on_state_changed_t callback, void *arg) {
+    void start_async(const std::string &config, on_state_changed_t callback, void *arg) {
         if (!m_loop) {
             EasyEventLoop loop;
             if (!loop.start()) {
@@ -158,7 +160,7 @@ public:
                 warnlog(g_logger, "VPN has been already started");
                 return;
             }
-            m_vpn = vpn_easy_start_internal(config.data(), callback, arg);  // blocking
+            m_vpn = vpn_easy_start_internal(config.data(), callback, arg); // blocking
             if (!m_vpn) {
                 errlog(g_logger, "Failed to start VPN!");
                 return;

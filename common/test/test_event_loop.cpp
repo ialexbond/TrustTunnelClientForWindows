@@ -203,7 +203,7 @@ TEST_F(EventLoopTest, DISABLED_CancelAfterStopDoesntCrash) {
 
 TEST_F(EventLoopTest, StopSubmitDestroy) {
     run_event_loop();
-    event_loop::dispatch_sync(m_ev_loop.get(), []{});
+    event_loop::dispatch_sync(m_ev_loop.get(), [] {});
     vpn_event_loop_stop(m_ev_loop.get());
 
     struct Ctx {
@@ -212,15 +212,18 @@ TEST_F(EventLoopTest, StopSubmitDestroy) {
     };
     Ctx ctx{};
     vpn_event_loop_stop(m_ev_loop.get());
-    event_loop::AutoTaskId id = event_loop::submit(m_ev_loop.get(), {
-            .arg = &ctx,
-            .action = [](void *arg, TaskId) {
-                ((Ctx *) arg)->ran = true;
-            },
-            .finalize = [](void *arg) {
-                ((Ctx *) arg)->finalized = true;
-            },
-    });
+    event_loop::AutoTaskId id = event_loop::submit(m_ev_loop.get(),
+            {
+                    .arg = &ctx,
+                    .action =
+                            [](void *arg, TaskId) {
+                                ((Ctx *) arg)->ran = true;
+                            },
+                    .finalize =
+                            [](void *arg) {
+                                ((Ctx *) arg)->finalized = true;
+                            },
+            });
     ASSERT_TRUE(id.has_value());
     ASSERT_FALSE(ctx.finalized);
 
@@ -233,7 +236,7 @@ TEST_F(EventLoopTest, StopSubmitDestroy) {
 
 TEST_F(EventLoopTest, StopSubmitRun) {
     run_event_loop();
-    event_loop::dispatch_sync(m_ev_loop.get(), []{});
+    event_loop::dispatch_sync(m_ev_loop.get(), [] {});
     vpn_event_loop_stop(m_ev_loop.get());
 
     struct Ctx {
@@ -242,15 +245,18 @@ TEST_F(EventLoopTest, StopSubmitRun) {
     };
     Ctx ctx{};
     vpn_event_loop_stop(m_ev_loop.get());
-    event_loop::AutoTaskId id = event_loop::submit(m_ev_loop.get(), {
-            .arg = &ctx,
-            .action = [](void *arg, TaskId) {
-                ((Ctx *) arg)->ran = true;
-            },
-            .finalize = [](void *arg) {
-                ((Ctx *) arg)->finalized = true;
-            },
-    });
+    event_loop::AutoTaskId id = event_loop::submit(m_ev_loop.get(),
+            {
+                    .arg = &ctx,
+                    .action =
+                            [](void *arg, TaskId) {
+                                ((Ctx *) arg)->ran = true;
+                            },
+                    .finalize =
+                            [](void *arg) {
+                                ((Ctx *) arg)->finalized = true;
+                            },
+            });
     ASSERT_TRUE(id.has_value());
     ASSERT_FALSE(ctx.finalized);
 
@@ -258,7 +264,7 @@ TEST_F(EventLoopTest, StopSubmitRun) {
     m_loop_thread = std::thread([&] {
         vpn_event_loop_run(m_ev_loop.get());
     });
-    event_loop::dispatch_sync(m_ev_loop.get(), []{});
+    event_loop::dispatch_sync(m_ev_loop.get(), [] {});
     vpn_event_loop_stop(m_ev_loop.get());
     m_loop_thread.join();
 

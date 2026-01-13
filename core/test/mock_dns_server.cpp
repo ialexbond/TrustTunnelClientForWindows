@@ -188,8 +188,7 @@ void ag::MockDnsServer::tcp_handler(void *arg, TcpSocketEvent what, void *data) 
                     error = tcp_socket_write(conn->socket.get(), response->data(), ntohs(size));
                 }
                 if (error.code) {
-                    infolog(g_logger, "Peer {} tcp_socket_write(): ({}) {}", conn->from,
-                            error.code, error.text);
+                    infolog(g_logger, "Peer {} tcp_socket_write(): ({}) {}", conn->from, error.code, error.text);
                     tcp_socket_set_rst(conn->socket.get(), true);
                     remove_conn = true;
                     break;
@@ -207,8 +206,7 @@ void ag::MockDnsServer::tcp_handler(void *arg, TcpSocketEvent what, void *data) 
     }
     case TCP_SOCKET_EVENT_ERROR: {
         auto *error = (VpnError *) data;
-        infolog(g_logger, "Peer {} error: ({}) {}", conn->from, error->code,
-                error->text);
+        infolog(g_logger, "Peer {} error: ({}) {}", conn->from, error->code, error->text);
         tcp_socket_set_rst(conn->socket.get(), true);
         conn->server->m_tcp_conns.remove_if([&](const TcpConn &e) {
             return std::addressof(e) == conn;

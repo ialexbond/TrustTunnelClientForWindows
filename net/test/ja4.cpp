@@ -18,8 +18,8 @@
 #include <arpa/inet.h>
 #endif
 
-#include <openssl/sha.h>
 #include <fmt/format.h>
+#include <openssl/sha.h>
 
 #include "common/defs.h"
 

@@ -78,7 +78,7 @@ void TrustTunnelClient::notify_network_change(VpnNetworkState state) {
 
 void TrustTunnelClient::notify_sleep() {
     if (m_vpn) {
-        vpn_notify_sleep(m_vpn, [](void *){}, nullptr);
+        vpn_notify_sleep(m_vpn, [](void *) {}, nullptr);
     }
 }
 
@@ -89,9 +89,7 @@ void TrustTunnelClient::notify_wake() {
 }
 
 bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
-    return m_vpn
-        ? vpn_process_client_packets(m_vpn, packets)
-        : false;
+    return m_vpn && vpn_process_client_packets(m_vpn, packets);
 }
 
 void TrustTunnelClient::vpn_protect_socket(SocketProtectEvent *event) {
@@ -395,11 +393,11 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
     win_settings.block_untunneled_exclude_ports = m_config.killswitch_allow_ports.c_str();
     VpnError res = m_tunnel->init(&tunnel_settings, &win_settings);
 #else
-# ifdef __linux__
+#ifdef __linux__
     VpnError res = m_tunnel->init(&tunnel_settings, config.netns);
-# else
+#else
     VpnError res = m_tunnel->init(&tunnel_settings);
-# endif
+#endif
 #endif
     if (res.code != 0) {
         errlog(m_logger, "Failed to initialize tunnel: {}", res.text);

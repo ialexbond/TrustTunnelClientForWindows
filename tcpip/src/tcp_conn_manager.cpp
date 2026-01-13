@@ -378,7 +378,9 @@ TcpFlowCtrlInfo tcp_cm_flow_ctrl_info(const TcpConnDescriptor *connection) {
     TcpFlowCtrlInfo r = {};
     if (connection->pcb != nullptr) {
         r = {
-                .send_buffer_size = (tcp_sndqueuelen(connection->pcb) < TCP_SND_QUEUELEN) ? tcp_raw_get_out_buf_space(connection->pcb) : 0,
+                .send_buffer_size = (tcp_sndqueuelen(connection->pcb) < TCP_SND_QUEUELEN)
+                        ? tcp_raw_get_out_buf_space(connection->pcb)
+                        : 0,
                 .send_window_size = size_t(SND_WND_SCALE(connection->pcb, connection->pcb->snd_wnd)),
         };
     }

@@ -34,10 +34,10 @@
 #include <magic_enum/magic_enum.hpp>
 #include <openssl/ssl.h>
 
+#include "common/cache.h"
 #include "common/logger.h"
 #include "common/net_utils.h"
 #include "common/utils.h"
-#include "common/cache.h"
 #include "net/dns_utils.h"
 #include "net/http_header.h"
 #include "net/http_session.h"
@@ -118,8 +118,7 @@ static void nv_list_add_header(std::vector<NameValue> &nva, std::string_view nam
 /* Workaround for clang optimization bug in NDK 15 */
 __attribute((optnone))
 #endif //__clang__
-std::vector<NameValue>
-http_headers_to_nv_list(const HttpHeaders *headers) {
+std::vector<NameValue> http_headers_to_nv_list(const HttpHeaders *headers) {
     size_t max_field_count = headers->fields.size() + 4;
     std::vector<NameValue> nva;
     nva.reserve(max_field_count);
@@ -499,7 +498,8 @@ static std::optional<SystemDnsServers> retrieve_interface_dns_servers_with_doh(c
         }
         default:
             warnlog(g_logger, "Server has unexpected property type, assuming it's plain UDP: type={}, server={}",
-                    magic_enum::enum_name(server_property->Type), servers.main.at(server_property->ServerIndex).address);
+                    magic_enum::enum_name(server_property->Type),
+                    servers.main.at(server_property->ServerIndex).address);
             break;
         }
     }
@@ -631,7 +631,7 @@ private:
 
 public:
     explicit SessionAccumulator(size_t max_size = DEFAULT_MAX_SIZE)
-        : m_max_size(max_size) {
+            : m_max_size(max_size) {
     }
     void insert(DeclPtr<SSL_SESSION, &SSL_SESSION_free> session) const {
         if (m_list.size() >= m_max_size && !m_list.empty()) {
@@ -668,7 +668,7 @@ static std::string session_cache_key(std::string_view sni, bool quic) {
     key.reserve(SHA256_DIGEST_LENGTH * 2 + 1);
 
     static constexpr char hex[] = "0123456789ABCDEF";
-    for (size_t i = 0;  i != sizeof(sni_hash);  i++) {
+    for (size_t i = 0; i != sizeof(sni_hash); i++) {
         key += hex[sni_hash[i] >> 4];
         key += hex[sni_hash[i] & 0x0f];
     }
@@ -688,7 +688,8 @@ static int cache_session(SSL *ssl, SSL_SESSION *session, bool quic) {
         } else {
             SessionAccumulator session_accum;
             session_accum.insert(DeclPtr<SSL_SESSION, &SSL_SESSION_free>{session});
-            dbglog(g_logger, "{} sessions remaining for SNI: {}, QUIC: {}", session_accum.list().size(), hostname, quic);
+            dbglog(g_logger, "{} sessions remaining for SNI: {}, QUIC: {}", session_accum.list().size(), hostname,
+                    quic);
             g_session_cache.insert(key, std::move(session_accum));
         }
         return 1;
@@ -697,11 +698,11 @@ static int cache_session(SSL *ssl, SSL_SESSION *session, bool quic) {
 }
 
 static int cache_session_quic_cb(SSL *ssl, SSL_SESSION *session) {
-    return cache_session(ssl, session, /*quic*/true);
+    return cache_session(ssl, session, /*quic*/ true);
 }
 
 static int cache_session_tcp_cb(SSL *ssl, SSL_SESSION *session) {
-    return cache_session(ssl, session, /*quic*/false);
+    return cache_session(ssl, session, /*quic*/ false);
 }
 
 static DeclPtr<SSL_SESSION, &SSL_SESSION_free> pop_session_from_cache(const std::string &sni, bool quic) {
@@ -721,19 +722,22 @@ static DeclPtr<SSL_SESSION, &SSL_SESSION_free> pop_session_from_cache(const std:
 class SessionStorage {
 public:
     explicit SessionStorage(std::filesystem::path path)
-        : m_dir(std::move(path)) {
+            : m_dir(std::move(path)) {
     }
     void load_ssl_cache() {
         if (!exists(m_dir)) {
-            warnlog(g_logger, "SSL sessions won't be loaded and stored on disk because provided path doesn't exists: {}", m_dir.string());
+            warnlog(g_logger,
+                    "SSL sessions won't be loaded and stored on disk because provided path doesn't exists: {}",
+                    m_dir.string());
             return;
         }
         std::lock_guard l{g_session_cache_mutex};
-        std::map<size_t, std::pair<std::string, std::map<size_t, DeclPtr<SSL_SESSION, &SSL_SESSION_free>>>> sorted_cache;
+        std::map<size_t, std::pair<std::string, std::map<size_t, DeclPtr<SSL_SESSION, &SSL_SESSION_free>>>>
+                sorted_cache;
         std::set<std::filesystem::path> files_to_remove;
         size_t sessions_counter = 0;
 
-        for (const auto &entry: std::filesystem::directory_iterator(m_dir)) {
+        for (const auto &entry : std::filesystem::directory_iterator(m_dir)) {
             auto filename = entry.path().filename().string();
             auto parsed_filename = parse_filename(filename);
             if (!parsed_filename) {
@@ -745,14 +749,19 @@ public:
                 sessions_counter++;
                 auto entry = sorted_cache.find(parsed_filename->index);
                 if (entry == sorted_cache.end()) {
-                    entry = sorted_cache.insert(std::pair{parsed_filename->index, std::pair{parsed_filename->key, std::map<size_t, DeclPtr<SSL_SESSION, &SSL_SESSION_free>>{}}}).first;
+                    entry = sorted_cache
+                                    .insert(std::pair{parsed_filename->index,
+                                            std::pair{parsed_filename->key,
+                                                    std::map<size_t, DeclPtr<SSL_SESSION, &SSL_SESSION_free>>{}}})
+                                    .first;
                     entry->second.first = parsed_filename->key;
                 }
                 entry->second.second.insert({parsed_filename->session_index, std::move(session)});
             }
         }
-        dbglog(g_logger, "Loaded {} SSL sessions for {} domains from disk cache", sessions_counter, sorted_cache.size());
-        for (const auto &file: files_to_remove) {
+        dbglog(g_logger, "Loaded {} SSL sessions for {} domains from disk cache", sessions_counter,
+                sorted_cache.size());
+        for (const auto &file : files_to_remove) {
             std::error_code ec;
             std::filesystem::remove(file, ec);
         }
@@ -778,8 +787,9 @@ public:
             size_t session_index = 0;
             for (const auto &session : accum.list()) {
                 if (session && check_session_timings(session.get())) {
-                    auto key = std::string(FILE_PREFIX) + std::to_string(key_index) + INDEX_DELIMETER + std::to_string(session_index) + INDEX_DELIMETER + cache_key;
-                    write_session(m_dir/key, session.get());
+                    auto key = std::string(FILE_PREFIX) + std::to_string(key_index) + INDEX_DELIMETER
+                            + std::to_string(session_index) + INDEX_DELIMETER + cache_key;
+                    write_session(m_dir / key, session.get());
                     session_index++;
                 }
             }
@@ -813,16 +823,14 @@ private:
         filename.remove_prefix(index_str.size() + 1);
         auto session_index_str = filename.substr(0, filename.find_first_of(INDEX_DELIMETER));
         size_t session_index = 0;
-        ec = std::from_chars(session_index_str.data(), session_index_str.data() + session_index_str.size(), session_index).ec;
+        ec = std::from_chars(
+                session_index_str.data(), session_index_str.data() + session_index_str.size(), session_index)
+                     .ec;
         if (ec != std::errc()) {
             return std::nullopt;
         }
-        auto hash= filename.substr(session_index_str.size() + 1);
-        return FileNameEntry{
-            index,
-            session_index,
-            hash
-        };
+        auto hash = filename.substr(session_index_str.size() + 1);
+        return FileNameEntry{index, session_index, hash};
     }
 
     DeclPtr<SSL_SESSION, &SSL_SESSION_free> read_session(const std::filesystem::path &path) {
@@ -830,7 +838,7 @@ private:
             return nullptr;
         }
         auto path_str = path.string();
-        ag::UniquePtr<FILE, &fclose> f (fopen(path_str.c_str(), "r"));
+        ag::UniquePtr<FILE, &fclose> f(fopen(path_str.c_str(), "r"));
         if (!f) {
             return nullptr;
         }
@@ -842,7 +850,7 @@ private:
     }
     void write_session(const std::filesystem::path &path, SSL_SESSION *session) {
         auto path_str = path.string();
-        ag::UniquePtr<FILE, &fclose> f (fopen(path_str.c_str(), "w"));
+        ag::UniquePtr<FILE, &fclose> f(fopen(path_str.c_str(), "w"));
         if (!f) {
             return;
         }
@@ -858,13 +866,13 @@ void dump_session_cache(const std::string &path) {
     SessionStorage(path).save_ssl_cache();
 }
 
-void load_session_cache(const std::string& path) {
+void load_session_cache(const std::string &path) {
     SessionStorage(path).load_ssl_cache();
 }
 
 #ifdef OPENSSL_IS_BORINGSSL
-static int DecompressBrotliCert(SSL *ssl, CRYPTO_BUFFER **out, size_t uncompressed_len,
-        const uint8_t *in, size_t in_len) {
+static int DecompressBrotliCert(
+        SSL *ssl, CRYPTO_BUFFER **out, size_t uncompressed_len, const uint8_t *in, size_t in_len) {
     uint8_t *data;
     CRYPTO_BUFFER *decompressed = CRYPTO_BUFFER_alloc(&data, uncompressed_len);
     if (!decompressed) {
@@ -923,7 +931,8 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
 
 // Mimic Chrome's ClientHello if we are using BoringSSL.
 #ifdef OPENSSL_IS_BORINGSSL
-    if (SSL_CTX_add_cert_compression_alg(ctx.get(), TLSEXT_cert_compression_brotli, nullptr, DecompressBrotliCert) != 1) {
+    if (SSL_CTX_add_cert_compression_alg(ctx.get(), TLSEXT_cert_compression_brotli, nullptr, DecompressBrotliCert)
+            != 1) {
         return "Failed to add certificate compression algorithm";
     }
 
@@ -989,8 +998,8 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
 #ifdef OPENSSL_IS_BORINGSSL
     SSL_set_enable_ech_grease(ssl.get(), 1);
 
-    const char *alps = quic ? "h3": "h2";
-    if (SSL_add_application_settings(ssl.get(), (uint8_t *)alps, 2, nullptr, 0) != 1) {
+    const char *alps = quic ? "h3" : "h2";
+    if (SSL_add_application_settings(ssl.get(), (uint8_t *) alps, 2, nullptr, 0) != 1) {
         return "Failed to add ALPS extension";
     }
     SSL_set_alps_use_new_codepoint(ssl.get(), 1);
@@ -1039,7 +1048,8 @@ std::variant<SslPtr, std::string> make_ssl(int (*verification_callback)(X509_STO
     }
 
 #ifdef __mips__
-    if (!SSL_set_cipher_list(ssl.get(), "CHACHA20") || !SSL_set_ciphersuites(ssl.get(), "TLS_CHACHA20_POLY1305_SHA256")) {
+    if (!SSL_set_cipher_list(ssl.get(), "CHACHA20")
+            || !SSL_set_ciphersuites(ssl.get(), "TLS_CHACHA20_POLY1305_SHA256")) {
         return "Failed to set CHACHA20 cipher";
     }
 #endif

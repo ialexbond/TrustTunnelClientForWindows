@@ -27,8 +27,8 @@ std::optional<GUID> ag::string_to_guid(std::string_view guid_str) {
         guid_str.remove_suffix(1);
     }
     // check dash format
-    if (guid_str.size() != 36 || guid_str[GUID_DASH_IDX[0]] != '-' || guid_str[GUID_DASH_IDX[1]] != '-' || guid_str[GUID_DASH_IDX[2]] != '-'
-            || guid_str[GUID_DASH_IDX[3]] != '-') {
+    if (guid_str.size() != 36 || guid_str[GUID_DASH_IDX[0]] != '-' || guid_str[GUID_DASH_IDX[1]] != '-'
+            || guid_str[GUID_DASH_IDX[2]] != '-' || guid_str[GUID_DASH_IDX[3]] != '-') {
         return std::nullopt;
     }
     GUID guid{};
@@ -68,7 +68,7 @@ std::optional<GUID> ag::string_to_guid(std::string_view guid_str) {
 GUID ag::random_guid() {
     GUID guid{};
     RAND_bytes((uint8_t *) &guid, sizeof(guid));
-    guid.Data3 = 0x40 | (guid.Data3 &0x0f);
+    guid.Data3 = 0x40 | (guid.Data3 & 0x0f);
     guid.Data4[0] = 0x80 | (guid.Data4[0] & 0x3f);
     return guid;
 }

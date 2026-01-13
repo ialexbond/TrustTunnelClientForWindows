@@ -10,7 +10,7 @@ static ag::Logger g_logger{"DNS_CLIENT"};
 
 static constexpr size_t DNS_MESSAGE_MAX_SIZE = 4096;
 
-#define log_client(self_, lvl_, fmt_, ...) lvl_## log(g_logger, "[{}]: " fmt_, self_->m_parameters.tag, ## __VA_ARGS__)
+#define log_client(self_, lvl_, fmt_, ...) lvl_##log(g_logger, "[{}]: " fmt_, self_->m_parameters.tag, ##__VA_ARGS__)
 
 void ag::DnsClient::tcp_socket_handler(void *arg, TcpSocketEvent what, void *data) {
     auto *self = (DnsClient *) arg;

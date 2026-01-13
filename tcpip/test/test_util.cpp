@@ -4,8 +4,8 @@
 #include <event2/util.h>
 #include <lwip/ip_addr.h>
 
-#include "tcpip_util.h"
 #include "common/socket_address.h"
+#include "tcpip_util.h"
 #include "vpn/utils.h"
 
 using namespace ag;

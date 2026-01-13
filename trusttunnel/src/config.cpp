@@ -1,22 +1,22 @@
 #include <cstdio>
 #include <functional>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <ranges>
 
 #include <magic_enum/magic_enum.hpp>
 #include <openssl/pem.h>
 
 #include "net/tls.h"
-#include "vpn/trusttunnel/config.h"
 #include "utils.h"
+#include "vpn/trusttunnel/config.h"
 
 #ifndef _WIN32
-#include <unistd.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 
 using namespace ag; // NOLINT(google-build-using-namespace)
@@ -43,7 +43,7 @@ static std::string streamable_to_string(const T &obj) {
 }
 
 static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view pem_certificate) {
-    UniquePtr<BIO, &BIO_free> bio {BIO_new_mem_buf(pem_certificate.data(), (long) pem_certificate.size())};
+    UniquePtr<BIO, &BIO_free> bio{BIO_new_mem_buf(pem_certificate.data(), (long) pem_certificate.size())};
 
     UniquePtr<X509, &X509_free> cert{PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr)};
     if (cert == nullptr) {
@@ -105,11 +105,12 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
         location.ca_store = load_certificate(*x);
     }
 
-    if (auto upstream_protocol = config["upstream_protocol"].value<std::string_view>(); upstream_protocol && UPSTREAM_PROTO_MAP.contains(*upstream_protocol)) {
+    if (auto upstream_protocol = config["upstream_protocol"].value<std::string_view>();
+            upstream_protocol && UPSTREAM_PROTO_MAP.contains(*upstream_protocol)) {
         location.upstream_protocol = UPSTREAM_PROTO_MAP.at(*upstream_protocol);
     } else {
         errlog(g_logger, "Unexpected endpoint upstream protocol value: {}",
-                            streamable_to_string(config["upstream_protocol"].node()));
+                streamable_to_string(config["upstream_protocol"].node()));
         return std::nullopt;
     }
     if (auto upstream_fallback_protocol = config["upstream_fallback_protocol"].value<std::string_view>();
@@ -118,7 +119,7 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
             location.upstream_fallback_protocol = UPSTREAM_PROTO_MAP.at(*upstream_fallback_protocol);
         } else {
             errlog(g_logger, "Unexpected endpoint upstream fallback protocol value: {}",
-                   streamable_to_string(config["upstream_protocol"].node()));
+                    streamable_to_string(config["upstream_protocol"].node()));
             return std::nullopt;
         }
     }
@@ -172,10 +173,10 @@ static std::optional<TrustTunnelConfig::TunListener> parse_tun_listener_config(c
 #endif
 
     TrustTunnelConfig::TunListener tun = {
-        .mtu_size = (*tun_config)["mtu_size"].value<uint32_t>().value_or(DEFAULT_MTU),
-        .bound_if = std::move(bound_if),
-        .change_system_dns = (*tun_config)["change_system_dns"].value_or<bool>(true),
-        .netns = (*tun_config)["netns"].value<std::string>(),
+            .mtu_size = (*tun_config)["mtu_size"].value<uint32_t>().value_or(DEFAULT_MTU),
+            .bound_if = std::move(bound_if),
+            .change_system_dns = (*tun_config)["change_system_dns"].value_or<bool>(true),
+            .netns = (*tun_config)["netns"].value<std::string>(),
     };
 
     if (const auto *x = (*tun_config)["included_routes"].as_array(); x != nullptr) {
@@ -273,7 +274,6 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
             }
         }
     }
-
 
     const toml::table *endpoint_config = config["endpoint"].as_table();
     if (endpoint_config == nullptr) {

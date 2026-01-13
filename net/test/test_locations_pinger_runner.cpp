@@ -146,11 +146,15 @@ TEST_F(LocationsPingerRunnerTest, Multiple) {
     // Cloudflare DNS servers
     std::vector<VpnEndpoint> endpoints_1 = {
             {sockaddr_from_str("1.1.1.1:443"), "nullptr"},
+#ifndef IPV6_UNAVAILABLE
             {sockaddr_from_str("[2606:4700:4700::1111]:443"), "nullptr"},
+#endif
     };
     std::vector<VpnEndpoint> endpoints_2 = {
             {sockaddr_from_str("1.0.0.1:443"), "nullptr"},
+#ifndef IPV6_UNAVAILABLE
             {sockaddr_from_str("[2606:4700:4700::1001]:443"), "nullptr"},
+#endif
     };
 
     std::vector<VpnLocation> locations = {
@@ -178,10 +182,9 @@ TEST_F(LocationsPingerRunnerTest, Multiple) {
     ASSERT_EQ(test_ctx.results.size(), locations.size());
 
     for (const auto &l : locations) {
-        ASSERT_EQ(test_ctx.result_ids[l.id], l.id)
-                << SocketAddress(test_ctx.results[l.id].endpoint->address).str();
+        ASSERT_EQ(test_ctx.result_ids[l.id], l.id) << SocketAddress(test_ctx.results[l.id].endpoint->address).str();
 #ifdef IPV6_UNAVAILABLE
-        ASSERT_EQ(test_ctx.results[l.id].endpoint->address.ss_family, AF_INET)
+        ASSERT_EQ(test_ctx.results[l.id].endpoint->address.sa_family, AF_INET)
                 << SocketAddress(test_ctx.results[l.id].endpoint->address).str();
 #else
         // IPv6 should always be preferred
@@ -327,6 +330,9 @@ TEST_F(LocationsPingerRunnerTest, RelayAddresses) {
 }
 
 TEST_F(LocationsPingerRunnerTest, QuicToTlsFallback) {
+#ifdef IPV6_UNAVAILABLE
+    GTEST_SKIP() << "Comment me out if you want to run this test";
+#endif
     // At the time of writing, Quad9 doesn't respond to QUIC
     std::vector<VpnEndpoint> endpoints = {
             {sockaddr_from_str("9.9.9.9:443"), "dns.quad9.net"},
@@ -374,6 +380,9 @@ TEST_F(LocationsPingerRunnerTest, QuicToTlsFallback) {
 }
 
 TEST_F(LocationsPingerRunnerTest, QuicToTlsFallbackAndRelayAddresses) {
+#ifdef IPV6_UNAVAILABLE
+    GTEST_SKIP() << "Comment me out if you want to run this test";
+#endif
     // At the time of writing, Quad9 doesn't respond to QUIC
     std::vector<VpnEndpoint> endpoints = {
             // Blackhole addresses
@@ -538,7 +547,6 @@ TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelay) {
     ASSERT_TRUE(ctx.relay_address.empty());
 }
 
-
 TEST_F(LocationsPingerRunnerTest, DISABLED_Live) {
     std::ifstream in("locations.json");
     nlohmann::json json;
@@ -558,7 +566,7 @@ TEST_F(LocationsPingerRunnerTest, DISABLED_Live) {
         location = {};
         location.id = safe_strdup(fmt::format(
                 "{}/{}", json_loc["country_name"].get<std::string>(), json_loc["city_name"].get<std::string>())
-                                          .c_str());
+                        .c_str());
         static_assert(std::is_trivial_v<VpnEndpoint>);
         location.endpoints.data = (VpnEndpoint *) malloc(2 * json_loc["endpoints"].size() * sizeof(VpnEndpoint));
         location.endpoints.size = 0;

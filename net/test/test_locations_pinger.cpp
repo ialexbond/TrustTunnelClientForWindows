@@ -157,11 +157,15 @@ TEST_F(LocationsPingerTest, Multiple) {
     // Cloudflare DNS servers
     std::vector<VpnEndpoint> endpoints_1 = {
             {sockaddr_from_str("1.1.1.1:443"), "nullptr"},
+#ifndef IPV6_UNAVAILABLE
             {sockaddr_from_str("[2606:4700:4700::1111]:443"), "nullptr"},
+#endif
     };
     std::vector<VpnEndpoint> endpoints_2 = {
             {sockaddr_from_str("1.0.0.1:443"), "nullptr"},
+#ifndef IPV6_UNAVAILABLE
             {sockaddr_from_str("[2606:4700:4700::1001]:443"), "nullptr"},
+#endif
     };
 
     std::vector<VpnLocation> locations = {
@@ -196,10 +200,9 @@ TEST_F(LocationsPingerTest, Multiple) {
     ASSERT_EQ(test_ctx.results.size(), locations.size());
 
     for (const auto &l : locations) {
-        ASSERT_EQ(test_ctx.result_ids[l.id], l.id)
-                << SocketAddress(test_ctx.results[l.id].endpoint->address).str();
+        ASSERT_EQ(test_ctx.result_ids[l.id], l.id) << SocketAddress(test_ctx.results[l.id].endpoint->address).str();
 #ifdef IPV6_UNAVAILABLE
-        ASSERT_EQ(test_ctx.results[l.id].endpoint->address.ss_family, AF_INET)
+        ASSERT_EQ(test_ctx.results[l.id].endpoint->address.sa_family, AF_INET)
                 << SocketAddress(test_ctx.results[l.id].endpoint->address).str();
 #else
         ASSERT_EQ(test_ctx.results[l.id].endpoint->address.sa_family, AF_INET6)

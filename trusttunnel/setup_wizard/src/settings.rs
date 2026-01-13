@@ -1,13 +1,11 @@
 use crate::user_interaction::{
     ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_password,
-    checked_overwrite, select_variant,
+    select_variant,
 };
 use crate::Mode;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::BufReader;
+use std::fs;
 use std::ops::Not;
-use std::{fs, path};
 use x509_parser::extensions::GeneralName;
 
 macro_rules! docgen {
@@ -355,12 +353,12 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
     ))
     .and_then(|x| {
         fs::read_to_string(&x)
-            .map_err(|e| panic!("Failed to read endpoint config file:\n{}", e.to_string()))
+            .map_err(|e| panic!("Failed to read endpoint config file:\n{}", e))
             .ok()
     })
     .and_then(|x| {
         toml::de::from_str(x.as_str())
-            .map_err(|e| panic!("Failed to parse endpoint config:\n{}", e.to_string()))
+            .map_err(|e| panic!("Failed to parse endpoint config:\n{}", e))
             .ok()
     });
     let mut x = Endpoint {
@@ -647,20 +645,6 @@ struct Cert {
     alt_names: Vec<String>,
     #[allow(dead_code)] // needed only for logging
     expiration_date: String,
-}
-
-fn lookup_existent_cert() -> Option<Cert> {
-    fs::read_dir(".")
-        .ok()?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .metadata()
-                .map(|meta| meta.is_file())
-                .unwrap_or_default()
-        })
-        .filter_map(|entry| entry.path().to_str().map(String::from))
-        .find_map(parse_cert)
 }
 
 fn parse_cert(contents: String) -> Option<Cert> {

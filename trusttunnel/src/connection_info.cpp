@@ -1,6 +1,6 @@
-#include <nlohmann/json.hpp>
-#include <magic_enum/magic_enum.hpp>
 #include <common/time_utils.h>
+#include <magic_enum/magic_enum.hpp>
+#include <nlohmann/json.hpp>
 
 #include "vpn/trusttunnel/connection_info.h"
 
@@ -8,9 +8,9 @@ namespace ag {
 
 std::string ConnectionInfo::to_json(VpnConnectionInfoEvent *info, bool include_current_time) {
     static const std::map<VpnFinalConnectionAction, std::string_view> ACTION_MAP = {
-        { VPN_FCA_BYPASS, "bypass" },
-        { VPN_FCA_TUNNEL, "tunnel" },
-        { VPN_FCA_REJECT, "reject" },
+            {VPN_FCA_BYPASS, "bypass"},
+            {VPN_FCA_TUNNEL, "tunnel"},
+            {VPN_FCA_REJECT, "reject"},
     };
 
     nlohmann::json json;

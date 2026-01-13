@@ -64,7 +64,8 @@ ag::WfpFirewall::WfpFirewall()
         return;
     }
 
-    auto register_base_objects = [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
+    auto register_base_objects =
+            [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
         std::wstring name = L"AdGuard VPN provider";
 
         FWPM_PROVIDER0 provider{
@@ -184,178 +185,185 @@ static FWP_V6_ADDR_AND_MASK fwp_v6_range_from_cidr_range(const ag::CidrRange &ra
     return value;
 }
 
-ag::WfpFirewallError ag::WfpFirewall::restrict_dns_to(std::span<const CidrRange> allowed_v4, std::span<const CidrRange> allowed_v6) {
+ag::WfpFirewallError ag::WfpFirewall::restrict_dns_to(
+        std::span<const CidrRange> allowed_v4, std::span<const CidrRange> allowed_v6) {
     if (m_impl->engine_handle == INVALID_HANDLE_VALUE) {
         return make_error(FE_NOT_INITIALIZED);
     }
-    return run_transaction(m_impl->engine_handle, [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
-        FWPM_FILTER_CONDITION0 dns_conditions[] = {
-                {
-                        .fieldKey = FWPM_CONDITION_IP_REMOTE_PORT,
-                        .matchType = FWP_MATCH_EQUAL,
-                        .conditionValue =
+    return run_transaction(m_impl->engine_handle,
+            [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
+                FWPM_FILTER_CONDITION0 dns_conditions[] = {
+                        {
+                                .fieldKey = FWPM_CONDITION_IP_REMOTE_PORT,
+                                .matchType = FWP_MATCH_EQUAL,
+                                .conditionValue =
+                                        {
+                                                .type = FWP_UINT16,
+                                                .uint16 = ag::dns_utils::PLAIN_DNS_PORT_NUMBER,
+                                        },
+                        },
+                        {
+                                .fieldKey = FWPM_CONDITION_IP_PROTOCOL,
+                                .matchType = FWP_MATCH_EQUAL,
+                                .conditionValue =
+                                        {
+                                                .type = FWP_UINT8,
+                                                .uint8 = IPPROTO_TCP,
+                                        },
+                        },
+                        {
+                                .fieldKey = FWPM_CONDITION_IP_PROTOCOL,
+                                .matchType = FWP_MATCH_EQUAL,
+                                .conditionValue =
+                                        {
+                                                .type = FWP_UINT8,
+                                                .uint8 = IPPROTO_UDP,
+                                        },
+                        },
+                };
+
+                std::wstring name = L"AdGuard VPN restrict DNS";
+                FWPM_FILTER0 filter{
+                        .displayData =
                                 {
-                                        .type = FWP_UINT16,
-                                        .uint16 = ag::dns_utils::PLAIN_DNS_PORT_NUMBER,
+                                        .name = name.data(),
                                 },
-                },
-                {
-                        .fieldKey = FWPM_CONDITION_IP_PROTOCOL,
-                        .matchType = FWP_MATCH_EQUAL,
-                        .conditionValue =
+                        .providerKey = &m_impl->provider_key,
+                        .subLayerKey = m_impl->sublayer_key,
+                        .weight =
                                 {
                                         .type = FWP_UINT8,
-                                        .uint8 = IPPROTO_TCP,
+                                        .uint8 = DNS_RESTRICT_DENY_WEIGHT,
                                 },
-                },
-                {
-                        .fieldKey = FWPM_CONDITION_IP_PROTOCOL,
-                        .matchType = FWP_MATCH_EQUAL,
-                        .conditionValue =
+                        .numFilterConditions = (UINT32) std::size(dns_conditions),
+                        .filterCondition = &dns_conditions[0],
+                        .action =
                                 {
-                                        .type = FWP_UINT8,
-                                        .uint8 = IPPROTO_UDP,
+                                        .type = FWP_ACTION_BLOCK,
                                 },
-                },
-        };
+                };
 
-        std::wstring name = L"AdGuard VPN restrict DNS";
-        FWPM_FILTER0 filter{
-                .displayData =
-                        {
-                                .name = name.data(),
-                        },
-                .providerKey = &m_impl->provider_key,
-                .subLayerKey = m_impl->sublayer_key,
-                .weight =
-                        {
-                                .type = FWP_UINT8,
-                                .uint8 = DNS_RESTRICT_DENY_WEIGHT,
-                        },
-                .numFilterConditions = (UINT32) std::size(dns_conditions),
-                .filterCondition = &dns_conditions[0],
-                .action =
-                        {
-                                .type = FWP_ACTION_BLOCK,
-                        },
-        };
-
-        // Block all inbound/outbound IPv4/IPv6 DNS traffic.
-        for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
-                     FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
-            filter.layerKey = layer_key;
-            if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                    error != ERROR_SUCCESS) {
-                return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
-            }
-        }
-
-        filter.action = {.type = FWP_ACTION_PERMIT};
-        filter.weight.uint8 = DNS_RESTRICT_ALLOW_WEIGHT;
-
-        // Allow IPv4 inbound/outbound DNS traffic for specified addresses.
-        std::vector<FWPM_FILTER_CONDITION0> allow_v4_conditions;
-        allow_v4_conditions.reserve(std::size(dns_conditions) + allowed_v4.size());
-        allow_v4_conditions.insert(allow_v4_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
-        std::list<FWP_V4_ADDR_AND_MASK> allow_v4_ranges;
-        for (const CidrRange &range : allowed_v4) {
-            if (range.get_address().size() != IPV4_ADDRESS_SIZE) {
-                continue;
-            }
-            allow_v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
-                    .fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
-                    .matchType = FWP_MATCH_EQUAL,
-                    .conditionValue =
-                            {
-                                    .type = FWP_V4_ADDR_MASK,
-                                    .v4AddrMask = &allow_v4_ranges.emplace_back(fwp_v4_range_from_cidr_range(range)),
-                            },
-            });
-        }
-        if (allow_v4_conditions.size() > std::size(dns_conditions)) {
-            filter.numFilterConditions = allow_v4_conditions.size();
-            filter.filterCondition = allow_v4_conditions.data();
-            for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4}) {
-                filter.layerKey = layer_key;
-                if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                        error != ERROR_SUCCESS) {
-                    return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                // Block all inbound/outbound IPv4/IPv6 DNS traffic.
+                for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                             FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
+                    filter.layerKey = layer_key;
+                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                            error != ERROR_SUCCESS) {
+                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    }
                 }
-            }
-        }
 
-        // Allow IPv6 inbound/outbound DNS traffic for specified addresses.
-        std::vector<FWPM_FILTER_CONDITION0> allow_v6_conditions;
-        allow_v6_conditions.reserve(std::size(dns_conditions) + allowed_v6.size());
-        allow_v6_conditions.insert(allow_v6_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
-        std::list<FWP_V6_ADDR_AND_MASK> allow_v6_ranges;
-        for (const auto &range : allowed_v6) {
-            if (range.get_address().size() != IPV6_ADDRESS_SIZE) {
-                continue;
-            }
-            allow_v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
-                    .fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
-                    .matchType = FWP_MATCH_EQUAL,
-                    .conditionValue =
-                            {
-                                    .type = FWP_V6_ADDR_MASK,
-                                    .v6AddrMask = &allow_v6_ranges.emplace_back(fwp_v6_range_from_cidr_range(range)),
-                            },
-            });
-        }
-        if (allow_v6_conditions.size() > std::size(dns_conditions)) {
-            filter.numFilterConditions = allow_v6_conditions.size();
-            filter.filterCondition = allow_v6_conditions.data();
-            for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
-                filter.layerKey = layer_key;
-                if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                        error != ERROR_SUCCESS) {
-                    return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                filter.action = {.type = FWP_ACTION_PERMIT};
+                filter.weight.uint8 = DNS_RESTRICT_ALLOW_WEIGHT;
+
+                // Allow IPv4 inbound/outbound DNS traffic for specified addresses.
+                std::vector<FWPM_FILTER_CONDITION0> allow_v4_conditions;
+                allow_v4_conditions.reserve(std::size(dns_conditions) + allowed_v4.size());
+                allow_v4_conditions.insert(
+                        allow_v4_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
+                std::list<FWP_V4_ADDR_AND_MASK> allow_v4_ranges;
+                for (const CidrRange &range : allowed_v4) {
+                    if (range.get_address().size() != IPV4_ADDRESS_SIZE) {
+                        continue;
+                    }
+                    allow_v4_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                            .fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            .matchType = FWP_MATCH_EQUAL,
+                            .conditionValue =
+                                    {
+                                            .type = FWP_V4_ADDR_MASK,
+                                            .v4AddrMask =
+                                                    &allow_v4_ranges.emplace_back(fwp_v4_range_from_cidr_range(range)),
+                                    },
+                    });
                 }
-            }
-        }
+                if (allow_v4_conditions.size() > std::size(dns_conditions)) {
+                    filter.numFilterConditions = allow_v4_conditions.size();
+                    filter.filterCondition = allow_v4_conditions.data();
+                    for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4}) {
+                        filter.layerKey = layer_key;
+                        if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                                error != ERROR_SUCCESS) {
+                            return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                        }
+                    }
+                }
 
-        return nullptr;
-    });
+                // Allow IPv6 inbound/outbound DNS traffic for specified addresses.
+                std::vector<FWPM_FILTER_CONDITION0> allow_v6_conditions;
+                allow_v6_conditions.reserve(std::size(dns_conditions) + allowed_v6.size());
+                allow_v6_conditions.insert(
+                        allow_v6_conditions.end(), std::begin(dns_conditions), std::end(dns_conditions));
+                std::list<FWP_V6_ADDR_AND_MASK> allow_v6_ranges;
+                for (const auto &range : allowed_v6) {
+                    if (range.get_address().size() != IPV6_ADDRESS_SIZE) {
+                        continue;
+                    }
+                    allow_v6_conditions.emplace_back(FWPM_FILTER_CONDITION0{
+                            .fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            .matchType = FWP_MATCH_EQUAL,
+                            .conditionValue =
+                                    {
+                                            .type = FWP_V6_ADDR_MASK,
+                                            .v6AddrMask =
+                                                    &allow_v6_ranges.emplace_back(fwp_v6_range_from_cidr_range(range)),
+                                    },
+                    });
+                }
+                if (allow_v6_conditions.size() > std::size(dns_conditions)) {
+                    filter.numFilterConditions = allow_v6_conditions.size();
+                    filter.filterCondition = allow_v6_conditions.data();
+                    for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
+                        filter.layerKey = layer_key;
+                        if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                                error != ERROR_SUCCESS) {
+                            return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                        }
+                    }
+                }
+
+                return nullptr;
+            });
 }
 
 ag::WfpFirewallError ag::WfpFirewall::block_ipv6() {
     if (m_impl->engine_handle == INVALID_HANDLE_VALUE) {
         return make_error(FE_NOT_INITIALIZED);
     }
-    return run_transaction(m_impl->engine_handle, [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
-        std::wstring name = L"AdGuard VPN block IPv6";
-        FWPM_FILTER0 filter{
-                .displayData =
-                        {
-                                .name = name.data(),
-                        },
-                .providerKey = &m_impl->provider_key,
-                .subLayerKey = m_impl->sublayer_key,
-                .weight =
-                        {
-                                .type = FWP_UINT8,
-                                .uint8 = IPV6_BLOCK_DENY_WEIGHT,
-                        },
-                .numFilterConditions = 0,
-                .filterCondition = nullptr,
-                .action =
-                        {
-                                .type = FWP_ACTION_BLOCK,
-                        },
-        };
+    return run_transaction(m_impl->engine_handle,
+            [&]() -> WfpFirewallError { // NOLINT(cppcoreguidelines-avoid-capture-default-when-capturing-this)
+                std::wstring name = L"AdGuard VPN block IPv6";
+                FWPM_FILTER0 filter{
+                        .displayData =
+                                {
+                                        .name = name.data(),
+                                },
+                        .providerKey = &m_impl->provider_key,
+                        .subLayerKey = m_impl->sublayer_key,
+                        .weight =
+                                {
+                                        .type = FWP_UINT8,
+                                        .uint8 = IPV6_BLOCK_DENY_WEIGHT,
+                                },
+                        .numFilterConditions = 0,
+                        .filterCondition = nullptr,
+                        .action =
+                                {
+                                        .type = FWP_ACTION_BLOCK,
+                                },
+                };
 
-        // Block all inbound/outbound IPv6 traffic.
-        for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
-            filter.layerKey = layer_key;
-            if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
-                    error != ERROR_SUCCESS) {
-                return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
-            }
-        }
+                // Block all inbound/outbound IPv6 traffic.
+                for (GUID layer_key : {FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6}) {
+                    filter.layerKey = layer_key;
+                    if (DWORD error = FwpmFilterAdd0(m_impl->engine_handle, &filter, nullptr, nullptr);
+                            error != ERROR_SUCCESS) {
+                        return make_error(FE_WFP_ERROR, AG_FMT("FwpmFilterAdd0 failed with code {:#x}", error));
+                    }
+                }
 
-        return nullptr;
-    });
+                return nullptr;
+            });
 }
 
 ag::WfpFirewallError ag::WfpFirewall::block_untunneled(const CidrRange &tunaddr4, const CidrRange &tunaddr6,

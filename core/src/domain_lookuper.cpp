@@ -232,8 +232,9 @@ struct ParserFactory {
 };
 
 struct DomainLookuper::Context {
-    explicit Context(int proto): proto(proto) {};
-    int proto {};
+    explicit Context(int proto)
+            : proto(proto) {};
+    int proto{};
     ParserFactory factory = {};
     std::unique_ptr<Parser> current_parser = factory.produce(proto);
     std::vector<uint8_t> buffer;
@@ -261,7 +262,8 @@ DomainLookuperResult DomainLookuper::Context::parse(
     return {DLUS_NOTFOUND, ""};
 }
 
-DomainLookuperResult DomainLookuper::proceed(DomainLookuperPacketDirection dir, int proto, const uint8_t *data, size_t length) {
+DomainLookuperResult DomainLookuper::proceed(
+        DomainLookuperPacketDirection dir, int proto, const uint8_t *data, size_t length) {
     if (m_context == nullptr) {
         m_context = std::make_unique<DomainLookuper::Context>(proto);
     }

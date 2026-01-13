@@ -538,7 +538,7 @@ int Http3Upstream::verify_callback(X509_STORE_CTX *store_ctx, void *arg) {
             !safe_to_string_view(self->vpn->upstream_config.endpoint->remote_id).empty()
                     ? self->vpn->upstream_config.endpoint->remote_id
                     : self->vpn->upstream_config.endpoint->name,
-            (sockaddr *)&self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
+            (sockaddr *) &self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
             self->vpn->parameters.cert_verify_handler.arg);
 }
 

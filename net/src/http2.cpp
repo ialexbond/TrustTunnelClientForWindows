@@ -206,9 +206,7 @@ static int on_frame_recv_callback(nghttp2_session *ngsession, const nghttp2_fram
 
         // on_end_headers might have modified h2_session
         iter = kh_get(h2_streams_ht, h2_session->streams, (khint32_t) stream_id);
-        stream = (iter != kh_end(h2_session->streams))
-                ? kh_value(h2_session->streams, iter)
-                : nullptr;
+        stream = (iter != kh_end(h2_session->streams)) ? kh_value(h2_session->streams, iter) : nullptr;
 
         // fall-through
     case NGHTTP2_DATA:
@@ -545,8 +543,8 @@ int http2_session_send_headers(HttpSession *session, int32_t stream_id, const Ht
     ng_nva.reserve(nva.size());
     for (const auto &[name, value] : nva) {
         ng_nva.push_back(nghttp2_nv{
-                .name = (uint8_t *)name.data(),
-                .value = (uint8_t *)value.data(),
+                .name = (uint8_t *) name.data(),
+                .value = (uint8_t *) value.data(),
                 .namelen = name.size(),
                 .valuelen = value.size(),
         });
@@ -739,9 +737,8 @@ int http_session_set_recv_window(HttpSession *session, int32_t stream_id, size_t
 
     // don't reduce window, but don't let it be more than `MAX_STREAM_WINDOW_SIZE`
     int32_t current_window = nghttp2_session_get_stream_effective_local_window_size(ngsession, stream_id);
-    int32_t new_window = std::min(
-            std::max(current_window, size > INT32_MAX ? INT32_MAX : int32_t(size)),
-            MAX_STREAM_WINDOW_SIZE);
+    int32_t new_window =
+            std::min(std::max(current_window, size > INT32_MAX ? INT32_MAX : int32_t(size)), MAX_STREAM_WINDOW_SIZE);
     log_sid(session, stream_id, trace, "Requested={} current={} new={}", size, current_window, new_window);
 
     int r = nghttp2_session_set_local_window_size(ngsession, NGHTTP2_FLAG_NONE, stream_id, new_window);

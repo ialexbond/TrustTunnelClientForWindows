@@ -41,18 +41,17 @@ static constexpr QuicInitialSalt QUIC_INITIAL_SALTS[] = {
         // QUIC draft 34
         {.version = 0xff000022,
                 .salt = {0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad,
-                        0xcc, 0xbb, 0x7f, 0x0a,}},
+                        0xcc, 0xbb, 0x7f, 0x0a}},
 
         // QUIC draft 28
         {.version = 0xff00001c,
                 .salt = {0xaf, 0xbf, 0xec, 0x28, 0x99, 0x93, 0xd2, 0x4c, 0x9e, 0x97, 0x86, 0xf1, 0x9c, 0x61, 0x11, 0xe0,
-                        0x43, 0x90, 0xa8, 0x99,}},
+                        0x43, 0x90, 0xa8, 0x99}},
 
         // QUIC v1 (same as latest draft)
         {.version = 0x00000001,
                 .salt = {0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad,
-                        0xcc, 0xbb, 0x7f, 0x0a,}
-        },
+                        0xcc, 0xbb, 0x7f, 0x0a}},
 };
 
 static uint64_t get_varint(size_t *length, const uint8_t *buf);
@@ -89,7 +88,7 @@ static bool decrypt_quic_payload(uint8_t *dest, const uint8_t *payload_key, cons
     }
 
     int r = ngtcp2_crypto_decrypt(dest, &ctx.aead, aead_ctx.get(), ciphertext, ciphertext_len, nonce, NONCE_LEN,
-                    associated_data, associated_data_len);
+            associated_data, associated_data_len);
 
     if (max_overhead) {
         *max_overhead = ctx.aead.max_overhead;
@@ -117,8 +116,7 @@ std::optional<std::vector<uint8_t>> quic_utils::decrypt_initial(
     // the secrets for protecting client packets
     std::array<uint8_t, QUIC_INITIAL_SECRETLEN> initial_secret_buf{};
 
-    if (!tls13_utils::hkdf_extract(initial_secret_buf, std::span{hd.dcid.data(), hd.dcid_len},
-                initial_salt_it->salt)) {
+    if (!tls13_utils::hkdf_extract(initial_secret_buf, std::span{hd.dcid.data(), hd.dcid_len}, initial_salt_it->salt)) {
         return std::nullopt;
     }
 

@@ -4,7 +4,7 @@
 
 using namespace ag;
 
-TEST(VpnPacketPool, Functional){
+TEST(VpnPacketPool, Functional) {
     const size_t pool_capacity = 20;
     std::unique_ptr<VpnPacketPool> pool{new VpnPacketPool(pool_capacity, DEFAULT_MTU_SIZE)};
     std::vector<VpnPacket> packets;

@@ -82,8 +82,8 @@ static dns::DnsProxySettings make_dns_proxy_settings(const DnsProxyAccessor::Par
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     settings.qos_settings = {
-        .qos_class = parameters.qos_settings.qos_class,
-        .relative_priority = parameters.qos_settings.relative_priority
+            .qos_class = parameters.qos_settings.qos_class,
+            .relative_priority = parameters.qos_settings.relative_priority,
     };
 #endif // __APPLE__ && TARGET_OS_IPHONE
 

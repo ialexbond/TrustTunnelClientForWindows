@@ -10,17 +10,17 @@
 #include <utility>
 
 #include <cxxopts.hpp>
-#include <toml++/toml.h>
 #include <magic_enum/magic_enum.hpp>
+#include <toml++/toml.h>
 
 #include "common/logger.h"
 #include "common/net_utils.h"
 #include "common/socket_address.h"
-#include "net/tls.h"
 #include "net/network_manager.h"
+#include "net/tls.h"
+#include "utils.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
-#include "utils.h"
 
 #ifdef __APPLE__
 #include "AppleSleepNotifier.h"
@@ -120,7 +120,7 @@ int main(int argc, char **argv) {
         errlog(g_logger, "Failed to parse config");
         return 1;
     }
-    auto& config = *config_res;
+    auto &config = *config_res;
     if (!TrustTunnelCliUtils::apply_cmd_args(config, result)) {
         return 1;
     }
@@ -130,10 +130,10 @@ int main(int argc, char **argv) {
     vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
 
     VpnCallbacks callbacks = {
-        .protect_handler = get_protect_socket_callback(config),
-        .verify_handler = get_verify_certificate_callback(),
-        .state_changed_handler = get_state_changed_callback(),
-        .connection_info_handler = get_connection_info_callback(),
+            .protect_handler = get_protect_socket_callback(config),
+            .verify_handler = get_verify_certificate_callback(),
+            .state_changed_handler = get_state_changed_callback(),
+            .connection_info_handler = get_connection_info_callback(),
     };
 
     g_client = new TrustTunnelClient(std::move(config), std::move(callbacks));
@@ -151,8 +151,12 @@ int main(int argc, char **argv) {
 
 #ifdef __APPLE__
     auto sleep_notifier = std::make_unique<AppleSleepNotifier>(
-            [] { g_client->notify_sleep(); },
-            [] { g_client->notify_wake(); });
+            [] {
+                g_client->notify_sleep();
+            },
+            [] {
+                g_client->notify_wake();
+            });
 #endif
 
     std::unique_lock<std::mutex> lock(g_waiter_mutex);
@@ -173,7 +177,7 @@ int main(int argc, char **argv) {
 std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const TrustTunnelConfig &config) {
     const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&config.listener);
     if (!tun) {
-        return [](auto){};
+        return [](auto) {};
     }
 
     return [bound_if = tun->bound_if](SocketProtectEvent *event) {
@@ -195,8 +199,7 @@ std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const Trus
 
 #ifdef __linux__
         if (!bound_if.empty()) {
-            if (setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, bound_if.data(), (socklen_t) bound_if.size())
-                    != 0) {
+            if (setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, bound_if.data(), (socklen_t) bound_if.size()) != 0) {
                 event->result = -1;
             }
         }

@@ -136,12 +136,12 @@ struct SingleUpstreamConnector::Impl {
             self->pending_error = *error;
         }
 
-        self->deferred_task = event_loop::submit(self->parent.PARAMETERS.ev_loop, {self, [](void *arg, TaskId) {
-                                                                               auto *self = (Impl *) arg;
-                                                                               self->deferred_task.release();
-                                                                               self->fsm.perform_transition(
-                                                                                       E_DEFERRED_DISCONNECT, nullptr);
-                                                                           }});
+        self->deferred_task = event_loop::submit(
+                self->parent.PARAMETERS.ev_loop, {self, [](void *arg, TaskId) {
+                                                      auto *self = (Impl *) arg;
+                                                      self->deferred_task.release();
+                                                      self->fsm.perform_transition(E_DEFERRED_DISCONNECT, nullptr);
+                                                  }});
 
         log_connector(self, trace, "Done");
     }

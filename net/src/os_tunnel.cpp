@@ -1,8 +1,8 @@
 #include <vector>
 
+#include "common/utils.h"
 #include "net/os_tunnel.h"
 #include "net/utils.h"
-#include "common/utils.h"
 
 #ifdef _WIN32
 #define POPEN _popen
@@ -53,7 +53,8 @@ void ag::tunnel_utils::get_setup_dns(
 }
 
 void ag::tunnel_utils::get_setup_routes(std::vector<ag::CidrRange> &ipv4_routes,
-        std::vector<ag::CidrRange> &ipv6_routes, ag::VpnAddressArray &included_routes, ag::VpnAddressArray &excluded_routes) {
+        std::vector<ag::CidrRange> &ipv6_routes, ag::VpnAddressArray &included_routes,
+        ag::VpnAddressArray &excluded_routes) {
     for (size_t i = 0; i < included_routes.size; i++) {
         std::string_view route(included_routes.data[i]);
         if (route.find(':') == std::string::npos) {
@@ -123,16 +124,17 @@ ag::Result<std::string, ag::tunnel_utils::ExecError> ag::tunnel_utils::sys_cmd_w
         }
         if (result.value().status != 0) {
             dbglog(g_logger, "Exit code: {}", result.value().status);
-            return make_error(ag::tunnel_utils::ExecError::AE_CMD_FAILURE, AG_FMT("Command failed: Non-zero exit code: {}", result.value().status));
+            return make_error(ag::tunnel_utils::ExecError::AE_CMD_FAILURE,
+                    AG_FMT("Command failed: Non-zero exit code: {}", result.value().status));
         }
         return output;
     }
     dbglog(g_logger, "{}", result.error()->str());
     switch (result.error()->value()) {
-        case ag::EE_POPEN:
-            return make_error(ag::tunnel_utils::ExecError::AE_POPEN, AG_FMT("popen() failed: {}", result.error()->str()));
-        case ag::EE_PCLOSE:
-            return make_error(ag::tunnel_utils::ExecError::AE_PCLOSE, AG_FMT("pclose() failed: {}", result.error()->str()));
+    case ag::EE_POPEN:
+        return make_error(ag::tunnel_utils::ExecError::AE_POPEN, AG_FMT("popen() failed: {}", result.error()->str()));
+    case ag::EE_PCLOSE:
+        return make_error(ag::tunnel_utils::ExecError::AE_PCLOSE, AG_FMT("pclose() failed: {}", result.error()->str()));
     }
 }
 #endif // defined _WIN32
@@ -154,18 +156,18 @@ ag::VpnOsTunnelSettings *ag::vpn_os_tunnel_settings_clone(const ag::VpnOsTunnelS
     dst->ipv4_address = safe_strdup(settings->ipv4_address);
     dst->ipv6_address = safe_strdup(settings->ipv6_address);
     dst->included_routes.size = settings->included_routes.size;
-    dst->included_routes.data = new const char *[settings->included_routes.size] {};
+    dst->included_routes.data = new const char *[settings->included_routes.size]{};
     for (size_t i = 0; i != dst->included_routes.size; i++) {
         dst->included_routes.data[i] = safe_strdup(settings->included_routes.data[i]);
     }
     dst->excluded_routes.size = settings->excluded_routes.size;
-    dst->excluded_routes.data = new const char *[settings->excluded_routes.size] {};
+    dst->excluded_routes.data = new const char *[settings->excluded_routes.size]{};
     for (size_t i = 0; i != dst->excluded_routes.size; i++) {
         dst->excluded_routes.data[i] = safe_strdup(settings->excluded_routes.data[i]);
     }
     dst->mtu = settings->mtu;
     dst->dns_servers.size = settings->dns_servers.size;
-    dst->dns_servers.data = new const char *[settings->dns_servers.size] {};
+    dst->dns_servers.data = new const char *[settings->dns_servers.size]{};
     for (size_t i = 0; i != dst->dns_servers.size; i++) {
         dst->dns_servers.data[i] = safe_strdup(settings->dns_servers.data[i]);
     }
@@ -195,7 +197,8 @@ void ag::vpn_os_tunnel_settings_destroy(ag::VpnOsTunnelSettings *settings) {
 
 const ag::VpnOsTunnelSettings *ag::vpn_os_tunnel_settings_defaults() {
     static const char *included_routes[] = {"0.0.0.0/0", "2000::/3"};
-    static const char *excluded_routes[] = {"10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"};
+    static const char *excluded_routes[] = {
+            "10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"};
     static const char *dns_servers[] = {AG_UNFILTERED_DNS_IPS_V4[0].data(), AG_UNFILTERED_DNS_IPS_V4[1].data()};
     static const VpnOsTunnelSettings settings{
             .ipv4_address = "172.16.219.2",

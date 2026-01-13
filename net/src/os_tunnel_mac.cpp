@@ -78,9 +78,7 @@ evutil_socket_t ag::VpnMacTunnel::tun_open() {
         warnlog(logger, "Failed to make socket close on exec: ({}) {}", errno, strerror(errno));
     }
 
-    struct ctl_info info{
-        .ctl_name = UTUN_CONTROL_NAME
-    };
+    struct ctl_info info{.ctl_name = UTUN_CONTROL_NAME};
 
     if (ioctl(fd, CTLIOCGINFO, &info) < 0) {
         errlog(logger, "IOCTL system call failed: ({}) {}", errno, strerror(errno));
@@ -88,7 +86,7 @@ evutil_socket_t ag::VpnMacTunnel::tun_open() {
         return -1;
     }
 
-    struct sockaddr_ctl addr {};
+    struct sockaddr_ctl addr{};
     addr.sc_id = info.ctl_id;
     addr.sc_len = sizeof(addr);
     addr.sc_family = AF_SYSTEM;
@@ -136,8 +134,7 @@ bool ag::VpnMacTunnel::setup_routes() {
     for (auto &route : ipv4_routes) {
         if (!sys_cmd_bool(AG_FMT("route add {} -iface {}", route.to_string(), m_tun_name))) {
             auto splitted = route.split();
-            if (!splitted
-                    || !sys_cmd_bool(AG_FMT("route add {} -iface {}", splitted->first.to_string(), m_tun_name))
+            if (!splitted || !sys_cmd_bool(AG_FMT("route add {} -iface {}", splitted->first.to_string(), m_tun_name))
                     || !sys_cmd_bool(AG_FMT("route add {} -iface {}", splitted->second.to_string(), m_tun_name))) {
                 return false;
             }
@@ -148,7 +145,8 @@ bool ag::VpnMacTunnel::setup_routes() {
             auto splitted = route.split();
             if (!splitted
                     || !sys_cmd_bool(AG_FMT("route add -inet6 {} -iface {}", splitted->first.to_string(), m_tun_name))
-                    || !sys_cmd_bool(AG_FMT("route add -inet6 {} -iface {}", splitted->second.to_string(), m_tun_name))) {
+                    || !sys_cmd_bool(
+                            AG_FMT("route add -inet6 {} -iface {}", splitted->second.to_string(), m_tun_name))) {
                 return false;
             }
         }
@@ -159,7 +157,8 @@ bool ag::VpnMacTunnel::setup_routes() {
 [[clang::optnone]]
 void ag::VpnMacTunnel::setup_dns() {
     m_system_dns_setup_success = false;
-    std::vector<std::string_view> dns_servers{m_settings->dns_servers.data, m_settings->dns_servers.data + m_settings->dns_servers.size};
+    std::vector<std::string_view> dns_servers{
+            m_settings->dns_servers.data, m_settings->dns_servers.data + m_settings->dns_servers.size};
     m_dns_manager = VpnMacDnsSettingsManager::create(dns_servers);
     m_system_dns_setup_success = (m_dns_manager != nullptr);
 }

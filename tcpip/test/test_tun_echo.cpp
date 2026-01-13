@@ -1,7 +1,7 @@
 /**
  * @file test_tun_echo.cpp
  * @brief Minimal TUN echo test for tcpip module
- * 
+ *
  * This test:
  * 1. Creates a UTUN descriptor using SYS_CONTROL socket
  * 2. Configures the adapter: ifconfig utunN 1.2.3.3/24 up; route add 1.2.3.4 -iface utunN
@@ -11,16 +11,16 @@
  */
 
 #include <arpa/inet.h>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
 #include <atomic>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <net/if.h>
+#include <sys/ioctl.h>
 #include <thread>
+#include <unistd.h>
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -62,7 +62,7 @@ static void setup_signal_handler() {
     sigaddset(&sigset, SIGINT);
     sigaddset(&sigset, SIGTERM);
     pthread_sigmask(SIG_BLOCK, &sigset, nullptr);
-    
+
     // Create thread to wait for signals
     std::thread([sigset] {
         int signum = 0;
@@ -91,9 +91,7 @@ static int create_utun_device(std::string &tun_name) {
         warnlog(g_test_log, "Failed to make socket close on exec: ({}) {}", errno, strerror(errno));
     }
 
-    struct ctl_info info{
-        .ctl_name = UTUN_CONTROL_NAME
-    };
+    struct ctl_info info{.ctl_name = UTUN_CONTROL_NAME};
 
     if (ioctl(fd, CTLIOCGINFO, &info) < 0) {
         errlog(g_test_log, "IOCTL system call failed: ({}) {}", errno, strerror(errno));
@@ -160,7 +158,7 @@ static bool configure_tun_interface(const std::string &tun_name) {
     // Configure interface: ifconfig utunN 1.2.3.3/24 up
     std::string cmd = AG_FMT("ifconfig {} 1.2.3.3 1.2.3.3 netmask 255.255.255.0 up", tun_name);
     dbglog(g_test_log, "Executing: {}", cmd);
-    
+
     int result = system(cmd.c_str());
     if (result != 0) {
         errlog(g_test_log, "Failed to configure interface, exit code: {}", WEXITSTATUS(result));
@@ -170,7 +168,7 @@ static bool configure_tun_interface(const std::string &tun_name) {
     // Add route: route add 1.2.3.4 -iface utunN
     cmd = AG_FMT("route add 1.2.3.4 -iface {}", tun_name);
     dbglog(g_test_log, "Executing: {}", cmd);
-    
+
     result = system(cmd.c_str());
     if (result != 0) {
         errlog(g_test_log, "Failed to add route, exit code: {}", WEXITSTATUS(result));
@@ -181,7 +179,7 @@ static bool configure_tun_interface(const std::string &tun_name) {
     // Configure interface: ip addr add 1.2.3.3/24 dev tunN
     std::string cmd = AG_FMT("ip addr add 1.2.3.3/24 dev {}", tun_name);
     dbglog(g_test_log, "Executing: {}", cmd);
-    
+
     int result = system(cmd.c_str());
     if (result != 0) {
         errlog(g_test_log, "Failed to configure interface, exit code: {}", WEXITSTATUS(result));
@@ -191,7 +189,7 @@ static bool configure_tun_interface(const std::string &tun_name) {
     // Bring interface up
     cmd = AG_FMT("ip link set {} up", tun_name);
     dbglog(g_test_log, "Executing: {}", cmd);
-    
+
     result = system(cmd.c_str());
     if (result != 0) {
         errlog(g_test_log, "Failed to bring interface up, exit code: {}", WEXITSTATUS(result));
@@ -201,7 +199,7 @@ static bool configure_tun_interface(const std::string &tun_name) {
     // Add route: ip route add 1.2.3.4 dev tunN
     cmd = AG_FMT("ip route add 1.2.3.4 dev {}", tun_name);
     dbglog(g_test_log, "Executing: {}", cmd);
-    
+
     result = system(cmd.c_str());
     if (result != 0) {
         errlog(g_test_log, "Failed to add route, exit code: {}", WEXITSTATUS(result));
@@ -234,36 +232,28 @@ static void tcpip_event_handler(void *arg, TcpipEvent event, void *data) {
         auto *req = (TcpipConnectRequestEvent *) data;
         char src_str[INET6_ADDRSTRLEN];
         char dst_str[INET6_ADDRSTRLEN];
-        
+
         const sockaddr *src_sa = req->src->c_sockaddr();
         const sockaddr *dst_sa = req->dst->c_sockaddr();
-        
+
         inet_ntop(src_sa->sa_family,
-                src_sa->sa_family == AF_INET 
-                    ? (void*)&((struct sockaddr_in*)src_sa)->sin_addr
-                    : (void*)&((struct sockaddr_in6*)src_sa)->sin6_addr,
+                src_sa->sa_family == AF_INET ? (void *) &((struct sockaddr_in *) src_sa)->sin_addr
+                                             : (void *) &((struct sockaddr_in6 *) src_sa)->sin6_addr,
                 src_str, sizeof(src_str));
-        
+
         inet_ntop(dst_sa->sa_family,
-                dst_sa->sa_family == AF_INET
-                    ? (void*)&((struct sockaddr_in*)dst_sa)->sin_addr
-                    : (void*)&((struct sockaddr_in6*)dst_sa)->sin6_addr,
+                dst_sa->sa_family == AF_INET ? (void *) &((struct sockaddr_in *) dst_sa)->sin_addr
+                                             : (void *) &((struct sockaddr_in6 *) dst_sa)->sin6_addr,
                 dst_str, sizeof(dst_str));
 
-        uint16_t src_port = ntohs(src_sa->sa_family == AF_INET
-                ? ((struct sockaddr_in*)src_sa)->sin_port
-                : ((struct sockaddr_in6*)src_sa)->sin6_port);
-        
-        uint16_t dst_port = ntohs(dst_sa->sa_family == AF_INET
-                ? ((struct sockaddr_in*)dst_sa)->sin_port
-                : ((struct sockaddr_in6*)dst_sa)->sin6_port);
+        uint16_t src_port = ntohs(src_sa->sa_family == AF_INET ? ((struct sockaddr_in *) src_sa)->sin_port
+                                                               : ((struct sockaddr_in6 *) src_sa)->sin6_port);
 
-        dbglog(g_test_log, "[{}] Connect request: {} proto={} {}:{} -> {}:{}",
-                req->id,
-                req->proto == IPPROTO_TCP ? "TCP" : "UDP",
-                req->proto,
-                src_str, src_port,
-                dst_str, dst_port);
+        uint16_t dst_port = ntohs(dst_sa->sa_family == AF_INET ? ((struct sockaddr_in *) dst_sa)->sin_port
+                                                               : ((struct sockaddr_in6 *) dst_sa)->sin6_port);
+
+        dbglog(g_test_log, "[{}] Connect request: {} proto={} {}:{} -> {}:{}", req->id,
+                req->proto == IPPROTO_TCP ? "TCP" : "UDP", req->proto, src_str, src_port, dst_str, dst_port);
 
         // Accept all connections
         tcpip_complete_connect_request(g_tcpip, req->id, TCPIP_ACT_BYPASS);
@@ -278,7 +268,7 @@ static void tcpip_event_handler(void *arg, TcpipEvent event, void *data) {
 
     case TCPIP_EVENT_READ: {
         auto *read_event = (TcpipReadEvent *) data;
-        
+
         // Calculate total data size
         size_t total_size = 0;
         for (size_t i = 0; i < read_event->iovlen; i++) {
@@ -326,15 +316,15 @@ static void tcpip_event_handler(void *arg, TcpipEvent event, void *data) {
     case TCPIP_EVENT_ICMP_ECHO: {
         auto *icmp = (IcmpEchoRequestEvent *) data;
         dbglog(g_test_log, "ICMP echo request: id={} seq={}", icmp->request.id, icmp->request.seqno);
-        
+
         // Echo ICMP reply
         IcmpEchoReply reply{};
         reply.peer = icmp->request.peer;
         reply.id = icmp->request.id;
         reply.seqno = icmp->request.seqno;
-        reply.type = 0;  // ICMP Echo Reply
+        reply.type = 0; // ICMP Echo Reply
         reply.code = 0;
-        
+
         tcpip_process_icmp_echo_reply(g_tcpip, &reply);
         icmp->result = 0;
         break;
@@ -486,7 +476,7 @@ int main(int argc, char *argv[]) {
     dbglog(g_test_log, "Stopping event loop...");
     vpn_event_loop_stop(g_event_loop);
     event_loop_thread.join();
-    
+
     dbglog(g_test_log, "Event loop stopped gracefully");
 
     // Cleanup

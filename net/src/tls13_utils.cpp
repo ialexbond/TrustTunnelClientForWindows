@@ -2,8 +2,8 @@
 
 #include <span>
 
-#include <openssl/evp.h>
 #include <ngtcp2/ngtcp2_crypto.h>
+#include <openssl/evp.h>
 
 #include "common/defs.h"
 
@@ -22,7 +22,8 @@ bool hkdf_extract(std::span<uint8_t> dest, std::span<const uint8_t> secret, std:
     ngtcp2_crypto_ctx ctx;
     ngtcp2_crypto_ctx_initial(&ctx);
 
-    return ngtcp2_crypto_hkdf_extract(dest.data(), &ctx.md, secret.data(), secret.size(), salt.data(), salt.size()) == 0;
+    return ngtcp2_crypto_hkdf_extract(dest.data(), &ctx.md, secret.data(), secret.size(), salt.data(), salt.size())
+            == 0;
 }
 
 bool hkdf_expand_label(std::span<uint8_t> dest, std::span<const uint8_t> secret, std::string_view label,
@@ -42,8 +43,9 @@ bool hkdf_expand_label(std::span<uint8_t> dest, std::span<const uint8_t> secret,
 
     ngtcp2_crypto_ctx ctx;
     ngtcp2_crypto_ctx_initial(&ctx);
-    return ngtcp2_crypto_hkdf_expand(dest.data(), dest.size(), &ctx.md, secret.data(), secret.size(),
-                   info.data(), info.size()) == 0;
+    return ngtcp2_crypto_hkdf_expand(
+                   dest.data(), dest.size(), &ctx.md, secret.data(), secret.size(), info.data(), info.size())
+            == 0;
 }
 
-}  // namespace ag::tls13_utils
+} // namespace ag::tls13_utils

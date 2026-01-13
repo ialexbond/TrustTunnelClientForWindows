@@ -1,30 +1,30 @@
+#include "net/network_manager.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/connection_info.h"
-#include "net/network_manager.h"
 
 #include "jni_utils.h"
-#include <jni.h>
 #include <common/cidr_range.h>
+#include <jni.h>
 
 static ag::Logger g_logger("TrustTunnelJni");
 
 class VpnCtx {
 public:
-    VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback,
-           jmethodID verify_callback, jmethodID state_changed_callback, jmethodID connection_info_callback,
-           ag::TrustTunnelConfig &&config)
-        : m_protect_socket_callback(protect_socket_callback)
-        , m_verify_callback(verify_callback)
-        , m_state_changed_callback(state_changed_callback)
-        , m_connection_info_callback(connection_info_callback)
-        , m_native_client(std::move(config), create_callbacks()) {
-            env->GetJavaVM(&m_vm);
-            this->m_callback_object = {m_vm, callback_object};
-        }
+    VpnCtx(JNIEnv *env, jobject callback_object, jmethodID protect_socket_callback, jmethodID verify_callback,
+            jmethodID state_changed_callback, jmethodID connection_info_callback, ag::TrustTunnelConfig &&config)
+            : m_protect_socket_callback(protect_socket_callback)
+            , m_verify_callback(verify_callback)
+            , m_state_changed_callback(state_changed_callback)
+            , m_connection_info_callback(connection_info_callback)
+            , m_native_client(std::move(config), create_callbacks()) {
+        env->GetJavaVM(&m_vm);
+        this->m_callback_object = {m_vm, callback_object};
+    }
 
     ag::TrustTunnelClient &get_native_client() {
         return m_native_client;
     }
+
 private:
     GlobalRef<jobject> m_callback_object;
     JavaVM *m_vm = nullptr;
@@ -110,25 +110,28 @@ private:
 
     ag::VpnCallbacks create_callbacks() {
         return {
-                .protect_handler = [this] (auto event) {
-                    protectSocket(event);
-                },
-                .verify_handler = [this] (auto event) {
-                    verifyCertificate(event);
-                },
-                .state_changed_handler = [this] (auto event) {
-                    onStateChanged(event);
-                },
-                .connection_info_handler = [this] (auto event) {
-                    onConnectionInfo(event);
-                },
+                .protect_handler =
+                        [this](auto event) {
+                            protectSocket(event);
+                        },
+                .verify_handler =
+                        [this](auto event) {
+                            verifyCertificate(event);
+                        },
+                .state_changed_handler =
+                        [this](auto event) {
+                            onStateChanged(event);
+                        },
+                .connection_info_handler =
+                        [this](auto event) {
+                            onConnectionInfo(event);
+                        },
         };
     }
 };
 
-extern "C"
-JNIEXPORT jlong JNICALL
-Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, jstring config) {
+extern "C" JNIEXPORT jlong JNICALL Java_com_adguard_trusttunnel_VpnClient_createNative(
+        JNIEnv *env, jobject thiz, jstring config) {
     jclass callback_class = env->GetObjectClass(thiz);
     if (!callback_class) {
         errlog(g_logger, "Failed to find Java class for the Callback object");
@@ -141,7 +144,8 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
         return 0;
     }
 
-    jmethodID verify_certificate_method_id = env->GetMethodID(callback_class, "verifyCertificate", "([BLjava/util/List;)Z");
+    jmethodID verify_certificate_method_id =
+            env->GetMethodID(callback_class, "verifyCertificate", "([BLjava/util/List;)Z");
     if (!verify_certificate_method_id) {
         errlog(g_logger, "There is no `verifyCertificate` method in the Callback object");
         return 0;
@@ -153,8 +157,7 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
         return 0;
     }
 
-    jmethodID connection_info_method_id = env->GetMethodID(callback_class, "onConnectionInfo",
-                                                           "(Ljava/lang/String;)V");
+    jmethodID connection_info_method_id = env->GetMethodID(callback_class, "onConnectionInfo", "(Ljava/lang/String;)V");
     if (!connection_info_method_id) {
         errlog(g_logger, "There is no `onConnectionInfo` method in the Callback object");
         return 0;
@@ -174,18 +177,14 @@ Java_com_adguard_trusttunnel_VpnClient_createNative(JNIEnv *env, jobject thiz, j
 
     ag::vpn_post_quantum_group_set_enabled(trusttunnel_config->post_quantum_group_enabled);
 
-    auto ctx = std::make_unique<VpnCtx>(
-            env, thiz,
-            protect_socket_method_id, verify_certificate_method_id, state_changed_method_id, connection_info_method_id,
-            std::move(*trusttunnel_config)
-    );
+    auto ctx = std::make_unique<VpnCtx>(env, thiz, protect_socket_method_id, verify_certificate_method_id,
+            state_changed_method_id, connection_info_method_id, std::move(*trusttunnel_config));
 
     return (jlong) ctx.release();
 }
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_adguard_trusttunnel_VpnClient_startNative(JNIEnv *env, jobject thiz, jlong native_ptr, jint tun_fd) {
+extern "C" JNIEXPORT jboolean JNICALL Java_com_adguard_trusttunnel_VpnClient_startNative(
+        JNIEnv *env, jobject thiz, jlong native_ptr, jint tun_fd) {
     if (!native_ptr) {
         errlog(g_logger, "Nothing to start, create VpnClient first");
         return (jboolean) false;
@@ -200,9 +199,8 @@ Java_com_adguard_trusttunnel_VpnClient_startNative(JNIEnv *env, jobject thiz, jl
     return (jboolean) true;
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_trusttunnel_VpnClient_stopNative(JNIEnv *env, jobject thiz, jlong native_ptr) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_trusttunnel_VpnClient_stopNative(
+        JNIEnv *env, jobject thiz, jlong native_ptr) {
     if (!native_ptr) {
         warnlog(g_logger, "Nothing to stop, VpnClient is not created");
         return;
@@ -212,35 +210,29 @@ Java_com_adguard_trusttunnel_VpnClient_stopNative(JNIEnv *env, jobject thiz, jlo
     ctx->get_native_client().disconnect();
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_trusttunnel_VpnClient_destroyNative(JNIEnv *env, jobject thiz, jlong native_ptr) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_trusttunnel_VpnClient_destroyNative(
+        JNIEnv *env, jobject thiz, jlong native_ptr) {
     if (!native_ptr) {
         warnlog(g_logger, "VpnClient has been already destroyed");
         return;
     }
     delete (VpnCtx *) native_ptr;
 }
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_trusttunnel_VpnClient_notifyNetworkChangeNative(JNIEnv *env, jobject thiz,
-                                                                 jlong native_ptr, jboolean available) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_trusttunnel_VpnClient_notifyNetworkChangeNative(
+        JNIEnv *env, jobject thiz, jlong native_ptr, jboolean available) {
     if (!native_ptr) {
         errlog(g_logger, "VpnClient is not created");
         return;
     }
     auto *ctx = (VpnCtx *) native_ptr;
 
-    ctx->get_native_client().notify_network_change(available ? ag::VpnNetworkState::VPN_NS_CONNECTED : ag::VpnNetworkState::VPN_NS_NOT_CONNECTED);
+    ctx->get_native_client().notify_network_change(
+            available ? ag::VpnNetworkState::VPN_NS_CONNECTED : ag::VpnNetworkState::VPN_NS_NOT_CONNECTED);
 }
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_adguard_trusttunnel_VpnClient_setSystemDnsServersNative(JNIEnv *env, jobject thiz,
-                                                                 jobjectArray servers,
-                                                                 jobjectArray bootstraps) {
+extern "C" JNIEXPORT jboolean JNICALL Java_com_adguard_trusttunnel_VpnClient_setSystemDnsServersNative(
+        JNIEnv *env, jobject thiz, jobjectArray servers, jobjectArray bootstraps) {
     size_t num_servers = env->GetArrayLength(servers);
-    size_t num_bootstraps = bootstraps != nullptr
-                            ? num_bootstraps = env->GetArrayLength(bootstraps) : 0;
+    size_t num_bootstraps = bootstraps != nullptr ? num_bootstraps = env->GetArrayLength(bootstraps) : 0;
 
     ag::SystemDnsServers c_servers;
     c_servers.main.reserve(num_servers);
@@ -264,11 +256,8 @@ Java_com_adguard_trusttunnel_VpnClient_setSystemDnsServersNative(JNIEnv *env, jo
 
     return ag::vpn_network_manager_update_system_dns(std::move(c_servers));
 }
-extern "C"
-JNIEXPORT jobjectArray JNICALL
-Java_com_adguard_trusttunnel_VpnClient_excludeCidr(JNIEnv *env, jclass clazz,
-                                                   jobjectArray included_routes,
-                                                   jobjectArray excluded_routes) {
+extern "C" JNIEXPORT jobjectArray JNICALL Java_com_adguard_trusttunnel_VpnClient_excludeCidr(
+        JNIEnv *env, jclass clazz, jobjectArray included_routes, jobjectArray excluded_routes) {
     size_t num_included = env->GetArrayLength(included_routes);
     std::vector<ag::CidrRange> included_ranges;
     included_ranges.reserve(num_included);

@@ -672,19 +672,18 @@ VpnError tcp_socket_acquire_fd(TcpSocket *socket, evutil_socket_t fd) {
 
     if (0 != set_nodelay(fd)) {
         int error = evutil_socket_geterror(fd);
-        log_sock(socket, warn, "Failed to set TCP_NODELAY: ({}) {}", error,
-                 evutil_socket_error_to_string(error));
+        log_sock(socket, warn, "Failed to set TCP_NODELAY: ({}) {}", error, evutil_socket_error_to_string(error));
     }
     if (0 != evutil_make_socket_nonblocking(fd)) {
         int error = evutil_socket_geterror(fd);
         log_sock(socket, err, "Failed to make socket non-blocking: ({}) {}", error,
-                 evutil_socket_error_to_string(error));
+                evutil_socket_error_to_string(error));
         return {-1, "Failed to make socket non-blocking"};
     }
     if (0 != evutil_make_socket_closeonexec(fd)) {
         int error = evutil_socket_geterror(fd);
         log_sock(socket, warn, "Failed to make socket close-on-exec: ({}) {}", error,
-                 evutil_socket_error_to_string(error));
+                evutil_socket_error_to_string(error));
     }
 
     bufferevent_enable(socket->bev, EV_WRITE);
@@ -1145,12 +1144,12 @@ done:
 #endif // _WIN32
 
 VpnError do_handshake(TcpSocket *socket) {
-    auto err_log_wrapper = [socket](const int code, const char* text) -> VpnError {
+    auto err_log_wrapper = [socket](const int code, const char *text) -> VpnError {
         if (code != 0) {
             log_sock(socket, dbg, "SSL handshake completed with error: {}", text);
         }
 
-        return {.code=code, .text=text};
+        return {.code = code, .text = text};
     };
 
     size_t bio_written = 0;
@@ -1205,7 +1204,7 @@ VpnError do_handshake(TcpSocket *socket) {
             if (BIO_should_retry(SSL_get_wbio(socket->ssl.get()))) {
                 break;
             }
-            return err_log_wrapper(-1,"BIO_read failed");
+            return err_log_wrapper(-1, "BIO_read failed");
         }
         if (ret == 0) {
             break;
@@ -1229,7 +1228,7 @@ void tcp_socket_update_timeout(TcpSocket *sock) {
     if (sock->parameters.timeout.count()) {
         sock->timeout_ts = get_next_timeout_ts(sock);
         sock->subscribe_id = socket_manager_timer_subscribe(sock->parameters.socket_manager, sock->parameters.ev_loop,
-                                                            uint32_t(sock->parameters.timeout.count()), timer_callback, sock);
+                uint32_t(sock->parameters.timeout.count()), timer_callback, sock);
     }
 }
 

@@ -294,8 +294,7 @@ TaskId vpn_event_loop_schedule(VpnEventLoop *loop, VpnEventLoopTask task, Millis
         break;
     }
 
-    DeferredTaskInfo &info = loop->deferred_task_queue.emplace_back(
-            DeferredTaskInfo{{task_id, task}});
+    DeferredTaskInfo &info = loop->deferred_task_queue.emplace_back(DeferredTaskInfo{{task_id, task}});
 
     // Will be freed by `vpn_timer_event_free_finalize`
     auto *task_ctx = new DeferredTaskCtx{loop, task_id};

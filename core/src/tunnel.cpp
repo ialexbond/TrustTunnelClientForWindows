@@ -455,7 +455,8 @@ static bool send_buffered_data(const Tunnel *self, uint64_t conn_client_id) {
     }
 
     size_t server_can_send = upstream->available_to_send(conn->server_id);
-    log_conn(self, conn, trace, "Can send to server side: {} bytes, upstream sent zero bytes: {}", server_can_send, sent_zero_bytes);
+    log_conn(self, conn, trace, "Can send to server side: {} bytes, upstream sent zero bytes: {}", server_can_send,
+            sent_zero_bytes);
     listener->turn_read(conn->client_id, server_can_send > 0 && !sent_zero_bytes);
     upstream->update_flow_control(conn->server_id, listener->flow_control_info(conn_client_id));
     return true;
@@ -488,15 +489,14 @@ static void report_connection_info(const Tunnel *self, VpnConnection *conn, cons
         return;
     }
 
-    if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst);
-            dst && dst->is_loopback()) {
+    if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst); dst && dst->is_loopback()) {
         return;
     }
 
     conn->flags.set(CONNF_CONN_INFO_SENT);
     VpnConnectionInfoEvent info;
     info.src = conn->addr.src.c_storage();
-    if (const SocketAddress *dst =std::get_if<SocketAddress>(&conn->addr.dst)) {
+    if (const SocketAddress *dst = std::get_if<SocketAddress>(&conn->addr.dst)) {
         info.dst = dst->c_storage();
         info.domain = domain;
     } else {
@@ -536,17 +536,17 @@ static void schedule_send_buffered_data(Tunnel *tunnel, VpnConnection *conn) {
         uint64_t conn_client_id;
     };
     conn->send_buffered_task = event_loop::submit(tunnel->vpn->parameters.ev_loop,
-                                                  {
-                                                          new Ctx{tunnel, conn->client_id},
-                                                          [](void *arg, TaskId) {
-                                                              auto *ctx = (Ctx *) arg;
+            {
+                    new Ctx{tunnel, conn->client_id},
+                    [](void *arg, TaskId) {
+                        auto *ctx = (Ctx *) arg;
 
-                                                              send_buffered_data(ctx->tunnel, ctx->conn_client_id);
-                                                          },
-                                                          [](void *arg) {
-                                                              delete (Ctx *) arg;
-                                                          },
-                                                  });
+                        send_buffered_data(ctx->tunnel, ctx->conn_client_id);
+                    },
+                    [](void *arg) {
+                        delete (Ctx *) arg;
+                    },
+            });
 }
 
 void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, ServerEvent what, void *data) {
@@ -775,8 +775,8 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
             listener->turn_read(conn->client_id, server_can_send > 0);
 
             if (event->length > 0) {
-                log_conn(this, conn, trace, "{} bytes sent to server (can send to server side: {} bytes)", event->length,
-                        server_can_send);
+                log_conn(this, conn, trace, "{} bytes sent to server (can send to server side: {} bytes)",
+                        event->length, server_can_send);
             }
 
             if (!conn->buffered_packets.empty()) {
@@ -1089,8 +1089,7 @@ static std::optional<SocketAddress> select_resolved_destination_address(
         }
 
         std::shared_ptr<ServerUpstream> upstream = select_upstream(self, action, nullptr);
-        if (upstream != nullptr
-                && upstream->ip_version_availability.test(get_ip_version(address).value())) {
+        if (upstream != nullptr && upstream->ip_version_availability.test(get_ip_version(address).value())) {
             return address;
         }
 
@@ -1293,8 +1292,7 @@ void Tunnel::complete_connect_request(uint64_t id, std::optional<VpnConnectActio
         break;
     case VPN_CA_DEFAULT:
         conn->flags.set(CONNF_LOOKINGUP_DOMAIN,
-                std::holds_alternative<SocketAddress>(conn->addr.dst)
-                        && !conn->flags.test(CONNF_PLAIN_DNS_CONNECTION));
+                std::holds_alternative<SocketAddress>(conn->addr.dst) && !conn->flags.test(CONNF_PLAIN_DNS_CONNECTION));
         action = VPN_CA_DEFAULT;
         break;
     case VPN_CA_REJECT:
@@ -1545,8 +1543,8 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
             conn->requested_at = std::chrono::high_resolution_clock::now();
         }
 
-        log_conn(this, conn, dbg, "New client connection request: {}->{} (proto: {})",
-                *client_event->src, tunnel_addr_to_str(&client_event_addr.dst), client_event->protocol);
+        log_conn(this, conn, dbg, "New client connection request: {}->{} (proto: {})", *client_event->src,
+                tunnel_addr_to_str(&client_event_addr.dst), client_event->protocol);
 
         add_connection(this, conn);
 

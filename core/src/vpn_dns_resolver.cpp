@@ -412,8 +412,8 @@ void VpnDnsResolver::resolve_queue(VpnDnsResolverQueue queue_type) {
 
             this->state.deadlines.emplace(now + g_query_timeout, query_id);
             auto timeout = std::chrono::duration_cast<Millis>(this->state.deadlines.begin()->first - now);
-            this->state.periodic_queries_check_task = event_loop::schedule(
-                    this->vpn->parameters.ev_loop, {this, on_periodic_queries_check}, timeout);
+            this->state.periodic_queries_check_task =
+                    event_loop::schedule(this->vpn->parameters.ev_loop, {this, on_periodic_queries_check}, timeout);
 
             log_resolver(this, dbg,
                     "Sent query for resolution: query id={}, resolution id={}, name={}, rtype={}, queue={}", query_id,

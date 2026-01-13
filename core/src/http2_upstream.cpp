@@ -216,7 +216,7 @@ void Http2Upstream::http_handler(void *arg, HttpEventId what, void *data) {
     }
     case HTTP_EVENT_DATA_FINISHED: {
         // endpoint may send a couple of RST frames in response
-        http_session_send_data(upstream->m_session.get(), (int32_t) * (uint32_t *) data, nullptr, 0, true);
+        http_session_send_data(upstream->m_session.get(), (int32_t) *(uint32_t *) data, nullptr, 0, true);
         break;
     }
     case HTTP_EVENT_STREAM_PROCESSED: {
@@ -577,8 +577,8 @@ void Http2Upstream::close_session() {
     log_upstream(this, dbg, "Done");
 }
 
-std::optional<uint32_t> Http2Upstream::send_connect_request(uint64_t conn_id,
-        const TunnelAddress *dst_addr, std::string_view app_name) {
+std::optional<uint32_t> Http2Upstream::send_connect_request(
+        uint64_t conn_id, const TunnelAddress *dst_addr, std::string_view app_name) {
     if (m_session == nullptr) {
         log_upstream(this, dbg, "Failed to send connect request: upstream is inactive");
         return std::nullopt;
@@ -806,7 +806,7 @@ int Http2Upstream::verify_callback(X509_STORE_CTX *store_ctx, void *arg) {
             !safe_to_string_view(self->vpn->upstream_config.endpoint->remote_id).empty()
                     ? self->vpn->upstream_config.endpoint->remote_id
                     : self->vpn->upstream_config.endpoint->name,
-            (sockaddr *)&self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
+            (sockaddr *) &self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
             self->vpn->parameters.cert_verify_handler.arg);
 }
 
@@ -859,7 +859,8 @@ void Http2Upstream::do_health_check(bool need_result) {
                                 [](void *arg, TaskId) {
                                     auto *self = (Http2Upstream *) arg;
                                     bool need_result = self->m_health_check_info.has_value()
-                                            ? self->m_health_check_info->need_result : true;
+                                            ? self->m_health_check_info->need_result
+                                            : true;
                                     self->m_health_check_info.reset();
                                     VpnError e = {VPN_EC_ERROR, "Failed to send health check request"};
                                     self->report_health_check_error(need_result, e);
@@ -879,7 +880,8 @@ void Http2Upstream::do_health_check(bool need_result) {
                             [](void *arg, TaskId) {
                                 auto *self = (Http2Upstream *) arg;
                                 bool need_result = self->m_health_check_info.has_value()
-                                        ? self->m_health_check_info->need_result : true;
+                                        ? self->m_health_check_info->need_result
+                                        : true;
                                 self->m_health_check_info.reset();
                                 VpnError e = {VPN_EC_ERROR, "Health check has timed out"};
                                 self->report_health_check_error(need_result, e);

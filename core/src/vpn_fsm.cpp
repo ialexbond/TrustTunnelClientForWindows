@@ -300,7 +300,8 @@ static void run_ping(void *ctx, void *) {
         pinger_info.relay_parallel = vpn->selected_endpoint->relay->get();
     }
 
-    vpn->pinger.reset(locations_pinger_start(&pinger_info, {pinger_handler, vpn}, vpn->ev_loop.get(), vpn->network_manager.get()));
+    vpn->pinger.reset(locations_pinger_start(
+            &pinger_info, {pinger_handler, vpn}, vpn->ev_loop.get(), vpn->network_manager.get()));
 
     vpn->pending_error.reset();
     vpn->selected_endpoint.reset();
@@ -471,9 +472,7 @@ static void raise_state(void *ctx, void *) {
         kex_group_name = kex_group_name_by_nid(kex_group_nid);
         event.connected_info = {
                 .endpoint = vpn->selected_endpoint->endpoint.get(),
-                .relay = vpn->selected_endpoint->relay.has_value()
-                        ? vpn->selected_endpoint->relay->get()
-                        : nullptr,
+                .relay = vpn->selected_endpoint->relay.has_value() ? vpn->selected_endpoint->relay->get() : nullptr,
                 .protocol = vpn->client.endpoint_upstream->get_protocol(),
                 .kex_group = kex_group_name.c_str(),
         };

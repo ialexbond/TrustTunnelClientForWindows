@@ -136,7 +136,7 @@ static UdpSocket *udp_socket_create_inner(const UdpSocketParameters *parameters,
         if (0 != evutil_make_socket_closeonexec(fd)) {
             int err = evutil_socket_geterror(fd);
             log_sock(sock, warn, "Failed to make socket close-on-exec: {} ({})", evutil_socket_error_to_string(err),
-                     err);
+                    err);
         }
 
 #ifdef __MACH__
@@ -163,8 +163,8 @@ static UdpSocket *udp_socket_create_inner(const UdpSocketParameters *parameters,
 
         sock->timeout_ts = get_next_timeout_ts(sock);
         if (sock->parameters.timeout.count()) {
-            sock->subscribe_id = socket_manager_timer_subscribe(sock->parameters.socket_manager, sock->parameters.ev_loop,
-                uint32_t(sock->parameters.timeout.count()), timer_callback, sock);
+            sock->subscribe_id = socket_manager_timer_subscribe(sock->parameters.socket_manager,
+                    sock->parameters.ev_loop, uint32_t(sock->parameters.timeout.count()), timer_callback, sock);
             if (sock->subscribe_id < 0) {
                 log_sock(sock, err, "Failed to subscribe for timer events");
                 goto fail;
@@ -288,8 +288,8 @@ void udp_socket_set_timeout(UdpSocket *socket, Millis timeout) {
         log_sock(socket, dbg, "{}", timeout);
         socket->parameters.timeout = timeout;
         socket->timeout_ts = get_next_timeout_ts(socket);
-        socket->subscribe_id = socket_manager_timer_subscribe(socket->parameters.socket_manager, socket->parameters.ev_loop,
-                uint32_t(socket->parameters.timeout.count()), timer_callback, socket);
+        socket->subscribe_id = socket_manager_timer_subscribe(socket->parameters.socket_manager,
+                socket->parameters.ev_loop, uint32_t(socket->parameters.timeout.count()), timer_callback, socket);
     } else {
         log_sock(socket, dbg, "Timeout disabled");
     }

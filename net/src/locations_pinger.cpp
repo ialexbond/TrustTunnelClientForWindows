@@ -168,10 +168,9 @@ static void finalize_location(LocationsPinger *pinger, FinalizeLocationInfo info
             result.relay = selected->relay.get();
         }
         log_location(pinger, location->info->id, dbg, "Selected endpoint: {}{} ({}){}{} ({} ms)",
-                result.is_quic ? "udp://" : "tcp://",
-                result.endpoint->name,
-                SocketAddress(result.endpoint->address), result.relay ? " through relay " : "",
-                result.relay ? SocketAddress(result.relay->address).str() : "", result.ping_ms);
+                result.is_quic ? "udp://" : "tcp://", result.endpoint->name, SocketAddress(result.endpoint->address),
+                result.relay ? " through relay " : "", result.relay ? SocketAddress(result.relay->address).str() : "",
+                result.ping_ms);
     } else {
         log_location(pinger, location->info->id, dbg, "None of the endpoints has been pinged successfully");
         result.ping_ms = -1;
@@ -260,10 +259,10 @@ static void start_location_ping(LocationsPinger *pinger) {
     auto i = pinger->pending_locations.begin();
 
     log_location(pinger, i->info->id, dbg, "Starting location ping");
-    PingInfo ping_info = {i->info->id, pinger->loop, pinger->network_manager, {i->info->endpoints.data, i->info->endpoints.size},
-            pinger->timeout_ms, {pinger->interfaces.data(), pinger->interfaces.size()}, pinger->rounds,
-            pinger->main_protocol, pinger->anti_dpi, pinger->handoff,
-            {i->info->relays.data, i->info->relays.size}, *pinger->relay_parallel,
+    PingInfo ping_info = {i->info->id, pinger->loop, pinger->network_manager,
+            {i->info->endpoints.data, i->info->endpoints.size}, pinger->timeout_ms,
+            {pinger->interfaces.data(), pinger->interfaces.size()}, pinger->rounds, pinger->main_protocol,
+            pinger->anti_dpi, pinger->handoff, {i->info->relays.data, i->info->relays.size}, *pinger->relay_parallel,
             pinger->quic_max_idle_timeout_ms, pinger->quic_version};
     Ping *ping = ping_start(&ping_info, {ping_handler, pinger});
     if (!ping) {
@@ -287,8 +286,8 @@ static void start_location_ping(LocationsPinger *pinger) {
     }
 }
 
-LocationsPinger *locations_pinger_start(
-        const LocationsPingerInfo *info, LocationsPingerHandler handler, VpnEventLoop *ev_loop, VpnNetworkManager *network_manager) {
+LocationsPinger *locations_pinger_start(const LocationsPingerInfo *info, LocationsPingerHandler handler,
+        VpnEventLoop *ev_loop, VpnNetworkManager *network_manager) {
     auto *pinger = new LocationsPinger{};
 
     pinger->handler = handler;

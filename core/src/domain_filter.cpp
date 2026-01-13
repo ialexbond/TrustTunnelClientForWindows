@@ -24,8 +24,10 @@ DomainFilterValidationStatus DomainFilter::validate_entry(std::string_view entry
     ParseResult result = parse_entry(entry);
     static_assert(std::is_same_v<typename std::variant_alternative<DFVS_OK_ADDR, ParseResult>::type, SocketAddress>);
     static_assert(std::is_same_v<typename std::variant_alternative<DFVS_OK_CIDR, ParseResult>::type, CidrRange>);
-    static_assert(std::is_same_v<typename std::variant_alternative<DFVS_OK_DOMAIN, ParseResult>::type, DomainEntryInfo>);
-    static_assert(std::is_same_v<typename std::variant_alternative<DFVS_MALFORMED, ParseResult>::type, DomainEntryMalformed>);
+    static_assert(
+            std::is_same_v<typename std::variant_alternative<DFVS_OK_DOMAIN, ParseResult>::type, DomainEntryInfo>);
+    static_assert(
+            std::is_same_v<typename std::variant_alternative<DFVS_MALFORMED, ParseResult>::type, DomainEntryMalformed>);
     static_assert(std::variant_size<ParseResult>::value == 4);
 
     return DomainFilterValidationStatus(result.index());

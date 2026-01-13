@@ -5,11 +5,11 @@
 #include <vector>
 
 #define log_req(mngr_, msg_, lvl_, fmt_, ...)                                                                          \
-    lvl_##log((mngr_)->m_log, "[{}] [{}/{}/{}] " fmt_, (mngr_)->m_id, (msg_).peer,                                     \
-            (int) (msg_).id, (int) (msg_).seqno, ##__VA_ARGS__)
+    lvl_##log((mngr_)->m_log, "[{}] [{}/{}/{}] " fmt_, (mngr_)->m_id, (msg_).peer, (int) (msg_).id,                    \
+            (int) (msg_).seqno, ##__VA_ARGS__)
 #define log_reply(mngr_, msg_, lvl_, fmt_, ...)                                                                        \
-    lvl_##log((mngr_)->m_log, "[{}] [{}/{}/{}] " fmt_, (mngr_)->m_id, (msg_).peer,                                     \
-            (int) (msg_).id, (int) (msg_).seqno, ##__VA_ARGS__)
+    lvl_##log((mngr_)->m_log, "[{}] [{}/{}/{}] " fmt_, (mngr_)->m_id, (msg_).peer, (int) (msg_).id,                    \
+            (int) (msg_).seqno, ##__VA_ARGS__)
 
 using namespace std::chrono;
 

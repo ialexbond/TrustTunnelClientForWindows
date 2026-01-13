@@ -3,8 +3,8 @@
 #include <chrono>
 
 #ifdef __APPLE__
-#include <sys/qos.h>
 #include <TargetConditionals.h>
+#include <sys/qos.h>
 #endif // __APPLE__
 
 #include <magic_enum/magic_enum.hpp>
@@ -90,7 +90,8 @@ vpn_client::Parameters Vpn::make_client_parameters() const {
 }
 
 vpn_client::EndpointConnectionConfig Vpn::make_client_upstream_config() const {
-    AutoVpnEndpoint endpoint = vpn_endpoint_clone(this->selected_endpoint.value().endpoint.get()); // NOLINT(bugprone-unchecked-optional-access)
+    AutoVpnEndpoint endpoint = vpn_endpoint_clone(
+            this->selected_endpoint.value().endpoint.get()); // NOLINT(bugprone-unchecked-optional-access)
     if (this->selected_endpoint->relay.has_value()) {
         AutoVpnRelay relay = vpn_relay_clone(this->selected_endpoint->relay.value().get());
         endpoint->address = relay->address;
@@ -102,7 +103,8 @@ vpn_client::EndpointConnectionConfig Vpn::make_client_upstream_config() const {
         ip_availability.set(IPV6);
     }
     return {
-            .main_protocol = VpnUpstreamProtocolConfig{.type = this->client.quic_connector ? VPN_UP_HTTP3 : VPN_UP_HTTP2},
+            .main_protocol =
+                    VpnUpstreamProtocolConfig{.type = this->client.quic_connector ? VPN_UP_HTTP3 : VPN_UP_HTTP2},
             .fallback = VpnUpstreamFallbackConfig{},
             .endpoint = std::move(endpoint),
             .timeout = Millis{this->upstream_config->timeout_ms},
@@ -153,12 +155,13 @@ bool Vpn::run_event_loop() {
     }
 
     this->executor_thread = std::thread([this]() {
-        int ret = vpn_event_loop_run(this->ev_loop.get(), {
+        int ret = vpn_event_loop_run(this->ev_loop.get(),
+                {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-            .qos_class = this->client.parameters.qos_settings.qos_class,
-            .relative_priority = this->client.parameters.qos_settings.relative_priority,
+                        .qos_class = this->client.parameters.qos_settings.qos_class,
+                        .relative_priority = this->client.parameters.qos_settings.relative_priority,
 #endif // __APPLE__ && TARGET_OS_IPHONE
-        });
+                });
         if (ret != 0) {
             log_vpn(this, err, "Event loop run returned {}, shutting down", ret);
             this->pending_error = {.code = VPN_EC_EVENT_LOOP_FAILURE, .text = "Event loop run error"};
@@ -267,8 +270,8 @@ static VpnError validate_upstream_config(const Vpn *vpn, const VpnUpstreamConfig
         }
 
         if (const char *error_message = check_address(SocketAddress(i_ep->address)); error_message != nullptr) {
-            log_vpn(vpn, err, "Invalid endpoint address {} ({}): {}", SocketAddress(i_ep->address),
-                    i_ep->name, error_message);
+            log_vpn(vpn, err, "Invalid endpoint address {} ({}): {}", SocketAddress(i_ep->address), i_ep->name,
+                    error_message);
             return {VPN_EC_INVALID_SETTINGS, "Invalid endpoint address"};
         }
     }
@@ -613,16 +616,13 @@ void vpn_notify_sleep(Vpn *vpn, void (*completion_handler)(void *), void *arg) {
     }
 
     // Completion handler MUST be called even if the task doesn't run
-    std::shared_ptr<void> complete(
-        nullptr, [=](void *) {
-            completion_handler(arg);
-        }
-    );
+    std::shared_ptr<void> complete(nullptr, [=](void *) {
+        completion_handler(arg);
+    });
 
-    event_loop::submit(vpn->ev_loop.get(), [vpn, complete]{
+    event_loop::submit(vpn->ev_loop.get(), [vpn, complete] {
         vpn->client.handle_sleep();
-        event_loop::submit(vpn->ev_loop.get(), [complete] {
-        }).release();
+        event_loop::submit(vpn->ev_loop.get(), [complete] {}).release();
     }).release();
 
     l.unlock();
@@ -690,8 +690,7 @@ bool vpn_process_client_packets(Vpn *vpn, VpnPackets packets) {
     return true;
 }
 
-static int ssl_verify_callback(
-        const char *host_name, const sockaddr *host_ip, const CertVerifyCtx &ctx, void *arg) {
+static int ssl_verify_callback(const char *host_name, const sockaddr *host_ip, const CertVerifyCtx &ctx, void *arg) {
     const Vpn *vpn = (Vpn *) arg;
 
     int result = 0;

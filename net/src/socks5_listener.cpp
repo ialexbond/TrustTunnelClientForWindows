@@ -259,8 +259,7 @@ Socks5Listener *socks5_listener_create(const Socks5ListenerConfig *config, const
         return nullptr;
     }
 
-    if (!listener->config.listen_address.is_loopback()
-            && listener->config.username.empty()) {
+    if (!listener->config.listen_address.is_loopback() && listener->config.username.empty()) {
         errlog(g_logger, "Username must be set if listening on a non-loopback address");
         socks5_listener_destroy(listener);
         return nullptr;
@@ -762,7 +761,7 @@ static Socks5ConnectionAddress dst_addr_from_request(Socks5AddressType type, con
     } else {
         addr.type = S5CAT_SOCKADDR;
         size_t addr_len = (type == S5AT_IPV4) ? 4 : 16;
-        addr.ip = SocketAddress({data, addr_len}, ntohs(*(uint16_t *)(data + addr_len)));
+        addr.ip = SocketAddress({data, addr_len}, ntohs(*(uint16_t *) (data + addr_len)));
     }
 
     return addr;

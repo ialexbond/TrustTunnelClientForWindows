@@ -20,8 +20,7 @@
 using namespace ag; // NOLINT(google-build-using-namespace)
 
 static int cert_verify_handler(
-        const char * /*host_name*/, const sockaddr * /*host_ip*/, const CertVerifyCtx & /*ctx*/,
-        void * /*arg*/) {
+        const char * /*host_name*/, const sockaddr * /*host_ip*/, const CertVerifyCtx & /*ctx*/, void * /*arg*/) {
     return 1;
 }
 
@@ -815,8 +814,8 @@ TEST_F(DnsRoutingAllProxies, IpVersionsSystem) {
 
     ASSERT_GT(i, 0);
     while (--i >= 0) {
-        auto ret = vpn.domain_filter.match_tag(
-                {.addr = SocketAddress(AG_FMT("1.1.1.{}", i)), .appname = "TestAppName"});
+        auto ret =
+                vpn.domain_filter.match_tag({.addr = SocketAddress(AG_FMT("1.1.1.{}", i)), .appname = "TestAppName"});
         ASSERT_EQ(DFMS_SUSPECT_EXCLUSION, ret.status);
     }
 }

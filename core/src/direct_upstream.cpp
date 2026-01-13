@@ -47,8 +47,7 @@ static constexpr uint16_t ICMP_PING_EMULATION_PORT = 443;
 
 DirectUpstream::DirectUpstream(int id)
         : ServerUpstream(id)
-        , m_udp_recv_buffer(UDP_MAX_DATAGRAM_SIZE)
-{
+        , m_udp_recv_buffer(UDP_MAX_DATAGRAM_SIZE) {
 }
 
 DirectUpstream::~DirectUpstream() = default;
@@ -204,7 +203,8 @@ void DirectUpstream::udp_socket_handler(void *arg, UdpSocketEvent what, void *da
 
         size_t attempts_made = 0;
         do {
-            ssize_t r = udp_socket_recv(it->second.socket.get(), upstream->m_udp_recv_buffer.data(), upstream->m_udp_recv_buffer.size());
+            ssize_t r = udp_socket_recv(
+                    it->second.socket.get(), upstream->m_udp_recv_buffer.data(), upstream->m_udp_recv_buffer.size());
             if (r <= 0) {
                 int err = evutil_socket_geterror(udp_socket_get_fd(it->second.socket.get()));
                 if (err != 0 && !AG_ERR_IS_EAGAIN(err)) {

@@ -43,9 +43,9 @@ setup_cmake: bootstrap_deps
 endif
 ifeq ($(OS), Windows_NT)
 	cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-		-DCMAKE_C_FLAGS_DEBUG=/MT ^
-		-DCMAKE_CXX_FLAGS_DEBUG=/MT ^
-		-G "Visual Studio $(MSVC_VER) $(MSVC_YEAR)" ^
+		-DCMAKE_C_COMPILER="cl.exe" ^
+		-DCMAKE_CXX_COMPILER="cl.exe" ^
+		-G "Ninja" ^
 		..
 else
 	mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) && \
@@ -105,10 +105,9 @@ lint-cpp: clang-format
 ## Check c++ code formatting with clang-format.
 .PHONY: clang-format
 clang-format:
-	find . \
-	-path './third-party' -prune -o \
-	-name '*.c' -o -name '*.cpp' -o -name '*.h' \
-	-print | xargs clang-format -n -Werror
+	git ls-files --exclude-standard -- . ":!third-party/**" ":!**/pigeon/**" \
+		| grep -E '\.(cpp|c|h)$$' \
+		| xargs clang-format -n -Werror
 
 ## Check c++ code formatting with clang-tidy.
 .PHONY: clang-tidy
@@ -128,6 +127,7 @@ lint-md:
 ##    rustup component add rustfmt
 .PHONY: lint-rust
 lint-rust:
+	cargo clippy --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml -- -D warnings
 	cargo fmt --all --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml -- --check
 
 ## Fix linter issues that are auto-fixable.
@@ -137,14 +137,14 @@ lint-fix: lint-fix-rust lint-fix-md lint-fix-cpp
 ## Auto-fix c++ formatting with clang-format.
 .PHONY: lint-fix-cpp
 lint-fix-cpp:
-	find . \
-		-path './third-party' -prune -o \
-		-name '*.c' -o -name '*.cpp' -o -name '*.h' \
-		-print | xargs clang-format -i
+	git ls-files --exclude-standard -- . ":!third-party/**" ":!**/pigeon/**" \
+		| grep -E '\.(cpp|c|h)$$' \
+		| xargs clang-format -i
 
 ## Auto-fix Rust code formatting issues with rustfmt.
 .PHONY: lint-fix-rust
 lint-fix-rust:
+	cargo clippy --fix --allow-dirty --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml
 	cargo fmt --all --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml
 
 ## Auto-fix markdown files.

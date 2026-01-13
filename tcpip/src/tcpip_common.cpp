@@ -15,11 +15,11 @@
 #include <event2/buffer.h>
 #include <event2/event.h>
 #include <event2/util.h>
+#include <lwip/ip_addr.h>
 #include <lwip/netdb.h>
 #include <lwip/netif.h>
 #include <lwip/pbuf.h>
 #include <lwip/tcp.h>
-#include <lwip/ip_addr.h>
 
 #include "libevent_lwip.h"
 #include "tcp_conn_manager.h"
@@ -161,9 +161,9 @@ static err_t netif_init_cb(struct netif *netif) {
 }
 
 enum TunReadStatus {
-    TRS_OK,     // data was read from tun device and sent to netif driver
-    TRS_DROP,   // read data was malformed, so another read is required
-    TRS_STOP    // no more data can be read from tun device
+    TRS_OK,   // data was read from tun device and sent to netif driver
+    TRS_DROP, // read data was malformed, so another read is required
+    TRS_STOP  // no more data can be read from tun device
 };
 
 /**
@@ -234,8 +234,8 @@ static pbuf *zerocopy_pbuf_create(VpnPacket *packet) {
     buf_custom->p.custom_free_function = zerocopy_pbuf_free;
     buf_custom->v = *packet;
 
-    pbuf *buffer = pbuf_alloced_custom(PBUF_RAW, buf_custom->v.size, PBUF_REF, &buf_custom->p,
-            buf_custom->v.data, u16_t(buf_custom->v.size));
+    pbuf *buffer = pbuf_alloced_custom(
+            PBUF_RAW, buf_custom->v.size, PBUF_REF, &buf_custom->p, buf_custom->v.data, u16_t(buf_custom->v.size));
     if (buffer == nullptr) {
         delete buf_custom;
         return nullptr;
@@ -361,7 +361,7 @@ static void clean_up_events(TcpipCtx *ctx) {
 }
 
 TcpipCtx *tcpip_init_internal(const TcpipParameters *params) {
-    auto *ctx = new(std::nothrow) TcpipCtx{};
+    auto *ctx = new (std::nothrow) TcpipCtx{};
     if (nullptr == ctx) {
         errlog(ctx->logger, "init: no memory for operation");
         return nullptr;

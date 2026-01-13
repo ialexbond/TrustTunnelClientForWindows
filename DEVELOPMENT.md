@@ -58,7 +58,9 @@
     - NASM
         - Windows (Chocolatey): `choco install nasm`
     - Visual Studio 2022
-        - Windows (Chocolatey): `choco install visualstudio2022buildtools`
+        - Windows: Refer to the official [install page](https://visualstudio.microsoft.com/downloads/).
+
+          Select `Desktop development with C++` workload and `Windows SDK` component in the installer.
 
 ## Building
 
@@ -93,10 +95,10 @@ To build the main library:
 
     ```shell
     mkdir build && cd build
-    cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-      -DCMAKE_C_FLAGS_DEBUG=/MT ^
-      -DCMAKE_CXX_FLAGS_DEBUG=/MT ^
-      -G "Visual Studio 17 2022" ^
+    cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+      -DCMAKE_C_COMPILER="cl.exe" `
+      -DCMAKE_CXX_COMPILER="cl.exe" `
+      -G "Ninja" `
       ..
     cmake --build . --target vpnlibs_core
     ```

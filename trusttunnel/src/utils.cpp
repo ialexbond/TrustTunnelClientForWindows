@@ -16,7 +16,7 @@ std::optional<ag::LogLevel> TrustTunnelCliUtils::parse_loglevel(std::string_view
     };
 
     if (auto it = LOG_LEVEL_MAP.find(level); it != LOG_LEVEL_MAP.end()) {
-            return it->second;
+        return it->second;
     }
     return std::nullopt;
 }
@@ -25,14 +25,16 @@ bool TrustTunnelCliUtils::apply_cmd_args(TrustTunnelConfig &config, const cxxopt
     if (args.count("s") > 0) {
         bool x = args["s"].as<bool>();
         if (x != config.location.skip_verification) {
-            infolog(g_logger, "Skip verification value was overwritten: old={}, new={}", config.location.skip_verification, x);
+            infolog(g_logger, "Skip verification value was overwritten: old={}, new={}",
+                    config.location.skip_verification, x);
         }
         config.location.skip_verification = x;
     }
     if (args.count("loglevel") > 0) {
         if (auto loglevel = parse_loglevel(args["loglevel"].as<std::string>())) {
             if (loglevel != config.loglevel) {
-                infolog(g_logger, "Log Level value was overwritten: old={}, new={}", magic_enum::enum_name(config.loglevel), magic_enum::enum_name(*loglevel));
+                infolog(g_logger, "Log Level value was overwritten: old={}, new={}",
+                        magic_enum::enum_name(config.loglevel), magic_enum::enum_name(*loglevel));
                 config.loglevel = *loglevel;
             }
         } else {

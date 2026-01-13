@@ -135,8 +135,8 @@ ag::VpnError ag::quic_connector_connect(
     SocketAddress local_address = local_socket_address_from_fd(udp_socket_get_fd(connector->socket.get()));
     SocketAddress peer = parameters->peer ? *parameters->peer : SocketAddress{};
     connector->conn.reset(quiche_conn_new_with_tls(scid, sizeof(scid), RUST_EMPTY, 0, local_address.c_sockaddr(),
-            local_address.c_socklen(), peer.c_sockaddr(), peer.c_socklen(),
-            config.get(), ssl.release(), /*is_server*/ false));
+            local_address.c_socklen(), peer.c_sockaddr(), peer.c_socklen(), config.get(), ssl.release(),
+            /*is_server*/ false));
     if (connector->conn == nullptr) {
         connector->ssl = nullptr;
         return {.code = -1, .text = "Failed to create a QUIC connection object"};

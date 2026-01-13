@@ -223,8 +223,8 @@ VpnDnsStamp *vpn_dns_stamp_from_str(const char *stamp_str, const char **error) {
         }
     }
     if (stamp.props.has_value()) {
-        c_result->properties = (VpnDnsStampInformalProperties *)calloc(1, sizeof(VpnDnsStampInformalProperties));
-        *c_result->properties = (VpnDnsStampInformalProperties)stamp.props.value();
+        c_result->properties = (VpnDnsStampInformalProperties *) calloc(1, sizeof(VpnDnsStampInformalProperties));
+        *c_result->properties = (VpnDnsStampInformalProperties) stamp.props.value();
     }
     return c_result;
 }
@@ -257,8 +257,8 @@ static dns::ServerStamp marshal_stamp(const VpnDnsStamp *c_stamp) {
     if (c_stamp->provider_name) {
         stamp.provider_name = c_stamp->provider_name;
     }
-    stamp.server_pk.assign(c_stamp->server_public_key.data,
-            c_stamp->server_public_key.data + c_stamp->server_public_key.size);
+    stamp.server_pk.assign(
+            c_stamp->server_public_key.data, c_stamp->server_public_key.data + c_stamp->server_public_key.size);
     stamp.hashes.reserve(c_stamp->hashes.size);
     for (size_t i = 0; i < c_stamp->hashes.size; ++i) {
         const VpnBuffer &hash = c_stamp->hashes.data[i];
@@ -290,7 +290,7 @@ void vpn_string_free(const char *s) {
 }
 
 uint32_t ntoh_24(uint32_t x) {
-    const auto *b = (uint8_t *)&x;
+    const auto *b = (uint8_t *) &x;
     return (b[0] << 16) | (b[1] << 8) | b[2]; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 }
 

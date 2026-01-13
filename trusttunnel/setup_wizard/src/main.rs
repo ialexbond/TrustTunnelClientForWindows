@@ -133,7 +133,7 @@ Values of each parameter occurence are gathered into a list."#,
                 .long("cert")
                 .action(clap::ArgAction::Set)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
-                .help(format!("Path to a endpoint's certificate file.")),
+                .help("Path to a endpoint's certificate file."),
             clap::Arg::new(SETTINGS_FILE_PARAM_NAME)
                 .long("settings")
                 .action(clap::ArgAction::Set)
@@ -166,13 +166,13 @@ Required in non-interactive mode."#),
         _ => unreachable!(),
     };
 
-    if get_mode() == Mode::NonInteractive {
-        if !(args.contains_id(ENDPOINT_CONFIG_PARAM_NAME) || args.contains_id(HOSTNAME_PARAM_NAME))
-        {
-            command
-                .error(
-                    clap::error::ErrorKind::MissingRequiredArgument,
-                    r#"Additional arguments required for non-interactive mode
+    if get_mode() == Mode::NonInteractive
+        && !(args.contains_id(ENDPOINT_CONFIG_PARAM_NAME) || args.contains_id(HOSTNAME_PARAM_NAME))
+    {
+        command
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                r#"Additional arguments required for non-interactive mode
 
 Must be provided either:
 1. All required options separatelly:
@@ -183,9 +183,8 @@ OR
    --endpoint_config <endpoint_config>
 
 Note: Cannot mix both variants"#,
-                )
-                .exit();
-        }
+            )
+            .exit();
     }
 
     *PREDEFINED_PARAMS.lock().unwrap() = PredefinedParameters::new(&args);

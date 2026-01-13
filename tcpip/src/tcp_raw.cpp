@@ -6,8 +6,8 @@
 #endif
 
 #include <algorithm>
-#include <errno.h>
 #include <cstring>
+#include <errno.h>
 #include <limits>
 #include <vector>
 

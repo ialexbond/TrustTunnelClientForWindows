@@ -1,6 +1,6 @@
+#include "common/utils.h"
 #include "net/os_tunnel.h"
 #include "vpn/utils.h"
-#include "common/utils.h"
 
 #include <net/if.h> // should be included before linux/if.h
 
@@ -32,7 +32,7 @@ static bool sys_cmd_bool(std::string cmd) {
     return false;
 }
 
-static bool sys_cmd_netns(const std::string& netns, std::string cmd) {
+static bool sys_cmd_netns(const std::string &netns, std::string cmd) {
     if (!netns.empty()) {
         cmd = AG_FMT("ip netns exec {} {}", ag::utils::escape_argument_for_shell(netns), cmd);
     }
@@ -59,7 +59,8 @@ static void sys_cmd_netns_ignore_errors(const std::string &netns, std::string cm
     }
 }
 
-static ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output_netns(const std::string& netns, std::string cmd) {
+static ag::Result<std::string, ag::tunnel_utils::ExecError> sys_cmd_with_output_netns(
+        const std::string &netns, std::string cmd) {
     if (!netns.empty()) {
         cmd = AG_FMT("ip netns exec {} {}", ag::utils::escape_argument_for_shell(netns), cmd);
     }
@@ -128,7 +129,8 @@ evutil_socket_t ag::VpnLinuxTunnel::tun_open() {
 void ag::VpnLinuxTunnel::setup_if() {
     // Move interface to network namespace if specified
     if (!m_netns.empty()) {
-        if (!sys_cmd_bool(AG_FMT("ip link set {} netns {}", m_tun_name, ag::utils::escape_argument_for_shell(m_netns)))) {
+        if (!sys_cmd_bool(
+                    AG_FMT("ip link set {} netns {}", m_tun_name, ag::utils::escape_argument_for_shell(m_netns)))) {
             errlog(logger, "Failed to move tunnel interface to network namespace {}", m_netns);
             return;
         }
@@ -136,17 +138,18 @@ void ag::VpnLinuxTunnel::setup_if() {
     }
 
     // Set the interface address (in netns if specified)
-    if (!sys_cmd_netns(m_netns, AG_FMT("ip addr add {} dev {}",
-            tunnel_utils::get_address_for_index(m_settings->ipv4_address, m_if_index).to_string(),
-            m_tun_name))) {
+    if (!sys_cmd_netns(m_netns,
+                AG_FMT("ip addr add {} dev {}",
+                        tunnel_utils::get_address_for_index(m_settings->ipv4_address, m_if_index).to_string(),
+                        m_tun_name))) {
         errlog(logger, "Failed to set IPv4 address");
         return;
     }
 
     // Try to set IPv6 address (in netns if specified)
-    auto result = sys_cmd_with_output_netns(m_netns, AG_FMT("ip -6 addr add {} dev {}",
-            tunnel_utils::get_address_for_index(m_settings->ipv6_address, m_if_index).to_string(),
-            m_tun_name));
+    auto result = sys_cmd_with_output_netns(m_netns,
+            AG_FMT("ip -6 addr add {} dev {}",
+                    tunnel_utils::get_address_for_index(m_settings->ipv6_address, m_if_index).to_string(), m_tun_name));
     if (result.has_error()) {
         warnlog(logger, "Failed to set IPv6 address: {}", result.error()->str());
     } else {
@@ -193,25 +196,30 @@ bool ag::VpnLinuxTunnel::setup_routes(int16_t table_id) {
     }
 
     for (auto &route : ipv4_routes) {
-        if (!sys_cmd_netns(m_netns, AG_FMT("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
+        if (!sys_cmd_netns(
+                    m_netns, AG_FMT("ip ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
             auto splitted = route.split();
             if (!splitted
-                    || !sys_cmd_netns(m_netns, AG_FMT("ip ro add {} dev {} table {}",
-                            splitted->first.to_string(), m_tun_name, table_name))
-                    || !sys_cmd_netns(m_netns, AG_FMT("ip ro add {} dev {} table {}",
-                            splitted->second.to_string(), m_tun_name, table_name))) {
+                    || !sys_cmd_netns(m_netns,
+                            AG_FMT("ip ro add {} dev {} table {}", splitted->first.to_string(), m_tun_name, table_name))
+                    || !sys_cmd_netns(m_netns,
+                            AG_FMT("ip ro add {} dev {} table {}", splitted->second.to_string(), m_tun_name,
+                                    table_name))) {
                 return false;
             }
         }
     }
     for (auto &route : ipv6_routes) {
-        if (!sys_cmd_netns(m_netns, AG_FMT("ip -6 ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
+        if (!sys_cmd_netns(
+                    m_netns, AG_FMT("ip -6 ro add {} dev {} table {}", route.to_string(), m_tun_name, table_name))) {
             auto splitted = route.split();
             if (!splitted
-                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 ro add {} dev {} table {}",
-                            splitted->first.to_string(), m_tun_name, table_name))
-                    || !sys_cmd_netns(m_netns, AG_FMT("ip -6 ro add {} dev {} table {}",
-                            splitted->second.to_string(), m_tun_name, table_name))) {
+                    || !sys_cmd_netns(m_netns,
+                            AG_FMT("ip -6 ro add {} dev {} table {}", splitted->first.to_string(), m_tun_name,
+                                    table_name))
+                    || !sys_cmd_netns(m_netns,
+                            AG_FMT("ip -6 ro add {} dev {} table {}", splitted->second.to_string(), m_tun_name,
+                                    table_name))) {
                 return false;
             }
         }
@@ -248,14 +256,15 @@ void ag::VpnLinuxTunnel::setup_dns() {
             m_settings->dns_servers.data, m_settings->dns_servers.data + m_settings->dns_servers.size};
 
     std::vector<std::string> escaped_servers;
-    for (const auto& dns_server : dns_servers) {
+    for (const auto &dns_server : dns_servers) {
         escaped_servers.push_back(ag::utils::escape_argument_for_shell(dns_server));
     }
 
     m_system_dns_setup_success = false;
     constexpr int TRIES = 5;
     for (int i = 0; i < TRIES; i++) {
-        auto result = sys_cmd_with_output_netns(m_netns, AG_FMT("resolvectl dns {} {}", m_tun_name, fmt::join(escaped_servers, " ")));
+        auto result = sys_cmd_with_output_netns(
+                m_netns, AG_FMT("resolvectl dns {} {}", m_tun_name, fmt::join(escaped_servers, " ")));
         if (result.has_error()) {
             warnlog(logger, "System DNS servers are not set");
             return;
@@ -266,7 +275,7 @@ void ag::VpnLinuxTunnel::setup_dns() {
             return;
         }
         auto output = result.value();
-        bool found = std::find_if(dns_servers.begin(), dns_servers.end(), [&output](auto &&server){
+        bool found = std::find_if(dns_servers.begin(), dns_servers.end(), [&output](auto &&server) {
             return output.find(server) != output.npos;
         }) != dns_servers.end();
         if (found) {

@@ -45,8 +45,7 @@ static ag::Logger g_logger{"PING"}; // NOLINT(cert-err58-cpp,cppcoreguidelines-a
 #define log_conn(ping_, conn_, lvl_, fmt_, ...)                                                                        \
     log_ping(ping_, lvl_, "Round {}: {}{} ({}){}{} via {}: " fmt_, (ping_)->rounds_started,                            \
             (conn_)->use_quic ? "udp://" : "tcp://", (conn_)->endpoint->name,                                          \
-            SocketAddress((conn_)->endpoint->address),                                                                 \
-            (conn_)->relay->address.sa_family ? " through relay " : "",                                                \
+            SocketAddress((conn_)->endpoint->address), (conn_)->relay->address.sa_family ? " through relay " : "",     \
             (conn_)->relay->address.sa_family ? SocketAddress((conn_)->relay->address).str() : "",                     \
             (conn_)->bound_if_name, ##__VA_ARGS__)
 
@@ -165,13 +164,13 @@ static void on_timer(evutil_socket_t, short, void *arg) {
     self->connect_shortcut_task_id.reset();
     if (!self->prepare_task_id.has_value()) {
         self->prepare_task_id = event_loop::submit(self->loop,
-            {
-                    .arg = self,
-                    .action =
-                            [](void *arg, TaskId) {
-                                do_prepare(arg);
-                            },
-            });
+                {
+                        .arg = self,
+                        .action =
+                                [](void *arg, TaskId) {
+                                    do_prepare(arg);
+                                },
+                });
     }
 }
 
@@ -407,9 +406,8 @@ static void do_prepare(void *arg) {
             if (!conn->no_quic_fallback && conn->use_quic) { // Fall back from QUIC to TLS
                 conn->use_quic = false;
                 conn->old_use_quic = true;
-            } else if (std::string sni; !conn->no_relay_fallback && !self->have_direct_result
-                       && !self->relays.empty()
-                       && !relay_snis.contains((sni = conn->endpoint->name))) { // NOLINT(*-assignment-in-if-condition)
+            } else if (std::string sni; !conn->no_relay_fallback && !self->have_direct_result && !self->relays.empty()
+                    && !relay_snis.contains((sni = conn->endpoint->name))) { // NOLINT(*-assignment-in-if-condition)
                 // Fall back to the next relay address
                 conn->relay = vpn_relay_clone(self->relays.back().get());
                 relay_snis.emplace(std::move(sni));
@@ -502,17 +500,18 @@ static void do_prepare(void *arg) {
     }
 }
 
-void add_endpoint(Ping *self, std::list<PingConn> &list, const VpnEndpoint &endpoint, uint32_t bound_if,
-        const VpnRelay *relay) {
+void add_endpoint(
+        Ping *self, std::list<PingConn> &list, const VpnEndpoint &endpoint, uint32_t bound_if, const VpnRelay *relay) {
 
     VpnUpstreamProtocol protocol =
             self->main_protocol != VPN_UP_AUTO ? self->main_protocol : endpoint.preferred_protocol;
 
     if (protocol == VPN_UP_AUTO) {
-        add_endpoint(self, list, endpoint, bound_if, relay, /*use_quic=*/ false, /*no_quic_fallback=*/ false);
-        add_endpoint(self, list, endpoint, bound_if, relay, /*use_quic=*/ true, /*no_quic_fallback=*/ true);
+        add_endpoint(self, list, endpoint, bound_if, relay, /*use_quic=*/false, /*no_quic_fallback=*/false);
+        add_endpoint(self, list, endpoint, bound_if, relay, /*use_quic=*/true, /*no_quic_fallback=*/true);
     } else {
-        add_endpoint(self, list, endpoint, bound_if, relay, /*use_quic=*/ protocol == VPN_UP_HTTP3, /*no_quic_fallback=*/ false);
+        add_endpoint(self, list, endpoint, bound_if, relay, /*use_quic=*/protocol == VPN_UP_HTTP3,
+                /*no_quic_fallback=*/false);
     }
 }
 

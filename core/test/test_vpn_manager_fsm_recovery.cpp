@@ -54,7 +54,7 @@ struct TestUpstream : public ServerUpstream {
     }
 };
 
-static constexpr Secs TIMEOUT{ 10 };
+static constexpr Secs TIMEOUT{10};
 
 struct ConnectingVpnManagerTest : MockedTest {
     Vpn *vpn = nullptr;

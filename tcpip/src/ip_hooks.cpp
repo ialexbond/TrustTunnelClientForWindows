@@ -297,7 +297,8 @@ static void icmp6_err_message_hook_exit() {
     ip_current_netif() = nullptr;
 }
 
-static int finalize_icmpv6_request(TcpipCtx *ctx, IcmpRequestDescriptor *request, struct pbuf *buffer, u16_t header_len) {
+static int finalize_icmpv6_request(
+        TcpipCtx *ctx, IcmpRequestDescriptor *request, struct pbuf *buffer, u16_t header_len) {
     if (ip_addr_isany_val(request->reply_src)) {
         return DROP_PACKET(buffer);
     }

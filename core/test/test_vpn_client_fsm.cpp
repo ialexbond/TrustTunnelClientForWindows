@@ -19,8 +19,7 @@ static void vpn_handler(void *, vpn_client::Event what, void *) {
 }
 
 static int cert_verify_handler(
-        const char * /*host_name*/, const sockaddr * /*host_ip*/, const CertVerifyCtx & /*ctx*/,
-        void * /*arg*/) {
+        const char * /*host_name*/, const sockaddr * /*host_ip*/, const CertVerifyCtx & /*ctx*/, void * /*arg*/) {
     return 1;
 }
 
@@ -275,8 +274,12 @@ void Tunnel::on_after_endpoint_disconnect(ServerUpstream *) {
 }
 void Tunnel::on_exclusions_updated() {
 }
-bool Tunnel::should_complete_immediately(uint64_t) const { return false; }
-bool Tunnel::update_dns_handler_parameters() { return true; }
+bool Tunnel::should_complete_immediately(uint64_t) const {
+    return false;
+}
+bool Tunnel::update_dns_handler_parameters() {
+    return true;
+}
 void Tunnel::on_network_change() {
 }
 void Tunnel::handle_sleep() {
@@ -284,7 +287,6 @@ void Tunnel::handle_sleep() {
 void Tunnel::handle_wake() {
 }
 } // namespace ag
-
 
 // Check that client raises error event on an error
 TEST_F(VpnClientTest, Error) {

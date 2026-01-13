@@ -47,7 +47,6 @@ static const std::pair<TunnelAddress, TunnelAddress> NOT_EQUAL_ADDRS_SAMPLES[] =
 };
 INSTANTIATE_TEST_SUITE_P(TunnelAddressTest, NotEqual, testing::ValuesIn(NOT_EQUAL_ADDRS_SAMPLES));
 
-
 class CleanUpFiles : public ::testing::Test {
 protected:
     static constexpr const char *DIR = "./hopefully_nonexisting_dir";

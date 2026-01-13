@@ -6,21 +6,17 @@
 
 static ag::Logger g_logger("JNI.NativeLogger");
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_trusttunnel_log_NativeLogger_setDefaultLogLevel(JNIEnv *env, jclass clazz, jint level) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_trusttunnel_log_NativeLogger_setDefaultLogLevel(
+        JNIEnv *env, jclass clazz, jint level) {
     ag::Logger::set_log_level((ag::LogLevel) level);
 }
 
-extern "C"
-JNIEXPORT jint JNICALL
-Java_com_adguard_trusttunnel_log_NativeLogger_getDefaultLogLevel0(JNIEnv *env, jclass clazz) {
+extern "C" JNIEXPORT jint JNICALL Java_com_adguard_trusttunnel_log_NativeLogger_getDefaultLogLevel0(
+        JNIEnv *env, jclass clazz) {
     return ag::Logger::get_log_level();
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_trusttunnel_log_NativeLogger_setupSlf4j(JNIEnv *env, jclass clazz) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_trusttunnel_log_NativeLogger_setupSlf4j(JNIEnv *env, jclass clazz) {
     JavaVM *vm;
     env->GetJavaVM(&vm);
     GlobalRef<jclass> gtype{vm, clazz};

@@ -35,9 +35,8 @@ struct ag::DnsHandlerServerUpstreamBase::ConnectionInfo {
     std::string_view app_name;
 
     friend std::string format_as(const ConnectionInfo &info) {
-        return AG_FMT("[R:{}] {} -> {} proto: {} app: {}", info.upstream_conn_id,
-                info.addrs->src, tunnel_addr_to_str(&info.addrs->dst), info.proto,
-                info.app_name);
+        return AG_FMT("[R:{}] {} -> {} proto: {} app: {}", info.upstream_conn_id, info.addrs->src,
+                tunnel_addr_to_str(&info.addrs->dst), info.proto, info.app_name);
     }
 };
 
@@ -96,8 +95,8 @@ void ag::DnsHandlerServerUpstreamBase::send_response(uint64_t upstream_conn_id, 
                             event.result, upstream_conn_id);
                 } else {
                     log_upstream(this, info, "Failed to send UDP {} ({}) <- {}: handler returned {}",
-                        it->second.addrs.src, it->second.app_name,
-                        tunnel_addr_to_str(&it->second.addrs.dst), event.result);
+                            it->second.addrs.src, it->second.app_name, tunnel_addr_to_str(&it->second.addrs.dst),
+                            event.result);
                 }
             } else {
                 it = m_connections.find(upstream_conn_id);
@@ -106,16 +105,15 @@ void ag::DnsHandlerServerUpstreamBase::send_response(uint64_t upstream_conn_id, 
                     if (--conn.unanswered_dns_requests == 0) {
                         log_upstream(this, dbg,
                                 "[R:{}] All DNS requests answered for connection {} -> {} proto: {} app: {}",
-                                upstream_conn_id, conn.addrs.src,
-                                tunnel_addr_to_str(&conn.addrs.dst), conn.proto, conn.app_name);
+                                upstream_conn_id, conn.addrs.src, tunnel_addr_to_str(&conn.addrs.dst), conn.proto,
+                                conn.app_name);
                         close_connection(upstream_conn_id, /*graceful*/ false, /*async*/ false);
                     }
                 }
             }
         } else {
-            log_upstream(this, info, "Failed to send UDP {} ({}) <- {}: read disabled",
-                    it->second.addrs.src, it->second.app_name,
-                    tunnel_addr_to_str(&it->second.addrs.dst));
+            log_upstream(this, info, "Failed to send UDP {} ({}) <- {}: read disabled", it->second.addrs.src,
+                    it->second.app_name, tunnel_addr_to_str(&it->second.addrs.dst));
         }
     } else {
         write_dns_message_to(it->second.rcv_buf, message);
@@ -151,8 +149,8 @@ uint64_t ag::DnsHandlerServerUpstreamBase::open_connection(
 
 void ag::DnsHandlerServerUpstreamBase::close_connection(uint64_t upstream_conn_id, bool /*graceful*/, bool async) {
     if (std::erase_if(m_new_connections, [&](uint64_t id_) {
-        return id_ == upstream_conn_id;
-    })) {
+            return id_ == upstream_conn_id;
+        })) {
         return;
     }
 
@@ -345,15 +343,13 @@ uint64_t ag::DnsHandlerClientListenerBase::send_as_listener(
             };
             this->handler.func(this->handler.arg, CLIENT_EVENT_READ, &event);
             if (event.result <= 0) {
-                log_upstream(this, info, "Failed to send UDP {} ({}) -> {}: handler returned {}",
-                        info.addrs->src, info.app_name,
-                        tunnel_addr_to_str(&info.addrs->dst), event.result);
+                log_upstream(this, info, "Failed to send UDP {} ({}) -> {}: handler returned {}", info.addrs->src,
+                        info.app_name, tunnel_addr_to_str(&info.addrs->dst), event.result);
             }
         } else if (it->second.udp_pending.size() < MAX_UDP_QUEUE_SIZE) {
             it->second.udp_pending.emplace_back(message.begin(), message.end());
         } else {
-            log_upstream(this, info, "Failed to send UDP {} ({}) -> {}: read disabled",
-                    info.addrs->src, info.app_name,
+            log_upstream(this, info, "Failed to send UDP {} ({}) -> {}: read disabled", info.addrs->src, info.app_name,
                     tunnel_addr_to_str(&info.addrs->dst));
         }
     } else {
@@ -612,22 +608,19 @@ bool ag::DnsHandler::start_dns_proxy() {
     }
 
     if (m_parameters.dns_proxy_listener_address.is_any() || !m_parameters.dns_proxy_listener_address.is_loopback()) {
-        log_handler(this, warn, "DNS proxy listener address is invalid: {}",
-                m_parameters.dns_proxy_listener_address);
+        log_handler(this, warn, "DNS proxy listener address is invalid: {}", m_parameters.dns_proxy_listener_address);
         return false;
     }
 
-    m_dns_proxy = std::make_unique<DnsProxyAccessor>(DnsProxyAccessor::Parameters{
-            .upstreams = std::move(m_parameters.dns_upstreams),
-            .socks_listener_address = m_parameters.dns_proxy_listener_address,
-            .cert_verify_handler = m_parameters.cert_verify_handler,
+    m_dns_proxy = std::make_unique<DnsProxyAccessor>(
+            DnsProxyAccessor::Parameters{.upstreams = std::move(m_parameters.dns_upstreams),
+                    .socks_listener_address = m_parameters.dns_proxy_listener_address,
+                    .cert_verify_handler = m_parameters.cert_verify_handler,
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-            .qos_settings = {
-                .qos_class = ServerUpstream::vpn->parameters.qos_settings.qos_class,
-                .relative_priority = ServerUpstream::vpn->parameters.qos_settings.relative_priority
-            }
+                    .qos_settings = {.qos_class = ServerUpstream::vpn->parameters.qos_settings.qos_class,
+                            .relative_priority = ServerUpstream::vpn->parameters.qos_settings.relative_priority}
 #endif // __APPLE__ && TARGET_OS_IPHONE
-    });
+            });
 
     if (!m_dns_proxy->start()) {
         log_handler(this, err, "Failed to start DNS proxy");
@@ -719,16 +712,13 @@ bool ag::DnsHandler::start_system_dns_proxy() {
                     .resolved_host = std::move(server.resolved_host),
             });
         }
-        proxy = std::make_unique<DnsProxyAccessor>(DnsProxyAccessor::Parameters{
-                .upstreams = std::move(upstreams),
+        proxy = std::make_unique<DnsProxyAccessor>(DnsProxyAccessor::Parameters{.upstreams = std::move(upstreams),
                 .fallbacks = std::move(servers->fallback),
                 .bootstraps = std::move(servers->bootstrap),
                 .cert_verify_handler = m_parameters.cert_verify_handler,
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-                .qos_settings = {
-                    .qos_class = ServerUpstream::vpn->parameters.qos_settings.qos_class,
-                    .relative_priority = ServerUpstream::vpn->parameters.qos_settings.relative_priority
-            }
+                .qos_settings = {.qos_class = ServerUpstream::vpn->parameters.qos_settings.qos_class,
+                        .relative_priority = ServerUpstream::vpn->parameters.qos_settings.relative_priority}
 #endif // __APPLE__ && TARGET_OS_IPHONE
         });
 
@@ -927,9 +917,9 @@ void ag::DnsHandler::on_dns_response(uint64_t upstream_conn_id, U8View message) 
             for (const auto &addr : response->addresses) {
                 ServerUpstream::vpn->domain_filter.add_exclusion_suspect(
                         SocketAddress({addr.ip.data(), addr.ip.size()}, 0),
-                        is_vpn_resolver_connection(upstream_conn_id) ? std::max(addr.ttl,
-                                                                                Tunnel::EXCLUSIONS_RESOLVE_PERIOD)
-                                                                     : addr.ttl);
+                        is_vpn_resolver_connection(upstream_conn_id)
+                                ? std::max(addr.ttl, Tunnel::EXCLUSIONS_RESOLVE_PERIOD)
+                                : addr.ttl);
             }
             // Remove ECH parameters.
             if (dns_utils::remove_svcparam_echconfig(response->pkt.get())) {

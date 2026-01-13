@@ -246,20 +246,16 @@ VpnClient::VpnClient(vpn_client::Parameters parameters)
         , id(g_next_id++) {
 }
 
-static const std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>> g_udp_close_wait_hostname_cache{
-    new WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>{
-        .val {300, Secs (300)}
-    }
-};
+static const std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>>
+        g_udp_close_wait_hostname_cache{
+                new WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>{.val{300, Secs(300)}}};
 
 VpnError VpnClient::init(const VpnSettings *settings) {
     log_client(this, dbg, "...");
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    this->parameters.qos_settings = {
-        .qos_class = settings->qos_settings.qos_class,
-        .relative_priority = settings->qos_settings.relative_priority
-    };
+    this->parameters.qos_settings = {.qos_class = settings->qos_settings.qos_class,
+            .relative_priority = settings->qos_settings.relative_priority};
 #endif // __APPLE__ && TARGET_OS_IPHONE
 
     this->tunnel->udp_close_wait_hostname_cache = g_udp_close_wait_hostname_cache;
@@ -440,8 +436,7 @@ fail:
     return error;
 }
 
-VpnError VpnClient::listen(
-        std::unique_ptr<ClientListener> listener, const VpnListenerConfig *config) {
+VpnError VpnClient::listen(std::unique_ptr<ClientListener> listener, const VpnListenerConfig *config) {
     log_client(this, dbg, "...");
 
     this->client_listener = std::move(listener);
@@ -848,12 +843,12 @@ static void vpn_client::submit_disconnect(void *ctx, void *data) {
         vpn->pending_error = *error;
     }
 
-    vpn->deferred_tasks.emplace(event_loop::submit(vpn->parameters.ev_loop, {vpn, [](void *arg, TaskId task_id) {
-                                                                         auto *vpn = (VpnClient *) arg;
-                                                                         release_deferred_task(vpn, task_id);
-                                                                         vpn->fsm.perform_transition(
-                                                                                 E_DEFERRED_DISCONNECT, nullptr);
-                                                                     }}));
+    vpn->deferred_tasks.emplace(event_loop::submit(
+            vpn->parameters.ev_loop, {vpn, [](void *arg, TaskId task_id) {
+                                          auto *vpn = (VpnClient *) arg;
+                                          release_deferred_task(vpn, task_id);
+                                          vpn->fsm.perform_transition(E_DEFERRED_DISCONNECT, nullptr);
+                                      }}));
 
     log_client(vpn, trace, "Done");
 }

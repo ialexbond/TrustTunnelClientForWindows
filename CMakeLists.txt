@@ -27,6 +27,10 @@ else ()
     add_compile_options(-fno-omit-frame-pointer)
 endif ()
 
+if (IPV6_UNAVAILABLE)
+    add_compile_definitions(IPV6_UNAVAILABLE)
+endif()
+
 add_subdirectory(core)
 add_subdirectory(trusttunnel)
 

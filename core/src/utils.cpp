@@ -2,8 +2,8 @@
 
 #include "common/base64.h"
 #include "common/net_utils.h"
-#include "common/utils.h"
 #include "common/socket_address.h"
+#include "common/utils.h"
 #include "http_udp_multiplexer.h"
 #include "vpn/internal/utils.h"
 #include "vpn/platform.h"
@@ -42,9 +42,7 @@ void clean_up_buffer_files(const char *dir) {
     std::vector<fs::path> to_remove;
     fs::directory_iterator diter(dir, fs_err);
     while (!fs_err && diter != fs::directory_iterator()) {
-        if (!diter->is_directory(fs_err)
-                && !fs_err
-                && is_conn_buffer_file(diter->path().filename().string().c_str())) {
+        if (!diter->is_directory(fs_err) && !fs_err && is_conn_buffer_file(diter->path().filename().string().c_str())) {
             to_remove.push_back(diter->path());
         }
         diter = diter.increment(fs_err);

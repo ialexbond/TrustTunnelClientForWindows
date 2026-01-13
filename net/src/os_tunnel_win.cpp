@@ -8,14 +8,14 @@
 #include <WS2tcpip.h>
 #include <iphlpapi.h>
 #include <mstcpip.h>
+#include <netioapi.h>
 #include <winreg.h>
 #include <winsock2.h>
 #include <winternl.h>
 #include <ws2ipdef.h>
-#include <netioapi.h>
 
-#include "common/utils.h"
 #include "common/socket_address.h"
+#include "common/utils.h"
 #include "net/network_manager.h"
 #include "net/os_tunnel.h"
 #include "vpn/guid_utils.h"
@@ -58,8 +58,7 @@ struct WintunThreadParams {
     void *read_callback_arg;
 };
 
-static void CALLBACK log_wintun(WINTUN_LOGGER_LEVEL level, DWORD64 /*timestamp*/, LPCWSTR log_line)
-{
+static void CALLBACK log_wintun(WINTUN_LOGGER_LEVEL level, DWORD64 /*timestamp*/, LPCWSTR log_line) {
     switch (level) {
     case WINTUN_LOG_INFO:
         infolog(wintun_logger, "{}", ag::utils::from_wstring(log_line));
@@ -308,8 +307,7 @@ static DWORD set_dns_via_registry(std::string_view dns_list, std::string_view if
     } else {
         interfaces_path = WINREG_INTERFACES_PATH_V4;
     }
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, interfaces_path.data(), 0, KEY_ALL_ACCESS, &current_key)
-            == ERROR_SUCCESS) {
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, interfaces_path.data(), 0, KEY_ALL_ACCESS, &current_key) == ERROR_SUCCESS) {
         // set dns for specified interface
         error = RegSetKeyValueA(current_key, if_guid.data(), "NameServer", REG_SZ, dns_list.data(), dns_list.size());
         RegCloseKey(current_key);
@@ -408,8 +406,7 @@ bool ag::VpnWinTunnel::setup_routes(std::span<const CidrRange> ipv4_routes, std:
     for (auto &route : ipv4_routes) {
         if (!add_adapter_route(route, m_if_index)) {
             auto splitted = route.split();
-            if (!splitted
-                    || !add_adapter_route(splitted->first, m_if_index)
+            if (!splitted || !add_adapter_route(splitted->first, m_if_index)
                     || !add_adapter_route(splitted->second, m_if_index)) {
                 return false;
             }
@@ -421,8 +418,7 @@ bool ag::VpnWinTunnel::setup_routes(std::span<const CidrRange> ipv4_routes, std:
         for (auto &route : ipv6_routes) {
             if (!add_adapter_route(route, m_if_index)) {
                 auto splitted = route.split();
-                if (!splitted
-                        || !add_adapter_route(splitted->first, m_if_index)
+                if (!splitted || !add_adapter_route(splitted->first, m_if_index)
                         || !add_adapter_route(splitted->second, m_if_index)) {
                     return false;
                 }
@@ -465,20 +461,22 @@ std::optional<ag::VpnPacket> ag::VpnWinTunnel::recv_packet() {
     }
     if (m_win_settings->zerocopy) {
         return VpnPacket{
-            .data = (uint8_t *) data,
-            .size = (size_t) size,
-            .destructor = [](void *arg, uint8_t *data) {
-                WintunReleaseReceivePacket((WINTUN_SESSION_HANDLE) arg, data);
-            },
-            .destructor_arg = m_wintun_session,
+                .data = (uint8_t *) data,
+                .size = (size_t) size,
+                .destructor =
+                        [](void *arg, uint8_t *data) {
+                            WintunReleaseReceivePacket((WINTUN_SESSION_HANDLE) arg, data);
+                        },
+                .destructor_arg = m_wintun_session,
         };
     }
     VpnPacket packet{
-        .data = (uint8_t *) std::malloc(size),
-        .size = (size_t) size,
-        .destructor = [](void *, uint8_t *data) {
-            std::free(data);
-        },
+            .data = (uint8_t *) std::malloc(size),
+            .size = (size_t) size,
+            .destructor =
+                    [](void *, uint8_t *data) {
+                        std::free(data);
+                    },
     };
     std::memcpy(packet.data, data, packet.size);
     WintunReleaseReceivePacket(m_wintun_session, data);
