@@ -81,7 +81,9 @@ internal class PrefixedLenRingProto {
             // Process all records if there is no `startIndex` and only
             // remaining if it is present
             let count: UInt32
-            if (start <= header.writeIndex) {
+            if (startIndex == nil) {
+                count = header.count
+            } else if (start <= header.writeIndex) {
                 count = header.writeIndex - start
             } else {
                 if start >= maxRecords {
