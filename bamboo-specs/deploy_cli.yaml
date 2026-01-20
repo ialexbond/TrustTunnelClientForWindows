@@ -23,7 +23,7 @@ stages:
 Linux build:
   key: BL
   docker:
-    image: adguard/core-libs:2.6
+    image: adguard/core-libs:2.8
     volumes:
       ${bamboo.working.directory}: ${bamboo.working.directory}
       ${bamboo.tmp.directory}: ${bamboo.tmp.directory}
@@ -175,7 +175,7 @@ Mac build:
 Deploy artifacts:
   key: DA
   docker:
-    image: adguard/core-libs:2.6
+    image: adguard/core-libs:2.8
     volumes:
       ${bamboo.working.directory}: ${bamboo.working.directory}
       ${bamboo.tmp.directory}: ${bamboo.tmp.directory}
