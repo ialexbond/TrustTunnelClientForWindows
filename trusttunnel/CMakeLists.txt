@@ -60,6 +60,12 @@ if (APPLE)
     )
 endif ()
 
+ if (WIN32)
+     list(APPEND EXE_SOURCE_FILES
+             trusttunnel_client.rc
+     )
+ endif ()
+
 add_executable(trusttunnel_client EXCLUDE_FROM_ALL ${EXE_SOURCE_FILES})
 target_link_libraries(trusttunnel_client vpnlibs_trusttunnel)
 if (NOT MSVC)
@@ -93,13 +99,17 @@ if (APPLE)
     endif ()
 endif (APPLE)
 
+if (WIN32 AND MSVC)
+    set(CARGO_ENV_RUSTFLAGS RUSTFLAGS=-Ctarget-feature=+crt-static)
+endif ()
+
 ExternalProject_Add(setup_wizard
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/setup_wizard
         BUILD_ALWAYS TRUE
         UPDATE_COMMAND ""
         PATCH_COMMAND ""
         CONFIGURE_COMMAND ""
-        BUILD_COMMAND ${CMAKE_COMMAND} -E env CARGO_BUILD_TARGET_DIR=<BINARY_DIR> cargo build
+        BUILD_COMMAND ${CMAKE_COMMAND} -E env CARGO_BUILD_TARGET_DIR=<BINARY_DIR> ${CARGO_ENV_RUSTFLAGS} cargo build
         BUILD_COMMAND     --manifest-path=<SOURCE_DIR>/Cargo.toml ${CARGO_BUILD_TYPE} ${CARGO_TARGET}
         BUILD_COMMAND     --bin setup_wizard
         TEST_COMMAND ""

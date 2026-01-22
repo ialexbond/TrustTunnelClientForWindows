@@ -14,6 +14,7 @@ stages:
       jobs:
         - Linux build
         - Mac build
+        - Win build
   - Deploy artifacts:
       manual: false
       final: false
@@ -172,6 +173,98 @@ Mac build:
       required: true
       shared: true
 
+Win build:
+  key: WB
+  tasks:
+    - checkout:
+        description: Checkout Default Repository
+        force-clean-build: 'true'
+    - script:
+        interpreter: WINDOWS_POWER_SHELL
+        scripts:
+          - |-
+            $ErrorActionPreference = 'Stop'
+
+            & conan remote add --index 0 art $Env:bamboo_conanRepoUrl
+            $Env:bamboo_sshSecretKey -replace '\\n', "`n" | sc $Env:USERPROFILE\.ssh\id_rsa
+
+            # Save vcvars to switch between them
+            $vcvars32 = cmd /c "vcvarsamd64_x86 & set"
+            $vcvars64 = cmd /c "vcvars64 & set"
+            $vcvarsarm64 = cmd /c "vcvarsamd64_arm64 & set"
+            function setvar($_) {
+              if ($_ -match "=") {
+                $v = $_.split("="); set-item -force -path "ENV:\$($v[0])"  -value "$($v[1])"
+              }
+            }
+
+            & {
+              $vcvars64 | foreach { setvar $_ }
+              $repoRoot = (Get-Location).Path
+              mkdir build64
+              pushd build64
+              & cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+                -DCMAKE_C_COMPILER="cl.exe" `
+                -DCMAKE_CXX_COMPILER="cl.exe" `
+                -G Ninja ..
+              if (!$?) { exit 1 }
+              & ninja trusttunnel_client setup_wizard
+              if (!$?) { exit 1 }
+
+              function Sign-File([string]$Path) {
+                if (!(Test-Path $Path)) { throw "File not found: $Path" }
+                if ([string]::IsNullOrEmpty($Env:bamboo_signerUrl)) { throw 'bamboo_signerUrl is not set' }
+                if ([string]::IsNullOrEmpty($Env:bamboo_trustTunnelWinSignerSecretApiKey)) { throw 'bamboo_trustTunnelWinSignerSecretApiKey is not set' }
+
+                $python = (Get-Command python -ErrorAction SilentlyContinue)
+                if (!$python) { $python = (Get-Command python3 -ErrorAction SilentlyContinue) }
+                if (!$python) { throw 'Python (python or python3) not found on agent' }
+
+                & $python.Source -m pip install --disable-pip-version-check -q requests
+                if (!$?) { throw 'Failed to install Python requests' }
+
+                & $python.Source (Join-Path $repoRoot 'scripts\win_sign_binary.py') $Path
+                if (!$?) { throw "Signing helper failed for: $Path" }
+              }
+
+              Sign-File "trusttunnel\\trusttunnel_client.exe"
+              Sign-File "trusttunnel\\setup_wizard.exe"
+              popd
+            }
+
+            $versionLine = Get-Content conandata.yml | Select-String -Pattern '[0-9]+\.[0-9]+\.' | Select-Object -Last 1
+            if (!$versionLine) { throw 'Failed to detect VERSION from conandata.yml' }
+            $VERSION = ($versionLine.ToString() -replace '"', '' -replace ':', '' -replace ' ', '').Trim()
+
+            $NAME = "trusttunnel_client-v$VERSION-windows-x86_64"
+            New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+            Copy-Item -Force LICENSE build64\trusttunnel\LICENSE.txt
+
+            # This is a copy of https://www.wintun.net/builds/wintun-0.14.1.zip
+            $wintunUrl = "https://$Env:bamboo_artifactoryHostname/artifactory/adguard-pods/binaries/wintun-0.14.1.zip"
+            $wintunZip = Join-Path $PWD 'wintun-0.14.1.zip'
+            Invoke-WebRequest -Uri $wintunUrl -OutFile $wintunZip
+            Expand-Archive -Force -Path $wintunZip -DestinationPath 'wintun'
+            Copy-Item -Force 'wintun\wintun\bin\amd64\wintun.dll' 'build64\trusttunnel\wintun.dll'
+            Copy-Item -Force 'wintun\wintun\LICENSE.txt' 'build64\trusttunnel\WINTUN_LICENSE.txt'
+            Compress-Archive -Force -DestinationPath ("artifacts\\$NAME.zip") -Path @(
+              'build64\\trusttunnel\\trusttunnel_client.exe',
+              'build64\\trusttunnel\\setup_wizard.exe',
+              'build64\\trusttunnel\\LICENSE.txt',
+              'build64\\trusttunnel\\wintun.dll',
+              'build64\\trusttunnel\\WINTUN_LICENSE.txt'
+            )
+  requirements:
+    - ephemeral-windows
+    - image: registry.int.agrd.dev/windows/windows11-bamboo:19
+  artifact-subscriptions: [ ]
+  artifacts:
+    - name: Build for Windows
+      location: artifacts
+      pattern: 'trusttunnel_client-*.zip'
+      required: true
+      shared: true
+
 Deploy artifacts:
   key: DA
   docker:
@@ -227,6 +320,7 @@ Deploy artifacts:
               gh release upload ${TAG} ../build/linux/trusttunnel_client-v${VERSION}-linux-${ARCH}.tar.gz
             done
             gh release upload ${TAG} ../build/mac/trusttunnel_client-v${VERSION}-macos-universal.tar.gz
+            gh release upload ${TAG} ../build/win/trusttunnel_client-v${VERSION}-windows-x86_64.zip
   requirements:
     - adg-privileged-docker
   artifact-subscriptions:
@@ -234,6 +328,8 @@ Deploy artifacts:
       destination: build/linux
     - artifact: Build for Mac
       destination: build/mac
+    - artifact: Build for Windows
+      destination: build/win
   artifacts: []
 
 
