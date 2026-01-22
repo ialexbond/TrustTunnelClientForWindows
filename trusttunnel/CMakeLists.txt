@@ -100,6 +100,27 @@ if (APPLE)
 endif (APPLE)
 
 if (WIN32 AND MSVC)
+    if (DEFINED ENV{VSCMD_ARG_TGT_ARCH})
+        set(MSVC_TARGET_ARCH "$ENV{VSCMD_ARG_TGT_ARCH}")
+    elseif (DEFINED CMAKE_C_COMPILER_ARCHITECTURE_ID)
+        set(MSVC_TARGET_ARCH "${CMAKE_C_COMPILER_ARCHITECTURE_ID}")
+    endif ()
+
+    string(TOLOWER "${MSVC_TARGET_ARCH}" MSVC_TARGET_ARCH_LOWER)
+    if (MSVC_TARGET_ARCH_LOWER STREQUAL "x86")
+        set(RUST_TARGET_TRIPLE i686-pc-windows-msvc)
+    elseif (MSVC_TARGET_ARCH_LOWER STREQUAL "arm64")
+        set(RUST_TARGET_TRIPLE aarch64-pc-windows-msvc)
+    else ()
+        set(RUST_TARGET_TRIPLE x86_64-pc-windows-msvc)
+    endif ()
+
+    message("Rust target triple: ${RUST_TARGET_TRIPLE}")
+    set(CARGO_TARGET --target ${RUST_TARGET_TRIPLE})
+    set(TARGET_SUBDIR "${RUST_TARGET_TRIPLE}/${TARGET_SUBDIR}")
+endif ()
+
+if (WIN32 AND MSVC)
     set(CARGO_ENV_RUSTFLAGS RUSTFLAGS=-Ctarget-feature=+crt-static)
 endif ()
 
