@@ -119,8 +119,7 @@ static void nv_list_add_header(std::vector<NameValue> &nva, std::string_view nam
 /* Workaround for clang optimization bug in NDK 15 */
 __attribute((optnone))
 #endif //__clang__
-std::vector<NameValue>
-http_headers_to_nv_list(const HttpHeaders *headers) {
+std::vector<NameValue> http_headers_to_nv_list(const HttpHeaders *headers) {
     size_t max_field_count = headers->fields.size() + 4;
     std::vector<NameValue> nva;
     nva.reserve(max_field_count);

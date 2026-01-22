@@ -917,7 +917,7 @@ static std::shared_ptr<ServerUpstream> select_upstream(
                 return self->dns_handler;
             }
         }
-        if (const SocketAddress * dst; // NOLINT(cppcoreguidelines-init-variables)
+        if (const SocketAddress *dst; // NOLINT(cppcoreguidelines-init-variables)
                 conn != nullptr && conn->flags.test(CONNF_LOOKINGUP_DOMAIN) && conn->flags.test(CONNF_SUSPECT_EXCLUSION)
                 && nullptr != (dst = std::get_if<SocketAddress>(&conn->addr.dst))
                 && is_domain_scannable_port(dst->port())) {

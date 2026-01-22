@@ -858,6 +858,7 @@ void Http3Upstream::handle_h3_event(quiche_h3_event *h3_event, uint64_t stream_i
                 stream_close_code = H3_NO_ERROR;
             } else {
                 stream_close_code = H3_REQUEST_CANCELLED;
+                // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                 this->handler.func(this->handler.arg, SERVER_EVENT_HEALTH_CHECK_ERROR, &m_health_check_info->error);
             }
             m_health_check_info.reset();

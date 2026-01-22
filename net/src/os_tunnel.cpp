@@ -159,18 +159,18 @@ ag::VpnOsTunnelSettings *ag::vpn_os_tunnel_settings_clone(const ag::VpnOsTunnelS
     dst->ipv4_address = safe_strdup(settings->ipv4_address);
     dst->ipv6_address = safe_strdup(settings->ipv6_address);
     dst->included_routes.size = settings->included_routes.size;
-    dst->included_routes.data = new const char *[settings->included_routes.size] {};
+    dst->included_routes.data = new const char *[settings->included_routes.size]{};
     for (size_t i = 0; i != dst->included_routes.size; i++) {
         dst->included_routes.data[i] = safe_strdup(settings->included_routes.data[i]);
     }
     dst->excluded_routes.size = settings->excluded_routes.size;
-    dst->excluded_routes.data = new const char *[settings->excluded_routes.size] {};
+    dst->excluded_routes.data = new const char *[settings->excluded_routes.size]{};
     for (size_t i = 0; i != dst->excluded_routes.size; i++) {
         dst->excluded_routes.data[i] = safe_strdup(settings->excluded_routes.data[i]);
     }
     dst->mtu = settings->mtu;
     dst->dns_servers.size = settings->dns_servers.size;
-    dst->dns_servers.data = new const char *[settings->dns_servers.size] {};
+    dst->dns_servers.data = new const char *[settings->dns_servers.size]{};
     for (size_t i = 0; i != dst->dns_servers.size; i++) {
         dst->dns_servers.data[i] = safe_strdup(settings->dns_servers.data[i]);
     }

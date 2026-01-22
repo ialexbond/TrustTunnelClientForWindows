@@ -97,7 +97,11 @@ Checks: >-
   -bugprone-switch-missing-default-case,
   -google-readability-todo,
   -readability-identifier-naming,
-  -concurrency-mt-unsafe
+  -concurrency-mt-unsafe,
+  -cppcoreguidelines-use-enum-class,
+  -portability-template-virtual-member-function,
+  -modernize-use-integer-sign-comparison,
+  -misc-const-correctness
 
 WarningsAsErrors: '*'
 
@@ -144,4 +148,8 @@ CheckOptions: [
   { key: performance-move-const-arg.CheckTriviallyCopyableMove, value: false },
 
   { key: concurrency-mt-unsafe.FunctionSet, value: 'glibc' },
+
+  { key: bugprone-unchecked-optional-access.IgnoreValueCalls, value: true },
+
+  { key: modernize-use-scoped-lock.WarnOnSingleLocks, value: false },
 ]
