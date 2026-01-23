@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.99.93
+
 - [Fix] Fixed setup_wizard architecture in Linux builds #5
 
 ## 0.99.92
