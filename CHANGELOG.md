@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- [Fix] [Windows] Fixed certificate validation failing with `WCRYPT_E_POLICY_STATUS` error.
+
 ## 0.99.93
 
 - [Fix] Fixed setup_wizard architecture in Linux builds #5
