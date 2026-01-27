@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.99.96
+
 - [Fix] [Windows] Fixed certificate validation failing with `WCRYPT_E_POLICY_STATUS` error.
 
 ## 0.99.93
