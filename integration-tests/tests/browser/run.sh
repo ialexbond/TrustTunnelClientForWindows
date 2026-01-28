@@ -20,6 +20,7 @@ TEST_DIR="${TEST_DIR:-/tests}"
 OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 AGVPN_HELPER_URL="${AGVPN_HELPER_URL:-}"
 CLIENT_PID_FILE="${OUTPUT_DIR}/vpn_client.pid"
+CLI_ROOT="$HOME/.local/share/adguardvpn-cli"
 
 echo "Starting browser test runner..."
 
@@ -75,6 +76,8 @@ else
 fi
 
 echo "Step 2: Getting location data from backend..."
+# Make data dir to get valid json output from agvpn_helper
+mkdir -p "$CLI_ROOT"
 # Get location data from backend via agvpn_helper
 location=$(./agvpn_helper get-location -c "Frankfurt" -t "$BAMBOO_VPN_TOKEN")
 if [[ -z "$location" ]]; then
