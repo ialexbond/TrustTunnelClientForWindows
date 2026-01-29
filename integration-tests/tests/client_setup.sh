@@ -120,7 +120,7 @@ excluded_routes = [
     "192.168.0.0/16",
     "224.0.0.0/3",
 ]
-mtu_size = 1500
+mtu_size = 1280
 EOF
   echo "TUN mode configuration created"
 else

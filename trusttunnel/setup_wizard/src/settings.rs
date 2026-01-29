@@ -295,7 +295,7 @@ impl TunListener {
         ]
     }
     pub fn default_mtu_size() -> usize {
-        1500
+        1280
     }
 
     pub fn default_change_system_dns() -> bool {

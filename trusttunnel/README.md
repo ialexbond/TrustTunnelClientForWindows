@@ -130,7 +130,7 @@ The configuration file uses TOML format. Below are all available settings.
 | `bound_if` | string | auto-detected | Network interface for VPN client connections (Linux/Windows: auto, macOS: `en0`) |
 | `included_routes` | array[string] | `["0.0.0.0/0", "2000::/3"]` | Routes in CIDR notation to set to the virtual interface |
 | `excluded_routes` | array[string] | `["0.0.0.0/8", "10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"]` | Routes in CIDR notation to exclude from VPN routing |
-| `mtu_size` | int | `1500` | MTU size on the virtual interface |
+| `mtu_size` | int | `1280` | MTU size on the virtual interface |
 | `change_system_dns` | bool | `true` | Allow changing system DNS servers |
 
 ### SOCKS Listener Settings (`[listener.socks]`)
@@ -192,7 +192,7 @@ anti_dpi = false
 bound_if = ""
 included_routes = ["0.0.0.0/0", "2000::/3"]
 excluded_routes = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
-mtu_size = 1500
+mtu_size = 1280
 ```
 
 ---
