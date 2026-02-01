@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.99.102
+
 - Post-quantum cryptography is now enabled by default
 - [Feature] Add functions to get default VPN settings and free allocated resources.
     - See `vpn_get_default_settings` and `vpn_free_default_settings`.
