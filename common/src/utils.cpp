@@ -10,10 +10,12 @@
 #include "vpn/platform.h"
 #include "vpn/utils.h"
 
+#include "default_settings.h"
+
 namespace ag {
 
-static std::atomic_bool g_handler_profiling_enabled = false;
-static std::atomic_bool g_post_quantum_group_enabled = false;
+static std::atomic_bool g_handler_profiling_enabled = VPN_DEFAULT_HANDLER_PROFILING_ENABLED;
+static std::atomic_bool g_post_quantum_group_enabled = VPN_DEFAULT_POST_QUANTUM_GROUP_ENABLED;
 
 static constexpr uint32_t DEFAULT_HANDLER_PROFILING_THRESHOLD_NS = 5'000'000; // 5 milliseconds
 
@@ -295,6 +297,23 @@ const char *vpn_dns_stamp_prettier_url(VpnDnsStamp *c_stamp) {
 
 void vpn_string_free(const char *s) {
     std::free((void *) s);
+}
+
+VpnDefaultSettings *vpn_get_default_settings() {
+    auto *settings = (VpnDefaultSettings *) std::malloc(sizeof(VpnDefaultSettings));
+    if (settings == nullptr) {
+        return nullptr;
+    }
+    settings->post_quantum_group_enabled = VPN_DEFAULT_POST_QUANTUM_GROUP_ENABLED;
+    settings->handler_profiling_enabled = VPN_DEFAULT_HANDLER_PROFILING_ENABLED;
+    return settings;
+}
+
+void vpn_free_default_settings(VpnDefaultSettings *settings) {
+    if (settings == nullptr) {
+        return;
+    }
+    std::free(settings);
 }
 // NOLINTEND(cppcoreguidelines-no-malloc,hicpp-no-malloc)
 

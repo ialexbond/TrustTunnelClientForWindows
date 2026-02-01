@@ -169,6 +169,14 @@ private:
 };
 
 /**
+ * Default settings for vpn
+ */
+struct VpnDefaultSettings {
+    bool post_quantum_group_enabled; /**< Default state for post-quantum group in TLS handshakes */
+    bool handler_profiling_enabled;  /**< Default state for handler profiling */
+};
+
+/**
  * Convert milliseconds to timeval structure
  */
 static inline struct timeval ms_to_timeval(uint32_t ms) {
@@ -390,6 +398,18 @@ WIN_EXPORT void vpn_post_quantum_group_set_enabled(bool enabled);
 
 /** Return `true` if a post-quantum group can be used in TLS handshakes initiated by the library, `false` otherwise. */
 WIN_EXPORT bool vpn_post_quantum_group_enabled();
+
+/**
+ * Get default VPN settings.
+ * @return Pointer to allocated VpnDefaultSettings structure
+ */
+WIN_EXPORT VpnDefaultSettings *vpn_get_default_settings();
+
+/**
+ * Free VpnDefaultSettings structure
+ * @param settings Pointer to VpnDefaultSettings structure to free
+ */
+WIN_EXPORT void vpn_free_default_settings(VpnDefaultSettings *settings);
 
 } // extern "C"
 } // namespace ag
