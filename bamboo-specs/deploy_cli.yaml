@@ -52,6 +52,12 @@ Linux build:
 
             ARCHES=${ARCHES:-x86_64 aarch64 armv7 mips mipsel}
 
+            # Set up GPG for signing binaries
+            GPG_KEY=devteam@adguard.com
+            echo "${bamboo.gpgSecretKeyPart1}${bamboo.gpgSecretKeyPart2}"\
+                        | awk '{ gsub(/\\n/, "\n"); print; }'\
+                        | gpg --import --batch --yes
+
             rustup +nightly component add rust-src
 
             for ARCH in $ARCHES; do
@@ -87,8 +93,20 @@ Linux build:
               pushd build_${ARCH}/trusttunnel
                 llvm-strip trusttunnel_client
                 llvm-strip setup_wizard
+                # Sign binaries with GPG
+                gpg --default_key "${GPG_KEY}" \
+                    --detach_sig \
+                    --passphrase "${bamboo.gpgPassword}" \
+                    --pinentry-mode loopback \
+                    trusttunnel_client
+                gpg --default_key "${GPG_KEY}" \
+                    --detach_sig \
+                    --passphrase "${bamboo.gpgPassword}" \
+                    --pinentry-mode loopback \
+                    setup_wizard
                 cp ${VPNLIBS_ROOT}/LICENSE .
-                tar zcf ${NAME}.tar.gz --transform "s,^,${NAME}/," trusttunnel_client setup_wizard LICENSE
+                # Include .sig files in the archive
+                tar zcf ${NAME}.tar.gz --transform "s,^,${NAME}/," trusttunnel_client trusttunnel_client.sig setup_wizard setup_wizard.sig LICENSE
                 mv ${NAME}.tar.gz ${ARTIFACTS_DIR}/
               popd
             done
@@ -138,6 +156,12 @@ Mac build:
             bundle exec fastlane certs
 
             VERSION=$(cat conandata.yml | grep "[0-9]*\.[0-9]*." | tail -1 | sed "s/\"//" | sed "s/\"\://" | sed "s/ //g")
+            
+            # Set up GPG for signing binaries
+            GPG_KEY=devteam@adguard.com
+            echo "${bamboo.gpgSecretKeyPart1}${bamboo.gpgSecretKeyPart2}"\
+                        | awk '{ gsub(/\\n/, "\n"); print; }'\
+                        | gpg --import --batch --yes
 
             ARCHES=${ARCHES:-x86_64 arm64}
             for ARCH in $ARCHES; do
@@ -168,9 +192,21 @@ Mac build:
                 bundle exec fastlane notari id:"${CODESIGN_IDENTIFIER}" bundle:"${BIN_PATH}/setup_wizard"
                 bundle exec fastlane remove_certs || true
               popd
+              # Sign binaries with GPG
+                gpg --default_key "${GPG_KEY}" \
+                    --detach_sig \
+                    --passphrase "${bamboo.gpgPassword}" \
+                    --pinentry-mode loopback \
+                    trusttunnel_client
+                gpg --default_key "${GPG_KEY}" \
+                    --detach_sig \
+                    --passphrase "${bamboo.gpgPassword}" \
+                    --pinentry-mode loopback \
+                    setup_wizard
               cp ${REPO_ROOT}/LICENSE .
               NAME=trusttunnel_client-v${VERSION}-macos-universal
-              tar zcf ${NAME}.tar.gz -s ",^,${NAME}/," trusttunnel_client setup_wizard LICENSE
+              # Include .sig files in the archive
+              tar zcf ${NAME}.tar.gz -s ",^,${NAME}/," trusttunnel_client trusttunnel_client.sig setup_wizard setup_wizard.sig LICENSE
             popd
     - script:
         scripts:

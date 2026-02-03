@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- [Feature] Add GPG signing for TrustTunnel executables.
+
 ## 0.99.102
 
 - Post-quantum cryptography is now enabled by default

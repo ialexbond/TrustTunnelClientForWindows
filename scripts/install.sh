@@ -315,18 +315,18 @@ check_out_dir() {
   set -e
 }
 
-# TODO: enable this once binaries are signed with gpg
 # Function verify_hint prints a hint about how to verify the installation.
-# verify_hint() {
-#   # Check if `.sig` file exists
-#   if [ -f "${output_dir}/${exe_name}.sig" ]
-#   then
-#     echo
-#     echo "To verify the installation, run the following command to import the public key and verify the signature:"
-#     echo "    gpg --keyserver 'keys.openpgp.org' --recv-key '28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6'"
-#     echo "    gpg --verify ${output_dir}/${exe_name}.sig ${output_dir}/${exe_name}"
-#   fi
-# }
+verify_hint() {
+  exe_name=trusttunnel_client
+  # Check if `.sig` file exists
+  if [ -f "${output_dir}/${exe_name}.sig" ]
+  then
+    echo
+    echo "To verify the installation, run the following command to import the public key and verify the signature:"
+    echo "    gpg --keyserver 'keys.openpgp.org' --recv-key '28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6'"
+    echo "    gpg --verify ${output_dir}/${exe_name}.sig ${output_dir}/${exe_name}"
+  fi
+}
 
 # Function remove_downloaded_package deletes the archive only if it was downloaded and not transferred.
 remove_downloaded_package() {
@@ -627,3 +627,5 @@ handle_existing
 unpack
 
 report_success
+
+verify_hint

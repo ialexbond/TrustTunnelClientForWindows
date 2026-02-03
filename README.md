@@ -93,4 +93,5 @@ Apache 2.0
 - [Apple adapter](platform/apple/README.md)
 - [Windows adapter](platform/windows/README.md)
 - [Changelog](CHANGELOG.md)
+- [Verifying releases](VERIFY_RELEASES.md)
 - [License](LICENSE)
