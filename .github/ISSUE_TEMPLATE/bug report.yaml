@@ -1,5 +1,5 @@
 name: 🐞 Bug report
-description: Report a bug related to Flutter app or plugin behavior
+description: Report a bug related to TrustTunnel console client
 title: "[Bug]: "
 labels: ["Bug"]
 body:
@@ -19,44 +19,10 @@ body:
       options:
         - label: I read the README and followed all setup steps in order
           required: true
-        - label: I verified that my GPR key is valid and correctly passed to the environment
-          required: true
         - label: I searched existing issues and found no duplicates
           required: true
-        - label: I am using the latest version of the app
+        - label: I am using the latest version of the TrustTunnel console client
           required: true
-
-  - type: textarea
-    id: doctor
-    attributes:
-      label: Flutter Doctor output
-      render: shell
-      description: Paste the output of `flutter doctor -v`.
-    validations:
-      required: true
-
-  - type: dropdown
-    id: platform
-    attributes:
-      label: Platform
-      multiple: true
-      options:
-        - Android
-        - iOS
-    validations:
-      required: true
-
-  - type: dropdown
-    id: build_mode
-    attributes:
-      label: Build mode
-      multiple: false
-      options:
-        - Debug
-        - Profile
-        - Release
-    validations:
-      required: true
 
   - type: textarea
     id: environment
@@ -65,12 +31,10 @@ body:
       description: |
         Please provide relevant environment details.
         Examples:
-          - **OS**: Android 14 / iOS 17
-          - **Device**: Pixel 7 / iPhone 14
-          - **Architecture**: arm64
+          - **OS**: Ubuntu v22.04
+          - **Architecture**: x86-64
       value: |
         - OS:
-        - Device:
         - Architecture:
     validations:
       required: true
@@ -79,8 +43,8 @@ body:
     id: app_version
     attributes:
       label: App version
-      description: Version where the issue occurs (see `pubspec.yaml`)
-      placeholder: ex. 1.0.1+3971
+      description: Version where the issue occurs
+      placeholder: ex. 0.99.99
     validations:
       required: true
 
@@ -95,19 +59,6 @@ body:
         1. Run the app
         2. Click on the toggle button
         3. Observe crash / incorrect behavior
-    validations:
-      required: true
-
-  - type: dropdown
-    id: reproducibility
-    attributes:
-      label: Reproducibility
-      multiple: false
-      options:
-        - Always
-        - Often
-        - Sometimes
-        - Rarely
     validations:
       required: true
 
@@ -146,19 +97,6 @@ body:
       required: false
 
   - type: textarea
-    id: logs
-    attributes:
-      label: Logs
-      render: shell
-      description: |
-        Paste relevant logs here.
-        Prefer output from:
-        - `flutter run --verbose`
-        - platform-specific logs (Logcat / console.app)
-    validations:
-      required: true
-
-  - type: textarea
     id: additional
     attributes:
       label: Additional Information
@@ -169,4 +107,5 @@ body:
     attributes:
       value: |
         ---
-        Upvote [important issues](https://github.com/TrustTunnel/TrustTunnelFlutterClient/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc+) with a :+1:
+
+        Upvote [important issues](https://github.com/TrustTunnel/TrustTunnelClient/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc+) with a :+1:
