@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.99.108
+
+- [Fix] Fixed segfault when running on FreshTomato-RT-AC66U MIPS firmware
+
 ## 0.99.104
 
 - [Feature] Add GPG signing for TrustTunnel executables.
