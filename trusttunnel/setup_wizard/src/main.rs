@@ -232,7 +232,7 @@ Note: Cannot mix both variants"#,
             Action::ModifyAndOverwrite { path, settings } => {
                 (get_mode() == Mode::Interactive).then(|| println!("Let's build the settings"));
                 let settings = settings::build(Some(&settings));
-                println!("The settings are successfully built\n");
+                println!("The settings are successfully built");
 
                 let doc = composer::compose_document(Some(&path), &settings);
                 fs::write(&path, doc.to_string()).expect("Couldn't write the settings to a file");
@@ -242,7 +242,7 @@ Note: Cannot mix both variants"#,
             Action::MakeFromScratch => {
                 (get_mode() == Mode::Interactive).then(|| println!("Let's build the settings"));
                 let settings = settings::build(None);
-                println!("The settings are successfully built\n");
+                println!("The settings are successfully built");
 
                 let path = ask_for_input::<String>(
                     "Path to a file to store the settings",
@@ -261,10 +261,38 @@ Note: Cannot mix both variants"#,
         }
     };
 
-    println!("To start client, run the following command:");
-    println!("\ttrusttunnel_client -c {settings_path}");
-    println!("To see full set of the available options, run the following command:");
-    println!("\ttrusttunnel_client -h");
+    print_completion_message(&settings_path);
+}
+
+fn print_completion_message(settings_path: &str) {
+    println!();
+    println!("═══════════════════════════════════════════════════════════════");
+    println!("                    Setup Complete!");
+    println!("═══════════════════════════════════════════════════════════════");
+    println!();
+    println!("Configuration file created:");
+    println!("  • {}  - Client settings", settings_path);
+    println!();
+    println!("───────────────────────────────────────────────────────────────");
+    println!("                      Next Steps");
+    println!("───────────────────────────────────────────────────────────────");
+    println!();
+    println!("1. Start the client:");
+    #[cfg(target_os = "windows")]
+    println!("   trusttunnel_client -c {}", settings_path);
+    #[cfg(not(target_os = "windows"))]
+    println!("   sudo trusttunnel_client -c {}", settings_path);
+    println!();
+    println!("2. For advanced settings (exclusions, DNS, kill switch), edit:");
+    println!("   {}", settings_path);
+    println!();
+    #[cfg(target_os = "windows")]
+    println!("Note: For TUN mode, wintun.dll must be in the same directory or PATH.");
+    #[cfg(target_os = "windows")]
+    println!();
+    println!("See https://github.com/TrustTunnel/TrustTunnelClient/blob/master/README.md for documentation.");
+    println!();
+    println!("Run `trusttunnel_client -h` for all available options.");
 }
 
 fn find_existent_settings<T: serde::de::DeserializeOwned>(path: &str) -> Option<(String, T)> {
