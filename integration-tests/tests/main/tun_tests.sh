@@ -101,8 +101,8 @@ echo "Check ICMP - ping 8.8.8.8 ..."
 tunexec ping -c 10 8.8.8.8 &> /dev/null
 check_error
 
-echo "Check ICMP ipv6 - ping 2a00:1450:4017:814::200e ..."
-tunexec ping -c 10 2a00:1450:4017:814::200e &> /dev/null
+echo "Check ICMP ipv6 - ping 2001:4860:4860::8888 ..."
+tunexec ping -c 10 2001:4860:4860::8888 &> /dev/null
 check_error
 
 echo "Check ICMP ipv6 - ping6 ipv6.google.com ..."
