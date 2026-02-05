@@ -60,7 +60,7 @@ struct SingleUpstreamConnector::Impl {
 
         switch (what) {
         case SERVER_EVENT_SESSION_OPENED: {
-            log_connector(self, dbg, "Session is opened successfully");
+            log_connector(self, dbg, "Session opened successfully");
             self->fsm.perform_transition(E_SESSION_OPENED, nullptr);
             break;
         }

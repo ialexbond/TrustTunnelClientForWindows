@@ -1,21 +1,21 @@
 #include <gtest/gtest.h>
 
 #include "net/quic_utils.h"
-#include "vpn/internal/domain_lookuper.h"
+#include "vpn/internal/domain_extractor.h"
 
 using namespace ag;
 
 struct TestParam {
     std::vector<uint8_t> input;
-    DomainLookuperPacketDirection dir;
-    DomainLookuperStatus expected_status;
+    DomainExtractorPacketDirection dir;
+    DomainExtractorStatus expected_status;
     std::string expected_domain;
 };
 
 class OutgoingDataTcp : public testing::TestWithParam<TestParam> {
 public:
-    DomainLookuper lookuper = {};
-    DomainLookuperResult result = {};
+    DomainExtractor domain_extractor = {};
+    DomainExtractorResult result = {};
 
     static void SetUpTestSuite() {
         ag::Logger::set_log_level(ag::LOG_LEVEL_TRACE);
@@ -29,7 +29,7 @@ public:
 TEST_P(OutgoingDataTcp, Test) {
     const TestParam &param = GetParam();
 
-    result = lookuper.proceed(param.dir, IPPROTO_TCP, (uint8_t *) param.input.data(), param.input.size());
+    result = domain_extractor.proceed(param.dir, IPPROTO_TCP, (uint8_t *) param.input.data(), param.input.size());
 
     ASSERT_EQ(result.status, param.expected_status) << result.domain;
     ASSERT_EQ(result.domain, param.expected_domain);
@@ -37,8 +37,8 @@ TEST_P(OutgoingDataTcp, Test) {
 
 class OutgoingDataUdp : public testing::TestWithParam<TestParam> {
 public:
-    DomainLookuper lookuper = {};
-    DomainLookuperResult result = {};
+    DomainExtractor domain_extractor = {};
+    DomainExtractorResult result = {};
 
     static void SetUpTestSuite() {
         ag::Logger::set_log_level(ag::LOG_LEVEL_TRACE);
@@ -58,7 +58,7 @@ TEST_P(OutgoingDataUdp, Test) {
     auto data =
             ag::quic_utils::prepare_for_domain_lookup({param.input.data(), param.input.size()}, quic_header.value());
     ASSERT_TRUE(data);
-    result = lookuper.proceed(param.dir, IPPROTO_UDP, data->data(), data->size());
+    result = domain_extractor.proceed(param.dir, IPPROTO_UDP, data->data(), data->size());
 
     ASSERT_EQ(result.status, param.expected_status) << result.domain;
     ASSERT_EQ(result.domain, param.expected_domain);
@@ -141,7 +141,7 @@ static const TestParam QUIC_TEST_SAMPLES[] = {
                                 "056df31bd267b6b90a079831aaf579be0a39013137aac6d404f518cfd4684064"
                                 "7e78bfe706ca4cf5e9c5453e9f7cfd2b8b4c8d169a44e55c88d4a9a7f9474241"
                                 "e221af44860018ab0856972e194cd934"),
-                DLUPD_OUTGOING, DLUS_FOUND, "example.com"},
+                DEPD_OUTGOING, DES_FOUND, "example.com"},
         {// client hello sni=quic.nginx.org; quic version 1
                 decode_from_hex("c300000001089714ce4dc712435c000045349815f4232d1334276442f35"
                                 "fa3505fa9fbbafc0d57c8e502d00ff976b3acc29aeaecb9ac05f9861fc75cf6c"
@@ -186,36 +186,36 @@ static const TestParam QUIC_TEST_SAMPLES[] = {
                                 "699046673647ed84f9a5271cd5ef73c09870d955b37b464ef6a8d79e8d7bb301"
                                 "5f17e869fa064dde2cbc9f38e58a0116a9b148b6ef56796d72e1994d1bfc1060"
                                 "44d00d350ffb602fc"),
-                DLUPD_OUTGOING, DLUS_FOUND, "quic.nginx.org"},
+                DEPD_OUTGOING, DES_FOUND, "quic.nginx.org"},
 };
 
-INSTANTIATE_TEST_SUITE_P(DomainLookuperQuic, OutgoingDataUdp, testing::ValuesIn(QUIC_TEST_SAMPLES));
+INSTANTIATE_TEST_SUITE_P(DomainExtractorQuic, OutgoingDataUdp, testing::ValuesIn(QUIC_TEST_SAMPLES));
 
 static const TestParam HTTP_TEST_SAMPLES[] = {
-        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHost: example.com\r\n\r\n"), DLUPD_OUTGOING,
-                DLUS_FOUND, "example.com"},
-        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHost:example.com\r"), DLUPD_OUTGOING, DLUS_FOUND,
+        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHost: example.com\r\n\r\n"), DEPD_OUTGOING,
+                DES_FOUND, "example.com"},
+        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHost:example.com\r"), DEPD_OUTGOING, DES_FOUND,
                 "example.com"},
         {string_view_to_vector(
                  "GET / HTTP/1.1\r\nAccept: text/html\r\nHost:   example.com\r\nAccept: text/html\r\n\r\n"),
-                DLUPD_OUTGOING, DLUS_FOUND, "example.com"},
-        {string_view_to_vector("CONNECT http://example.com/ HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DLUPD_OUTGOING,
-                DLUS_FOUND, "example.com"},
-        {string_view_to_vector("CONNECT http://example.com:80/ HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DLUPD_OUTGOING,
-                DLUS_FOUND, "example.com"},
-        {string_view_to_vector("CONNECT example.com HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DLUPD_OUTGOING, DLUS_FOUND,
+                DEPD_OUTGOING, DES_FOUND, "example.com"},
+        {string_view_to_vector("CONNECT http://example.com/ HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DEPD_OUTGOING,
+                DES_FOUND, "example.com"},
+        {string_view_to_vector("CONNECT http://example.com:80/ HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DEPD_OUTGOING,
+                DES_FOUND, "example.com"},
+        {string_view_to_vector("CONNECT example.com HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DEPD_OUTGOING, DES_FOUND,
                 "example.com"},
 
-        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHo: example.com\r\n\r\n"), DLUPD_OUTGOING,
-                DLUS_NOTFOUND, ""},
-        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHo: example.com"), DLUPD_OUTGOING, DLUS_NOTFOUND,
+        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHo: example.com\r\n\r\n"), DEPD_OUTGOING,
+                DES_NOTFOUND, ""},
+        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text/html\r\nHo: example.com"), DEPD_OUTGOING, DES_NOTFOUND,
                 ""},
-        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text"), DLUPD_OUTGOING, DLUS_NOTFOUND, ""},
-        {string_view_to_vector("CONNECT /example HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DLUPD_OUTGOING, DLUS_NOTFOUND,
+        {string_view_to_vector("GET / HTTP/1.1\r\nAccept: text"), DEPD_OUTGOING, DES_NOTFOUND, ""},
+        {string_view_to_vector("CONNECT /example HTTP/1.1\r\nAccept: text/html\r\n\r\n"), DEPD_OUTGOING, DES_NOTFOUND,
                 ""},
-        {string_view_to_vector("CONNECT example.com"), DLUPD_OUTGOING, DLUS_NOTFOUND, ""},
+        {string_view_to_vector("CONNECT example.com"), DEPD_OUTGOING, DES_NOTFOUND, ""},
 };
-INSTANTIATE_TEST_SUITE_P(DomainLookuperHTTP, OutgoingDataTcp, testing::ValuesIn(HTTP_TEST_SAMPLES));
+INSTANTIATE_TEST_SUITE_P(DomainExtractorHTTP, OutgoingDataTcp, testing::ValuesIn(HTTP_TEST_SAMPLES));
 
 static const TestParam TLS_TEST_SAMPLES[] = {
         {// client hello sni=localhost
@@ -240,7 +240,7 @@ static const TestParam TLS_TEST_SAMPLES[] = {
                         0x01, 0x06, 0x02, 0x06, 0x03, 0x05, 0x01, 0x05, 0x02, 0x05, 0x03, 0x04, 0x01, 0x04, 0x02, 0x04,
                         0x03, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03, 0x02, 0x01, 0x02, 0x02, 0x02, 0x03, 0x00, 0x0F, 0x00,
                         0x01, 0x01},
-                DLUPD_OUTGOING, DLUS_FOUND, "localhost"},
+                DEPD_OUTGOING, DES_FOUND, "localhost"},
         {// client hello no sni
                 {0x16, 0x03, 0x01, 0x01, 0x2C, 0x01, 0x00, 0x01, 0x28, 0x03, 0x03, 0x77, 0xB6, 0x93, 0xFB, 0xA0, 0xE5,
                         0x3F, 0xA2, 0x3E, 0x44, 0x04, 0x1B, 0x54, 0x18, 0x44, 0x1B, 0x1D, 0x16, 0x27, 0x6B, 0x73, 0x2B,
@@ -261,7 +261,7 @@ static const TestParam TLS_TEST_SAMPLES[] = {
                         0x09, 0x00, 0x0A, 0x00, 0x23, 0x00, 0x00, 0x00, 0x0D, 0x00, 0x20, 0x00, 0x1E, 0x06, 0x01, 0x06,
                         0x02, 0x06, 0x03, 0x05, 0x01, 0x05, 0x02, 0x05, 0x03, 0x04, 0x01, 0x04, 0x02, 0x04, 0x03, 0x03,
                         0x01, 0x03, 0x02, 0x03, 0x03, 0x02, 0x01, 0x02, 0x02, 0x02, 0x03, 0x00, 0x0F, 0x00, 0x01, 0x01},
-                DLUPD_OUTGOING, DLUS_PASS, ""},
+                DEPD_OUTGOING, DES_PASS, ""},
         {// bad client hello
                 {0x16, 0x03, 0x01, 0x00, 0xd5, 0x01, 0x00, 0x03, 0x11, 0xda, 0xf5, 0x00, 0x01, 0xd6, 0x00, 0x74, 0x00,
                         0x00, 0x38, 0x40, 0x01, 0x00, 0xc7, 0x00, 0x2d, 0x00, 0x00, 0x00, 0x2f, 0x00, 0x36, 0x00, 0x43,
@@ -294,14 +294,14 @@ static const TestParam TLS_TEST_SAMPLES[] = {
                         0x36, 0x26, 0xc4, 0x45, 0x17, 0x55, 0x29, 0xba, 0x62, 0x2e, 0xa4, 0x06, 0x69, 0xda, 0x07, 0x2c,
                         0x35, 0xa2, 0x4c, 0xdf, 0xe2, 0x84, 0xde, 0x6e, 0xe2, 0x68, 0x6e, 0xaf, 0x90, 0x22, 0xcd, 0x55,
                         0x84, 0x02, 0xd1},
-                DLUPD_OUTGOING, DLUS_NOTFOUND, ""},
+                DEPD_OUTGOING, DES_NOTFOUND, ""},
 };
-INSTANTIATE_TEST_SUITE_P(DomainLookuperTLS, OutgoingDataTcp, testing::ValuesIn(TLS_TEST_SAMPLES));
+INSTANTIATE_TEST_SUITE_P(DomainExtractorTLS, OutgoingDataTcp, testing::ValuesIn(TLS_TEST_SAMPLES));
 
 class TLSExchange : public testing::Test {
 public:
-    DomainLookuper lookuper = {};
-    DomainLookuperResult result = {};
+    DomainExtractor domain_extractor = {};
+    DomainExtractorResult result = {};
 
     TLSExchange() {
         ag::Logger::set_log_level(ag::LOG_LEVEL_TRACE);
@@ -328,8 +328,9 @@ public:
                 0x00, 0x0D, 0x00, 0x20, 0x00, 0x1E, 0x06, 0x01, 0x06, 0x02, 0x06, 0x03, 0x05, 0x01, 0x05, 0x02, 0x05,
                 0x03, 0x04, 0x01, 0x04, 0x02, 0x04, 0x03, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03, 0x02, 0x01, 0x02, 0x02,
                 0x02, 0x03, 0x00, 0x0F, 0x00, 0x01, 0x01};
-        result = lookuper.proceed(DLUPD_OUTGOING, IPPROTO_TCP, CLIENT_HELLO_NOSNI.data(), CLIENT_HELLO_NOSNI.size());
-        ASSERT_EQ(result.status, DLUS_PASS);
+        result = domain_extractor.proceed(
+                DEPD_OUTGOING, IPPROTO_TCP, CLIENT_HELLO_NOSNI.data(), CLIENT_HELLO_NOSNI.size());
+        ASSERT_EQ(result.status, DES_PASS);
     }
 };
 
@@ -340,8 +341,8 @@ TEST_F(TLSExchange, Test) {
             0x00, 0x16, 0xff, 0x01, 0x00, 0x01, 0x00, 0x00, 0x0b, 0x00, 0x04, 0x03, 0x00, 0x01, 0x02, 0x00, 0x23, 0x00,
             0x00, 0x00, 0x0f, 0x00, 0x01, 0x01};
 
-    result = lookuper.proceed(DLUPD_INCOMING, IPPROTO_TCP, SERVER_HELLO.data(), SERVER_HELLO.size());
-    ASSERT_EQ(result.status, DLUS_PASS);
+    result = domain_extractor.proceed(DEPD_INCOMING, IPPROTO_TCP, SERVER_HELLO.data(), SERVER_HELLO.size());
+    ASSERT_EQ(result.status, DES_PASS);
 
     static const std::vector<uint8_t> SERVER_CERT = {0x16, 0x03, 0x03, 0x0f, 0x84, 0x0b, 0x00, 0x0f, 0x80, 0x00, 0x0f,
             0x7d, 0x00, 0x06, 0x10, 0x30, 0x82, 0x06, 0x0c, 0x30, 0x82, 0x04, 0xf4, 0xa0, 0x03, 0x02, 0x01, 0x02, 0x02,
@@ -566,15 +567,15 @@ TEST_F(TLSExchange, Test) {
             0xd9, 0xd6, 0x86, 0x8e, 0x19, 0x1f, 0xa6, 0x06, 0x47, 0x42, 0x72, 0xe0, 0x56, 0x0a, 0x00, 0x1c, 0x78, 0xb9,
             0x8d, 0xcc, 0x99, 0x04, 0x37, 0x49};
 
-    result = lookuper.proceed(DLUPD_INCOMING, IPPROTO_TCP, SERVER_CERT.data(), SERVER_CERT.size());
-    ASSERT_EQ(result.status, DLUS_FOUND);
+    result = domain_extractor.proceed(DEPD_INCOMING, IPPROTO_TCP, SERVER_CERT.data(), SERVER_CERT.size());
+    ASSERT_EQ(result.status, DES_FOUND);
     ASSERT_EQ(result.domain, "ya.ru");
 }
 
 class TLSExchangeSplittedPackets : public testing::Test {
 public:
-    DomainLookuper lookuper = {};
-    DomainLookuperResult result = {};
+    DomainExtractor domain_extractor = {};
+    DomainExtractorResult result = {};
 
     TLSExchangeSplittedPackets() {
         ag::Logger::set_log_level(ag::LOG_LEVEL_TRACE);
@@ -601,12 +602,12 @@ public:
                 0x00, 0x0D, 0x00, 0x20, 0x00, 0x1E, 0x06, 0x01, 0x06, 0x02, 0x06, 0x03, 0x05, 0x01, 0x05, 0x02, 0x05,
                 0x03, 0x04, 0x01, 0x04, 0x02, 0x04, 0x03, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03, 0x02, 0x01, 0x02, 0x02,
                 0x02, 0x03, 0x00, 0x0F, 0x00, 0x01, 0x01};
-        result = lookuper.proceed(DLUPD_OUTGOING, IPPROTO_TCP, CLIENT_HELLO_NOSNI.data(), 1);
-        ASSERT_EQ(result.status, DLUS_WANT_MORE);
+        result = domain_extractor.proceed(DEPD_OUTGOING, IPPROTO_TCP, CLIENT_HELLO_NOSNI.data(), 1);
+        ASSERT_EQ(result.status, DES_WANT_MORE);
 
-        result = lookuper.proceed(
-                DLUPD_OUTGOING, IPPROTO_TCP, CLIENT_HELLO_NOSNI.data() + 1, CLIENT_HELLO_NOSNI.size() - 1);
-        ASSERT_EQ(result.status, DLUS_PASS);
+        result = domain_extractor.proceed(
+                DEPD_OUTGOING, IPPROTO_TCP, CLIENT_HELLO_NOSNI.data() + 1, CLIENT_HELLO_NOSNI.size() - 1);
+        ASSERT_EQ(result.status, DES_PASS);
     }
 };
 
@@ -617,8 +618,8 @@ TEST_F(TLSExchangeSplittedPackets, Test) {
             0x00, 0x16, 0xff, 0x01, 0x00, 0x01, 0x00, 0x00, 0x0b, 0x00, 0x04, 0x03, 0x00, 0x01, 0x02, 0x00, 0x23, 0x00,
             0x00, 0x00, 0x0f, 0x00, 0x01, 0x01};
 
-    result = lookuper.proceed(DLUPD_INCOMING, IPPROTO_TCP, SERVER_HELLO.data(), SERVER_HELLO.size());
-    ASSERT_EQ(result.status, DLUS_PASS);
+    result = domain_extractor.proceed(DEPD_INCOMING, IPPROTO_TCP, SERVER_HELLO.data(), SERVER_HELLO.size());
+    ASSERT_EQ(result.status, DES_PASS);
 
     static const std::vector<uint8_t> SERVER_CERT = {0x16, 0x03, 0x03, 0x0f, 0x84, 0x0b, 0x00, 0x0f, 0x80, 0x00, 0x0f,
             0x7d, 0x00, 0x06, 0x10, 0x30, 0x82, 0x06, 0x0c, 0x30, 0x82, 0x04, 0xf4, 0xa0, 0x03, 0x02, 0x01, 0x02, 0x02,
@@ -843,7 +844,7 @@ TEST_F(TLSExchangeSplittedPackets, Test) {
             0xd9, 0xd6, 0x86, 0x8e, 0x19, 0x1f, 0xa6, 0x06, 0x47, 0x42, 0x72, 0xe0, 0x56, 0x0a, 0x00, 0x1c, 0x78, 0xb9,
             0x8d, 0xcc, 0x99, 0x04, 0x37, 0x49};
 
-    result = lookuper.proceed(DLUPD_INCOMING, IPPROTO_TCP, SERVER_CERT.data(), SERVER_CERT.size());
-    ASSERT_EQ(result.status, DLUS_FOUND);
+    result = domain_extractor.proceed(DEPD_INCOMING, IPPROTO_TCP, SERVER_CERT.data(), SERVER_CERT.size());
+    ASSERT_EQ(result.status, DES_FOUND);
     ASSERT_EQ(result.domain, "ya.ru");
 }

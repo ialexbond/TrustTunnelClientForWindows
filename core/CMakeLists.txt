@@ -24,7 +24,7 @@ set(SOURCE_FILES
         ${VPNCORE_SRC_DIR}/fake_upstream.cpp
         ${VPNCORE_SRC_DIR}/utils.cpp
         ${VPNCORE_SRC_DIR}/domain_filter.cpp
-        ${VPNCORE_SRC_DIR}/domain_lookuper.cpp
+        ${VPNCORE_SRC_DIR}/domain_extractor.cpp
         ${VPNCORE_SRC_DIR}/memory_buffer.cpp
         ${VPNCORE_SRC_DIR}/memfile_buffer.cpp
         ${VPNCORE_SRC_DIR}/single_upstream_connector.cpp
@@ -143,7 +143,7 @@ target_include_directories(vpnlibs_core_mocked PUBLIC ${TEST_EXTRA_INCLUDES})
 
 add_unit_test(test_domain_filter "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE FALSE)
 add_unit_test(test_utils "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE FALSE)
-add_unit_test(test_domain_lookuper "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE FALSE)
+add_unit_test(test_domain_extractor "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE FALSE)
 
 add_unit_test(test_tunnel "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 add_unit_test(test_memory_buffer "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)

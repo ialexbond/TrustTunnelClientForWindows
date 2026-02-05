@@ -68,7 +68,7 @@ struct Tunnel {
     std::shared_ptr<ServerUpstream> fake_upstream;
     std::shared_ptr<DnsHandler> dns_handler;
     std::unique_ptr<ConnectionStatisticsMonitor> statistics_monitor;
-    std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>> udp_close_wait_hostname_cache;
+    std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainExtractorResult>>> udp_close_wait_hostname_cache;
 
     Tunnel();
     ~Tunnel();

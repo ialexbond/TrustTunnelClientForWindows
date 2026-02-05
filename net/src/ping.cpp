@@ -447,7 +447,7 @@ static void do_prepare(void *arg) {
     }
 
     if (self->pending.empty()) {
-        log_ping(self, dbg, "Pinging done, reporting results");
+        log_ping(self, dbg, "Pinging is done, reporting results");
         self->timer.reset();
         self->relay_shortcut_timer.reset();
         self->report_task_id = event_loop::submit(self->loop,

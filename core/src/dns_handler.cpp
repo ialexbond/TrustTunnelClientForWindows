@@ -603,7 +603,7 @@ bool ag::DnsHandler::start_dns_proxy() {
     }
 
     if (m_parameters.dns_upstreams.empty()) {
-        log_handler(this, info, "User DNS servers empty");
+        log_handler(this, info, "User DNS servers are empty");
         return true;
     }
 

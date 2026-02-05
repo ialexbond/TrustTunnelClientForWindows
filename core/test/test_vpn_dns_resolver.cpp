@@ -158,7 +158,7 @@ TEST_F(VpnDnsResolverTest, Cancel) {
     ASSERT_FALSE(this->raised_result.has_value());
 }
 
-TEST_F(VpnDnsResolverTest, BackgroundsDontBlockForegrounds) {
+TEST_F(VpnDnsResolverTest, BackgroundsDoNotBlockForegrounds) {
     ((VpnDnsResolver *) this->resolver.get())->resolve(VDRQ_BACKGROUND, "example.org");
     this->run_event_loop_once();
     this->resolver->complete_connect_request(this->raised_connection_requests[0], CCR_PASS);

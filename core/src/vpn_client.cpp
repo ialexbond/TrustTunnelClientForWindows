@@ -246,9 +246,9 @@ VpnClient::VpnClient(vpn_client::Parameters parameters)
         , id(g_next_id++) {
 }
 
-static const std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>>
+static const std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainExtractorResult>>>
         g_udp_close_wait_hostname_cache{
-                new WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>{.val{300, Secs(300)}}};
+                new WithMtx<LruTimeoutCache<TunnelAddressPair, DomainExtractorResult>>{.val{300, Secs(300)}}};
 
 VpnError VpnClient::init(const VpnSettings *settings) {
     log_client(this, dbg, "...");

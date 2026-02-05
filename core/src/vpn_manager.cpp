@@ -367,10 +367,10 @@ VpnError vpn_listen(Vpn *vpn, VpnListener *listener_, const VpnListenerConfig *c
     log_vpn(vpn, info, "...");
 
     if (!listener_) {
-        return VpnError{.code = VPN_EC_INVALID_SETTINGS, .text = "Listener is NULL"};
+        return VpnError{.code = VPN_EC_INVALID_SETTINGS, .text = "Listener is null"};
     }
     if (!config) {
-        return VpnError{.code = VPN_EC_INVALID_SETTINGS, .text = "Listener config is NULL"};
+        return VpnError{.code = VPN_EC_INVALID_SETTINGS, .text = "Listener config is null"};
     }
 
     std::unique_ptr<ClientListener> listener((ClientListener *) listener_);
@@ -820,10 +820,11 @@ void vpn_abandon_endpoint(Vpn *vpn, const VpnEndpoint *endpoint) {
                             return abandoned_family == iter.address.sa_family;
                         })) {
             vpn->pending_error = (vpn->upstream_config->location.endpoints.size == 0)
-                    ? VpnError{VPN_EC_LOCATION_UNAVAILABLE, "Exhausted all endpoints of location"}
-                    : ((abandoned_family == AF_INET)
-                                      ? VpnError{VPN_EC_LOCATION_UNAVAILABLE, "Exhausted IPv4 endpoints of location"}
-                                      : VpnError{VPN_EC_LOCATION_UNAVAILABLE, "Exhausted IPv6 endpoints of location"});
+                    ? VpnError{VPN_EC_LOCATION_UNAVAILABLE, "Exhausted all endpoints in location"}
+                    : ((abandoned_family == AF_INET) ? VpnError{VPN_EC_LOCATION_UNAVAILABLE,
+                                                               "Exhausted all IPv4 endpoints in location"}
+                                                     : VpnError{VPN_EC_LOCATION_UNAVAILABLE,
+                                                               "Exhausted all IPv6 endpoints in location"});
             log_vpn(vpn, info, "{}", vpn->pending_error->text);
             vpn_endpoints_destroy(&vpn->upstream_config->location.endpoints);
         } else if (!is_selected_endpoint) {

@@ -5,7 +5,7 @@
 
 #include "connection_statistics.h"
 
-class ConnectionStatisticsMonitor : public ::testing::Test {
+class ConnectionStatisticsMonitorTest : public ::testing::Test {
 protected:
     std::vector<ag::ConnectionStatistics> m_stats;
     std::thread m_loop_thread;
@@ -28,7 +28,7 @@ protected:
     }
 };
 
-TEST_F(ConnectionStatisticsMonitor, DontRaiseThrottlingTrafficThresholdReached) {
+TEST_F(ConnectionStatisticsMonitorTest, DontRaiseThrottlingTrafficThresholdReached) {
     static constexpr uint64_t THRESHOLD = 42;
     static constexpr uint64_t ID = 21;
     static constexpr auto THROTTLING_PERIOD = ag::Millis{1000000};
@@ -40,7 +40,7 @@ TEST_F(ConnectionStatisticsMonitor, DontRaiseThrottlingTrafficThresholdReached) 
     ASSERT_EQ(m_stats.size(), 0);
 }
 
-TEST_F(ConnectionStatisticsMonitor, DontRaiseNoThrottlingTrafficThresholdNotReached) {
+TEST_F(ConnectionStatisticsMonitorTest, DontRaiseNoThrottlingTrafficThresholdNotReached) {
     static constexpr uint64_t THRESHOLD = 42;
     static constexpr uint64_t INC = THRESHOLD - 1;
     static constexpr uint64_t ID = 21;
@@ -57,7 +57,7 @@ TEST_F(ConnectionStatisticsMonitor, DontRaiseNoThrottlingTrafficThresholdNotReac
     ASSERT_EQ(m_stats.size(), 0);
 }
 
-TEST_F(ConnectionStatisticsMonitor, RaiseTrafficThresholdReached) {
+TEST_F(ConnectionStatisticsMonitorTest, RaiseTrafficThresholdReached) {
     static constexpr uint64_t THRESHOLD = 42;
     static constexpr uint64_t ID = 21;
     static constexpr auto THROTTLING_PERIOD = ag::Millis{100};
@@ -78,7 +78,7 @@ TEST_F(ConnectionStatisticsMonitor, RaiseTrafficThresholdReached) {
     ASSERT_EQ(m_stats[0].download, THRESHOLD);
 }
 
-TEST_F(ConnectionStatisticsMonitor, RaiseMultiple) {
+TEST_F(ConnectionStatisticsMonitorTest, RaiseMultiple) {
     static constexpr uint64_t THRESHOLD = 42;
     static constexpr uint64_t ID = 21;
     static constexpr auto THROTTLING_PERIOD = ag::Millis{50};
@@ -111,7 +111,7 @@ TEST_F(ConnectionStatisticsMonitor, RaiseMultiple) {
     ASSERT_EQ(m_stats[1].download, THRESHOLD);
 }
 
-TEST_F(ConnectionStatisticsMonitor, DontRaiseOnUnregister) {
+TEST_F(ConnectionStatisticsMonitorTest, DontRaiseOnUnregister) {
     static constexpr uint64_t THRESHOLD = 42;
     static constexpr uint64_t INC = THRESHOLD - 1;
     static constexpr uint64_t ID = 21;
@@ -129,7 +129,7 @@ TEST_F(ConnectionStatisticsMonitor, DontRaiseOnUnregister) {
     ASSERT_EQ(m_stats.size(), 0);
 }
 
-TEST_F(ConnectionStatisticsMonitor, RaiseOnUnregister) {
+TEST_F(ConnectionStatisticsMonitorTest, RaiseOnUnregister) {
     static constexpr uint64_t THRESHOLD = 42;
     static constexpr uint64_t INC = THRESHOLD - 1;
     static constexpr uint64_t ID = 21;
