@@ -720,7 +720,11 @@ static void timer_callback(void *arg, struct timeval now) {
 }
 
 void tcp_socket_set_timeout(TcpSocket *sock, Millis x) {
-    log_sock(sock, dbg, "Timeout set to {} ms", x.count() ? AG_FMT("{}", x.count()) : "Timeout disabled");
+    if (x.count()) {
+        log_sock(sock, dbg, "Timeout set to {} ms", x.count());
+    } else {
+        log_sock(sock, dbg, "Timeout disabled");
+    }
     sock->parameters.timeout = x;
     tcp_socket_update_timeout(sock);
 }

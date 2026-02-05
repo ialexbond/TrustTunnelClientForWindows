@@ -124,7 +124,7 @@ static void destroy_connection(Tunnel *tunnel, uint64_t client_id, uint64_t serv
 
         if (conn->proto == IPPROTO_UDP && tunnel->udp_close_wait_hostname_cache) {
             std::scoped_lock l(tunnel->udp_close_wait_hostname_cache->mtx);
-            tunnel->udp_close_wait_hostname_cache->val.insert(conn->addr, conn->domain_lookuper_result);
+            tunnel->udp_close_wait_hostname_cache->val.insert(conn->addr, conn->domain_extractor_result);
         }
 
         log_conn(tunnel, conn, dbg, "Destroyed (download={}, upload={})", conn->incoming_bytes, conn->outgoing_bytes);
@@ -290,31 +290,31 @@ static void close_client_side(Tunnel *tunnel, ServerUpstream *upstream) {
     }
 }
 
-enum AfterLookuperAction {
-    ALUA_DONE,      // lookuper has nothing more to do
-    ALUA_PASS,      // lookuper wants to process the next packet, the current one can be sent
-    ALUA_DROP,      // lookuper wants to process the next packet, the current one can be dropped
-    ALUA_SHUTDOWN,  // lookuper realized that connection should've been routed to another upstream
-    ALUA_BLOCK,     // lookuper realized that connection shouldn't be processed
-    ALUA_WANT_MORE, // the same as `ALUA_PASS`, but waiting for a packet divided by AntiDpi
+enum TunnelDomainLookupAction {
+    TDLA_DONE,      // domain lookup has nothing more to do
+    TDLA_PASS,      // domain lookup wants to process the next packet, the current one can be sent
+    TDLA_DROP,      // domain lookup wants to process the next packet, the current one can be dropped
+    TDLA_SHUTDOWN,  // domain lookup realized that connection should've been routed to another upstream
+    TDLA_BLOCK,     // domain lookup realized that connection shouldn't be processed
+    TDLA_WANT_MORE, // the same as `ALUA_PASS`, but waiting for a packet divided by AntiDpi
 };
 
-static std::variant<AfterLookuperAction, DomainLookuperResult> lookup_udp(
-        Tunnel *tunnel, VpnConnection *conn, DomainLookuperPacketDirection dir, const uint8_t *data, size_t length) {
+static std::variant<TunnelDomainLookupAction, DomainExtractorResult> domain_lookup_process_udp(
+        Tunnel *tunnel, VpnConnection *conn, DomainExtractorPacketDirection dir, const uint8_t *data, size_t length) {
     // parse quic header
     auto quic_header = ag::quic_utils::parse_quic_header({data, length});
     if (quic_header.has_value()) {
         if (quic_header->type == ag::quic_utils::ZERO_RTT) {
-            return ALUA_DROP;
+            return TDLA_DROP;
         }
         if (quic_header->type == ag::quic_utils::INITIAL) {
             // quic traffic
             auto quic_data = ag::quic_utils::prepare_for_domain_lookup({data, length}, quic_header.value());
             if (!quic_data.has_value()) {
                 // no data for domain lookup
-                return ALUA_DONE;
+                return TDLA_DONE;
             }
-            return conn->domain_lookuper.proceed(dir, conn->proto, quic_data->data(), quic_data->size());
+            return conn->domain_extractor.proceed(dir, conn->proto, quic_data->data(), quic_data->size());
         }
     }
 
@@ -322,7 +322,7 @@ static std::variant<AfterLookuperAction, DomainLookuperResult> lookup_udp(
         std::scoped_lock l(tunnel->udp_close_wait_hostname_cache->mtx);
         if (auto value = tunnel->udp_close_wait_hostname_cache->val.get(conn->addr); value) {
             log_conn(tunnel, conn, dbg, "Found cached result for pass_through_lookuper");
-            return DomainLookuperResult{*value};
+            return DomainExtractorResult{*value};
         }
     }
 
@@ -334,51 +334,51 @@ static std::variant<AfterLookuperAction, DomainLookuperResult> lookup_udp(
     // Check if destination is default quic port
     if (dst_port == ag::quic_utils::DEFAULT_QUIC_PORT) {
         // expected to get quic initial, but got wrong data, block it
-        return ALUA_BLOCK;
+        return TDLA_BLOCK;
     }
 #endif
     // simple udp traffic
-    return ALUA_DONE;
+    return TDLA_DONE;
 }
 
-static AfterLookuperAction pass_through_lookuper(
-        Tunnel *tunnel, VpnConnection *conn, DomainLookuperPacketDirection dir, const uint8_t *data, size_t length) {
-    DomainLookuper *lookuper = &conn->domain_lookuper;
-    DomainLookuperResult r;
-    AfterLookuperAction action = ALUA_DONE;
+static TunnelDomainLookupAction pass_through_domain_lookup(
+        Tunnel *tunnel, VpnConnection *conn, DomainExtractorPacketDirection dir, const uint8_t *data, size_t length) {
+    DomainExtractor *domain_extractor = &conn->domain_extractor;
+    DomainExtractorResult r;
+    TunnelDomainLookupAction action = TDLA_DONE;
     DomainFilter *filter = &tunnel->vpn->domain_filter;
     if (conn->proto == IPPROTO_UDP) {
-        auto result = lookup_udp(tunnel, conn, dir, data, length);
-        if (auto *result_action = std::get_if<AfterLookuperAction>(&result)) {
+        auto result = domain_lookup_process_udp(tunnel, conn, dir, data, length);
+        if (auto *result_action = std::get_if<TunnelDomainLookupAction>(&result)) {
             return *result_action;
         }
-        r = std::get<DomainLookuperResult>(result);
+        r = std::get<DomainExtractorResult>(result);
     } else {
         // tcp traffic
-        r = lookuper->proceed(dir, conn->proto, data, length);
+        r = domain_extractor->proceed(dir, conn->proto, data, length);
     }
-    conn->domain_lookuper_result = r;
+    conn->domain_extractor_result = r;
 
     switch (r.status) {
-    case DLUS_NOTFOUND:
+    case DES_NOTFOUND:
         log_conn(tunnel, conn, dbg, "Gave up to find domain name");
-        lookuper->reset();
+        domain_extractor->reset();
         break;
-    case DLUS_FOUND: {
-        log_conn(tunnel, conn, dbg, "Found domain in {} data: {}", (dir == DLUPD_OUTGOING) ? "outgoing" : "incoming",
+    case DES_FOUND: {
+        log_conn(tunnel, conn, dbg, "Found domain in {} data: {}", (dir == DEPD_OUTGOING) ? "outgoing" : "incoming",
                 r.domain);
         if (DFMS_EXCLUSION == filter->match_domain(r.domain)) {
-            action = ALUA_SHUTDOWN;
+            action = TDLA_SHUTDOWN;
         }
         filter->add_resolved_tag(conn->make_tag(), std::move(r.domain));
-        lookuper->reset();
+        domain_extractor->reset();
         break;
     }
-    case DLUS_PASS:
-        action = ALUA_PASS;
+    case DES_PASS:
+        action = TDLA_PASS;
         break;
-    case DLUS_WANT_MORE:
-        action = ALUA_WANT_MORE;
+    case DES_WANT_MORE:
+        action = TDLA_WANT_MORE;
         break;
     }
 
@@ -598,7 +598,7 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
                             : upstream.get() == this->fake_upstream.get()        ? "fake upstream"
                             : upstream.get() == this->dns_handler.get()          ? "DNS handler upstream"
                                                                                  : "unknown upstream");
-            report_connection_info(this, conn, conn->domain_lookuper_result.domain.c_str());
+            report_connection_info(this, conn, conn->domain_extractor_result.domain.c_str());
             conn->state = CONNS_WAITING_ACCEPT;
             listener->complete_connect_request(conn->client_id, CCR_PASS);
             break;
@@ -702,17 +702,18 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
         log_conn(this, conn, trace, "Received {} bytes from server", event->length);
 
         if (conn->flags.test(CONNF_LOOKINGUP_DOMAIN)) {
-            AfterLookuperAction alua = pass_through_lookuper(this, conn, DLUPD_INCOMING, event->data, event->length);
-            log_conn(this, conn, dbg, "alua={}", magic_enum::enum_name(alua));
-            switch (alua) {
-            case ALUA_DONE:
+            TunnelDomainLookupAction action =
+                    pass_through_domain_lookup(this, conn, DEPD_INCOMING, event->data, event->length);
+            log_conn(this, conn, dbg, "tdla={}", magic_enum::enum_name(action));
+            switch (action) {
+            case TDLA_DONE:
                 conn->flags.reset(CONNF_LOOKINGUP_DOMAIN);
                 break;
-            case ALUA_PASS:
-            case ALUA_WANT_MORE:
-            case ALUA_DROP:
+            case TDLA_PASS:
+            case TDLA_WANT_MORE:
+            case TDLA_DROP:
                 break;
-            case ALUA_SHUTDOWN:
+            case TDLA_SHUTDOWN:
                 log_conn(this, conn, dbg, "Server: Connection had been routed {}, closing it to re-route",
                         (upstream.get() == this->vpn->endpoint_upstream.get())         ? "through VPN endpoint"
                                 : (upstream.get() == this->vpn->bypass_upstream.get()) ? "directly to target host"
@@ -720,7 +721,7 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
                                                                                        : "through unknown endpoint");
                 close_client_side_connection(this, conn, 0, false);
                 return;
-            case ALUA_BLOCK:
+            case TDLA_BLOCK:
                 log_conn(this, conn, dbg, "Dropped QUIC connection");
                 upstream->update_flow_control(event->id, {});
                 close_client_side_connection(this, conn, -1, /* async */ false);
@@ -969,7 +970,7 @@ static std::shared_ptr<ServerUpstream> select_upstream(
     sw_conn->flags.set(CONNF_LOOKINGUP_DOMAIN, conn->flags.test(CONNF_LOOKINGUP_DOMAIN));
     sw_conn->migrating_client_id = conn->client_id;
     sw_conn->app_name = conn->app_name;
-    sw_conn->domain_lookuper_result = conn->domain_lookuper_result;
+    sw_conn->domain_extractor_result = conn->domain_extractor_result;
     add_connection(self, sw_conn);
     if (conn->proto == IPPROTO_UDP) {
         // do not turn off reads on migrating UDP connections,
@@ -1660,20 +1661,21 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
 
         if (conn->flags.test(CONNF_LOOKINGUP_DOMAIN)) {
             bool migrate_to_another_upstream = false;
-            AfterLookuperAction alua = pass_through_lookuper(this, conn, DLUPD_OUTGOING, event->data, event->length);
-            log_conn(this, conn, dbg, "alua={}", magic_enum::enum_name(alua));
-            switch (alua) {
-            case ALUA_DONE:
+            TunnelDomainLookupAction action =
+                    pass_through_domain_lookup(this, conn, DEPD_OUTGOING, event->data, event->length);
+            log_conn(this, conn, dbg, "tdla={}", magic_enum::enum_name(action));
+            switch (action) {
+            case TDLA_DONE:
                 conn->flags.reset(CONNF_LOOKINGUP_DOMAIN);
                 break;
-            case ALUA_PASS:
+            case TDLA_PASS:
                 break;
-            case ALUA_DROP: {
+            case TDLA_DROP: {
                 log_conn(this, conn, trace, "Dropping packet without closing connection, length: {}", event->length);
                 event->result = static_cast<int>(event->length);
                 return;
             }
-            case ALUA_WANT_MORE: {
+            case TDLA_WANT_MORE: {
                 // If tunnel faced with Anti-Dpi which can split ClientHello into parts, it needs to wait other parts
                 // of ClientHello message (max - 3 parts)
                 static constexpr int MAX_LOOKUP_ATTEMPTS = 3;
@@ -1686,12 +1688,12 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
                 log_conn(this, conn, trace, "Exceeded the number of domain lookup attempts");
                 break;
             }
-            case ALUA_SHUTDOWN:
+            case TDLA_SHUTDOWN:
                 conn->action = invert_action(vpn_mode_to_action(this->vpn->domain_filter.get_mode()));
                 conn->flags.reset(CONNF_LOOKINGUP_DOMAIN);
                 migrate_to_another_upstream = true;
                 break;
-            case ALUA_BLOCK:
+            case TDLA_BLOCK:
                 log_conn(this, conn, dbg, "Dropped QUIC connection");
                 listener->turn_read(conn->client_id, false);
                 close_client_side_connection(this, conn, -1, true);
@@ -1699,7 +1701,7 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
                 return;
             }
 
-            report_connection_info(this, conn, conn->domain_lookuper_result.domain.c_str());
+            report_connection_info(this, conn, conn->domain_extractor_result.domain.c_str());
             if (migrate_to_another_upstream) {
                 if (!conn->flags.test(CONNF_FIRST_PACKET)) {
                     log_conn(this, conn, dbg, "Can't switch upstream in the middle of handshake");

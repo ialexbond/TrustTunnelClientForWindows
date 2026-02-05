@@ -55,6 +55,7 @@ public:
         ag::Logger::set_log_level(ag::LOG_LEVEL_TRACE);
     }
 
+protected:
     static std::unordered_map<int, TestUpstreamInfo> g_upstreams;
     static std::optional<int> g_health_checking_upstream_id;
     static bool g_open_session_result;
@@ -429,7 +430,7 @@ TEST_F(UpstreamMuxTest, PostponeConnections) {
 }
 
 // Check that connections are postponed if multiplexer falls back to unconnected upstream
-TEST_F(UpstreamMuxTest, FallBackToUnconnectedUpstream) {
+TEST_F(UpstreamMuxTest, FallbackToUnconnectedUpstream) {
     int first_upstream_id = g_upstreams.begin()->first;
     // make new unconnected upstream
     for (size_t i = 0; i < 2 * UpstreamMultiplexer::NEW_UPSTREAM_CONNECTIONS_NUM_THRESHOLD; ++i) {

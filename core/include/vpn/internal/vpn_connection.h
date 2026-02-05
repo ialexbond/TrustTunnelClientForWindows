@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "vpn/event_loop.h"
-#include "vpn/internal/domain_lookuper.h"
+#include "vpn/internal/domain_extractor.h"
 #include "vpn/internal/utils.h"
 #include "vpn/utils.h"
 
@@ -71,8 +71,8 @@ struct VpnConnection {
     int proto = 0;
     std::bitset<width_of<VpnConnectionFlags>()> flags;
     int uid = 0;
-    DomainLookuper domain_lookuper;
-    DomainLookuperResult domain_lookuper_result;
+    DomainExtractor domain_extractor;
+    DomainExtractorResult domain_extractor_result;
     uint64_t migrating_client_id = NON_ID;
     std::string app_name;
     event_loop::AutoTaskId complete_connect_request_task;

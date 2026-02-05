@@ -1,4 +1,4 @@
-#include "vpn/internal/domain_lookuper.h"
+#include "vpn/internal/domain_extractor.h"
 
 #include <cassert>
 #include <memory>
@@ -13,7 +13,7 @@ namespace ag {
 
 struct Parser { // NOLINT(cppcoreguidelines-special-member-functions,hicpp-special-member-functions)
     virtual ~Parser() = default;
-    virtual DomainLookuperResult parse(DomainLookuperPacketDirection dir, std::vector<uint8_t> *buffer) = 0;
+    virtual DomainExtractorResult parse(DomainExtractorPacketDirection dir, std::vector<uint8_t> *buffer) = 0;
 };
 
 struct QuicParser : public Parser {
@@ -21,14 +21,14 @@ struct QuicParser : public Parser {
 
     ~QuicParser() override = default;
 
-    DomainLookuperResult parse(DomainLookuperPacketDirection dir, std::vector<uint8_t> *buffer) override {
-        if (dir != DLUPD_OUTGOING) {
-            return {DLUS_NOTFOUND}; // not TLS
+    DomainExtractorResult parse(DomainExtractorPacketDirection dir, std::vector<uint8_t> *buffer) override {
+        if (dir != DEPD_OUTGOING) {
+            return {DES_NOTFOUND}; // not TLS
         }
 
         auto reassembled_crypto = ag::quic_utils::reassemble_initial_crypto_frames({buffer->data(), buffer->size()});
         if (!reassembled_crypto.has_value()) {
-            return {DLUS_NOTFOUND};
+            return {DES_NOTFOUND};
         }
         tls_input_hshake(&this->reader, reassembled_crypto->data(), reassembled_crypto->size());
 
@@ -36,12 +36,12 @@ struct QuicParser : public Parser {
             TlsParseResult r = tls_parse(&this->reader);
             switch (r) {
             case TLS_RCLIENT_HELLO_SNI:
-                return {DLUS_FOUND, {this->reader.tls_hostname.data(), this->reader.tls_hostname.size()}};
+                return {DES_FOUND, {this->reader.tls_hostname.data(), this->reader.tls_hostname.size()}};
             case TLS_RERR:
             case TLS_RMORE:
-                return {DLUS_WANT_MORE};
+                return {DES_WANT_MORE};
             case TLS_RDONE:
-                return {DLUS_NOTFOUND};
+                return {DES_NOTFOUND};
             default:
                 continue;
             }
@@ -62,23 +62,23 @@ struct TlsParser : public Parser { // NOLINT(cppcoreguidelines-special-member-fu
 
     ~TlsParser() override = default;
 
-    [[nodiscard]] DomainLookuperResult parse_cert_to_lookuper_result(TlsParseResult r) const {
+    [[nodiscard]] DomainExtractorResult parse_cert_to_lookuper_result(TlsParseResult r) const {
         switch (r) {
         case TLS_RMORE:
-            return {DLUS_PASS};
+            return {DES_PASS};
         case TLS_RCERT:
-            return {DLUS_FOUND, this->reader.x509_subject_common_name};
+            return {DES_FOUND, this->reader.x509_subject_common_name};
         case TLS_RSERV_HELLO:
-            return {DLUS_PASS};
+            return {DES_PASS};
         default:
-            return {DLUS_NOTFOUND};
+            return {DES_NOTFOUND};
         }
     }
 
-    DomainLookuperResult parse(DomainLookuperPacketDirection dir, std::vector<uint8_t> *buffer) override {
+    DomainExtractorResult parse(DomainExtractorPacketDirection dir, std::vector<uint8_t> *buffer) override {
         switch (this->state) {
         case TPS_IDLE: {
-            if (dir != DLUPD_OUTGOING) {
+            if (dir != DEPD_OUTGOING) {
                 break; // not TLS
             }
 
@@ -89,24 +89,24 @@ struct TlsParser : public Parser { // NOLINT(cppcoreguidelines-special-member-fu
             case TLS_RCLIENT_HELLO:
                 r = tls_parse(&this->reader);
                 if (r == TLS_RCLIENT_HELLO_SNI && !this->reader.tls_hostname.empty()) {
-                    DomainLookuperResult result = {
-                            DLUS_FOUND, {this->reader.tls_hostname.data(), this->reader.tls_hostname.size()}};
+                    DomainExtractorResult result = {
+                            DES_FOUND, {this->reader.tls_hostname.data(), this->reader.tls_hostname.size()}};
                     buffer->clear();
                     return result;
                 }
                 this->state = TPS_SERVER_HELLO;
                 buffer->clear();
-                return {DLUS_PASS};
+                return {DES_PASS};
             case TLS_RMORE:
-                return {DLUS_WANT_MORE};
+                return {DES_WANT_MORE};
             default:
                 break;
             }
             break;
         }
         case TPS_SERVER_HELLO: {
-            if (dir == DLUPD_OUTGOING) {
-                return {DLUS_PASS};
+            if (dir == DEPD_OUTGOING) {
+                return {DES_PASS};
             }
 
             this->reader = {};
@@ -119,7 +119,7 @@ struct TlsParser : public Parser { // NOLINT(cppcoreguidelines-special-member-fu
                 break;
             case TLS_RMORE:
             default: // not a server hello
-                return {DLUS_PASS};
+                return {DES_PASS};
             }
 
             this->buffer_offset = this->reader.in.data() - buffer->data();
@@ -130,8 +130,8 @@ struct TlsParser : public Parser { // NOLINT(cppcoreguidelines-special-member-fu
             [[fallthrough]];
         }
         case TPS_CERT: {
-            if (dir == DLUPD_OUTGOING) {
-                return {DLUS_PASS};
+            if (dir == DEPD_OUTGOING) {
+                return {DES_PASS};
             }
 
             tls_input(&this->reader, buffer->data() + this->buffer_offset, buffer->size() - this->buffer_offset);
@@ -140,14 +140,14 @@ struct TlsParser : public Parser { // NOLINT(cppcoreguidelines-special-member-fu
         }
         }
 
-        return {DLUS_NOTFOUND};
+        return {DES_NOTFOUND};
     }
 };
 
 struct HttpParser : public Parser {
     ~HttpParser() override = default;
 
-    DomainLookuperResult parse(DomainLookuperPacketDirection, std::vector<uint8_t> *buffer) override {
+    DomainExtractorResult parse(DomainExtractorPacketDirection, std::vector<uint8_t> *buffer) override {
         static constexpr size_t MIN_METHOD_LENGTH = 3;
         static constexpr size_t MAX_METHOD_LENGTH = 32;
 
@@ -159,12 +159,12 @@ struct HttpParser : public Parser {
                 break;
             }
             if (!isalpha((unsigned char) ch) || i == MAX_METHOD_LENGTH) {
-                return {DLUS_NOTFOUND};
+                return {DES_NOTFOUND};
             }
         }
 
         if (i < MIN_METHOD_LENGTH) {
-            return {DLUS_NOTFOUND};
+            return {DES_NOTFOUND};
         }
 
         static constexpr std::string_view HOST_MARKER = "Host:";
@@ -173,7 +173,7 @@ struct HttpParser : public Parser {
                 && host_header_pos + HOST_MARKER.length() < seek.length()
                 && seek.npos != (host_start = seek.find_first_not_of(" \t", host_header_pos + HOST_MARKER.length()))
                 && seek.npos != (host_end = seek.find_first_of("\r\n", host_start)) && host_start < host_end) {
-            return {DLUS_FOUND, {seek.data() + host_start, seek.data() + host_end}};
+            return {DES_FOUND, {seek.data() + host_start, seek.data() + host_end}};
         }
         if (size_t uri_start; // try extract host from uri
                 seek.npos != (uri_start = seek.find_first_not_of(" \t")) && seek[uri_start] != '/') {
@@ -182,17 +182,17 @@ struct HttpParser : public Parser {
             if (host_start == seek.npos) {
                 host_start = uri_start;
             } else if (host_start + SCHEME_MARKER.length() >= seek.length()) {
-                return {DLUS_NOTFOUND};
+                return {DES_NOTFOUND};
             } else {
                 host_start += SCHEME_MARKER.length();
             }
             size_t host_end = seek.find_first_of(":/ \t", host_start);
             if (host_end != seek.npos) {
-                return {DLUS_FOUND, {seek.data() + host_start, seek.data() + host_end}};
+                return {DES_FOUND, {seek.data() + host_start, seek.data() + host_end}};
             }
         }
 
-        return {DLUS_NOTFOUND};
+        return {DES_NOTFOUND};
     }
 };
 
@@ -231,7 +231,7 @@ struct ParserFactory {
     }
 };
 
-struct DomainLookuper::Context {
+struct DomainExtractor::Context {
     explicit Context(int proto)
             : proto(proto) {};
     int proto{};
@@ -239,44 +239,44 @@ struct DomainLookuper::Context {
     std::unique_ptr<Parser> current_parser = factory.produce(proto);
     std::vector<uint8_t> buffer;
 
-    DomainLookuperResult parse(DomainLookuperPacketDirection dir, const uint8_t *data, size_t length);
+    DomainExtractorResult parse(DomainExtractorPacketDirection dir, const uint8_t *data, size_t length);
 };
 
-DomainLookuperResult DomainLookuper::Context::parse(
-        DomainLookuperPacketDirection dir, const uint8_t *data, size_t length) {
+DomainExtractorResult DomainExtractor::Context::parse(
+        DomainExtractorPacketDirection dir, const uint8_t *data, size_t length) {
     this->buffer.insert(this->buffer.end(), data, data + length);
 
     while (this->current_parser != nullptr) {
-        DomainLookuperResult r = this->current_parser->parse(dir, &this->buffer);
+        DomainExtractorResult r = this->current_parser->parse(dir, &this->buffer);
         switch (r.status) {
-        case DLUS_WANT_MORE:
-        case DLUS_FOUND:
-        case DLUS_PASS:
+        case DES_WANT_MORE:
+        case DES_FOUND:
+        case DES_PASS:
             return r;
-        case DLUS_NOTFOUND:
+        case DES_NOTFOUND:
             this->current_parser = this->factory.produce(proto);
             break;
         }
     }
 
-    return {DLUS_NOTFOUND, ""};
+    return {DES_NOTFOUND, ""};
 }
 
-DomainLookuperResult DomainLookuper::proceed(
-        DomainLookuperPacketDirection dir, int proto, const uint8_t *data, size_t length) {
+DomainExtractorResult DomainExtractor::proceed(
+        DomainExtractorPacketDirection dir, int proto, const uint8_t *data, size_t length) {
     if (m_context == nullptr) {
-        m_context = std::make_unique<DomainLookuper::Context>(proto);
+        m_context = std::make_unique<DomainExtractor::Context>(proto);
     }
 
-    DomainLookuperResult r = m_context->parse(dir, data, length);
+    DomainExtractorResult r = m_context->parse(dir, data, length);
     return r;
 }
 
-void DomainLookuper::reset() {
+void DomainExtractor::reset() {
     m_context.reset();
 }
 
-DomainLookuper::DomainLookuper() = default;
-DomainLookuper::~DomainLookuper() = default;
+DomainExtractor::DomainExtractor() = default;
+DomainExtractor::~DomainExtractor() = default;
 
 } // namespace ag

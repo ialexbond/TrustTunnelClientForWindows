@@ -63,9 +63,9 @@ protected:
     Vpn *vpn = nullptr;
     std::mutex guard;
     std::condition_variable cond_var;
-    VpnUpstreamConfig upstream;
-    int raised_events;
-    VpnError vpn_error;
+    VpnUpstreamConfig upstream{};
+    int raised_events = 0;
+    VpnError vpn_error{};
 
     void SetUp() override {
         infolog(log, "\n\n{}(): ...\n\n", __func__);
@@ -258,7 +258,7 @@ static void vpn_handler(void *arg, VpnEvent what, void *data) {
 }
 
 // Check successful connect flow
-TEST_F(VpnManagerTest, SuccessfullConnect) {
+TEST_F(VpnManagerTest, SuccessfulConnect) {
     VpnEndpoint endpoints[] = {
             {sockaddr_from_str("127.0.0.1:443"), "localhost"},
             {sockaddr_from_str("127.0.0.2:443"), "localhost"},

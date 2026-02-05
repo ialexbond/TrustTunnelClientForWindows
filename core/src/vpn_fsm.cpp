@@ -187,7 +187,7 @@ static void pinger_handler(void *arg, const LocationsPingerResult *result) {
                     return vpn_endpoint_equals(seek, &iter);
                 })) {
         vpn->ping_failure_induces_location_unavailable = failure_induces_location_unavailable;
-        VpnError error = {VPN_EC_ERROR, "Best available endpoint isn't found in location"};
+        VpnError error = {VPN_EC_ERROR, "Best available endpoint wasn't found in location"};
         log_vpn(vpn, warn, "{}: {}", error.text, *result->endpoint);
         vpn->fsm.perform_transition(vpn_fsm::CE_PING_FAIL, &error);
         return;

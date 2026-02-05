@@ -740,8 +740,8 @@ public:
 };
 
 TEST_F(UdpRebindingTest, CachedUdpParams) {
-    static const std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>> cache{
-            new WithMtx<LruTimeoutCache<TunnelAddressPair, DomainLookuperResult>>{.val{300, Secs(300)}}};
+    static const std::shared_ptr<WithMtx<LruTimeoutCache<TunnelAddressPair, DomainExtractorResult>>> cache{
+            new WithMtx<LruTimeoutCache<TunnelAddressPair, DomainExtractorResult>>{.val{300, Secs(300)}}};
 
     tun.udp_close_wait_hostname_cache = cache;
 

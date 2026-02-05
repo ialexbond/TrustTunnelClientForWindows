@@ -406,7 +406,7 @@ void Http2Upstream::net_handler(void *arg, TcpSocketEvent what, void *data) {
             upstream->m_streams_to_reset.clear();
 
             if (!tcp_socket_drain(socket, r)) {
-                VpnError err = {VPN_EC_ERROR, "Couldn't drain data from socket buffer"};
+                VpnError err = {VPN_EC_ERROR, "Could not drain data from socket buffer"};
                 upstream->close_session_inner(err);
                 break;
             }

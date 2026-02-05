@@ -84,7 +84,7 @@ extern "C" bool socket_manager_complete_write(SocketManager *manager, struct buf
  * @param timeout_ms time out value of the subscriber
  * @param tick_handler timer tick handler
  * @param arg user context
- * @return <0 if failed, otherwise the subscriber idendtifier
+ * @return <0 if failed, otherwise the subscriber identifier
  */
 extern "C" int socket_manager_timer_subscribe(SocketManager *manager, VpnEventLoop *loop, uint32_t timeout_ms,
         void (*tick_handler)(void *arg, struct timeval now), void *arg);
