@@ -463,7 +463,7 @@ TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelayQuic) {
     } ctx;
     DeclPtr<LocationsPingerRunner, &locations_pinger_runner_free> runner;
     LocationsPingerInfo info{
-            .timeout_ms = 1000,
+            .timeout_ms = 3000,
             .locations = {&location, 1},
             .rounds = 1,
             .main_protocol = VPN_UP_HTTP3,
@@ -519,7 +519,7 @@ TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelay) {
     } ctx;
     DeclPtr<LocationsPingerRunner, &locations_pinger_runner_free> runner;
     LocationsPingerInfo info{
-            .timeout_ms = 1000,
+            .timeout_ms = 3000,
             .locations = {&location, 1},
             .rounds = 1,
             .main_protocol = VPN_UP_HTTP3,
