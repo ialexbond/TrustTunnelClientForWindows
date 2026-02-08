@@ -50,10 +50,6 @@ jobs:
           PY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))")
           echo "$PY_BIN" >> $GITHUB_PATH
 
-      - name: Lint
-        run: |
-          make lint-cpp
-
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -82,6 +78,10 @@ jobs:
         if: steps.conan-cache.outputs.cache-hit != 'true'
         run: |
           ./scripts/bootstrap_conan_deps.py
+
+      - name: Lint
+        run: |
+          make lint-cpp
 
       - name: Run cmake
         run: |
@@ -131,6 +131,7 @@ jobs:
       - name: Install packages
         run: |
           brew install ninja llvm@21
+          sed -i '' 's/_LIBCPP_INTRODUCED_IN_LLVM_21 1/_LIBCPP_INTRODUCED_IN_LLVM_21 0/g' "$(brew --prefix llvm@21)/include/c++/v1/__configuration/availability.h"
           pip install -r requirements.txt
           pip install conan~=$CONAN_VER
           pip install clang-format~=$CLANG_FORMAT_VER
@@ -138,10 +139,6 @@ jobs:
           ## Add python's bin dir to path to ensure the correct clang-format version
           PY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))")
           echo "$PY_BIN" >> $GITHUB_PATH
-
-      - name: Lint
-        run: |
-          make lint-cpp
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -164,13 +161,17 @@ jobs:
         id: conan-cache
         with:
           path: ~/.conan2/
-          key: ${{ runner.os }}-conan2-v4-${{ hashFiles('conanfile.py') }}
-          restore-keys: ${{ runner.os }}-conan2-v4-
+          key: ${{ runner.os }}-conan2-v4-1-${{ hashFiles('conanfile.py') }}
+          restore-keys: ${{ runner.os }}-conan2-v4-1-
 
       - name: Bootstrap conan
         if: steps.conan-cache.outputs.cache-hit != 'true'
         run: |
           ./scripts/bootstrap_conan_deps.py
+
+      - name: Lint
+        run: |
+          make lint-cpp
 
       - name: Run cmake
         run: |
@@ -192,7 +193,7 @@ jobs:
         if: steps.conan-cache.outputs.cache-hit != 'true'
         with:
           path: ~/.conan2/
-          key: ${{ runner.os }}-conan2-v4-${{ hashFiles('conanfile.py') }}
+          key: ${{ runner.os }}-conan2-v4-1-${{ hashFiles('conanfile.py') }}
 
       - name: Build tests
         run: |
