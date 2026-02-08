@@ -452,7 +452,7 @@ TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelayQuic) {
             {sockaddr_from_str("1.0.0.1:443")},
     };
     VpnLocation location{
-            .id = "Quad9",
+            .id = "OneOneOneOne",
             .endpoints = {.data = endpoints.data(), .size = (uint32_t) endpoints.size()},
             .relays = {.data = relays.data(), .size = (uint32_t) relays.size()},
     };
@@ -492,23 +492,22 @@ TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelayQuic) {
 }
 
 TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelay) {
-    // At the time of writing, Quad9 doesn't respond to QUIC
     std::vector<VpnEndpoint> endpoints = {
             // Blackhole addresses
-            {sockaddr_from_str("94.140.14.200:443"), "dns.quad9.net"},
-            {sockaddr_from_str("[2a10:50c0::42]:443"), "dns.quad9.net"},
-            {sockaddr_from_str("[2a10:50c0::43]:443"), "dns.quad9.net"},
+            {sockaddr_from_str("94.140.14.200:443"), "one.one.one.one"},
+            {sockaddr_from_str("[2a10:50c0::42]:443"), "one.one.one.one"},
+            {sockaddr_from_str("[2a10:50c0::43]:443"), "one.one.one.one"},
             // Immediately fails
             {sockaddr_from_str("[fe80::]:443"), "dns.quad9.net"},
             // Working endpoint
-            {sockaddr_from_str("9.9.9.9:443"), "dns.quad9.net"},
+            {sockaddr_from_str("1.1.1.1:443"), "one.one.one.one"},
     };
     std::vector<VpnRelay> relays = {
-            // Working 9.9.9.9 alternative
-            {sockaddr_from_str("149.112.112.112:443")},
+            // Working 1.1.1.1 alternative
+            {sockaddr_from_str("1.0.0.1:443")},
     };
     VpnLocation location{
-            .id = "Quad9",
+            .id = "OneOneOneOne",
             .endpoints = {.data = endpoints.data(), .size = (uint32_t) endpoints.size()},
             .relays = {.data = relays.data(), .size = (uint32_t) relays.size()},
     };
@@ -522,7 +521,7 @@ TEST_F(LocationsPingerRunnerTest, NoRelayIfAnyAccessibleWithoutRelay) {
             .timeout_ms = 3000,
             .locations = {&location, 1},
             .rounds = 1,
-            .main_protocol = VPN_UP_HTTP3,
+            .main_protocol = VPN_UP_HTTP2,
     };
     runner.reset(locations_pinger_runner_create(&info,
             {
