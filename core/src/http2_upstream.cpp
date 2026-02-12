@@ -86,17 +86,24 @@ std::pair<uint64_t, Http2Upstream::TcpConnection *> Http2Upstream::get_conn_by_s
 }
 
 void Http2Upstream::handle_response(const HttpHeadersEvent *http_event) {
+    uint32_t stream_id = http_event->stream_id;
+
+    // Handle 407 (Proxy Authentication Required) on ANY stream as a fatal session error.
+    // We defer the error reporting to avoid unsafe callback calls directly from handle_response.
+    if (http_event->headers->status_code == HTTP_AUTH_REQUIRED_STATUS) {
+        log_upstream(this, dbg, "[SID:{}] Proxy authentication required", stream_id);
+        close_session_inner(VpnError{VPN_EC_AUTH_REQUIRED, HTTP_AUTH_REQUIRED_MSG});
+        return;
+    }
+
     ServerHandler *handler = &this->handler;
 
-    uint32_t stream_id = http_event->stream_id;
     if (stream_id == m_udp_mux.get_stream_id()) {
         m_udp_mux.handle_response(http_event->headers);
     } else if (stream_id == m_icmp_mux.get_stream_id()) {
         m_icmp_mux.handle_response(http_event->headers);
     } else if (m_health_check_info.has_value() && m_health_check_info->stream_id == stream_id) {
-        if (http_event->headers->status_code == HTTP_AUTH_REQUIRED_STATUS) {
-            m_health_check_info->error = {VPN_EC_AUTH_REQUIRED, HTTP_AUTH_REQUIRED_MSG};
-        } else if (http_event->headers->status_code != HTTP_OK_STATUS) {
+        if (http_event->headers->status_code != HTTP_OK_STATUS) {
             m_health_check_info->error = {VPN_EC_ERROR, "Bad response code"};
         }
     } else {
