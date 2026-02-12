@@ -786,7 +786,7 @@ void Http3Upstream::on_udp_packet() {
 
     m_in_handler = false;
     if (m_closed) {
-        close_session_inner();
+        close_session_inner(std::exchange(m_pending_session_error, std::nullopt));
     }
 }
 
@@ -893,6 +893,14 @@ void Http3Upstream::handle_h3_event(quiche_h3_event *h3_event, uint64_t stream_i
 }
 
 void Http3Upstream::handle_response(uint64_t stream_id, const HttpHeaders *headers) {
+    // Handle 407 (Proxy Authentication Required) on ANY stream as a fatal session error.
+    // We defer the error reporting to avoid unsafe callback calls directly from handle_response.
+    if (headers->status_code == HTTP_AUTH_REQUIRED_STATUS) {
+        log_stream(this, stream_id, dbg, "Proxy authentication required");
+        close_session_inner(VpnError{VPN_EC_AUTH_REQUIRED, HTTP_AUTH_REQUIRED_MSG});
+        return;
+    }
+
     if (m_udp_mux.get_stream_id() == stream_id) {
         m_udp_mux.handle_response(headers);
         return;
@@ -905,9 +913,7 @@ void Http3Upstream::handle_response(uint64_t stream_id, const HttpHeaders *heade
 
     if (is_health_check_stream(stream_id)) {
         // NOLINTBEGIN(bugprone-unchecked-optional-access)
-        if (headers->status_code == HTTP_AUTH_REQUIRED_STATUS) {
-            m_health_check_info->error = {VPN_EC_AUTH_REQUIRED, HTTP_AUTH_REQUIRED_MSG};
-        } else if (headers->status_code != HTTP_OK_STATUS) {
+        if (headers->status_code != HTTP_OK_STATUS) {
             m_health_check_info->error = {VPN_EC_ERROR, "Bad response code"};
         }
         m_health_check_info->timeout_task_id.reset();
@@ -1040,14 +1046,15 @@ void Http3Upstream::process_pending_data(uint64_t stream_id) {
     }
 }
 
-void Http3Upstream::close_session_inner() {
+void Http3Upstream::close_session_inner(std::optional<VpnError> error) {
     if (m_in_handler) {
         m_closed = true;
+        m_pending_session_error = error;
         return;
     }
 
-    std::optional<VpnError> error;
-    if (m_quic_conn != nullptr) {
+    // If no explicit error provided, try to get it from QUIC peer error
+    if (!error.has_value() && m_quic_conn != nullptr) {
         uint64_t code;
         bool is_app;
         const uint8_t *reason_bytes;
