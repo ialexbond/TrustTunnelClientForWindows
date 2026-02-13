@@ -9,6 +9,7 @@ mod composer;
 mod settings;
 mod template_settings;
 mod user_interaction;
+mod version;
 
 const MODE_PARAM_NAME: &str = "mode";
 const MODE_NON_INTERACTIVE: &str = "non-interactive";
@@ -72,6 +73,7 @@ pub fn get_predefined_params() -> MutexGuard<'static, PredefinedParameters> {
 
 fn main() {
     let mut command = clap::Command::new("TrustTunnel CLI Client Setup Wizard")
+        .version(version::VERSION)
         .about("Generate configuration files for TrustTunnel CLI Client")
         .long_about(r#"Generate configuration files for TrustTunnel CLI Client.
 
