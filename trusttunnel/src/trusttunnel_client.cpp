@@ -21,6 +21,7 @@
 #include "utils.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
+#include "vpn/trusttunnel/version.h"
 
 #ifdef __APPLE__
 #include "AppleSleepNotifier.h"
@@ -94,9 +95,10 @@ static void setup_sighandler() {
 int main(int argc, char **argv) {
     setup_sighandler();
 
-    cxxopts::Options args("TrustTunnel client", "Simple console client");
+    cxxopts::Options args("trusttunnel_client", "TrustTunnel console client");
     // clang-format off
     args.add_options()
+            ("v,version", "Print version")
             ("s", "Skip verify certificate", cxxopts::value<bool>()->default_value("false"))
             ("c,config", "Config file name.", cxxopts::value<std::string>()->default_value(std::string(DEFAULT_CONFIG_FILE)))
             ("l,loglevel", "Logging level. Possible values: error, warn, info, debug, trace.", cxxopts::value<std::string>()->default_value("info"))
@@ -104,6 +106,11 @@ int main(int argc, char **argv) {
     // clang-format on
 
     auto result = args.parse(argc, argv);
+    if (result.count("version")) {
+        std::cout << args.program() << " " TRUSTTUNNEL_VERSION << '\n';
+        return 0;
+    }
+
     if (result.count("help")) {
         std::cout << args.help() << '\n';
         return 1;
