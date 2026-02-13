@@ -52,8 +52,9 @@ typedef enum {
     VPN_EC_ADDR_IN_USE,      // Operation failed because the specified address was in use
     VPN_EC_INVALID_STATE,    // VPN client instance is in invalid state for the requested operation
     // Recoverable runtime errors. Client may update data from backend and reconnect.
-    VPN_EC_AUTH_REQUIRED,        // Authorization error (in case user credentials are invalid or expired)
-    VPN_EC_LOCATION_UNAVAILABLE, // None of the endpoints in a location are available
+    VPN_EC_AUTH_REQUIRED,                   // Authorization error (in case user credentials are invalid or expired)
+    VPN_EC_LOCATION_UNAVAILABLE,            // None of the endpoints in a location are available
+    VPN_EC_CERTIFICATE_VERIFICATION_FAILED, // Endpoint certificate verification failed
     // Unrecoverable runtime errors. Client should NOT reconnect automatically.
     VPN_EC_EVENT_LOOP_FAILURE,       // Failed to start the IO event loop, or it unexpectedly terminated
     VPN_EC_INITIAL_CONNECT_FAILED,   // No connection attempts left after initial connect() call

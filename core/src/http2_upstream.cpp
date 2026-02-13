@@ -423,8 +423,14 @@ void Http2Upstream::net_handler(void *arg, TcpSocketEvent what, void *data) {
     case TCP_SOCKET_EVENT_ERROR: {
         const VpnError *sock_event = (VpnError *) data;
 
-        log_upstream(upstream, dbg, "Error on HTTP session socket: {} ({})", sock_event->text, sock_event->code);
-        upstream->close_session_inner(VpnError{VPN_EC_ERROR, sock_event->text});
+        if (upstream->m_cert_verify_failed) {
+            log_upstream(upstream, dbg, "Error on HTTP session socket (certificate verification failed): {} ({})",
+                    sock_event->text, sock_event->code);
+            upstream->close_session_inner(VpnError{VPN_EC_CERTIFICATE_VERIFICATION_FAILED, sock_event->text});
+        } else {
+            log_upstream(upstream, dbg, "Error on HTTP session socket: {} ({})", sock_event->text, sock_event->code);
+            upstream->close_session_inner(VpnError{VPN_EC_ERROR, sock_event->text});
+        }
 
         break;
     }
@@ -815,12 +821,14 @@ int Http2Upstream::verify_callback(X509_STORE_CTX *store_ctx, void *arg) {
     auto *cert = X509_STORE_CTX_get0_cert(store_ctx);
     auto *chain = X509_STORE_CTX_get0_untrusted(store_ctx);
     auto *ssl = (SSL *) X509_STORE_CTX_get_ex_data(store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
-    return self->vpn->parameters.cert_verify_handler.func(
+    int ret = self->vpn->parameters.cert_verify_handler.func(
             !safe_to_string_view(self->vpn->upstream_config.endpoint->remote_id).empty()
                     ? self->vpn->upstream_config.endpoint->remote_id
                     : self->vpn->upstream_config.endpoint->name,
             (sockaddr *) &self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
             self->vpn->parameters.cert_verify_handler.arg);
+    self->m_cert_verify_failed = (ret != 1);
+    return ret;
 }
 
 void Http2Upstream::update_flow_control(uint64_t id, TcpFlowCtrlInfo info) {

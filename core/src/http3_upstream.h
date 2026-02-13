@@ -93,6 +93,7 @@ private:
     std::optional<HealthCheckInfo> m_health_check_info;
     bool m_in_handler = false;
     bool m_closed = false; // @todo: seems like it can be replaced by a separate state
+    bool m_cert_verify_failed = false;
     std::optional<VpnError> m_pending_session_error;
     ag::Logger m_log{"H3_UPSTREAM"};
     DeclPtr<QuicConnector, &quic_connector_destroy> m_quic_connector;
