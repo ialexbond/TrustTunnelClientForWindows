@@ -536,12 +536,14 @@ int Http3Upstream::verify_callback(X509_STORE_CTX *store_ctx, void *arg) {
     auto *cert = X509_STORE_CTX_get0_cert(store_ctx);
     auto *chain = X509_STORE_CTX_get0_untrusted(store_ctx);
     auto *ssl = (SSL *) X509_STORE_CTX_get_ex_data(store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
-    return self->vpn->parameters.cert_verify_handler.func(
+    int ret = self->vpn->parameters.cert_verify_handler.func(
             !safe_to_string_view(self->vpn->upstream_config.endpoint->remote_id).empty()
                     ? self->vpn->upstream_config.endpoint->remote_id
                     : self->vpn->upstream_config.endpoint->name,
             (sockaddr *) &self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
             self->vpn->parameters.cert_verify_handler.arg);
+    self->m_cert_verify_failed = (ret != 1);
+    return ret;
 }
 
 void Http3Upstream::quic_timer_callback(evutil_socket_t, short, void *arg) {
@@ -1053,7 +1055,10 @@ void Http3Upstream::close_session_inner(std::optional<VpnError> error) {
         return;
     }
 
-    // If no explicit error provided, try to get it from QUIC peer error
+    if (!error.has_value() && m_cert_verify_failed) {
+        log_upstream(this, dbg, "TLS certificate verification failed");
+        error = {VPN_EC_CERTIFICATE_VERIFICATION_FAILED, "TLS certificate verification failed"};
+    }
     if (!error.has_value() && m_quic_conn != nullptr) {
         uint64_t code;
         bool is_app;
