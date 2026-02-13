@@ -90,6 +90,40 @@ update_trusttunnel_windows_rc_versions() {
   fi
 }
 
+update_trusttunnel_version_h() {
+  local new_version=$1
+  local version_h="trusttunnel/include/vpn/trusttunnel/version.h"
+
+  if [ -f "$version_h" ]; then
+    echo "Updating ${version_h} to ${new_version}"
+
+    cat > "$version_h" << EOF
+#pragma once
+
+#define TRUSTTUNNEL_VERSION "${new_version}"
+EOF
+    echo "Updated ${version_h}"
+  else
+    echo "Warning: version.h not found at ${version_h}"
+  fi
+}
+
+update_setup_wizard_version() {
+  local new_version=$1
+  local version_rs="trusttunnel/setup_wizard/src/version.rs"
+
+  if [ -f "$version_rs" ]; then
+    echo "Updating ${version_rs} to ${new_version}"
+
+    cat > "$version_rs" << EOF
+pub const VERSION: &str = "${new_version}";
+EOF
+    echo "Updated ${version_rs}"
+  else
+    echo "Warning: version.rs not found at ${version_rs}"
+  fi
+}
+
 argument_version=$1
 if [ -z "$argument_version" ]
 then
@@ -128,6 +162,12 @@ update_apple_version "${NEW_VERSION}" "${VERSION}"
 update_trusttunnel_windows_rc_versions "${NEW_VERSION}" "trusttunnel/trusttunnel_client.rc"
 update_trusttunnel_windows_rc_versions "${NEW_VERSION}" "trusttunnel/setup_wizard/resources/setup_wizard.rc"
 
+# Update TrustTunnel CLI version header
+update_trusttunnel_version_h "${NEW_VERSION}"
+
+# Update setup_wizard version module
+update_setup_wizard_version "${NEW_VERSION}"
+
 # Update changelog
 sed -i -e '3{s/##/##/;t;s/^/## '${NEW_VERSION}'\n\n/}' CHANGELOG.md
 
@@ -140,4 +180,6 @@ echo "  - platform/apple/TrustTunnelClient.xcodeproj/project.pbxproj"
 echo "  - platform/apple/TrustTunnelClient.podspec"
 echo "  - trusttunnel/trusttunnel_client.rc"
 echo "  - trusttunnel/setup_wizard/resources/setup_wizard.rc"
+echo "  - trusttunnel/include/vpn/trusttunnel/version.h"
+echo "  - trusttunnel/setup_wizard/src/version.rs"
 echo "  - CHANGELOG.md"
