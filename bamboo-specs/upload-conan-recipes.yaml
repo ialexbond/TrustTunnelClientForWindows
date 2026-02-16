@@ -14,6 +14,10 @@ Default Job:
   key: JOB1
   docker:
     image: adguard/core-libs:2.8
+    volumes:
+      ${bamboo.working.directory}: ${bamboo.working.directory}
+      ${bamboo.tmp.directory}: ${bamboo.tmp.directory}
+      ${bamboo.git.cache.directory}: ${bamboo.git.cache.directory}
     docker-run-arguments: [ ]
   tasks:
     - !include docker-clean.yaml
