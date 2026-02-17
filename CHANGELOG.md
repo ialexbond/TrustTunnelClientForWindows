@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 1.0.3
+
 - [Feature] Add `custom_sni` field to the endpoint configuration.
   This allows specifying the TLS SNI value separately from the hostname, replacing the
   pipe (`|`) syntax in the `hostname` field. The old syntax is still supported for backward compatibility,
