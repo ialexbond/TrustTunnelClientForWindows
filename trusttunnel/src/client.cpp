@@ -199,7 +199,13 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
             remote_ids.emplace_back("");
         }
         if (endpoint.address.starts_with("|")) {
-            auto &relay = relays.emplace_back(sockaddr_from_str(endpoint.address.substr(1).c_str()));
+            auto resolved = resolve_endpoint_address(endpoint.address.substr(1).c_str());
+            if (resolved.empty()) {
+                warnlog(m_logger, "Failed to resolve relay address: {}", endpoint.address);
+                continue;
+            }
+            // Use only the first resolved address for relay
+            auto &relay = relays.emplace_back(resolved.front());
             if (!m_config.location.client_random.empty()) {
                 copy_to_c_buffer(relay.tls_client_random, m_config.location.client_random);
             }
@@ -208,19 +214,32 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_to_serve
             }
             continue;
         }
-        auto &last_el = endpoints.emplace_back(VpnEndpoint{
-                .address = sockaddr_from_str(endpoint.address.c_str()),
-                .name = hostnames.back().c_str(),
-                .remote_id = remote_ids.back().c_str(),
-                .has_ipv6 = m_config.location.has_ipv6,
-        });
-        if (!m_config.location.client_random.empty()) {
-            copy_to_c_buffer(last_el.tls_client_random, m_config.location.client_random);
+        auto resolved = resolve_endpoint_address(endpoint.address.c_str());
+        if (resolved.empty()) {
+            warnlog(m_logger, "Failed to resolve endpoint address: {}", endpoint.address);
+            continue;
         }
-        if (!m_config.location.client_random_mask.empty()) {
-            copy_to_c_buffer(last_el.tls_client_random_mask, m_config.location.client_random_mask);
+        for (const auto &addr : resolved) {
+            auto &last_el = endpoints.emplace_back(VpnEndpoint{
+                    .address = addr,
+                    .name = hostnames.back().c_str(),
+                    .remote_id = remote_ids.back().c_str(),
+                    .has_ipv6 = m_config.location.has_ipv6,
+            });
+            if (!m_config.location.client_random.empty()) {
+                copy_to_c_buffer(last_el.tls_client_random, m_config.location.client_random);
+            }
+            if (!m_config.location.client_random_mask.empty()) {
+                copy_to_c_buffer(last_el.tls_client_random_mask, m_config.location.client_random_mask);
+            }
         }
     }
+
+    if (endpoints.empty() && relays.empty()) {
+        return make_error(ConnectResultError{},
+                "Failed to resolve any endpoint or relay addresses. Check network connectivity and configuration.");
+    }
+
     VpnConnectParameters parameters = {
             .upstream_config =
                     {
@@ -285,14 +304,15 @@ VpnListener *TrustTunnelClient::make_tun_listener(ListenerSettings listener_sett
 
     std::vector<std::string> complete_excluded_routes = config.excluded_routes;
     for (const auto &endpoint : m_config.location.endpoints) {
-        auto result = ag::utils::split_host_port(endpoint.address);
-        if (result.has_error()) {
-            errlog(m_logger, "Failed to parse endpoint address: address={}, error={}", endpoint.address,
-                    result.error()->str());
+        auto resolved = resolve_endpoint_address(endpoint.address.c_str());
+        if (resolved.empty()) {
+            errlog(m_logger, "Failed to resolve endpoint address for excluded routes: {}", endpoint.address);
             return nullptr;
         }
-        auto [host_view, port_view] = result.value();
-        complete_excluded_routes.emplace_back(host_view.data(), host_view.size());
+        for (const auto &addr : resolved) {
+            SocketAddress sa(addr);
+            complete_excluded_routes.emplace_back(sa.host_str());
+        }
     }
 
     std::vector<const char *> excluded_routes;
