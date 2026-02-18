@@ -29,7 +29,7 @@ class VpnLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
-        self.requires("dns-libs/2.8.20@adguard/oss", transitive_headers=True)
+        self.requires("dns-libs/2.8.26@adguard/oss", transitive_headers=True)
         self.requires("native_libs_common/8.0.15@adguard/oss", transitive_headers=True)
 
         self.requires("brotli/1.1.0", transitive_headers=True)
@@ -58,6 +58,7 @@ class VpnLibsConan(ConanFile):
         self.options["gtest"].build_gmock = False
         # Resolve conflict between pcre2 required from dns-libs and pcre2 required form native_libs_common
         self.options["pcre2"].build_pcre2grep = False
+        self.options["dns-libs"].tcpip = False
 
     def source(self):
         self.run(f"git init . && git remote add origin {self.vcs_url} && git fetch")
