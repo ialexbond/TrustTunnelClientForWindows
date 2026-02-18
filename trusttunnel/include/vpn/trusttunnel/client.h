@@ -87,15 +87,14 @@ public:
 
     bool process_client_packets(VpnPackets packets);
 
+    std::string_view get_bound_if() const;
+
     ~TrustTunnelClient();
 
 private:
     Error<ConnectResultError> connect_impl(ListenerSettings listener_settings);
     Error<ConnectResultError> vpn_runner(ListenerSettings listener_settings);
     Error<ConnectResultError> connect_to_server();
-
-    void vpn_protect_socket(SocketProtectEvent *event);
-    int set_outbound_interface();
 
     VpnListener *make_tun_listener(ListenerSettings listener_settings);
     VpnListener *make_socks_listener(ListenerSettings listener_settings);
