@@ -1,3 +1,3 @@
 #pragma once
 
-#define TRUSTTUNNEL_VERSION "0.99.114"
+#define TRUSTTUNNEL_VERSION "1.0.7"

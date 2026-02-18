@@ -50,6 +50,8 @@ Increment version:
             git add platform/apple/TrustTunnelClient.podspec
             git add trusttunnel/trusttunnel_client.rc
             git add trusttunnel/setup_wizard/resources/setup_wizard.rc
+            git add trusttunnel/include/vpn/trusttunnel/version.h
+            git add trusttunnel/setup_wizard/src/version.rs
             git commit -m "skipci: Automatic version increment by Bamboo"
             git push
 
