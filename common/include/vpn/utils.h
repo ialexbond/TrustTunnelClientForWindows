@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #include <event2/util.h>
 
@@ -229,6 +230,22 @@ uint64_t socket_address_pair_hash(const SocketAddress &src, const SocketAddress 
  * @return parsed socket address storage
  */
 SocketAddressStorage sockaddr_from_str(const char *str);
+
+/**
+ * Resolve a host:port string to socket addresses
+ *
+ * If the host part is a numeric IP address, behaves like `sockaddr_from_str`.
+ * If the host part is a hostname, resolves it via the system resolver.
+ *
+ * Recognized formats are:
+ *   - [IPv6Address]:port
+ *   - IPv4Address:port
+ *   - hostname:port
+ *
+ * @param str string to resolve
+ * @return resolved socket addresses (may contain both IPv4 and IPv6), empty on failure
+ */
+std::vector<SocketAddressStorage> resolve_endpoint_address(const char *str);
 
 /**
  * Get bound socket address storage from file descriptor

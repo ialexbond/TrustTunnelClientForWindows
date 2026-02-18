@@ -2,9 +2,17 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
+#include <netdb.h>
+#endif
 
 #include <event2/util.h>
 
+#include "common/net_utils.h"
 #include "common/socket_address.h"
 #include "dns/dnsstamp/dns_stamp.h"
 #include "vpn/platform.h"
@@ -67,6 +75,56 @@ SocketAddressStorage sockaddr_from_str(const char *str) {
 void sockaddr_from_str_out(const char *str, struct SocketAddressStorage *result) {
     SocketAddressStorage local_result = sockaddr_from_str(str);
     std::memcpy(result, &local_result, sizeof(SocketAddressStorage));
+}
+
+std::vector<SocketAddressStorage> resolve_endpoint_address(const char *str) {
+    if (str == nullptr || *str == '\0') {
+        return {};
+    }
+
+    // Fast path: try parsing as a numeric IP address
+    SocketAddress parsed(str);
+    if (parsed.valid()) {
+        if (parsed.port() == 0) {
+            return {};
+        }
+        return {*parsed.c_storage()};
+    }
+
+    auto split = utils::split_host_port(str);
+    if (split.has_error()) {
+        return {};
+    }
+    auto [host, port] = split.value();
+    if (host.empty() || port.empty()) {
+        return {};
+    }
+
+    struct addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_ADDRCONFIG;
+
+    struct addrinfo *res = nullptr;
+    std::string host_str(host);
+    std::string port_str(port);
+    int rc = getaddrinfo(host_str.c_str(), port_str.c_str(), &hints, &res);
+    if (rc != 0 || res == nullptr) {
+        return {};
+    }
+
+    std::vector<SocketAddressStorage> result;
+    for (struct addrinfo *rp = res; rp != nullptr; rp = rp->ai_next) {
+        if (rp->ai_family != AF_INET && rp->ai_family != AF_INET6) {
+            continue;
+        }
+        SocketAddressStorage storage{};
+        std::memcpy(&storage, rp->ai_addr, rp->ai_addrlen);
+        result.push_back(storage);
+    }
+
+    freeaddrinfo(res);
+    return result;
 }
 
 SocketAddress local_socket_address_from_fd(evutil_socket_t fd) {

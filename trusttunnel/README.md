@@ -112,7 +112,7 @@ The configuration file uses TOML format. Below are all available settings.
 | Variable | Type | Default | Description |
 | -------- | ---- | ------- | ----------- |
 | `hostname` | string | *required* | Endpoint hostname for TLS session establishment |
-| `addresses` | array[string] | *required* | Endpoint IP:port addresses (pinger selects best) |
+| `addresses` | array[string] | *required* | Endpoint addresses as IP:port or hostname:port (pinger selects best) |
 | `has_ipv6` | bool | `true` | Whether IPv6 traffic can be routed through endpoint |
 | `username` | string | *required* | Authorization username |
 | `password` | string | *required* | Authorization password |

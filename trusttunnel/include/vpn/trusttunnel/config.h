@@ -16,7 +16,7 @@ namespace ag {
 struct TrustTunnelConfig {
     struct Endpoint {
         std::string hostname;
-        std::string address;
+        std::string address; ///< IP:port or hostname:port
         std::string custom_sni;
     };
 
