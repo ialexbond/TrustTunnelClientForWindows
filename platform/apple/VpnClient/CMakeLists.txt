@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 1.0.73.24)
+cmake_minimum_required(VERSION 3.24)
 
 set(ROOT_DIR ../../..)
 if(NOT CMAKE_INSTALL_PREFIX MATCHES "conan2")
@@ -46,8 +46,8 @@ add_library(${PROJECT_NAME} SHARED
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     FRAMEWORK TRUE
-    FRAMEWORK_VERSION 1.0.7A
-    VERSION 1.0.70.99.118
+    FRAMEWORK_VERSION A
+    VERSION 1.0.7
     PUBLIC_HEADER VpnClient.h
     MACOSX_FRAMEWORK_INFO_PLIST "${INFOPLIST_FILE}"
     MACOSX_FRAMEWORK_IDENTIFIER com.adguard.TrustTunnel.VpnClientFramework

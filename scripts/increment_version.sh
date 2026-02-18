@@ -50,23 +50,18 @@ update_android_version() {
 
 update_apple_version() {
   local new_version=$1
-  local old_version=$2
 
   pushd platform/apple/
     local pbxproj_file="TrustTunnelClient.xcodeproj/project.pbxproj"
-    sed -i -e "s/CURRENT_PROJECT_VERSION = ${old_version}/CURRENT_PROJECT_VERSION = ${new_version}/" ${pbxproj_file}
-    sed -i -e "s/DYLIB_CURRENT_VERSION = ${old_version}/DYLIB_CURRENT_VERSION = ${new_version}/" ${pbxproj_file}
-    sed -i -e "s/MARKETING_VERSION = ${old_version}/MARKETING_VERSION = ${new_version}/" ${pbxproj_file}
+    sed -i -E "s/(CURRENT_PROJECT_VERSION = )[0-9.]+/\1${new_version}/" "${pbxproj_file}"
+    sed -i -E "s/(DYLIB_CURRENT_VERSION = )[0-9.]+/\1${new_version}/" "${pbxproj_file}"
+    sed -i -E "s/(MARKETING_VERSION = )[0-9.]+/\1${new_version}/" "${pbxproj_file}"
 
     local vpn_client_cmake="VpnClient/CMakeLists.txt"
-    local old_part="VERSION ${old_version}"
-    local new_part="VERSION ${new_version}"
-    sed -i -e "s/${old_part}/${new_part}/" "${vpn_client_cmake}"
+    sed -i -E "s/(VERSION )[0-9]+\.[0-9]+\.[0-9]+/\1${new_version}/" "${vpn_client_cmake}"
 
     local spec_file="TrustTunnelClient.podspec"
-    local old_part="s.version      = \"${old_version}\""
-    local new_part="s.version      = \"${new_version}\""
-    sed -i -e "s/${old_part}/${new_part}/" "${spec_file}"
+    sed -i -E "s/(s\.version *= *\")[0-9.]+/\1${new_version}/" "${spec_file}"
   popd
 }
 
@@ -124,11 +119,12 @@ EOF
   fi
 }
 
+VERSION=$(cat conandata.yml | grep "[0-9]*\.[0-9]*." | tail -1 | sed "s/\"//" | sed "s/\"\://" | sed "s/ //g")
+echo "Last version was ${VERSION}"
+
 argument_version=$1
 if [ -z "$argument_version" ]
 then
-  VERSION=$(cat conandata.yml | grep "[0-9]*\.[0-9]*." | tail -1 | sed "s/\"//" | sed "s/\"\://" | sed "s/ //g")
-  echo "Last version was ${VERSION}"
   NEW_VERSION=$(increment_version ${VERSION})
   echo "New version is ${NEW_VERSION}"
 else
@@ -156,7 +152,7 @@ printf "  \"${NEW_VERSION}\":\n    hash: \"${COMMIT_HASH}\"\n" | tee -a conandat
 # Update Android library version
 update_android_version "${NEW_VERSION}"
 
-update_apple_version "${NEW_VERSION}" "${VERSION}"
+update_apple_version "${NEW_VERSION}"
 
 # Update TrustTunnel Windows resources versions
 update_trusttunnel_windows_rc_versions "${NEW_VERSION}" "trusttunnel/trusttunnel_client.rc"
