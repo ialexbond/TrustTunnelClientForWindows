@@ -1,5 +1,8 @@
 # CHANGELOG
 
+- [Feature] Support hostnames in endpoint addresses. Hostnames are resolved via DNS at connect time,
+            producing multiple endpoints for each resolved IP address.
+
 ## 1.0.3
 
 - [Feature] Add `custom_sni` field to the endpoint configuration.

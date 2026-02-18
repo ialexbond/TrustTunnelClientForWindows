@@ -64,6 +64,7 @@ set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 add_unit_test(test_fsm "${TEST_DIR}" "${COMMON_SRC_DIR}" TRUE TRUE)
 add_unit_test(test_event_loop "${TEST_DIR}" "${COMMON_SRC_DIR}" TRUE TRUE)
 add_unit_test(test_dns_stamp "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+add_unit_test(test_resolve_endpoint_address "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 
 if (WIN32)
     add_unit_test(test_guid "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)

@@ -124,10 +124,11 @@ docgen! {
     pub struct Endpoint {
         #{doc("Endpoint host name, used for TLS session establishment")}
         pub hostname: String,
-        #{doc(r#"Endpoint addresses.
-The exact address is selected by the pinger. Absence of IPv6 addresses in
-the list makes the VPN client reject IPv6 connections which must be routed
-through the endpoint with unreachable code."#)}
+        #{doc(r#"Endpoint addresses (IP:port or hostname:port).
+The exact address is selected by the pinger. Hostnames are resolved via DNS
+at connect time. Absence of IPv6 addresses in the list makes the VPN client
+reject IPv6 connections which must be routed through the endpoint with
+unreachable code."#)}
         pub addresses: Vec<String>,
         #{doc("Whether IPv6 traffic can be routed through the endpoint")}
         #[serde(default = "Endpoint::default_has_ipv6")]
