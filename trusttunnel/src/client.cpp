@@ -1,21 +1,3 @@
-#ifdef __APPLE__
-#include <net/if.h>
-#include <netinet/in.h>
-#endif // __APPLE__
-
-#ifdef __linux__
-// clang-format off
-#include <net/if.h>
-
-#include <linux/if.h>
-#include <linux/if_tun.h>
-// clang-format on
-#endif
-
-#ifdef _WIN32
-#include <WinSock2.h>
-#endif
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -92,61 +74,11 @@ bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
     return m_vpn && vpn_process_client_packets(m_vpn, packets);
 }
 
-void TrustTunnelClient::vpn_protect_socket(SocketProtectEvent *event) {
-    const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&m_config.listener);
-    if (tun == nullptr) {
-        return;
+std::string_view TrustTunnelClient::get_bound_if() const {
+    if (const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&m_config.listener)) {
+        return tun->bound_if;
     }
-#ifdef __APPLE__
-    uint32_t idx = vpn_network_manager_get_outbound_interface();
-    if (idx == 0) {
-        return;
-    }
-    if (event->peer->sa_family == AF_INET) {
-        if (setsockopt(event->fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx)) != 0) {
-            event->result = -1;
-        }
-    } else if (event->peer->sa_family == AF_INET6) {
-        if (setsockopt(event->fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, sizeof(idx)) != 0) {
-            event->result = -1;
-        }
-    }
-#endif // __APPLE__
-
-#ifdef __linux__
-    if (!tun->bound_if.empty()) {
-        if (setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, tun->bound_if.data(), (socklen_t) tun->bound_if.size())
-                != 0) {
-            event->result = -1;
-        }
-    }
-#endif
-
-#ifdef _WIN32
-    bool protect_success = vpn_win_socket_protect(event->fd, event->peer);
-    if (!protect_success) {
-        event->result = -1;
-    }
-#endif
-}
-
-int TrustTunnelClient::set_outbound_interface() {
-    auto &config = std::get<TrustTunnelConfig::TunListener>(m_config.listener);
-    if (config.bound_if.empty()) {
-        return 0;
-    }
-    uint32_t if_index = if_nametoindex(config.bound_if.c_str());
-    if (if_index == 0) {
-        if (auto idx = ag::utils::to_integer<uint32_t>(config.bound_if)) {
-            if_index = idx.value();
-        }
-    }
-    if (if_index == 0) {
-        errlog(m_logger, "Unknown interface name: {}. Use 'ifconfig' to see possible values", config.bound_if);
-        return -1;
-    }
-    vpn_network_manager_set_outbound_interface(if_index);
-    return 0;
+    return {};
 }
 
 Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::set_system_dns() {
@@ -184,12 +116,6 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_impl(Lis
 
     if (m_config.ssl_session_storage_path.has_value()) {
         settings.ssl_sessions_storage_path = m_config.ssl_session_storage_path->c_str();
-    }
-
-    if (std::holds_alternative<TrustTunnelConfig::TunListener>(m_config.listener)) {
-        if (int r = set_outbound_interface(); r < 0) {
-            return make_error(ConnectResultError{}, "Failed to set outbound interface");
-        }
     }
 
     m_vpn = vpn_open(&settings);

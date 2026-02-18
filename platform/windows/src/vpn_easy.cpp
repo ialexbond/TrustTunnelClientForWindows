@@ -12,6 +12,7 @@
 #include "net/tls.h"
 #include "vpn/event_loop.h"
 #include "vpn/platform.h"
+#include "vpn/trusttunnel/auto_network_monitor.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
 
@@ -80,6 +81,7 @@ private:
 
 struct vpn_easy_s {
     std::unique_ptr<ag::TrustTunnelClient> client;
+    std::unique_ptr<ag::AutoNetworkMonitor> network_monitor;
 };
 
 static vpn_easy_t *vpn_easy_start_internal(
@@ -121,6 +123,11 @@ static vpn_easy_t *vpn_easy_start_internal(
     auto vpn = std::make_unique<vpn_easy_t>();
 
     vpn->client = std::make_unique<ag::TrustTunnelClient>(std::move(*trusttunnel_config), std::move(callbacks));
+    vpn->network_monitor = std::make_unique<ag::AutoNetworkMonitor>(vpn->client.get());
+    if (!vpn->network_monitor->start()) {
+        errlog(g_logger, "Failed to start network monitor");
+        return nullptr;
+    }
     if (auto connect_error = vpn->client->connect(ag::TrustTunnelClient::AutoSetup{})) {
         errlog(g_logger, "Failed to connect: {}", connect_error->pretty_str());
         return nullptr;
@@ -135,6 +142,9 @@ static void vpn_easy_stop_internal(vpn_easy_t *vpn) {
     }
     if (vpn->client) {
         vpn->client->disconnect();
+    }
+    if (vpn->network_monitor) {
+        vpn->network_monitor->stop();
     }
     delete vpn;
 }
