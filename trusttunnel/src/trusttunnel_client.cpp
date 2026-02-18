@@ -19,6 +19,7 @@
 #include "net/network_manager.h"
 #include "net/tls.h"
 #include "utils.h"
+#include "vpn/trusttunnel/auto_network_monitor.h"
 #include "vpn/trusttunnel/client.h"
 #include "vpn/trusttunnel/config.h"
 #include "vpn/trusttunnel/version.h"
@@ -35,7 +36,7 @@ static const ag::Logger g_logger("TRUSTTUNNEL_CLIENT_APP");
 static std::atomic_bool keep_running{true};
 static std::condition_variable g_waiter;
 static std::mutex g_waiter_mutex;
-static TrustTunnelClient *g_client;
+static std::weak_ptr<TrustTunnelClient> g_client;
 
 static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const TrustTunnelConfig &config);
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback();
@@ -51,13 +52,13 @@ static void sighandler(int sig) {
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
 
-    if (g_client) {
+    if (auto client = g_client.lock()) {
 #ifndef _WIN32
         if (sig == SIGHUP) {
-            g_client->notify_network_change(ag::VPN_NS_NOT_CONNECTED);
-            std::thread t([]() {
+            client->notify_network_change(ag::VPN_NS_NOT_CONNECTED);
+            std::thread t([client]() {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
-                g_client->notify_network_change(ag::VPN_NS_CONNECTED);
+                client->notify_network_change(ag::VPN_NS_CONNECTED);
             });
             t.detach();
             return;
@@ -131,7 +132,6 @@ int main(int argc, char **argv) {
     if (!TrustTunnelCliUtils::apply_cmd_args(config, result)) {
         return 1;
     }
-    TrustTunnelCliUtils::detect_bound_if(config);
     ag::Logger::set_log_level(config.loglevel);
 
     vpn_post_quantum_group_set_enabled(config.post_quantum_group_enabled);
@@ -143,14 +143,20 @@ int main(int argc, char **argv) {
             .connection_info_handler = get_connection_info_callback(),
     };
 
-    g_client = new TrustTunnelClient(std::move(config), std::move(callbacks));
+    auto client = std::make_shared<TrustTunnelClient>(std::move(config), std::move(callbacks));
+    g_client = client;
+    AutoNetworkMonitor network_monitor(client.get());
+    if (!network_monitor.start()) {
+        errlog(g_logger, "Failed to start network monitor");
+        return 1;
+    }
 
-    auto res = g_client->set_system_dns();
+    auto res = client->set_system_dns();
     if (res) {
         errlog(g_logger, "{}", res->str());
         return 1;
     }
-    res = g_client->connect(TrustTunnelClient::AutoSetup{});
+    res = client->connect(TrustTunnelClient::AutoSetup{});
     if (res) {
         errlog(g_logger, "{}", res->str());
         return 1;
@@ -158,11 +164,15 @@ int main(int argc, char **argv) {
 
 #ifdef __APPLE__
     auto sleep_notifier = std::make_unique<AppleSleepNotifier>(
-            [] {
-                g_client->notify_sleep();
+            [client_weak = std::weak_ptr(client)] {
+                if (auto client = client_weak.lock()) {
+                    client->notify_sleep();
+                }
             },
-            [] {
-                g_client->notify_wake();
+            [client_weak = std::weak_ptr(client)] {
+                if (auto client = client_weak.lock()) {
+                    client->notify_wake();
+                }
             });
 #endif
 
@@ -175,8 +185,8 @@ int main(int argc, char **argv) {
     sleep_notifier.reset();
 #endif
 
-    g_client->disconnect();
-    delete g_client;
+    network_monitor.stop();
+    client->disconnect();
 
     return 0;
 }
