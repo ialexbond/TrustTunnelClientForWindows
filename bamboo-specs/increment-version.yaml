@@ -23,6 +23,9 @@ Increment version:
     - checkout:
         repository: core-libs/vpn-libs
         path: vpn-libs
+    - checkout:
+        repository: git-scripts
+        path: git-scripts
     - script:
         interpreter: SHELL
         scripts:
@@ -37,9 +40,7 @@ Increment version:
             fi
             ./scripts/increment_version.sh ${bamboo_custom_version} || exit 1
 
-            printf "%b\n" "${bamboo_sshSecretKey}" > ~/.ssh/id_rsa
-            chmod 600 ~/.ssh/id_rsa
-
+            ../git-scripts/git_kit.sh pull ${bamboo_planRepository_repositoryUrl}
             git reset
             git add conandata.yml
             git add CHANGELOG.md
