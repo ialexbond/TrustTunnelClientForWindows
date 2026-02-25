@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["settings", "deeplink-ffi", "setup_wizard"]
+
+[profile.release]
+debug = true
+panic = "abort"
