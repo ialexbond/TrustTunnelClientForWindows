@@ -71,6 +71,11 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         private fun start(context: Context, action: String, config: String?) = start(context, getIntent(context, action), config)
 
         fun startNetworkManager(context: Context) {
+            if (::networkCallback.isInitialized) {
+                // Avoid double initialization
+                return
+            }
+
             connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             networkRequest = NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -126,15 +131,10 @@ class VpnService : android.net.VpnService(), VpnClientListener {
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = synchronized(SYNC) {
-        val action: String?
-        val config: String?
-        if (intent == null || (intent.action == null && intent.getStringExtra(PARAM_CONFIG) == null)) {
-            LOG.info("System-triggered start (Always-On VPN), loading persisted config")
-            action = ACTION_START
-            config = getConfigStorage(applicationContext).load()
-        } else {
-            action = intent.action
-            config = intent.getStringExtra(PARAM_CONFIG)
+        if (intent == null) {
+            LOG.info("Received a null intent, doing nothing")
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         // Foreground service must spawn its notification in the first 5 seconds of the service lifetime
@@ -149,11 +149,18 @@ class VpnService : android.net.VpnService(), VpnClientListener {
         singleThread.execute {
             try {
                 currentStartId = startId
+                val action = intent.action
+                val config = intent.getStringExtra(PARAM_CONFIG)
                 LOG.info("Start executing action=$action flags=$flags startId=$startId")
                 when (action) {
                     ACTION_START    -> processStarting(config, startId)
                     ACTION_STOP     -> close(startId)
-                    else            -> LOG.info("Unknown command $action")
+                    else            -> {
+                        startNetworkManager(applicationContext)
+                        LOG.info("System-triggered start (Always-On VPN), loading persisted config")
+                        val persistedConfig = getConfigStorage(applicationContext).load()
+                        processStarting(persistedConfig, startId)
+                    }
                 }
 
                 LOG.info("Command $action for the VPN has been executed")
