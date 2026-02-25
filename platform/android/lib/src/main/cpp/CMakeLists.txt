@@ -13,9 +13,13 @@ project("trusttunnel_android")
 add_library(${CMAKE_PROJECT_NAME} SHARED
     lib.cpp
     native_logger.cpp
-    jni_utils.cpp)
+    jni_utils.cpp
+    deeplink.cpp)
 
 
 add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/trusttunnel)
 
-target_link_libraries(${CMAKE_PROJECT_NAME} android log vpnlibs_trusttunnel)
+target_link_libraries(${CMAKE_PROJECT_NAME} android log vpnlibs_trusttunnel trusttunnel_deeplink_ffi)
+
+# Allow multiple definitions from Rust static libraries (trusttunnel_deeplink_ffi and quiche)
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE "-Wl,--allow-multiple-definition")
