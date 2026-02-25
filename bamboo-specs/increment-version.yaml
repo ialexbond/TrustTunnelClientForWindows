@@ -53,7 +53,7 @@ Increment version:
             git add trusttunnel/include/vpn/trusttunnel/version.h
             git add trusttunnel/setup_wizard/src/version.rs
             git commit -m "skipci: Automatic version increment by Bamboo"
-            git push
+            git push origin HEAD
 
             case "${bamboo_repository_branch_name}" in
             master)
