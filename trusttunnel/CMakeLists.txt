@@ -90,16 +90,56 @@ else ()
     set(TARGET_SUBDIR release)
 endif ()
 
-set(CARGO_ENV_RUSTFLAGS "RUSTFLAGS=")
+set(RUST_WORKSPACE_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/rust_workspace)
+set(DEEPLINK_FFI_STATICLIB_NAME ${CMAKE_STATIC_LIBRARY_PREFIX}trusttunnel_deeplink_ffi${CMAKE_STATIC_LIBRARY_SUFFIX})
 if (APPLE)
-    if (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+    # On Apple, use cdylib (.dylib) to avoid duplicate Rust std symbols with libquiche.a.
+    # A cdylib encapsulates Rust std inside the dynamic library, so symbols don't leak
+    # into the global namespace and can't conflict with libquiche.a's bundled copy.
+    set(DEEPLINK_FFI_LIBNAME libtrusttunnel_deeplink_ffi.dylib)
+else ()
+    set(DEEPLINK_FFI_LIBNAME ${DEEPLINK_FFI_STATICLIB_NAME})
+endif ()
+
+set(CARGO_ENV_RUSTFLAGS "RUSTFLAGS=")
+if (ANDROID)
+    if (ANDROID_ABI STREQUAL "arm64-v8a")
+        set(CARGO_TARGET ndk --target=aarch64-linux-android --platform=21 build)
+        set(TARGET_SUBDIR "aarch64-linux-android/${TARGET_SUBDIR}")
+    elseif (ANDROID_ABI STREQUAL "armeabi-v7a")
+        set(CARGO_TARGET ndk --target=armv7-linux-androideabi --platform=21 build)
+        set(TARGET_SUBDIR "armv7-linux-androideabi/${TARGET_SUBDIR}")
+    elseif (ANDROID_ABI STREQUAL "x86_64")
+        set(CARGO_TARGET ndk --target=x86_64-linux-android --platform=21 build)
+        set(TARGET_SUBDIR "x86_64-linux-android/${TARGET_SUBDIR}")
+    else ()
+        message(FATAL_ERROR "Unsupported Android ABI: ${ANDROID_ABI}")
+    endif ()
+    if (DEFINED ENV{ANDROID_HOME})
+        set(ANDROID_HOME_VAR "ANDROID_HOME=$ENV{ANDROID_HOME}")
+    endif ()
+elseif (APPLE)
+    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        if (CMAKE_OSX_SYSROOT STREQUAL "iphonesimulator")
+            if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+                set(CARGO_TARGET --target aarch64-apple-ios-sim)
+                set(TARGET_SUBDIR "aarch64-apple-ios-sim/${TARGET_SUBDIR}")
+            else ()
+                set(CARGO_TARGET --target x86_64-apple-ios)
+                set(TARGET_SUBDIR "x86_64-apple-ios/${TARGET_SUBDIR}")
+            endif ()
+        else ()
+            set(CARGO_TARGET --target aarch64-apple-ios)
+            set(TARGET_SUBDIR "aarch64-apple-ios/${TARGET_SUBDIR}")
+        endif ()
+    elseif (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
         set(CARGO_TARGET --target x86_64-apple-darwin)
         set(TARGET_SUBDIR "x86_64-apple-darwin/${TARGET_SUBDIR}")
     elseif (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
         set(CARGO_TARGET --target aarch64-apple-darwin)
         set(TARGET_SUBDIR "aarch64-apple-darwin/${TARGET_SUBDIR}")
     endif ()
-endif (APPLE)
+endif ()
 
 if (WIN32 AND MSVC)
     if (DEFINED ENV{VSCMD_ARG_TGT_ARCH})
@@ -158,33 +198,78 @@ endif ()
 
 message("Rust target triple: ${RUST_TARGET_TRIPLE}")
 
-ExternalProject_Add(setup_wizard
-        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/setup_wizard
-        BUILD_ALWAYS TRUE
-        UPDATE_COMMAND ""
-        PATCH_COMMAND ""
-        CONFIGURE_COMMAND ""
-        BUILD_COMMAND ${CMAKE_COMMAND} -E env CARGO_BUILD_TARGET_DIR=<BINARY_DIR> ${CARGO_ENV_CC} "${CARGO_ENV_RUSTFLAGS}"
-        BUILD_COMMAND     cargo ${CARGO_CHANNEL} build ${CARGO_EXTRA_ARGS}
-        BUILD_COMMAND     --manifest-path=<SOURCE_DIR>/Cargo.toml ${CARGO_BUILD_TYPE} ${CARGO_TARGET}
-        BUILD_COMMAND     --bin setup_wizard
-        TEST_COMMAND ""
-        INSTALL_COMMAND ${CMAKE_COMMAND} -E copy ${TARGET_SUBDIR}/${WIZARD_EXE_NAME} ${CMAKE_CURRENT_BINARY_DIR}
-        )
+set(DEEPLINK_FFI_LIBFILE "${RUST_WORKSPACE_TARGET_DIR}/${TARGET_SUBDIR}/${DEEPLINK_FFI_LIBNAME}")
 
-add_custom_target(run_setup_wizard)
-add_custom_command(
-        TARGET run_setup_wizard
-        POST_BUILD
-        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${WIZARD_EXE_NAME}
-        USES_TERMINAL TRUE
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+if (ANDROID)
+    ExternalProject_Add(trusttunnel_rust
+            SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
+            BUILD_IN_SOURCE TRUE
+            BUILD_ALWAYS TRUE
+            UPDATE_COMMAND ""
+            PATCH_COMMAND ""
+            CONFIGURE_COMMAND ""
+            BUILD_COMMAND ${CMAKE_COMMAND} -E env CARGO_BUILD_TARGET_DIR=${RUST_WORKSPACE_TARGET_DIR} ${ANDROID_HOME_VAR}
+            cargo ${CARGO_TARGET}
+            ${CARGO_BUILD_TYPE}
+            --package trusttunnel-deeplink-ffi
+            TEST_COMMAND ""
+            INSTALL_COMMAND ""
+            BUILD_BYPRODUCTS ${DEEPLINK_FFI_LIBFILE}
+            )
+    set(DEEPLINK_FFI_BUILD_TARGET trusttunnel_rust)
+else ()
+    ExternalProject_Add(setup_wizard
+            SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
+            BUILD_ALWAYS TRUE
+            UPDATE_COMMAND ""
+            PATCH_COMMAND ""
+            CONFIGURE_COMMAND ""
+            BUILD_COMMAND ${CMAKE_COMMAND} -E env CARGO_BUILD_TARGET_DIR=${RUST_WORKSPACE_TARGET_DIR} ${CARGO_ENV_CC} "${CARGO_ENV_RUSTFLAGS}"
+            cargo ${CARGO_CHANNEL} build ${CARGO_EXTRA_ARGS}
+            --manifest-path=<SOURCE_DIR>/Cargo.toml ${CARGO_BUILD_TYPE} ${CARGO_TARGET}
+            --workspace
+            TEST_COMMAND ""
+            INSTALL_COMMAND ${CMAKE_COMMAND} -E copy ${RUST_WORKSPACE_TARGET_DIR}/${TARGET_SUBDIR}/${WIZARD_EXE_NAME} ${CMAKE_CURRENT_BINARY_DIR}
+            BUILD_BYPRODUCTS ${DEEPLINK_FFI_LIBFILE}
+            )
+    set(DEEPLINK_FFI_BUILD_TARGET setup_wizard)
+
+    add_custom_target(run_setup_wizard)
+    add_custom_command(
+            TARGET run_setup_wizard
+            POST_BUILD
+            COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${WIZARD_EXE_NAME}
+            USES_TERMINAL TRUE
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_dependencies(run_setup_wizard setup_wizard)
+endif ()
+
+if (APPLE)
+    # Fix the dylib install name before anything links against it, so the consuming
+    # framework records @rpath/... instead of the absolute build path.
+    ExternalProject_Add_Step(${DEEPLINK_FFI_BUILD_TARGET} fix_dylib_install_name
+            DEPENDEES build
+            DEPENDERS install
+            ALWAYS TRUE
+            COMMAND install_name_tool -id @rpath/libtrusttunnel_deeplink_ffi.dylib ${DEEPLINK_FFI_LIBFILE}
+            COMMENT "Setting install name for libtrusttunnel_deeplink_ffi.dylib"
+    )
+    add_library(trusttunnel_deeplink_ffi SHARED IMPORTED GLOBAL)
+else ()
+    add_library(trusttunnel_deeplink_ffi STATIC IMPORTED GLOBAL)
+endif ()
+set_target_properties(trusttunnel_deeplink_ffi PROPERTIES
+    IMPORTED_LOCATION "${DEEPLINK_FFI_LIBFILE}"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/deeplink-ffi/include"
 )
-add_dependencies(run_setup_wizard setup_wizard)
+add_dependencies(trusttunnel_deeplink_ffi ${DEEPLINK_FFI_BUILD_TARGET})
 
 enable_testing()
-add_dependencies(tests
-        trusttunnel_client
-        vpnlibs_trusttunnel
-        setup_wizard
-        )
+if (NOT ANDROID)
+    add_dependencies(tests
+            trusttunnel_client
+            vpnlibs_trusttunnel
+            setup_wizard
+            )
+endif ()

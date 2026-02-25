@@ -41,6 +41,8 @@ add_subdirectory(${ROOT_DIR} ${CMAKE_BINARY_DIR}/trusttunnel)
 add_library(${PROJECT_NAME} SHARED
     VpnClient.h
     VpnClient.mm
+    DeepLink.h
+    DeepLink.mm
     module.modulemap
 )
 
@@ -48,7 +50,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     FRAMEWORK TRUE
     FRAMEWORK_VERSION A
     VERSION 1.0.8
-    PUBLIC_HEADER VpnClient.h
+    PUBLIC_HEADER "VpnClient.h;DeepLink.h"
     MACOSX_FRAMEWORK_INFO_PLIST "${INFOPLIST_FILE}"
     MACOSX_FRAMEWORK_IDENTIFIER com.adguard.TrustTunnel.VpnClientFramework
     INSTALL_NAME_DIR "@rpath"
@@ -58,7 +60,18 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 target_link_options(${PROJECT_NAME} PRIVATE "-ObjC")
 
-target_link_libraries(${PROJECT_NAME} vpnlibs_trusttunnel)
+target_link_libraries(${PROJECT_NAME} vpnlibs_trusttunnel trusttunnel_deeplink_ffi)
+
+# Embed the deeplink FFI dylib in the framework bundle so it's found at runtime.
+# The dylib is built as cdylib to avoid duplicate Rust std symbols with libquiche.a.
+# Its install name is already set to @rpath/... by the ExternalProject step.
+get_target_property(DEEPLINK_FFI_DYLIB trusttunnel_deeplink_ffi IMPORTED_LOCATION)
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:${PROJECT_NAME}>/Frameworks"
+        COMMAND ${CMAKE_COMMAND} -E copy "${DEEPLINK_FFI_DYLIB}" "$<TARGET_BUNDLE_DIR:${PROJECT_NAME}>/Frameworks/libtrusttunnel_deeplink_ffi.dylib"
+        COMMENT "Embedding libtrusttunnel_deeplink_ffi.dylib in framework"
+)
+target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-rpath,@loader_path/Frameworks")
 
 target_link_libraries(${PROJECT_NAME} "-framework Foundation" "-framework NetworkExtension")
 
