@@ -230,7 +230,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_adguard_trusttunnel_VpnClient_notifyN
             available ? ag::VpnNetworkState::VPN_NS_CONNECTED : ag::VpnNetworkState::VPN_NS_NOT_CONNECTED);
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_adguard_trusttunnel_VpnClient_setSystemDnsServersNative(
-        JNIEnv *env, jobject thiz, jobjectArray servers, jobjectArray bootstraps) {
+        JNIEnv *env, jclass clazz, jobjectArray servers, jobjectArray bootstraps) {
     size_t num_servers = env->GetArrayLength(servers);
     size_t num_bootstraps = bootstraps != nullptr ? num_bootstraps = env->GetArrayLength(bootstraps) : 0;
 
