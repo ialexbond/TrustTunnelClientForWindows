@@ -24,6 +24,12 @@ class VpnClient (
         }
         @JvmStatic
         private external fun excludeCidr(includedRoutes: Array<String>, excludedRoutes: Array<String>): Array<String>?
+
+        fun setSystemDnsServers(servers: List<String>, bootstraps: List<String>?): Boolean {
+            return setSystemDnsServersNative(servers.toTypedArray(), bootstraps?.toTypedArray())
+        }
+        @JvmStatic
+        private external fun setSystemDnsServersNative(servers: Array<String>, bootstraps: Array<String>?): Boolean
     }
     private var nativePtr: Long = 0
     private val sync = Any()
@@ -54,10 +60,6 @@ class VpnClient (
         notifyNetworkChangeNative(nativePtr, available);
     }
 
-    fun setSystemDnsServers(servers: Array<String>, bootstraps: Array<String>?): Boolean = synchronized(sync) {
-        return setSystemDnsServersNative(servers, bootstraps)
-    }
-
     override fun close() = synchronized(sync) {
         if (nativePtr.toInt() != 0) {
             destroyNative(nativePtr);
@@ -84,6 +86,5 @@ class VpnClient (
     private external fun startNative(nativePtr: Long, tunFd: Int): Boolean;
     private external fun stopNative(nativePtr: Long);
     private external fun notifyNetworkChangeNative(nativePtr: Long, available: Boolean);
-    private external fun setSystemDnsServersNative(servers: Array<String>, bootstraps: Array<String>?): Boolean
     private external fun destroyNative(nativePtr: Long);
 }
