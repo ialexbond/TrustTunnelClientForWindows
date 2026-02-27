@@ -21,18 +21,15 @@ class NetworkUtils {
         class NetworkCollector : ConnectivityManager.NetworkCallback() {
             fun startNotifying(vpnClient: VpnClient?) {
                 this.vpnClient = vpnClient
-                availableNetworks.values.maxByOrNull { it.type }?.systemDns?.apply {
-                    vpnClient?.setSystemDnsServers(servers, bootstraps)
-                }
             }
 
             fun stopNotifying() {
                 vpnClient = null
             }
 
-            inner class SystemDns (
-                val servers: Array<String>,
-                val bootstraps: Array<String>?
+            data class SystemDns (
+                val servers: List<String>,
+                val bootstraps: List<String>?
             )
             inner class NetworkProps {
                 var type: Int = 0
@@ -45,18 +42,18 @@ class NetworkUtils {
                 super.onLost(network)
                 availableNetworks[network]?.apply {
                     availableNetworks.remove(network)
-                    if (vpnClient == null) {
-                        return
-                    }
                     if (availableNetworks.isEmpty()) {
                         // No more networks available, notify as disconnected
                         vpnClient?.notifyNetworkChange(false)
                         return
                     }
-                    val remainType = availableNetworks.values.maxOf { it.type }
+                    val preferredNetwork = availableNetworks.values.maxBy { it.type }
                     // Update only if higher priority network lost
-                    if (remainType < this.type) {
+                    if (preferredNetwork.type < this.type) {
                         vpnClient?.notifyNetworkChange(true)
+                        preferredNetwork.systemDns?.apply {
+                            VpnClient.setSystemDnsServers(servers, bootstraps)
+                        }
                     }
                 }
             }
@@ -69,6 +66,9 @@ class NetworkUtils {
                 networkCapabilities: NetworkCapabilities
             ) {
                 super.onCapabilitiesChanged(network, networkCapabilities)
+                if (availableNetworks[network] != null) {
+                    return
+                }
                 val oldType = availableNetworks.values.maxOfOrNull { it.type } ?: 0
                 val newType = getNetworkType(networkCapabilities)
                 availableNetworks[network] = NetworkProps()
@@ -94,17 +94,18 @@ class NetworkUtils {
                 val props = availableNetworks[network] ?: return
 
                 val systemDns = if (privateDns != null) {
-                    SystemDns(privateDns, servers)
+                    SystemDns(privateDns.toList(), servers.toList())
                 } else {
-                    SystemDns(servers, null)
+                    SystemDns(servers.toList(), null)
+                }
+                // Update dns only if they have changed
+                if (props.systemDns == systemDns) {
+                    return
                 }
                 props.systemDns = systemDns
 
-                if (vpnClient == null) {
-                    return
-                }
                 if (props.type >= availableNetworks.values.maxOf{ it.type }) {
-                    vpnClient?.setSystemDnsServers(systemDns.servers, systemDns.bootstraps)
+                    VpnClient.setSystemDnsServers(systemDns.servers, systemDns.bootstraps)
                 }
             }
 
