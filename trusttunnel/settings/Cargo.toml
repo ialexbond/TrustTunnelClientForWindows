@@ -8,4 +8,4 @@ crate-type = ["lib"]
 
 [dependencies]
 serde = { version = "1.0.163", features = ["derive"] }
-trusttunnel-deeplink = { git = "https://github.com/TrustTunnel/TrustTunnel" }
+trusttunnel-deeplink = { git = "https://github.com/TrustTunnel/TrustTunnel", tag = "v1.0.9" }
