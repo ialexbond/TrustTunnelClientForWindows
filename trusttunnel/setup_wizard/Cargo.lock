@@ -749,7 +749,7 @@ dependencies = [
 [[package]]
 name = "trusttunnel-deeplink"
 version = "0.1.0"
-source = "git+https://github.com/TrustTunnel/TrustTunnel#8d5f207a38a7be66e7cb5dfa5f41cb9e24edd507"
+source = "git+https://github.com/TrustTunnel/TrustTunnel?tag=v1.0.9#81fd43f363d7d723e00e384383be937a128679cf"
 dependencies = [
  "base64",
  "hex",
