@@ -1,6 +1,11 @@
 package com.adguard.trusttunnel
 
 object DeepLink {
+
+    init {
+        System.loadLibrary("trusttunnel_android")
+    }
+
     /**
      * Decode a `tt://` deep-link URI into a `[endpoint]` TOML section string.
      *
