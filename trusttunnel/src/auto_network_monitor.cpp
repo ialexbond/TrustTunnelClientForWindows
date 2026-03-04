@@ -35,6 +35,12 @@ static bool update_interface(std::string_view if_name) {
         vpn_network_manager_set_outbound_interface(if_index);
         return true;
     }
+#ifdef _WIN32
+    if (auto idx = ag::utils::to_integer<uint32_t>(if_name)) {
+        vpn_network_manager_set_outbound_interface(*idx);
+        return true;
+    }
+#endif
     return false;
 }
 
