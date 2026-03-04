@@ -1315,3 +1315,5 @@ commit_hash:
     hash: "4f93f382499756d37b53627a4bb846c702c7adeb"
   "1.0.17":
     hash: "0ed009de3b36afd8d9d9b5b66a7b9413dfa23912"
+  "1.0.18":
+    hash: "5071deb5886e9aa85bbcf25b48d6986ab6a5c3ab"
