@@ -3,11 +3,60 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Password, Select};
 use once_cell::sync::Lazy;
 use std::fs;
+use std::io::Write;
 use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
 
 pub static THEME: Lazy<ColorfulTheme> = Lazy::new(ColorfulTheme::default);
+
+/// Ask user to enter a raw line using bracketed paste mode.
+/// This delivers the entire paste as a single event, bypassing the TTY canonical
+/// mode line buffer that truncates long inputs like deep-link URIs.
+/// This function supports only Paste and Enter events.
+pub fn ask_for_input_raw_line(message: &str) -> String {
+    use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode};
+    use crossterm::execute;
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    print!("? {} › ", message);
+    std::io::stdout().flush().unwrap();
+
+    enable_raw_mode().unwrap();
+    execute!(std::io::stdout(), EnableBracketedPaste).unwrap();
+
+    let mut result = String::new();
+    loop {
+        match event::read().unwrap() {
+            Event::Paste(text) => {
+                result = text;
+
+                // As long as deeplink URI contains only ASCII characters,
+                // we can safety slice by bytes.
+                let bytes = result.as_bytes();
+                let print_len = bytes.len().min(1024);
+                let mut stdout = std::io::stdout();
+
+                stdout.write_all(&bytes[..print_len]).unwrap();
+                if bytes.len() > 1024 {
+                    stdout.write_all(b"...").unwrap();
+                }
+                stdout.flush().unwrap();
+                break;
+            }
+            Event::Key(key) if key.code == KeyCode::Enter => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    execute!(std::io::stdout(), DisableBracketedPaste).unwrap();
+    disable_raw_mode().unwrap();
+    println!();
+
+    result
+}
 
 /// Ask user to enter a value.
 /// If [`default`] is [`Some`], suggest the value in the prompt.

@@ -1,8 +1,8 @@
 pub use trusttunnel_settings::Endpoint;
 
 use crate::user_interaction::{
-    ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_password,
-    select_variant,
+    ask_for_agreement, ask_for_agreement_with_default, ask_for_input, ask_for_input_raw_line,
+    ask_for_password, select_variant,
 };
 use crate::Mode;
 use serde::{Deserialize, Serialize};
@@ -328,7 +328,7 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
                 }
                 1 => {
                     // Deep-link URI
-                    let uri = ask_for_input::<String>("Paste deep-link URI", None);
+                    let uri = ask_for_input_raw_line("Paste deep-link URI");
                     return endpoint_from_deeplink(&uri);
                 }
                 _ => unreachable!(),
