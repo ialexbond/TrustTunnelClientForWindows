@@ -441,7 +441,7 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
     if endpoint_config.is_some() {
         let config = endpoint_config.as_ref().unwrap();
         x.hostname = config.hostname.clone();
-        x.certificate = config.certificate.clone().into();
+        x.certificate = empty_to_none(config.certificate.clone());
     } else {
         let (hostname, certificate) = if crate::get_mode() == Mode::NonInteractive {
             (
