@@ -1,3 +1,4 @@
+#include <common/logger.h>
 #include <cstdio>
 #include <functional>
 #include <optional>
@@ -8,6 +9,7 @@
 #include <unordered_map>
 
 #include <magic_enum/magic_enum.hpp>
+#include <openssl/err.h>
 #include <openssl/pem.h>
 
 #include "net/tls.h"
@@ -43,22 +45,39 @@ static std::string streamable_to_string(const T &obj) {
     return stream.str();
 }
 
-static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view pem_certificate) {
-    UniquePtr<BIO, &BIO_free> bio{BIO_new_mem_buf(pem_certificate.data(), (long) pem_certificate.size())};
-
-    UniquePtr<X509, &X509_free> cert{PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr)};
-    if (cert == nullptr) {
-        warnlog(g_logger, "Failed to parse certificate, ensure it is in PEM format");
+static UniquePtr<X509_STORE, &X509_STORE_free> load_certificate(std::string_view pem_bundle) {
+    UniquePtr<BIO, &BIO_free> bio{BIO_new_mem_buf(pem_bundle.data(), static_cast<int>(pem_bundle.size()))};
+    if (!bio) {
         return nullptr;
     }
 
     UniquePtr<X509_STORE, &X509_STORE_free> store{tls_create_ca_store()};
-    if (store == nullptr) {
+    if (!store) {
         warnlog(g_logger, "Failed to create CA store");
         return nullptr;
     }
 
-    X509_STORE_add_cert(store.get(), cert.get());
+    bool any_loaded = false;
+    for (;;) {
+        UniquePtr<X509, &X509_free> cert{PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr)};
+        if (!cert) {
+            if (auto err = ERR_peek_last_error(); ERR_GET_REASON(err) != PEM_R_NO_START_LINE) {
+                warnlog(g_logger, "Failed to parse certificate, ensure it is in PEM format");
+            }
+            ERR_clear_error();
+            break;
+        }
+
+        if (X509_STORE_add_cert(store.get(), cert.get()) != 1) {
+            warnlog(g_logger, "Failed to add to the CA store");
+        }
+        any_loaded = true;
+    }
+
+    if (!any_loaded) {
+        warnlog(g_logger, "Failed to load certificate");
+        return nullptr;
+    }
 
     return store;
 }
