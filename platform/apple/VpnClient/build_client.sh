@@ -146,6 +146,9 @@ function build_target() {
         exit 1
     fi
 
+    install_name_tool -change @rpath/libtrusttunnel_deeplink_ffi.dylib @rpath/${target_name}.framework/Frameworks/libtrusttunnel_deeplink_ffi.dylib \
+        ${target_name}.framework/${target_name}
+
     if [ -n "${CODESIGN_IDENTITY}" ]; then
         codesign --force --sign "${CODESIGN_IDENTITY}" --options runtime --timestamp "${target_name}.framework"
     fi
@@ -175,10 +178,12 @@ mkdir -p "${BUILD_DIR}/framework-macos"
 cp -Rf "${BUILD_DIR}/framework-macos-x86_64/${TARGET_NAME}.framework" "${BUILD_DIR}/framework-macos/"
 rm "${BUILD_DIR}/framework-macos/${TARGET_NAME}.framework/Versions/A/${TARGET_NAME}"
 lipo -create -output "${BUILD_DIR}"/framework-macos{,-x86_64,-arm64}/"${TARGET_NAME}.framework/Versions/A/${TARGET_NAME}"
+lipo -create -output "${BUILD_DIR}"/framework-macos{,-x86_64,-arm64}/"${TARGET_NAME}.framework/Frameworks/libtrusttunnel_deeplink_ffi.dylib"
 mkdir -p "${BUILD_DIR}/framework-iphonesimulator"
 cp -Rf "${BUILD_DIR}/framework-iphonesimulator-x86_64/${TARGET_NAME}.framework" "${BUILD_DIR}/framework-iphonesimulator/"
 rm "${BUILD_DIR}/framework-iphonesimulator/${TARGET_NAME}.framework/${TARGET_NAME}"
 lipo -create -output "${BUILD_DIR}"/framework-iphonesimulator{,-x86_64,-arm64}/"${TARGET_NAME}.framework/${TARGET_NAME}"
+lipo -create -output "${BUILD_DIR}"/framework-iphonesimulator{,-x86_64,-arm64}/"${TARGET_NAME}.framework/Frameworks/libtrusttunnel_deeplink_ffi.dylib"
 
 dsymutil -o "${BUILD_DIR}/framework-ios/${TARGET_NAME}.framework.dSYM" "${BUILD_DIR}/framework-ios/${TARGET_NAME}.framework/${TARGET_NAME}"
 dsymutil -o "${BUILD_DIR}/framework-iphonesimulator/${TARGET_NAME}.framework.dSYM" "${BUILD_DIR}/framework-iphonesimulator/${TARGET_NAME}.framework/${TARGET_NAME}"
