@@ -29,7 +29,7 @@ class VpnLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
-        self.requires("dns-libs/2.8.27@adguard/oss", transitive_headers=True)
+        self.requires("dns-libs/2.8.37@adguard/oss", transitive_headers=True)
         self.requires("native_libs_common/8.0.23@adguard/oss", transitive_headers=True)
 
         self.requires("brotli/1.1.0", transitive_headers=True)
@@ -40,7 +40,7 @@ class VpnLibsConan(ConanFile):
         self.requires("libevent/2.1.11@adguard/oss", transitive_headers=True)
         self.requires("magic_enum/0.9.5", transitive_headers=True)
         self.requires("nghttp2/1.56.0@adguard/oss", transitive_headers=True)
-        self.requires("nlohmann_json/3.10.5")
+        self.requires("nlohmann_json/3.12.0")
         self.requires("tomlplusplus/3.3.0")
         self.requires("zlib/1.3.1", transitive_headers=True)
 
