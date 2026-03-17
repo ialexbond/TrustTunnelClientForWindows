@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Settings, FolderOpen, Save, RefreshCw, Eye, EyeOff, Trash2, AlertTriangle, Loader2, Download } from "lucide-react";
+import { Settings, FolderOpen, Save, Eye, EyeOff, Trash2, AlertTriangle, Loader2, Download } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import type { VpnConfig, VpnStatus } from "../App";
 
@@ -382,8 +382,16 @@ function SettingsPanel({
           />
           <button
             onClick={async () => {
+              // Open dialog in the directory of the current config file
+              let defaultPath: string | undefined;
+              if (localPath) {
+                const sep = localPath.includes("/") ? "/" : "\\";
+                const lastSep = localPath.lastIndexOf(sep);
+                if (lastSep > 0) defaultPath = localPath.substring(0, lastSep);
+              }
               const selected = await open({
                 multiple: false,
+                defaultPath,
                 filters: [{ name: "TOML Config", extensions: ["toml"] }],
               });
               if (selected) {
@@ -396,14 +404,6 @@ function SettingsPanel({
             title="Выбрать файл"
           >
             <FolderOpen className="w-3 h-3" />
-          </button>
-          <button
-            onClick={loadConfig}
-            className="p-1.5 bg-white/5 border border-white/10 rounded-lg
-                       hover:bg-white/10 transition-colors text-gray-400 hover:text-gray-200"
-            title="Перечитать конфиг"
-          >
-            <RefreshCw className="w-3 h-3" />
           </button>
         </div>
       </div>

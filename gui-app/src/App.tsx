@@ -89,7 +89,7 @@ function App() {
     try {
       const currentVersion = await getVersion();
       const res = await fetch(
-        "https://api.github.com/repos/ialexbond/TrustTunnelClient/releases/latest",
+        "https://api.github.com/repos/ialexbond/TrustTunnelClientForWindows/releases/latest",
         { headers: { "Accept": "application/vnd.github.v3+json" } }
       );
       if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
@@ -117,6 +117,7 @@ function App() {
   useEffect(() => { checkForUpdates(true); }, [checkForUpdates]);
 
   // Validate saved config path on startup — if file doesn't exist, reset to wizard
+  // Also auto-detect .toml config in app directory if no config is set
   useEffect(() => {
     const savedPath = localStorage.getItem("tt_config_path");
     if (savedPath) {
@@ -135,6 +136,14 @@ function App() {
         setActiveTab("setup");
         setWizardKey(k => k + 1);
       });
+    } else {
+      // No saved config — try to auto-detect .toml in app directory
+      invoke<string | null>("auto_detect_config").then((detected) => {
+        if (detected) {
+          setConfig(prev => ({ ...prev, configPath: detected }));
+          if (activeTab === "setup") setActiveTab("settings");
+        }
+      }).catch(() => {});
     }
   }, []);
 
@@ -222,6 +231,14 @@ function App() {
     try {
       setError(null);
       setStatus("connecting");
+      // Apply routing rules to TOML config before connecting
+      try {
+        await invoke("apply_routing_to_config", { configPath: config.configPath });
+      } catch (routeErr) {
+        const msg = `Ошибка применения правил маршрутизации: ${routeErr}`;
+        console.warn(msg);
+        setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), level: "warn", message: msg }]);
+      }
       await invoke("vpn_connect", {
         configPath: config.configPath,
         logLevel: config.logLevel,

@@ -1,3 +1,4 @@
+mod geodata;
 mod sidecar;
 mod ssh_deploy;
 
@@ -269,12 +270,64 @@ async fn uninstall_server(
     ssh_deploy::uninstall_server(&app, host, port, user, password).await
 }
 
+/// Find .toml config files next to the executable
+#[tauri::command]
+fn auto_detect_config() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    for entry in std::fs::read_dir(dir).ok()? {
+        if let Ok(e) = entry {
+            let path = e.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("toml")
+                && path.file_name().and_then(|s| s.to_str()) != Some("Cargo.toml")
+            {
+                // Verify it looks like a trusttunnel config (has [endpoint] or [listener])
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if content.contains("[endpoint]") || content.contains("[listener") {
+                        return Some(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
 fn read_client_config(config_path: String) -> Result<serde_json::Value, String> {
     let content = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read config: {e}"))?;
-    let table: toml::Value = content.parse()
-        .map_err(|e| format!("Failed to parse TOML: {e}"))?;
+    let table: toml::Value = match content.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            // Attempt recovery: strip all exclusions blocks and re-parse
+            eprintln!("[config] Parse error: {e}. Attempting recovery by stripping exclusions...");
+            let mut lines: Vec<&str> = Vec::new();
+            let mut skip = false;
+            for line in content.lines() {
+                let t = line.trim();
+                if t.starts_with("exclusions") && t.contains('[') {
+                    skip = true;
+                    continue;
+                }
+                if skip {
+                    if t == "]" { skip = false; continue; }
+                    if t.starts_with('"') || t.is_empty() || t.starts_with('#') { continue; }
+                    skip = false;
+                }
+                lines.push(line);
+            }
+            let fixed = lines.join("\n");
+            // Write the fixed config back to disk so future reads succeed
+            if let Ok(parsed) = fixed.parse::<toml::Value>() {
+                let _ = std::fs::write(&config_path, &fixed);
+                eprintln!("[config] Recovery successful, fixed config saved");
+                parsed
+            } else {
+                return Err(format!("Failed to parse TOML: {e}"));
+            }
+        }
+    };
     // Convert toml::Value to serde_json::Value
     let json = serde_json::to_value(&table)
         .map_err(|e| format!("Failed to convert: {e}"))?;
@@ -324,7 +377,7 @@ pub fn run() {
             // Create tray icon
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("TrustTunnel-клиент")
+                .tooltip("TrustTunnel Client for Windows")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
@@ -373,10 +426,20 @@ pub fn run() {
             diagnose_server,
             check_process_conflict,
             kill_existing_process,
+            auto_detect_config,
             read_client_config,
             save_client_config,
             check_server_installation,
-            uninstall_server
+            uninstall_server,
+            geodata::get_geodata_status,
+            geodata::download_geodata,
+            geodata::download_all_geodata,
+            geodata::resolve_geodata_category,
+            geodata::list_geodata_sources,
+            geodata::load_routing_rules,
+            geodata::save_routing_rules,
+            geodata::apply_routing_to_config,
+            geodata::list_running_processes
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

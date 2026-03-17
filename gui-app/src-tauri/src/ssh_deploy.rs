@@ -38,6 +38,7 @@ pub struct EndpointSettings {
     pub vpn_password: String,
     pub cert_type: String,
     pub domain: String,
+    #[allow(dead_code)]
     pub client_name: String,
     #[serde(default)]
     pub email: String,
@@ -462,7 +463,7 @@ pub async fn deploy_server(
     emit_log(app, "info", "Сертификаты созданы ✓");
 
     // Pre-flight: run endpoint briefly to verify config is valid
-    let (preflight, preflight_code) = exec_command(
+    let (preflight, _preflight_code) = exec_command(
         &handle, app,
         &format!("cd /opt/trusttunnel && timeout 2 {sudo}./trusttunnel_endpoint vpn.toml hosts.toml 2>&1 || true")
     ).await?;
