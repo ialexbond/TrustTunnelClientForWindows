@@ -7,6 +7,27 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::RunEvent;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Force-kill ALL trusttunnel_client.exe processes system-wide.
+/// Called before connecting and on app exit to avoid stale WinTUN locks.
+fn kill_all_sidecar_processes() {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "trusttunnel_client.exe"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output();
+}
+
+/// Kill the sidecar stored in AppState, if any.
+fn kill_sidecar_from_state(state: &AppState) {
+    if let Ok(mut guard) = state.sidecar_child.lock() {
+        if let Some(child) = guard.take() {
+            child.child.kill().ok();
+        }
+    }
+}
 
 #[derive(Clone, Serialize)]
 struct VpnLogPayload {
@@ -51,6 +72,11 @@ async fn vpn_connect(
             return Err("VPN is already running".into());
         }
     }
+
+    // Kill any stale sidecar processes that might hold the WinTUN adapter
+    kill_all_sidecar_processes();
+    // Give OS a moment to release the adapter
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     app.emit("vpn-log", VpnLogPayload {
         message: "Spawning trusttunnel_client process...".into(),
@@ -302,6 +328,11 @@ pub fn run() {
                             }
                         }
                         "quit" => {
+                            // Kill sidecar + all stale processes before exiting
+                            if let Some(state) = app.try_state::<AppState>() {
+                                kill_sidecar_from_state(&state);
+                            }
+                            kill_all_sidecar_processes();
                             app.exit(0);
                         }
                         _ => {}
@@ -340,6 +371,15 @@ pub fn run() {
             check_server_installation,
             uninstall_server
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                // Final cleanup: kill sidecar from state + any stale processes
+                if let Some(state) = app.try_state::<AppState>() {
+                    kill_sidecar_from_state(&state);
+                }
+                kill_all_sidecar_processes();
+            }
+        });
 }

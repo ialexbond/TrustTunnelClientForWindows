@@ -1,4 +1,15 @@
 fn main() {
+    // Use Tauri's own WindowsAttributes to embed requireAdministrator manifest.
+    // This replaces Tauri's default asInvoker manifest so UAC prompt is shown on launch.
+    #[cfg(windows)]
+    {
+        let windows_attrs = tauri_build::WindowsAttributes::new()
+            .app_manifest(include_str!("trusttunnel-gui.exe.manifest"));
+        let attrs = tauri_build::Attributes::new()
+            .windows_attributes(windows_attrs);
+        tauri_build::try_build(attrs).expect("failed to run tauri build");
+    }
+    #[cfg(not(windows))]
     tauri_build::build();
 
     // Copy correct vcruntime DLLs to output dir (Miniconda ships older versions
