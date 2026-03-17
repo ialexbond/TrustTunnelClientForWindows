@@ -986,10 +986,10 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               <ChevronRight className="w-4 h-4" />
             </button>
             <button
-              onClick={() => setWizardStep("endpoint")}
+              onClick={() => setWizardStep("welcome")}
               className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
             >
-              Переустановить сервер
+              ← На главную
             </button>
           </div>
         </div>

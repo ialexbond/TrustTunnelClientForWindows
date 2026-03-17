@@ -83,6 +83,24 @@ pub async fn spawn_trusttunnel(
                             )
                             .ok();
                     }
+
+                    // Detect config parse errors and surface them clearly
+                    if trimmed.contains("Failed parsing configuration") {
+                        let err_msg = if let Some(pos) = trimmed.find("Failed parsing configuration") {
+                            &trimmed[pos..]
+                        } else {
+                            "Ошибка разбора конфигурации. Проверьте файл .toml"
+                        };
+                        app_handle
+                            .emit(
+                                "vpn-status",
+                                serde_json::json!({
+                                    "status": "error",
+                                    "error": format!("⚠ Ошибка конфигурации: {err_msg}"),
+                                }),
+                            )
+                            .ok();
+                    }
                 }
                 CommandEvent::Terminated(payload) => {
                     if let Ok(mut g) = is_connected.lock() { *g = false; }
