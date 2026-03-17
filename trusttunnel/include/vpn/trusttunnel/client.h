@@ -9,6 +9,7 @@
 #include "config.h"
 #include "net/os_tunnel.h"
 #include "net/utils.h"
+#include "vpn/internal/domain_filter.h"
 #include "vpn/vpn.h"
 
 #ifdef __APPLE__
@@ -112,6 +113,7 @@ private:
     std::optional<FileHandler> m_logfile_handler;
     std::optional<Logger::LogToFile> m_logtofile;
     VpnCallbacks m_callbacks;
+    DomainFilter m_blocked_filter;
 #ifdef _WIN32
     HMODULE m_wintun;
 #endif

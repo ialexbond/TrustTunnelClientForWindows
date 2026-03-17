@@ -57,6 +57,13 @@ struct TrustTunnelConfig {
     bool post_quantum_group_enabled = true;
     std::string log_file_path;
     std::string exclusions;
+    /// Path to a plain-text file (one entry per line) used as an alternative/addition to inline exclusions.
+    /// Avoids TOML size limits for large lists.
+    std::string exclusions_file;
+    /// Whitespace-separated list of domains/IPs/CIDRs that should be blocked (connection rejected).
+    std::string blocked;
+    /// Path to a plain-text file (one entry per line) with entries to be blocked.
+    std::string blocked_file;
     std::optional<std::string> ssl_session_storage_path;
     std::vector<std::string> dns_upstreams;
     Location location;
