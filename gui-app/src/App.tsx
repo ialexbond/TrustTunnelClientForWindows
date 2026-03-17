@@ -231,14 +231,6 @@ function App() {
     try {
       setError(null);
       setStatus("connecting");
-      // Apply routing rules to TOML config before connecting
-      try {
-        await invoke("apply_routing_to_config", { configPath: config.configPath });
-      } catch (routeErr) {
-        const msg = `Ошибка применения правил маршрутизации: ${routeErr}`;
-        console.warn(msg);
-        setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), level: "warn", message: msg }]);
-      }
       await invoke("vpn_connect", {
         configPath: config.configPath,
         logLevel: config.logLevel,
@@ -336,7 +328,16 @@ function App() {
       </div>
 
       <div className="flex-1 flex flex-col p-3 overflow-hidden" style={{ display: activeTab === "routing" ? "flex" : "none" }}>
-        <RoutingPanel />
+        <RoutingPanel
+          configPath={config.configPath}
+          status={status}
+          onReconnect={async () => {
+            if (status === "connected" || status === "connecting") {
+              await handleDisconnect();
+              setTimeout(() => handleConnect(), 500);
+            }
+          }}
+        />
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden" style={{ display: activeTab === "about" ? "flex" : "none" }}>

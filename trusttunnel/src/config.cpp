@@ -279,6 +279,41 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
         }
     }
 
+    // Load exclusions from external file (avoids TOML size limits for large domain/IP lists)
+    if (auto ef = config["exclusions_file"].value<std::string>(); ef.has_value() && !ef->empty()) {
+        if (FILE *f = std::fopen(ef->c_str(), "r"); f != nullptr) {
+            std::fseek(f, 0, SEEK_END);
+            long sz = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (sz > 0) {
+                std::string content(static_cast<size_t>(sz), '\0');
+                std::fread(content.data(), 1, static_cast<size_t>(sz), f);
+                result.exclusions += content;
+            }
+            std::fclose(f);
+            infolog(g_logger, "Loaded exclusions from file: {} ({} bytes)", *ef, sz > 0 ? sz : 0);
+        } else {
+            warnlog(g_logger, "Failed to open exclusions_file: {}", *ef);
+        }
+    }
+
+    // Load blocked domains/IPs from external file
+    if (auto bf = config["blocked_file"].value<std::string>(); bf.has_value() && !bf->empty()) {
+        if (FILE *f = std::fopen(bf->c_str(), "r"); f != nullptr) {
+            std::fseek(f, 0, SEEK_END);
+            long sz = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (sz > 0) {
+                result.blocked.resize(static_cast<size_t>(sz), '\0');
+                std::fread(result.blocked.data(), 1, static_cast<size_t>(sz), f);
+            }
+            std::fclose(f);
+            infolog(g_logger, "Loaded blocked list from file: {} ({} bytes)", *bf, sz > 0 ? sz : 0);
+        } else {
+            warnlog(g_logger, "Failed to open blocked_file: {}", *bf);
+        }
+    }
+
     if (const auto *x = config["dns_upstreams"].as_array(); x != nullptr) {
         result.dns_upstreams.reserve(x->size());
         for (const auto &a : *x) {

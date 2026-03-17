@@ -21,6 +21,9 @@ TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&
         : m_config(std::move(config))
         , m_extra_loop(vpn_event_loop_create())
         , m_callbacks(std::move(callbacks)) {
+    if (!m_config.blocked.empty()) {
+        m_blocked_filter.update_exclusions(VPN_MODE_GENERAL, m_config.blocked);
+    }
     if (!m_config.log_file_path.empty()) {
         m_logfile_handler.emplace(m_config.log_file_path);
         m_logtofile.emplace(m_logfile_handler->get_file());
@@ -446,7 +449,15 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         auto *task_context = new TaskContext;
         const VpnConnectRequestEvent *event = (VpnConnectRequestEvent *) data;
         auto *info = new VpnConnectionInfo{event->id};
-        info->action = VPN_CA_DEFAULT;
+        // Check if destination should be blocked
+        VpnConnectAction action = VPN_CA_DEFAULT;
+        if (!m_config.blocked.empty() && event->dst != nullptr && event->dst->type == VPN_AT_HOST) {
+            std::string_view host{event->dst->host.name.data, event->dst->host.name.size};
+            if (!host.empty() && m_blocked_filter.match_domain(host) == DFMS_EXCLUSION) {
+                action = VPN_CA_REJECT;
+            }
+        }
+        info->action = action;
         info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
         task_context->info = info;
         task_context->vpn = m_vpn;
