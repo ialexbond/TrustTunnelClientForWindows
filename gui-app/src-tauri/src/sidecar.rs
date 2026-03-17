@@ -4,7 +4,7 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
 pub struct SidecarChild {
-    child: CommandChild,
+    pub child: CommandChild,
     pub disconnecting: Arc<Mutex<bool>>,
 }
 
