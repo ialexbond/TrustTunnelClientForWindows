@@ -116,6 +116,28 @@ function App() {
   // Auto-check on startup (silent)
   useEffect(() => { checkForUpdates(true); }, [checkForUpdates]);
 
+  // Validate saved config path on startup — if file doesn't exist, reset to wizard
+  useEffect(() => {
+    const savedPath = localStorage.getItem("tt_config_path");
+    if (savedPath) {
+      invoke("read_client_config", { configPath: savedPath }).catch(() => {
+        // Config file doesn't exist — stale localStorage, reset everything
+        localStorage.removeItem("tt_config_path");
+        localStorage.removeItem("tt_active_tab");
+        localStorage.removeItem("tt_connected_since");
+        try {
+          const raw = localStorage.getItem("trusttunnel_wizard");
+          const obj = raw ? JSON.parse(raw) : {};
+          obj.wizardStep = "welcome";
+          localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
+        } catch {}
+        setConfig({ configPath: "", logLevel: "info" });
+        setActiveTab("setup");
+        setWizardKey(k => k + 1);
+      });
+    }
+  }, []);
+
   // Persist tab and config to localStorage
   useEffect(() => { localStorage.setItem("tt_active_tab", activeTab); }, [activeTab]);
   useEffect(() => {
