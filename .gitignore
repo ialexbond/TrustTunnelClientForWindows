@@ -19,3 +19,6 @@ cmake/conan_provider.cmake
 # Build artifacts
 TrustTunnel-Portable/
 *.zip
+webview_data/
+geodata/
+routing_rules.json
