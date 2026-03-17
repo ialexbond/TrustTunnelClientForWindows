@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+
+# Tauri generated schemas (regenerated on build)
+src-tauri/gen/
+
+# Binary files (sidecar, DLLs) — download or build separately
+src-tauri/binaries/*.exe
+src-tauri/*.exe
+src-tauri/wintun.dll
+src-tauri/admin-manifest.rc
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Runtime data (generated configs, logs)
+*.toml.bak
+trusttunnel_client.toml
