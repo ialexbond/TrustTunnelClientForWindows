@@ -1,0 +1,73 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+// Block F5, Ctrl+R reload shortcuts
+document.addEventListener("keydown", (e) => {
+  if (
+    e.key === "F5" ||
+    (e.ctrlKey && e.key === "r") ||
+    (e.ctrlKey && e.shiftKey && e.key === "R")
+  ) {
+    e.preventDefault();
+  }
+});
+
+// React Error Boundary to catch rendering errors without crashing the page
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[ErrorBoundary]", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 32, color: "#ef4444", fontFamily: "monospace" }}>
+          <h2>Произошла ошибка в интерфейсе</h2>
+          <pre style={{ whiteSpace: "pre-wrap" }}>{this.state.error}</pre>
+          <button
+            onClick={() => this.setState({ hasError: false, error: "" })}
+            style={{
+              marginTop: 16, padding: "8px 16px",
+              background: "#333", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
+            }}
+          >
+            Попробовать снова
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Catch ALL unhandled errors and rejections globally
+window.addEventListener("error", (e) => {
+  console.error("[global error]", e.error);
+  e.preventDefault();
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("[unhandled rejection]", e.reason);
+  e.preventDefault();
+});
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </React.StrictMode>,
+);
