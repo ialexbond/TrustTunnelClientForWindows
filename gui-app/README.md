@@ -4,7 +4,7 @@
 
 ## Архитектура
 
-```
+```text
 gui-app/
 ├── src/                    # React frontend (Vite + Tailwind)
 │   ├── components/
@@ -41,7 +41,7 @@ cmake --build build --target trusttunnel_client
 
 Tauri требует, чтобы имя файла содержало **target triple** платформы:
 
-```
+```text
 gui-app/src-tauri/binaries/
   trusttunnel_client-x86_64-pc-windows-msvc.exe   # Windows x64
   trusttunnel_client-aarch64-pc-windows-msvc.exe   # Windows ARM64
@@ -82,11 +82,13 @@ copy build\trusttunnel\Release\trusttunnel_client.exe gui-app\src-tauri\binaries
 ### Шаг 4: Как это работает в коде
 
 **Rust (src-tauri/src/sidecar.rs):**
+
 - `spawn_trusttunnel()` — запускает `trusttunnel_client` с аргументами `-c <config> -l <loglevel>`
 - Перехватывает stdout/stderr и отправляет в React через `app.emit("vpn-log", ...)`
 - При завершении процесса отправляет `vpn-status` с соответствующим статусом
 
 **React (src/App.tsx):**
+
 - Вызывает `invoke("vpn_connect", { configPath, logLevel })` для подключения
 - Слушает события `vpn-log` и `vpn-status` через `listen()`
 
