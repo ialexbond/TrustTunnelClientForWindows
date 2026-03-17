@@ -431,15 +431,8 @@ pub fn run() {
             save_client_config,
             check_server_installation,
             uninstall_server,
-            geodata::get_geodata_status,
-            geodata::download_geodata,
-            geodata::download_all_geodata,
-            geodata::resolve_geodata_category,
-            geodata::list_geodata_sources,
-            geodata::load_routing_rules,
-            geodata::save_routing_rules,
-            geodata::apply_routing_to_config,
-            geodata::list_running_processes
+            geodata::load_exclusion_list,
+            geodata::save_exclusion_list
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
