@@ -462,6 +462,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="text-[11px] text-gray-600 space-y-0.5 pt-2">
             <p>Для настройки сервера потребуется:</p>
             <p>• Linux-сервер (Ubuntu 22+, Debian 11+) с SSH-доступом</p>
+            <p>• Минимум 1 ядро CPU и 512 МБ RAM (рекомендуется 1 ГБ)</p>
             <p>• Права root • Домен, направленный на IP сервера</p>
           </div>
         </div>
@@ -952,7 +953,6 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         <div className="flex-1 flex flex-col items-center justify-center p-6">
           <div className="max-w-md w-full space-y-4">
             <div className="text-center space-y-1">
-              <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
               <h2 className="text-lg font-bold">Устанавливаем TrustTunnel...</h2>
               <p className="text-xs text-gray-500">Это может занять несколько минут</p>
             </div>
