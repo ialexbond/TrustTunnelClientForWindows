@@ -149,10 +149,9 @@ Compress-Archive "TrustTunnel-Portable\*" "TrustTunnel-portable-win64.zip"
 
 ## Планы развития
 
-- [ ] Автообновление приложения
 - [ ] Поддержка нескольких серверов / профилей
-- [ ] Killswitch (блокировка трафика при разрыве VPN)
 - [ ] Split tunneling в GUI (выбор приложений/сайтов)
+- [ ] Обновление протокола
 
 ---
 
