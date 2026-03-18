@@ -162,6 +162,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   const [copied, setCopied] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
+  // Tracks current operation so the event listener only reacts to relevant events
+  const operationRef = useRef<"deploy" | "fetch" | "uninstall" | null>(null);
+
   // Persist form fields on change
   useEffect(() => { saveField("host", host); }, [host]);
   useEffect(() => { saveField("port", port); }, [port]);
@@ -199,6 +202,10 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     const unlistenStep = listen<DeployStep>("deploy-step", (event) => {
       const { step, status, message } = event.payload;
       setDeploySteps((prev) => ({ ...prev, [step]: { step, status, message } }));
+
+      // Only react to deploy/fetch operations, not uninstall
+      const op = operationRef.current;
+      if (op === "uninstall") return;
 
       if (step === "done" && status === "ok") {
         setTimeout(() => setWizardStep("done"), 600);
@@ -248,33 +255,34 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   };
 
   const handleUninstall = async () => {
+    operationRef.current = "uninstall";
     setWizardStep("uninstalling");
     setDeploySteps({});
     setDeployLogs([]);
+    setErrorMessage("");
     try {
+      // Disconnect VPN FIRST — if VPN routes all traffic through the server,
+      // SSH will break when we stop the TrustTunnel service during uninstall
+      try { await invoke("vpn_disconnect"); } catch { /* already disconnected */ }
+
       await invoke("uninstall_server", {
         host,
         port: parseInt(port),
         user: sshUser,
         password: sshPassword,
       });
-      // Auto-disconnect VPN client since server is gone
-      invoke("vpn_disconnect").catch(() => {});
-      // After uninstall, auto-deploy with existing settings if they're filled in
-      setTimeout(() => {
-        if (vpnUsername.trim() && vpnPassword && (certType !== "letsencrypt" || (domain.trim() && email.trim()))) {
-          handleDeploy();
-        } else {
-          setWizardStep("endpoint");
-        }
-      }, 800);
+      // Always go to endpoint settings so user can review/change params before deploying
+      operationRef.current = null;
+      setWizardStep("endpoint");
     } catch (e) {
+      operationRef.current = null;
       setErrorMessage(String(e));
       setWizardStep("error");
     }
   };
 
   const handleDeploy = async () => {
+    operationRef.current = "deploy";
     setWizardStep("deploying");
     setDeploySteps({});
     setDeployLogs([]);
@@ -298,10 +306,11 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       });
       setConfigPath(result);
     } catch (e) {
-      if (wizardStep !== "error") {
-        setErrorMessage(String(e));
-        setWizardStep("error");
-      }
+      // Only set error if the event listener hasn't already done so
+      setErrorMessage((prev) => prev || String(e));
+      setWizardStep("error");
+    } finally {
+      operationRef.current = null;
     }
   };
 
@@ -316,6 +325,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   };
 
   const handleFetchConfig = async () => {
+    operationRef.current = "fetch";
     setWizardStep("fetching");
     setDeploySteps({});
     setDeployLogs([]);
@@ -333,8 +343,10 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       setFetchRetryCount(0);
     } catch (e) {
       setFetchRetryCount((c) => c + 1);
-      setErrorMessage(String(e));
+      setErrorMessage((prev) => prev || String(e));
       setWizardStep("error");
+    } finally {
+      operationRef.current = null;
     }
   };
 
