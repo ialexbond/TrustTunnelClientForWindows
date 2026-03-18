@@ -108,7 +108,7 @@ function StatusPanel({
               </div>
             )}
             {error && (
-              <p className="text-[11px] text-red-400 mt-0.5 max-w-sm truncate">
+              <p className="text-[11px] text-red-400 mt-0.5 max-w-sm break-words line-clamp-3" title={error}>
                 {error}
               </p>
             )}

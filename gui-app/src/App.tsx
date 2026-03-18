@@ -5,7 +5,6 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
 import Header from "./components/Header";
 import StatusPanel from "./components/StatusPanel";
-import LogPanel from "./components/LogPanel";
 import SetupWizard from "./components/SetupWizard";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
@@ -35,11 +34,6 @@ export interface VpnConfig {
   logLevel: string;
 }
 
-export interface LogEntry {
-  timestamp: string;
-  level: string;
-  message: string;
-}
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);
@@ -63,18 +57,13 @@ function App() {
     return "setup";
   });
   const [status, setStatus] = useState<VpnStatus>("disconnected");
-  const [logs, setLogs] = useState<LogEntry[]>(() => {
-    try {
-      const saved = sessionStorage.getItem("tt_logs");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
   const [config, setConfig] = useState<VpnConfig>(() => {
     const savedPath = localStorage.getItem("tt_config_path") || "";
     const savedLevel = localStorage.getItem("tt_log_level") || "info";
     return { configPath: savedPath, logLevel: savedLevel };
   });
   const [error, setError] = useState<string | null>(null);
+  const [vpnMode, setVpnMode] = useState<string>("general");
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
@@ -122,7 +111,9 @@ function App() {
   useEffect(() => {
     const savedPath = localStorage.getItem("tt_config_path");
     if (savedPath) {
-      invoke("read_client_config", { configPath: savedPath }).catch(() => {
+      invoke<{ vpn_mode?: string }>("read_client_config", { configPath: savedPath }).then((cfg) => {
+        if (cfg?.vpn_mode) setVpnMode(cfg.vpn_mode);
+      }).catch(() => {
         // Config file doesn't exist — stale localStorage, reset everything
         localStorage.removeItem("tt_config_path");
         localStorage.removeItem("tt_active_tab");
@@ -157,10 +148,6 @@ function App() {
   }, [config]);
   useEffect(() => { localStorage.setItem("tt_vpn_status", status); }, [status]);
 
-  // Persist logs to sessionStorage (survives WebView2 network-change reloads)
-  useEffect(() => {
-    try { sessionStorage.setItem("tt_logs", JSON.stringify(logs.slice(-200))); } catch {}
-  }, [logs]);
 
   // Persist connectedSince
   useEffect(() => {
@@ -188,21 +175,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unlisten = listen<{ message: string; level: string }>(
-      "vpn-log",
-      (event) => {
-        console.log(`[VPN ${event.payload.level}] ${event.payload.message}`);
-        setLogs((prev) => [
-          ...prev.slice(-500),
-          {
-            timestamp: new Date().toLocaleTimeString(),
-            level: event.payload.level,
-            message: event.payload.message,
-          },
-        ]);
-      },
-    );
-
     const unlistenStatus = listen<{ status: VpnStatus; error?: string }>(
       "vpn-status",
       (event) => {
@@ -219,7 +191,6 @@ function App() {
     );
 
     return () => {
-      unlisten.then((f) => f());
       unlistenStatus.then((f) => f());
     };
   }, []);
@@ -258,10 +229,6 @@ function App() {
     setActiveTab("settings");
   }, []);
 
-  const clearLogs = useCallback(() => {
-    setLogs([]);
-    try { sessionStorage.removeItem("tt_logs"); } catch {}
-  }, []);
 
   const handleSwitchToSetup = useCallback(() => {
     setActiveTab("setup");
@@ -302,6 +269,8 @@ function App() {
         updateInfo={updateInfo}
         onCheckUpdates={() => checkForUpdates(false)}
         onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
+        hasConfig={!!config.configPath}
+        vpnStatus={status}
       />
 
       {/* All tabs always mounted; inactive hidden via display:none to preserve state */}
@@ -317,7 +286,7 @@ function App() {
           onConnect={handleConnect}
           onDisconnect={handleDisconnect}
         />
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-2 min-h-0">
+        <div className="flex-1 min-h-0">
           <SettingsPanel
             configPath={config.configPath}
             onConfigChange={setConfig}
@@ -325,14 +294,13 @@ function App() {
             onReconnect={async () => {
               if (status === "connected" || status === "connecting") {
                 await handleDisconnect();
-                // Small delay before reconnecting
                 setTimeout(() => handleConnect(), 500);
               }
             }}
             onSwitchToSetup={handleSwitchToSetup}
             onClearConfig={handleClearConfig}
+            onVpnModeChange={setVpnMode}
           />
-          <LogPanel logs={logs} onClear={clearLogs} />
         </div>
       </div>
 
@@ -340,6 +308,7 @@ function App() {
         <RoutingPanel
           configPath={config.configPath}
           status={status}
+          vpnMode={vpnMode}
           onReconnect={async () => {
             if (status === "connected" || status === "connecting") {
               await handleDisconnect();

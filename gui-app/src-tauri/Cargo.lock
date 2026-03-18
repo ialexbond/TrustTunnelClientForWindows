@@ -5812,7 +5812,7 @@ dependencies = [
 
 [[package]]
 name = "trusttunnel"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -5828,6 +5828,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
  "tokio",
+ "tokio-stream",
  "toml 0.8.2",
  "toml_edit 0.22.27",
 ]

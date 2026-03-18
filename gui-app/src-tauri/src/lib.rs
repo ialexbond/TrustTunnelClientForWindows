@@ -381,6 +381,18 @@ fn read_client_config(config_path: String) -> Result<serde_json::Value, String> 
 
 #[tauri::command]
 fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
+    // Read existing exclusions before overwriting — they are managed by RoutingPanel
+    // via save_exclusion_list and must not be lost when SettingsPanel saves.
+    let existing_exclusions: Vec<String> = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|c| c.parse::<toml_edit::DocumentMut>().ok())
+        .and_then(|doc| {
+            doc.get("exclusions")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        })
+        .unwrap_or_default();
+
     // Convert JSON back to toml::Value then serialize
     let toml_val: toml::Value = serde_json::from_value(config)
         .map_err(|e| format!("Failed to convert config: {e}"))?;
@@ -388,6 +400,207 @@ fn save_client_config(config_path: String, config: serde_json::Value) -> Result<
         .map_err(|e| format!("Failed to serialize TOML: {e}"))?;
     std::fs::write(&config_path, &content)
         .map_err(|e| format!("Failed to write config: {e}"))?;
+
+    // Re-apply exclusions that were in the file before the overwrite
+    if !existing_exclusions.is_empty() {
+        let fresh = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to re-read config: {e}"))?;
+        let mut doc: toml_edit::DocumentMut = fresh
+            .parse()
+            .map_err(|e: toml_edit::TomlError| format!("Failed to re-parse config: {e}"))?;
+        let mut arr = toml_edit::Array::new();
+        for d in &existing_exclusions {
+            arr.push(d.as_str());
+        }
+        doc["exclusions"] = toml_edit::value(arr);
+        std::fs::write(&config_path, doc.to_string())
+            .map_err(|e| format!("Failed to write exclusions back: {e}"))?;
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Serialize)]
+struct UpdateProgress {
+    stage: String,
+    percent: u32,
+    message: String,
+}
+
+/// Self-update: download new ZIP, extract, create updater script, restart.
+#[tauri::command]
+async fn self_update(
+    app: tauri::AppHandle,
+    download_url: String,
+) -> Result<(), String> {
+    use std::io::Write;
+    use tokio::io::AsyncWriteExt;
+
+    let emit = |stage: &str, percent: u32, msg: &str| {
+        app.emit("update-progress", UpdateProgress {
+            stage: stage.to_string(),
+            percent,
+            message: msg.to_string(),
+        }).ok();
+    };
+
+    emit("download", 0, "Начинаем загрузку...");
+
+    // Determine paths
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Cannot determine exe path: {e}"))?;
+    let app_dir = exe_path.parent()
+        .ok_or("Cannot determine app directory")?;
+    let temp_dir = std::env::temp_dir();
+    let zip_path = temp_dir.join("trusttunnel_update.zip");
+    let extract_dir = temp_dir.join("trusttunnel_update");
+
+    // Clean up previous update artifacts
+    let _ = std::fs::remove_file(&zip_path);
+    let _ = std::fs::remove_dir_all(&extract_dir);
+
+    // Download the ZIP with progress
+    emit("download", 5, "Подключение к серверу...");
+    let client = reqwest::Client::new();
+    let resp = client.get(&download_url)
+        .header("User-Agent", "TrustTunnel-Updater")
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Download HTTP error: {}", resp.status()));
+    }
+
+    let total_size = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut file = tokio::fs::File::create(&zip_path)
+        .await
+        .map_err(|e| format!("Cannot create temp file: {e}"))?;
+
+    let mut stream = resp.bytes_stream();
+    use tokio_stream::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Download error: {e}"))?;
+        file.write_all(&chunk).await.map_err(|e| format!("Write error: {e}"))?;
+        downloaded += chunk.len() as u64;
+        if total_size > 0 {
+            let pct = ((downloaded as f64 / total_size as f64) * 80.0) as u32 + 5;
+            emit("download", pct.min(85), &format!("Загрузка: {:.1} МБ / {:.1} МБ",
+                downloaded as f64 / 1_048_576.0,
+                total_size as f64 / 1_048_576.0));
+        }
+    }
+    file.flush().await.ok();
+    drop(file);
+
+    emit("extract", 88, "Распаковка обновления...");
+
+    // Extract ZIP using PowerShell
+    let extract_dir_str = extract_dir.to_string_lossy().to_string();
+    let zip_path_str = zip_path.to_string_lossy().to_string();
+    let ps_output = tokio::process::Command::new("powershell")
+        .args([
+            "-NoProfile", "-Command",
+            &format!(
+                "Remove-Item '{}' -Recurse -Force -ErrorAction SilentlyContinue; \
+                 Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                extract_dir_str, zip_path_str, extract_dir_str
+            ),
+        ])
+        .creation_flags(0x08000000)
+        .output()
+        .await
+        .map_err(|e| format!("Extract failed: {e}"))?;
+
+    if !ps_output.status.success() {
+        let err = String::from_utf8_lossy(&ps_output.stderr);
+        return Err(format!("Extraction failed: {err}"));
+    }
+
+    // Find the extracted files — could be in a subfolder
+    let source_dir = {
+        let mut src = extract_dir.clone();
+        // If there's a single subfolder, use that
+        if let Ok(mut entries) = std::fs::read_dir(&extract_dir) {
+            let first = entries.next();
+            let second = entries.next();
+            if second.is_none() {
+                if let Some(Ok(entry)) = first {
+                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        src = entry.path();
+                    }
+                }
+            }
+        }
+        src
+    };
+
+    // Verify the extracted folder has trusttunnel.exe
+    if !source_dir.join("trusttunnel.exe").exists() {
+        return Err("Обновление не содержит trusttunnel.exe. Архив повреждён?".into());
+    }
+
+    emit("install", 92, "Подготовка к установке...");
+
+    // Create the updater batch script
+    let bat_path = temp_dir.join("trusttunnel_updater.bat");
+    let pid = std::process::id();
+    let app_dir_str = app_dir.to_string_lossy().to_string();
+    let source_dir_str = source_dir.to_string_lossy().to_string();
+    let bat_content = format!(
+        r#"@echo off
+chcp 65001 >nul
+title TrustTunnel Updater
+echo Ожидание завершения TrustTunnel (PID {pid})...
+:waitloop
+tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto waitloop
+)
+echo Копирование обновления...
+xcopy /Y /E /I "{source_dir_str}\*" "{app_dir_str}\" >nul 2>&1
+if errorlevel 1 (
+    echo Ошибка копирования! Попробуйте обновить вручную.
+    pause
+    exit /b 1
+)
+echo Запуск обновлённой версии...
+start "" "{app_dir_str}\trusttunnel.exe"
+echo Очистка временных файлов...
+rd /s /q "{extract_dir_str}" >nul 2>&1
+del "{zip_path_str}" >nul 2>&1
+(goto) 2>nul & del "%~f0"
+"#
+    );
+
+    {
+        let mut bat_file = std::fs::File::create(&bat_path)
+            .map_err(|e| format!("Cannot create updater script: {e}"))?;
+        bat_file.write_all(bat_content.as_bytes())
+            .map_err(|e| format!("Cannot write updater script: {e}"))?;
+    }
+
+    emit("install", 96, "Запуск обновления, приложение перезапустится...");
+
+    // Kill VPN sidecar before exit
+    if let Some(state) = app.try_state::<AppState>() {
+        kill_sidecar_from_state(&state);
+    }
+    kill_all_sidecar_processes();
+
+    // Launch the updater bat (hidden window)
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", "/MIN", &bat_path.to_string_lossy()])
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|e| format!("Cannot launch updater: {e}"))?;
+
+    // Give the bat a moment to start, then exit the app
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    app.exit(0);
+
     Ok(())
 }
 
@@ -515,7 +728,8 @@ pub fn run() {
             geodata::load_exclusion_list,
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,
-            geodata::save_exclusion_json
+            geodata::save_exclusion_json,
+            self_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
