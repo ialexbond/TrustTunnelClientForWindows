@@ -1,19 +1,19 @@
 [package]
-name = "trusttunnel-gui"
-version = "1.1.0"
-description = "TrustTunnel VPN GUI Client"
-authors = ["you"]
-edition = "2021"
+name = "trusttunnel"
+version = "1.2.1"
+description = "TrustTunnel VPN Client"
+authors = ["Alex Bond"]
+edition = "2026"
 
 [lib]
-name = "trusttunnel_gui_lib"
+name = "trusttunnel_lib"
 crate-type = ["lib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
@@ -26,7 +26,9 @@ async-trait = "0.1"
 toml = "0.8"
 toml_edit = "0.22"
 tauri-plugin-single-instance = "2.4.0"
-reqwest = { version = "0.13.2", features = ["default-tls"] }
+tauri-plugin-notification = "2"
+reqwest = { version = "0.13.2", features = ["default-tls", "stream"] }
+tokio-stream = "0.1"
 
 [features]
 default = ["custom-protocol"]
