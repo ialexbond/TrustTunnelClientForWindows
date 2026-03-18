@@ -1,5 +1,5 @@
 import { Shield, Wand2, Settings, GitBranch, Info, Download } from "lucide-react";
-import type { AppTab, UpdateInfo } from "../App";
+import type { AppTab, UpdateInfo, VpnStatus } from "../App";
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -7,6 +7,8 @@ interface HeaderProps {
   updateInfo?: UpdateInfo;
   onCheckUpdates?: () => void;
   onOpenDownload?: () => void;
+  hasConfig?: boolean;
+  vpnStatus?: VpnStatus;
 }
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode }[] = [
@@ -16,14 +18,26 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode }[] = [
   { id: "about", label: "О программе", icon: <Info className="w-3.5 h-3.5" /> },
 ];
 
-function Header({ activeTab, onTabChange, updateInfo, onOpenDownload }: HeaderProps) {
+const STATUS_DOT: Record<string, string> = {
+  connected: "bg-emerald-400 shadow-emerald-400/50",
+  connecting: "bg-amber-400 animate-pulse shadow-amber-400/50",
+  recovering: "bg-amber-400 animate-pulse shadow-amber-400/50",
+  disconnecting: "bg-amber-400 animate-pulse shadow-amber-400/50",
+  error: "bg-red-400 shadow-red-400/50",
+  disconnected: "bg-gray-600",
+};
+
+function Header({ activeTab, onTabChange, updateInfo, onOpenDownload, hasConfig, vpnStatus }: HeaderProps) {
   return (
     <header
       className="flex items-center gap-3 px-5 py-3 border-b border-white/10 bg-surface-900/50 backdrop-blur-sm"
       data-tauri-drag-region
     >
-      <div className="p-2 rounded-lg bg-indigo-500/20">
+      <div className="relative p-2 rounded-lg bg-indigo-500/20">
         <Shield className="w-5 h-5 text-indigo-400" />
+        {vpnStatus && vpnStatus !== "disconnected" && (
+          <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full shadow-lg ${STATUS_DOT[vpnStatus] || STATUS_DOT.disconnected}`} />
+        )}
       </div>
       <div className="mr-4">
         <h1 className="text-sm font-bold tracking-wide">TrustTunnel</h1>
@@ -36,13 +50,19 @@ function Header({ activeTab, onTabChange, updateInfo, onOpenDownload }: HeaderPr
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => onTabChange(tab.id)}
+            onClick={() => {
+              if ((tab.id === "settings" || tab.id === "routing") && !hasConfig) return;
+              onTabChange(tab.id);
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200
               ${
-                activeTab === tab.id
+                (tab.id === "settings" || tab.id === "routing") && !hasConfig
+                  ? "text-gray-700 cursor-not-allowed"
+                  : activeTab === tab.id
                   ? "bg-white/10 text-white"
                   : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
               }`}
+            title={(tab.id === "settings" || tab.id === "routing") && !hasConfig ? "Сначала настройте VPN" : undefined}
           >
             {tab.icon}
             {tab.label}
