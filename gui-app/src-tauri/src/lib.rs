@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::image::Image;
 use tauri::RunEvent;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -30,6 +31,37 @@ fn kill_sidecar_from_state(state: &AppState) {
     }
 }
 
+
+/// Load a tray icon PNG from the icons directory embedded at compile time.
+/// Red shield = disconnected/connecting, Green shield = connected.
+fn load_tray_icon(status: &str) -> Image<'static> {
+    let png_bytes: &[u8] = match status {
+        "connected" => include_bytes!("../icons/tray_connected.png"),
+        _ => include_bytes!("../icons/tray_disconnected.png"),
+    };
+    Image::from_bytes(png_bytes).expect("Failed to load tray icon PNG")
+}
+
+/// Update tray icon and tooltip based on VPN status.
+fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let icon_status = match status {
+            "connected" => "connected",
+            _ => "disconnected",
+        };
+        let tooltip = match status {
+            "connected" => "TrustTunnel — Подключен",
+            "connecting" => "TrustTunnel — Подключение...",
+            "recovering" => "TrustTunnel — Переподключение...",
+            "disconnecting" => "TrustTunnel — Отключение...",
+            "error" => "TrustTunnel — Ошибка",
+            _ => "TrustTunnel — Отключен",
+        };
+        tray.set_icon(Some(load_tray_icon(icon_status))).ok();
+        tray.set_tooltip(Some(tooltip)).ok();
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct VpnLogPayload {
     message: String,
@@ -46,6 +78,7 @@ struct AppState {
     sidecar_child: Arc<Mutex<Option<sidecar::SidecarChild>>>,
     disconnecting: Arc<Mutex<bool>>,
     is_connected: Arc<Mutex<bool>>,
+    tray_notified: Arc<Mutex<bool>>,
 }
 
 #[tauri::command]
@@ -270,6 +303,18 @@ async fn uninstall_server(
     ssh_deploy::uninstall_server(&app, host, port, user, password).await
 }
 
+#[tauri::command]
+async fn fetch_server_config(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    client_name: String,
+) -> Result<String, String> {
+    ssh_deploy::fetch_server_config(&app, host, port, user, password, client_name).await
+}
+
 /// Find .toml config files next to the executable
 #[tauri::command]
 fn auto_detect_config() -> Option<String> {
@@ -336,6 +381,18 @@ fn read_client_config(config_path: String) -> Result<serde_json::Value, String> 
 
 #[tauri::command]
 fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
+    // Read existing exclusions before overwriting — they are managed by RoutingPanel
+    // via save_exclusion_list and must not be lost when SettingsPanel saves.
+    let existing_exclusions: Vec<String> = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|c| c.parse::<toml_edit::DocumentMut>().ok())
+        .and_then(|doc| {
+            doc.get("exclusions")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        })
+        .unwrap_or_default();
+
     // Convert JSON back to toml::Value then serialize
     let toml_val: toml::Value = serde_json::from_value(config)
         .map_err(|e| format!("Failed to convert config: {e}"))?;
@@ -343,6 +400,207 @@ fn save_client_config(config_path: String, config: serde_json::Value) -> Result<
         .map_err(|e| format!("Failed to serialize TOML: {e}"))?;
     std::fs::write(&config_path, &content)
         .map_err(|e| format!("Failed to write config: {e}"))?;
+
+    // Re-apply exclusions that were in the file before the overwrite
+    if !existing_exclusions.is_empty() {
+        let fresh = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to re-read config: {e}"))?;
+        let mut doc: toml_edit::DocumentMut = fresh
+            .parse()
+            .map_err(|e: toml_edit::TomlError| format!("Failed to re-parse config: {e}"))?;
+        let mut arr = toml_edit::Array::new();
+        for d in &existing_exclusions {
+            arr.push(d.as_str());
+        }
+        doc["exclusions"] = toml_edit::value(arr);
+        std::fs::write(&config_path, doc.to_string())
+            .map_err(|e| format!("Failed to write exclusions back: {e}"))?;
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Serialize)]
+struct UpdateProgress {
+    stage: String,
+    percent: u32,
+    message: String,
+}
+
+/// Self-update: download new ZIP, extract, create updater script, restart.
+#[tauri::command]
+async fn self_update(
+    app: tauri::AppHandle,
+    download_url: String,
+) -> Result<(), String> {
+    use std::io::Write;
+    use tokio::io::AsyncWriteExt;
+
+    let emit = |stage: &str, percent: u32, msg: &str| {
+        app.emit("update-progress", UpdateProgress {
+            stage: stage.to_string(),
+            percent,
+            message: msg.to_string(),
+        }).ok();
+    };
+
+    emit("download", 0, "Начинаем загрузку...");
+
+    // Determine paths
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Cannot determine exe path: {e}"))?;
+    let app_dir = exe_path.parent()
+        .ok_or("Cannot determine app directory")?;
+    let temp_dir = std::env::temp_dir();
+    let zip_path = temp_dir.join("trusttunnel_update.zip");
+    let extract_dir = temp_dir.join("trusttunnel_update");
+
+    // Clean up previous update artifacts
+    let _ = std::fs::remove_file(&zip_path);
+    let _ = std::fs::remove_dir_all(&extract_dir);
+
+    // Download the ZIP with progress
+    emit("download", 5, "Подключение к серверу...");
+    let client = reqwest::Client::new();
+    let resp = client.get(&download_url)
+        .header("User-Agent", "TrustTunnel-Updater")
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Download HTTP error: {}", resp.status()));
+    }
+
+    let total_size = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut file = tokio::fs::File::create(&zip_path)
+        .await
+        .map_err(|e| format!("Cannot create temp file: {e}"))?;
+
+    let mut stream = resp.bytes_stream();
+    use tokio_stream::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Download error: {e}"))?;
+        file.write_all(&chunk).await.map_err(|e| format!("Write error: {e}"))?;
+        downloaded += chunk.len() as u64;
+        if total_size > 0 {
+            let pct = ((downloaded as f64 / total_size as f64) * 80.0) as u32 + 5;
+            emit("download", pct.min(85), &format!("Загрузка: {:.1} МБ / {:.1} МБ",
+                downloaded as f64 / 1_048_576.0,
+                total_size as f64 / 1_048_576.0));
+        }
+    }
+    file.flush().await.ok();
+    drop(file);
+
+    emit("extract", 88, "Распаковка обновления...");
+
+    // Extract ZIP using PowerShell
+    let extract_dir_str = extract_dir.to_string_lossy().to_string();
+    let zip_path_str = zip_path.to_string_lossy().to_string();
+    let ps_output = tokio::process::Command::new("powershell")
+        .args([
+            "-NoProfile", "-Command",
+            &format!(
+                "Remove-Item '{}' -Recurse -Force -ErrorAction SilentlyContinue; \
+                 Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                extract_dir_str, zip_path_str, extract_dir_str
+            ),
+        ])
+        .creation_flags(0x08000000)
+        .output()
+        .await
+        .map_err(|e| format!("Extract failed: {e}"))?;
+
+    if !ps_output.status.success() {
+        let err = String::from_utf8_lossy(&ps_output.stderr);
+        return Err(format!("Extraction failed: {err}"));
+    }
+
+    // Find the extracted files — could be in a subfolder
+    let source_dir = {
+        let mut src = extract_dir.clone();
+        // If there's a single subfolder, use that
+        if let Ok(mut entries) = std::fs::read_dir(&extract_dir) {
+            let first = entries.next();
+            let second = entries.next();
+            if second.is_none() {
+                if let Some(Ok(entry)) = first {
+                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        src = entry.path();
+                    }
+                }
+            }
+        }
+        src
+    };
+
+    // Verify the extracted folder has trusttunnel.exe
+    if !source_dir.join("trusttunnel.exe").exists() {
+        return Err("Обновление не содержит trusttunnel.exe. Архив повреждён?".into());
+    }
+
+    emit("install", 92, "Подготовка к установке...");
+
+    // Create the updater batch script
+    let bat_path = temp_dir.join("trusttunnel_updater.bat");
+    let pid = std::process::id();
+    let app_dir_str = app_dir.to_string_lossy().to_string();
+    let source_dir_str = source_dir.to_string_lossy().to_string();
+    let bat_content = format!(
+        r#"@echo off
+chcp 65001 >nul
+title TrustTunnel Updater
+echo Ожидание завершения TrustTunnel (PID {pid})...
+:waitloop
+tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto waitloop
+)
+echo Копирование обновления...
+xcopy /Y /E /I "{source_dir_str}\*" "{app_dir_str}\" >nul 2>&1
+if errorlevel 1 (
+    echo Ошибка копирования! Попробуйте обновить вручную.
+    pause
+    exit /b 1
+)
+echo Запуск обновлённой версии...
+start "" "{app_dir_str}\trusttunnel.exe"
+echo Очистка временных файлов...
+rd /s /q "{extract_dir_str}" >nul 2>&1
+del "{zip_path_str}" >nul 2>&1
+(goto) 2>nul & del "%~f0"
+"#
+    );
+
+    {
+        let mut bat_file = std::fs::File::create(&bat_path)
+            .map_err(|e| format!("Cannot create updater script: {e}"))?;
+        bat_file.write_all(bat_content.as_bytes())
+            .map_err(|e| format!("Cannot write updater script: {e}"))?;
+    }
+
+    emit("install", 96, "Запуск обновления, приложение перезапустится...");
+
+    // Kill VPN sidecar before exit
+    if let Some(state) = app.try_state::<AppState>() {
+        kill_sidecar_from_state(&state);
+    }
+    kill_all_sidecar_processes();
+
+    // Launch the updater bat (hidden window)
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", "/MIN", &bat_path.to_string_lossy()])
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|e| format!("Cannot launch updater: {e}"))?;
+
+    // Give the bat a moment to start, then exit the app
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    app.exit(0);
+
     Ok(())
 }
 
@@ -359,10 +617,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             sidecar_child: Arc::new(Mutex::new(None)),
             disconnecting: Arc::new(Mutex::new(false)),
             is_connected: Arc::new(Mutex::new(false)),
+            tray_notified: Arc::new(Mutex::new(false)),
         })
         .setup(|app| {
             // Build tray context menu
@@ -374,10 +634,13 @@ pub fn run() {
                 .item(&quit_item)
                 .build()?;
 
-            // Create tray icon
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("TrustTunnel Client for Windows")
+            // Load disconnected tray icon (red) as initial state
+            let initial_icon = load_tray_icon("disconnected");
+
+            // Create tray icon with ID so we can update it later
+            TrayIconBuilder::with_id("main-tray")
+                .icon(initial_icon)
+                .tooltip("TrustTunnel — Отключен")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
@@ -399,7 +662,11 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event {
                         if let Some(w) = tray.app_handle().get_webview_window("main") {
                             w.show().ok();
                             w.set_focus().ok();
@@ -408,6 +675,17 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Listen for vpn-status events to update tray icon color
+            use tauri::Listener;
+            let app_handle = app.handle().clone();
+            app.listen_any("vpn-status", move |event| {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    if let Some(status) = payload.get("status").and_then(|s| s.as_str()) {
+                        update_tray_icon(&app_handle, status);
+                    }
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -415,6 +693,21 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 window.hide().ok();
                 api.prevent_close();
+
+                // Show notification once that app is still running in tray
+                if let Some(state) = window.app_handle().try_state::<AppState>() {
+                    let mut notified = state.tray_notified.lock().unwrap_or_else(|e| e.into_inner());
+                    if !*notified {
+                        *notified = true;
+                        use tauri_plugin_notification::NotificationExt;
+                        window.app_handle().notification()
+                            .builder()
+                            .title("TrustTunnel")
+                            .body("Приложение свёрнуто в трей. Нажмите на иконку, чтобы открыть.")
+                            .show()
+                            .ok();
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -431,8 +724,12 @@ pub fn run() {
             save_client_config,
             check_server_installation,
             uninstall_server,
+            fetch_server_config,
             geodata::load_exclusion_list,
-            geodata::save_exclusion_list
+            geodata::save_exclusion_list,
+            geodata::load_exclusion_json,
+            geodata::save_exclusion_json,
+            self_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
