@@ -12,6 +12,7 @@ interface SettingsPanelProps {
   onReconnect: () => Promise<void>;
   onSwitchToSetup: () => void;
   onClearConfig: () => void;
+  onVpnModeChange?: (mode: string) => void;
 }
 
 interface ClientConfig {
@@ -295,6 +296,7 @@ function SettingsPanel({
   onReconnect,
   onSwitchToSetup,
   onClearConfig,
+  onVpnModeChange,
 }: SettingsPanelProps) {
   const [config, setConfig] = useState<ClientConfig | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -369,7 +371,7 @@ function SettingsPanel({
   }, [config, localPath, onConfigChange, status, onReconnect]);
 
   return (
-    <div className="glass-card lg:col-span-1 overflow-hidden">
+    <div className="glass-card overflow-hidden h-full">
     <div className="p-3 flex flex-col gap-2 overflow-y-auto h-full">
       <div className="flex items-center gap-2">
         <Settings className="w-3.5 h-3.5 text-indigo-400" />
@@ -486,7 +488,7 @@ function SettingsPanel({
             <label className="block text-[10px] text-gray-500 mb-1">Режим VPN</label>
             <div className="grid grid-cols-2 gap-1">
               <button
-                onClick={() => updateField("vpn_mode", "general")}
+                onClick={() => { updateField("vpn_mode", "general"); onVpnModeChange?.("general"); }}
                 className={`px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all border ${
                   config.vpn_mode === "general"
                     ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300"
@@ -496,14 +498,14 @@ function SettingsPanel({
                 Всё через VPN
               </button>
               <button
-                onClick={() => updateField("vpn_mode", "selective")}
+                onClick={() => { updateField("vpn_mode", "selective"); onVpnModeChange?.("selective"); }}
                 className={`px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all border ${
                   config.vpn_mode === "selective"
                     ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300"
                     : "bg-white/5 border-white/10 text-gray-400 hover:text-gray-200"
                 }`}
               >
-                Только избранное
+                Напрямую
               </button>
             </div>
             <p className="text-[9px] text-gray-600 mt-0.5">
@@ -621,7 +623,7 @@ function SettingsPanel({
               {saving
                 ? "Сохранение..."
                 : dirty
-                ? "Сохранить и переподключить"
+                ? (status === "connected" || status === "connecting" ? "Сохранить и переподключить" : "Сохранить")
                 : "Настройки сохранены"}
             </button>
           </div>
