@@ -7,15 +7,17 @@ interface RoutingPanelProps {
   configPath: string;
   status: VpnStatus;
   onReconnect: () => Promise<void>;
+  vpnMode?: string;
 }
 
-function RoutingPanel({ configPath, status, onReconnect }: RoutingPanelProps) {
+function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanelProps) {
   const [domains, setDomains] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [input, setInput] = useState("");
+  const [saveError, setSaveError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const isActive = status === "connected" || status === "connecting" || status === "recovering";
 
@@ -58,6 +60,7 @@ function RoutingPanel({ configPath, status, onReconnect }: RoutingPanelProps) {
   const save = useCallback(async (newDomains: string[]) => {
     setDomains(newDomains);
     setSaving(true);
+    setSaveError("");
     try {
       // Always save to JSON backup
       await invoke("save_exclusion_json", { domains: newDomains });
@@ -68,6 +71,7 @@ function RoutingPanel({ configPath, status, onReconnect }: RoutingPanelProps) {
       setNeedsReconnect(true);
     } catch (e) {
       console.error("Failed to save:", e);
+      setSaveError(String(e));
     } finally {
       setSaving(false);
     }
@@ -145,7 +149,9 @@ function RoutingPanel({ configPath, status, onReconnect }: RoutingPanelProps) {
           <GitBranch className="w-5 h-5 text-indigo-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-gray-200">Исключения VPN</h2>
+          <h2 className="text-sm font-semibold text-gray-200">
+            {vpnMode === "selective" ? "Через VPN" : "Напрямую"}
+          </h2>
           <p className="text-[10px] text-gray-500">
             {domains.length} записей · {saving ? "сохранение..." : "авто-сохранение"}
           </p>
@@ -204,12 +210,20 @@ function RoutingPanel({ configPath, status, onReconnect }: RoutingPanelProps) {
         </div>
       )}
 
+      {/* Save error */}
+      {saveError && (
+        <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 shrink-0">
+          <p className="text-[11px] text-red-400 break-words">{saveError}</p>
+        </div>
+      )}
+
       {/* Info */}
-      {!needsReconnect && !showImportBanner && (
+      {!needsReconnect && !showImportBanner && !saveError && (
         <div className="px-3 py-2 rounded-lg bg-surface-900/30 border border-white/5 shrink-0">
           <p className="text-[11px] text-gray-400">
-            Домены обрабатываются согласно <span className="text-amber-300">vpn_mode</span> в конфиге.
-            Применяется при подключении.
+            {vpnMode === "selective"
+              ? "Режим: Напрямую. Домены ниже пойдут через VPN, остальной трафик — напрямую."
+              : "Режим: Всё через VPN. Домены ниже пойдут напрямую, остальной трафик — через VPN."}
           </p>
         </div>
       )}
