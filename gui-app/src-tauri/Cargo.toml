@@ -2,8 +2,8 @@
 name = "trusttunnel"
 version = "1.2.1"
 description = "TrustTunnel VPN Client"
-authors = ["you"]
-edition = "2021"
+authors = ["Alex Bond"]
+edition = "2026"
 
 [lib]
 name = "trusttunnel_lib"
