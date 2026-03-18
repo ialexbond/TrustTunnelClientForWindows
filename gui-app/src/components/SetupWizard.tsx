@@ -81,9 +81,23 @@ function saveField(key: string, value: unknown) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const obj = raw ? JSON.parse(raw) : {};
-    obj[key] = value;
+    // Obfuscate password fields with base64
+    if (OBFUSCATED_FIELDS.includes(key) && typeof value === "string" && value) {
+      obj[key] = "b64:" + btoa(unescape(encodeURIComponent(value)));
+    } else {
+      obj[key] = value;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch { /* ignore */ }
+}
+
+const OBFUSCATED_FIELDS = ["sshPassword", "vpnPassword"];
+
+function deobfuscate(val: string): string {
+  if (val.startsWith("b64:")) {
+    try { return decodeURIComponent(escape(atob(val.slice(4)))); } catch { return val; }
+  }
+  return val;
 }
 
 function SetupWizard({ onSetupComplete }: SetupWizardProps) {
@@ -110,19 +124,18 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   const [host, setHost] = useState(() => loadSaved("host", ""));
   const [port, setPort] = useState(() => loadSaved("port", "22"));
   const [sshUser, setSshUser] = useState(() => loadSaved("sshUser", "root"));
-  const [sshPassword, setSshPassword] = useState(() => loadSaved("sshPassword", ""));
+  const [sshPassword, setSshPassword] = useState(() => deobfuscate(loadSaved("sshPassword", "")));
   const [showSshPassword, setShowSshPassword] = useState(false);
 
   // Endpoint settings (persisted)
   const [listenAddress, setListenAddress] = useState(() => loadSaved("listenAddress", "0.0.0.0:443"));
   const [vpnUsername, setVpnUsername] = useState(() => loadSaved("vpnUsername", ""));
-  const [vpnPassword, setVpnPassword] = useState(() => loadSaved("vpnPassword", ""));
+  const [vpnPassword, setVpnPassword] = useState(() => deobfuscate(loadSaved("vpnPassword", "")));
   const [showVpnPassword, setShowVpnPassword] = useState(false);
   const [certType, setCertType] = useState<"selfsigned" | "letsencrypt">(() => loadSaved("certType", "letsencrypt"));
   const [domain, setDomain] = useState(() => loadSaved("domain", ""));
   const [email, setEmail] = useState(() => loadSaved("email", ""));
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [fetchClientName, setFetchClientName] = useState(() => loadSaved("fetchClientName", ""));
 
   // Fetch retry count — tracks consecutive fetch failures for reinstall prompt
   const [fetchRetryCount, setFetchRetryCount] = useState(0);
@@ -160,7 +173,6 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   useEffect(() => { saveField("certType", certType); }, [certType]);
   useEffect(() => { saveField("domain", domain); }, [domain]);
   useEffect(() => { saveField("email", email); }, [email]);
-  useEffect(() => { saveField("fetchClientName", fetchClientName); }, [fetchClientName]);
 
   // Persist deploy state
   useEffect(() => { saveField("deploySteps", JSON.stringify(deploySteps)); }, [deploySteps]);
@@ -248,8 +260,14 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       });
       // Auto-disconnect VPN client since server is gone
       invoke("vpn_disconnect").catch(() => {});
-      // After uninstall, go to endpoint settings for fresh install
-      setTimeout(() => setWizardStep("endpoint"), 800);
+      // After uninstall, auto-deploy with existing settings if they're filled in
+      setTimeout(() => {
+        if (vpnUsername.trim() && vpnPassword && (certType !== "letsencrypt" || (domain.trim() && email.trim()))) {
+          handleDeploy();
+        } else {
+          setWizardStep("endpoint");
+        }
+      }, 800);
     } catch (e) {
       setErrorMessage(String(e));
       setWizardStep("error");
@@ -309,7 +327,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         port: parseInt(port),
         user: sshUser,
         password: sshPassword,
-        clientName: fetchClientName || vpnUsername || "",
+        clientName: vpnUsername || "",
       });
       setConfigPath(result);
       setFetchRetryCount(0);
@@ -405,7 +423,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
           <div className="space-y-3">
             <button
-              onClick={() => setWizardStep("server")}
+              onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
               className="w-full btn-primary flex items-center justify-center gap-2 py-3"
             >
               <Server className="w-4 h-4" />
@@ -1113,6 +1131,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
   // ─── Done ───────────────────────────────────────
   if (wizardStep === "done") {
+    const isFetch = (loadSaved("wizardMode", "") as string) === "fetch";
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="max-w-sm w-full text-center space-y-5">
@@ -1123,7 +1142,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="space-y-1.5">
             <h2 className="text-xl font-bold text-emerald-300">Всё готово!</h2>
             <p className="text-sm text-gray-400">
-              Сервер установлен и запущен. Конфигурация создана автоматически.
+              {isFetch
+                ? "Конфигурация получена с сервера и сохранена."
+                : "Сервер установлен и запущен. Конфигурация создана автоматически."}
             </p>
           </div>
 
