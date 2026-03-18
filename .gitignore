@@ -17,8 +17,12 @@ conan/
 cmake/conan_provider.cmake
 
 # Build artifacts
-TrustTunnel-Portable/
 *.zip
 webview_data/
 geodata/
 routing_rules.json
+
+# Portable build folders (any version)
+TrustTunnel-Portable/
+TrustTunnel-v*-portable-*/
+exclusions.json
