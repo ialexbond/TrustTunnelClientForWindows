@@ -27,6 +27,7 @@ import {
   Trash2,
   PackageCheck,
   SkipForward,
+  Download,
 } from "lucide-react";
 
 interface DeployStep {
@@ -40,7 +41,7 @@ interface DeployLog {
   level: string;
 }
 
-type WizardStep = "welcome" | "server" | "checking" | "found" | "uninstalling" | "endpoint" | "deploying" | "done" | "error";
+type WizardStep = "welcome" | "server" | "checking" | "found" | "uninstalling" | "endpoint" | "deploying" | "fetching" | "done" | "error";
 
 interface SetupWizardProps {
   onSetupComplete: (configPath: string) => void;
@@ -80,21 +81,37 @@ function saveField(key: string, value: unknown) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const obj = raw ? JSON.parse(raw) : {};
-    obj[key] = value;
+    // Obfuscate password fields with base64
+    if (OBFUSCATED_FIELDS.includes(key) && typeof value === "string" && value) {
+      obj[key] = "b64:" + btoa(unescape(encodeURIComponent(value)));
+    } else {
+      obj[key] = value;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch { /* ignore */ }
+}
+
+const OBFUSCATED_FIELDS = ["sshPassword", "vpnPassword"];
+
+function deobfuscate(val: string): string {
+  if (val.startsWith("b64:")) {
+    try { return decodeURIComponent(escape(atob(val.slice(4)))); } catch { return val; }
+  }
+  return val;
 }
 
 function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   // Wizard navigation — persisted so tab switches don't reset
   const [wizardStep, setWizardStepRaw] = useState<WizardStep>(() => {
     const saved = loadSaved("wizardStep", "welcome") as WizardStep;
-    // "done"/"deploying" only make sense if a config file was actually saved
+    // "done"/"deploying"/"fetching" only make sense if a config file was actually saved
     const hasConfig = !!localStorage.getItem("tt_config_path");
-    if ((saved === "done" || saved === "deploying") && !hasConfig) return "welcome";
-    // Restore stable steps; transient steps (checking/uninstalling) fall back to server
-    const restorable: WizardStep[] = ["welcome", "server", "found", "endpoint", "deploying", "done", "error"];
+    if ((saved === "done" || saved === "deploying" || saved === "fetching") && !hasConfig) return "welcome";
+    // Restore only stable steps; transient steps fall back to safe defaults
+    const restorable: WizardStep[] = ["welcome", "server", "found", "endpoint", "done", "error"];
     if (restorable.includes(saved)) return saved;
+    // "deploying"/"fetching" are dead after restart — go back to endpoint so user can retry
+    if (saved === "deploying" || saved === "fetching") return "endpoint";
     if (saved === "checking" || saved === "uninstalling") return "server";
     return "welcome";
   });
@@ -107,18 +124,21 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   const [host, setHost] = useState(() => loadSaved("host", ""));
   const [port, setPort] = useState(() => loadSaved("port", "22"));
   const [sshUser, setSshUser] = useState(() => loadSaved("sshUser", "root"));
-  const [sshPassword, setSshPassword] = useState(() => loadSaved("sshPassword", ""));
+  const [sshPassword, setSshPassword] = useState(() => deobfuscate(loadSaved("sshPassword", "")));
   const [showSshPassword, setShowSshPassword] = useState(false);
 
   // Endpoint settings (persisted)
   const [listenAddress, setListenAddress] = useState(() => loadSaved("listenAddress", "0.0.0.0:443"));
   const [vpnUsername, setVpnUsername] = useState(() => loadSaved("vpnUsername", ""));
-  const [vpnPassword, setVpnPassword] = useState(() => loadSaved("vpnPassword", ""));
+  const [vpnPassword, setVpnPassword] = useState(() => deobfuscate(loadSaved("vpnPassword", "")));
   const [showVpnPassword, setShowVpnPassword] = useState(false);
   const [certType, setCertType] = useState<"selfsigned" | "letsencrypt">(() => loadSaved("certType", "letsencrypt"));
   const [domain, setDomain] = useState(() => loadSaved("domain", ""));
   const [email, setEmail] = useState(() => loadSaved("email", ""));
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Fetch retry count — tracks consecutive fetch failures for reinstall prompt
+  const [fetchRetryCount, setFetchRetryCount] = useState(0);
 
   // Server check state
   const [serverInfo, setServerInfo] = useState<{
@@ -141,6 +161,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   const [configPath, setConfigPath] = useState(() => loadSaved("configPath", ""));
   const [copied, setCopied] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Tracks current operation so the event listener only reacts to relevant events
+  const operationRef = useRef<"deploy" | "fetch" | "uninstall" | null>(null);
 
   // Persist form fields on change
   useEffect(() => { saveField("host", host); }, [host]);
@@ -179,6 +202,10 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     const unlistenStep = listen<DeployStep>("deploy-step", (event) => {
       const { step, status, message } = event.payload;
       setDeploySteps((prev) => ({ ...prev, [step]: { step, status, message } }));
+
+      // Only react to deploy/fetch operations, not uninstall
+      const op = operationRef.current;
+      if (op === "uninstall") return;
 
       if (step === "done" && status === "ok") {
         setTimeout(() => setWizardStep("done"), 600);
@@ -228,27 +255,34 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   };
 
   const handleUninstall = async () => {
+    operationRef.current = "uninstall";
     setWizardStep("uninstalling");
     setDeploySteps({});
     setDeployLogs([]);
+    setErrorMessage("");
     try {
+      // Disconnect VPN FIRST — if VPN routes all traffic through the server,
+      // SSH will break when we stop the TrustTunnel service during uninstall
+      try { await invoke("vpn_disconnect"); } catch { /* already disconnected */ }
+
       await invoke("uninstall_server", {
         host,
         port: parseInt(port),
         user: sshUser,
         password: sshPassword,
       });
-      // Auto-disconnect VPN client since server is gone
-      invoke("vpn_disconnect").catch(() => {});
-      // After uninstall, go to endpoint settings for fresh install
-      setTimeout(() => setWizardStep("endpoint"), 800);
+      // Always go to endpoint settings so user can review/change params before deploying
+      operationRef.current = null;
+      setWizardStep("endpoint");
     } catch (e) {
+      operationRef.current = null;
       setErrorMessage(String(e));
       setWizardStep("error");
     }
   };
 
   const handleDeploy = async () => {
+    operationRef.current = "deploy";
     setWizardStep("deploying");
     setDeploySteps({});
     setDeployLogs([]);
@@ -272,10 +306,11 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       });
       setConfigPath(result);
     } catch (e) {
-      if (wizardStep !== "error") {
-        setErrorMessage(String(e));
-        setWizardStep("error");
-      }
+      // Only set error if the event listener hasn't already done so
+      setErrorMessage((prev) => prev || String(e));
+      setWizardStep("error");
+    } finally {
+      operationRef.current = null;
     }
   };
 
@@ -286,6 +321,32 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     });
     if (selected) {
       onSetupComplete(selected as string);
+    }
+  };
+
+  const handleFetchConfig = async () => {
+    operationRef.current = "fetch";
+    setWizardStep("fetching");
+    setDeploySteps({});
+    setDeployLogs([]);
+    setErrorMessage("");
+
+    try {
+      const result = await invoke<string>("fetch_server_config", {
+        host,
+        port: parseInt(port),
+        user: sshUser,
+        password: sshPassword,
+        clientName: vpnUsername || "",
+      });
+      setConfigPath(result);
+      setFetchRetryCount(0);
+    } catch (e) {
+      setFetchRetryCount((c) => c + 1);
+      setErrorMessage((prev) => prev || String(e));
+      setWizardStep("error");
+    } finally {
+      operationRef.current = null;
     }
   };
 
@@ -313,6 +374,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       uninstalling: "checking",
       endpoint: "endpoint",
       deploying: "deploying",
+      fetching: "deploying",
     };
     const mapped = stepMap[wizardStep] || wizardStep;
     const currentIdx = stepNumbers.findIndex((s) => s.key === mapped);
@@ -373,11 +435,19 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
           <div className="space-y-3">
             <button
-              onClick={() => setWizardStep("server")}
+              onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
               className="w-full btn-primary flex items-center justify-center gap-2 py-3"
             >
               <Server className="w-4 h-4" />
               Настроить сервер
+            </button>
+            <button
+              onClick={() => { saveField("wizardMode", "fetch"); setWizardStep("server"); }}
+              className="w-full px-6 py-3 rounded-xl text-sm text-gray-300 hover:text-white
+                         border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 transition-all flex items-center justify-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Забрать конфиг с сервера
             </button>
             <button
               onClick={handleSkip}
@@ -392,6 +462,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="text-[11px] text-gray-600 space-y-0.5 pt-2">
             <p>Для настройки сервера потребуется:</p>
             <p>• Linux-сервер (Ubuntu 22+, Debian 11+) с SSH-доступом</p>
+            <p>• Минимум 1 ядро CPU и 512 МБ RAM (рекомендуется 1 ГБ)</p>
             <p>• Права root • Домен, направленный на IP сервера</p>
           </div>
         </div>
@@ -460,8 +531,11 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                     placeholder="••••••••"
                     className="wizard-input !py-2 pr-10"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && canGoToEndpoint)
-                        setWizardStep("endpoint");
+                      if (e.key === "Enter" && canGoToEndpoint) {
+                        const mode = loadSaved("wizardMode", "") as string;
+                        if (mode === "fetch") handleFetchConfig();
+                        else handleCheckServer();
+                      }
                     }}
                   />
                   <button
@@ -477,17 +551,21 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => setWizardStep("welcome")}
+                onClick={() => { saveField("wizardMode", ""); setWizardStep("welcome"); }}
                 className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
               >
                 Назад
               </button>
               <button
-                onClick={handleCheckServer}
+                onClick={() => {
+                  const mode = loadSaved("wizardMode", "") as string;
+                  if (mode === "fetch") handleFetchConfig();
+                  else handleCheckServer();
+                }}
                 disabled={!canGoToEndpoint}
                 className="flex-1 btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Далее
+                {(loadSaved("wizardMode", "") as string) === "fetch" ? "Забрать конфиг" : "Далее"}
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -549,6 +627,13 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 </div>
 
                 <div className="space-y-2">
+                  <button
+                    onClick={handleFetchConfig}
+                    className="w-full btn-primary flex items-center justify-center gap-2 py-3"
+                  >
+                    <Download className="w-4 h-4" />
+                    Забрать конфиг с сервера
+                  </button>
                   {confirmUninstall ? (
                     <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 space-y-2.5">
                       <p className="text-xs text-red-300 font-medium text-center">
@@ -868,7 +953,6 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         <div className="flex-1 flex flex-col items-center justify-center p-6">
           <div className="max-w-md w-full space-y-4">
             <div className="text-center space-y-1">
-              <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
               <h2 className="text-lg font-bold">Устанавливаем TrustTunnel...</h2>
               <p className="text-xs text-gray-500">Это может занять несколько минут</p>
             </div>
@@ -954,8 +1038,112 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     );
   }
 
+  // ─── Fetching config from server ─────────────────
+  if (wizardStep === "fetching") {
+    const FETCH_STEPS_ORDER = ["connect", "auth", "check", "export", "save", "done"];
+    const FETCH_STEP_LABELS: Record<string, string> = {
+      connect: "Подключение к серверу",
+      auth: "Авторизация",
+      check: "Проверка TrustTunnel",
+      export: "Экспорт конфига",
+      save: "Сохранение",
+      done: "Готово",
+    };
+    return (
+      <>
+        {renderStepBar()}
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="max-w-md w-full space-y-4">
+            <div className="text-center space-y-1">
+              <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+              <h2 className="text-lg font-bold">Получаем конфиг с сервера...</h2>
+              <p className="text-xs text-gray-500">Подключаемся и экспортируем клиентскую конфигурацию</p>
+            </div>
+
+            <div className="glass-card p-4 space-y-2">
+              {FETCH_STEPS_ORDER.map((stepId) => {
+                const step = deploySteps[stepId];
+                if (!step) {
+                  return (
+                    <div key={stepId} className="flex items-center gap-2.5 text-gray-600">
+                      <div className="w-4 h-4 rounded-full border border-gray-700/50 shrink-0" />
+                      <span className="text-xs">{FETCH_STEP_LABELS[stepId]}</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={stepId} className="flex items-center gap-2.5">
+                    {step.status === "progress" && (
+                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                    )}
+                    {step.status === "ok" && (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    )}
+                    {step.status === "error" && (
+                      <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    )}
+                    <span
+                      className={`text-xs ${
+                        step.status === "progress"
+                          ? "text-amber-300"
+                          : step.status === "ok"
+                          ? "text-emerald-300"
+                          : "text-red-300"
+                      }`}
+                    >
+                      {step.message}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div>
+              <button
+                onClick={() => setShowLogs(!showLogs)}
+                className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {showLogs ? "Скрыть детали" : "Показать детали"}
+                <span className="text-gray-700">({deployLogs.length})</span>
+              </button>
+
+              {showLogs && (
+                <div className="mt-1.5 glass-card p-2.5 max-h-36 overflow-y-auto font-mono text-[10px] space-y-0.5 select-text cursor-text relative group">
+                  <button
+                    onClick={copyLogsToClipboard}
+                    className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-white/10 hover:bg-white/20 text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                    title="Копировать логи"
+                  >
+                    {copied ? <ClipboardCheck className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                  {deployLogs.map((log, i) => (
+                    <div
+                      key={i}
+                      className={
+                        log.level === "warn"
+                          ? "text-amber-400/80"
+                          : log.level === "error"
+                          ? "text-red-400/80"
+                          : "text-gray-500"
+                      }
+                    >
+                      {log.message}
+                    </div>
+                  ))}
+                  <div ref={logsEndRef} />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   // ─── Done ───────────────────────────────────────
   if (wizardStep === "done") {
+    const isFetch = (loadSaved("wizardMode", "") as string) === "fetch";
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="max-w-sm w-full text-center space-y-5">
@@ -966,7 +1154,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="space-y-1.5">
             <h2 className="text-xl font-bold text-emerald-300">Всё готово!</h2>
             <p className="text-sm text-gray-400">
-              Сервер установлен и запущен. Конфигурация создана автоматически.
+              {isFetch
+                ? "Конфигурация получена с сервера и сохранена."
+                : "Сервер установлен и запущен. Конфигурация создана автоматически."}
             </p>
           </div>
 
@@ -979,7 +1169,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
           <div className="flex flex-col gap-2 items-center">
             <button
-              onClick={() => onSetupComplete(configPath)}
+              onClick={() => { setWizardStep("welcome"); onSetupComplete(configPath); }}
               className="btn-primary inline-flex items-center gap-2 px-6 py-3"
             >
               Перейти к подключению
@@ -999,18 +1189,23 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
   // ─── Error ──────────────────────────────────────
   if (wizardStep === "error") {
+    const isFetchMode = (loadSaved("wizardMode", "") as string) === "fetch";
+    const showReinstallPrompt = isFetchMode && fetchRetryCount >= 2;
+
     return (
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-sm w-full text-center space-y-4">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-2xl shadow-red-500/30">
+      <div className="flex-1 flex flex-col items-center overflow-y-auto p-6">
+        <div className="max-w-sm w-full text-center space-y-4 my-auto">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-2xl shadow-red-500/30 shrink-0">
             <XCircle className="w-8 h-8 text-white" />
           </div>
 
           <div className="space-y-1.5">
             <h2 className="text-xl font-bold text-red-300">Что-то пошло не так</h2>
-            <p className="text-xs text-gray-400 leading-relaxed select-text cursor-text">
-              {errorMessage || "Неизвестная ошибка"}
-            </p>
+            <div className="max-h-32 overflow-y-auto rounded-lg bg-white/5 p-2">
+              <p className="text-xs text-gray-400 leading-relaxed select-text cursor-text break-words">
+                {errorMessage || "Неизвестная ошибка"}
+              </p>
+            </div>
           </div>
 
           {deployLogs.length > 0 && (
@@ -1044,17 +1239,47 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             </div>
           )}
 
-          <div className="flex gap-2 justify-center">
-            <button
-              onClick={() => setWizardStep("endpoint")}
-              className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              Назад к настройкам
-            </button>
-            <button onClick={handleDeploy} className="btn-primary !py-2.5 text-sm">
-              Попробовать снова
-            </button>
-          </div>
+          {showReinstallPrompt ? (
+            <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2.5">
+              <p className="text-xs text-amber-300 font-medium">
+                Хотите переустановить VPN на сервере?
+              </p>
+              <p className="text-[10px] text-amber-300/60 leading-relaxed">
+                Копирование конфига не удалось повторно. Можно переустановить VPN с нуля.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setWizardStep("server")}
+                  className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-400
+                             border border-white/10 hover:bg-white/5 transition-all"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={() => { setFetchRetryCount(0); saveField("wizardMode", ""); setWizardStep("endpoint"); }}
+                  className="flex-1 px-3 py-2 rounded-xl text-xs font-medium
+                             bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-all"
+                >
+                  Да, переустановить
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => setWizardStep(isFetchMode ? "server" : "endpoint")}
+                className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                {isFetchMode ? "Назад" : "Назад к настройкам"}
+              </button>
+              <button
+                onClick={isFetchMode ? handleFetchConfig : handleDeploy}
+                className="btn-primary !py-2.5 text-sm"
+              >
+                Попробовать снова
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

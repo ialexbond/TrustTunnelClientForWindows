@@ -85,7 +85,6 @@ function StatusPanel({
   onDisconnect,
 }: StatusPanelProps) {
   const cfg = STATUS_CONFIG[status];
-  const isActive = status === "connected" || status === "connecting" || status === "recovering";
 
   return (
     <div className="glass-card p-4">
@@ -108,7 +107,7 @@ function StatusPanel({
               </div>
             )}
             {error && (
-              <p className="text-[11px] text-red-400 mt-0.5 max-w-sm truncate">
+              <p className="text-[11px] text-red-400 mt-0.5 max-w-sm break-words line-clamp-3" title={error}>
                 {error}
               </p>
             )}
@@ -116,12 +115,34 @@ function StatusPanel({
         </div>
 
         <div>
-          {isActive ? (
-            <button onClick={onDisconnect} className="btn-danger !px-5 !py-2.5 text-sm">
+          {status === "connecting" || status === "recovering" ? (
+            <button
+              disabled
+              className="px-5 py-2.5 rounded-xl font-semibold text-sm text-white cursor-not-allowed
+                         bg-gradient-to-r from-amber-500 to-yellow-500 shadow-lg shadow-amber-500/25 opacity-90"
+            >
+              {status === "connecting" ? "Подключение..." : "Восстановление..."}
+            </button>
+          ) : status === "disconnecting" ? (
+            <button
+              disabled
+              className="px-5 py-2.5 rounded-xl font-semibold text-sm text-white cursor-not-allowed
+                         bg-gradient-to-r from-amber-500 to-yellow-500 shadow-lg shadow-amber-500/25 opacity-90"
+            >
+              Отключение...
+            </button>
+          ) : status === "connected" ? (
+            <button
+              onClick={onDisconnect}
+              className="btn-danger !px-5 !py-2.5 text-sm"
+            >
               Отключить
             </button>
           ) : (
-            <button onClick={onConnect} className="btn-primary !px-5 !py-2.5 text-sm">
+            <button
+              onClick={onConnect}
+              className="btn-primary !px-5 !py-2.5 text-sm"
+            >
               Подключить
             </button>
           )}
