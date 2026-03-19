@@ -30,9 +30,10 @@ const STATUS_DOT: Record<string, string> = {
 function Header({ activeTab, onTabChange, updateInfo, onOpenDownload, hasConfig, vpnStatus }: HeaderProps) {
   return (
     <header
-      className="flex items-center gap-3 px-5 py-3 border-b border-white/10 bg-surface-900/50 backdrop-blur-sm"
+      className="border-b border-white/10 bg-surface-900/50 backdrop-blur-sm"
       data-tauri-drag-region
     >
+    <div className="flex items-center gap-3 px-5 py-3 max-w-[980px] mx-auto">
       <div className="relative p-2 rounded-lg bg-indigo-500/20">
         <Shield className="w-5 h-5 text-indigo-400" />
         {vpnStatus && vpnStatus !== "disconnected" && (
@@ -40,7 +41,12 @@ function Header({ activeTab, onTabChange, updateInfo, onOpenDownload, hasConfig,
         )}
       </div>
       <div className="mr-4">
-        <h1 className="text-sm font-bold tracking-wide">TrustTunnel</h1>
+        <h1 className="text-sm font-bold tracking-wide">
+          TrustTunnel
+          {import.meta.env.DEV && (
+            <span className="ml-1.5 text-[9px] font-semibold text-amber-400 bg-amber-400/15 px-1.5 py-0.5 rounded align-middle">DEV</span>
+          )}
+        </h1>
         <p className="text-[10px] text-gray-500 uppercase tracking-widest">
           VPN Client
         </p>
@@ -70,16 +76,17 @@ function Header({ activeTab, onTabChange, updateInfo, onOpenDownload, hasConfig,
         ))}
       </nav>
 
-      {updateInfo?.available && (
+      {(updateInfo?.available || import.meta.env.DEV) && (
         <button
           onClick={onOpenDownload}
           className="flex items-center gap-1.5 px-2.5 py-1 ml-2 rounded-lg text-[11px] font-medium bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors animate-pulse"
-          title={`Доступна версия ${updateInfo.latestVersion}`}
+          title={`Доступна версия ${updateInfo?.latestVersion || "?.?.?"}`}
         >
           <Download className="w-3.5 h-3.5" />
-          v{updateInfo.latestVersion}
+          v{updateInfo?.latestVersion || "?.?.?"}
         </button>
       )}
+    </div>
     </header>
   );
 }
