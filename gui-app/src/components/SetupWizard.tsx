@@ -830,15 +830,11 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   <div className="text-[10px] text-gray-500 mt-0.5">Рекомендуется</div>
                 </button>
                 <button
-                  onClick={() => setCertType("selfsigned")}
-                  className={`p-2.5 rounded-xl text-xs text-left transition-all border ${
-                    certType === "selfsigned"
-                      ? "border-amber-500/50 bg-amber-500/10 text-white"
-                      : "border-white/10 bg-white/5 text-gray-400 hover:bg-white/10"
-                  }`}
+                  disabled
+                  className="p-2.5 rounded-xl text-xs text-left border border-white/5 bg-white/[0.02] text-gray-600 cursor-not-allowed opacity-50"
                 >
                   <div className="font-medium">Самоподписанный</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">Только для тестов</div>
+                  <div className="text-[10px] text-gray-600 mt-0.5">Недоступно</div>
                 </button>
               </div>
 

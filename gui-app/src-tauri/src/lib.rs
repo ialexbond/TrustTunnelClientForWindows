@@ -1,3 +1,4 @@
+mod connectivity;
 mod geodata;
 mod sidecar;
 mod ssh_deploy;
@@ -675,6 +676,17 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Set window icon (taskbar)
+            if let Some(w) = app.get_webview_window("main") {
+                let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))
+                    .expect("Failed to load window icon");
+                w.set_icon(icon).ok();
+            }
+
+            // Start connectivity monitor
+            let is_conn_for_monitor = Arc::clone(&app.state::<AppState>().is_connected);
+            connectivity::start_monitor(app.handle().clone(), is_conn_for_monitor);
+
             // Listen for vpn-status events to update tray icon color
             use tauri::Listener;
             let app_handle = app.handle().clone();
@@ -729,6 +741,12 @@ pub fn run() {
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,
             geodata::save_exclusion_json,
+            geodata::fetch_whitelist_domains,
+            geodata::get_iplist_groups,
+            geodata::fetch_iplist_group_domains,
+            geodata::load_active_groups,
+            geodata::save_active_groups,
+            geodata::load_group_cache,
             self_update
         ])
         .build(tauri::generate_context!())
