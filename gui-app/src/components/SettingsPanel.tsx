@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Settings, FolderOpen, Save, Eye, EyeOff, Trash2, AlertTriangle, Loader2, Download, Minus, Plus } from "lucide-react";
+import { Settings, FolderOpen, Save, Eye, EyeOff, Trash2, AlertTriangle, Loader2, Download, Minus, Plus, Shield, Terminal, Lock, RefreshCw } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import type { VpnConfig, VpnStatus } from "../App";
 
@@ -630,6 +630,44 @@ function SettingsPanel({
               value={config.endpoint?.has_ipv6 || false}
               onChange={(v) => updateField("endpoint.has_ipv6", v)}
             />
+          </div>
+
+          {/* Utilities — coming soon */}
+          <div className="border-t border-white/5 pt-2 space-y-1.5">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Утилиты сервера</span>
+            <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-2 opacity-50 pointer-events-none select-none">
+              <p className="text-[10px] text-gray-500 text-center mb-2">В разработке — будет доступно в будущих обновлениях</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+                  <Shield className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+                  <div>
+                    <p className="text-[11px] text-gray-500 font-medium">Firewall</p>
+                    <p className="text-[9px] text-gray-600">Настройка правил</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+                  <Lock className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+                  <div>
+                    <p className="text-[11px] text-gray-500 font-medium">Fail2Ban</p>
+                    <p className="text-[9px] text-gray-600">Защита от брутфорса</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+                  <RefreshCw className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+                  <div>
+                    <p className="text-[11px] text-gray-500 font-medium">WARP</p>
+                    <p className="text-[9px] text-gray-600">Cloudflare WARP</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+                  <Terminal className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+                  <div>
+                    <p className="text-[11px] text-gray-500 font-medium">SSH порт</p>
+                    <p className="text-[9px] text-gray-600">Смена порта SSH</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Danger Zone */}
