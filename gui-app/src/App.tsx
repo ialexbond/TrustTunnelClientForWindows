@@ -195,6 +195,57 @@ function App() {
     };
   }, []);
 
+  // Auto-reconnect on internet loss
+  // Backend monitors connectivity and sends action-based events:
+  //   { online: false, action: "disconnect" } — disconnect VPN, backend will wait for adapter
+  //   { online: true, action: "reconnect" }   — adapter is back, reconnect VPN
+  //   { online: false, action: "give_up" }    — adapter didn't come back in 5 min
+  useEffect(() => {
+    const unlistenInternet = listen<{ online: boolean; action?: string }>(
+      "internet-status",
+      async (event) => {
+        const { online, action } = event.payload;
+
+        if (!online && action === "disconnect") {
+          console.warn("[connectivity] Internet lost — disconnecting VPN, waiting for adapter...");
+          setStatus("recovering");
+          setError("Интернет-соединение потеряно. Отключение VPN, ожидание восстановления сети...");
+          try {
+            await invoke("vpn_disconnect");
+          } catch (e) {
+            console.error("[connectivity] Disconnect failed:", e);
+          }
+        } else if (online && action === "reconnect") {
+          console.log("[connectivity] Adapter back online — reconnecting VPN");
+          setError("Сеть восстановлена. Переподключение к VPN...");
+          const savedPath = localStorage.getItem("tt_config_path");
+          const savedLevel = localStorage.getItem("tt_log_level") || "info";
+          if (savedPath) {
+            try {
+              setStatus("connecting");
+              await invoke("vpn_connect", {
+                configPath: savedPath,
+                logLevel: savedLevel,
+              });
+              setError(null);
+            } catch (e) {
+              console.error("[connectivity] Reconnect failed:", e);
+              setError(`Ошибка переподключения: ${e}`);
+              setStatus("error");
+            }
+          }
+        } else if (!online && action === "give_up") {
+          setError("Не удалось дождаться восстановления сети (5 мин). Подключитесь вручную.");
+          setStatus("disconnected");
+        }
+      },
+    );
+
+    return () => {
+      unlistenInternet.then((f) => f());
+    };
+  }, []);
+
   const handleConnect = useCallback(async () => {
     if (!config.configPath) {
       setError("Сначала укажите файл конфигурации или настройте сервер");
@@ -263,6 +314,7 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-surface-950">
+      {/* Header — full width, edge-to-edge */}
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -273,57 +325,60 @@ function App() {
         vpnStatus={status}
       />
 
-      {/* All tabs always mounted; inactive hidden via display:none to preserve state */}
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ display: activeTab === "setup" ? "flex" : "none" }}>
-        <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} />
-      </div>
+      {/* Content — constrained max-width, centered */}
+      <div className="flex-1 min-h-0 w-full max-w-[980px] mx-auto px-5">
+        {/* All tabs always mounted; inactive hidden via display:none to preserve state */}
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "setup" ? "flex" : "none" }}>
+          <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} />
+        </div>
 
-      <div className="flex-1 flex flex-col gap-2 p-3 overflow-hidden" style={{ display: activeTab === "settings" ? "flex" : "none" }}>
-        <StatusPanel
-          status={status}
-          error={error}
-          connectedSince={connectedSince}
-          onConnect={handleConnect}
-          onDisconnect={handleDisconnect}
-        />
-        <div className="flex-1 min-h-0">
-          <SettingsPanel
-            configPath={config.configPath}
-            onConfigChange={setConfig}
+        <div className="h-full flex flex-col gap-2 py-3 overflow-hidden" style={{ display: activeTab === "settings" ? "flex" : "none" }}>
+          <StatusPanel
             status={status}
+            error={error}
+            connectedSince={connectedSince}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+          />
+          <div className="flex-1 min-h-0">
+            <SettingsPanel
+              configPath={config.configPath}
+              onConfigChange={setConfig}
+              status={status}
+              onReconnect={async () => {
+                if (status === "connected" || status === "connecting") {
+                  await handleDisconnect();
+                  setTimeout(() => handleConnect(), 500);
+                }
+              }}
+              onSwitchToSetup={handleSwitchToSetup}
+              onClearConfig={handleClearConfig}
+              onVpnModeChange={setVpnMode}
+            />
+          </div>
+        </div>
+
+        <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activeTab === "routing" ? "flex" : "none" }}>
+          <RoutingPanel
+            configPath={config.configPath}
+            status={status}
+            vpnMode={vpnMode}
             onReconnect={async () => {
               if (status === "connected" || status === "connecting") {
                 await handleDisconnect();
                 setTimeout(() => handleConnect(), 500);
               }
             }}
-            onSwitchToSetup={handleSwitchToSetup}
-            onClearConfig={handleClearConfig}
-            onVpnModeChange={setVpnMode}
           />
         </div>
-      </div>
 
-      <div className="flex-1 flex flex-col p-3 overflow-hidden" style={{ display: activeTab === "routing" ? "flex" : "none" }}>
-        <RoutingPanel
-          configPath={config.configPath}
-          status={status}
-          vpnMode={vpnMode}
-          onReconnect={async () => {
-            if (status === "connected" || status === "connecting") {
-              await handleDisconnect();
-              setTimeout(() => handleConnect(), 500);
-            }
-          }}
-        />
-      </div>
-
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ display: activeTab === "about" ? "flex" : "none" }}>
-        <AboutPanel
-          updateInfo={updateInfo}
-          onCheckUpdates={() => checkForUpdates(false)}
-          onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
-        />
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "about" ? "flex" : "none" }}>
+          <AboutPanel
+            updateInfo={updateInfo}
+            onCheckUpdates={() => checkForUpdates(false)}
+            onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
+          />
+        </div>
       </div>
     </div>
   );
