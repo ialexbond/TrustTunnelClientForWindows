@@ -374,6 +374,22 @@ fn read_client_config(config_path: String) -> Result<serde_json::Value, String> 
             }
         }
     };
+    // Auto-patch: ensure killswitch_allow_ports includes DHCP ports (67, 68)
+    // so Kill Switch doesn't block DHCP lease renewal on existing configs
+    if table.get("killswitch_allow_ports").is_none() {
+        if let Ok(mut doc) = std::fs::read_to_string(&config_path)
+            .unwrap_or_default()
+            .parse::<toml_edit::DocumentMut>()
+        {
+            let mut ports = toml_edit::Array::new();
+            ports.push(67);
+            ports.push(68);
+            doc["killswitch_allow_ports"] = toml_edit::value(ports);
+            let _ = std::fs::write(&config_path, doc.to_string());
+            eprintln!("[config] Auto-patched: added killswitch_allow_ports = [67, 68]");
+        }
+    }
+
     // Convert toml::Value to serde_json::Value
     let json = serde_json::to_value(&table)
         .map_err(|e| format!("Failed to convert: {e}"))?;
@@ -402,20 +418,31 @@ fn save_client_config(config_path: String, config: serde_json::Value) -> Result<
     std::fs::write(&config_path, &content)
         .map_err(|e| format!("Failed to write config: {e}"))?;
 
-    // Re-apply exclusions that were in the file before the overwrite
-    if !existing_exclusions.is_empty() {
+    // Re-apply exclusions and ensure killswitch_allow_ports includes DHCP
+    {
         let fresh = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to re-read config: {e}"))?;
         let mut doc: toml_edit::DocumentMut = fresh
             .parse()
             .map_err(|e: toml_edit::TomlError| format!("Failed to re-parse config: {e}"))?;
-        let mut arr = toml_edit::Array::new();
-        for d in &existing_exclusions {
-            arr.push(d.as_str());
+
+        if !existing_exclusions.is_empty() {
+            let mut arr = toml_edit::Array::new();
+            for d in &existing_exclusions {
+                arr.push(d.as_str());
+            }
+            doc["exclusions"] = toml_edit::value(arr);
         }
-        doc["exclusions"] = toml_edit::value(arr);
+
+        // Ensure DHCP ports (67, 68) are always in killswitch_allow_ports
+        // so Kill Switch doesn't block DHCP lease renewal
+        let mut ports = toml_edit::Array::new();
+        ports.push(67);
+        ports.push(68);
+        doc["killswitch_allow_ports"] = toml_edit::value(ports);
+
         std::fs::write(&config_path, doc.to_string())
-            .map_err(|e| format!("Failed to write exclusions back: {e}"))?;
+            .map_err(|e| format!("Failed to write config back: {e}"))?;
     }
 
     Ok(())
