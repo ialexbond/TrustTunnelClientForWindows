@@ -86,9 +86,10 @@ function App() {
       const data = await res.json();
       const latestTag = (data.tag_name || "").replace(/^v/, "");
       const isNewer = compareVersions(latestTag, currentVersion) > 0;
-      const asset = data.assets?.find((a: { name: string }) =>
-        a.name.endsWith(".exe") || a.name.endsWith(".zip") || a.name.endsWith(".msi")
-      );
+      const assets = data.assets || [];
+      const asset =
+        assets.find((a: { name: string }) => a.name.endsWith(".zip")) ||
+        assets.find((a: { name: string }) => a.name.endsWith(".exe") || a.name.endsWith(".msi"));
       setUpdateInfo({
         available: isNewer,
         latestVersion: latestTag,
@@ -320,7 +321,7 @@ function App() {
         onTabChange={setActiveTab}
         updateInfo={updateInfo}
         onCheckUpdates={() => checkForUpdates(false)}
-        onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
+        onOpenDownload={() => { setActiveTab("about"); }}
         hasConfig={!!config.configPath}
         vpnStatus={status}
       />
