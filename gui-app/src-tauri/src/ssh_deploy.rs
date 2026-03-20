@@ -621,6 +621,7 @@ pub async fn deploy_server(
 loglevel = "info"
 vpn_mode = "general"
 killswitch_enabled = true
+killswitch_allow_ports = [67, 68]
 post_quantum_group_enabled = false
 
 [endpoint]
@@ -1068,6 +1069,7 @@ pub async fn fetch_server_config(
 loglevel = "info"
 vpn_mode = "general"
 killswitch_enabled = true
+killswitch_allow_ports = [67, 68]
 post_quantum_group_enabled = false
 
 [endpoint]
