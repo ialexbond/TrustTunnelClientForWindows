@@ -1,0 +1,280 @@
+{
+  "tabs": {
+    "server": "Server",
+    "settings": "VPN Settings",
+    "dashboard": "Dashboard",
+    "routing": "Routing",
+    "logs": "Logs",
+    "about": "About",
+    "setup": "VPN Setup"
+  },
+  "status": {
+    "connected": "Connected",
+    "connecting": "Connecting...",
+    "disconnected": "Disconnected",
+    "disconnecting": "Disconnecting...",
+    "recovering": "Recovering...",
+    "error": "Error",
+    "saving": "Saving...",
+    "preparing": "Preparing...",
+    "checking": "Checking...",
+    "checking_server": "Checking server...",
+    "deleting": "Deleting..."
+  },
+  "buttons": {
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "save": "Save",
+    "save_and_reconnect": "Save & Reconnect",
+    "cancel": "Cancel",
+    "back": "Back",
+    "next": "Next",
+    "install": "Install",
+    "delete": "Delete",
+    "delete_all": "Delete All",
+    "retry": "Try Again",
+    "select_file": "Select File",
+    "fetch_config": "Fetch Config",
+    "copy_logs": "Copy Logs",
+    "show_details": "Show Details",
+    "hide_details": "Hide Details",
+    "show_logs": "Show Logs",
+    "hide_logs": "Hide Logs",
+    "clear_logs": "Clear Logs",
+    "reconnect": "Reconnect",
+    "import": "Import",
+    "auto_update": "Update Automatically",
+    "check_updates": "Check for Updates",
+    "download_from_browser": "Download manually",
+    "save_as": "Save As...",
+    "back_to_home": "← Home",
+    "back_to_ssh": "← Back to SSH",
+    "back_to_settings": "Back to Settings",
+    "go_to_connection": "Go to Connection",
+    "continue_setup": "Continue Setup",
+    "add_dns": "Add DNS",
+    "confirm_delete": "Yes, Delete",
+    "confirm_reinstall": "Yes, Reinstall",
+    "add_and_fetch_config": "Add & Fetch Config",
+    "skip_have_config": "Skip — I have a config",
+    "uninstall_and_reinstall": "Uninstall & Reinstall",
+    "reinstall_without_delete": "Reinstall (keep data)",
+    "uninstall_vpn_from_server": "Uninstall VPN from Server",
+    "advanced_settings": "Advanced Settings",
+    "no": "No",
+    "speed_test": "Speed Test"
+  },
+  "labels": {
+    "config_file": "Configuration File",
+    "host": "Host",
+    "username": "Username",
+    "password": "Password",
+    "ssh_password": "SSH Password",
+    "server_ip": "Server IP",
+    "port": "Port",
+    "vpn_mode": "VPN Mode",
+    "mtu": "MTU",
+    "protocol": "Protocol",
+    "log_level": "Log Level",
+    "domain_name": "Domain Name",
+    "email_for_notifications": "Notification Email",
+    "listen_address": "Listen Address",
+    "firewall_rules": "Firewall Rules",
+    "bruteforce_protection": "Brute-force Protection",
+    "ssh_port_change": "Change SSH Port",
+    "recommended": "Recommended",
+    "unavailable": "Unavailable"
+  },
+  "sections": {
+    "connection": "Connection",
+    "advanced": "Advanced",
+    "danger_zone": "Danger Zone",
+    "server_utilities": "Server Utilities",
+    "logs": "Logs",
+    "settings": "Settings"
+  },
+  "features": {
+    "kill_switch": "Kill Switch",
+    "anti_dpi": "Anti-DPI",
+    "post_quantum": "Post-Quantum",
+    "ipv6": "IPv6"
+  },
+  "help_text": {
+    "kill_switch": "Block internet if VPN drops",
+    "anti_dpi": "Bypass DPI blocking",
+    "post_quantum": "Post-quantum cryptography",
+    "ipv6": "Allow IPv6 traffic through VPN",
+    "vpn_mode_general": "All traffic through VPN, except exclusions",
+    "vpn_mode_selective": "All traffic direct, except specified routes",
+    "uninstall_description": "Completely remove TrustTunnel from the server: stop the service, delete files and configuration.",
+    "uninstall_consequences": "The service will be stopped, all TrustTunnel files will be deleted from the server. The current VPN connection will be terminated."
+  },
+  "tooltips": {
+    "kill_switch_detailed": "When the VPN connection drops, all internet traffic is blocked to prevent your data from leaking outside the VPN. Recommended to keep enabled for maximum security.",
+    "anti_dpi_detailed": "Disguises VPN traffic as regular HTTPS to bypass Deep Packet Inspection (DPI) systems used by ISPs and government agencies to block VPNs.",
+    "post_quantum_detailed": "Uses encryption algorithms resistant to quantum computer attacks. Protects your data from future decryption. Slightly increases connection time.",
+    "ipv6_detailed": "Allows IPv6 traffic routing through the VPN tunnel. If your ISP or server doesn't support IPv6, keep this disabled to avoid connection issues.",
+    "dns_upstreams": "Custom DNS servers for queries through VPN. Multiple servers work as fallbacks: if the first doesn't respond, the next is used. Encrypted protocols DoT, DoH, DoQ are supported to protect DNS queries from ISP interception."
+  },
+  "vpn_modes": {
+    "general": "Everything via VPN",
+    "selective": "Direct"
+  },
+  "messages": {
+    "configure_vpn_first": "Configure VPN first",
+    "config_required": "Please select a configuration file or set up a server first",
+    "saved_check": "Saved ✔",
+    "settings_saved": "Settings saved",
+    "coming_soon": "In development — will be available in future updates",
+    "specify_config_path": "Specify config path...",
+    "vpn_not_found": "VPN not found on server",
+    "vpn_not_installed_install_prompt": "TrustTunnel is not installed on this server. Would you like to install it?",
+    "network_restored_reconnecting": "Network restored. Reconnecting to VPN...",
+    "logs_appear_on_connect": "Logs will appear after connecting...",
+    "domain_already_exists": "Domain \"{{domain}}\" is already in the list",
+    "domain_in_ru_list": "Domain \"{{domain}}\" is already included in RU domains"
+  },
+  "errors": {
+    "internet_lost_disconnecting": "Internet connection lost. Disconnecting VPN, waiting for network recovery...",
+    "reconnection_failed": "Reconnection failed: {{error}}",
+    "network_recovery_timeout": "Network recovery timed out (5 min). Please reconnect manually."
+  },
+  "confirmations": {
+    "irreversible_action": "Are you sure? This action is irreversible."
+  },
+  "updates": {
+    "version_available": "Version {{version}} available",
+    "current_version_latest": "You have the latest version installed"
+  },
+  "wizard": {
+    "steps": {
+      "server_connection": "Server Connection",
+      "authorization": "Authorization",
+      "environment_check": "Environment Check",
+      "system_update": "System Update",
+      "install_trusttunnel": "Install TrustTunnel",
+      "endpoint_config": "Endpoint Configuration",
+      "service_start": "Start Service",
+      "config_export": "Export Config",
+      "save": "Save",
+      "done": "Done"
+    },
+    "progress": {
+      "server": "Server",
+      "checking": "Check",
+      "settings": "Settings",
+      "installation": "Install"
+    },
+    "welcome": {
+      "tagline": "Fast and secure VPN protocol.",
+      "description": "Set up a server in minutes or use an existing config.",
+      "setup_server": "Set Up Server",
+      "fetch_config": "Fetch Config from Server",
+      "use_existing_config": "I have a config",
+      "requirements_header": "Server setup requires:",
+      "requirement_linux": "• Linux server (Ubuntu 22+, Debian 11+) with SSH access",
+      "requirement_resources": "• Minimum 1 CPU core and 512 MB RAM (1 GB recommended)",
+      "requirement_root_domain": "• Root access • Domain pointed to server IP"
+    },
+    "server": {
+      "title": "Server Connection",
+      "description": "SSH credentials to access your server",
+      "server_ip_label": "Server IP Address"
+    },
+    "checking": {
+      "title": "Checking server...",
+      "description": "Connecting via SSH and checking TrustTunnel installation"
+    },
+    "found": {
+      "already_installed": "TrustTunnel is already installed",
+      "version_label": "Version: {{version}}",
+      "service_running": "Service: running",
+      "service_stopped": "not running",
+      "users_on_server": "Users on server",
+      "add_user": "Add User",
+      "add_user_description": "Each device should connect with its own user.",
+      "server_unreachable": "Server unreachable",
+      "connection_error_help": "Could not connect to the server via SSH. Check the address, port, username and password. The server may be unreachable from your network.",
+      "server_ready": "Server is ready for setup",
+      "not_found_can_install": "TrustTunnel not found — can install from scratch",
+      "uninstall_consequences": "The service will be stopped, all TrustTunnel files will be deleted from the server. The current VPN connection will be terminated."
+    },
+    "uninstalling": {
+      "title": "Removing TrustTunnel...",
+      "description": "Stopping service and removing files...",
+      "success": "TrustTunnel removed"
+    },
+    "endpoint": {
+      "title": "VPN Settings",
+      "vpn_credentials": "VPN Credentials",
+      "tls_certificate": "TLS Certificate",
+      "self_signed": "Self-signed",
+      "self_signed_warning": "Self-signed certificates are insecure and may be blocked. We strongly recommend using a domain with Let's Encrypt.",
+      "dns_record_help": "A record for domain → {{host}}, port 80 open",
+      "certificate_email_help": "For certificate renewal notifications",
+      "listen_address_help": "Leave default if unsure",
+      "system_requirements": "Requirements: Linux x86_64, 512 MB RAM, 100 MB disk, port 443"
+    },
+    "deploying": {
+      "title": "Installing TrustTunnel...",
+      "description": "This may take a few minutes"
+    },
+    "fetching": {
+      "title": "Fetching config from server...",
+      "description": "Connecting and exporting client configuration"
+    },
+    "done": {
+      "title": "All done!",
+      "fetch_description": "Configuration fetched from server and saved.",
+      "deploy_description": "Server installed and running. Configuration created automatically."
+    },
+    "error": {
+      "title": "Something went wrong",
+      "unknown": "Unknown error",
+      "possible_cause": "Possible cause",
+      "hint_dns": "The DNS record (A record) for the domain does not point to the server IP address. Add an A record in your domain control panel and wait 5–10 minutes.",
+      "hint_letsencrypt": "Let's Encrypt could not issue a certificate. Make sure the domain points to the server and port 80 is open.",
+      "hint_port_80": "Port 80 must be open and not occupied by another service (nginx, apache) to obtain a certificate.",
+      "hint_unreachable": "Server unreachable. Verify the IP address is correct, the server is running and not blocking connections from your network.",
+      "hint_auth_failed": "SSH authentication error. Check your username and password.",
+      "reinstall_prompt": "Would you like to reinstall VPN on the server?",
+      "reinstall_description": "Config fetching failed again. You can reinstall VPN from scratch."
+    }
+  },
+  "routing": {
+    "ru_domains_marker": "@@RU-domains",
+    "ru_domains": "RU Domains",
+    "no_config_selected": "No configuration selected",
+    "configure_in_settings": "Configure connection in Settings tab",
+    "saved_domains_found": "Found {{count}} saved domains",
+    "domains_will_auto_load": "They will be automatically loaded into config after setting up a connection.",
+    "previously_saved_domains_found": "Found {{count}} previously saved domains",
+    "mode_selective": "Via VPN",
+    "mode_general": "Direct",
+    "entries_unit": " entries",
+    "domains_unit": " domains",
+    "saving": "saving...",
+    "auto_saving": "auto-saving",
+    "refresh_ru_domains": "Refresh RU domains list",
+    "ru_domains_already_added": "RU domains already added",
+    "add_ru_domains": "Add RU Domains",
+    "download_and_add_ru_domains": "Download & Add RU Domains",
+    "list_changed_restart_needed": "List changed — restart needed",
+    "list_changed_apply_on_connect": "List changed — will apply on connect",
+    "available_new_domains": "{{count}} new domains available",
+    "list_empty": "List is empty",
+    "add_domains_above": "Add domains above",
+    "mode_selective_description": "Mode: Direct. Domains below will go through VPN, all other traffic — direct.",
+    "mode_general_description": "Mode: Everything via VPN. Domains below will go direct, all other traffic — through VPN."
+  },
+  "about": {
+    "section_title": "About",
+    "section_updates": "Updates",
+    "description": "TrustTunnel is a VPN protocol developed by AdGuard. This application is an unofficial Windows client that allows automatic deployment of a VPN server on a remote machine via SSH and connecting to it.",
+    "vibe_coding": "vibe coding",
+    "vibe_coding_info": "This client application was entirely created using {{method}} — a development approach where an AI assistant writes code based on natural language task descriptions."
+  },
+  "units": {
+    "mbps": "Mbps"
+  }
+}

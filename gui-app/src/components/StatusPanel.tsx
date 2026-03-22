@@ -1,10 +1,15 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Wifi,
   WifiOff,
   Loader2,
   AlertTriangle,
   Clock,
+  Activity,
+  RefreshCw,
+  ArrowDown,
+  ArrowUp,
 } from "lucide-react";
 import type { VpnStatus } from "../App";
 
@@ -14,6 +19,7 @@ interface StatusPanelProps {
   connectedSince: Date | null;
   onConnect: () => void;
   onDisconnect: () => void;
+  configPath?: string;
 }
 
 const STATUS_CONFIG: Record<
@@ -45,7 +51,7 @@ const STATUS_CONFIG: Record<
     color: "text-amber-400",
   },
   recovering: {
-    label: "Восстановление...",
+    label: "Ожидание сети...",
     dotClass: "status-dot-connecting",
     icon: <Loader2 className="w-8 h-8 animate-spin" />,
     color: "text-amber-400",
@@ -77,12 +83,112 @@ function UptimeCounter({ since }: { since: Date }) {
   return <span>{formatUptime(since)}</span>;
 }
 
+interface SpeedResult {
+  download_mbps: number;
+  upload_mbps: number;
+}
+
+function PingDisplay({ configPath, status }: { configPath?: string; status: VpnStatus }) {
+  const [ping, setPing] = useState<number | null>(null);
+  const [speed, setSpeed] = useState<SpeedResult | null>(null);
+  const [testing, setTesting] = useState(false);
+  const endpointRef = useRef<{ host: string; port: number } | null>(null);
+  const isConnected = status === "connected";
+
+  // Parse endpoint from config once
+  useEffect(() => {
+    if (!configPath) return;
+    invoke<{ endpoint?: { hostname?: string } }>("read_client_config", { configPath })
+      .then((cfg) => {
+        const raw = cfg?.endpoint?.hostname || "";
+        const parts = raw.split(":");
+        const host = parts[0] || "";
+        const port = parts.length > 1 ? parseInt(parts[1], 10) : 443;
+        if (host) endpointRef.current = { host, port };
+      })
+      .catch(() => {});
+  }, [configPath]);
+
+  const doPing = useCallback(async () => {
+    if (!endpointRef.current) return;
+    const { host, port } = endpointRef.current;
+    try {
+      const ms = await invoke<number>("ping_endpoint", { host, port });
+      setPing(ms);
+    } catch {
+      setPing(-1);
+    }
+  }, []);
+
+  // Only ping when connected; clear on disconnect
+  useEffect(() => {
+    if (!isConnected) {
+      setPing(null);
+      setSpeed(null);
+      setTesting(false);
+      return;
+    }
+    doPing();
+    const iv = setInterval(doPing, 10000);
+    return () => clearInterval(iv);
+  }, [isConnected, doPing]);
+
+  const runSpeedTest = useCallback(async () => {
+    if (testing) return;
+    setTesting(true);
+    try {
+      const result = await invoke<SpeedResult>("speedtest_run");
+      setSpeed(result);
+    } catch {
+      // keep previous result on error
+    } finally {
+      setTesting(false);
+    }
+  }, [testing]);
+
+  if (!isConnected || ping === null) return null;
+
+  const color = ping < 0 ? "text-gray-600" : ping < 90 ? "text-emerald-400" : ping <= 200 ? "text-amber-400" : "text-red-400";
+  const label = ping < 0 ? "—" : `${ping} ms`;
+  const dl = speed?.download_mbps ?? 0;
+  const ul = speed?.upload_mbps ?? 0;
+
+  return (
+    <div className="flex items-center gap-2 text-xs mt-0.5">
+      <div className={`flex items-center gap-1 ${color}`}>
+        <Activity className="w-3 h-3" />
+        <span>{label}</span>
+      </div>
+      <span className="text-gray-600">|</span>
+      <span className="flex items-center gap-0.5 text-emerald-400">
+        <ArrowDown className="w-3 h-3" />{dl} Мбит/с
+      </span>
+      <span className="flex items-center gap-0.5 text-indigo-400">
+        <ArrowUp className="w-3 h-3" />{ul} Мбит/с
+      </span>
+      <button
+        onClick={runSpeedTest}
+        disabled={testing}
+        className="text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50"
+        title="Тест скорости"
+      >
+        {testing ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <RefreshCw className="w-3 h-3" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 function StatusPanel({
   status,
   error,
   connectedSince,
   onConnect,
   onDisconnect,
+  configPath,
 }: StatusPanelProps) {
   const cfg = STATUS_CONFIG[status];
 
@@ -91,7 +197,8 @@ function StatusPanel({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div
-            className={`p-3 rounded-xl bg-white/5 border border-white/10 ${cfg.color}`}
+            className={`p-3 rounded-xl ${cfg.color}`}
+            style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
           >
             {cfg.icon}
           </div>
@@ -106,6 +213,7 @@ function StatusPanel({
                 <UptimeCounter since={connectedSince} />
               </div>
             )}
+            <PingDisplay configPath={configPath} status={status} />
             {error && (
               <p className="text-[11px] text-red-400 mt-0.5 max-w-sm break-words line-clamp-3" title={error}>
                 {error}
@@ -121,7 +229,7 @@ function StatusPanel({
               className="px-5 py-2.5 rounded-xl font-semibold text-sm text-white cursor-not-allowed
                          bg-gradient-to-r from-amber-500 to-yellow-500 shadow-lg shadow-amber-500/25 opacity-90"
             >
-              {status === "connecting" ? "Подключение..." : "Восстановление..."}
+              {status === "connecting" ? "Подключение..." : "Переподключение..."}
             </button>
           ) : status === "disconnecting" ? (
             <button
