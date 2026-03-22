@@ -1,0 +1,280 @@
+{
+  "tabs": {
+    "server": "Сервер",
+    "settings": "Настройки VPN",
+    "dashboard": "Дашборд",
+    "routing": "Маршрутизация",
+    "logs": "Логи",
+    "about": "О программе",
+    "setup": "Установка VPN"
+  },
+  "status": {
+    "connected": "Подключен",
+    "connecting": "Подключение...",
+    "disconnected": "Отключен",
+    "disconnecting": "Отключение...",
+    "recovering": "Восстановление...",
+    "error": "Ошибка",
+    "saving": "Сохранение...",
+    "preparing": "Подготовка...",
+    "checking": "Проверка...",
+    "checking_server": "Проверка сервера...",
+    "deleting": "Удаление..."
+  },
+  "buttons": {
+    "connect": "Подключить",
+    "disconnect": "Отключить",
+    "save": "Сохранить",
+    "save_and_reconnect": "Сохранить и переподключить",
+    "cancel": "Отмена",
+    "back": "Назад",
+    "next": "Далее",
+    "install": "Установить",
+    "delete": "Удалить",
+    "delete_all": "Удалить все",
+    "retry": "Попробовать снова",
+    "select_file": "Выбрать файл",
+    "fetch_config": "Забрать конфиг",
+    "copy_logs": "Копировать логи",
+    "show_details": "Показать детали",
+    "hide_details": "Скрыть детали",
+    "show_logs": "Показать логи",
+    "hide_logs": "Скрыть логи",
+    "clear_logs": "Очистить логи",
+    "reconnect": "Переподключить",
+    "import": "Подгрузить",
+    "auto_update": "Обновить автоматически",
+    "check_updates": "Проверить обновления",
+    "download_from_browser": "Скачать вручную из браузера",
+    "save_as": "Сохранить как...",
+    "back_to_home": "← На главную",
+    "back_to_ssh": "← Назад к SSH",
+    "back_to_settings": "Назад к настройкам",
+    "go_to_connection": "Перейти к подключению",
+    "continue_setup": "Продолжить настройку",
+    "add_dns": "Добавить DNS",
+    "confirm_delete": "Да, удалить",
+    "confirm_reinstall": "Да, переустановить",
+    "add_and_fetch_config": "Добавить и получить конфиг",
+    "skip_have_config": "Пропустить — у меня есть конфиг",
+    "uninstall_and_reinstall": "Удалить и переустановить",
+    "reinstall_without_delete": "Переустановить поверх (без удаления)",
+    "uninstall_vpn_from_server": "Удалить VPN с сервера",
+    "advanced_settings": "Дополнительные настройки",
+    "no": "Нет",
+    "speed_test": "Тест скорости"
+  },
+  "labels": {
+    "config_file": "Файл конфигурации",
+    "host": "Хост",
+    "username": "Имя пользователя",
+    "password": "Пароль",
+    "ssh_password": "Пароль SSH",
+    "server_ip": "IP сервера",
+    "port": "Порт",
+    "vpn_mode": "Режим VPN",
+    "mtu": "MTU",
+    "protocol": "Протокол",
+    "log_level": "Уровень логирования",
+    "domain_name": "Доменное имя",
+    "email_for_notifications": "Email для уведомлений",
+    "listen_address": "Адрес прослушивания",
+    "firewall_rules": "Настройка правил",
+    "bruteforce_protection": "Защита от брутфорса",
+    "ssh_port_change": "Смена порта SSH",
+    "recommended": "Рекомендуется",
+    "unavailable": "Недоступно"
+  },
+  "sections": {
+    "connection": "Подключение",
+    "advanced": "Дополнительно",
+    "danger_zone": "Опасная зона",
+    "server_utilities": "Утилиты сервера",
+    "logs": "Логи",
+    "settings": "Настройки"
+  },
+  "features": {
+    "kill_switch": "Kill Switch",
+    "anti_dpi": "Anti-DPI",
+    "post_quantum": "Post-Quantum",
+    "ipv6": "IPv6"
+  },
+  "help_text": {
+    "kill_switch": "Блокировать интернет при обрыве VPN",
+    "anti_dpi": "Обход блокировок DPI",
+    "post_quantum": "Постквантовая криптография",
+    "ipv6": "Разрешить IPv6 трафик через VPN",
+    "vpn_mode_general": "Весь трафик через VPN, кроме исключений",
+    "vpn_mode_selective": "Весь трафик напрямую, кроме указанных маршрутов",
+    "uninstall_description": "Полностью удалить TrustTunnel с сервера: остановка сервиса, удаление файлов и конфигурации.",
+    "uninstall_consequences": "Сервис будет остановлен, все файлы TrustTunnel будут удалены с сервера. Текущее VPN-подключение будет разорвано."
+  },
+  "tooltips": {
+    "kill_switch_detailed": "При потере VPN-соединения весь интернет-трафик блокируется, чтобы ваши данные не утекли в обход VPN. Рекомендуется держать включённым для максимальной безопасности.",
+    "anti_dpi_detailed": "Маскирует VPN-трафик под обычный HTTPS, чтобы обойти системы глубокого анализа пакетов (DPI), которые используют провайдеры и госорганы для блокировки VPN.",
+    "post_quantum_detailed": "Использует алгоритмы шифрования, устойчивые к атакам квантовых компьютеров. Защищает ваши данные от расшифровки в будущем. Немного увеличивает время подключения.",
+    "ipv6_detailed": "Разрешает маршрутизацию IPv6-трафика через VPN-туннель. Если ваш провайдер или сервер не поддерживают IPv6, оставьте выключенным — это избежит проблем с подключением.",
+    "dns_upstreams": "Кастомные DNS-серверы для запросов через VPN. Несколько серверов работают как резервные: если первый не отвечает, используется следующий. Поддерживаются шифрованные протоколы DoT, DoH, DoQ для защиты DNS-запросов от перехвата провайдером."
+  },
+  "vpn_modes": {
+    "general": "Всё через VPN",
+    "selective": "Напрямую"
+  },
+  "messages": {
+    "configure_vpn_first": "Сначала настройте VPN",
+    "config_required": "Сначала укажите файл конфигурации или настройте сервер",
+    "saved_check": "Сохранено ✔",
+    "settings_saved": "Настройки сохранены",
+    "coming_soon": "В разработке — будет доступно в будущих обновлениях",
+    "specify_config_path": "Укажите путь к конфигу...",
+    "vpn_not_found": "VPN не найден на сервере",
+    "vpn_not_installed_install_prompt": "TrustTunnel не установлен на этом сервере. Хотите установить?",
+    "network_restored_reconnecting": "Сеть восстановлена. Переподключение к VPN...",
+    "logs_appear_on_connect": "Логи появятся после подключения...",
+    "domain_already_exists": "Домен «{{domain}}» уже есть в списке",
+    "domain_in_ru_list": "Домен «{{domain}}» уже включён в RU-домены"
+  },
+  "errors": {
+    "internet_lost_disconnecting": "Интернет-соединение потеряно. Отключение VPN, ожидание восстановления сети...",
+    "reconnection_failed": "Ошибка переподключения: {{error}}",
+    "network_recovery_timeout": "Не удалось дождаться восстановления сети (5 мин). Подключитесь вручную."
+  },
+  "confirmations": {
+    "irreversible_action": "Вы уверены? Это действие необратимо."
+  },
+  "updates": {
+    "version_available": "Доступна версия {{version}}",
+    "current_version_latest": "У вас установлена актуальная версия"
+  },
+  "wizard": {
+    "steps": {
+      "server_connection": "Подключение к серверу",
+      "authorization": "Авторизация",
+      "environment_check": "Проверка окружения",
+      "system_update": "Обновление системы",
+      "install_trusttunnel": "Установка TrustTunnel",
+      "endpoint_config": "Настройка Endpoint",
+      "service_start": "Запуск сервиса",
+      "config_export": "Экспорт конфига",
+      "save": "Сохранение",
+      "done": "Готово"
+    },
+    "progress": {
+      "server": "Сервер",
+      "checking": "Проверка",
+      "settings": "Настройки",
+      "installation": "Установка"
+    },
+    "welcome": {
+      "tagline": "Быстрый и защищённый VPN-протокол.",
+      "description": "Настройте сервер за пару минут или используйте готовый конфиг.",
+      "setup_server": "Настроить сервер",
+      "fetch_config": "Забрать конфиг с сервера",
+      "use_existing_config": "У меня есть конфиг",
+      "requirements_header": "Для настройки сервера потребуется:",
+      "requirement_linux": "• Linux-сервер (Ubuntu 22+, Debian 11+) с SSH-доступом",
+      "requirement_resources": "• Минимум 1 ядро CPU и 512 МБ RAM (рекомендуется 1 ГБ)",
+      "requirement_root_domain": "• Права root • Домен, направленный на IP сервера"
+    },
+    "server": {
+      "title": "Подключение к серверу",
+      "description": "SSH-данные для доступа к вашему серверу",
+      "server_ip_label": "IP-адрес сервера"
+    },
+    "checking": {
+      "title": "Проверяем сервер...",
+      "description": "Подключение по SSH и проверка установленного TrustTunnel"
+    },
+    "found": {
+      "already_installed": "TrustTunnel уже установлен",
+      "version_label": "Версия: {{version}}",
+      "service_running": "Сервис: работает",
+      "service_stopped": "не запущен",
+      "users_on_server": "Пользователи на сервере",
+      "add_user": "Добавить пользователя",
+      "add_user_description": "Каждое устройство должно подключаться под своим пользователем.",
+      "server_unreachable": "Сервер недоступен",
+      "connection_error_help": "Не удалось подключиться к серверу по SSH. Проверьте адрес, порт, логин и пароль. Возможно, сервер недоступен из вашей сети.",
+      "server_ready": "Сервер готов к настройке",
+      "not_found_can_install": "TrustTunnel не обнаружен — можно установить с нуля",
+      "uninstall_consequences": "Сервис будет остановлен, все файлы TrustTunnel будут удалены с сервера. Текущее VPN-подключение будет разорвано."
+    },
+    "uninstalling": {
+      "title": "Удаление TrustTunnel...",
+      "description": "Останавливаем сервис и удаляем файлы...",
+      "success": "TrustTunnel удалён"
+    },
+    "endpoint": {
+      "title": "Настройки VPN",
+      "vpn_credentials": "Учётные данные VPN",
+      "tls_certificate": "TLS-сертификат",
+      "self_signed": "Самоподписанный",
+      "self_signed_warning": "Самоподписанный сертификат небезопасен и может быть заблокирован. Настоятельно рекомендуем использовать домен с Let's Encrypt.",
+      "dns_record_help": "A-запись домена → {{host}}, порт 80 открыт",
+      "certificate_email_help": "Для уведомлений об обновлении сертификата",
+      "listen_address_help": "Оставьте по умолчанию, если не уверены",
+      "system_requirements": "Требования: Linux x86_64, 512 MB RAM, 100 MB диска, порт 443"
+    },
+    "deploying": {
+      "title": "Устанавливаем TrustTunnel...",
+      "description": "Это может занять несколько минут"
+    },
+    "fetching": {
+      "title": "Получаем конфиг с сервера...",
+      "description": "Подключаемся и экспортируем клиентскую конфигурацию"
+    },
+    "done": {
+      "title": "Всё готово!",
+      "fetch_description": "Конфигурация получена с сервера и сохранена.",
+      "deploy_description": "Сервер установлен и запущен. Конфигурация создана автоматически."
+    },
+    "error": {
+      "title": "Что-то пошло не так",
+      "unknown": "Неизвестная ошибка",
+      "possible_cause": "Возможная причина",
+      "hint_dns": "DNS-запись (A-запись) домена не указывает на IP-адрес сервера. Добавьте A-запись в панели управления доменом и подождите 5–10 минут.",
+      "hint_letsencrypt": "Let's Encrypt не смог выпустить сертификат. Убедитесь, что домен указывает на сервер и порт 80 открыт.",
+      "hint_port_80": "Порт 80 должен быть открыт и не занят другим сервисом (nginx, apache) для получения сертификата.",
+      "hint_unreachable": "Сервер недоступен. Проверьте, что IP-адрес верный, сервер включён и не блокирует подключения из вашей сети.",
+      "hint_auth_failed": "Ошибка авторизации SSH. Проверьте логин и пароль.",
+      "reinstall_prompt": "Хотите переустановить VPN на сервере?",
+      "reinstall_description": "Копирование конфига не удалось повторно. Можно переустановить VPN с нуля."
+    }
+  },
+  "routing": {
+    "ru_domains_marker": "@@RU-домены",
+    "ru_domains": "RU-домены",
+    "no_config_selected": "Конфигурация не выбрана",
+    "configure_in_settings": "Настройте подключение на вкладке Настройки",
+    "saved_domains_found": "Найдено {{count}} сохранённых доменов",
+    "domains_will_auto_load": "Они будут автоматически подгружены в конфиг после настройки подключения.",
+    "previously_saved_domains_found": "Найдено {{count}} ранее сохранённых доменов",
+    "mode_selective": "Через VPN",
+    "mode_general": "Напрямую",
+    "entries_unit": " записей",
+    "domains_unit": " доменов",
+    "saving": "сохранение...",
+    "auto_saving": "авто-сохранение",
+    "refresh_ru_domains": "Обновить список RU-доменов",
+    "ru_domains_already_added": "RU-домены уже добавлены",
+    "add_ru_domains": "Добавить RU-домены",
+    "download_and_add_ru_domains": "Скачать и добавить RU-домены",
+    "list_changed_restart_needed": "Список изменён — нужен перезапуск",
+    "list_changed_apply_on_connect": "Список изменён — применится при подключении",
+    "available_new_domains": "Доступно {{count}} новых доменов",
+    "list_empty": "Список пуст",
+    "add_domains_above": "Добавьте домены выше",
+    "mode_selective_description": "Режим: Напрямую. Домены ниже пойдут через VPN, остальной трафик — напрямую.",
+    "mode_general_description": "Режим: Всё через VPN. Домены ниже пойдут напрямую, остальной трафик — через VPN."
+  },
+  "about": {
+    "section_title": "О программе",
+    "section_updates": "Обновления",
+    "description": "TrustTunnel — VPN-протокол, разработанный компанией AdGuard. Данное приложение — неофициальный клиент для Windows, позволяющий автоматически развернуть VPN-сервер на удалённой машине через SSH и подключиться к нему.",
+    "vibe_coding": "вайб-кодинга",
+    "vibe_coding_info": "Клиентское приложение было полностью создано с помощью {{method}} — метода разработки, при котором AI-ассистент пишет код на основе описания задач на естественном языке."
+  },
+  "units": {
+    "mbps": "Мбит/с"
+  }
+}
