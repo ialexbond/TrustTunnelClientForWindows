@@ -28,8 +28,13 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
   const inputRef = useRef<HTMLInputElement>(null);
   const isActive = status === "connected" || status === "connecting" || status === "recovering";
 
-  // Cached RU-domains (the actual domain list behind the marker)
+  // Baseline: the flat domain list that was loaded initially (what VPN is running with)
+  const baselineFlat = useRef<string>("");
+
+  // Cached RU-domains (full whitelist from server)
   const [ruDomainsCache, setRuDomainsCache] = useState<string[]>([]);
+  // Active RU-domains (the subset actually present in config — may be smaller than cache)
+  const [ruDomainsActive, setRuDomainsActive] = useState<string[]>([]);
 
   // JSON backup domains (survives config deletion)
   const [jsonBackupDomains, setJsonBackupDomains] = useState<string[]>([]);
@@ -47,6 +52,19 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
       .catch(() => {});
   }, []);
 
+  // Helper: given flat domains and a whitelist, separate into marker + manual
+  // Also sets ruDomainsActive to the matched subset
+  const collapseRuDomains = useCallback((flatDomains: string[], whitelist: string[]): string[] => {
+    const wlSet = new Set(whitelist);
+    const ruMatched = flatDomains.filter((d) => wlSet.has(d));
+    const manual = flatDomains.filter((d) => !wlSet.has(d)).sort((a, b) => a.localeCompare(b));
+    if (ruMatched.length > 0) {
+      setRuDomainsActive(ruMatched);
+      return [RU_DOMAINS_MARKER, ...manual];
+    }
+    return manual;
+  }, []);
+
   // Load domains from config
   useEffect(() => {
     if (!configPath) {
@@ -62,49 +80,66 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
       return;
     }
     invoke<string[]>("load_exclusion_list", { configPath })
-      .then((tomlDomains) => {
-        // Reconstruct display entries from flat domain list
-        invoke<string[]>("load_group_cache", { groupId: "ru_whitelist" })
-          .then((cached) => {
-            if (cached.length > 0) {
-              setRuDomainsCache(cached);
-              setWhitelistLoaded(true);
-              const cachedSet = new Set(cached);
-              const hasRu = tomlDomains.some((d) => cachedSet.has(d));
-              const manual = tomlDomains.filter((d) => !cachedSet.has(d)).sort((a, b) => a.localeCompare(b));
-              if (hasRu) {
-                setDisplayEntries([RU_DOMAINS_MARKER, ...manual]);
+      .then(async (tomlDomains) => {
+        // Set baseline for dirty comparison
+        baselineFlat.current = JSON.stringify(tomlDomains.slice().sort());
+        // First try local cache
+        let cached: string[] = [];
+        try {
+          cached = await invoke<string[]>("load_group_cache", { groupId: "ru_whitelist" });
+        } catch { /* no cache */ }
+
+        if (cached.length > 0) {
+          // Cache exists — use it to detect RU-domains
+          setRuDomainsCache(cached);
+          setWhitelistLoaded(true);
+          setDisplayEntries(collapseRuDomains(tomlDomains, cached));
+        } else if (tomlDomains.length > 50) {
+          // No cache but many domains — try to auto-detect by fetching whitelist
+          try {
+            const fetched = await invoke<string[]>("fetch_whitelist_domains");
+            if (fetched.length > 0) {
+              const wlSet = new Set(fetched);
+              const overlap = tomlDomains.filter((d) => wlSet.has(d)).length;
+              // If >50% of config domains match the whitelist, auto-detect
+              if (overlap > tomlDomains.length * 0.5 || overlap > 100) {
+                setRuDomainsCache(fetched);
+                setWhitelistLoaded(true);
+                setDisplayEntries(collapseRuDomains(tomlDomains, fetched));
               } else {
                 setDisplayEntries(tomlDomains.sort((a, b) => a.localeCompare(b)));
               }
             } else {
               setDisplayEntries(tomlDomains.sort((a, b) => a.localeCompare(b)));
             }
-          })
-          .catch(() => {
+          } catch {
             setDisplayEntries(tomlDomains.sort((a, b) => a.localeCompare(b)));
-          });
+          }
+        } else {
+          setDisplayEntries(tomlDomains.sort((a, b) => a.localeCompare(b)));
+        }
 
-        invoke<string[]>("load_exclusion_json")
-          .then((jsonDomains) => {
-            const hasNew = jsonDomains.some((d) => !tomlDomains.includes(d));
-            if (jsonDomains.length > 0 && hasNew) {
-              setJsonBackupDomains(jsonDomains);
-              setShowImportBanner(true);
-            }
-          })
-          .catch(console.warn);
+        // Check JSON backup for additional domains
+        try {
+          const jsonDomains = await invoke<string[]>("load_exclusion_json");
+          const hasNew = jsonDomains.some((d) => !tomlDomains.includes(d));
+          if (jsonDomains.length > 0 && hasNew) {
+            setJsonBackupDomains(jsonDomains);
+            setShowImportBanner(true);
+          }
+        } catch { /* ignore */ }
       })
       .catch(console.warn)
       .finally(() => setLoading(false));
-  }, [configPath]);
+  }, [configPath, collapseRuDomains]);
 
   // Expand display entries → flat domain list for saving to config
-  const expandToFlat = useCallback((entries: string[], cache: string[]): string[] => {
+  // Uses ruDomainsActive (actual config domains), NOT full cache
+  const expandToFlat = useCallback((entries: string[], activeDomains: string[]): string[] => {
     const all = new Set<string>();
     for (const e of entries) {
       if (e === RU_DOMAINS_MARKER) {
-        cache.forEach((d) => all.add(d));
+        activeDomains.forEach((d) => all.add(d));
       } else {
         all.add(e);
       }
@@ -112,11 +147,16 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
     return [...all].sort((a, b) => a.localeCompare(b));
   }, []);
 
-  const totalDomains = expandToFlat(displayEntries, ruDomainsCache).length;
+  const totalDomains = expandToFlat(displayEntries, ruDomainsActive).length;
 
-  const saveEntries = useCallback(async (newEntries: string[], cache: string[], skipReconnect = false) => {
+  // How many new domains are available in the whitelist but not in the active set
+  const ruDomainsMissing = ruDomainsCache.length > 0 && ruDomainsActive.length > 0
+    ? ruDomainsCache.filter((d) => !new Set(ruDomainsActive).has(d)).length
+    : 0;
+
+  const saveEntries = useCallback(async (newEntries: string[], activeDomains: string[], skipReconnect = false) => {
     setDisplayEntries(newEntries);
-    const flat = expandToFlat(newEntries, cache);
+    const flat = expandToFlat(newEntries, activeDomains);
     setSaving(true);
     setSaveError("");
     try {
@@ -125,7 +165,9 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
         await invoke("save_exclusion_list", { configPath, domains: flat });
       }
       if (!skipReconnect) {
-        setNeedsReconnect(true);
+        // Compare against baseline to decide if reconnect is needed
+        const currentSorted = JSON.stringify(flat.slice().sort());
+        setNeedsReconnect(currentSorted !== baselineFlat.current);
       }
     } catch (e) {
       console.error("Failed to save:", e);
@@ -137,19 +179,23 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
 
   const handleImportFromJson = useCallback(async () => {
     if (!configPath) return;
-    const flat = expandToFlat(displayEntries, ruDomainsCache);
+    const flat = expandToFlat(displayEntries, ruDomainsActive);
     const merged = new Set(flat);
     for (const d of jsonBackupDomains) merged.add(d);
     const cachedSet = new Set(ruDomainsCache);
     const hasRu = displayEntries.includes(RU_DOMAINS_MARKER);
     const allMerged = [...merged];
     const manual = allMerged.filter((d) => !cachedSet.has(d)).sort((a, b) => a.localeCompare(b));
+    // Update active with any new RU-domains from the import
+    const newActive = hasRu ? allMerged.filter((d) => cachedSet.has(d)) : ruDomainsActive;
+    if (hasRu) setRuDomainsActive(newActive);
     const newEntries = hasRu ? [RU_DOMAINS_MARKER, ...manual] : allMerged.sort((a, b) => a.localeCompare(b));
-    await saveEntries(newEntries, ruDomainsCache);
+    await saveEntries(newEntries, newActive);
     setShowImportBanner(false);
-  }, [configPath, jsonBackupDomains, displayEntries, ruDomainsCache, expandToFlat, saveEntries]);
+  }, [configPath, jsonBackupDomains, displayEntries, ruDomainsCache, ruDomainsActive, expandToFlat, saveEntries]);
 
   // Download and add RU-domains as a single marker entry
+  // Deduplicates: existing domains that match the whitelist get absorbed into the marker
   const handleAddRuDomains = useCallback(async () => {
     if (displayEntries.includes(RU_DOMAINS_MARKER)) return;
     setFetchingDownload(true);
@@ -158,7 +204,12 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
       const fetched = await invoke<string[]>("fetch_whitelist_domains");
       setRuDomainsCache(fetched);
       setWhitelistLoaded(true);
-      const newEntries = [RU_DOMAINS_MARKER, ...displayEntries];
+      // Absorb existing domains that match the whitelist into the marker
+      const wlSet = new Set(fetched);
+      const manualOnly = displayEntries.filter((d) => !wlSet.has(d));
+      // Active = full whitelist (user chose to add all RU-domains)
+      setRuDomainsActive(fetched);
+      const newEntries = [RU_DOMAINS_MARKER, ...manualOnly];
       await saveEntries(newEntries, fetched);
     } catch (e) {
       setSaveError(String(e));
@@ -167,13 +218,14 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
     }
   }, [displayEntries, saveEntries]);
 
-  // Refresh RU-domains cache (re-download)
+  // Refresh RU-domains: re-download whitelist and update active to full whitelist
   const handleRefreshRuDomains = useCallback(async () => {
     setFetchingRefresh(true);
     setSaveError("");
     try {
       const fetched = await invoke<string[]>("fetch_whitelist_domains");
       setRuDomainsCache(fetched);
+      setRuDomainsActive(fetched);
       if (displayEntries.includes(RU_DOMAINS_MARKER)) {
         await saveEntries(displayEntries, fetched);
       }
@@ -184,6 +236,13 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
     }
   }, [displayEntries, saveEntries]);
 
+  // Add missing RU-domains (update active to full whitelist)
+  const handleUpdateRuDomains = useCallback(async () => {
+    if (!displayEntries.includes(RU_DOMAINS_MARKER)) return;
+    setRuDomainsActive(ruDomainsCache);
+    await saveEntries(displayEntries, ruDomainsCache);
+  }, [displayEntries, ruDomainsCache, saveEntries]);
+
   const handleClearAll = useCallback(async () => {
     setDisplayEntries([]);
     setSaving(true);
@@ -193,7 +252,8 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
       if (configPath) {
         await invoke("save_exclusion_list", { configPath, domains: [] as string[] });
       }
-      setNeedsReconnect(true);
+      const currentSorted = JSON.stringify([] as string[]);
+      setNeedsReconnect(currentSorted !== baselineFlat.current);
     } catch (e) {
       setSaveError(String(e));
     } finally {
@@ -206,10 +266,13 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
     setNeedsReconnect(false);
     try {
       await onReconnect();
+      // After successful reconnect, update baseline to current state
+      const flat = expandToFlat(displayEntries, ruDomainsActive);
+      baselineFlat.current = JSON.stringify(flat.slice().sort());
     } finally {
       setReconnecting(false);
     }
-  }, [onReconnect]);
+  }, [onReconnect, displayEntries, ruDomainsActive, expandToFlat]);
 
   const addDomain = () => {
     const val = input.trim().toLowerCase();
@@ -225,14 +288,19 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
       return;
     }
     setDuplicateWarning("");
-    saveEntries([...displayEntries, val], ruDomainsCache);
+    saveEntries([...displayEntries, val], ruDomainsActive);
     setInput("");
     inputRef.current?.focus();
   };
 
   const removeEntry = (idx: number) => {
+    const removed = displayEntries[idx];
     const newEntries = displayEntries.filter((_, i) => i !== idx);
-    saveEntries(newEntries, ruDomainsCache);
+    // If removing the RU-domains marker, clear active
+    if (removed === RU_DOMAINS_MARKER) {
+      setRuDomainsActive([]);
+    }
+    saveEntries(newEntries, removed === RU_DOMAINS_MARKER ? [] : ruDomainsActive);
   };
 
   if (!configPath) {
@@ -397,7 +465,7 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") addDomain(); }}
-          placeholder="example.com, *.google.com, 192.168.1.0/24..."
+          placeholder="example.com, *.google.com, sub.domain.ru..."
           className="flex-1 px-3 py-2 rounded-lg bg-surface-900/50 border border-white/10 text-xs text-gray-200 placeholder-gray-600 focus:border-indigo-500/50 focus:outline-none font-mono"
         />
         <button
@@ -415,7 +483,7 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
           <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600">
             <Globe className="w-8 h-8" />
             <p className="text-xs">Список пуст</p>
-            <p className="text-[10px]">Добавьте домены или IP-адреса выше</p>
+            <p className="text-[10px]">Добавьте домены выше</p>
           </div>
         ) : (
           displayEntries.map((entry, idx) => {
@@ -437,10 +505,21 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode }: RoutingPanel
                 <span className={`flex-1 text-xs truncate ${isRuMarker ? "text-emerald-300 font-medium" : "text-gray-300 font-mono"}`}>
                   {isRuMarker ? "RU-домены" : entry}
                 </span>
-                {isRuMarker && ruDomainsCache.length > 0 && (
+                {isRuMarker && ruDomainsActive.length > 0 && (
                   <span className="text-[9px] text-emerald-400/60 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                    {ruDomainsCache.length} доменов
+                    {ruDomainsActive.length} доменов
                   </span>
+                )}
+                {isRuMarker && ruDomainsMissing > 0 && (
+                  <button
+                    onClick={handleUpdateRuDomains}
+                    disabled={saving}
+                    className="flex items-center gap-1 text-[9px] text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-1.5 py-0.5 rounded transition-colors disabled:opacity-50"
+                    title={`Доступно ${ruDomainsMissing} новых доменов`}
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    +{ruDomainsMissing}
+                  </button>
                 )}
                 <button
                   onClick={() => removeEntry(idx)}
