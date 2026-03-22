@@ -1,0 +1,10 @@
+{
+  "identifier": "com.trusttunnel.gui.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "TrustTunnel Client [DEV]"
+      }
+    ]
+  }
+}

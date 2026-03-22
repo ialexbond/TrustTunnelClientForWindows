@@ -1,6 +1,6 @@
 [package]
 name = "trusttunnel"
-version = "1.5.0"
+version = "2.0.0"
 description = "TrustTunnel VPN Client"
 authors = ["Alex Bond"]
 edition = "2021"
@@ -27,8 +27,14 @@ toml = "0.8"
 toml_edit = "0.22"
 tauri-plugin-single-instance = "2.4.0"
 tauri-plugin-notification = "2"
-reqwest = { version = "0.13.2", features = ["default-tls", "stream"] }
+reqwest = { version = "0.13.2", features = ["default-tls", "stream", "json"] }
 tokio-stream = "0.1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
 
 [features]
 default = ["custom-protocol"]

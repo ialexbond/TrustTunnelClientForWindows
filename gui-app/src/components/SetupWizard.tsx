@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   Shield,
   Server,
@@ -28,6 +28,7 @@ import {
   PackageCheck,
   SkipForward,
   Download,
+  UserPlus,
 } from "lucide-react";
 
 interface DeployStep {
@@ -145,9 +146,16 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     installed: boolean;
     version: string;
     serviceActive: boolean;
+    users: string[];
   } | null>(null);
   const [checkError, setCheckError] = useState("");
   const [confirmUninstall, setConfirmUninstall] = useState(false);
+
+  // Add user form
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [_addingUser, setAddingUser] = useState(false);
 
   // Deploy state — persisted
   const [deploySteps, setDeploySteps] = useState<Record<string, DeployStep>>(() => {
@@ -224,6 +232,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       unlistenStep.then((f) => f());
       unlistenLog.then((f) => f());
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCheckServer = async () => {
@@ -235,6 +244,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         installed: boolean;
         version: string;
         serviceActive: boolean;
+        users: string[];
       }>("check_server_installation", {
         host,
         port: parseInt(port),
@@ -250,7 +260,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     } catch (e) {
       setCheckError(String(e));
       setWizardStep("found");
-      setServerInfo({ installed: false, version: "", serviceActive: false });
+      setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
     }
   };
 
@@ -320,11 +330,16 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       filters: [{ name: "TrustTunnel Config", extensions: ["toml"] }],
     });
     if (selected) {
-      onSetupComplete(selected as string);
+      try {
+        const copied = await invoke<string>("copy_config_to_app_dir", { sourcePath: selected as string });
+        onSetupComplete(copied);
+      } catch {
+        onSetupComplete(selected as string);
+      }
     }
   };
 
-  const handleFetchConfig = async () => {
+  const handleFetchConfig = async (forUser?: string) => {
     operationRef.current = "fetch";
     setWizardStep("fetching");
     setDeploySteps({});
@@ -337,7 +352,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         port: parseInt(port),
         user: sshUser,
         password: sshPassword,
-        clientName: vpnUsername || "",
+        clientName: forUser || vpnUsername || "",
       });
       setConfigPath(result);
       setFetchRetryCount(0);
@@ -347,6 +362,36 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       setWizardStep("error");
     } finally {
       operationRef.current = null;
+    }
+  };
+
+  const handleAddUser = async () => {
+    if (!newUsername.trim() || !newPassword.trim()) return;
+    setAddingUser(true);
+    operationRef.current = "deploy";
+    setWizardStep("deploying");
+    setDeploySteps({});
+    setDeployLogs([]);
+    setErrorMessage("");
+
+    try {
+      const result = await invoke<string>("add_server_user", {
+        host,
+        port: parseInt(port),
+        user: sshUser,
+        password: sshPassword,
+        vpnUsername: newUsername.trim(),
+        vpnPassword: newPassword.trim(),
+      });
+      setConfigPath(result);
+      setNewUsername("");
+      setNewPassword("");
+    } catch (e) {
+      setErrorMessage((prev) => prev || String(e));
+      setWizardStep("error");
+    } finally {
+      operationRef.current = null;
+      setAddingUser(false);
     }
   };
 
@@ -418,15 +463,18 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="max-w-sm w-full text-center space-y-6">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-indigo-500/30">
+          <div
+            className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{ backgroundColor: "var(--color-accent-500)", boxShadow: "0 8px 24px rgba(99, 102, 241, 0.25)" }}
+          >
             <Shield className="w-8 h-8 text-white" />
           </div>
 
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+            <h1 className="text-2xl font-bold" style={{ color: "var(--color-text-primary)" }}>
               TrustTunnel VPN
             </h1>
-            <p className="text-sm text-gray-400 leading-relaxed">
+            <p className="text-sm leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
               Быстрый и защищённый VPN-протокол.
               <br />
               Настройте сервер за пару минут или используйте готовый конфиг.
@@ -436,34 +484,43 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="space-y-3">
             <button
               onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
-              className="w-full btn-primary flex items-center justify-center gap-2 py-3"
+              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-semibold text-white text-sm active:scale-95 transition-all"
+              style={{ backgroundColor: "var(--color-accent-500)", boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)" }}
             >
               <Server className="w-4 h-4" />
               Настроить сервер
             </button>
             <button
               onClick={() => { saveField("wizardMode", "fetch"); setWizardStep("server"); }}
-              className="w-full px-6 py-3 rounded-xl text-sm text-gray-300 hover:text-white
-                         border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 transition-all flex items-center justify-center gap-2"
+              className="w-full px-6 py-3 rounded-xl text-sm transition-all flex items-center justify-center gap-2 active:scale-95"
+              style={{
+                backgroundColor: "rgba(99, 102, 241, 0.08)",
+                border: "1px solid rgba(99, 102, 241, 0.25)",
+                color: "var(--color-accent-500)",
+              }}
             >
               <Download className="w-4 h-4" />
               Забрать конфиг с сервера
             </button>
             <button
               onClick={handleSkip}
-              className="w-full px-6 py-3 rounded-xl text-sm text-gray-400 hover:text-white
-                         border border-white/10 hover:bg-white/5 transition-all flex items-center justify-center gap-2"
+              className="w-full px-6 py-3 rounded-xl text-sm transition-all flex items-center justify-center gap-2 active:scale-95"
+              style={{
+                backgroundColor: "var(--color-bg-hover)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text-secondary)",
+              }}
             >
               <FolderOpen className="w-4 h-4" />
               У меня есть конфиг
             </button>
           </div>
 
-          <div className="text-[11px] text-gray-600 space-y-0.5 pt-2">
-            <p>Для настройки сервера потребуется:</p>
-            <p>• Linux-сервер (Ubuntu 22+, Debian 11+) с SSH-доступом</p>
-            <p>• Минимум 1 ядро CPU и 512 МБ RAM (рекомендуется 1 ГБ)</p>
-            <p>• Права root • Домен, направленный на IP сервера</p>
+          <div className="space-y-0.5 pt-2">
+            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>Для настройки сервера потребуется:</p>
+            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>• Linux-сервер (Ubuntu 22+, Debian 11+) с SSH-доступом</p>
+            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>• Минимум 1 ядро CPU и 512 МБ RAM (рекомендуется 1 ГБ)</p>
+            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>• Права root • Домен, направленный на IP сервера</p>
           </div>
         </div>
       </div>
@@ -589,6 +646,12 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 Подключение по SSH и проверка установленного TrustTunnel
               </p>
             </div>
+            <button
+              onClick={() => setWizardStep("server")}
+              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              Отмена
+            </button>
           </div>
         </div>
       </>
@@ -601,8 +664,8 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     return (
       <>
         {renderStepBar()}
-        <div className="flex-1 flex items-center justify-center p-6">
-          <div className="max-w-sm w-full text-center space-y-5">
+        <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
+          <div className="max-w-sm w-full text-center space-y-5 my-auto">
             {isInstalled ? (
               <>
                 <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/20 flex items-center justify-center">
@@ -626,13 +689,86 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   </p>
                 </div>
 
+                {/* ── Users on server ── */}
+                {serverInfo?.users && serverInfo.users.length > 0 && (
+                  <div className="text-left space-y-2 p-3 rounded-xl border border-white/10 bg-white/5">
+                    <p className="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5" />
+                      Пользователи на сервере
+                    </p>
+                    <div className="space-y-1">
+                      {serverInfo.users.map((u) => (
+                        <div key={u} className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-gray-400 truncate">{u}</span>
+                          <button
+                            onClick={() => handleFetchConfig(u)}
+                            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium
+                                       bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/30 transition-all"
+                          >
+                            <Download className="w-3 h-3" />
+                            Забрать конфиг
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Add new user ── */}
+                <div className="text-left space-y-2 p-3 rounded-xl border border-white/10 bg-white/5">
+                  <p className="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5" />
+                    Добавить пользователя
+                  </p>
+                  <p className="text-[10px] text-gray-500 leading-relaxed">
+                    Каждое устройство должно подключаться под своим пользователем.
+                  </p>
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      placeholder="Имя пользователя"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/10
+                                 text-xs text-white placeholder-gray-600 focus:border-indigo-500/50 outline-none"
+                    />
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? "text" : "password"}
+                        placeholder="Пароль"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full px-3 py-1.5 pr-8 rounded-lg bg-white/5 border border-white/10
+                                   text-xs text-white placeholder-gray-600 focus:border-indigo-500/50 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                      >
+                        {showNewPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    <button
+                      onClick={handleAddUser}
+                      disabled={!newUsername.trim() || !newPassword.trim()}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium
+                                 btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Добавить и получить конфиг
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <button
-                    onClick={handleFetchConfig}
-                    className="w-full btn-primary flex items-center justify-center gap-2 py-3"
+                    onClick={handleSkip}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm
+                               text-gray-400 hover:text-white border border-white/10 hover:bg-white/5 transition-all"
                   >
-                    <Download className="w-4 h-4" />
-                    Забрать конфиг с сервера
+                    <SkipForward className="w-4 h-4" />
+                    Пропустить — у меня есть конфиг
                   </button>
                   {confirmUninstall ? (
                     <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 space-y-2.5">
@@ -663,29 +799,45 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   ) : (
                     <button
                       onClick={() => setConfirmUninstall(true)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium
-                                 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-all"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs
+                                 text-gray-500 hover:text-gray-300 border border-white/10 hover:bg-white/5 transition-all"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                       Удалить и переустановить
                     </button>
                   )}
                   <button
-                    onClick={handleSkip}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm
-                               text-gray-400 hover:text-white border border-white/10 hover:bg-white/5 transition-all"
-                  >
-                    <SkipForward className="w-4 h-4" />
-                    Пропустить — у меня есть конфиг
-                  </button>
-                  <button
                     onClick={() => setWizardStep("endpoint")}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[11px]
                                text-gray-500 hover:text-gray-300 transition-colors"
                   >
                     Переустановить поверх (без удаления)
                   </button>
                 </div>
+              </>
+            ) : checkError ? (
+              <>
+                <div className="mx-auto w-14 h-14 rounded-2xl bg-red-500/20 flex items-center justify-center">
+                  <XCircle className="w-7 h-7 text-red-400" />
+                </div>
+                <div className="space-y-1.5">
+                  <h2 className="text-lg font-bold text-red-300">Сервер недоступен</h2>
+                  <p className="text-xs text-gray-400">
+                    Не удалось подключиться к серверу по SSH. Проверьте адрес, порт, логин и пароль.
+                    Возможно, сервер недоступен из вашей сети.
+                  </p>
+                  <div className="max-h-20 overflow-y-auto rounded-lg bg-white/5 p-2 mt-2">
+                    <p className="text-[10px] text-red-400/80 leading-relaxed select-text cursor-text break-words">
+                      {checkError}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setWizardStep("server")}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm text-gray-400 hover:text-white border border-white/10 hover:bg-white/10 transition-all"
+                >
+                  ← Назад к SSH
+                </button>
               </>
             ) : (
               <>
@@ -697,28 +849,33 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   <p className="text-xs text-gray-500">
                     TrustTunnel не обнаружен — можно установить с нуля
                   </p>
-                  {checkError && (
-                    <p className="text-[10px] text-amber-400 mt-1">
-                      Предупреждение: {checkError}
-                    </p>
-                  )}
                 </div>
-                <button
-                  onClick={() => setWizardStep("endpoint")}
-                  className="btn-primary inline-flex items-center gap-2 px-6 py-3"
-                >
-                  Продолжить настройку
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                <div className="flex gap-2 w-full">
+                  <button
+                    onClick={() => setWizardStep("server")}
+                    className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    Назад
+                  </button>
+                  <button
+                    onClick={() => setWizardStep("endpoint")}
+                    className="flex-1 btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm"
+                  >
+                    Продолжить настройку
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </>
             )}
 
-            <button
-              onClick={() => setWizardStep("server")}
-              className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
-            >
-              ← Назад к SSH
-            </button>
+            {isInstalled && (
+              <button
+                onClick={() => setWizardStep("server")}
+                className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+              >
+                ← Назад к SSH
+              </button>
+            )}
           </div>
         </div>
       </>
@@ -1163,14 +1320,37 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             </div>
           )}
 
-          <div className="flex flex-col gap-2 items-center">
+          <div className="flex flex-col gap-2 items-center w-full">
             <button
               onClick={() => { setWizardStep("welcome"); onSetupComplete(configPath); }}
-              className="btn-primary inline-flex items-center gap-2 px-6 py-3"
+              className="w-full btn-primary inline-flex items-center justify-center gap-2 px-6 py-3"
             >
               Перейти к подключению
               <ChevronRight className="w-4 h-4" />
             </button>
+            {configPath && (
+              <button
+                onClick={async () => {
+                  const fileName = configPath.split(/[/\\]/).pop() || "trusttunnel_client.toml";
+                  const dest = await save({
+                    defaultPath: fileName,
+                    filters: [{ name: "TOML Config", extensions: ["toml"] }],
+                  });
+                  if (dest) {
+                    try {
+                      await invoke("copy_file", { source: configPath, destination: dest });
+                    } catch (e) {
+                      console.error("Save As failed:", e);
+                    }
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm
+                           text-gray-400 hover:text-white border border-white/10 hover:bg-white/5 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                Сохранить как...
+              </button>
+            )}
             <button
               onClick={() => setWizardStep("welcome")}
               className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
@@ -1188,6 +1368,25 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     const isFetchMode = (loadSaved("wizardMode", "") as string) === "fetch";
     const showReinstallPrompt = isFetchMode && fetchRetryCount >= 2;
 
+    // Smart error hints based on error message and deploy logs
+    const allText = [errorMessage, ...deployLogs.map(l => l.message)].join("\n").toLowerCase();
+    const hints: string[] = [];
+    if (allText.includes("nxdomain") || (allText.includes("dns") && allText.includes("domain"))) {
+      hints.push("DNS-запись (A-запись) домена не указывает на IP-адрес сервера. Добавьте A-запись в панели управления доменом и подождите 5–10 минут.");
+    }
+    if (allText.includes("certbot") || allText.includes("letsencrypt") || allText.includes("let's encrypt")) {
+      if (!hints.length) hints.push("Let's Encrypt не смог выпустить сертификат. Убедитесь, что домен указывает на сервер и порт 80 открыт.");
+    }
+    if (allText.includes("port 80")) {
+      hints.push("Порт 80 должен быть открыт и не занят другим сервисом (nginx, apache) для получения сертификата.");
+    }
+    if (allText.includes("connection refused") || allText.includes("connection timed out") || allText.includes("os error 10054") || allText.includes("os error 10060")) {
+      hints.push("Сервер недоступен. Проверьте, что IP-адрес верный, сервер включён и не блокирует подключения из вашей сети.");
+    }
+    if (allText.includes("authentication") || allText.includes("auth failed") || allText.includes("permission denied")) {
+      hints.push("Ошибка авторизации SSH. Проверьте логин и пароль.");
+    }
+
     return (
       <div className="flex-1 flex flex-col items-center overflow-y-auto p-6">
         <div className="max-w-sm w-full text-center space-y-4 my-auto">
@@ -1203,6 +1402,18 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               </p>
             </div>
           </div>
+
+          {hints.length > 0 && (
+            <div className="text-left space-y-1.5 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5">
+              <p className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                Возможная причина
+              </p>
+              {hints.map((hint, i) => (
+                <p key={i} className="text-[11px] text-amber-200/70 leading-relaxed">{hint}</p>
+              ))}
+            </div>
+          )}
 
           {deployLogs.length > 0 && (
             <div>
@@ -1269,7 +1480,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 {isFetchMode ? "Назад" : "Назад к настройкам"}
               </button>
               <button
-                onClick={isFetchMode ? handleFetchConfig : handleDeploy}
+                onClick={isFetchMode ? () => handleFetchConfig() : handleDeploy}
                 className="btn-primary !py-2.5 text-sm"
               >
                 Попробовать снова
