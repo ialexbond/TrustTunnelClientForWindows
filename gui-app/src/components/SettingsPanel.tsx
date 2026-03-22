@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Settings, FolderOpen, Save, Eye, EyeOff, Trash2, AlertTriangle, Loader2, Download, Minus, Plus, Shield, Terminal, Lock, RefreshCw } from "lucide-react";
-import { listen } from "@tauri-apps/api/event";
+import { Settings, FolderOpen, Save, Eye, EyeOff, Minus, Plus, Shield, Terminal, Lock, RefreshCw, HelpCircle, Trash2 } from "lucide-react";
 import type { VpnConfig, VpnStatus } from "../App";
+import { DangerZone } from "./settings/DangerZone";
 
 interface SettingsPanelProps {
   configPath: string;
@@ -40,20 +41,69 @@ interface ClientConfig {
       excluded_routes: string[];
     };
   };
+  dns_upstreams?: string[];
   [key: string]: unknown;
 }
 
+
+function Tooltip({ text, children }: { text: string; children: React.ReactNode }) {
+  const [show, setShow] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+
+  const positionTip = useCallback((tip: HTMLDivElement | null) => {
+    const tr = triggerRef.current;
+    if (!tip || !tr) return;
+
+    const trRect = tr.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    const pad = 8;
+
+    // Horizontal: centre on trigger, clamp to viewport
+    let left = trRect.left + trRect.width / 2 - tipRect.width / 2;
+    if (left < pad) left = pad;
+    if (left + tipRect.width > window.innerWidth - pad) left = window.innerWidth - pad - tipRect.width;
+
+    // Vertical: above if space, otherwise below
+    const above = trRect.top - tipRect.height - 6 >= pad;
+    const top = above ? trRect.top - tipRect.height - 6 : trRect.bottom + 6;
+
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+    tip.style.visibility = "visible";
+  }, []);
+
+  return (
+    <div className="relative inline-flex" ref={triggerRef}
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && createPortal(
+        <div
+          ref={positionTip}
+          className="fixed z-[9999] w-56 px-2.5 py-2
+                     bg-gray-900 border border-white/10 rounded-lg shadow-xl pointer-events-none"
+          style={{ visibility: "hidden" }}
+        >
+          <p className="text-[10px] text-gray-300 leading-relaxed whitespace-normal">{text}</p>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
 
 function Toggle({
   value,
   onChange,
   label,
   description,
+  tooltip,
 }: {
   value: boolean;
   onChange: (v: boolean) => void;
   label: string;
   description?: string;
+  tooltip?: string;
 }) {
   return (
     <div
@@ -61,242 +111,30 @@ function Toggle({
       onClick={() => onChange(!value)}
     >
       <div className="min-w-0">
-        <span className="text-xs text-gray-200 group-hover:text-white transition-colors">
-          {label}
-        </span>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-200 group-hover:text-white transition-colors">
+            {label}
+          </span>
+          {tooltip && (
+            <Tooltip text={tooltip}>
+              <HelpCircle className="w-3 h-3 text-gray-600 hover:text-gray-400 transition-colors shrink-0 cursor-help"
+                onClick={(e) => e.stopPropagation()} />
+            </Tooltip>
+          )}
+        </div>
         {description && (
           <p className="text-[10px] text-gray-500 mt-0.5">{description}</p>
         )}
       </div>
       <div
-        className={`relative w-9 h-5 rounded-full shrink-0 ml-3 transition-colors ${
-          value ? "bg-indigo-500" : "bg-white/10"
-        }`}
+        className="relative w-9 h-5 rounded-full shrink-0 ml-3 transition-colors"
+        style={{ backgroundColor: value ? "var(--color-toggle-on)" : "var(--color-toggle-off)" }}
       >
         <div
           className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-            value ? "translate-x-4" : "translate-x-0.5"
+            value ? "translate-x-[18px]" : "translate-x-0.5"
           }`}
         />
-      </div>
-    </div>
-  );
-}
-
-function DangerZone({ onSwitchToSetup, onClearConfig }: { onSwitchToSetup: () => void; onClearConfig: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const [phase, setPhase] = useState<"idle" | "confirming" | "checking" | "uninstalling" | "not_found">("idle");
-  const [host, setHost] = useState(() => {
-    try { const raw = localStorage.getItem("trusttunnel_wizard"); return raw ? JSON.parse(raw).host || "" : ""; } catch { return ""; }
-  });
-  const [port, setPort] = useState(() => {
-    try { const raw = localStorage.getItem("trusttunnel_wizard"); return raw ? JSON.parse(raw).port || "22" : "22"; } catch { return "22"; }
-  });
-  const [user, setUser] = useState(() => {
-    try { const raw = localStorage.getItem("trusttunnel_wizard"); return raw ? JSON.parse(raw).sshUser || "root" : "root"; } catch { return "root"; }
-  });
-  const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
-  const [result, setResult] = useState<"" | "ok" | "error">("");
-  const [resultMsg, setResultMsg] = useState("");
-
-  useEffect(() => {
-    const unlisten = listen<{ step: string; status: string; message: string }>(
-      "deploy-step",
-      (event) => {
-        if (event.payload.step === "uninstall") {
-          if (event.payload.status === "ok") {
-            setPhase("idle");
-            // Auto-disconnect VPN client since server is gone
-            invoke("vpn_disconnect").catch(() => {});
-            // Clear config and switch to setup tab
-            onClearConfig();
-            onSwitchToSetup();
-          } else if (event.payload.status === "error") {
-            setPhase("idle");
-            setResult("error");
-            setResultMsg(event.payload.message);
-          }
-        }
-      }
-    );
-    return () => { unlisten.then((f) => f()); };
-  }, [onClearConfig, onSwitchToSetup]);
-
-  const handleConfirm = async () => {
-    if (!host || !password) return;
-    setPhase("checking");
-    setResult("");
-    setResultMsg("");
-    try {
-      const info = await invoke<{ installed: boolean; version: string; service_active: boolean }>(
-        "check_server_installation",
-        { host, port: parseInt(port), user, password }
-      );
-      if (!info.installed) {
-        setPhase("not_found");
-      } else {
-        // TT found — proceed with uninstall
-        setPhase("uninstalling");
-        await invoke("uninstall_server", { host, port: parseInt(port), user, password });
-      }
-    } catch (e) {
-      setPhase("idle");
-      setResult("error");
-      setResultMsg(String(e));
-    }
-  };
-
-  const dangerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  const handleToggle = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next) {
-      setTimeout(() => dangerRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 350);
-    }
-  };
-
-  return (
-    <div ref={dangerRef} className="pt-3">
-      <button
-        onClick={handleToggle}
-        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-medium
-                   text-red-400/60 hover:text-red-400 border border-red-500/10 hover:border-red-500/30
-                   hover:bg-red-500/5 transition-all"
-      >
-        <AlertTriangle className="w-3 h-3" />
-        Опасная зона
-      </button>
-      <div
-        className="overflow-hidden transition-all duration-300 ease-in-out"
-        style={{ maxHeight: expanded ? (contentRef.current?.scrollHeight ?? 600) + 16 + "px" : "0px", opacity: expanded ? 1 : 0 }}
-      >
-        <div ref={contentRef} className="mt-2 space-y-2 p-2.5 rounded-lg border border-red-500/20 bg-red-500/5">
-          <p className="text-[10px] text-red-300/80 leading-relaxed">
-            Полностью удалить TrustTunnel с сервера: остановка сервиса, удаление файлов и конфигурации.
-          </p>
-          <div className="grid grid-cols-3 gap-1.5">
-            <input type="text" value={host} onChange={(e) => setHost(e.target.value)}
-              placeholder="IP сервера" className="col-span-2 bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600" />
-            <input type="text" value={port} onChange={(e) => setPort(e.target.value)}
-              placeholder="22" className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600" />
-          </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            <input type="text" value={user} onChange={(e) => setUser(e.target.value)}
-              placeholder="root" className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600" />
-            <div className="relative">
-              <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="Пароль SSH" className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 pr-7 text-[10px] text-gray-200 placeholder-gray-600" />
-              <button type="button" onClick={() => setShowPw(!showPw)}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
-                {showPw ? <EyeOff className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
-              </button>
-            </div>
-          </div>
-
-          {result === "error" && (
-            <p className="text-[10px] text-red-400">{resultMsg}</p>
-          )}
-
-          {/* VPN not found on server — offer to install */}
-          {phase === "not_found" && (
-            <div className="p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 space-y-2">
-              <p className="text-[11px] text-amber-300 font-medium text-center">
-                VPN не найден на сервере
-              </p>
-              <p className="text-[10px] text-amber-300/60 text-center">
-                TrustTunnel не установлен на этом сервере. Хотите установить?
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setPhase("idle"); setExpanded(false); }}
-                  className="flex-1 px-3 py-1.5 rounded-lg text-[11px] text-gray-400
-                             border border-white/10 hover:bg-white/5 transition-all"
-                >
-                  Нет
-                </button>
-                <button
-                  onClick={() => {
-                    setPhase("idle");
-                    // Save SSH credentials to wizard storage so endpoint step has them
-                    try {
-                      const raw = localStorage.getItem("trusttunnel_wizard");
-                      const obj = raw ? JSON.parse(raw) : {};
-                      obj.host = host;
-                      obj.port = port;
-                      obj.sshUser = user;
-                      obj.sshPassword = password;
-                      obj.wizardStep = "endpoint";
-                      localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
-                    } catch {}
-                    onClearConfig();
-                    onSwitchToSetup();
-                  }}
-                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium
-                             bg-indigo-500/30 border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/40 transition-all"
-                >
-                  <Download className="w-3 h-3" />
-                  Установить
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Confirmation dialog */}
-          {phase === "confirming" && (
-            <div className="p-2.5 rounded-lg border border-red-500/30 bg-red-500/10 space-y-2">
-              <p className="text-[11px] text-red-300 font-medium text-center">
-                Вы уверены? Это действие необратимо.
-              </p>
-              <p className="text-[10px] text-red-300/60 text-center">
-                Сервис будет остановлен, все файлы TrustTunnel будут удалены с сервера.
-                {" "}Текущее VPN-подключение будет разорвано.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPhase("idle")}
-                  className="flex-1 px-3 py-1.5 rounded-lg text-[11px] text-gray-400
-                             border border-white/10 hover:bg-white/5 transition-all"
-                >
-                  Отмена
-                </button>
-                <button
-                  onClick={handleConfirm}
-                  className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium
-                             bg-red-500/30 border border-red-500/50 text-red-300 hover:bg-red-500/40 transition-all"
-                >
-                  Да, удалить
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Checking / Uninstalling spinner */}
-          {(phase === "checking" || phase === "uninstalling") && (
-            <div className="flex items-center justify-center gap-2 py-2">
-              <Loader2 className="w-4 h-4 text-red-400 animate-spin" />
-              <span className="text-[11px] text-red-300">
-                {phase === "checking" ? "Проверка сервера..." : "Удаление..."}
-              </span>
-            </div>
-          )}
-
-          {/* Main button — only shown in idle state */}
-          {phase === "idle" && (
-            <button
-              onClick={() => setPhase("confirming")}
-              disabled={!host || !password}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium
-                         bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30
-                         disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Удалить VPN с сервера
-            </button>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -312,18 +150,24 @@ function SettingsPanel({
   onVpnModeChange,
 }: SettingsPanelProps) {
   const [config, setConfig] = useState<ClientConfig | null>(null);
-  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [localPath, setLocalPath] = useState(configPath);
+  const [reloadKey, setReloadKey] = useState(0);
   const [showPass, setShowPass] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+
+  // Snapshot of config at last load/save for dirty comparison
+  const savedSnapshot = useRef<string>("");
+  const dirty = config ? JSON.stringify(config) !== savedSnapshot.current : false;
 
   useEffect(() => {
     setLocalPath(configPath);
+    setReloadKey((k) => k + 1);
     if (!configPath) {
       setConfig(null);
       setError("");
-      setDirty(false);
+      savedSnapshot.current = "";
     }
   }, [configPath]);
 
@@ -335,11 +179,12 @@ function SettingsPanel({
         configPath: localPath,
       });
       setConfig(data);
-      setDirty(false);
+      savedSnapshot.current = JSON.stringify(data);
     } catch (e) {
       setError(String(e));
     }
-  }, [localPath]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localPath, reloadKey]);
 
   useEffect(() => {
     loadConfig();
@@ -356,25 +201,35 @@ function SettingsPanel({
       }
       obj[parts[parts.length - 1]] = value;
       setConfig(clone);
-      setDirty(true);
     },
     [config]
   );
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (reconnect = false) => {
     if (!config || !localPath) return;
     setSaving(true);
     setError("");
     try {
+      // Always force system DNS on (required for full-tunnel mode)
+      const configToSave = {
+        ...config,
+        listener: {
+          ...config.listener,
+          tun: { ...config.listener?.tun, change_system_dns: true },
+        },
+      };
       await invoke("save_client_config", {
         configPath: localPath,
-        config,
+        config: configToSave,
       });
-      setDirty(false);
+      savedSnapshot.current = JSON.stringify(config);
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
-      // Reconnect if VPN is active
-      if (status === "connected" || status === "connecting") {
+      if (reconnect && (status === "connected" || status === "connecting")) {
         await onReconnect();
+      }
+      if (!reconnect) {
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 2000);
       }
     } catch (e) {
       setError(String(e));
@@ -382,6 +237,18 @@ function SettingsPanel({
       setSaving(false);
     }
   }, [config, localPath, onConfigChange, status, onReconnect]);
+
+  // Auto-save when VPN is not active
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!dirty || !config || !localPath) return;
+    if (status === "connected" || status === "connecting") return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      handleSave(false);
+    }, 600);
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
+  }, [dirty, config, localPath, status, handleSave]);
 
   return (
     <div className="glass-card overflow-hidden h-full">
@@ -426,8 +293,16 @@ function SettingsPanel({
                 filters: [{ name: "TOML Config", extensions: ["toml"] }],
               });
               if (selected) {
-                setLocalPath(selected as string);
-                onConfigChange({ configPath: selected as string, logLevel: config?.loglevel || "info" });
+                try {
+                  const copied = await invoke<string>("copy_config_to_app_dir", { sourcePath: selected as string });
+                  setLocalPath(copied);
+                  setReloadKey(k => k + 1);
+                  onConfigChange({ configPath: copied, logLevel: config?.loglevel || "info" });
+                } catch {
+                  setLocalPath(selected as string);
+                  setReloadKey(k => k + 1);
+                  onConfigChange({ configPath: selected as string, logLevel: config?.loglevel || "info" });
+                }
               }
             }}
             className="p-1.5 bg-white/5 border border-white/10 rounded-lg
@@ -455,10 +330,10 @@ function SettingsPanel({
               <input
                 type="text"
                 value={config.endpoint?.hostname || ""}
-                onChange={(e) => updateField("endpoint.hostname", e.target.value)}
+                readOnly
+                disabled
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-[11px]
-                           text-gray-200 focus:outline-none focus:border-indigo-500/50
-                           focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                           text-gray-400 cursor-default opacity-70"
               />
             </div>
             <div className="grid grid-cols-2 gap-1.5">
@@ -467,10 +342,10 @@ function SettingsPanel({
                 <input
                   type="text"
                   value={config.endpoint?.username || ""}
-                  onChange={(e) => updateField("endpoint.username", e.target.value)}
+                  readOnly
+                  disabled
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-[11px]
-                             text-gray-200 focus:outline-none focus:border-indigo-500/50
-                             focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                             text-gray-400 cursor-default opacity-70"
                 />
               </div>
               <div>
@@ -479,10 +354,10 @@ function SettingsPanel({
                   <input
                     type={showPass ? "text" : "password"}
                     value={config.endpoint?.password || ""}
-                    onChange={(e) => updateField("endpoint.password", e.target.value)}
+                    readOnly
+                    disabled
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 pr-7 text-[11px]
-                               text-gray-200 focus:outline-none focus:border-indigo-500/50
-                               focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                               text-gray-400 cursor-default opacity-70"
                   />
                   <button
                     type="button"
@@ -578,10 +453,10 @@ function SettingsPanel({
             </div>
           </div>
 
-          {/* Save button */}
+          {/* Save button — always visible */}
           <div className="pt-2 border-t border-white/5">
             <button
-              onClick={handleSave}
+              onClick={() => handleSave(status === "connected" || status === "connecting")}
               disabled={!dirty || saving}
               className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                 dirty
@@ -593,7 +468,11 @@ function SettingsPanel({
               {saving
                 ? "Сохранение..."
                 : dirty
-                ? (status === "connected" || status === "connecting" ? "Сохранить и переподключить" : "Сохранить")
+                ? (status === "connected" || status === "connecting"
+                    ? "Сохранить и переподключить"
+                    : "Сохранить")
+                : justSaved
+                ? "Сохранено ✔"
                 : "Настройки сохранены"}
             </button>
           </div>
@@ -605,31 +484,79 @@ function SettingsPanel({
               description="Блокировать интернет при обрыве VPN"
               value={config.killswitch_enabled}
               onChange={(v) => updateField("killswitch_enabled", v)}
+              tooltip="При потере VPN-соединения весь интернет-трафик блокируется, чтобы ваши данные не утекли в обход VPN. Рекомендуется держать включённым для максимальной безопасности."
             />
             <Toggle
               label="Anti-DPI"
               description="Обход блокировок DPI"
               value={config.endpoint?.anti_dpi || false}
               onChange={(v) => updateField("endpoint.anti_dpi", v)}
+              tooltip="Маскирует VPN-трафик под обычный HTTPS, чтобы обойти системы глубокого анализа пакетов (DPI), которые используют провайдеры и госорганы для блокировки VPN."
             />
             <Toggle
               label="Post-Quantum"
               description="Постквантовая криптография"
               value={config.post_quantum_group_enabled}
               onChange={(v) => updateField("post_quantum_group_enabled", v)}
-            />
-            <Toggle
-              label="Системный DNS"
-              description="Менять DNS системы при подключении"
-              value={config.listener?.tun?.change_system_dns || false}
-              onChange={(v) => updateField("listener.tun.change_system_dns", v)}
+              tooltip="Использует алгоритмы шифрования, устойчивые к атакам квантовых компьютеров. Защищает ваши данные от расшифровки в будущем. Немного увеличивает время подключения."
             />
             <Toggle
               label="IPv6"
               description="Разрешить IPv6 трафик через VPN"
               value={config.endpoint?.has_ipv6 || false}
               onChange={(v) => updateField("endpoint.has_ipv6", v)}
+              tooltip="Разрешает маршрутизацию IPv6-трафика через VPN-туннель. Если ваш провайдер или сервер не поддерживают IPv6, оставьте выключенным — это избежит проблем с подключением."
             />
+          </div>
+
+          {/* DNS Upstreams */}
+          <div className="border-t border-white/5 pt-2 space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">DNS Upstreams</span>
+              <Tooltip text="Кастомные DNS-серверы для запросов через VPN. Несколько серверов работают как резервные: если первый не отвечает, используется следующий. Поддерживаются шифрованные протоколы DoT, DoH, DoQ для защиты DNS-запросов от перехвата провайдером.">
+                <HelpCircle className="w-3 h-3 text-gray-600 hover:text-gray-400 transition-colors cursor-help" />
+              </Tooltip>
+            </div>
+            {(config.dns_upstreams || []).map((upstream, idx) => (
+              <div key={idx} className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={upstream}
+                  onChange={(e) => {
+                    const arr = [...(config.dns_upstreams || [])];
+                    arr[idx] = e.target.value;
+                    updateField("dns_upstreams", arr);
+                  }}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-[11px]
+                             text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/50
+                             focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                  placeholder="8.8.8.8:53 / tls://1.1.1.1 / https://dns.example/dns-query"
+                />
+                <button
+                  onClick={() => {
+                    const arr = [...(config.dns_upstreams || [])];
+                    arr.splice(idx, 1);
+                    updateField("dns_upstreams", arr);
+                  }}
+                  className="p-1 rounded-md text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title="Удалить"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const arr = [...(config.dns_upstreams || []), ""];
+                updateField("dns_upstreams", arr);
+              }}
+              className="w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px]
+                         text-gray-400 hover:text-gray-200 border border-dashed border-white/10
+                         hover:border-white/20 hover:bg-white/5 transition-all"
+            >
+              <Plus className="w-3 h-3" />
+              Добавить DNS
+            </button>
           </div>
 
           {/* Utilities — coming soon */}

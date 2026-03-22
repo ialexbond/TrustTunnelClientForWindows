@@ -1,7 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./shared/styles/tokens.css";
 import "./index.css";
+import "./shared/i18n";
 
 // Block F5, Ctrl+R reload shortcuts
 document.addEventListener("keydown", (e) => {
@@ -12,6 +14,11 @@ document.addEventListener("keydown", (e) => {
   ) {
     e.preventDefault();
   }
+});
+
+// Block right-click context menu
+document.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
 });
 
 // React Error Boundary to catch rendering errors without crashing the page
