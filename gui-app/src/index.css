@@ -4,21 +4,28 @@
 
 @layer base {
   body {
-    @apply bg-surface-950 text-gray-100 antialiased;
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  button, nav, header, [data-tauri-drag-region] {
+  button, nav, header, aside, [data-tauri-drag-region] {
     user-select: none;
   }
 }
 
 @layer components {
+  /* ── Glass card: adapts to theme ── */
   .glass-card {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
   }
 
+  /* ── Buttons ── */
   .btn-primary {
     @apply px-6 py-3 rounded-xl font-semibold text-white
            bg-gradient-to-r from-indigo-500 to-purple-600
@@ -35,6 +42,7 @@
            shadow-lg shadow-red-500/25;
   }
 
+  /* ── Status dots ── */
   .status-dot {
     @apply w-3 h-3 rounded-full;
   }
@@ -57,19 +65,215 @@
     @apply bg-red-400 shadow-lg shadow-red-400/50;
   }
 
+  /* ── Wizard input: theme-aware ── */
   .wizard-input {
-    @apply w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm
-           text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/50
-           focus:ring-1 focus:ring-indigo-500/25 transition-colors;
+    width: 100%;
+    background-color: var(--color-input-bg);
+    border: 1px solid var(--color-input-border);
+    border-radius: var(--radius-xl);
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .wizard-input::placeholder {
+    color: var(--color-text-muted);
+  }
+  .wizard-input:focus {
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
   }
 }
 
+/* ── Theme-aware overrides for legacy Tailwind classes ── */
+/*
+ * Contrast hierarchy in light mode:
+ *   text-gray-100/200 → labels, toggle names = --color-text-secondary (#44445a)
+ *   text-gray-300/400  → section headers, descriptions = --color-text-secondary
+ *   text-gray-500      → section labels (UPPERCASE) = --color-text-muted (#70708a)
+ *   text-gray-600      → placeholder-level = slightly lighter muted
+ *
+ * In dark mode, add subtle accent to section headers:
+ */
+
+/* Light: main text (toggle labels like "Kill Switch", "Anti-DPI") */
+[data-theme="light"] .text-gray-100,
+[data-theme="light"] .text-gray-200 {
+  color: #2d2d44 !important;
+}
+
+/* Light: secondary text (descriptions, nav items) */
+[data-theme="light"] .text-gray-300,
+[data-theme="light"] .text-gray-400 {
+  color: #4a4a64 !important;
+}
+
+/* Light: section labels ("Подключение", "Дополнительно", "DNS Upstreams") */
+[data-theme="light"] .text-gray-500 {
+  color: #555570 !important;
+}
+
+/* Light: subtle text (descriptions under toggles) */
+[data-theme="light"] .text-gray-600 {
+  color: #6e6e88 !important;
+}
+
+[data-theme="light"] .text-gray-700 {
+  color: #8888a0 !important;
+}
+
+/* Dark: make section labels slightly brighter for emphasis */
+[data-theme="dark"] .text-gray-500.uppercase,
+[data-theme="dark"] .tracking-wider {
+  color: #8888a8 !important;
+}
+
+/* Light: accent colors — readable on white */
+[data-theme="light"] .text-indigo-300,
+[data-theme="light"] .text-indigo-400 {
+  color: #4338ca !important;
+}
+
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-400 {
+  color: #047857 !important;
+}
+
+[data-theme="light"] .text-amber-300 {
+  color: #92400e !important;
+}
+
+[data-theme="light"] .text-red-300 {
+  color: #b91c1c !important;
+}
+
+[data-theme="light"] .text-violet-300,
+[data-theme="light"] .text-violet-400 {
+  color: #6d28d9 !important;
+}
+
+/* Backgrounds */
+[data-theme="light"] .bg-white\/5,
+[data-theme="light"] .bg-white\/\[0\.02\],
+[data-theme="light"] .bg-white\/\[0\.03\] {
+  background-color: var(--color-bg-surface) !important;
+}
+
+[data-theme="light"] .bg-white\/10 {
+  background-color: var(--color-bg-hover) !important;
+}
+
+[data-theme="light"] .bg-surface-950,
+[data-theme="light"] .bg-surface-900\/50 {
+  background-color: var(--color-bg-surface) !important;
+}
+
+/* About page cards */
+[data-theme="light"] .shadow-indigo-500\/10 {
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.12) !important;
+}
+
+
+/* Borders */
+[data-theme="light"] .border-white\/10,
+[data-theme="light"] .border-white\/5 {
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="light"] .border-white\/20 {
+  border-color: var(--color-border-hover) !important;
+}
+
+/* Inputs in light mode */
+[data-theme="light"] input,
+[data-theme="light"] select {
+  background-color: var(--color-input-bg) !important;
+  border-color: var(--color-input-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="light"] input::placeholder {
+  color: var(--color-text-muted) !important;
+}
+
+[data-theme="light"] input:disabled {
+  background-color: var(--color-bg-surface) !important;
+  color: var(--color-text-muted) !important;
+}
+
+/* Indigo accent backgrounds in light mode */
+[data-theme="light"] .bg-indigo-500\/20 {
+  background-color: rgba(99, 102, 241, 0.1) !important;
+}
+
+[data-theme="light"] .border-indigo-500\/50 {
+  border-color: rgba(99, 102, 241, 0.3) !important;
+}
+
+/* Red/danger in light */
+[data-theme="light"] .bg-red-500\/5,
+[data-theme="light"] .bg-red-500\/10,
+[data-theme="light"] .bg-red-500\/20 {
+  background-color: rgba(239, 68, 68, 0.08) !important;
+}
+
+[data-theme="light"] .border-red-500\/10,
+[data-theme="light"] .border-red-500\/20,
+[data-theme="light"] .border-red-500\/30,
+[data-theme="light"] .border-red-500\/40 {
+  border-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+[data-theme="light"] .text-red-400,
+[data-theme="light"] .text-red-400\/60,
+[data-theme="light"] .text-red-300\/80 {
+  color: #dc2626 !important;
+}
+
+[data-theme="light"] .text-red-300\/60 {
+  color: #b91c1c !important;
+}
+
+/* Emerald/success in light */
+[data-theme="light"] .bg-emerald-500\/10,
+[data-theme="light"] .bg-emerald-500\/20 {
+  background-color: rgba(16, 185, 129, 0.08) !important;
+}
+
+[data-theme="light"] .border-emerald-500\/20 {
+  border-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+/* Amber/warning in light */
+[data-theme="light"] .bg-amber-500\/10 {
+  background-color: rgba(245, 158, 11, 0.08) !important;
+}
+
+[data-theme="light"] .border-amber-500\/30 {
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+[data-theme="light"] .text-amber-300\/60 {
+  color: #92400e !important;
+}
+
+/* Scrollbar for light */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12) !important;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ── Animations ── */
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
 
-/* Number input spinners — match app theme */
+/* ── Number input spinners ── */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -81,7 +285,7 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Custom scrollbar */
+/* ── Scrollbar ── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

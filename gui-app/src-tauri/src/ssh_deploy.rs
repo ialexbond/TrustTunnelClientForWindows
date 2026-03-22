@@ -230,7 +230,8 @@ private_key_path = "certs/key.pem""#
                 r#"
 # Install certbot and get Let's Encrypt certificate
 if command -v apt-get >/dev/null 2>&1; then
-    {sudo}apt-get install -y -qq certbot 2>/dev/null
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+    {sudo}apt-get -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' install certbot 2>/dev/null
 elif command -v dnf >/dev/null 2>&1; then
     {sudo}dnf install -y -q certbot 2>/dev/null
 elif command -v yum >/dev/null 2>&1; then
@@ -381,10 +382,10 @@ pub async fn deploy_server(
 
     let update_cmd = format!(
         "if command -v apt-get >/dev/null 2>&1; then \
-             export DEBIAN_FRONTEND=noninteractive && \
+             export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a && \
              {sudo}apt-get update -qq && \
-             {sudo}apt-get upgrade -y -qq && \
-             {sudo}apt-get install -y -qq curl iptables; \
+             {sudo}apt-get -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' upgrade && \
+             {sudo}apt-get -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' install curl iptables; \
          elif command -v dnf >/dev/null 2>&1; then \
              {sudo}dnf upgrade -y -q && \
              {sudo}dnf install -y -q curl iptables; \
@@ -622,7 +623,7 @@ loglevel = "info"
 vpn_mode = "general"
 killswitch_enabled = true
 killswitch_allow_ports = [67, 68]
-post_quantum_group_enabled = false
+post_quantum_group_enabled = true
 
 [endpoint]
 {endpoint_section}
@@ -792,12 +793,29 @@ pub async fn check_server_installation(
     ).await?;
     let service_active = svc_status.trim() == "active";
 
+    // Get list of VPN users from credentials.toml
+    let users: Vec<String> = if installed {
+        let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+        let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+        let (creds_raw, _) = exec_command(
+            &handle, app,
+            &format!("{sudo}grep -oP 'username\\s*=\\s*\"\\K[^\"]+' /opt/trusttunnel/credentials.toml 2>/dev/null || echo ''")
+        ).await?;
+        creds_raw.lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    } else {
+        vec![]
+    };
+
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     Ok(serde_json::json!({
         "installed": installed,
         "version": version,
         "serviceActive": service_active,
+        "users": users,
     }))
 }
 
@@ -1070,7 +1088,7 @@ loglevel = "info"
 vpn_mode = "general"
 killswitch_enabled = true
 killswitch_allow_ports = [67, 68]
-post_quantum_group_enabled = false
+post_quantum_group_enabled = true
 
 [endpoint]
 {endpoint_section}
@@ -1110,6 +1128,216 @@ excluded_routes = []
     Ok(config_path_str)
 }
 
+// ─── Add user to server ────────────────────────────
+
+/// SSH to the server, append a new [[client]] entry to credentials.toml,
+/// restart the service, export the client config, and save it locally.
+pub async fn add_server_user(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    vpn_username: String,
+    vpn_password: String,
+) -> Result<String, String> {
+    emit_step(app, "connect", "progress", "Подключение к серверу...");
+
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(60)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| {
+            let msg = format!("Не удалось подключиться к {host}:{port} — {e}");
+            emit_step(app, "connect", "error", &msg);
+            msg
+        })?;
+
+    emit_step(app, "connect", "ok", "Подключено к серверу");
+
+    emit_step(app, "auth", "progress", "Авторизация...");
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| {
+            let msg = format!("Ошибка авторизации: {e}");
+            emit_step(app, "auth", "error", &msg);
+            msg
+        })?;
+
+    if !auth_ok {
+        let msg = "Неверный SSH логин или пароль";
+        emit_step(app, "auth", "error", msg);
+        return Err(msg.into());
+    }
+
+    emit_step(app, "auth", "ok", "Авторизация успешна");
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    // Check that credentials.toml exists
+    emit_step(app, "check", "progress", "Проверка конфигурации...");
+
+    let (cfg_check, _) = exec_command(
+        &handle, app,
+        "test -f /opt/trusttunnel/credentials.toml && echo CFG_OK || echo CFG_MISSING"
+    ).await?;
+
+    if !cfg_check.contains("CFG_OK") {
+        let msg = "credentials.toml не найден на сервере";
+        emit_step(app, "check", "error", msg);
+        return Err(msg.into());
+    }
+
+    // Check if username already exists
+    let (creds_raw, _) = exec_command(
+        &handle, app,
+        &format!("{sudo}grep -oP 'username\\s*=\\s*\"\\K[^\"]+' /opt/trusttunnel/credentials.toml 2>/dev/null || echo ''")
+    ).await?;
+    let existing_users: Vec<&str> = creds_raw.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    if existing_users.iter().any(|u| *u == vpn_username.as_str()) {
+        let msg = format!("Пользователь '{}' уже существует на сервере", vpn_username);
+        emit_step(app, "check", "error", &msg);
+        return Err(msg);
+    }
+
+    emit_step(app, "check", "ok", "Конфигурация проверена");
+
+    // Append new [[client]] block to credentials.toml
+    emit_step(app, "configure", "progress", &format!("Добавление пользователя '{}'...", vpn_username));
+
+    let escaped_user = vpn_username.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped_pass = vpn_password.replace('\\', "\\\\").replace('"', "\\\"");
+    let append_cmd = format!(
+        r#"{sudo}bash -c 'printf "\n\n[[client]]\nusername = \"{escaped_user}\"\npassword = \"{escaped_pass}\"\n" >> /opt/trusttunnel/credentials.toml'"#
+    );
+
+    let (_, append_code) = exec_command(&handle, app, &append_cmd).await?;
+
+    if append_code != 0 {
+        let msg = "Не удалось добавить пользователя в credentials.toml";
+        emit_step(app, "configure", "error", msg);
+        return Err(msg.into());
+    }
+
+    emit_step(app, "configure", "ok", "Пользователь добавлен");
+
+    // Restart service to pick up new credentials
+    emit_step(app, "service", "progress", "Перезапуск сервиса...");
+
+    let (_, restart_code) = exec_command(
+        &handle, app,
+        &format!("{sudo}systemctl restart trusttunnel 2>&1")
+    ).await?;
+
+    if restart_code != 0 {
+        emit_log(app, "warn", "Не удалось перезапустить сервис. Возможно, нужна ручная перезагрузка.");
+    }
+
+    // Wait for service to start
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    emit_step(app, "service", "ok", "Сервис перезапущен");
+
+    // Export config for the new user
+    emit_step(app, "export", "progress", "Экспорт конфига...");
+
+    // Determine export address
+    let (listen_raw, _) = exec_command(
+        &handle, app,
+        r#"grep -oP 'listen_address\s*=\s*"\K[^"]+' /opt/trusttunnel/vpn.toml 2>/dev/null || echo '0.0.0.0:443'"#
+    ).await?;
+    let listen_addr = listen_raw.trim();
+    let listen_port = listen_addr.split(':').last().unwrap_or("443");
+
+    let (hostname_raw, _) = exec_command(
+        &handle, app,
+        r#"grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#
+    ).await?;
+    let endpoint_hostname = hostname_raw.trim();
+    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
+        format!("{endpoint_hostname}:{listen_port}")
+    } else {
+        format!("{host}:{listen_port}")
+    };
+
+    let export_cmd = format!(
+        "cd /opt/trusttunnel && {sudo}./trusttunnel_endpoint vpn.toml hosts.toml -c {vpn_username} -a {export_address} --format toml 2>&1"
+    );
+
+    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
+
+    if export_code != 0 || export_output.trim().is_empty() {
+        emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
+        let msg = format!("Не удалось экспортировать конфиг для '{vpn_username}'");
+        emit_step(app, "export", "error", &msg);
+        return Err(msg);
+    }
+
+    // Extract only the TOML part
+    let endpoint_section: String = export_output
+        .lines()
+        .skip_while(|l| !l.starts_with('#') && !l.starts_with("hostname"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let client_toml = format!(
+        r#"# TrustTunnel Client Configuration
+# User: {vpn_username}
+
+loglevel = "info"
+vpn_mode = "general"
+killswitch_enabled = true
+killswitch_allow_ports = [67, 68]
+post_quantum_group_enabled = true
+
+[endpoint]
+{endpoint_section}
+
+[listener.tun]
+mtu_size = 1280
+change_system_dns = true
+included_routes = ["0.0.0.0/0"]
+excluded_routes = []
+"#
+    );
+
+    let client_toml = client_toml.replace("anti_dpi = false", "anti_dpi = true");
+
+    emit_step(app, "export", "ok", "Конфиг экспортирован");
+
+    // Save locally with username-specific filename
+    emit_step(app, "save", "progress", "Сохранение конфигурации...");
+
+    let config_dir = portable_data_dir();
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
+
+    let safe_name = vpn_username.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+    let client_config_path = config_dir.join(format!("trusttunnel_client_{safe_name}.toml"));
+    std::fs::write(&client_config_path, &client_toml)
+        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
+
+    let config_path_str = client_config_path.to_string_lossy().to_string();
+    emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
+    emit_step(app, "save", "ok", "Конфигурация сохранена");
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    emit_step(app, "done", "ok", &format!("Пользователь '{}' добавлен!", vpn_username));
+
+    Ok(config_path_str)
+}
+
 // ─── Utility functions ─────────────────────────────
 
 /// Check if another trusttunnel_client process is running.
@@ -1136,6 +1364,365 @@ pub fn check_process_conflict() -> Option<String> {
         }
     }
     None
+}
+
+// ─── Server Management Functions ──────────────────
+
+/// Restart the TrustTunnel service on the remote server.
+pub async fn server_restart_service(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+) -> Result<(), String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl restart trusttunnel")).await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if code != 0 {
+        return Err("Не удалось перезапустить сервис".into());
+    }
+
+    Ok(())
+}
+
+/// Stop the TrustTunnel service on the remote server.
+pub async fn server_stop_service(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+) -> Result<(), String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl stop trusttunnel")).await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if code != 0 {
+        return Err("Не удалось остановить сервис".into());
+    }
+
+    Ok(())
+}
+
+/// Start the TrustTunnel service on the remote server.
+pub async fn server_start_service(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+) -> Result<(), String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl start trusttunnel")).await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if code != 0 {
+        return Err("Не удалось запустить сервис".into());
+    }
+
+    Ok(())
+}
+
+/// Reboot the remote server (fire and forget).
+pub async fn server_reboot(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+) -> Result<(), String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    // Fire and forget — the connection will drop when the server reboots
+    let _ = exec_command(&handle, app, &format!("{sudo}reboot")).await;
+
+    Ok(())
+}
+
+/// Fetch service logs from the remote server.
+pub async fn server_get_logs(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+) -> Result<String, String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let (logs, _) = exec_command(
+        &handle,
+        app,
+        &format!("{sudo}journalctl -u trusttunnel --no-pager -n 100 2>/dev/null || {sudo}tail -100 /opt/trusttunnel/logs/*.log 2>/dev/null || echo 'No logs found'"),
+    )
+    .await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    Ok(logs)
+}
+
+/// Remove a VPN user from credentials.toml on the remote server and restart the service.
+pub async fn server_remove_user(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    vpn_username: String,
+) -> Result<(), String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    // Use sed to remove the [[client]] block matching the username.
+    // Pattern: delete from [[client]] line through the next blank line (or EOF)
+    // when the block contains the target username.
+    let escaped_user = vpn_username.replace('\'', "'\\''");
+    let remove_cmd = format!(
+        r#"{sudo}python3 -c "
+import re, sys
+with open('/opt/trusttunnel/credentials.toml', 'r') as f:
+    content = f.read()
+# Split into blocks by [[client]]
+blocks = re.split(r'(?=\[\[client\]\])', content)
+filtered = [b for b in blocks if not re.search(r'username\s*=\s*\"{}\"', b)]
+with open('/opt/trusttunnel/credentials.toml', 'w') as f:
+    f.write(''.join(filtered).strip() + '\n')
+" 2>/dev/null || {sudo}sed -i '/\[\[client\]\]/,/^$/{{/username\s*=\s*\"{escaped_user}\"/{{:a;N;/\n\s*$/!ba;d}}}}' /opt/trusttunnel/credentials.toml"#,
+        escaped_user
+    );
+
+    let (_, remove_code) = exec_command(&handle, app, &remove_cmd).await?;
+
+    if remove_code != 0 {
+        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+        return Err("Не удалось удалить пользователя из credentials.toml".into());
+    }
+
+    // Restart service to apply changes
+    let (_, restart_code) = exec_command(
+        &handle, app,
+        &format!("{sudo}systemctl restart trusttunnel 2>&1"),
+    ).await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if restart_code != 0 {
+        return Err("Пользователь удалён, но не удалось перезапустить сервис".into());
+    }
+
+    Ok(())
+}
+
+/// Fetch available TrustTunnel versions from GitHub releases API.
+pub async fn server_get_available_versions() -> Result<Vec<String>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("TrustTunnel-Client")
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let resp = client
+        .get("https://api.github.com/repos/TrustTunnel/TrustTunnel/releases")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch releases: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API returned status {}", resp.status()));
+    }
+
+    let releases: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse releases: {e}"))?;
+
+    let versions: Vec<String> = releases
+        .iter()
+        .filter_map(|r| r.get("tag_name").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .collect();
+
+    Ok(versions)
+}
+
+/// Upgrade TrustTunnel on the remote server to a specific version.
+pub async fn server_upgrade(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    version: String,
+) -> Result<(), String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(120)),
+        ..Default::default()
+    });
+
+    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
+        .await
+        .map_err(|e| format!("SSH connect failed: {e}"))?;
+
+    let auth_ok = handle
+        .authenticate_password(&ssh_user, &ssh_password)
+        .await
+        .map_err(|e| format!("SSH auth failed: {e}"))?;
+
+    if !auth_ok {
+        return Err("Неверный SSH логин или пароль".into());
+    }
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    // Stop existing service before upgrade
+    let _ = exec_command(&handle, app, &format!("{sudo}systemctl stop trusttunnel 2>/dev/null; sleep 1; true")).await;
+
+    // Run install script with version flag
+    let escaped_version = version.replace('\'', "'\\''");
+    let install_cmd = format!(
+        "curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh | {sudo}sh -s -- -V '{escaped_version}' -a y"
+    );
+
+    let (_, install_code) = exec_command(&handle, app, &install_cmd).await?;
+
+    if install_code != 0 {
+        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+        return Err(format!("Обновление завершилось с ошибкой (код {install_code})"));
+    }
+
+    // Restart service
+    let (_, restart_code) = exec_command(
+        &handle, app,
+        &format!("{sudo}systemctl restart trusttunnel 2>&1"),
+    ).await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if restart_code != 0 {
+        return Err("Обновление выполнено, но не удалось перезапустить сервис".into());
+    }
+
+    Ok(())
 }
 
 /// Kill any running trusttunnel_client processes.

@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -14,5 +15,12 @@ export default defineConfig(async () => ({
     // which kills connections and triggers unwanted page reloads.
     hmr: false,
     watch: null,
+  },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    css: true,
   },
 }));
