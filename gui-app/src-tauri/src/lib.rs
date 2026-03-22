@@ -316,6 +316,139 @@ async fn fetch_server_config(
     ssh_deploy::fetch_server_config(&app, host, port, user, password, client_name).await
 }
 
+#[tauri::command]
+async fn add_server_user(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    vpn_username: String,
+    vpn_password: String,
+) -> Result<String, String> {
+    ssh_deploy::add_server_user(&app, host, port, user, password, vpn_username, vpn_password).await
+}
+
+#[tauri::command]
+async fn server_restart_service(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<(), String> {
+    ssh_deploy::server_restart_service(&app, host, port, user, password).await
+}
+
+#[tauri::command]
+async fn server_stop_service(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<(), String> {
+    ssh_deploy::server_stop_service(&app, host, port, user, password).await
+}
+
+#[tauri::command]
+async fn server_start_service(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<(), String> {
+    ssh_deploy::server_start_service(&app, host, port, user, password).await
+}
+
+#[tauri::command]
+async fn server_reboot(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<(), String> {
+    ssh_deploy::server_reboot(&app, host, port, user, password).await
+}
+
+#[tauri::command]
+async fn server_get_logs(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<String, String> {
+    ssh_deploy::server_get_logs(&app, host, port, user, password).await
+}
+
+#[tauri::command]
+async fn server_remove_user(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    vpn_username: String,
+) -> Result<(), String> {
+    ssh_deploy::server_remove_user(&app, host, port, user, password, vpn_username).await
+}
+
+#[tauri::command]
+async fn server_get_available_versions() -> Result<Vec<String>, String> {
+    ssh_deploy::server_get_available_versions().await
+}
+
+#[tauri::command]
+async fn server_upgrade(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    version: String,
+) -> Result<(), String> {
+    ssh_deploy::server_upgrade(&app, host, port, user, password, version).await
+}
+
+/// Copy a file to a user-chosen destination (for "Save As" functionality).
+#[tauri::command]
+fn copy_file(source: String, destination: String) -> Result<(), String> {
+    std::fs::copy(&source, &destination)
+        .map_err(|e| format!("Не удалось скопировать файл: {e}"))?;
+    Ok(())
+}
+
+/// Copy a config file into the app directory (next to the executable).
+/// Returns the new path. If the file is already in the app dir, returns it as-is.
+#[tauri::command]
+fn copy_config_to_app_dir(source_path: String) -> Result<String, String> {
+    let src = std::path::Path::new(&source_path);
+    if !src.exists() {
+        return Err(format!("Source file does not exist: {source_path}"));
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("Cannot find exe path: {e}"))?;
+    let app_dir = exe.parent().ok_or("Cannot determine app directory")?;
+    let src_dir = src.parent().unwrap_or(std::path::Path::new(""));
+
+    // Already in app dir — no copy needed
+    if src_dir == app_dir {
+        return Ok(source_path);
+    }
+
+    let file_name = src
+        .file_name()
+        .ok_or("Cannot determine file name")?;
+    let dest = app_dir.join(file_name);
+
+    std::fs::copy(src, &dest)
+        .map_err(|e| format!("Failed to copy config: {e}"))?;
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
 /// Find .toml config files next to the executable
 #[tauri::command]
 fn auto_detect_config() -> Option<String> {
@@ -448,6 +581,89 @@ fn save_client_config(config_path: String, config: serde_json::Value) -> Result<
     Ok(())
 }
 
+/// Run a simple speed test using Cloudflare endpoints.
+/// Returns { download_mbps, upload_mbps } or an error.
+#[tauri::command]
+async fn speedtest_run() -> Result<serde_json::Value, String> {
+    use std::time::Instant;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    // Download test: fetch 5MB from Cloudflare
+    let dl_bytes: usize = 5_000_000;
+    let dl_url = format!("https://speed.cloudflare.com/__down?bytes={dl_bytes}");
+    let dl_start = Instant::now();
+    let dl_resp = client
+        .get(&dl_url)
+        .send()
+        .await
+        .map_err(|e| format!("Download request failed: {e}"))?;
+    let dl_data = dl_resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Download read failed: {e}"))?;
+    let dl_elapsed = dl_start.elapsed().as_secs_f64();
+    let dl_actual = dl_data.len() as f64;
+    let download_mbps = if dl_elapsed > 0.0 {
+        (dl_actual * 8.0) / (dl_elapsed * 1_000_000.0)
+    } else {
+        0.0
+    };
+
+    // Upload test: send 2MB to Cloudflare
+    let ul_size: usize = 2_000_000;
+    let ul_payload = vec![0u8; ul_size];
+    let ul_start = Instant::now();
+    let _ul_resp = client
+        .post("https://speed.cloudflare.com/__up")
+        .body(ul_payload)
+        .send()
+        .await
+        .map_err(|e| format!("Upload request failed: {e}"))?;
+    let ul_elapsed = ul_start.elapsed().as_secs_f64();
+    let upload_mbps = if ul_elapsed > 0.0 {
+        (ul_size as f64 * 8.0) / (ul_elapsed * 1_000_000.0)
+    } else {
+        0.0
+    };
+
+    Ok(serde_json::json!({
+        "download_mbps": (download_mbps * 10.0).round() / 10.0,
+        "upload_mbps": (upload_mbps * 10.0).round() / 10.0,
+    }))
+}
+
+/// Measure TCP connect latency to a host:port (in milliseconds).
+/// Returns -1 if unreachable.
+#[tauri::command]
+async fn ping_endpoint(host: String, port: u16) -> i64 {
+    use std::net::ToSocketAddrs;
+    use std::time::Instant;
+
+    let addr_str = format!("{host}:{port}");
+    let addr = match addr_str.to_socket_addrs() {
+        Ok(mut addrs) => match addrs.next() {
+            Some(a) => a,
+            None => return -1,
+        },
+        Err(_) => return -1,
+    };
+
+    let start = Instant::now();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::net::TcpStream::connect(addr),
+    )
+    .await
+    {
+        Ok(Ok(_stream)) => start.elapsed().as_millis() as i64,
+        _ => -1,
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct UpdateProgress {
     stage: String,
@@ -576,29 +792,30 @@ async fn self_update(
     let pid = std::process::id();
     let app_dir_str = app_dir.to_string_lossy().to_string();
     let source_dir_str = source_dir.to_string_lossy().to_string();
+    let vbs_path_str = temp_dir.join("trusttunnel_updater.vbs").to_string_lossy().to_string();
     let bat_content = format!(
         r#"@echo off
-chcp 65001 >nul
 title TrustTunnel Updater
-echo Ожидание завершения TrustTunnel (PID {pid})...
+echo Waiting for TrustTunnel to exit (PID {pid})...
 :waitloop
 tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
 if not errorlevel 1 (
     timeout /t 1 /nobreak >nul
     goto waitloop
 )
-echo Копирование обновления...
+echo Copying update files...
 xcopy /Y /E /I "{source_dir_str}\*" "{app_dir_str}\" >nul 2>&1
 if errorlevel 1 (
-    echo Ошибка копирования! Попробуйте обновить вручную.
+    echo Copy failed! Please update manually.
     pause
     exit /b 1
 )
-echo Запуск обновлённой версии...
-start "" "{app_dir_str}\trusttunnel.exe"
-echo Очистка временных файлов...
+echo Starting updated version...
+start "" "{app_dir_str}\TrustTunnel.exe"
+echo Cleaning up temp files...
 rd /s /q "{extract_dir_str}" >nul 2>&1
 del "{zip_path_str}" >nul 2>&1
+del "{vbs_path_str}" >nul 2>&1
 (goto) 2>nul & del "%~f0"
 "#
     );
@@ -618,9 +835,17 @@ del "{zip_path_str}" >nul 2>&1
     }
     kill_all_sidecar_processes();
 
-    // Launch the updater bat (hidden window)
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", "/MIN", &bat_path.to_string_lossy()])
+    // Launch the updater bat completely hidden via a VBS wrapper
+    let vbs_path = temp_dir.join("trusttunnel_updater.vbs");
+    let vbs_content = format!(
+        "CreateObject(\"Wscript.Shell\").Run \"{}\", 0, False",
+        bat_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\"\"")
+    );
+    std::fs::write(&vbs_path, &vbs_content)
+        .map_err(|e| format!("Cannot create VBS launcher: {e}"))?;
+
+    std::process::Command::new("wscript.exe")
+        .arg(&vbs_path)
         .creation_flags(0x08000000)
         .spawn()
         .map_err(|e| format!("Cannot launch updater: {e}"))?;
@@ -758,12 +983,23 @@ pub fn run() {
             diagnose_server,
             check_process_conflict,
             kill_existing_process,
+            copy_file,
+            copy_config_to_app_dir,
             auto_detect_config,
             read_client_config,
             save_client_config,
             check_server_installation,
             uninstall_server,
             fetch_server_config,
+            add_server_user,
+            server_restart_service,
+            server_stop_service,
+            server_start_service,
+            server_reboot,
+            server_get_logs,
+            server_remove_user,
+            server_get_available_versions,
+            server_upgrade,
             geodata::load_exclusion_list,
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,
@@ -774,6 +1010,8 @@ pub fn run() {
             geodata::load_active_groups,
             geodata::save_active_groups,
             geodata::load_group_cache,
+            ping_endpoint,
+            speedtest_run,
             self_update
         ])
         .build(tauri::generate_context!())
