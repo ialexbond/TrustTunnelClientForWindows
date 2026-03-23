@@ -39,7 +39,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "server", icon: <Server className="w-[18px] h-[18px]" />, labelKey: "tabs.server" },
+  { id: "server", icon: <Server className="w-[18px] h-[18px]" />, labelKey: "tabs.serverSetup" },
   { id: "settings", icon: <Settings className="w-[18px] h-[18px]" />, labelKey: "tabs.settings", requiresConfig: true },
   { id: "dashboard", icon: <BarChart3 className="w-[18px] h-[18px]" />, labelKey: "tabs.dashboard", requiresConfig: true },
   { id: "routing", icon: <GitBranch className="w-[18px] h-[18px]" />, labelKey: "tabs.routing", requiresConfig: true },

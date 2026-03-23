@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useTranslation } from "react-i18next";
+// import { useTranslation } from "react-i18next"; // i18n ready for future
 import {
   Server,
   RefreshCw,
@@ -124,7 +124,7 @@ export function ServerPanel({
   onClearConfig,
   onConfigExported,
 }: ServerPanelProps) {
-  const { t } = useTranslation();
+  // i18n ready — will use useTranslation() when migrating strings
 
   // ─── State ───
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);

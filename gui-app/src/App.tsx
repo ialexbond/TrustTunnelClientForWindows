@@ -360,6 +360,7 @@ function App() {
   const handleSetupComplete = useCallback((configPath: string) => {
     setConfig((prev) => ({ ...prev, configPath }));
     localStorage.setItem("tt_config_path", configPath);
+    setForceWizard(false);
     setActivePage("settings");
   }, []);
 
@@ -368,6 +369,9 @@ function App() {
   }, []);
 
   const [wizardKey, setWizardKey] = useState(0);
+  const wizardResetRef = useRef<(() => void) | null>(null);
+  // When true, always show SetupWizard instead of ServerPanel
+  const [forceWizard, setForceWizard] = useState(false);
 
   const handleClearConfig = useCallback(() => {
     setConfig({ configPath: "", logLevel: "info" });
@@ -403,7 +407,14 @@ function App() {
       {/* Sidebar */}
       <Sidebar
         activePage={activePage}
-        onPageChange={setActivePage}
+        onPageChange={(page) => {
+          if (page === "server") {
+            // Always show SetupWizard welcome screen when clicking sidebar
+            setForceWizard(true);
+            if (wizardResetRef.current) wizardResetRef.current();
+          }
+          setActivePage(page);
+        }}
         hasConfig={hasConfig}
         theme={theme}
         onThemeToggle={toggleTheme}
@@ -431,7 +442,7 @@ function App() {
         <div className="flex-1 min-h-0 px-4">
           {/* Server/Setup — show ServerPanel if configured, otherwise SetupWizard */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "server" ? "flex" : "none" }}>
-            {hasConfig && sshData.host && sshData.password ? (
+            {hasConfig && sshData.host && sshData.password && !forceWizard ? (
               <ServerPanel
                 host={sshData.host}
                 port={sshData.port}
@@ -445,7 +456,7 @@ function App() {
                 }}
               />
             ) : (
-              <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} />
+              <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
             )}
           </div>
 

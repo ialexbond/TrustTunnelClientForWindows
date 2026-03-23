@@ -84,6 +84,15 @@
     border-color: var(--color-accent-500);
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
   }
+
+  /* Hide native password reveal button (Edge/Chrome) to avoid double eye icon */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
+  input::-webkit-credentials-auto-fill-button {
+    display: none !important;
+  }
 }
 
 /* ── Theme-aware overrides for legacy Tailwind classes ── */
@@ -283,6 +292,12 @@ input[type="number"]::-webkit-outer-spin-button {
 
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* Hide native password reveal (Edge/IE) — we have our own toggle */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
 }
 
 /* ── Scrollbar ── */
