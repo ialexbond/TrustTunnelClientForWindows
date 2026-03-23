@@ -1,6 +1,7 @@
 {
   "tabs": {
     "server": "Server",
+    "serverSetup": "Server Setup",
     "settings": "VPN Settings",
     "dashboard": "Dashboard",
     "routing": "Routing",

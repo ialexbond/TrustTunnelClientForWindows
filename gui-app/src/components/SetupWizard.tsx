@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -23,10 +24,9 @@ import {
   FolderOpen,
   AlertTriangle,
   Mail,
-  Info,
   Trash2,
+  RefreshCw,
   PackageCheck,
-  SkipForward,
   Download,
   UserPlus,
 } from "lucide-react";
@@ -46,6 +46,7 @@ type WizardStep = "welcome" | "server" | "checking" | "found" | "uninstalling" |
 
 interface SetupWizardProps {
   onSetupComplete: (configPath: string) => void;
+  resetToWelcomeRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 const STEPS_ORDER = [
@@ -101,7 +102,41 @@ function deobfuscate(val: string): string {
   return val;
 }
 
-function SetupWizard({ onSetupComplete }: SetupWizardProps) {
+function ConfirmDialog({ open, title, message, onConfirm, onCancel, loading }: {
+  open: boolean; title: string; message: string;
+  onConfirm: () => void; onCancel: () => void; loading?: boolean;
+}) {
+  if (!open) return null;
+  return createPortal(
+    <div className="flex items-center justify-center"
+      style={{ position: "fixed", top: "-50px", left: "-50px", right: "-50px", bottom: "-50px", zIndex: 9999, backgroundColor: "rgba(0,0,0,0.4)", backdropFilter: "blur(6px)" }}>
+      <div className="max-w-sm w-full mx-4 p-6 rounded-2xl space-y-4 shadow-2xl" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+        <h3 className="text-base font-semibold text-center" style={{ color: "var(--color-danger-500)" }}>{title}</h3>
+        <p className="text-xs text-center leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>{message}</p>
+        <div className="flex gap-3">
+          <button onClick={onCancel} disabled={loading}
+            className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.97] hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}>
+            Отмена
+          </button>
+          <button onClick={onConfirm} disabled={loading}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.97] hover:opacity-80 disabled:opacity-70 disabled:cursor-not-allowed"
+            style={{ backgroundColor: "var(--color-danger-500)", color: "white" }}>
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Удаление...
+              </>
+            ) : "Да, удалить"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function SetupWizard({ onSetupComplete, resetToWelcomeRef }: SetupWizardProps) {
   // Wizard navigation — persisted so tab switches don't reset
   const [wizardStep, setWizardStepRaw] = useState<WizardStep>(() => {
     const saved = loadSaved("wizardStep", "welcome") as WizardStep;
@@ -156,6 +191,11 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
   const [newPassword, setNewPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [_addingUser, setAddingUser] = useState(false);
+  const [_deletingUser, setDeletingUser] = useState<string | null>(null);
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  // Track if we came from "found" screen to know where Back should go
+  const [cameFromFound, setCameFromFound] = useState(false);
 
   // Deploy state — persisted
   const [deploySteps, setDeploySteps] = useState<Record<string, DeployStep>>(() => {
@@ -172,6 +212,14 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
   // Tracks current operation so the event listener only reacts to relevant events
   const operationRef = useRef<"deploy" | "fetch" | "uninstall" | null>(null);
+
+  // Expose reset-to-welcome function for sidebar navigation
+  useEffect(() => {
+    if (resetToWelcomeRef) {
+      resetToWelcomeRef.current = () => setWizardStep("welcome");
+    }
+    return () => { if (resetToWelcomeRef) resetToWelcomeRef.current = null; };
+  }, [resetToWelcomeRef, setWizardStep]);
 
   // Persist form fields on change
   useEffect(() => { saveField("host", host); }, [host]);
@@ -211,9 +259,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       const { step, status, message } = event.payload;
       setDeploySteps((prev) => ({ ...prev, [step]: { step, status, message } }));
 
-      // Only react to deploy/fetch operations, not uninstall
+      // Only react to deploy/fetch operations, not uninstall or add_user
       const op = operationRef.current;
-      if (op === "uninstall") return;
+      if (op !== "deploy" && op !== "fetch") return;
 
       if (step === "done" && status === "ok") {
         setTimeout(() => setWizardStep("done"), 600);
@@ -253,6 +301,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
       });
       setServerInfo(result);
       if (result.installed) {
+        setWizardStep("found");
+      } else if (isFetchMode) {
+        // In fetch mode, show "not installed" screen instead of endpoint settings
         setWizardStep("found");
       } else {
         setWizardStep("endpoint");
@@ -365,62 +416,150 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     }
   };
 
-  const handleAddUser = async () => {
-    if (!newUsername.trim() || !newPassword.trim()) return;
-    setAddingUser(true);
-    operationRef.current = "deploy";
-    setWizardStep("deploying");
-    setDeploySteps({});
-    setDeployLogs([]);
-    setErrorMessage("");
-
+  // Save config for a user — fetch + save dialog without leaving current screen
+  const [savingConfigFor, setSavingConfigFor] = useState<string | null>(null);
+  const handleSaveConfigDirect = async (forUser: string) => {
+    setSavingConfigFor(forUser);
     try {
-      const result = await invoke<string>("add_server_user", {
+      const result = await invoke<string>("fetch_server_config", {
         host,
         port: parseInt(port),
         user: sshUser,
         password: sshPassword,
-        vpnUsername: newUsername.trim(),
+        clientName: forUser,
+      });
+      // Open save dialog
+      const fileName = `trusttunnel_${forUser}.toml`;
+      const dest = await save({
+        defaultPath: fileName,
+        filters: [{ name: "TOML Config", extensions: ["toml"] }],
+      });
+      if (dest) {
+        try {
+          await invoke("copy_file", { source: result, destination: dest });
+        } catch { /* fallback: config already saved to app dir */ }
+      }
+    } catch (e) {
+      setErrorMessage(String(e));
+    } finally {
+      setSavingConfigFor(null);
+    }
+  };
+
+  const handleAddUser = async () => {
+    if (!newUsername.trim() || !newPassword.trim()) return;
+    setAddingUser(true);
+    setErrorMessage("");
+    const addedName = newUsername.trim();
+
+    try {
+      await invoke<string>("add_server_user", {
+        host,
+        port: parseInt(port),
+        user: sshUser,
+        password: sshPassword,
+        vpnUsername: addedName,
         vpnPassword: newPassword.trim(),
       });
-      setConfigPath(result);
+      // Re-check server to refresh user list BEFORE clearing fields
+      try {
+        const result = await invoke<{
+          installed: boolean;
+          version: string;
+          serviceActive: boolean;
+          users: string[];
+        }>("check_server_installation", {
+          host,
+          port: parseInt(port),
+          user: sshUser,
+          password: sshPassword,
+        });
+        setServerInfo(result);
+      } catch { /* keep current serverInfo */ }
+      // Only clear fields AFTER user list is updated
       setNewUsername("");
       setNewPassword("");
     } catch (e) {
-      setErrorMessage((prev) => prev || String(e));
-      setWizardStep("error");
+      setErrorMessage(String(e));
     } finally {
-      operationRef.current = null;
       setAddingUser(false);
     }
   };
 
+  const handleDeleteUser = async (username: string) => {
+    setDeletingUser(username);
+    setConfirmDeleteUser(null); // Close dialog immediately
+    try {
+      await invoke("server_remove_user", {
+        host,
+        port: parseInt(port),
+        user: sshUser,
+        password: sshPassword,
+        vpnUsername: username,
+      });
+      // Re-check server to refresh user list
+      try {
+        const result = await invoke<{
+          installed: boolean;
+          version: string;
+          serviceActive: boolean;
+          users: string[];
+        }>("check_server_installation", {
+          host,
+          port: parseInt(port),
+          user: sshUser,
+          password: sshPassword,
+        });
+        setServerInfo(result);
+      } catch { /* keep current */ }
+    } catch (e) {
+      setErrorMessage(String(e));
+    } finally {
+      setDeletingUser(null);
+    }
+  };
+
   const canGoToEndpoint = host.trim().length > 0 && sshPassword.length > 0;
+  const isValidEmail = (e: string) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
   const canDeploy =
     vpnUsername.trim().length > 0 &&
     vpnPassword.length > 0 &&
-    (certType !== "letsencrypt" || (domain.trim().length > 0 && email.trim().length > 0));
+    (certType !== "letsencrypt" || (domain.trim().length > 0 && isValidEmail(email)));
 
   // ─── Step indicator (top bar) ───────────────────
-  const stepNumbers: { key: WizardStep; label: string }[] = [
-    { key: "server", label: "Сервер" },
-    { key: "checking", label: "Проверка" },
-    { key: "endpoint", label: "Настройки" },
-    { key: "deploying", label: "Установка" },
-  ];
+  const isFetchMode = (loadSaved("wizardMode", "") as string) === "fetch";
+  const stepNumbers: { key: WizardStep; label: string }[] = isFetchMode
+    ? [
+        { key: "server", label: "Сервер" },
+        { key: "checking", label: "Проверка" },
+        { key: "fetching", label: "Сохранение конфига" },
+      ]
+    : [
+        { key: "server", label: "Сервер" },
+        { key: "checking", label: "Проверка" },
+        { key: "endpoint", label: "Настройки" },
+        { key: "deploying", label: "Установка" },
+      ];
 
   const renderStepBar = () => {
     if (wizardStep === "welcome" || wizardStep === "done" || wizardStep === "error")
       return null;
-    const stepMap: Record<string, string> = {
-      server: "server",
-      checking: "checking",
-      found: "checking",
-      uninstalling: "checking",
-      endpoint: "endpoint",
-      deploying: "deploying",
-      fetching: "deploying",
-    };
+    const stepMap: Record<string, string> = isFetchMode
+      ? {
+          server: "server",
+          checking: "checking",
+          found: "checking",
+          fetching: "fetching",
+        }
+      : {
+          server: "server",
+          checking: "checking",
+          found: "checking",
+          uninstalling: "checking",
+          endpoint: "endpoint",
+          deploying: "deploying",
+          fetching: "fetching",
+        };
     const mapped = stepMap[wizardStep] || wizardStep;
     const currentIdx = stepNumbers.findIndex((s) => s.key === mapped);
     return (
@@ -428,28 +567,27 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         {stepNumbers.map((s, i) => (
           <div key={s.key} className="flex items-center gap-2">
             <div
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors ${
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors"
+              style={
                 i < currentIdx
-                  ? "bg-emerald-500/20 text-emerald-400"
+                  ? { backgroundColor: "rgba(16, 185, 129, 0.1)", color: "var(--color-success-500)" }
                   : i === currentIdx
-                  ? "bg-indigo-500/30 text-indigo-300 ring-2 ring-indigo-500/50"
-                  : "bg-white/5 text-gray-600"
-              }`}
+                  ? { backgroundColor: "rgba(99, 102, 241, 0.15)", color: "var(--color-accent-500)", boxShadow: "0 0 0 2px rgba(99, 102, 241, 0.5)" }
+                  : { backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }
+              }
             >
               {i < currentIdx ? "✓" : i + 1}
             </div>
             <span
-              className={`text-[11px] ${
-                i === currentIdx ? "text-gray-300" : "text-gray-600"
-              }`}
+              className="text-[11px]"
+              style={{ color: i === currentIdx ? "var(--color-text-primary)" : "var(--color-text-muted)" }}
             >
               {s.label}
             </span>
             {i < stepNumbers.length - 1 && (
               <div
-                className={`w-8 h-px ${
-                  i < currentIdx ? "bg-emerald-500/40" : "bg-white/10"
-                }`}
+                className="w-8 h-px"
+                style={{ backgroundColor: i < currentIdx ? "rgba(16, 185, 129, 0.3)" : "var(--color-border)" }}
               />
             )}
           </div>
@@ -500,7 +638,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               }}
             >
               <Download className="w-4 h-4" />
-              Забрать конфиг с сервера
+              Сохранить конфиг с сервера
             </button>
             <button
               onClick={handleSkip}
@@ -535,17 +673,17 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-sm w-full space-y-4">
             <div className="text-center space-y-1">
-              <div className="mx-auto w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
-                <Server className="w-5 h-5 text-indigo-400" />
+              <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+                <Server className="w-5 h-5" style={{ color: "var(--color-accent-500)" }} />
               </div>
               <h2 className="text-lg font-bold">Подключение к серверу</h2>
-              <p className="text-xs text-gray-500">SSH-данные для доступа к вашему серверу</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>SSH-данные для доступа к вашему серверу</p>
             </div>
 
             <div className="space-y-3">
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="block text-[11px] text-gray-500 mb-1">IP-адрес сервера</label>
+                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>IP-адрес сервера</label>
                   <input
                     type="text"
                     value={host}
@@ -556,7 +694,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   />
                 </div>
                 <div className="w-20">
-                  <label className="block text-[11px] text-gray-500 mb-1">Порт</label>
+                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Порт</label>
                   <input
                     type="text"
                     value={port}
@@ -568,7 +706,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               </div>
 
               <div>
-                <label className="block text-[11px] text-gray-500 mb-1">Имя пользователя</label>
+                <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Имя пользователя</label>
                 <input
                   type="text"
                   value={sshUser}
@@ -579,7 +717,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               </div>
 
               <div>
-                <label className="block text-[11px] text-gray-500 mb-1">Пароль SSH</label>
+                <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Пароль SSH</label>
                 <div className="relative">
                   <input
                     type={showSshPassword ? "text" : "password"}
@@ -588,17 +726,13 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                     placeholder="••••••••"
                     className="wizard-input !py-2 pr-10"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && canGoToEndpoint) {
-                        const mode = loadSaved("wizardMode", "") as string;
-                        if (mode === "fetch") handleFetchConfig();
-                        else handleCheckServer();
-                      }
+                      if (e.key === "Enter" && canGoToEndpoint) handleCheckServer();
                     }}
                   />
                   <button
                     type="button"
                     onClick={() => setShowSshPassword(!showSshPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors" style={{ color: "var(--color-text-muted)" }}
                   >
                     {showSshPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
@@ -609,20 +743,20 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => { saveField("wizardMode", ""); setWizardStep("welcome"); }}
-                className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
               >
                 Назад
               </button>
               <button
-                onClick={() => {
-                  const mode = loadSaved("wizardMode", "") as string;
-                  if (mode === "fetch") handleFetchConfig();
-                  else handleCheckServer();
-                }}
+                onClick={handleCheckServer}
                 disabled={!canGoToEndpoint}
-                className="flex-1 btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
               >
-                {(loadSaved("wizardMode", "") as string) === "fetch" ? "Забрать конфиг" : "Далее"}
+                Далее
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -639,16 +773,19 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         {renderStepBar()}
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-sm w-full text-center space-y-5">
-            <Loader2 className="w-10 h-10 text-indigo-400 animate-spin mx-auto" />
+            <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: "var(--color-accent-500)" }} />
             <div className="space-y-1">
               <h2 className="text-lg font-bold">Проверяем сервер...</h2>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 Подключение по SSH и проверка установленного TrustTunnel
               </p>
             </div>
             <button
               onClick={() => setWizardStep("server")}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+              style={{ color: "var(--color-text-secondary)" }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
             >
               Отмена
             </button>
@@ -658,7 +795,152 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     );
   }
 
-  // ─── Found: TT already installed ──────────────
+  // ─── Found (Fetch mode): show users only, save config ──────────────
+  if (wizardStep === "found" && isFetchMode) {
+    const isInstalled = serverInfo?.installed;
+    const users = serverInfo?.users || [];
+    return (
+      <>
+        {renderStepBar()}
+        <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
+          <div className="max-w-sm w-full text-center space-y-5 my-auto">
+            {isInstalled && users.length > 0 ? (
+              <>
+                <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(16, 185, 129, 0.1)" }}>
+                  <User className="w-7 h-7" style={{ color: "var(--color-success-500)" }} />
+                </div>
+                <div className="space-y-1.5">
+                  <h2 className="text-lg font-bold">Пользователи на сервере</h2>
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    Выберите пользователя для сохранения конфига
+                  </p>
+                </div>
+
+                <div className="text-left space-y-1 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                  {users.map((u) => (
+                    <div key={u} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg transition-colors cursor-default"
+                      style={{ backgroundColor: "transparent" }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                    >
+                      <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{u}</span>
+                      <button
+                        onClick={() => handleSaveConfigDirect(u)}
+                        disabled={!!savingConfigFor}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80 disabled:opacity-40"
+                        style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+                      >
+                        {savingConfigFor === u ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Сохранение...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3 h-3" />
+                            Сохранить
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {errorMessage && (
+                  <p className="text-xs" style={{ color: "var(--color-danger-500)" }}>{errorMessage}</p>
+                )}
+
+                <button
+                  onClick={() => setWizardStep("welcome")}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                  style={{ color: "var(--color-text-secondary)" }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                >
+                  На главную
+                </button>
+              </>
+            ) : isInstalled && users.length === 0 ? (
+              <>
+                <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
+                  <User className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
+                </div>
+                <div className="space-y-1.5">
+                  <h2 className="text-lg font-bold">Нет пользователей</h2>
+                  <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    TrustTunnel установлен на сервере, но пользователи не настроены. Настройте сервер, чтобы добавить пользователей.
+                  </p>
+                </div>
+                <div className="flex gap-2 w-full">
+                  <button
+                    onClick={() => setWizardStep("server")}
+                    className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                  >
+                    Назад
+                  </button>
+                  <button
+                    onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
+                    style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+                  >
+                    Настроить сервер
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(239, 68, 68, 0.08)" }}>
+                  <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
+                </div>
+                <div className="space-y-1.5">
+                  <h2 className="text-lg font-bold" style={{ color: "var(--color-danger-500)" }}>
+                    {checkError ? "Сервер недоступен" : "TrustTunnel не установлен"}
+                  </h2>
+                  <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    {checkError
+                      ? "Не удалось подключиться к серверу по SSH. Проверьте данные подключения."
+                      : "На сервере не найден TrustTunnel. Сначала настройте сервер."}
+                  </p>
+                  {checkError && (
+                    <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                      <p className="text-[10px] leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
+                        {checkError}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 w-full">
+                  <button
+                    onClick={() => setWizardStep("server")}
+                    className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                  >
+                    Назад
+                  </button>
+                  <button
+                    onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
+                    style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+                  >
+                    Настроить сервер
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ─── Found: TT already installed (setup mode) ──────────────
   if (wizardStep === "found") {
     const isInstalled = serverInfo?.installed;
     return (
@@ -668,198 +950,246 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="max-w-sm w-full text-center space-y-5 my-auto">
             {isInstalled ? (
               <>
-                <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/20 flex items-center justify-center">
-                  <PackageCheck className="w-7 h-7 text-amber-400" />
+                <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
+                  <PackageCheck className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
                 </div>
                 <div className="space-y-1.5">
-                  <h2 className="text-lg font-bold text-amber-300">
+                  <h2 className="text-lg font-bold" style={{ color: "var(--color-warning-500)" }}>
                     TrustTunnel уже установлен
                   </h2>
                   {serverInfo?.version && (
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                       Версия: {serverInfo.version}
                     </p>
                   )}
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                     Сервис: {serverInfo?.serviceActive ? (
-                      <span className="text-emerald-400">работает</span>
+                      <span style={{ color: "var(--color-success-500)" }}>работает</span>
                     ) : (
-                      <span className="text-gray-500">не запущен</span>
+                      <span style={{ color: "var(--color-text-muted)" }}>не запущен</span>
                     )}
                   </p>
                 </div>
 
                 {/* ── Users on server ── */}
                 {serverInfo?.users && serverInfo.users.length > 0 && (
-                  <div className="text-left space-y-2 p-3 rounded-xl border border-white/10 bg-white/5">
-                    <p className="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5">
+                  <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                    <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
                       <User className="w-3.5 h-3.5" />
                       Пользователи на сервере
                     </p>
                     <div className="space-y-1">
-                      {serverInfo.users.map((u) => (
-                        <div key={u} className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-gray-400 truncate">{u}</span>
-                          <button
-                            onClick={() => handleFetchConfig(u)}
-                            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium
-                                       bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/30 transition-all"
+                      {serverInfo.users.map((u) => {
+                        const isSelected = selectedUser === u;
+                        return (
+                          <div key={u} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg transition-colors"
+                            style={{ backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent", border: isSelected ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent" }}
+                            onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
+                            onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                           >
-                            <Download className="w-3 h-3" />
-                            Забрать конфиг
-                          </button>
-                        </div>
-                      ))}
+                            <button
+                              onClick={() => setSelectedUser(u)}
+                              className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                            >
+                              <div className="w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center"
+                                style={{ borderColor: isSelected ? "var(--color-accent-500)" : "var(--color-border)" }}
+                              >
+                                {isSelected && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />}
+                              </div>
+                              <span className="text-xs truncate" style={{ color: isSelected ? "var(--color-accent-500)" : "var(--color-text-secondary)" }}>{u}</span>
+                            </button>
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <button
+                                onClick={() => handleSaveConfigDirect(u)}
+                                disabled={!!savingConfigFor}
+                                className="p-1.5 rounded-lg transition-all hover:opacity-70 disabled:opacity-40"
+                                style={{ color: "var(--color-accent-500)" }}
+                                title="Сохранить конфиг"
+                              >
+                                {savingConfigFor === u ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => !_deletingUser && setConfirmDeleteUser(u)}
+                                disabled={!!_deletingUser}
+                                className="p-1.5 rounded-lg transition-all hover:opacity-70 disabled:opacity-40"
+                                style={{ color: "var(--color-danger-500)" }}
+                                title="Удалить пользователя"
+                              >
+                                {_deletingUser === u ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
+                    <ConfirmDialog
+                      open={!!confirmDeleteUser}
+                      title="Удалить пользователя?"
+                      message={`Пользователь «${confirmDeleteUser}» будет удалён с сервера. Его конфигурация перестанет работать.`}
+                      onConfirm={() => confirmDeleteUser && handleDeleteUser(confirmDeleteUser)}
+                      onCancel={() => setConfirmDeleteUser(null)}
+                    />
                   </div>
                 )}
 
                 {/* ── Add new user ── */}
-                <div className="text-left space-y-2 p-3 rounded-xl border border-white/10 bg-white/5">
-                  <p className="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5">
+                <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                  <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
                     <UserPlus className="w-3.5 h-3.5" />
                     Добавить пользователя
                   </p>
-                  <p className="text-[10px] text-gray-500 leading-relaxed">
+                  <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
                     Каждое устройство должно подключаться под своим пользователем.
                   </p>
                   <div className="space-y-1.5">
-                    <input
-                      type="text"
-                      placeholder="Имя пользователя"
-                      value={newUsername}
-                      onChange={(e) => setNewUsername(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/10
-                                 text-xs text-white placeholder-gray-600 focus:border-indigo-500/50 outline-none"
-                    />
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Имя пользователя"
+                        value={newUsername}
+                        onChange={(e) => setNewUsername(e.target.value.replace(/\s/g, ""))}
+                        className="w-full px-3 py-1.5 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                      />
+                      {newUsername.trim() && serverInfo?.users?.includes(newUsername.trim()) && (
+                        <p className="text-[10px] mt-0.5" style={{ color: "var(--color-danger-500)" }}>
+                          Пользователь с таким именем уже существует
+                        </p>
+                      )}
+                    </div>
                     <div className="relative">
                       <input
                         type={showNewPassword ? "text" : "password"}
                         placeholder="Пароль"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full px-3 py-1.5 pr-8 rounded-lg bg-white/5 border border-white/10
-                                   text-xs text-white placeholder-gray-600 focus:border-indigo-500/50 outline-none"
+                        className="w-full px-3 py-1.5 pr-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
                       />
                       <button
                         type="button"
                         onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 transition-colors" style={{ color: "var(--color-text-muted)" }}
                       >
                         {showNewPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                       </button>
                     </div>
                     <button
                       onClick={handleAddUser}
-                      disabled={!newUsername.trim() || !newPassword.trim()}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium
-                                 btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={_addingUser || !newUsername.trim() || !newPassword.trim() || !!serverInfo?.users?.includes(newUsername.trim())}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
                     >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      Добавить и получить конфиг
+                      {_addingUser ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Добавляем...
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-3.5 h-3.5" />
+                          Добавить
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                {/* Continue button — always visible, disabled until user explicitly selected */}
+                <button
+                  onClick={() => { if (selectedUser) handleFetchConfig(selectedUser); }}
+                  disabled={!selectedUser}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+                >
+                  Продолжить
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                <div className="space-y-2 pt-1">
                   <button
                     onClick={handleSkip}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm
-                               text-gray-400 hover:text-white border border-white/10 hover:bg-white/5 transition-all"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
+                    style={{ backgroundColor: "var(--color-bg-hover)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
                   >
-                    <SkipForward className="w-4 h-4" />
+                    <FolderOpen className="w-4 h-4" />
                     Пропустить — у меня есть конфиг
                   </button>
-                  {confirmUninstall ? (
-                    <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 space-y-2.5">
-                      <p className="text-xs text-red-300 font-medium text-center">
-                        Вы уверены? Это действие необратимо.
-                      </p>
-                      <p className="text-[10px] text-red-300/60 text-center leading-relaxed">
-                        Сервис будет остановлен, все файлы TrustTunnel будут удалены с сервера.
-                        Текущее VPN-подключение будет разорвано.
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setConfirmUninstall(false)}
-                          className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-400
-                                     border border-white/10 hover:bg-white/5 transition-all"
-                        >
-                          Отмена
-                        </button>
-                        <button
-                          onClick={() => { setConfirmUninstall(false); handleUninstall(); }}
-                          className="flex-1 px-3 py-2 rounded-xl text-xs font-medium
-                                     bg-red-500/30 border border-red-500/50 text-red-300 hover:bg-red-500/40 transition-all"
-                        >
-                          Да, удалить
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmUninstall(true)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs
-                                 text-gray-500 hover:text-gray-300 border border-white/10 hover:bg-white/5 transition-all"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Удалить и переустановить
-                    </button>
-                  )}
                   <button
-                    onClick={() => setWizardStep("endpoint")}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[11px]
-                               text-gray-500 hover:text-gray-300 transition-colors"
+                    onClick={() => { setCameFromFound(true); setWizardStep("endpoint"); }}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
+                    style={{ backgroundColor: "var(--color-bg-hover)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
                   >
-                    Переустановить поверх (без удаления)
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Переустановить TrustTunnel
+                  </button>
+                  <button
+                    onClick={() => setConfirmUninstall(true)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
+                    style={{ backgroundColor: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", color: "var(--color-danger-500)" }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Удалить TrustTunnel
                   </button>
                 </div>
+                <ConfirmDialog
+                  open={confirmUninstall}
+                  title="Вы уверены?"
+                  message="Сервис будет остановлен, все файлы TrustTunnel будут удалены с сервера. Текущее VPN-подключение будет разорвано."
+                  onConfirm={() => { setConfirmUninstall(false); handleUninstall(); }}
+                  onCancel={() => setConfirmUninstall(false)}
+                />
               </>
             ) : checkError ? (
               <>
-                <div className="mx-auto w-14 h-14 rounded-2xl bg-red-500/20 flex items-center justify-center">
-                  <XCircle className="w-7 h-7 text-red-400" />
+                <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(239, 68, 68, 0.08)" }}>
+                  <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
                 </div>
                 <div className="space-y-1.5">
-                  <h2 className="text-lg font-bold text-red-300">Сервер недоступен</h2>
-                  <p className="text-xs text-gray-400">
+                  <h2 className="text-lg font-bold" style={{ color: "var(--color-danger-500)" }}>Сервер недоступен</h2>
+                  <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                     Не удалось подключиться к серверу по SSH. Проверьте адрес, порт, логин и пароль.
                     Возможно, сервер недоступен из вашей сети.
                   </p>
-                  <div className="max-h-20 overflow-y-auto rounded-lg bg-white/5 p-2 mt-2">
-                    <p className="text-[10px] text-red-400/80 leading-relaxed select-text cursor-text break-words">
+                  <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                    <p className="text-[10px] leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
                       {checkError}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => setWizardStep("server")}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm text-gray-400 hover:text-white border border-white/10 hover:bg-white/10 transition-all"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                  style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
                 >
-                  ← Назад к SSH
+                  Назад
                 </button>
               </>
             ) : (
               <>
-                <div className="mx-auto w-14 h-14 rounded-2xl bg-indigo-500/20 flex items-center justify-center">
-                  <Server className="w-7 h-7 text-indigo-400" />
+                <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+                  <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
                 </div>
                 <div className="space-y-1.5">
                   <h2 className="text-lg font-bold">Сервер готов к настройке</h2>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                     TrustTunnel не обнаружен — можно установить с нуля
                   </p>
                 </div>
                 <div className="flex gap-2 w-full">
                   <button
                     onClick={() => setWizardStep("server")}
-                    className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                    className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                    style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
                   >
                     Назад
                   </button>
                   <button
                     onClick={() => setWizardStep("endpoint")}
-                    className="flex-1 btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm"
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
+                    style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
                   >
                     Продолжить настройку
                     <ChevronRight className="w-4 h-4" />
@@ -871,9 +1201,12 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             {isInstalled && (
               <button
                 onClick={() => setWizardStep("server")}
-                className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
               >
-                ← Назад к SSH
+                Назад
               </button>
             )}
           </div>
@@ -891,9 +1224,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-sm w-full text-center space-y-5">
             {step?.status === "ok" ? (
-              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+              <CheckCircle2 className="w-10 h-10 mx-auto" style={{ color: "var(--color-success-500)" }} />
             ) : (
-              <Loader2 className="w-10 h-10 text-red-400 animate-spin mx-auto" />
+              <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: "var(--color-danger-500)" }} />
             )}
             <div className="space-y-1">
               <h2 className="text-lg font-bold">
@@ -901,7 +1234,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   ? "TrustTunnel удалён"
                   : "Удаление TrustTunnel..."}
               </h2>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 {step?.message || "Останавливаем сервис и удаляем файлы..."}
               </p>
             </div>
@@ -919,21 +1252,21 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
           <div className="max-w-sm w-full space-y-3">
             <div className="text-center space-y-1">
-              <div className="mx-auto w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
-                <Settings className="w-5 h-5 text-purple-400" />
+              <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+                <Settings className="w-5 h-5" style={{ color: "var(--color-accent-500)" }} />
               </div>
               <h2 className="text-lg font-bold">Настройки VPN</h2>
             </div>
 
             {/* VPN Credentials */}
             <div className="glass-card p-3 space-y-2">
-              <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
                 <User className="w-3 h-3" />
                 Учётные данные VPN
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-gray-500 mb-1">Логин</label>
+                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Логин</label>
                   <input
                     type="text"
                     value={vpnUsername}
@@ -944,7 +1277,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-gray-500 mb-1">Пароль</label>
+                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Пароль</label>
                   <div className="relative">
                     <input
                       type={showVpnPassword ? "text" : "password"}
@@ -956,7 +1289,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                     <button
                       type="button"
                       onClick={() => setShowVpnPassword(!showVpnPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 transition-colors" style={{ color: "var(--color-text-muted)" }}
                     >
                       {showVpnPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                     </button>
@@ -967,38 +1300,40 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
             {/* Certificate */}
             <div className="glass-card p-3 space-y-2">
-              <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
                 <Lock className="w-3 h-3" />
                 TLS-сертификат
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setCertType("letsencrypt")}
-                  className={`p-2.5 rounded-xl text-xs text-left transition-all border ${
+                  className="p-2.5 rounded-xl text-xs text-left transition-all"
+                  style={
                     certType === "letsencrypt"
-                      ? "border-emerald-500/50 bg-emerald-500/10 text-white"
-                      : "border-white/10 bg-white/5 text-gray-400 hover:bg-white/10"
-                  }`}
+                      ? { border: "1px solid rgba(16, 185, 129, 0.4)", backgroundColor: "rgba(16, 185, 129, 0.08)", color: "var(--color-text-primary)" }
+                      : { border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }
+                  }
                 >
                   <div className="font-medium flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <CheckCircle2 className="w-3 h-3" style={{ color: "var(--color-success-500)" }} />
                     Let's Encrypt
                   </div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">Рекомендуется</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>Рекомендуется</div>
                 </button>
                 <button
                   disabled
-                  className="p-2.5 rounded-xl text-xs text-left border border-white/5 bg-white/[0.02] text-gray-600 cursor-not-allowed opacity-50"
+                  className="p-2.5 rounded-xl text-xs text-left border cursor-not-allowed opacity-50"
+                  style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}
                 >
                   <div className="font-medium">Самоподписанный</div>
-                  <div className="text-[10px] text-gray-600 mt-0.5">Недоступно</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>Недоступно</div>
                 </button>
               </div>
 
               {certType === "selfsigned" && (
-                <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-amber-300 leading-relaxed">
+                <div className="flex items-start gap-2 p-2 rounded-lg" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
+                  <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-warning-500)" }}>
                     Самоподписанный сертификат небезопасен и может быть заблокирован.
                     Настоятельно рекомендуем использовать домен с Let's Encrypt.
                   </p>
@@ -1008,9 +1343,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               {certType === "letsencrypt" && (
                 <div className="space-y-2">
                   <div>
-                    <label className="block text-[11px] text-gray-500 mb-1">Доменное имя</label>
+                    <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Доменное имя</label>
                     <div className="relative">
-                      <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-600" />
+                      <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                       <input
                         type="text"
                         value={domain}
@@ -1019,14 +1354,14 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                         className="wizard-input !py-2 !text-xs pl-9"
                       />
                     </div>
-                    <p className="text-[10px] text-gray-600 mt-0.5">
+                    <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                       A-запись домена → {host || "IP сервера"}, порт 80 открыт
                     </p>
                   </div>
                   <div>
-                    <label className="block text-[11px] text-gray-500 mb-1">Email для уведомлений</label>
+                    <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Email для уведомлений</label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-600" />
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                       <input
                         type="email"
                         value={email}
@@ -1035,8 +1370,8 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                         className="wizard-input !py-2 !text-xs pl-9"
                       />
                     </div>
-                    <p className="text-[10px] text-gray-600 mt-0.5">
-                      Для уведомлений об обновлении сертификата
+                    <p className="text-[10px] mt-0.5" style={{ color: email.trim() && !isValidEmail(email) ? "var(--color-danger-500)" : "var(--color-text-muted)" }}>
+                      {email.trim() && !isValidEmail(email) ? "Введите корректный email" : "Необязательно · для уведомлений об обновлении сертификата"}
                     </p>
                   </div>
                 </div>
@@ -1046,14 +1381,14 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             {/* Advanced settings (collapsed) */}
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              className="flex items-center gap-1.5 text-[11px] transition-colors" style={{ color: "var(--color-text-muted)" }}
             >
               {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               Дополнительные настройки
             </button>
             {showAdvanced && (
               <div className="glass-card p-3">
-                <label className="block text-[11px] text-gray-500 mb-1">Адрес прослушивания</label>
+                <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>Адрес прослушивания</label>
                 <input
                   type="text"
                   value={listenAddress}
@@ -1061,32 +1396,37 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                   placeholder="0.0.0.0:443"
                   className="wizard-input !py-2 !text-xs"
                 />
-                <p className="text-[10px] text-gray-600 mt-0.5">
+                <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                   Оставьте по умолчанию, если не уверены
                 </p>
               </div>
             )}
 
-            {/* System requirements info */}
-            <div className="flex items-start gap-2 p-2 rounded-lg bg-indigo-500/5 border border-indigo-500/10">
-              <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-              <div className="text-[10px] text-gray-500 leading-relaxed">
-                <span className="text-gray-400">Требования:</span> Linux x86_64, 512 MB RAM, 100 MB диска, порт 443
-                {certType === "letsencrypt" && " + порт 80"}
+            {/* DNS warning */}
+            {certType === "letsencrypt" && domain.trim() && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl" style={{ backgroundColor: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
+                <div className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
+                  <span className="font-semibold" style={{ color: "var(--color-warning-500)" }}>Важно:</span> убедитесь, что A-запись домена <span className="font-mono font-medium">{domain}</span> указывает на IP <span className="font-mono font-medium">{host || "вашего сервера"}</span>. Без этого Let's Encrypt не сможет выпустить сертификат.
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => setWizardStep("server")}
-                className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                onClick={() => { const goBack = cameFromFound || serverInfo?.installed ? "found" : "server"; setCameFromFound(false); setWizardStep(goBack); }}
+                className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
               >
                 Назад
               </button>
               <button
                 onClick={handleDeploy}
                 disabled={!canDeploy}
-                className="flex-1 btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
               >
                 <Rocket className="w-4 h-4" />
                 Установить
@@ -1107,7 +1447,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           <div className="max-w-md w-full space-y-4">
             <div className="text-center space-y-1">
               <h2 className="text-lg font-bold">Устанавливаем TrustTunnel...</h2>
-              <p className="text-xs text-gray-500">Это может занять несколько минут</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Это может занять несколько минут</p>
             </div>
 
             <div className="glass-card p-4 space-y-2">
@@ -1115,8 +1455,8 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 const step = deploySteps[stepId];
                 if (!step) {
                   return (
-                    <div key={stepId} className="flex items-center gap-2.5 text-gray-600">
-                      <div className="w-4 h-4 rounded-full border border-gray-700/50 shrink-0" />
+                    <div key={stepId} className="flex items-center gap-2.5" style={{ color: "var(--color-text-muted)" }}>
+                      <div className="w-4 h-4 rounded-full shrink-0" style={{ border: "1px solid var(--color-border)" }} />
                       <span className="text-xs">{STEP_LABELS[stepId]}</span>
                     </div>
                   );
@@ -1124,22 +1464,23 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 return (
                   <div key={stepId} className="flex items-center gap-2.5">
                     {step.status === "progress" && (
-                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-warning-500)" }} />
                     )}
                     {step.status === "ok" && (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
                     )}
                     {step.status === "error" && (
-                      <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+                      <XCircle className="w-4 h-4 shrink-0" style={{ color: "var(--color-danger-500)" }} />
                     )}
                     <span
-                      className={`text-xs ${
-                        step.status === "progress"
-                          ? "text-amber-300"
+                      className="text-xs"
+                      style={{
+                        color: step.status === "progress"
+                          ? "var(--color-warning-500)"
                           : step.status === "ok"
-                          ? "text-emerald-300"
-                          : "text-red-300"
-                      }`}
+                          ? "var(--color-success-500)"
+                          : "var(--color-danger-500)"
+                      }}
                     >
                       {step.message}
                     </span>
@@ -1148,43 +1489,6 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               })}
             </div>
 
-            <div>
-              <button
-                onClick={() => setShowLogs(!showLogs)}
-                className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                {showLogs ? "Скрыть детали" : "Показать детали"}
-                <span className="text-gray-700">({deployLogs.length})</span>
-              </button>
-
-              {showLogs && (
-                <div className="mt-1.5 glass-card p-2.5 max-h-36 overflow-y-auto font-mono text-[10px] space-y-0.5 select-text cursor-text relative group">
-                  <button
-                    onClick={copyLogsToClipboard}
-                    className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-white/10 hover:bg-white/20 text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-                    title="Копировать логи"
-                  >
-                    {copied ? <ClipboardCheck className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  </button>
-                  {deployLogs.map((log, i) => (
-                    <div
-                      key={i}
-                      className={
-                        log.level === "warn"
-                          ? "text-amber-400/80"
-                          : log.level === "error"
-                          ? "text-red-400/80"
-                          : "text-gray-500"
-                      }
-                    >
-                      {log.message}
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </>
@@ -1208,9 +1512,9 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
         <div className="flex-1 flex flex-col items-center justify-center p-6">
           <div className="max-w-md w-full space-y-4">
             <div className="text-center space-y-1">
-              <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+              <Loader2 className="w-8 h-8 animate-spin mx-auto" style={{ color: "var(--color-accent-500)" }} />
               <h2 className="text-lg font-bold">Получаем конфиг с сервера...</h2>
-              <p className="text-xs text-gray-500">Подключаемся и экспортируем клиентскую конфигурацию</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Подключаемся и экспортируем клиентскую конфигурацию</p>
             </div>
 
             <div className="glass-card p-4 space-y-2">
@@ -1218,8 +1522,8 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 const step = deploySteps[stepId];
                 if (!step) {
                   return (
-                    <div key={stepId} className="flex items-center gap-2.5 text-gray-600">
-                      <div className="w-4 h-4 rounded-full border border-gray-700/50 shrink-0" />
+                    <div key={stepId} className="flex items-center gap-2.5" style={{ color: "var(--color-text-muted)" }}>
+                      <div className="w-4 h-4 rounded-full shrink-0" style={{ border: "1px solid var(--color-border)" }} />
                       <span className="text-xs">{FETCH_STEP_LABELS[stepId]}</span>
                     </div>
                   );
@@ -1227,22 +1531,23 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 return (
                   <div key={stepId} className="flex items-center gap-2.5">
                     {step.status === "progress" && (
-                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-warning-500)" }} />
                     )}
                     {step.status === "ok" && (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
                     )}
                     {step.status === "error" && (
-                      <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+                      <XCircle className="w-4 h-4 shrink-0" style={{ color: "var(--color-danger-500)" }} />
                     )}
                     <span
-                      className={`text-xs ${
-                        step.status === "progress"
-                          ? "text-amber-300"
+                      className="text-xs"
+                      style={{
+                        color: step.status === "progress"
+                          ? "var(--color-warning-500)"
                           : step.status === "ok"
-                          ? "text-emerald-300"
-                          : "text-red-300"
-                      }`}
+                          ? "var(--color-success-500)"
+                          : "var(--color-danger-500)"
+                      }}
                     >
                       {step.message}
                     </span>
@@ -1251,43 +1556,6 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
               })}
             </div>
 
-            <div>
-              <button
-                onClick={() => setShowLogs(!showLogs)}
-                className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                {showLogs ? "Скрыть детали" : "Показать детали"}
-                <span className="text-gray-700">({deployLogs.length})</span>
-              </button>
-
-              {showLogs && (
-                <div className="mt-1.5 glass-card p-2.5 max-h-36 overflow-y-auto font-mono text-[10px] space-y-0.5 select-text cursor-text relative group">
-                  <button
-                    onClick={copyLogsToClipboard}
-                    className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-white/10 hover:bg-white/20 text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-                    title="Копировать логи"
-                  >
-                    {copied ? <ClipboardCheck className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  </button>
-                  {deployLogs.map((log, i) => (
-                    <div
-                      key={i}
-                      className={
-                        log.level === "warn"
-                          ? "text-amber-400/80"
-                          : log.level === "error"
-                          ? "text-red-400/80"
-                          : "text-gray-500"
-                      }
-                    >
-                      {log.message}
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </>
@@ -1296,17 +1564,17 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
   // ─── Done ───────────────────────────────────────
   if (wizardStep === "done") {
-    const isFetch = (loadSaved("wizardMode", "") as string) === "fetch";
+    const isFetch = isFetchMode;
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="max-w-sm w-full text-center space-y-5">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-2xl shadow-emerald-500/30">
+          <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-success-500)", boxShadow: "0 8px 24px rgba(16, 185, 129, 0.25)" }}>
             <CheckCircle2 className="w-8 h-8 text-white" />
           </div>
 
           <div className="space-y-1.5">
-            <h2 className="text-xl font-bold text-emerald-300">Всё готово!</h2>
-            <p className="text-sm text-gray-400">
+            <h2 className="text-xl font-bold" style={{ color: "var(--color-success-500)" }}>Всё готово!</h2>
+            <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
               {isFetch
                 ? "Конфигурация получена с сервера и сохранена."
                 : "Сервер установлен и запущен. Конфигурация создана автоматически."}
@@ -1315,15 +1583,16 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
           {configPath && (
             <div className="glass-card p-3 text-left">
-              <p className="text-[11px] text-gray-500 mb-0.5">Файл конфигурации:</p>
-              <p className="text-xs text-gray-300 font-mono break-all">{configPath}</p>
+              <p className="text-[11px] mb-0.5" style={{ color: "var(--color-text-muted)" }}>Файл конфигурации:</p>
+              <p className="text-xs font-mono break-all" style={{ color: "var(--color-text-primary)" }}>{configPath}</p>
             </div>
           )}
 
-          <div className="flex flex-col gap-2 items-center w-full">
+          <div className="space-y-2 w-full">
             <button
               onClick={() => { setWizardStep("welcome"); onSetupComplete(configPath); }}
-              className="w-full btn-primary inline-flex items-center justify-center gap-2 px-6 py-3"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all active:scale-95"
+              style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
             >
               Перейти к подключению
               <ChevronRight className="w-4 h-4" />
@@ -1344,8 +1613,8 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                     }
                   }
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm
-                           text-gray-400 hover:text-white border border-white/10 hover:bg-white/5 transition-all"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
+                style={{ backgroundColor: "var(--color-bg-hover)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
               >
                 <Download className="w-4 h-4" />
                 Сохранить как...
@@ -1353,9 +1622,12 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             )}
             <button
               onClick={() => setWizardStep("welcome")}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+              style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
             >
-              ← На главную
+              На главную
             </button>
           </div>
         </div>
@@ -1365,7 +1637,6 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
 
   // ─── Error ──────────────────────────────────────
   if (wizardStep === "error") {
-    const isFetchMode = (loadSaved("wizardMode", "") as string) === "fetch";
     const showReinstallPrompt = isFetchMode && fetchRetryCount >= 2;
 
     // Smart error hints based on error message and deploy logs
@@ -1390,27 +1661,27 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
     return (
       <div className="flex-1 flex flex-col items-center overflow-y-auto p-6">
         <div className="max-w-sm w-full text-center space-y-4 my-auto">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-2xl shadow-red-500/30 shrink-0">
+          <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-danger-500)", boxShadow: "0 8px 24px rgba(239, 68, 68, 0.25)" }}>
             <XCircle className="w-8 h-8 text-white" />
           </div>
 
           <div className="space-y-1.5">
-            <h2 className="text-xl font-bold text-red-300">Что-то пошло не так</h2>
-            <div className="max-h-32 overflow-y-auto rounded-lg bg-white/5 p-2">
-              <p className="text-xs text-gray-400 leading-relaxed select-text cursor-text break-words">
+            <h2 className="text-xl font-bold" style={{ color: "var(--color-danger-500)" }}>Что-то пошло не так</h2>
+            <div className="max-h-32 overflow-y-auto rounded-lg p-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+              <p className="text-xs leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-text-secondary)" }}>
                 {errorMessage || "Неизвестная ошибка"}
               </p>
             </div>
           </div>
 
           {hints.length > 0 && (
-            <div className="text-left space-y-1.5 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5">
-              <p className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
+            <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "rgba(245, 158, 11, 0.05)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+              <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 Возможная причина
               </p>
               {hints.map((hint, i) => (
-                <p key={i} className="text-[11px] text-amber-200/70 leading-relaxed">{hint}</p>
+                <p key={i} className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>{hint}</p>
               ))}
             </div>
           )}
@@ -1419,7 +1690,7 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             <div>
               <button
                 onClick={() => setShowLogs(!showLogs)}
-                className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors mx-auto"
+                className="flex items-center gap-1.5 text-[11px] transition-colors mx-auto" style={{ color: "var(--color-text-muted)" }}
               >
                 {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 {showLogs ? "Скрыть логи" : "Показать логи"}
@@ -1428,15 +1699,15 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
                 <div className="mt-1.5 glass-card p-2.5 max-h-36 overflow-y-auto font-mono text-[10px] space-y-0.5 text-left select-text cursor-text relative group">
                   <button
                     onClick={copyLogsToClipboard}
-                    className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-white/10 hover:bg-white/20 text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                    className="absolute top-1.5 right-1.5 p-1 rounded-lg hover:opacity-80 transition-colors opacity-0 group-hover:opacity-100" style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
                     title="Копировать логи"
                   >
-                    {copied ? <ClipboardCheck className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copied ? <ClipboardCheck className="w-3 h-3" style={{ color: "var(--color-success-500)" }} /> : <Copy className="w-3 h-3" />}
                   </button>
                   {deployLogs.map((log, i) => (
                     <div
                       key={i}
-                      className={log.level === "error" ? "text-red-400/80" : "text-gray-500"}
+                      style={{ color: log.level === "error" ? "var(--color-danger-500)" : "var(--color-text-muted)" }}
                     >
                       {log.message}
                     </div>
@@ -1447,25 +1718,27 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
           )}
 
           {showReinstallPrompt ? (
-            <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2.5">
-              <p className="text-xs text-amber-300 font-medium">
+            <div className="p-3 rounded-xl space-y-2.5" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
+              <p className="text-xs font-medium" style={{ color: "var(--color-warning-500)" }}>
                 Хотите переустановить VPN на сервере?
               </p>
-              <p className="text-[10px] text-amber-300/60 leading-relaxed">
+              <p className="text-xs leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
                 Копирование конфига не удалось повторно. Можно переустановить VPN с нуля.
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setWizardStep("server")}
-                  className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-400
-                             border border-white/10 hover:bg-white/5 transition-all"
+                  className="flex-1 px-3 py-2 rounded-xl text-xs transition-all"
+                  style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
                 >
                   Отмена
                 </button>
                 <button
                   onClick={() => { setFetchRetryCount(0); saveField("wizardMode", ""); setWizardStep("endpoint"); }}
-                  className="flex-1 px-3 py-2 rounded-xl text-xs font-medium
-                             bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-all"
+                  className="flex-1 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+                  style={{ backgroundColor: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "var(--color-warning-500)" }}
                 >
                   Да, переустановить
                 </button>
@@ -1475,13 +1748,17 @@ function SetupWizard({ onSetupComplete }: SetupWizardProps) {
             <div className="flex gap-2 justify-center">
               <button
                 onClick={() => setWizardStep(isFetchMode ? "server" : "endpoint")}
-                className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
+                style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
               >
                 {isFetchMode ? "Назад" : "Назад к настройкам"}
               </button>
               <button
                 onClick={isFetchMode ? () => handleFetchConfig() : handleDeploy}
-                className="btn-primary !py-2.5 text-sm"
+                className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
+                style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
               >
                 Попробовать снова
               </button>
