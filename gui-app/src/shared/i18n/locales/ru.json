@@ -1,6 +1,7 @@
 {
   "tabs": {
     "server": "Сервер",
+    "serverSetup": "Настройка сервера",
     "settings": "Настройки VPN",
     "dashboard": "Дашборд",
     "routing": "Маршрутизация",
