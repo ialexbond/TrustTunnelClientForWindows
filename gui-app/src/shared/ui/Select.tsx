@@ -53,11 +53,19 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
               borderStyle: "solid",
               borderColor: "var(--color-input-border)",
               color: "var(--color-text-primary)",
+              colorScheme: "dark",
             }}
             {...props}
           >
             {options.map((opt) => (
-              <option key={opt.value} value={opt.value}>
+              <option
+                key={opt.value}
+                value={opt.value}
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
                 {opt.label}
               </option>
             ))}
