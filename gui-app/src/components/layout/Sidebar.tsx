@@ -2,7 +2,9 @@ import { useState, useRef, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Server,
+  Monitor,
   Settings,
+  SlidersHorizontal,
   BarChart3,
   GitBranch,
   ScrollText,
@@ -15,11 +17,13 @@ import {
 
 export type SidebarPage =
   | "server"
+  | "control"
   | "settings"
   | "dashboard"
   | "routing"
   | "logs"
-  | "about";
+  | "about"
+  | "appSettings";
 
 interface SidebarProps {
   activePage: SidebarPage;
@@ -39,11 +43,13 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "server", icon: <Server className="w-[18px] h-[18px]" />, labelKey: "tabs.serverSetup" },
+  { id: "server", icon: <Server className="w-[18px] h-[18px]" />, labelKey: "tabs.installation" },
+  { id: "control", icon: <Monitor className="w-[18px] h-[18px]" />, labelKey: "tabs.controlPanel" },
   { id: "settings", icon: <Settings className="w-[18px] h-[18px]" />, labelKey: "tabs.settings", requiresConfig: true },
   { id: "dashboard", icon: <BarChart3 className="w-[18px] h-[18px]" />, labelKey: "tabs.dashboard", requiresConfig: true },
   { id: "routing", icon: <GitBranch className="w-[18px] h-[18px]" />, labelKey: "tabs.routing", requiresConfig: true },
   { id: "logs", icon: <ScrollText className="w-[18px] h-[18px]" />, labelKey: "tabs.logs", requiresConfig: true },
+  { id: "appSettings", icon: <SlidersHorizontal className="w-[18px] h-[18px]" />, labelKey: "tabs.appSettings" },
 ];
 
 export function Sidebar({
