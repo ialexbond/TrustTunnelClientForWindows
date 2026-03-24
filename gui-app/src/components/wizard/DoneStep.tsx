@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, ChevronRight, Download } from "lucide-react";
+import { CheckCircle2, ChevronRight, Download, Plug } from "lucide-react";
 import type { WizardState } from "./useWizardState";
 
 export function DoneStep(w: WizardState) {
@@ -35,9 +35,23 @@ export function DoneStep(w: WizardState) {
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all active:scale-95"
             style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
           >
-            {t('wizard.done.go_to_connection')}
+            {t('wizard.done.go_to_panel')}
             <ChevronRight className="w-4 h-4" />
           </button>
+          {w.configPath && (
+            <button
+              onClick={() => {
+                localStorage.setItem("tt_navigate_after_setup", "settings");
+                w.setWizardStep("welcome");
+                w.onSetupComplete(w.configPath);
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all active:scale-95"
+              style={{ backgroundColor: "var(--color-success-500)", color: "white" }}
+            >
+              <Plug className="w-4 h-4" />
+              {t('wizard.done.go_to_connection')}
+            </button>
+          )}
           {w.configPath && (
             <button
               onClick={w.handleSaveAs}

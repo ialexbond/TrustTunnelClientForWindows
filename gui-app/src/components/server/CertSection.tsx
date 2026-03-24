@@ -5,7 +5,6 @@ import {
   ShieldCheck,
   Info,
   RefreshCw,
-  Loader2,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
@@ -67,12 +66,18 @@ function parseCertInfo(data: unknown): CertInfo {
   if (parsed && typeof parsed === "object") {
     const obj = parsed as CertInfoResponse;
     const issuer = (obj.issuer || "").toLowerCase();
-    if (issuer.includes("let's encrypt") || issuer.includes("acme") || issuer.includes("letsencrypt")) {
+    const subject = (obj.subject || "").toLowerCase();
+    if (issuer.includes("let's encrypt") || issuer.includes("acme") || issuer.includes("letsencrypt") || issuer.includes("r3") || issuer.includes("r10") || issuer.includes("r11")) {
       result.certType = "lets_encrypt";
-    } else if (issuer.includes("self") || (!obj.issuer && obj.hostname)) {
+    } else if (
+      issuer.includes("self") ||
+      (!obj.issuer && obj.hostname) ||
+      // Self-signed: issuer equals subject
+      (issuer && subject && issuer === subject)
+    ) {
       result.certType = "self_signed";
     }
-    result.domain = obj.hostname || obj.subject?.replace(/^CN=/, "") || "";
+    result.domain = obj.hostname || obj.subject?.replace(/^CN\s*=\s*/, "") || "";
     result.notAfter = obj.notAfter || "";
     result.autoRenew = obj.autoRenew ?? false;
   }
@@ -92,36 +97,60 @@ function daysUntil(dateStr: string): number | null {
   }
 }
 
-export function CertSection({ state }: Props) {
-  const { t } = useTranslation();
-  const { sshParams, setActionResult } = state;
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(n) % 100;
+  const lastDigit = abs % 10;
+  if (abs >= 11 && abs <= 19) return `${n} ${many}`;
+  if (lastDigit === 1) return `${n} ${one}`;
+  if (lastDigit >= 2 && lastDigit <= 4) return `${n} ${few}`;
+  return `${n} ${many}`;
+}
 
-  const [certInfo, setCertInfo] = useState<CertInfo | null>(null);
-  const [certLoading, setCertLoading] = useState(true);
+function formatDaysHuman(totalDays: number, lang: string): string {
+  if (totalDays <= 0) return lang === "ru" ? "Истёк" : "Expired";
+
+  const years = Math.floor(totalDays / 365);
+  const months = Math.floor((totalDays % 365) / 30);
+  const days = totalDays % 30;
+
+  if (lang === "ru") {
+    const parts: string[] = [];
+    if (years > 0) parts.push(pluralRu(years, "год", "года", "лет"));
+    if (months > 0) parts.push(pluralRu(months, "месяц", "месяца", "месяцев"));
+    if (days > 0 && years === 0) parts.push(pluralRu(days, "день", "дня", "дней"));
+    if (parts.length === 0) parts.push(pluralRu(totalDays, "день", "дня", "дней"));
+    return parts.join(" ");
+  }
+
+  // English
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years}y`);
+  if (months > 0) parts.push(`${months}mo`);
+  if (days > 0 && years === 0) parts.push(`${days}d`);
+  if (parts.length === 0) parts.push(`${totalDays}d`);
+  return parts.join(" ");
+}
+
+export function CertSection({ state }: Props) {
+  const { t, i18n } = useTranslation();
+  const { sshParams, setActionResult, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
+
   const [certError, setCertError] = useState("");
   const [renewLoading, setRenewLoading] = useState(false);
   const [renewStatus, setRenewStatus] = useState<string>("");
   const [confirmRenew, setConfirmRenew] = useState(false);
 
+  const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;
+
   const loadCert = async () => {
-    setCertLoading(true);
     setCertError("");
     try {
       const raw = await invoke<unknown>("server_get_cert_info", sshParams);
-      setCertInfo(parseCertInfo(raw));
+      setPreloadedCert(raw);
     } catch (e) {
       setCertError(String(e));
-      setCertInfo(null);
-    } finally {
-      setCertLoading(false);
     }
   };
-
-  // Auto-load on mount
-  useEffect(() => {
-    loadCert();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleRenew = async () => {
     setConfirmRenew(false);
@@ -130,15 +159,17 @@ export function CertSection({ state }: Props) {
     try {
       setRenewStatus(t("server.cert.renew_progress_renewing"));
       await invoke("server_renew_cert", sshParams);
-      setRenewStatus(t("server.cert.renew_progress_done"));
-      setActionResult({ type: "ok", message: t("server.cert.renewed") });
+      setRenewStatus(t("server.cert.renew_progress_reloading"));
+      // Wait a bit for the new cert to be written to disk
+      await new Promise(r => setTimeout(r, 2000));
       await loadCert();
+      setRenewStatus("");
+      state.pushSuccess(t("server.cert.renewed"));
     } catch (e) {
       setRenewStatus("");
       setActionResult({ type: "error", message: String(e) });
     } finally {
       setRenewLoading(false);
-      setTimeout(() => setRenewStatus(""), 3000);
     }
   };
 
@@ -155,17 +186,7 @@ export function CertSection({ state }: Props) {
     }
   };
 
-  if (certLoading) {
-    return (
-      <Card>
-        <CardHeader title={t("server.cert.title")} icon={<ShieldCheck className="w-3.5 h-3.5" />} />
-        <div className="flex items-center gap-2 py-2">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-text-muted)" }} />
-          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.cert.loading")}</span>
-        </div>
-      </Card>
-    );
-  }
+  if (!certInfo && !certError) return null;
 
   if (certError) {
     return (
@@ -213,13 +234,12 @@ export function CertSection({ state }: Props) {
           <div className="flex items-center justify-between">
             <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.expires")}</span>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono" style={{ color: "var(--color-text-primary)" }}>{certInfo.notAfter}</span>
               {daysLeft !== null && (
                 <Badge
                   variant={daysLeft <= 7 ? "danger" : daysLeft <= 30 ? "warning" : "success"}
                   size="sm"
                 >
-                  {t("server.cert.days_left", { days: daysLeft })}
+                  {formatDaysHuman(daysLeft, i18n.language)}
                 </Badge>
               )}
             </div>
@@ -233,22 +253,21 @@ export function CertSection({ state }: Props) {
           </Badge>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<RefreshCw className="w-3.5 h-3.5" />}
-            loading={renewLoading}
-            onClick={() => setConfirmRenew(true)}
-          >
-            {renewLoading ? t("server.cert.renewing") : t("server.cert.renew")}
-          </Button>
-          {renewStatus && (
-            <span className="text-[10px] animate-pulse" style={{ color: "var(--color-text-muted)" }}>
-              {renewStatus}
-            </span>
-          )}
-        </div>
+        {/* Renew button — only for Let's Encrypt, disabled until implemented */}
+        {certInfo.certType === "lets_encrypt" && (
+          <Tooltip text={t("server.cert.renew_wip")}>
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<RefreshCw className="w-3.5 h-3.5" />}
+                disabled
+              >
+                {t("server.cert.renew")}
+              </Button>
+            </div>
+          </Tooltip>
+        )}
       </div>
 
       <ConfirmDialog

@@ -302,6 +302,8 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       filters: [{ name: "TrustTunnel Config", extensions: ["toml"] }],
     });
     if (selected) {
+      // Import → go to VPN settings, not control panel
+      localStorage.setItem("tt_navigate_after_setup", "settings");
       try {
         const copied = await invoke<string>("copy_config_to_app_dir", { sourcePath: selected as string });
         onSetupComplete(copied);
