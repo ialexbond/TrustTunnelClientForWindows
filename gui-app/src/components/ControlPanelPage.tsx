@@ -21,7 +21,6 @@ function readStoredCredentials(): SshCredentials | null {
     const raw = localStorage.getItem("trusttunnel_control_ssh");
     if (!raw) return null;
     const obj = JSON.parse(raw);
-    // Need either password or keyPath
     if (!obj.host || (!obj.password && !obj.keyPath)) return null;
     return {
       host: obj.host,
@@ -46,15 +45,31 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   const [creds, setCreds] = useState<SshCredentials | null>(readStoredCredentials);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Re-read credentials when localStorage changes (e.g. after wizard completes)
+  // Watch for a "force refresh" signal from the wizard (timestamp changes)
   useEffect(() => {
     const interval = setInterval(() => {
-      const fresh = readStoredCredentials();
-      if (fresh && !creds) {
-        setCreds(fresh);
-        setRefreshKey(k => k + 1);
+      const ts = localStorage.getItem("trusttunnel_control_refresh");
+      const lastTs = (interval as any).__lastTs;
+      if (ts && ts !== lastTs) {
+        (interval as any).__lastTs = ts;
+        const fresh = readStoredCredentials();
+        if (fresh) {
+          setCreds(fresh);
+          setRefreshKey(k => k + 1);
+        } else {
+          // Creds were removed — show SSH form
+          setCreds(null);
+        }
       }
-    }, 1000);
+      // Also pick up creds if we have none
+      if (!creds) {
+        const fresh = readStoredCredentials();
+        if (fresh) {
+          setCreds(fresh);
+          setRefreshKey(k => k + 1);
+        }
+      }
+    }, 500);
     return () => clearInterval(interval);
   }, [creds]);
 
@@ -65,6 +80,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
 
   const handleDisconnect = useCallback(() => {
     localStorage.removeItem("trusttunnel_control_ssh");
+    localStorage.removeItem("trusttunnel_control_refresh");
     setCreds(null);
   }, []);
 
@@ -78,10 +94,11 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {/* Header */}
       <div
-        className="flex justify-end px-4 py-2 shrink-0 sticky top-0 z-10"
+        className="flex justify-end px-4 py-2 shrink-0"
         style={{
-          backgroundColor: "var(--color-bg-secondary)",
+          backgroundColor: "var(--color-bg-primary)",
           borderBottom: "1px solid var(--color-border)",
         }}
       >
@@ -95,6 +112,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         </Button>
       </div>
 
+      {/* ServerPanel — refreshKey forces re-mount after wizard install */}
       <ServerPanel
         key={refreshKey}
         host={creds.host}
@@ -104,6 +122,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         sshKeyPath={creds.keyPath}
         onSwitchToSetup={onSwitchToSetup}
         onClearConfig={() => {}}
+        onDisconnect={handleDisconnect}
         onConfigExported={(path) => {
           onConfigExported(path);
           if (onNavigateToSettings) onNavigateToSettings();

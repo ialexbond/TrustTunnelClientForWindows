@@ -35,7 +35,7 @@ export function EndpointStep(w: WizardState) {
                 <input
                   type="text"
                   value={w.vpnUsername}
-                  onChange={(e) => w.setVpnUsername(e.target.value)}
+                  onChange={(e) => w.setVpnUsername(e.target.value.replace(/[^a-zA-Z0-9._\-]/g, ""))}
                   placeholder="vpnuser"
                   className="wizard-input !py-2 !text-xs"
                   autoFocus
@@ -47,7 +47,7 @@ export function EndpointStep(w: WizardState) {
                   <input
                     type={w.showVpnPassword ? "text" : "password"}
                     value={w.vpnPassword}
-                    onChange={(e) => w.setVpnPassword(e.target.value)}
+                    onChange={(e) => w.setVpnPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
                     placeholder="••••••••"
                     className="wizard-input !py-2 !text-xs pr-9"
                   />

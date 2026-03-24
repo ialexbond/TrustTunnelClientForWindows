@@ -39,23 +39,22 @@ export function ConfirmDialog({
         <p className="text-xs text-center leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
           {message}
         </p>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center justify-center">
           <Button
             variant="ghost"
-            fullWidth
             onClick={onCancel}
             disabled={loading}
-            className="py-2.5"
+            size="sm"
           >
             {cancelLabel}
           </Button>
           <Button
             variant={variant === "danger" ? "danger" : "warning"}
-            fullWidth
             onClick={onConfirm}
             loading={loading}
             disabled={loading}
-            className="py-2.5"
+            size="sm"
+            style={{ whiteSpace: "nowrap" }}
           >
             {confirmLabel}
           </Button>

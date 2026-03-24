@@ -6,6 +6,7 @@ import { Server, Loader2, AlertCircle, Lock, Key, FileKey } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
+import { translateSshError } from "../../shared/utils/translateSshError";
 
 export interface SshCredentials {
   host: string;
@@ -41,7 +42,6 @@ export function SshConnectForm({ onConnect }: Props) {
       const selected = await open({
         title: t("control.select_key_title"),
         filters: [
-          { name: "SSH Keys", extensions: ["pem", "key", "ppk", "id_rsa", "id_ed25519", ""] },
           { name: "All Files", extensions: ["*"] },
         ],
         multiple: false,
@@ -96,7 +96,7 @@ export function SshConnectForm({ onConnect }: Props) {
 
       onConnect(creds);
     } catch (e) {
-      setError(String(e));
+      setError(translateSshError(String(e), t));
     } finally {
       setConnecting(false);
     }

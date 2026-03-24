@@ -121,20 +121,20 @@ pub async fn ssh_connect(
         connect_fut,
     )
     .await
-    .map_err(|_| format!("SSH connection to {host}:{port} timed out after 15s"))?
-    .map_err(|e| format!("SSH connect failed: {e}"))?;
+    .map_err(|_| format!("SSH_TIMEOUT|{host}:{port}"))?
+    .map_err(|e| format!("SSH_CONNECT_FAILED|{e}"))?;
 
     // Try key-based auth if key_path provided
     if let Some(kp) = key_path {
         if !kp.is_empty() {
             let key = russh_keys::load_secret_key(kp, None)
-                .map_err(|e| format!("Failed to load SSH key '{kp}': {e}"))?;
+                .map_err(|e| format!("SSH_KEY_LOAD_FAILED|{kp}|{e}"))?;
             let auth_ok = handle
                 .authenticate_publickey(ssh_user, Arc::new(key))
                 .await
-                .map_err(|e| format!("SSH key auth failed: {e}"))?;
+                .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
             if !auth_ok {
-                return Err("SSH key authentication rejected by server".into());
+                return Err("SSH_KEY_REJECTED".into());
             }
             return Ok(handle);
         }
@@ -144,10 +144,10 @@ pub async fn ssh_connect(
     let auth_ok = handle
         .authenticate_password(ssh_user, ssh_password)
         .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
+        .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
 
     if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
+        return Err("SSH_AUTH_FAILED".into());
     }
 
     Ok(handle)
@@ -162,12 +162,12 @@ async fn exec_command(
     let mut channel = handle
         .channel_open_session()
         .await
-        .map_err(|e| format!("Ошибка открытия SSH-канала: {e}"))?;
+        .map_err(|e| format!("SSH_CHANNEL_FAILED|{e}"))?;
 
     channel
         .exec(true, command.as_bytes())
         .await
-        .map_err(|e| format!("Ошибка выполнения команды: {e}"))?;
+        .map_err(|e| format!("SSH_EXEC_FAILED|{e}"))?;
 
     let mut stdout = String::new();
     let mut exit_code: i32 = -1;
@@ -305,6 +305,10 @@ elif command -v dnf >/dev/null 2>&1; then
 elif command -v yum >/dev/null 2>&1; then
     {sudo}yum install -y -q certbot 2>/dev/null
 fi
+# Kill any lingering certbot processes and remove lock files
+{sudo}pkill -9 certbot 2>/dev/null || true
+{sudo}rm -f /tmp/.certbot.lock 2>/dev/null || true
+sleep 1
 {sudo}certbot certonly --standalone -d {hostname} --non-interactive --agree-tos {email_flag} --http-01-port 80
 {sudo}mkdir -p {dir}/certs
 {sudo}cp /etc/letsencrypt/live/{hostname}/fullchain.pem {dir}/certs/cert.pem
@@ -450,7 +454,7 @@ pub async fn deploy_server(
     let (_, update_code) = exec_command(&handle, app, &update_cmd).await?;
 
     if update_code != 0 {
-        emit_log(app, "warn", "Не удалось обновить пакеты. Продолжаем установку...");
+        emit_log(app, "warn", "Failed to update packages. Continuing installation...");
     }
 
     emit_step(app, "update", "ok", "Система обновлена");
@@ -522,7 +526,7 @@ pub async fn deploy_server(
     let (_, cfg_code) = exec_command(&handle, app, &configure_cmd).await?;
 
     if cfg_code != 0 {
-        let msg = "Не удалось создать файлы конфигурации. Проверьте логи.";
+        let msg = "SSH_CONFIG_CREATE_FAILED";
         emit_step(app, "configure", "error", msg);
         return Err(msg.into());
     }
@@ -549,7 +553,7 @@ pub async fn deploy_server(
 
     // Check for fatal config errors (but ignore timeout exit which is expected)
     if preflight.to_lowercase().contains("error") && preflight.to_lowercase().contains("pars") {
-        let msg = format!("Ошибка в конфигурации endpoint: {}", preflight.trim());
+        let msg = format!("SSH_ENDPOINT_CONFIG_ERROR|{}", preflight.trim());
         emit_step(app, "configure", "error", &msg);
         return Err(msg);
     }
@@ -571,7 +575,7 @@ pub async fn deploy_server(
     let (_, svc_code) = exec_command(&handle, app, &service_cmds).await?;
 
     if svc_code != 0 {
-        emit_log(app, "warn", "Не удалось запустить systemd сервис. Возможно, нужна ручная настройка.");
+        emit_log(app, "warn", "Failed to start systemd service. Manual setup may be needed.");
     }
 
     // Wait for service to start and verify it's running
@@ -652,7 +656,7 @@ pub async fn deploy_server(
     if export_code != 0 || export_output.trim().is_empty() {
         emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
         let msg = format!(
-            "Не удалось экспортировать конфиг (код {}). Пользователь '{}' не найден или ошибка endpoint.",
+            "SSH_EXPORT_FAILED|{}|{}",
             export_code, settings.vpn_username
         );
         emit_step(app, "export", "error", &msg);
@@ -700,11 +704,11 @@ excluded_routes = []
     let config_dir = portable_data_dir();
 
     std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
+        .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
 
     let client_config_path = config_dir.join("trusttunnel_client.toml");
     std::fs::write(&client_config_path, &client_toml)
-        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
+        .map_err(|e| format!("SSH_WRITE_CONFIG_FAILED|{e}"))?;
 
     let config_path_str = client_config_path.to_string_lossy().to_string();
     emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
@@ -910,7 +914,7 @@ fi
     let (output, code) = exec_command(&handle, app, &uninstall_script).await?;
 
     if output.contains("UNINSTALL_FAILED") || code != 0 {
-        let msg = format!("Не удалось полностью удалить TrustTunnel (код {}). Смотрите логи.", code);
+        let msg = format!("SSH_UNINSTALL_FAILED|{code}");
         emit_step(app, "uninstall", "error", &msg);
         handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err(msg);
@@ -1038,9 +1042,9 @@ pub async fn fetch_server_config(
     if export_code != 0 || export_output.trim().is_empty() {
         emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
         let msg = if !available_users.is_empty() {
-            format!("Не удалось экспортировать конфиг (код {}). Доступные пользователи: {}", export_code, available_users.join(", "))
+            format!("SSH_EXPORT_FAILED|{}|{}", export_code, available_users.join(", "))
         } else {
-            format!("Не удалось экспортировать конфиг (код {}). Проверьте credentials.toml на сервере.", export_code)
+            format!("SSH_EXPORT_FAILED|{}", export_code)
         };
         emit_step(app, "export", "error", &msg);
         return Err(msg);
@@ -1084,11 +1088,11 @@ excluded_routes = []
 
     let config_dir = portable_data_dir();
     std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
+        .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
 
     let client_config_path = config_dir.join("trusttunnel_client.toml");
     std::fs::write(&client_config_path, &client_toml)
-        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
+        .map_err(|e| format!("SSH_WRITE_CONFIG_FAILED|{e}"))?;
 
     let config_path_str = client_config_path.to_string_lossy().to_string();
     emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
@@ -1168,7 +1172,7 @@ pub async fn add_server_user(
     let (_, append_code) = exec_command(&handle, app, &append_cmd).await?;
 
     if append_code != 0 {
-        let msg = "Не удалось добавить пользователя в credentials.toml";
+        let msg = "SSH_ADD_USER_FAILED";
         emit_step(app, "configure", "error", msg);
         return Err(msg.into());
     }
@@ -1184,7 +1188,7 @@ pub async fn add_server_user(
     ).await?;
 
     if restart_code != 0 {
-        emit_log(app, "warn", "Не удалось перезапустить сервис. Возможно, нужна ручная перезагрузка.");
+        emit_log(app, "warn", "Failed to restart service. Manual restart may be needed.");
     }
 
     // Wait for service to start
@@ -1192,94 +1196,12 @@ pub async fn add_server_user(
 
     emit_step(app, "service", "ok", "Сервис перезапущен");
 
-    // Export config for the new user
-    emit_step(app, "export", "progress", "Экспорт конфига...");
-
-    // Determine export address
-    let (listen_raw, _) = exec_command(
-        &handle, app,
-        r#"grep -oP 'listen_address\s*=\s*"\K[^"]+' /opt/trusttunnel/vpn.toml 2>/dev/null || echo '0.0.0.0:443'"#
-    ).await?;
-    let listen_addr = listen_raw.trim();
-    let listen_port = listen_addr.split(':').last().unwrap_or("443");
-
-    let (hostname_raw, _) = exec_command(
-        &handle, app,
-        r#"grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#
-    ).await?;
-    let endpoint_hostname = hostname_raw.trim();
-    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
-        format!("{endpoint_hostname}:{listen_port}")
-    } else {
-        format!("{host}:{listen_port}")
-    };
-
-    let export_cmd = format!(
-        "cd /opt/trusttunnel && {sudo}./trusttunnel_endpoint vpn.toml hosts.toml -c {vpn_username} -a {export_address} --format toml 2>&1"
-    );
-
-    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
-
-    if export_code != 0 || export_output.trim().is_empty() {
-        emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
-        let msg = format!("Не удалось экспортировать конфиг для '{vpn_username}'");
-        emit_step(app, "export", "error", &msg);
-        return Err(msg);
-    }
-
-    // Extract only the TOML part
-    let endpoint_section: String = export_output
-        .lines()
-        .skip_while(|l| !l.starts_with('#') && !l.starts_with("hostname"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let client_toml = format!(
-        r#"# TrustTunnel Client Configuration
-# User: {vpn_username}
-
-loglevel = "info"
-vpn_mode = "general"
-killswitch_enabled = true
-killswitch_allow_ports = [67, 68]
-post_quantum_group_enabled = true
-
-[endpoint]
-{endpoint_section}
-
-[listener.tun]
-mtu_size = 1280
-change_system_dns = true
-included_routes = ["0.0.0.0/0"]
-excluded_routes = []
-"#
-    );
-
-    let client_toml = client_toml.replace("anti_dpi = false", "anti_dpi = true");
-
-    emit_step(app, "export", "ok", "Конфиг экспортирован");
-
-    // Save locally with username-specific filename
-    emit_step(app, "save", "progress", "Сохранение конфигурации...");
-
-    let config_dir = portable_data_dir();
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
-
-    let safe_name = vpn_username.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-    let client_config_path = config_dir.join(format!("trusttunnel_client_{safe_name}.toml"));
-    std::fs::write(&client_config_path, &client_toml)
-        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
-
-    let config_path_str = client_config_path.to_string_lossy().to_string();
-    emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
-    emit_step(app, "save", "ok", "Конфигурация сохранена");
-
+    // User added — config download is done separately via UI
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     emit_step(app, "done", "ok", &format!("Пользователь '{}' добавлен!", vpn_username));
 
-    Ok(config_path_str)
+    Ok(vpn_username)
 }
 
 // ─── Utility functions ─────────────────────────────
@@ -1331,7 +1253,7 @@ pub async fn server_restart_service(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось перезапустить сервис".into());
+        return Err("SSH_SERVICE_RESTART_FAILED".into());
     }
 
     Ok(())
@@ -1356,7 +1278,7 @@ pub async fn server_stop_service(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось остановить сервис".into());
+        return Err("SSH_SERVICE_STOP_FAILED".into());
     }
 
     Ok(())
@@ -1381,7 +1303,7 @@ pub async fn server_start_service(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось запустить сервис".into());
+        return Err("SSH_SERVICE_START_FAILED".into());
     }
 
     Ok(())
@@ -1470,7 +1392,7 @@ with open('/opt/trusttunnel/credentials.toml', 'w') as f:
 
     if remove_code != 0 {
         handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
-        return Err("Не удалось удалить пользователя из credentials.toml".into());
+        return Err("SSH_DELETE_USER_FAILED".into());
     }
 
     // Restart service to apply changes
@@ -1571,14 +1493,14 @@ pub fn kill_existing_process() -> Result<(), String> {
         std::process::Command::new("taskkill")
             .args(["/F", "/IM", "trusttunnel_client*"])
             .output()
-            .map_err(|e| format!("Не удалось завершить процесс: {e}"))?;
+            .map_err(|e| format!("SSH_KILL_PROCESS_FAILED|{e}"))?;
     }
     #[cfg(not(windows))]
     {
         std::process::Command::new("pkill")
             .args(["-f", "trusttunnel_client"])
             .output()
-            .map_err(|e| format!("Не удалось завершить процесс: {e}"))?;
+            .map_err(|e| format!("SSH_KILL_PROCESS_FAILED|{e}"))?;
     }
     Ok(())
 }
@@ -1609,7 +1531,7 @@ pub async fn get_server_config(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось прочитать vpn.toml на сервере".into());
+        return Err("SSH_READ_CONFIG_FAILED".into());
     }
 
     Ok(output)
@@ -1721,14 +1643,14 @@ pub async fn renew_cert(
     let (output, code) = exec_command(
         &handle,
         app,
-        &format!("{sudo}certbot renew --force-renewal && {sudo}systemctl restart trusttunnel"),
+        &format!("{sudo}pkill -9 certbot 2>/dev/null; {sudo}rm -f /tmp/.certbot.lock 2>/dev/null; sleep 1; {sudo}certbot renew --force-renewal && {sudo}systemctl restart trusttunnel"),
     )
     .await?;
 
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err(format!("Не удалось обновить сертификат (код {code}). Проверьте логи."));
+        return Err(format!("SSH_CERT_RENEW_FAILED|{code}"));
     }
 
     Ok(output)
@@ -1785,7 +1707,7 @@ pub async fn export_config_deeplink(
 
     if export_code != 0 || export_output.trim().is_empty() {
         return Err(format!(
-            "Не удалось экспортировать deeplink (код {export_code}). Проверьте имя пользователя '{client_name}'."
+            "SSH_DEEPLINK_EXPORT_FAILED|{export_code}|{client_name}"
         ));
     }
 
