@@ -74,6 +74,8 @@
   --color-toggle-off:   #ffffff18;
   --color-toggle-on:    var(--color-accent-500);
 
+  --color-glass-bg: rgba(17, 17, 24, 0.45);
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -84,7 +86,7 @@
   --color-bg-primary:   #f5f6fa;
   --color-bg-secondary: #ffffff;
   --color-bg-surface:   #ecedf2;
-  --color-bg-elevated:  #ffffff;
+  --color-bg-elevated:  #f3f4f8;
   --color-bg-hover:     #e2e3ec;
   --color-bg-active:    #d8d9e5;
 
@@ -97,12 +99,14 @@
   --color-border-hover:  #00000025;
   --color-border-active: #00000035;
 
-  --color-input-bg:     #ffffff;
-  --color-input-border: #00000020;
+  --color-input-bg:     #f3f4f8;
+  --color-input-border: #c8cbd4;
   --color-input-focus:  var(--color-accent-500);
 
   --color-toggle-off:   #00000020;
   --color-toggle-on:    var(--color-accent-500);
+
+  --color-glass-bg: rgba(255, 255, 255, 0.45);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);

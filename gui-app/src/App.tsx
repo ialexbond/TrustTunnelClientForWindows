@@ -369,8 +369,17 @@ function App() {
       }
     } catch { /* ignore */ }
 
-    // Navigate to Control Panel
-    setActivePage("control");
+    // Check if user wants to go to settings instead of control panel
+    const navigateTo = localStorage.getItem("tt_navigate_after_setup");
+    localStorage.removeItem("tt_navigate_after_setup");
+
+    if (navigateTo === "settings") {
+      setSettingsKey(k => k + 1);
+      setActivePage("settings");
+    } else {
+      setControlKey(k => k + 1);
+      setActivePage("control");
+    }
   }, []);
 
   const handleSwitchToSetup = useCallback(() => {
@@ -378,6 +387,8 @@ function App() {
   }, []);
 
   const [wizardKey, setWizardKey] = useState(0);
+  const [controlKey, setControlKey] = useState(0);
+  const [settingsKey, setSettingsKey] = useState(0);
   const wizardResetRef = useRef<(() => void) | null>(null);
 
   const handleClearConfig = useCallback(() => {
@@ -444,20 +455,23 @@ function App() {
         )}
 
         {/* Page content */}
-        <div className="flex-1 min-h-0 px-4">
+        <div className="flex-1 min-h-0">
           {/* Installation (SetupWizard) — always shows wizard */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "server" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "server" ? "flex" : "none" }}>
             <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
           </div>
 
           {/* Control Panel — SSH form or ServerPanel */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
             <ControlPanelPage
+              key={controlKey}
               onConfigExported={(path) => {
                 setConfig(prev => ({ ...prev, configPath: path }));
                 localStorage.setItem("tt_config_path", path);
+                setSettingsKey(k => k + 1);
               }}
               onSwitchToSetup={() => {
+                setWizardKey(k => k + 1);
                 setActivePage("server");
               }}
               onNavigateToSettings={() => {
@@ -467,9 +481,10 @@ function App() {
           </div>
 
           {/* Settings */}
-          <div className="h-full flex flex-col gap-2 py-3 overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col gap-2 py-3 overflow-hidden px-4" style={{ display: activePage === "settings" ? "flex" : "none" }}>
             <div className="flex-1 min-h-0">
               <SettingsPanel
+                key={settingsKey}
                 configPath={config.configPath}
                 onConfigChange={setConfig}
                 status={status}
@@ -482,7 +497,7 @@ function App() {
           </div>
 
           {/* Dashboard (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">Dashboard</p>
@@ -492,7 +507,7 @@ function App() {
           </div>
 
           {/* Routing */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "routing" ? "flex" : "none" }}>
             <RoutingPanel
               configPath={config.configPath}
               status={status}
@@ -502,7 +517,7 @@ function App() {
           </div>
 
           {/* Logs (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "logs" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "logs" ? "flex" : "none" }}>
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">Logs</p>
@@ -512,7 +527,7 @@ function App() {
           </div>
 
           {/* App Settings (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">{i18n.t("tabs.appSettings")}</p>
@@ -522,7 +537,7 @@ function App() {
           </div>
 
           {/* About */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "about" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "about" ? "flex" : "none" }}>
             <AboutPanel
               updateInfo={updateInfo}
               onCheckUpdates={() => checkForUpdates(false)}

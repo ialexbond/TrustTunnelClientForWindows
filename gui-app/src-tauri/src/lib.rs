@@ -954,6 +954,11 @@ pub fn run() {
             tray_notified: Arc::new(Mutex::new(false)),
         })
         .setup(|app| {
+            // Open devtools in release builds
+            #[cfg(feature = "devtools")]
+            if let Some(window) = app.get_webview_window("main") {
+                window.open_devtools();
+            }
             // Build tray context menu
             let show_item = MenuItemBuilder::with_id("show", "Показать").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Выход").build(app)?;

@@ -9,7 +9,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, description, icon, error, fullWidth = true, className = "", ...props }, ref) => {
+  ({ label, description, icon, error, fullWidth = true, className = "", style, ...rest }, ref) => {
     return (
       <div className={fullWidth ? "w-full" : ""}>
         {label && (
@@ -44,12 +44,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             `}
             style={{
               backgroundColor: "var(--color-input-bg)",
-              borderWidth: "1px",
-              borderStyle: "solid",
-              borderColor: error ? "var(--color-danger-500)" : "var(--color-input-border)",
+              border: `1px solid ${error ? "var(--color-danger-500)" : "var(--color-input-border)"}`,
               color: "var(--color-text-primary)",
+              ...style,
             }}
-            {...props}
+            {...rest}
           />
         </div>
         {error && (
