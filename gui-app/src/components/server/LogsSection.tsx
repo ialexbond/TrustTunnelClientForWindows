@@ -60,7 +60,8 @@ export function LogsSection({ state }: Props) {
 
   const handleCopy = () => {
     navigator.clipboard.writeText(serverLogs);
-    setActionResult({ type: "ok", message: t("server.logs.copied") });
+    state.pushSuccess(t("server.logs.copied"));
+    // Note: state is the full prop object from parent
   };
 
   const handleCollapse = () => {
@@ -101,12 +102,12 @@ export function LogsSection({ state }: Props) {
         className="overflow-hidden transition-all duration-300 ease-in-out"
         style={{ maxHeight: showLogs ? "240px" : "0px", opacity: showLogs ? 1 : 0, marginTop: showLogs ? "8px" : "0px" }}
       >
+        <div className="rounded-[var(--radius-md)] overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
         <pre
           ref={logsEndRef}
-          className="p-3 rounded-[var(--radius-md)] text-[10px] leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono"
+          className="p-3 text-[10px] leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono"
           style={{
             backgroundColor: "var(--color-bg-primary)",
-            border: "1px solid var(--color-border)",
             paddingRight: "1rem",
           }}
         >
@@ -120,6 +121,7 @@ export function LogsSection({ state }: Props) {
             <span style={{ color: "var(--color-text-muted)" }}>{t("server.logs.no_data")}</span>
           )}
         </pre>
+        </div>
       </div>
     </Card>
   );
