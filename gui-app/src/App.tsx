@@ -7,7 +7,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
 import StatusPanel from "./components/StatusPanel";
 import SetupWizard from "./components/SetupWizard";
-import { ServerPanel } from "./components/ServerPanel";
+import { ControlPanelPage } from "./components/ControlPanelPage";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
@@ -106,19 +106,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
 
-  // ─── SSH data for ServerPanel (read from wizard localStorage) ───
-  const sshData = (() => {
-    try {
-      const raw = localStorage.getItem("trusttunnel_wizard");
-      const obj = raw ? JSON.parse(raw) : {};
-      return {
-        host: obj.host || "",
-        port: obj.port || "22",
-        user: obj.sshUser || "root",
-        password: obj.sshPassword || "",
-      };
-    } catch { return { host: "", port: "22", user: "root", password: "" }; }
-  })();
+  // SSH data is now managed by ControlPanelPage via trusttunnel_control_ssh localStorage
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
@@ -360,8 +348,38 @@ function App() {
   const handleSetupComplete = useCallback((configPath: string) => {
     setConfig((prev) => ({ ...prev, configPath }));
     localStorage.setItem("tt_config_path", configPath);
-    setForceWizard(false);
-    setActivePage("settings");
+
+    // Copy SSH credentials from wizard to control panel storage
+    try {
+      const raw = localStorage.getItem("trusttunnel_wizard");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj.host && (obj.sshPassword || obj.sshKeyPath)) {
+          localStorage.setItem(
+            "trusttunnel_control_ssh",
+            JSON.stringify({
+              host: obj.host,
+              port: obj.port || "22",
+              user: obj.sshUser || "root",
+              password: obj.sshPassword || "", // Already obfuscated
+              keyPath: obj.sshKeyPath || "",
+            })
+          );
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Check if user wants to go to settings instead of control panel
+    const navigateTo = localStorage.getItem("tt_navigate_after_setup");
+    localStorage.removeItem("tt_navigate_after_setup");
+
+    if (navigateTo === "settings") {
+      setSettingsKey(k => k + 1);
+      setActivePage("settings");
+    } else {
+      setControlKey(k => k + 1);
+      setActivePage("control");
+    }
   }, []);
 
   const handleSwitchToSetup = useCallback(() => {
@@ -369,9 +387,9 @@ function App() {
   }, []);
 
   const [wizardKey, setWizardKey] = useState(0);
+  const [controlKey, setControlKey] = useState(0);
+  const [settingsKey, setSettingsKey] = useState(0);
   const wizardResetRef = useRef<(() => void) | null>(null);
-  // When true, always show SetupWizard instead of ServerPanel
-  const [forceWizard, setForceWizard] = useState(false);
 
   const handleClearConfig = useCallback(() => {
     setConfig({ configPath: "", logLevel: "info" });
@@ -397,7 +415,7 @@ function App() {
   }, [activePage]);
 
   const hasConfig = !!config.configPath;
-  const showStatusPanel = hasConfig && activePage !== "server";
+  const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
 
   return (
     <div
@@ -408,10 +426,8 @@ function App() {
       <Sidebar
         activePage={activePage}
         onPageChange={(page) => {
-          if (page === "server") {
-            // Always show SetupWizard welcome screen when clicking sidebar
-            setForceWizard(true);
-            if (wizardResetRef.current) wizardResetRef.current();
+          if (page === "server" && wizardResetRef.current) {
+            wizardResetRef.current();
           }
           setActivePage(page);
         }}
@@ -439,31 +455,36 @@ function App() {
         )}
 
         {/* Page content */}
-        <div className="flex-1 min-h-0 px-4">
-          {/* Server/Setup — show ServerPanel if configured, otherwise SetupWizard */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "server" ? "flex" : "none" }}>
-            {hasConfig && sshData.host && sshData.password && !forceWizard ? (
-              <ServerPanel
-                host={sshData.host}
-                port={sshData.port}
-                sshUser={sshData.user}
-                sshPassword={sshData.password}
-                onSwitchToSetup={() => { handleClearConfig(); }}
-                onClearConfig={handleClearConfig}
-                onConfigExported={(path) => {
-                  setConfig(prev => ({ ...prev, configPath: path }));
-                  localStorage.setItem("tt_config_path", path);
-                }}
-              />
-            ) : (
-              <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
-            )}
+        <div className="flex-1 min-h-0">
+          {/* Installation (SetupWizard) — always shows wizard */}
+          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "server" ? "flex" : "none" }}>
+            <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
+          </div>
+
+          {/* Control Panel — SSH form or ServerPanel */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
+            <ControlPanelPage
+              key={controlKey}
+              onConfigExported={(path) => {
+                setConfig(prev => ({ ...prev, configPath: path }));
+                localStorage.setItem("tt_config_path", path);
+                setSettingsKey(k => k + 1);
+              }}
+              onSwitchToSetup={() => {
+                setWizardKey(k => k + 1);
+                setActivePage("server");
+              }}
+              onNavigateToSettings={() => {
+                setActivePage("settings");
+              }}
+            />
           </div>
 
           {/* Settings */}
-          <div className="h-full flex flex-col gap-2 py-3 overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col gap-2 py-3 overflow-hidden px-4" style={{ display: activePage === "settings" ? "flex" : "none" }}>
             <div className="flex-1 min-h-0">
               <SettingsPanel
+                key={settingsKey}
                 configPath={config.configPath}
                 onConfigChange={setConfig}
                 status={status}
@@ -476,7 +497,7 @@ function App() {
           </div>
 
           {/* Dashboard (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">Dashboard</p>
@@ -486,7 +507,7 @@ function App() {
           </div>
 
           {/* Routing */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "routing" ? "flex" : "none" }}>
             <RoutingPanel
               configPath={config.configPath}
               status={status}
@@ -496,7 +517,7 @@ function App() {
           </div>
 
           {/* Logs (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "logs" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "logs" ? "flex" : "none" }}>
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">Logs</p>
@@ -505,8 +526,18 @@ function App() {
             </div>
           </div>
 
+          {/* App Settings (placeholder) */}
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
+              <div className="text-center">
+                <p className="text-lg font-semibold mb-1">{i18n.t("tabs.appSettings")}</p>
+                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
+              </div>
+            </div>
+          </div>
+
           {/* About */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "about" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "about" ? "flex" : "none" }}>
             <AboutPanel
               updateInfo={updateInfo}
               onCheckUpdates={() => checkForUpdates(false)}
