@@ -42,7 +42,19 @@ pub struct EndpointSettings {
     pub client_name: String,
     #[serde(default)]
     pub email: String,
+    #[serde(default)]
+    pub ping_enable: bool,
+    #[serde(default)]
+    pub speedtest_enable: bool,
+    #[serde(default = "default_true")]
+    pub ipv6_available: bool,
+    #[serde(default)]
+    pub cert_chain_path: String,
+    #[serde(default)]
+    pub cert_key_path: String,
 }
+
+fn default_true() -> bool { true }
 
 // ─── SSH Handler ───────────────────────────────────
 
@@ -90,6 +102,57 @@ fn emit_log(app: &tauri::AppHandle, level: &str, message: &str) {
     .ok();
 }
 
+/// Universal SSH connect — supports password or private key authentication.
+pub async fn ssh_connect(
+    host: &str,
+    port: u16,
+    ssh_user: &str,
+    ssh_password: &str,
+    key_path: Option<&str>,
+) -> Result<client::Handle<SshHandler>, String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+
+    let connect_fut = client::connect(config, (host, port), SshHandler);
+    let mut handle = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        connect_fut,
+    )
+    .await
+    .map_err(|_| format!("SSH_TIMEOUT|{host}:{port}"))?
+    .map_err(|e| format!("SSH_CONNECT_FAILED|{e}"))?;
+
+    // Try key-based auth if key_path provided
+    if let Some(kp) = key_path {
+        if !kp.is_empty() {
+            let key = russh_keys::load_secret_key(kp, None)
+                .map_err(|e| format!("SSH_KEY_LOAD_FAILED|{kp}|{e}"))?;
+            let auth_ok = handle
+                .authenticate_publickey(ssh_user, Arc::new(key))
+                .await
+                .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
+            if !auth_ok {
+                return Err("SSH_KEY_REJECTED".into());
+            }
+            return Ok(handle);
+        }
+    }
+
+    // Fallback to password auth
+    let auth_ok = handle
+        .authenticate_password(ssh_user, ssh_password)
+        .await
+        .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
+
+    if !auth_ok {
+        return Err("SSH_AUTH_FAILED".into());
+    }
+
+    Ok(handle)
+}
+
 /// Execute a command on the remote server, streaming output to the frontend.
 async fn exec_command(
     handle: &client::Handle<SshHandler>,
@@ -99,12 +162,12 @@ async fn exec_command(
     let mut channel = handle
         .channel_open_session()
         .await
-        .map_err(|e| format!("Ошибка открытия SSH-канала: {e}"))?;
+        .map_err(|e| format!("SSH_CHANNEL_FAILED|{e}"))?;
 
     channel
         .exec(true, command.as_bytes())
         .await
-        .map_err(|e| format!("Ошибка выполнения команды: {e}"))?;
+        .map_err(|e| format!("SSH_EXEC_FAILED|{e}"))?;
 
     let mut stdout = String::new();
     let mut exit_code: i32 = -1;
@@ -167,7 +230,9 @@ password = "{}""#,
     // 3. vpn.toml (main settings)
     let vpn = format!(
         r#"listen_address = "{}"
-ipv6_available = false
+ipv6_available = {}
+ping_enable = {}
+speedtest_enable = {}
 allow_private_network_connections = false
 tls_handshake_timeout_secs = 10
 client_listener_timeout_secs = 600
@@ -206,7 +271,10 @@ message_queue_capacity = 4096
 
 [forward_protocol]
 direct = {{}}"#,
-        settings.listen_address
+        settings.listen_address,
+        settings.ipv6_available,
+        settings.ping_enable,
+        settings.speedtest_enable,
     );
 
     // 4. hosts.toml (TLS certs — main hosts only, ping_hosts requires unique hostname)
@@ -237,6 +305,10 @@ elif command -v dnf >/dev/null 2>&1; then
 elif command -v yum >/dev/null 2>&1; then
     {sudo}yum install -y -q certbot 2>/dev/null
 fi
+# Kill any lingering certbot processes and remove lock files
+{sudo}pkill -9 certbot 2>/dev/null || true
+{sudo}rm -f /tmp/.certbot.lock 2>/dev/null || true
+sleep 1
 {sudo}certbot certonly --standalone -d {hostname} --non-interactive --agree-tos {email_flag} --http-01-port 80
 {sudo}mkdir -p {dir}/certs
 {sudo}cp /etc/letsencrypt/live/{hostname}/fullchain.pem {dir}/certs/cert.pem
@@ -246,6 +318,20 @@ fi
 {sudo}bash -c 'cat > /etc/cron.d/trusttunnel-cert-renew << CRON_EOF
 0 3 * * * root certbot renew --quiet --deploy-hook "cp /etc/letsencrypt/live/{hostname}/fullchain.pem {dir}/certs/cert.pem && cp /etc/letsencrypt/live/{hostname}/privkey.pem {dir}/certs/key.pem && systemctl restart trusttunnel"
 CRON_EOF'
+"#
+            )
+        }
+        "provided" => {
+            // User-provided certificate — copy from specified paths on the server
+            let chain = &settings.cert_chain_path;
+            let key = &settings.cert_key_path;
+            format!(
+                r#"
+# Use provided certificate files
+{sudo}mkdir -p {dir}/certs
+{sudo}cp {chain} {dir}/certs/cert.pem
+{sudo}cp {key} {dir}/certs/key.pem
+echo "Copied provided certificate files"
 "#
             )
         }
@@ -296,44 +382,14 @@ pub async fn deploy_server(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
     settings: EndpointSettings,
 ) -> Result<String, String> {
-    // ── Step 1: SSH Connect ──
+    // ── Step 1: SSH Connect + Authenticate ──
     emit_step(app, "connect", "progress", "Подключение к серверу...");
-
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(120)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| {
-            let msg = format!("Не удалось подключиться к {host}:{port} — {e}");
-            emit_step(app, "connect", "error", &msg);
-            msg
-        })?;
-
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Подключено к серверу");
-
-    // ── Step 2: Authenticate ──
-    emit_step(app, "auth", "progress", "Авторизация...");
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| {
-            let msg = format!("Ошибка авторизации: {e}");
-            emit_step(app, "auth", "error", &msg);
-            msg
-        })?;
-
-    if !auth_ok {
-        let msg = "Неверный SSH логин или пароль";
-        emit_step(app, "auth", "error", msg);
-        return Err(msg.into());
-    }
-
     emit_step(app, "auth", "ok", "Авторизация успешна");
 
     // ── Step 3: Check environment ──
@@ -398,7 +454,7 @@ pub async fn deploy_server(
     let (_, update_code) = exec_command(&handle, app, &update_cmd).await?;
 
     if update_code != 0 {
-        emit_log(app, "warn", "Не удалось обновить пакеты. Продолжаем установку...");
+        emit_log(app, "warn", "Failed to update packages. Continuing installation...");
     }
 
     emit_step(app, "update", "ok", "Система обновлена");
@@ -470,7 +526,7 @@ pub async fn deploy_server(
     let (_, cfg_code) = exec_command(&handle, app, &configure_cmd).await?;
 
     if cfg_code != 0 {
-        let msg = "Не удалось создать файлы конфигурации. Проверьте логи.";
+        let msg = "SSH_CONFIG_CREATE_FAILED";
         emit_step(app, "configure", "error", msg);
         return Err(msg.into());
     }
@@ -497,7 +553,7 @@ pub async fn deploy_server(
 
     // Check for fatal config errors (but ignore timeout exit which is expected)
     if preflight.to_lowercase().contains("error") && preflight.to_lowercase().contains("pars") {
-        let msg = format!("Ошибка в конфигурации endpoint: {}", preflight.trim());
+        let msg = format!("SSH_ENDPOINT_CONFIG_ERROR|{}", preflight.trim());
         emit_step(app, "configure", "error", &msg);
         return Err(msg);
     }
@@ -519,7 +575,7 @@ pub async fn deploy_server(
     let (_, svc_code) = exec_command(&handle, app, &service_cmds).await?;
 
     if svc_code != 0 {
-        emit_log(app, "warn", "Не удалось запустить systemd сервис. Возможно, нужна ручная настройка.");
+        emit_log(app, "warn", "Failed to start systemd service. Manual setup may be needed.");
     }
 
     // Wait for service to start and verify it's running
@@ -600,7 +656,7 @@ pub async fn deploy_server(
     if export_code != 0 || export_output.trim().is_empty() {
         emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
         let msg = format!(
-            "Не удалось экспортировать конфиг (код {}). Пользователь '{}' не найден или ошибка endpoint.",
+            "SSH_EXPORT_FAILED|{}|{}",
             export_code, settings.vpn_username
         );
         emit_step(app, "export", "error", &msg);
@@ -648,11 +704,11 @@ excluded_routes = []
     let config_dir = portable_data_dir();
 
     std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
+        .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
 
     let client_config_path = config_dir.join("trusttunnel_client.toml");
     std::fs::write(&client_config_path, &client_toml)
-        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
+        .map_err(|e| format!("SSH_WRITE_CONFIG_FAILED|{e}"))?;
 
     let config_path_str = client_config_path.to_string_lossy().to_string();
     emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
@@ -677,20 +733,9 @@ pub async fn diagnose_server(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<String, String> {
-    let config = russh::client::Config::default();
-    let mut handle = russh::client::connect(
-        Arc::new(config),
-        (host.as_str(), port),
-        SshHandler,
-    )
-    .await
-    .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let mut report = String::new();
 
@@ -749,24 +794,9 @@ pub async fn check_server_installation(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     // Check for binary
     let (bin_check, _bin_code) = exec_command(
@@ -826,36 +856,12 @@ pub async fn uninstall_server(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<(), String> {
     emit_step(app, "uninstall", "progress", "Подключение к серверу...");
 
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(120)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| {
-            let msg = format!("SSH connect failed: {e}");
-            emit_step(app, "uninstall", "error", &msg);
-            msg
-        })?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| {
-            let msg = format!("SSH auth failed: {e}");
-            emit_step(app, "uninstall", "error", &msg);
-            msg
-        })?;
-
-    if !auth_ok {
-        let msg = "Неверный SSH логин или пароль";
-        emit_step(app, "uninstall", "error", msg);
-        return Err(msg.into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+        .map_err(|e| { emit_step(app, "uninstall", "error", &e); e })?;
 
     // Determine sudo
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
@@ -908,7 +914,7 @@ fi
     let (output, code) = exec_command(&handle, app, &uninstall_script).await?;
 
     if output.contains("UNINSTALL_FAILED") || code != 0 {
-        let msg = format!("Не удалось полностью удалить TrustTunnel (код {}). Смотрите логи.", code);
+        let msg = format!("SSH_UNINSTALL_FAILED|{code}");
         emit_step(app, "uninstall", "error", &msg);
         handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err(msg);
@@ -932,42 +938,13 @@ pub async fn fetch_server_config(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
     client_name: String,
 ) -> Result<String, String> {
     emit_step(app, "connect", "progress", "Подключение к серверу...");
-
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(60)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| {
-            let msg = format!("Не удалось подключиться к {host}:{port} — {e}");
-            emit_step(app, "connect", "error", &msg);
-            msg
-        })?;
-
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Подключено к серверу");
-
-    emit_step(app, "auth", "progress", "Авторизация...");
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| {
-            let msg = format!("Ошибка авторизации: {e}");
-            emit_step(app, "auth", "error", &msg);
-            msg
-        })?;
-
-    if !auth_ok {
-        let msg = "Неверный SSH логин или пароль";
-        emit_step(app, "auth", "error", msg);
-        return Err(msg.into());
-    }
-
     emit_step(app, "auth", "ok", "Авторизация успешна");
 
     // Check TrustTunnel is installed
@@ -1065,9 +1042,9 @@ pub async fn fetch_server_config(
     if export_code != 0 || export_output.trim().is_empty() {
         emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
         let msg = if !available_users.is_empty() {
-            format!("Не удалось экспортировать конфиг (код {}). Доступные пользователи: {}", export_code, available_users.join(", "))
+            format!("SSH_EXPORT_FAILED|{}|{}", export_code, available_users.join(", "))
         } else {
-            format!("Не удалось экспортировать конфиг (код {}). Проверьте credentials.toml на сервере.", export_code)
+            format!("SSH_EXPORT_FAILED|{}", export_code)
         };
         emit_step(app, "export", "error", &msg);
         return Err(msg);
@@ -1111,11 +1088,11 @@ excluded_routes = []
 
     let config_dir = portable_data_dir();
     std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
+        .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
 
     let client_config_path = config_dir.join("trusttunnel_client.toml");
     std::fs::write(&client_config_path, &client_toml)
-        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
+        .map_err(|e| format!("SSH_WRITE_CONFIG_FAILED|{e}"))?;
 
     let config_path_str = client_config_path.to_string_lossy().to_string();
     emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
@@ -1138,43 +1115,14 @@ pub async fn add_server_user(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
     vpn_username: String,
     vpn_password: String,
 ) -> Result<String, String> {
     emit_step(app, "connect", "progress", "Подключение к серверу...");
-
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(60)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| {
-            let msg = format!("Не удалось подключиться к {host}:{port} — {e}");
-            emit_step(app, "connect", "error", &msg);
-            msg
-        })?;
-
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Подключено к серверу");
-
-    emit_step(app, "auth", "progress", "Авторизация...");
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| {
-            let msg = format!("Ошибка авторизации: {e}");
-            emit_step(app, "auth", "error", &msg);
-            msg
-        })?;
-
-    if !auth_ok {
-        let msg = "Неверный SSH логин или пароль";
-        emit_step(app, "auth", "error", msg);
-        return Err(msg.into());
-    }
-
     emit_step(app, "auth", "ok", "Авторизация успешна");
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
@@ -1224,7 +1172,7 @@ pub async fn add_server_user(
     let (_, append_code) = exec_command(&handle, app, &append_cmd).await?;
 
     if append_code != 0 {
-        let msg = "Не удалось добавить пользователя в credentials.toml";
+        let msg = "SSH_ADD_USER_FAILED";
         emit_step(app, "configure", "error", msg);
         return Err(msg.into());
     }
@@ -1240,7 +1188,7 @@ pub async fn add_server_user(
     ).await?;
 
     if restart_code != 0 {
-        emit_log(app, "warn", "Не удалось перезапустить сервис. Возможно, нужна ручная перезагрузка.");
+        emit_log(app, "warn", "Failed to restart service. Manual restart may be needed.");
     }
 
     // Wait for service to start
@@ -1248,94 +1196,12 @@ pub async fn add_server_user(
 
     emit_step(app, "service", "ok", "Сервис перезапущен");
 
-    // Export config for the new user
-    emit_step(app, "export", "progress", "Экспорт конфига...");
-
-    // Determine export address
-    let (listen_raw, _) = exec_command(
-        &handle, app,
-        r#"grep -oP 'listen_address\s*=\s*"\K[^"]+' /opt/trusttunnel/vpn.toml 2>/dev/null || echo '0.0.0.0:443'"#
-    ).await?;
-    let listen_addr = listen_raw.trim();
-    let listen_port = listen_addr.split(':').last().unwrap_or("443");
-
-    let (hostname_raw, _) = exec_command(
-        &handle, app,
-        r#"grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#
-    ).await?;
-    let endpoint_hostname = hostname_raw.trim();
-    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
-        format!("{endpoint_hostname}:{listen_port}")
-    } else {
-        format!("{host}:{listen_port}")
-    };
-
-    let export_cmd = format!(
-        "cd /opt/trusttunnel && {sudo}./trusttunnel_endpoint vpn.toml hosts.toml -c {vpn_username} -a {export_address} --format toml 2>&1"
-    );
-
-    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
-
-    if export_code != 0 || export_output.trim().is_empty() {
-        emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
-        let msg = format!("Не удалось экспортировать конфиг для '{vpn_username}'");
-        emit_step(app, "export", "error", &msg);
-        return Err(msg);
-    }
-
-    // Extract only the TOML part
-    let endpoint_section: String = export_output
-        .lines()
-        .skip_while(|l| !l.starts_with('#') && !l.starts_with("hostname"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let client_toml = format!(
-        r#"# TrustTunnel Client Configuration
-# User: {vpn_username}
-
-loglevel = "info"
-vpn_mode = "general"
-killswitch_enabled = true
-killswitch_allow_ports = [67, 68]
-post_quantum_group_enabled = true
-
-[endpoint]
-{endpoint_section}
-
-[listener.tun]
-mtu_size = 1280
-change_system_dns = true
-included_routes = ["0.0.0.0/0"]
-excluded_routes = []
-"#
-    );
-
-    let client_toml = client_toml.replace("anti_dpi = false", "anti_dpi = true");
-
-    emit_step(app, "export", "ok", "Конфиг экспортирован");
-
-    // Save locally with username-specific filename
-    emit_step(app, "save", "progress", "Сохранение конфигурации...");
-
-    let config_dir = portable_data_dir();
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Не удалось создать директорию: {e}"))?;
-
-    let safe_name = vpn_username.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-    let client_config_path = config_dir.join(format!("trusttunnel_client_{safe_name}.toml"));
-    std::fs::write(&client_config_path, &client_toml)
-        .map_err(|e| format!("Не удалось записать клиентский конфиг: {e}"))?;
-
-    let config_path_str = client_config_path.to_string_lossy().to_string();
-    emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
-    emit_step(app, "save", "ok", "Конфигурация сохранена");
-
+    // User added — config download is done separately via UI
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     emit_step(app, "done", "ok", &format!("Пользователь '{}' добавлен!", vpn_username));
 
-    Ok(config_path_str)
+    Ok(vpn_username)
 }
 
 // ─── Utility functions ─────────────────────────────
@@ -1375,24 +1241,9 @@ pub async fn server_restart_service(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1402,7 +1253,7 @@ pub async fn server_restart_service(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось перезапустить сервис".into());
+        return Err("SSH_SERVICE_RESTART_FAILED".into());
     }
 
     Ok(())
@@ -1415,24 +1266,9 @@ pub async fn server_stop_service(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1442,7 +1278,7 @@ pub async fn server_stop_service(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось остановить сервис".into());
+        return Err("SSH_SERVICE_STOP_FAILED".into());
     }
 
     Ok(())
@@ -1455,24 +1291,9 @@ pub async fn server_start_service(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1482,7 +1303,7 @@ pub async fn server_start_service(
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
-        return Err("Не удалось запустить сервис".into());
+        return Err("SSH_SERVICE_START_FAILED".into());
     }
 
     Ok(())
@@ -1495,24 +1316,9 @@ pub async fn server_reboot(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1530,24 +1336,9 @@ pub async fn server_get_logs(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
 ) -> Result<String, String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1571,25 +1362,10 @@ pub async fn server_remove_user(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
     vpn_username: String,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1616,7 +1392,7 @@ with open('/opt/trusttunnel/credentials.toml', 'w') as f:
 
     if remove_code != 0 {
         handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
-        return Err("Не удалось удалить пользователя из credentials.toml".into());
+        return Err("SSH_DELETE_USER_FAILED".into());
     }
 
     // Restart service to apply changes
@@ -1671,25 +1447,10 @@ pub async fn server_upgrade(
     port: u16,
     ssh_user: String,
     ssh_password: String,
+    key_path: Option<String>,
     version: String,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(120)),
-        ..Default::default()
-    });
-
-    let mut handle = client::connect(config, (host.as_str(), port), SshHandler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
-
-    let auth_ok = handle
-        .authenticate_password(&ssh_user, &ssh_password)
-        .await
-        .map_err(|e| format!("SSH auth failed: {e}"))?;
-
-    if !auth_ok {
-        return Err("Неверный SSH логин или пароль".into());
-    }
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1732,14 +1493,267 @@ pub fn kill_existing_process() -> Result<(), String> {
         std::process::Command::new("taskkill")
             .args(["/F", "/IM", "trusttunnel_client*"])
             .output()
-            .map_err(|e| format!("Не удалось завершить процесс: {e}"))?;
+            .map_err(|e| format!("SSH_KILL_PROCESS_FAILED|{e}"))?;
     }
     #[cfg(not(windows))]
     {
         std::process::Command::new("pkill")
             .args(["-f", "trusttunnel_client"])
             .output()
-            .map_err(|e| format!("Не удалось завершить процесс: {e}"))?;
+            .map_err(|e| format!("SSH_KILL_PROCESS_FAILED|{e}"))?;
     }
+    Ok(())
+}
+
+// ─── Get server vpn.toml config ───────────────────
+
+/// Read the raw vpn.toml configuration from the remote server.
+pub async fn get_server_config(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    key_path: Option<String>,
+) -> Result<String, String> {
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let (output, code) = exec_command(
+        &handle,
+        app,
+        &format!("{sudo}cat /opt/trusttunnel/vpn.toml"),
+    )
+    .await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if code != 0 {
+        return Err("SSH_READ_CONFIG_FAILED".into());
+    }
+
+    Ok(output)
+}
+
+// ─── Get certificate info ─────────────────────────
+
+/// Fetch TLS certificate information from the remote server.
+pub async fn get_cert_info(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    key_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    // Get hostname from hosts.toml
+    let (hostname_raw, _) = exec_command(
+        &handle,
+        app,
+        &format!(r#"{sudo}grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#),
+    )
+    .await?;
+    let hostname = hostname_raw.trim().to_string();
+
+    // Get cert path from hosts.toml
+    let (cert_path_raw, _) = exec_command(
+        &handle,
+        app,
+        &format!(r#"{sudo}grep -oP 'cert_chain_path\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#),
+    )
+    .await?;
+    let cert_path = cert_path_raw.trim().to_string();
+
+    // Resolve cert path (relative paths are relative to /opt/trusttunnel)
+    let resolved_cert_path = if cert_path.starts_with('/') {
+        cert_path.clone()
+    } else {
+        format!("/opt/trusttunnel/{cert_path}")
+    };
+
+    // Get cert details via openssl
+    let (cert_info, cert_code) = exec_command(
+        &handle,
+        app,
+        &format!("{sudo}openssl x509 -enddate -subject -issuer -noout -in {resolved_cert_path} 2>&1"),
+    )
+    .await?;
+
+    let mut not_after = String::new();
+    let mut issuer = String::new();
+    let mut subject = String::new();
+
+    if cert_code == 0 {
+        for line in cert_info.lines() {
+            let trimmed = line.trim();
+            if let Some(val) = trimmed.strip_prefix("notAfter=") {
+                not_after = val.trim().to_string();
+            } else if let Some(val) = trimmed.strip_prefix("issuer=") {
+                issuer = val.trim().to_string();
+            } else if let Some(val) = trimmed.strip_prefix("subject=") {
+                subject = val.trim().to_string();
+            }
+        }
+    }
+
+    // Check auto-renewal cron
+    let (renew_check, _) = exec_command(
+        &handle,
+        app,
+        &format!("{sudo}test -f /etc/cron.d/trusttunnel-cert-renew && echo \"true\" || echo \"false\""),
+    )
+    .await?;
+    let auto_renew = renew_check.trim() == "true";
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    Ok(serde_json::json!({
+        "hostname": hostname,
+        "certPath": resolved_cert_path,
+        "notAfter": not_after,
+        "issuer": issuer,
+        "subject": subject,
+        "autoRenew": auto_renew,
+    }))
+}
+
+// ─── Renew TLS certificate ───────────────────────
+
+/// Force-renew the TLS certificate via certbot and restart the service.
+pub async fn renew_cert(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    key_path: Option<String>,
+) -> Result<String, String> {
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let (output, code) = exec_command(
+        &handle,
+        app,
+        &format!("{sudo}pkill -9 certbot 2>/dev/null; {sudo}rm -f /tmp/.certbot.lock 2>/dev/null; sleep 1; {sudo}certbot renew --force-renewal && {sudo}systemctl restart trusttunnel"),
+    )
+    .await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if code != 0 {
+        return Err(format!("SSH_CERT_RENEW_FAILED|{code}"));
+    }
+
+    Ok(output)
+}
+
+// ─── Export config as deeplink ────────────────────
+
+/// Export a client configuration as a deeplink URL from the remote server.
+pub async fn export_config_deeplink(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    key_path: Option<String>,
+    client_name: String,
+) -> Result<String, String> {
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    // Get listen address from vpn.toml
+    let (listen_raw, _) = exec_command(
+        &handle,
+        app,
+        &format!(r#"{sudo}grep -oP 'listen_address\s*=\s*"\K[^"]+' /opt/trusttunnel/vpn.toml 2>/dev/null || echo '0.0.0.0:443'"#),
+    )
+    .await?;
+    let listen_addr = listen_raw.trim();
+    let listen_port = listen_addr.split(':').last().unwrap_or("443");
+
+    // Try to determine hostname from hosts.toml, fallback to host IP
+    let (hostname_raw, _) = exec_command(
+        &handle,
+        app,
+        &format!(r#"{sudo}grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#),
+    )
+    .await?;
+    let endpoint_hostname = hostname_raw.trim();
+    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
+        format!("{endpoint_hostname}:{listen_port}")
+    } else {
+        format!("{host}:{listen_port}")
+    };
+
+    let export_cmd = format!(
+        "cd /opt/trusttunnel && {sudo}./trusttunnel_endpoint vpn.toml hosts.toml -c {client_name} -a {export_address} --format deeplink 2>&1"
+    );
+
+    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    if export_code != 0 || export_output.trim().is_empty() {
+        return Err(format!(
+            "SSH_DEEPLINK_EXPORT_FAILED|{export_code}|{client_name}"
+        ));
+    }
+
+    // Extract the deeplink URL (skip any warning/log lines)
+    let deeplink = export_output
+        .lines()
+        .filter(|l| l.starts_with("trusttunnel://") || l.starts_with("tt://"))
+        .last()
+        .unwrap_or(export_output.trim());
+
+    Ok(deeplink.trim().to_string())
+}
+
+/// Toggle a boolean feature in vpn.toml (ping_enable, speedtest_enable, ipv6_available)
+pub async fn update_config_feature(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    key_path: Option<String>,
+    feature: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+
+    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+
+    let value = if enabled { "true" } else { "false" };
+
+    // Use sed to toggle the feature in vpn.toml
+    let cmd = format!(
+        r#"{sudo}sed -i 's/^{feature}\s*=\s*\(true\|false\)/{feature} = {value}/' /opt/trusttunnel/vpn.toml"#
+    );
+
+    let (_, code) = exec_command(&handle, app, &cmd).await?;
+
+    if code != 0 {
+        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+        return Err(format!("Failed to update {feature} in vpn.toml (code {code})"));
+    }
+
+    // Restart TrustTunnel to apply
+    let _ = exec_command(&handle, app, &format!("{sudo}systemctl restart trusttunnel")).await;
+
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
