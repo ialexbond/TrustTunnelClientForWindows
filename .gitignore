@@ -21,6 +21,10 @@ cmake/conan_provider.cmake
 webview_data/
 geodata/
 routing_rules.json
+build_log.txt
+
+# Claude Code local files
+.claude/
 
 # Portable build folders (any version)
 TrustTunnel-Portable/
