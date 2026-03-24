@@ -7,7 +7,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
 import StatusPanel from "./components/StatusPanel";
 import SetupWizard from "./components/SetupWizard";
-import { ServerPanel } from "./components/ServerPanel";
+import { ControlPanelPage } from "./components/ControlPanelPage";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
@@ -106,19 +106,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
 
-  // ─── SSH data for ServerPanel (read from wizard localStorage) ───
-  const sshData = (() => {
-    try {
-      const raw = localStorage.getItem("trusttunnel_wizard");
-      const obj = raw ? JSON.parse(raw) : {};
-      return {
-        host: obj.host || "",
-        port: obj.port || "22",
-        user: obj.sshUser || "root",
-        password: obj.sshPassword || "",
-      };
-    } catch { return { host: "", port: "22", user: "root", password: "" }; }
-  })();
+  // SSH data is now managed by ControlPanelPage via trusttunnel_control_ssh localStorage
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
@@ -360,8 +348,29 @@ function App() {
   const handleSetupComplete = useCallback((configPath: string) => {
     setConfig((prev) => ({ ...prev, configPath }));
     localStorage.setItem("tt_config_path", configPath);
-    setForceWizard(false);
-    setActivePage("settings");
+
+    // Copy SSH credentials from wizard to control panel storage
+    try {
+      const raw = localStorage.getItem("trusttunnel_wizard");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj.host && (obj.sshPassword || obj.sshKeyPath)) {
+          localStorage.setItem(
+            "trusttunnel_control_ssh",
+            JSON.stringify({
+              host: obj.host,
+              port: obj.port || "22",
+              user: obj.sshUser || "root",
+              password: obj.sshPassword || "", // Already obfuscated
+              keyPath: obj.sshKeyPath || "",
+            })
+          );
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Navigate to Control Panel
+    setActivePage("control");
   }, []);
 
   const handleSwitchToSetup = useCallback(() => {
@@ -370,8 +379,6 @@ function App() {
 
   const [wizardKey, setWizardKey] = useState(0);
   const wizardResetRef = useRef<(() => void) | null>(null);
-  // When true, always show SetupWizard instead of ServerPanel
-  const [forceWizard, setForceWizard] = useState(false);
 
   const handleClearConfig = useCallback(() => {
     setConfig({ configPath: "", logLevel: "info" });
@@ -397,7 +404,7 @@ function App() {
   }, [activePage]);
 
   const hasConfig = !!config.configPath;
-  const showStatusPanel = hasConfig && activePage !== "server";
+  const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
 
   return (
     <div
@@ -408,10 +415,8 @@ function App() {
       <Sidebar
         activePage={activePage}
         onPageChange={(page) => {
-          if (page === "server") {
-            // Always show SetupWizard welcome screen when clicking sidebar
-            setForceWizard(true);
-            if (wizardResetRef.current) wizardResetRef.current();
+          if (page === "server" && wizardResetRef.current) {
+            wizardResetRef.current();
           }
           setActivePage(page);
         }}
@@ -440,24 +445,25 @@ function App() {
 
         {/* Page content */}
         <div className="flex-1 min-h-0 px-4">
-          {/* Server/Setup — show ServerPanel if configured, otherwise SetupWizard */}
+          {/* Installation (SetupWizard) — always shows wizard */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "server" ? "flex" : "none" }}>
-            {hasConfig && sshData.host && sshData.password && !forceWizard ? (
-              <ServerPanel
-                host={sshData.host}
-                port={sshData.port}
-                sshUser={sshData.user}
-                sshPassword={sshData.password}
-                onSwitchToSetup={() => { handleClearConfig(); }}
-                onClearConfig={handleClearConfig}
-                onConfigExported={(path) => {
-                  setConfig(prev => ({ ...prev, configPath: path }));
-                  localStorage.setItem("tt_config_path", path);
-                }}
-              />
-            ) : (
-              <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
-            )}
+            <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
+          </div>
+
+          {/* Control Panel — SSH form or ServerPanel */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
+            <ControlPanelPage
+              onConfigExported={(path) => {
+                setConfig(prev => ({ ...prev, configPath: path }));
+                localStorage.setItem("tt_config_path", path);
+              }}
+              onSwitchToSetup={() => {
+                setActivePage("server");
+              }}
+              onNavigateToSettings={() => {
+                setActivePage("settings");
+              }}
+            />
           </div>
 
           {/* Settings */}
@@ -500,6 +506,16 @@ function App() {
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">Logs</p>
+                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* App Settings (placeholder) */}
+          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
+              <div className="text-center">
+                <p className="text-lg font-semibold mb-1">{i18n.t("tabs.appSettings")}</p>
                 <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
               </div>
             </div>
