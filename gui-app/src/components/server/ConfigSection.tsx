@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
-  Loader2,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
@@ -64,66 +63,69 @@ function parseTomlConfig(raw: string): ParsedConfig {
 
 export function ConfigSection({ state }: Props) {
   const { t } = useTranslation();
-  const { sshParams, setActionResult } = state;
-
-  const [configRaw, setConfigRaw] = useState("");
-  const [configLoading, setConfigLoading] = useState(true);
+  const { sshParams, setActionResult, configRaw: preloadedConfig, setConfigRaw: setPreloadedConfig } = state;
   const [configError, setConfigError] = useState("");
   const [showFull, setShowFull] = useState(false);
-  const [togglingFeature, setTogglingFeature] = useState<string | null>(null);
+  const [togglingFeatures, setTogglingFeatures] = useState<Set<string>>(new Set());
+  // Local overrides: optimistic UI — shows new value immediately after server confirms
+  const [localOverrides, setLocalOverrides] = useState<Record<string, boolean>>({});
+  const activeTogglesRef = useRef(0);
+
+  const configRaw = preloadedConfig || "";
 
   const loadConfig = async () => {
-    setConfigLoading(true);
-    setConfigError("");
     try {
       const raw = await invoke<string>("server_get_config", sshParams);
-      setConfigRaw(raw);
+      setPreloadedConfig(raw);
+      setConfigError("");
     } catch (e) {
       setConfigError(String(e));
-    } finally {
-      setConfigLoading(false);
     }
   };
 
-  // Auto-load on mount
-  useEffect(() => {
-    loadConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const featureNames: Record<string, string> = {
+    ping_enable: "Health-check Ping",
+    speedtest_enable: "Speedtest",
+    ipv6_available: "IPv6",
+  };
 
   const handleToggleFeature = async (feature: string, currentValue: boolean) => {
-    setTogglingFeature(feature);
+    // Ignore if already toggling this specific feature (prevent double-click)
+    if (togglingFeatures.has(feature)) return;
+
+    setTogglingFeatures(prev => new Set(prev).add(feature));
+    activeTogglesRef.current += 1;
+
     try {
       await invoke("server_update_config_feature", {
         ...sshParams,
         feature,
         enabled: !currentValue,
       });
-      await loadConfig();
-      setActionResult({
-        type: "ok",
-        message: `${feature}: ${!currentValue ? t("server.config.enabled") : t("server.config.disabled")}`,
-      });
+      // Optimistic: update THIS switch immediately
+      setLocalOverrides(prev => ({ ...prev, [feature]: !currentValue }));
+      const name = featureNames[feature] || feature;
+      const stateText = !currentValue ? t("server.config.toggled_on") : t("server.config.toggled_off");
+      state.pushSuccess(`${name} ${stateText}`);
     } catch (e) {
+      // Rollback: remove override so it shows original value
+      setLocalOverrides(prev => { const next = { ...prev }; delete next[feature]; return next; });
       setActionResult({ type: "error", message: String(e) });
     } finally {
-      setTogglingFeature(null);
+      setTogglingFeatures(prev => { const next = new Set(prev); next.delete(feature); return next; });
+      activeTogglesRef.current -= 1;
+      // Reload config only after ALL toggles are done — sync with server
+      if (activeTogglesRef.current === 0) {
+        await loadConfig();
+        setLocalOverrides({}); // Clear overrides, use fresh server data
+      }
     }
   };
 
   const parsed = configRaw ? parseTomlConfig(configRaw) : null;
 
-  if (configLoading) {
-    return (
-      <Card>
-        <CardHeader title={t("server.config.title")} icon={<Settings className="w-3.5 h-3.5" />} />
-        <div className="flex items-center gap-2 py-2">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-text-muted)" }} />
-          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.config.loading")}</span>
-        </div>
-      </Card>
-    );
-  }
+  // If no config data yet, don't render
+  if (!configRaw && !configError) return null;
 
   if (configError) {
     return (
@@ -138,9 +140,9 @@ export function ConfigSection({ state }: Props) {
   if (!parsed) return null;
 
   const featureItems = [
-    { key: "ping_enable", label: "Health-check Ping", desc: t("server.config.ping_desc"), value: parsed.pingEnable },
-    { key: "speedtest_enable", label: "Speedtest", desc: t("server.config.speedtest_desc"), value: parsed.speedtestEnable },
-    { key: "ipv6_available", label: "IPv6", desc: t("server.config.ipv6_desc"), value: parsed.ipv6Available },
+    { key: "ping_enable", label: "Health-check Ping", desc: t("server.config.ping_desc"), value: localOverrides.ping_enable ?? parsed.pingEnable },
+    { key: "speedtest_enable", label: "Speedtest", desc: t("server.config.speedtest_desc"), value: localOverrides.speedtest_enable ?? parsed.speedtestEnable },
+    { key: "ipv6_available", label: "IPv6", desc: t("server.config.ipv6_desc"), value: localOverrides.ipv6_available ?? parsed.ipv6Available },
   ];
 
   return (
@@ -200,36 +202,45 @@ export function ConfigSection({ state }: Props) {
 
         {/* Feature toggles */}
         <div>
-          <span className="text-[11px] font-medium block mb-2" style={{ color: "var(--color-text-secondary)" }}>
-            {t("server.config.features")}
-          </span>
-          <div className="space-y-2">
+          <div className="space-y-1">
             {featureItems.map((feat) => (
               <div
                 key={feat.key}
-                className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)]"
-                style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
+                className="flex items-center justify-between px-3 py-1.5 rounded-[var(--radius-md)]"
+                style={{ borderBottom: "1px solid var(--color-border)" }}
               >
-                <div>
-                  <span className="text-xs font-medium block" style={{ color: "var(--color-text-primary)" }}>{feat.label}</span>
-                  <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{feat.desc}</span>
+                <div className="leading-tight">
+                  <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{feat.label}</span>
+                  <span className="text-[10px] block" style={{ color: "var(--color-text-muted)", marginTop: "1px" }}>{feat.desc}</span>
                 </div>
                 <button
                   onClick={() => handleToggleFeature(feat.key, feat.value)}
-                  disabled={togglingFeature === feat.key}
-                  className="relative shrink-0 w-10 h-[22px] rounded-full transition-colors duration-200 focus:outline-none"
+                  disabled={togglingFeatures.has(feat.key)}
+                  className="shrink-0 rounded-full focus:outline-none relative overflow-hidden"
                   style={{
-                    backgroundColor: feat.value ? "var(--color-accent-500)" : "#d1d5db",
-                    opacity: togglingFeature === feat.key ? 0.5 : 1,
+                    width: "40px",
+                    height: "22px",
+                    backgroundColor: feat.value ? "var(--color-accent-500)" : "var(--color-border)",
+                    transition: "background-color 0.3s ease",
                   }}
                 >
                   <span
-                    className="absolute top-[3px] w-4 h-4 rounded-full transition-transform duration-200 shadow-sm"
+                    className="absolute flex items-center justify-center rounded-full"
                     style={{
+                      width: "18px",
+                      height: "18px",
+                      top: "2px",
+                      left: feat.value ? "20px" : "2px",
                       backgroundColor: "white",
-                      transform: feat.value ? "translateX(22px)" : "translateX(3px)",
+                      transition: "left 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                     }}
-                  />
+                  >
+                    {togglingFeatures.has(feat.key) && (
+                      <svg className="animate-spin" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                        <circle cx="5" cy="5" r="4" stroke="var(--color-accent-500)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="12 8" />
+                      </svg>
+                    )}
+                  </span>
                 </button>
               </div>
             ))}

@@ -19,7 +19,6 @@ export function ServerStep(w: WizardState) {
       const selected = await open({
         title: t("control.select_key_title"),
         filters: [
-          { name: "SSH Keys", extensions: ["pem", "key", "ppk", "id_rsa", "id_ed25519", ""] },
           { name: "All Files", extensions: ["*"] },
         ],
         multiple: false,

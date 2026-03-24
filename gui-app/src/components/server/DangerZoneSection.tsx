@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   RefreshCw,
   Trash2,
-  Settings,
 } from "lucide-react";
 import { CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
@@ -13,6 +12,14 @@ import type { ServerState } from "./useServerState";
 
 interface Props {
   state: ServerState;
+}
+
+function obfuscate(value: string): string {
+  try {
+    return "b64:" + btoa(unescape(encodeURIComponent(value)));
+  } catch {
+    return value;
+  }
 }
 
 export function DangerZoneSection({ state }: Props) {
@@ -33,14 +40,30 @@ export function DangerZoneSection({ state }: Props) {
     try {
       await invoke("uninstall_server", sshParams);
       setConfirmUninstall(false);
-      onClearConfig();
-      onSwitchToSetup();
+      state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
     } catch (e) {
       setActionResult({ type: "error", message: String(e) });
       setConfirmUninstall(false);
     } finally {
       setUninstallLoading(false);
     }
+  };
+
+  const handleReinstall = () => {
+    // Pre-fill wizard with current SSH credentials and skip to endpoint step
+    try {
+      const existing = localStorage.getItem("trusttunnel_wizard");
+      const obj = existing ? JSON.parse(existing) : {};
+      obj.host = state.host;
+      obj.port = sshParams.port.toString();
+      obj.sshUser = sshParams.user;
+      obj.sshPassword = obfuscate(sshParams.password);
+      if (sshParams.keyPath) obj.sshKeyPath = sshParams.keyPath;
+      obj.wizardStep = "endpoint";
+      obj.wizardMode = "deploy";
+      localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
+    } catch { /* ignore */ }
+    onSwitchToSetup();
   };
 
   return (
@@ -67,7 +90,7 @@ export function DangerZoneSection({ state }: Props) {
             variant="danger-outline"
             size="sm"
             icon={<RefreshCw className="w-3.5 h-3.5" />}
-            onClick={onSwitchToSetup}
+            onClick={handleReinstall}
           >
             {t("server.danger.reinstall")}
           </Button>
@@ -80,21 +103,9 @@ export function DangerZoneSection({ state }: Props) {
           >
             {t("server.danger.uninstall")}
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Settings className="w-3.5 h-3.5" />}
-            onClick={() => {
-              onClearConfig();
-              onSwitchToSetup();
-            }}
-          >
-            {t("server.danger.reconfigure")}
-          </Button>
         </div>
       </div>
 
-      {/* Uninstall confirmation */}
       <ConfirmDialog
         open={confirmUninstall}
         title={t("server.danger.confirm_uninstall_title")}

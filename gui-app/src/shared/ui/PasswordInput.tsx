@@ -8,7 +8,7 @@ interface PasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
 }
 
 export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
-  ({ label, error, showIcon = true, className = "", ...props }, ref) => {
+  ({ label, error, showIcon = true, className = "", style, ...rest }, ref) => {
     const [visible, setVisible] = useState(false);
 
     return (
@@ -32,18 +32,18 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
               w-full rounded-[var(--radius-lg)] py-2.5 text-sm pr-10
               transition-colors outline-none
               placeholder:opacity-40
+              disabled:opacity-50 disabled:cursor-not-allowed
               ${showIcon ? "pl-9" : "px-3"}
               ${error ? "ring-1 ring-[var(--color-danger-500)]" : ""}
               ${className}
             `}
             style={{
               backgroundColor: "var(--color-input-bg)",
-              borderWidth: "1px",
-              borderStyle: "solid",
-              borderColor: error ? "var(--color-danger-500)" : "var(--color-input-border)",
+              border: `1px solid ${error ? "var(--color-danger-500)" : "var(--color-input-border)"}`,
               color: "var(--color-text-primary)",
+              ...style,
             }}
-            {...props}
+            {...rest}
           />
           <button
             type="button"

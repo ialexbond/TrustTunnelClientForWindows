@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { translateSshError } from "../../shared/utils/translateSshError";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -14,6 +15,7 @@ export interface ServerPanelProps {
   sshKeyPath?: string;
   onSwitchToSetup: () => void;
   onClearConfig: () => void;
+  onDisconnect: () => void;
   onConfigExported: (configPath: string) => void;
 }
 
@@ -40,6 +42,14 @@ export function useServerState(props: ServerPanelProps) {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<ActionResult>(null);
+  const [successQueue, setSuccessQueue] = useState<string[]>([]);
+
+  const pushSuccess = useCallback((msg: string) => {
+    setSuccessQueue(prev => [...prev, msg]);
+  }, []);
+  const shiftSuccess = useCallback(() => {
+    setSuccessQueue(prev => prev.slice(1));
+  }, []);
 
   // ─── State: Users ───
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
@@ -56,6 +66,11 @@ export function useServerState(props: ServerPanelProps) {
   const [selectedVersion, setSelectedVersion] = useState("");
   const [showVersions, setShowVersions] = useState(false);
 
+  // ─── State: Panel data (config + cert) ───
+  const [configRaw, setConfigRaw] = useState<string | null>(null);
+  const [certRaw, setCertRaw] = useState<unknown>(null);
+  const [panelDataLoaded, setPanelDataLoaded] = useState(false);
+
   // ─── State: Logs ───
   const [serverLogs, setServerLogs] = useState("");
   const [showLogs, setShowLogs] = useState(false);
@@ -65,6 +80,9 @@ export function useServerState(props: ServerPanelProps) {
   const [diagResult, setDiagResult] = useState<string | null>(null);
   const [showDiag, setShowDiag] = useState(false);
   const [diagLoading, setDiagLoading] = useState(false);
+
+  // ─── State: Reboot ───
+  const [rebooting, setRebooting] = useState(false);
 
   // ─── State: Danger Zone Confirms ───
   const [confirmReboot, setConfirmReboot] = useState(false);
@@ -80,19 +98,40 @@ export function useServerState(props: ServerPanelProps) {
     keyPath: sshKeyPath || undefined,
   };
 
-  // ─── Load server info ───
-  const loadServerInfo = useCallback(async () => {
+  // ─── Load server info + panel data ───
+  const loadServerInfo = useCallback(async (silent = false) => {
     if (!host || (!sshPassword && !sshKeyPath)) return;
-    setLoading(true);
-    setError("");
+    if (!silent) {
+      setLoading(true);
+      setError("");
+    }
     try {
       const info = await invoke<ServerInfo>("check_server_installation", sshParams);
       setServerInfo(info);
+      if (!silent) setError("");
+
+      // If installed, load config + cert in parallel
+      if (info.installed && !silent) {
+        const [cfgResult, certResult] = await Promise.allSettled([
+          invoke<string>("server_get_config", sshParams),
+          invoke<unknown>("server_get_cert_info", sshParams),
+        ]);
+        if (cfgResult.status === "fulfilled") {
+          const val = cfgResult.value;
+          setConfigRaw(typeof val === "string" ? val : JSON.stringify(val));
+        }
+        if (certResult.status === "fulfilled") setCertRaw(certResult.value);
+        setPanelDataLoaded(true);
+      } else if (info.installed && silent) {
+        // Silent refresh — don't reload config/cert
+      }
     } catch (e) {
-      setError(String(e));
-      setServerInfo(null);
+      if (!silent) {
+        setError(translateSshError(String(e), t));
+        setServerInfo(null);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, port, sshUser, sshPassword, sshKeyPath]);
@@ -103,25 +142,26 @@ export function useServerState(props: ServerPanelProps) {
 
   // ─── Action helper ───
   const runAction = useCallback(
-    async (name: string, fn: () => Promise<unknown>) => {
+    async (name: string, fn: () => Promise<unknown>, successMessage?: string) => {
       setActionLoading(name);
       setActionResult(null);
       try {
         await fn();
-        setActionResult({ type: "ok", message: t('server.actions.success', { action: name }) });
-        setTimeout(() => loadServerInfo(), 1500);
+        // Refresh state first, then show snackbar
+        await loadServerInfo(true);
+        pushSuccess(successMessage || t('server.actions.success_generic'));
       } catch (e) {
-        setActionResult({ type: "error", message: String(e) });
+        setActionResult({ type: "error", message: translateSshError(String(e), t) });
       } finally {
         setActionLoading(null);
       }
     },
-    [loadServerInfo, t]
+    [loadServerInfo, t, pushSuccess]
   );
 
-  // ─── Auto-dismiss action result after 5 seconds ───
+  // ─── Auto-dismiss action result after 5 seconds (errors only, success goes to snackbar queue) ───
   useEffect(() => {
-    if (!actionResult) return;
+    if (!actionResult || actionResult.type === "ok") return;
     const timer = setTimeout(() => setActionResult(null), 5000);
     return () => clearTimeout(timer);
   }, [actionResult]);
@@ -162,6 +202,9 @@ export function useServerState(props: ServerPanelProps) {
     actionLoading,
     actionResult,
     setActionResult,
+    successQueue,
+    pushSuccess,
+    shiftSuccess,
 
     // Users
     selectedUser,
@@ -180,6 +223,13 @@ export function useServerState(props: ServerPanelProps) {
     setDeleteLoading,
     continueLoading,
     setContinueLoading,
+
+    // Panel data (preloaded)
+    configRaw,
+    setConfigRaw,
+    certRaw,
+    setCertRaw,
+    panelDataLoaded,
 
     // Versions
     availableVersions,
@@ -203,6 +253,10 @@ export function useServerState(props: ServerPanelProps) {
     setShowDiag,
     diagLoading,
     setDiagLoading,
+
+    // Reboot
+    rebooting,
+    setRebooting,
 
     // Danger zone
     confirmReboot,
