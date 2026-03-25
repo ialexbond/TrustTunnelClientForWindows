@@ -28,6 +28,10 @@
 #include "AppleSleepNotifier.h"
 #endif
 
+#ifdef __linux__
+#include <net/if.h>
+#endif
+
 static constexpr std::string_view DEFAULT_CONFIG_FILE = "trusttunnel_client.toml";
 
 using namespace ag;
@@ -143,9 +147,14 @@ int main(int argc, char **argv) {
             .connection_info_handler = get_connection_info_callback(),
     };
 
+    std::string bound_if;
+    if (const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&config.listener)) {
+        bound_if = tun->bound_if;
+    }
+
     auto client = std::make_shared<TrustTunnelClient>(std::move(config), std::move(callbacks));
     g_client = client;
-    AutoNetworkMonitor network_monitor(client.get());
+    AutoNetworkMonitor network_monitor(client.get(), std::move(bound_if));
     if (!network_monitor.start()) {
         errlog(g_logger, "Failed to start network monitor");
         return 1;
@@ -197,7 +206,7 @@ std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const Trus
         return [](auto) {};
     }
 
-    return [bound_if = tun->bound_if](SocketProtectEvent *event) {
+    return [](SocketProtectEvent *event) {
 #ifdef __APPLE__
         uint32_t idx = vpn_network_manager_get_outbound_interface();
         if (idx == 0) {
@@ -215,6 +224,10 @@ std::function<void(SocketProtectEvent *)> get_protect_socket_callback(const Trus
 #endif // __APPLE__
 
 #ifdef __linux__
+        uint32_t idx = vpn_network_manager_get_outbound_interface();
+        char if_name[IF_NAMESIZE]{};
+        if_indextoname(idx, if_name);
+        std::string bound_if{if_name};
         if (!bound_if.empty()) {
             if (setsockopt(event->fd, SOL_SOCKET, SO_BINDTODEVICE, bound_if.data(), (socklen_t) bound_if.size()) != 0) {
                 event->result = -1;
