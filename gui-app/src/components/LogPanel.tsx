@@ -1,5 +1,7 @@
-import { useRef, useEffect } from "react";
-import { Terminal, Trash2 } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { Terminal, Trash2, Copy, Check } from "lucide-react";
+import { Button } from "../shared/ui/Button";
 import type { LogEntry } from "../App";
 
 interface LogPanelProps {
@@ -17,7 +19,9 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 function LogPanel({ logs, onClear, fullWidth }: LogPanelProps) {
+  const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -25,25 +29,51 @@ function LogPanel({ logs, onClear, fullWidth }: LogPanelProps) {
     }
   }, [logs]);
 
+  const handleCopy = useCallback(() => {
+    const text = logs
+      .map((l) => `${l.timestamp} [${l.level.toUpperCase()}] ${l.message}`)
+      .join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [logs]);
+
   return (
     <div className={`glass-card p-5 flex flex-col min-h-0 ${fullWidth ? "" : "lg:col-span-2"}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-indigo-400" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">
-            Логи
+          <Terminal className="w-4 h-4" style={{ color: "var(--color-accent-400)" }} />
+          <h2 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            {t("sections.logs")}
           </h2>
-          <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded-full text-gray-500">
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
+          >
             {logs.length}
           </span>
         </div>
-        <button
-          onClick={onClear}
-          className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-gray-500 hover:text-gray-300"
-          title="Очистить логи"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            onClick={handleCopy}
+            disabled={logs.length === 0}
+          >
+            {t("buttons.copy_logs")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Trash2 className="w-3.5 h-3.5" />}
+            onClick={onClear}
+            disabled={logs.length === 0}
+          >
+            {t("buttons.clear_logs")}
+          </Button>
+        </div>
       </div>
 
       <div
@@ -52,8 +82,8 @@ function LogPanel({ logs, onClear, fullWidth }: LogPanelProps) {
                    scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
       >
         {logs.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-600">
-            Логи появятся после подключения...
+          <div className="flex items-center justify-center h-full" style={{ color: "var(--color-text-muted)" }}>
+            {t("messages.logs_appear_on_connect")}
           </div>
         ) : (
           logs.map((log, i) => (

@@ -5,11 +5,25 @@ interface TooltipProps {
   text: string;
   children: ReactNode;
   maxWidth?: number;
+  delay?: number;
 }
 
-export function Tooltip({ text, children, maxWidth = 224 }: TooltipProps) {
+export function Tooltip({ text, children, maxWidth = 224, delay = 400 }: TooltipProps) {
   const [show, setShow] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleEnter = () => {
+    timerRef.current = setTimeout(() => setShow(true), delay);
+  };
+
+  const handleLeave = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setShow(false);
+  };
 
   const positionTip = useCallback(
     (tip: HTMLDivElement | null) => {
@@ -39,8 +53,8 @@ export function Tooltip({ text, children, maxWidth = 224 }: TooltipProps) {
     <div
       className="relative inline-flex"
       ref={triggerRef}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
     >
       {children}
       {show &&

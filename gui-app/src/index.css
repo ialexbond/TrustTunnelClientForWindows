@@ -300,7 +300,7 @@ input::-ms-clear {
   display: none;
 }
 
-/* ── Scrollbar ── */
+/* ── Scrollbar (overlay — does not take layout space) ── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -321,4 +321,17 @@ input::-ms-clear {
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Scrollbar gutter: always reserves space so content never shifts */
+.scroll-overlay {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* Non-scrolling container that matches scroll-overlay gutter alignment */
+.scroll-gutter-match {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  max-height: 100%;
 }

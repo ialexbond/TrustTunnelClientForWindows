@@ -6,25 +6,24 @@ interface ToggleProps {
   label: string;
   description?: string;
   icon?: ReactNode;
+  labelExtra?: ReactNode;
   disabled?: boolean;
 }
 
-export function Toggle({ value, onChange, label, description, icon, disabled }: ToggleProps) {
+export function Toggle({ value, onChange, label, description, icon, labelExtra, disabled }: ToggleProps) {
   return (
-    <div
-      className={`flex items-center justify-between py-2 group ${
-        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-      }`}
-      onClick={() => !disabled && onChange(!value)}
-    >
-      <div className="min-w-0 flex items-start gap-2">
-        {icon && <span className="shrink-0 mt-0.5" style={{ color: "var(--color-text-muted)" }}>{icon}</span>}
+    <div className={`flex items-center justify-between py-2 ${disabled ? "opacity-50" : ""}`}>
+      <div className="min-w-0 flex items-center gap-2">
+        {icon && <span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{icon}</span>}
         <div>
-          <span
-            className="text-xs font-medium transition-colors"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            {label}
+          <span className="flex items-center gap-1">
+            <span
+              className="text-xs font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              {label}
+            </span>
+            {labelExtra}
           </span>
           {description && (
             <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
@@ -33,8 +32,13 @@ export function Toggle({ value, onChange, label, description, icon, disabled }: 
           )}
         </div>
       </div>
-      <div
-        className="relative w-9 h-5 rounded-full shrink-0 ml-3 transition-colors"
+      <button
+        type="button"
+        onClick={() => !disabled && onChange(!value)}
+        disabled={disabled}
+        className={`relative w-9 h-5 rounded-full shrink-0 ml-3 transition-colors ${
+          disabled ? "cursor-not-allowed" : "cursor-pointer"
+        }`}
         style={{ backgroundColor: value ? "var(--color-toggle-on)" : "var(--color-toggle-off)" }}
       >
         <div
@@ -42,7 +46,7 @@ export function Toggle({ value, onChange, label, description, icon, disabled }: 
             value ? "translate-x-[18px]" : "translate-x-0.5"
           }`}
         />
-      </div>
+      </button>
     </div>
   );
 }

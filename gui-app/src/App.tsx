@@ -10,6 +10,7 @@ import SetupWizard from "./components/SetupWizard";
 import { ControlPanelPage } from "./components/ControlPanelPage";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
+import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
 
 export type VpnStatus =
@@ -105,6 +106,7 @@ function App() {
   });
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
+  const [vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
 
   // SSH data is now managed by ControlPanelPage via trusttunnel_control_ssh localStorage
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
@@ -321,6 +323,43 @@ function App() {
     return () => { unlisten.then((f) => f()); };
   }, []);
 
+  // ─── VPN log collector + error detection ───
+  useEffect(() => {
+    const unlisten = listen<{ message: string; source: string }>("vpn-log", (event) => {
+      const msg = event.payload.message.trim();
+      if (!msg) return;
+      const now = new Date();
+      const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+      const level = event.payload.source === "stderr" ? "error" : "info";
+      setVpnLogs(prev => {
+        const next = [...prev, { timestamp: ts, level, message: msg }];
+        return next.length > 500 ? next.slice(-500) : next;
+      });
+
+      // ── Detect known errors and show user-friendly messages ──
+      if (msg.includes("Authorization Required")) {
+        setError(i18n.t("errors.auth_required", "Ошибка авторизации: логин или пароль неверны. Обновите конфиг с сервера через Панель управления."));
+        setStatus("error");
+      } else if (msg.includes("WintunCreateAdapter") && msg.includes("cannot find")) {
+        setError(i18n.t("errors.wintun_missing", "Не удалось создать VPN-адаптер. Запустите приложение от имени администратора."));
+        setStatus("error");
+      } else if (msg.includes("Failed to create listener")) {
+        setError(i18n.t("errors.listener_failed", "Не удалось запустить VPN-туннель. Проверьте права администратора и наличие wintun.dll."));
+        setStatus("error");
+      } else if (msg.includes("Connection refused") || msg.includes("connection refused")) {
+        setError(i18n.t("errors.connection_refused", "Сервер отклонил подключение. Проверьте, запущен ли VPN-сервис на сервере."));
+        setStatus("error");
+      } else if (msg.includes("timed out") || msg.includes("Timed out")) {
+        // Don't override status for non-fatal timeouts (like wintun device query)
+        if (msg.includes("Failed to setup adapter")) {
+          setError(i18n.t("errors.adapter_timeout", "Таймаут создания VPN-адаптера. Перезапустите приложение от имени администратора."));
+          setStatus("error");
+        }
+      }
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, [i18n]);
+
   const handleReconnect = useCallback(async () => {
     if (status !== "connected" && status !== "connecting") return;
 
@@ -417,6 +456,17 @@ function App() {
   const hasConfig = !!config.configPath;
   const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
 
+  const statusPanelNode = showStatusPanel ? (
+    <StatusPanel
+      status={status}
+      error={error}
+      connectedSince={connectedSince}
+      onConnect={handleConnect}
+      onDisconnect={handleDisconnect}
+      configPath={config.configPath}
+    />
+  ) : null;
+
   return (
     <div
       className="h-screen flex"
@@ -440,20 +490,6 @@ function App() {
 
       {/* Main content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Global StatusPanel — always visible (except server page without config) */}
-        {showStatusPanel && (
-          <div className="shrink-0 px-4 pt-3">
-            <StatusPanel
-              status={status}
-              error={error}
-              connectedSince={connectedSince}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-              configPath={config.configPath}
-            />
-          </div>
-        )}
-
         {/* Page content */}
         <div className="flex-1 min-h-0">
           {/* Installation (SetupWizard) — always shows wizard */}
@@ -481,23 +517,23 @@ function App() {
           </div>
 
           {/* Settings */}
-          <div className="h-full flex flex-col gap-2 py-3 overflow-hidden px-4" style={{ display: activePage === "settings" ? "flex" : "none" }}>
-            <div className="flex-1 min-h-0">
-              <SettingsPanel
-                key={settingsKey}
-                configPath={config.configPath}
-                onConfigChange={setConfig}
-                status={status}
-                onReconnect={handleReconnect}
-                onSwitchToSetup={handleSwitchToSetup}
-                onClearConfig={handleClearConfig}
-                onVpnModeChange={setVpnMode}
-              />
-            </div>
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
+            <SettingsPanel
+              key={settingsKey}
+              configPath={config.configPath}
+              onConfigChange={setConfig}
+              status={status}
+              onReconnect={handleReconnect}
+              onSwitchToSetup={handleSwitchToSetup}
+              onClearConfig={handleClearConfig}
+              onVpnModeChange={setVpnMode}
+              statusPanel={statusPanelNode}
+            />
           </div>
 
           {/* Dashboard (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+            {statusPanelNode}
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">Dashboard</p>
@@ -507,7 +543,8 @@ function App() {
           </div>
 
           {/* Routing */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+            {statusPanelNode}
             <RoutingPanel
               configPath={config.configPath}
               status={status}
@@ -516,18 +553,19 @@ function App() {
             />
           </div>
 
-          {/* Logs (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "logs" ? "flex" : "none" }}>
-            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-1">Logs</p>
-                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
-              </div>
-            </div>
+          {/* Logs */}
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "logs" ? "flex" : "none" }}>
+            {statusPanelNode}
+            <LogPanel
+              logs={vpnLogs}
+              onClear={() => setVpnLogs([])}
+              fullWidth
+            />
           </div>
 
           {/* App Settings (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+            {statusPanelNode}
             <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
               <div className="text-center">
                 <p className="text-lg font-semibold mb-1">{i18n.t("tabs.appSettings")}</p>
@@ -537,7 +575,8 @@ function App() {
           </div>
 
           {/* About */}
-          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "about" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "about" ? "flex" : "none" }}>
+            {statusPanelNode}
             <AboutPanel
               updateInfo={updateInfo}
               onCheckUpdates={() => checkForUpdates(false)}
