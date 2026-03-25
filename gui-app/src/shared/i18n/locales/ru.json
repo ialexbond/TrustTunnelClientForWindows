@@ -364,6 +364,26 @@
   "units": {
     "mbps": "Мбит/с"
   },
+  "dashboard": {
+    "ping_history": "Пинг",
+    "avg": "сред",
+    "no_data": "Нет данных",
+    "speed_test": "Тест скорости",
+    "run_test": "Тест",
+    "run_speed_test": "Запустите тест скорости",
+    "session": "Сессия",
+    "uptime": "Время работы",
+    "errors": "Ошибки",
+    "network": "Сеть",
+    "ping_period": "последние 10 мин",
+    "no_config": "Конфигурация не загружена",
+    "disconnected_title": "Дашборд",
+    "connect_to_see": "Подключитесь к VPN для отображения данных мониторинга",
+    "server_stats": "Сервер",
+    "server_stats_hint": "Войдите в Панель управления для получения статистики сервера",
+    "go_to_control": "Панель управления",
+    "active_connections": "Активные подключения"
+  },
   "server": {
     "status": {
       "title": "Статус протокола",
