@@ -364,6 +364,26 @@
   "units": {
     "mbps": "Mbps"
   },
+  "dashboard": {
+    "ping_history": "Ping",
+    "avg": "avg",
+    "no_data": "No data",
+    "speed_test": "Speed Test",
+    "run_test": "Test",
+    "run_speed_test": "Run speed test",
+    "session": "Session",
+    "uptime": "Uptime",
+    "errors": "Errors",
+    "network": "Network",
+    "ping_period": "last 10 min",
+    "no_config": "No configuration loaded",
+    "disconnected_title": "Dashboard",
+    "connect_to_see": "Connect to VPN to see monitoring data",
+    "server_stats": "Server",
+    "server_stats_hint": "Connect via Control Panel to see server stats",
+    "go_to_control": "Control Panel",
+    "active_connections": "Active connections"
+  },
   "server": {
     "status": {
       "title": "Protocol Status",

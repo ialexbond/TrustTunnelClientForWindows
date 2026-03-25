@@ -12,6 +12,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
 import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
+import DashboardPanel from "./components/DashboardPanel";
 
 export type VpnStatus =
   | "disconnected"
@@ -463,7 +464,6 @@ function App() {
       connectedSince={connectedSince}
       onConnect={handleConnect}
       onDisconnect={handleDisconnect}
-      configPath={config.configPath}
     />
   ) : null;
 
@@ -531,15 +531,17 @@ function App() {
             />
           </div>
 
-          {/* Dashboard (placeholder) */}
+          {/* Dashboard */}
           <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
-            {statusPanelNode}
-            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-1">Dashboard</p>
-                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
-              </div>
-            </div>
+            <DashboardPanel
+              status={status}
+              connectedSince={connectedSince}
+              configPath={config.configPath}
+              vpnMode={vpnMode}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onNavigateToControl={() => setActivePage("control")}
+            />
           </div>
 
           {/* Routing */}
