@@ -222,30 +222,30 @@ export function ServerPanel(props: ServerPanelProps) {
   // ─── Main panel ───
   return (
     <>
-      <div className="flex-1 overflow-y-auto py-3 px-4 space-y-4">
-        <ServerStatusSection state={state} />
-        <UsersSection state={state} />
-        <VersionSection state={state} />
-        <ConfigSection state={state} />
-        <CertSection state={state} />
-        <LogsSection state={state} />
-        <DangerZoneSection state={state} />
+      <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
+          <ServerStatusSection state={state} />
+          <UsersSection state={state} />
+          <VersionSection state={state} />
+          <ConfigSection state={state} />
+          <CertSection state={state} />
+          <LogsSection state={state} />
+          <DangerZoneSection state={state} />
 
-        {/* Reboot server confirmation */}
-        <ConfirmDialog
-          open={state.confirmReboot}
-          title={t("server.danger.confirm_reboot_title")}
-          message={t("server.danger.confirm_reboot_message")}
-          confirmLabel={t("server.danger.confirm_reboot_btn")}
-          cancelLabel={t("buttons.cancel")}
-          variant="warning"
-          onCancel={() => state.setConfirmReboot(false)}
-          onConfirm={() => {
-            state.setConfirmReboot(false);
-            state.setRebooting(true);
-            invoke("server_reboot", state.sshParams).catch(() => {});
-          }}
-        />
+          {/* Reboot server confirmation */}
+          <ConfirmDialog
+            open={state.confirmReboot}
+            title={t("server.danger.confirm_reboot_title")}
+            message={t("server.danger.confirm_reboot_message")}
+            confirmLabel={t("server.danger.confirm_reboot_btn")}
+            cancelLabel={t("buttons.cancel")}
+            variant="warning"
+            onCancel={() => state.setConfirmReboot(false)}
+            onConfirm={() => {
+              state.setConfirmReboot(false);
+              state.setRebooting(true);
+              invoke("server_reboot", state.sshParams).catch(() => {});
+            }}
+          />
       </div>
 
       {/* Success snackbar stack — bottom center, auto-dismiss */}

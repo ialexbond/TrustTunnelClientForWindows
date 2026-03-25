@@ -15,7 +15,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const variantStyles: Record<ButtonVariant, string> = {
   primary: `
     bg-[var(--color-accent-500)] hover:bg-[var(--color-accent-600)]
-    text-white shadow-sm
+    text-white shadow-sm border border-transparent
   `,
   secondary: `
     bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-active)]
@@ -23,7 +23,7 @@ const variantStyles: Record<ButtonVariant, string> = {
   `,
   danger: `
     bg-[var(--color-danger-500)] hover:bg-[var(--color-danger-600)]
-    text-white shadow-sm
+    text-white shadow-sm border border-transparent
   `,
   "danger-outline": `
     bg-[rgba(239,68,68,0.08)] hover:bg-[rgba(239,68,68,0.15)]
@@ -31,15 +31,15 @@ const variantStyles: Record<ButtonVariant, string> = {
   `,
   success: `
     bg-[var(--color-success-500)] hover:bg-[var(--color-success-600)]
-    text-white shadow-sm
+    text-white shadow-sm border border-transparent
   `,
   warning: `
     bg-[var(--color-warning-500)] hover:bg-[var(--color-warning-600)]
-    text-white shadow-sm
+    text-white shadow-sm border border-transparent
   `,
   ghost: `
     bg-transparent hover:bg-[var(--color-bg-hover)]
-    text-[var(--color-text-secondary)]
+    text-[var(--color-text-secondary)] border border-transparent
   `,
 };
 
