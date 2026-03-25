@@ -472,6 +472,18 @@ async fn server_export_config_deeplink(
 }
 
 #[tauri::command]
+async fn server_get_stats(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ssh_deploy::server_get_stats(&app, host, port, user, password, key_path).await
+}
+
+#[tauri::command]
 async fn server_get_available_versions() -> Result<Vec<String>, String> {
     ssh_deploy::server_get_available_versions().await
 }
@@ -1086,6 +1098,7 @@ pub fn run() {
             server_export_config_deeplink,
             server_get_available_versions,
             server_upgrade,
+            server_get_stats,
             geodata::load_exclusion_list,
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,
