@@ -15,9 +15,12 @@
   "status": {
     "connected": "Connected",
     "connecting": "Connecting...",
+    "connecting_short": "Connecting",
     "disconnected": "Disconnected",
     "disconnecting": "Disconnecting...",
+    "disconnecting_short": "Disconnecting",
     "recovering": "Recovering...",
+    "recovering_short": "Recovering",
     "error": "Error",
     "saving": "Saving...",
     "preparing": "Preparing...",
@@ -70,7 +73,7 @@
   },
   "labels": {
     "config_file": "Configuration File",
-    "host": "Host",
+    "host": "Domain Name",
     "username": "Username",
     "password": "Password",
     "ssh_password": "SSH Password",
@@ -118,17 +121,25 @@
     "anti_dpi_detailed": "Disguises VPN traffic as regular HTTPS to bypass Deep Packet Inspection (DPI) systems used by ISPs and government agencies to block VPNs.",
     "post_quantum_detailed": "Uses encryption algorithms resistant to quantum computer attacks. Protects your data from future decryption. Slightly increases connection time.",
     "ipv6_detailed": "Allows IPv6 traffic routing through the VPN tunnel. If your ISP or server doesn't support IPv6, keep this disabled to avoid connection issues.",
-    "dns_upstreams": "Custom DNS servers for queries through VPN. Multiple servers work as fallbacks: if the first doesn't respond, the next is used. Encrypted protocols DoT, DoH, DoQ are supported to protect DNS queries from ISP interception."
+    "dns_upstreams": "Custom DNS servers for queries through VPN. Multiple servers work as fallbacks: if the first doesn't respond, the next is used. Encrypted protocols DoT, DoH, DoQ are supported to protect DNS queries from ISP interception.",
+    "mtu": "MTU size (576–9000). Lower values are more reliable on poor connections, higher values improve throughput."
+  },
+  "settings": {
+    "tunnel": { "title": "Tunnel" },
+    "security": { "title": "Security" },
+    "network": { "title": "Network" }
   },
   "vpn_modes": {
-    "general": "Everything via VPN",
-    "selective": "Direct"
+    "general": "Proxy",
+    "selective": "Bypass"
   },
   "messages": {
     "configure_vpn_first": "Configure VPN first",
     "config_required": "Please select a configuration file or set up a server first",
     "saved_check": "Saved ✔",
     "settings_saved": "Settings saved",
+    "reconnecting": "Reconnecting...",
+    "config_cleared": "Configuration cleared",
     "coming_soon": "In development — will be available in future updates",
     "specify_config_path": "Specify config path...",
     "vpn_not_found": "VPN not found on server",
@@ -141,7 +152,12 @@
   "errors": {
     "internet_lost_disconnecting": "Internet connection lost. Disconnecting VPN, waiting for network recovery...",
     "reconnection_failed": "Reconnection failed: {{error}}",
-    "network_recovery_timeout": "Network recovery timed out (5 min). Please reconnect manually."
+    "network_recovery_timeout": "Network recovery timed out (5 min). Please reconnect manually.",
+    "auth_required": "Authorization error: invalid username or password. Update config from server via Control Panel.",
+    "wintun_missing": "Failed to create VPN adapter. Run the application as administrator.",
+    "listener_failed": "Failed to start VPN tunnel. Check administrator rights and wintun.dll presence.",
+    "connection_refused": "Server refused connection. Check if VPN service is running on the server.",
+    "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator."
   },
   "confirmations": {
     "irreversible_action": "Are you sure? This action is irreversible."

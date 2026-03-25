@@ -80,16 +80,23 @@ export function Sidebar({
 
   return (
     <aside
-      className="h-full flex flex-col border-r shrink-0 select-none overflow-hidden"
+      className="h-full shrink-0 select-none relative"
       style={{
-        width: expanded ? "var(--sidebar-width-expanded)" : "var(--sidebar-width-collapsed)",
-        backgroundColor: "var(--color-bg-secondary)",
-        borderColor: "var(--color-border)",
-        transition: "width 250ms ease",
+        width: "var(--sidebar-width-collapsed)",
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
+      <div
+        className="absolute top-0 left-0 bottom-0 h-full flex flex-col overflow-hidden border-r"
+        style={{
+          width: expanded ? "var(--sidebar-width-expanded)" : "var(--sidebar-width-collapsed)",
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border)",
+          transition: "width 250ms ease",
+          zIndex: 50,
+        }}
+      >
       {/* Logo */}
       <div
         className="flex items-center gap-2.5 px-3 py-4 border-b"
@@ -201,6 +208,7 @@ export function Sidebar({
             </span>
           )}
         </button>
+      </div>
       </div>
     </aside>
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Wifi,
@@ -10,8 +11,12 @@ import {
   RefreshCw,
   ArrowDown,
   ArrowUp,
+  Power,
 } from "lucide-react";
 import type { VpnStatus } from "../App";
+import { Card } from "../shared/ui/Card";
+import { Button } from "../shared/ui/Button";
+import { Badge } from "../shared/ui/Badge";
 
 interface StatusPanelProps {
   status: VpnStatus;
@@ -22,47 +27,41 @@ interface StatusPanelProps {
   configPath?: string;
 }
 
-const STATUS_CONFIG: Record<
-  VpnStatus,
-  { label: string; dotClass: string; icon: ReactNode; color: string }
-> = {
-  disconnected: {
-    label: "Отключен",
-    dotClass: "status-dot-disconnected",
-    icon: <WifiOff className="w-8 h-8" />,
-    color: "text-gray-400",
-  },
-  connecting: {
-    label: "Подключение...",
-    dotClass: "status-dot-connecting",
-    icon: <Loader2 className="w-8 h-8 animate-spin" />,
-    color: "text-amber-400",
-  },
-  connected: {
-    label: "Подключен",
-    dotClass: "status-dot-connected",
-    icon: <Wifi className="w-8 h-8" />,
-    color: "text-emerald-400",
-  },
-  disconnecting: {
-    label: "Отключение...",
-    dotClass: "status-dot-connecting",
-    icon: <Loader2 className="w-8 h-8 animate-spin" />,
-    color: "text-amber-400",
-  },
-  recovering: {
-    label: "Ожидание сети...",
-    dotClass: "status-dot-connecting",
-    icon: <Loader2 className="w-8 h-8 animate-spin" />,
-    color: "text-amber-400",
-  },
-  error: {
-    label: "Ошибка",
-    dotClass: "status-dot-error",
-    icon: <AlertTriangle className="w-8 h-8" />,
-    color: "text-red-400",
-  },
-};
+function getStatusConfig(status: VpnStatus, t: (key: string) => string) {
+  const configs: Record<VpnStatus, { label: string; icon: ReactNode; badgeVariant: "success" | "warning" | "danger" | "default" }> = {
+    disconnected: {
+      label: t("status.disconnected"),
+      icon: <WifiOff className="w-8 h-8" />,
+      badgeVariant: "default",
+    },
+    connecting: {
+      label: t("status.connecting_short", "Подключение"),
+      icon: <Loader2 className="w-8 h-8 animate-spin" />,
+      badgeVariant: "warning",
+    },
+    connected: {
+      label: t("status.connected"),
+      icon: <Wifi className="w-8 h-8" />,
+      badgeVariant: "success",
+    },
+    disconnecting: {
+      label: t("status.disconnecting_short", "Отключение"),
+      icon: <Loader2 className="w-8 h-8 animate-spin" />,
+      badgeVariant: "warning",
+    },
+    recovering: {
+      label: t("status.recovering_short", "Восстановление"),
+      icon: <Loader2 className="w-8 h-8 animate-spin" />,
+      badgeVariant: "warning",
+    },
+    error: {
+      label: t("status.error"),
+      icon: <AlertTriangle className="w-8 h-8" />,
+      badgeVariant: "danger",
+    },
+  };
+  return configs[status];
+}
 
 function formatUptime(since: Date): string {
   const diff = Math.floor((Date.now() - since.getTime()) / 1000);
@@ -74,12 +73,10 @@ function formatUptime(since: Date): string {
 
 function UptimeCounter({ since }: { since: Date }) {
   const [, setTick] = useState(0);
-
   useEffect(() => {
     const interval = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(interval);
   }, []);
-
   return <span>{formatUptime(since)}</span>;
 }
 
@@ -89,13 +86,13 @@ interface SpeedResult {
 }
 
 function PingDisplay({ configPath, status }: { configPath?: string; status: VpnStatus }) {
+  const { t } = useTranslation();
   const [ping, setPing] = useState<number | null>(null);
   const [speed, setSpeed] = useState<SpeedResult | null>(null);
   const [testing, setTesting] = useState(false);
   const endpointRef = useRef<{ host: string; port: number } | null>(null);
   const isConnected = status === "connected";
 
-  // Parse endpoint from config once
   useEffect(() => {
     if (!configPath) return;
     invoke<{ endpoint?: { hostname?: string } }>("read_client_config", { configPath })
@@ -120,7 +117,6 @@ function PingDisplay({ configPath, status }: { configPath?: string; status: VpnS
     }
   }, []);
 
-  // Only ping when connected; clear on disconnect
   useEffect(() => {
     if (!isConnected) {
       setPing(null);
@@ -148,29 +144,36 @@ function PingDisplay({ configPath, status }: { configPath?: string; status: VpnS
 
   if (!isConnected || ping === null) return null;
 
-  const color = ping < 0 ? "text-gray-600" : ping < 90 ? "text-emerald-400" : ping <= 200 ? "text-amber-400" : "text-red-400";
+  const pingColor = ping < 0
+    ? "var(--color-text-muted)"
+    : ping < 90
+      ? "var(--color-success-500)"
+      : ping <= 200
+        ? "var(--color-warning-500)"
+        : "var(--color-danger-500)";
   const label = ping < 0 ? "—" : `${ping} ms`;
   const dl = speed?.download_mbps ?? 0;
   const ul = speed?.upload_mbps ?? 0;
 
   return (
-    <div className="flex items-center gap-2 text-xs mt-0.5">
-      <div className={`flex items-center gap-1 ${color}`}>
+    <div className="flex items-center gap-2 text-xs mt-1">
+      <div className="flex items-center gap-1" style={{ color: pingColor }}>
         <Activity className="w-3 h-3" />
         <span>{label}</span>
       </div>
-      <span className="text-gray-600">|</span>
-      <span className="flex items-center gap-0.5 text-emerald-400">
-        <ArrowDown className="w-3 h-3" />{dl} Мбит/с
+      <span style={{ color: "var(--color-text-muted)" }}>|</span>
+      <span className="flex items-center gap-0.5" style={{ color: "var(--color-success-500)" }}>
+        <ArrowDown className="w-3 h-3" />{dl} {t("buttons.speed_test", "Мбит/с").includes("Мбит") ? "Мбит/с" : "Mbps"}
       </span>
-      <span className="flex items-center gap-0.5 text-indigo-400">
-        <ArrowUp className="w-3 h-3" />{ul} Мбит/с
+      <span className="flex items-center gap-0.5" style={{ color: "var(--color-accent-400)" }}>
+        <ArrowUp className="w-3 h-3" />{ul} {t("buttons.speed_test", "Мбит/с").includes("Мбит") ? "Мбит/с" : "Mbps"}
       </span>
       <button
         onClick={runSpeedTest}
         disabled={testing}
-        className="text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50"
-        title="Тест скорости"
+        className="transition-colors disabled:opacity-50"
+        style={{ color: "var(--color-text-muted)" }}
+        title={t("buttons.speed_test")}
       >
         {testing ? (
           <Loader2 className="w-3 h-3 animate-spin" />
@@ -190,73 +193,92 @@ function StatusPanel({
   onDisconnect,
   configPath,
 }: StatusPanelProps) {
-  const cfg = STATUS_CONFIG[status];
+  const { t } = useTranslation();
+  const cfg = getStatusConfig(status, t);
+
+  const isLoading = status === "connecting" || status === "disconnecting" || status === "recovering";
 
   return (
-    <div className="glass-card p-4">
+    <Card padding="lg">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
+          {/* Icon container */}
           <div
-            className={`p-3 rounded-xl ${cfg.color}`}
-            style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
+            className="p-3 rounded-[var(--radius-lg)]"
+            style={{
+              backgroundColor: "var(--color-bg-elevated)",
+              border: "1px solid var(--color-border)",
+              color: status === "connected"
+                ? "var(--color-success-500)"
+                : status === "error"
+                  ? "var(--color-danger-500)"
+                  : isLoading
+                    ? "var(--color-warning-500)"
+                    : "var(--color-text-muted)",
+            }}
           >
             {cfg.icon}
           </div>
+
+          {/* Status info */}
           <div>
             <div className="flex items-center gap-2">
-              <span className={`status-dot ${cfg.dotClass}`} />
-              <span className="text-base font-semibold">{cfg.label}</span>
+              <Badge variant={cfg.badgeVariant} size="sm" pulse={status === "connected"}>
+                {cfg.label}
+              </Badge>
             </div>
             {connectedSince && status === "connected" && (
-              <div className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+              <div className="flex items-center gap-1 text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
                 <Clock className="w-3 h-3" />
                 <UptimeCounter since={connectedSince} />
               </div>
             )}
             <PingDisplay configPath={configPath} status={status} />
             {error && (
-              <p className="text-[11px] text-red-400 mt-0.5 max-w-sm break-words line-clamp-3" title={error}>
+              <p
+                className="text-[11px] mt-1 max-w-sm break-words line-clamp-3"
+                style={{ color: "var(--color-danger-400)" }}
+                title={error}
+              >
                 {error}
               </p>
             )}
           </div>
         </div>
 
+        {/* Action button */}
         <div>
-          {status === "connecting" || status === "recovering" ? (
-            <button
-              disabled
-              className="px-5 py-2.5 rounded-xl font-semibold text-sm text-white cursor-not-allowed
-                         bg-gradient-to-r from-amber-500 to-yellow-500 shadow-lg shadow-amber-500/25 opacity-90"
-            >
-              {status === "connecting" ? "Подключение..." : "Переподключение..."}
-            </button>
-          ) : status === "disconnecting" ? (
-            <button
-              disabled
-              className="px-5 py-2.5 rounded-xl font-semibold text-sm text-white cursor-not-allowed
-                         bg-gradient-to-r from-amber-500 to-yellow-500 shadow-lg shadow-amber-500/25 opacity-90"
-            >
-              Отключение...
-            </button>
+          {isLoading ? (
+            <Button variant="warning" size="lg" disabled loading>
+              {status === "connecting"
+                ? t("status.connecting")
+                : status === "disconnecting"
+                  ? t("status.disconnecting")
+                  : t("status.recovering")}
+            </Button>
           ) : status === "connected" ? (
-            <button
+            <Button
+              variant="danger"
+              size="lg"
+              icon={<Power className="w-4 h-4" />}
               onClick={onDisconnect}
-              className="btn-danger !px-5 !py-2.5 text-sm"
             >
-              Отключить
-            </button>
+              {t("buttons.disconnect")}
+            </Button>
           ) : (
-            <button
+            <Button
+              variant="success"
+              size="lg"
+              icon={<Power className="w-4 h-4" />}
               onClick={onConnect}
-              className="btn-primary !px-5 !py-2.5 text-sm"
             >
-              Подключить
-            </button>
+              {t("buttons.connect")}
+            </Button>
           )}
         </div>
       </div>
-    </div>
+
+    </Card>
   );
 }
 
