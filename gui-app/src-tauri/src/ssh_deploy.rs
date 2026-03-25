@@ -1486,6 +1486,138 @@ pub async fn server_upgrade(
     Ok(())
 }
 
+/// Get server resource stats: CPU, RAM, disk, active VPN connections.
+pub async fn server_get_stats(
+    app: &tauri::AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    ssh_password: String,
+    key_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+
+    // Single compound command to minimize SSH roundtrips
+    // CPU: two /proc/stat samples 1s apart for actual current usage
+    let cmd = concat!(
+        "echo '---CPU---' && ",
+        "C1=$(grep 'cpu ' /proc/stat) && sleep 1 && C2=$(grep 'cpu ' /proc/stat) && echo \"$C1\" && echo \"$C2\" && ",
+        "echo '---LOAD---' && ",
+        "cat /proc/loadavg && ",
+        "echo '---MEM---' && ",
+        "free -b | grep Mem && ",
+        "echo '---DISK---' && ",
+        "df -B1 / | tail -1 && ",
+        "echo '---CONNS---' && ",
+        "TT_PID=$(pgrep -f '/opt/trusttunnel/bin/trusttunnel' 2>/dev/null | head -1); ",
+        "if [ -n \"$TT_PID\" ]; then ",
+        "  ss -tnp state established 2>/dev/null | grep \"pid=$TT_PID\" | awk '{print $NF}' | rev | cut -d: -f2- | rev | sort -u | wc -l; ",
+        "else echo 0; fi && ",
+        "echo '---CONNS_TOTAL---' && ",
+        "if [ -n \"$TT_PID\" ]; then ",
+        "  ss -tnp state established 2>/dev/null | grep \"pid=$TT_PID\" | wc -l; ",
+        "else echo 0; fi && ",
+        "echo '---UPTIME---' && ",
+        "cat /proc/uptime"
+    );
+
+    let (output, _) = exec_command(&handle, app, cmd).await?;
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    // Parse output
+    let mut cpu_usage: f64 = 0.0;
+    let mut cpu_samples: Vec<Vec<f64>> = Vec::new();
+    let mut load_1m: f64 = 0.0;
+    let mut load_5m: f64 = 0.0;
+    let mut load_15m: f64 = 0.0;
+    let mut mem_total: u64 = 0;
+    let mut mem_used: u64 = 0;
+    let mut disk_total: u64 = 0;
+    let mut disk_used: u64 = 0;
+    let mut unique_ips: u64 = 0;
+    let mut total_conns: u64 = 0;
+    let mut server_uptime: f64 = 0.0;
+
+    let mut section = "";
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("---") && trimmed.ends_with("---") {
+            section = trimmed;
+            continue;
+        }
+        match section {
+            "---CPU---" => {
+                // Two samples: cpu  user nice system idle iowait irq softirq steal
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 5 && parts[0] == "cpu" {
+                    let vals: Vec<f64> = parts[1..].iter().map(|s| s.parse().unwrap_or(0.0)).collect();
+                    cpu_samples.push(vals);
+                    if cpu_samples.len() == 2 {
+                        let total1: f64 = cpu_samples[0].iter().sum();
+                        let total2: f64 = cpu_samples[1].iter().sum();
+                        let idle1 = cpu_samples[0].get(3).copied().unwrap_or(0.0);
+                        let idle2 = cpu_samples[1].get(3).copied().unwrap_or(0.0);
+                        let total_diff = total2 - total1;
+                        let idle_diff = idle2 - idle1;
+                        if total_diff > 0.0 {
+                            cpu_usage = (((total_diff - idle_diff) / total_diff) * 100.0 * 10.0).round() / 10.0;
+                        }
+                    }
+                }
+            }
+            "---LOAD---" => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    load_1m = parts[0].parse().unwrap_or(0.0);
+                    load_5m = parts[1].parse().unwrap_or(0.0);
+                    load_15m = parts[2].parse().unwrap_or(0.0);
+                }
+            }
+            "---MEM---" => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    mem_total = parts[1].parse().unwrap_or(0);
+                    mem_used = parts[2].parse().unwrap_or(0);
+                }
+            }
+            "---DISK---" => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    disk_total = parts[1].parse().unwrap_or(0);
+                    disk_used = parts[2].parse().unwrap_or(0);
+                }
+            }
+            "---CONNS---" => {
+                unique_ips = trimmed.parse().unwrap_or(0);
+            }
+            "---CONNS_TOTAL---" => {
+                total_conns = trimmed.parse().unwrap_or(0);
+            }
+            "---UPTIME---" => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if !parts.is_empty() {
+                    server_uptime = parts[0].parse().unwrap_or(0.0);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(serde_json::json!({
+        "cpu_percent": cpu_usage,
+        "load_1m": load_1m,
+        "load_5m": load_5m,
+        "load_15m": load_15m,
+        "mem_total": mem_total,
+        "mem_used": mem_used,
+        "disk_total": disk_total,
+        "disk_used": disk_used,
+        "unique_ips": unique_ips,
+        "total_connections": total_conns,
+        "uptime_seconds": server_uptime,
+    }))
+}
+
 /// Kill any running trusttunnel_client processes.
 pub fn kill_existing_process() -> Result<(), String> {
     #[cfg(windows)]
