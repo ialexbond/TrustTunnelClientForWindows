@@ -892,6 +892,13 @@ void ag::DnsHandler::on_dns_request(const ConnectionInfo &info, U8View message) 
         return;
     }
 
+    // Check blocked filter first — drop DNS query (NXDOMAIN) for blocked domains
+    DomainFilterMatchStatus blocked_status = ServerUpstream::vpn->blocked_filter.match_domain(request.name);
+    if (blocked_status == DFMS_EXCLUSION) {
+        log_handler(this, dbg, "{} qname: {} BLOCKED — dropping DNS query", info, request.name);
+        return; // Simply don't forward → client gets no response → connection fails
+    }
+
     DomainFilterMatchStatus status = ServerUpstream::vpn->domain_filter.match_domain(request.name);
     bool included = (ServerUpstream::vpn->exclusions_mode == VPN_MODE_GENERAL) ? (status == DFMS_DEFAULT)
                                                                                : (status == DFMS_EXCLUSION);
