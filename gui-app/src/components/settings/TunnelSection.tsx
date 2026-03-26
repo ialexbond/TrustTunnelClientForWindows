@@ -11,10 +11,9 @@ interface Props {
 
 export function TunnelSection({ state }: Props) {
   const { t } = useTranslation();
-  const { config, updateField, onVpnModeChange } = state;
+  const { config, updateField } = state;
   if (!config) return null;
 
-  const vpnMode = config.vpn_mode;
   const protocol = config.endpoint?.upstream_protocol || "http2";
   const mtu = config.listener?.tun?.mtu_size || 1280;
 
@@ -24,32 +23,6 @@ export function TunnelSection({ state }: Props) {
         icon={<Cable className="w-4 h-4" />}
         title={t("settings.tunnel.title")}
       />
-
-      {/* VPN Mode */}
-      <div className="mb-2.5">
-        <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
-          {t("labels.vpn_mode")}
-        </label>
-        <div className="grid grid-cols-2 gap-1.5">
-          <Button
-            variant={vpnMode === "general" ? "primary" : "secondary"}
-            size="sm"
-            onClick={() => { updateField("vpn_mode", "general"); onVpnModeChange?.("general"); }}
-          >
-            {t("vpn_modes.general")}
-          </Button>
-          <Button
-            variant={vpnMode === "selective" ? "primary" : "secondary"}
-            size="sm"
-            onClick={() => { updateField("vpn_mode", "selective"); onVpnModeChange?.("selective"); }}
-          >
-            {t("vpn_modes.selective")}
-          </Button>
-        </div>
-        <p className="text-[9px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
-          {vpnMode === "general" ? t("help_text.vpn_mode_general") : t("help_text.vpn_mode_selective")}
-        </p>
-      </div>
 
       {/* Protocol + MTU */}
       <div className="grid grid-cols-2 gap-3">

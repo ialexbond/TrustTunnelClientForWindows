@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -24,6 +26,32 @@ TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&
     if (!m_config.blocked.empty()) {
         m_blocked_filter.update_exclusions(VPN_MODE_GENERAL, m_config.blocked);
     }
+
+    // Parse process filter lists (newline-separated process names, case-insensitive)
+    auto parse_process_list = [](const std::string &content) {
+        std::unordered_set<std::string> result;
+        std::istringstream stream(content);
+        std::string line;
+        while (std::getline(stream, line)) {
+            auto start = line.find_first_not_of(" \t\r\n");
+            auto end = line.find_last_not_of(" \t\r\n");
+            if (start != std::string::npos) {
+                std::string name = line.substr(start, end - start + 1);
+                std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                result.insert(std::move(name));
+            }
+        }
+        return result;
+    };
+    m_process_direct = parse_process_list(m_config.process_direct);
+    m_process_proxy = parse_process_list(m_config.process_proxy);
+    m_process_block = parse_process_list(m_config.process_block);
+
+    if (!m_process_direct.empty() || !m_process_proxy.empty() || !m_process_block.empty()) {
+        infolog(m_logger, "Process filters: {} direct, {} proxy, {} block",
+                m_process_direct.size(), m_process_proxy.size(), m_process_block.size());
+    }
+
     if (!m_config.log_file_path.empty()) {
         m_logfile_handler.emplace(m_config.log_file_path);
         m_logtofile.emplace(m_logfile_handler->get_file());
@@ -114,6 +142,7 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::connect_impl(Lis
             .handler = {static_vpn_handler, this},
             .mode = m_config.mode,
             .exclusions = {m_config.exclusions.data(), (uint32_t) m_config.exclusions.size()},
+            .blocked = {m_config.blocked.data(), (uint32_t) m_config.blocked.size()},
             .killswitch_enabled = m_config.killswitch_enabled,
     };
 
@@ -459,14 +488,73 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         auto *task_context = new TaskContext;
         const VpnConnectRequestEvent *event = (VpnConnectRequestEvent *) data;
         auto *info = new VpnConnectionInfo{event->id};
-        // Check if destination should be blocked
-        VpnConnectAction action = VPN_CA_DEFAULT;
-        if (!m_config.blocked.empty() && event->dst != nullptr && event->dst->type == VPN_AT_HOST) {
-            std::string_view host{event->dst->host.name.data, event->dst->host.name.size};
-            if (!host.empty() && m_blocked_filter.match_domain(host) == DFMS_EXCLUSION) {
-                action = VPN_CA_REJECT;
+
+        // Log destination details
+        std::string dst_str = "<unknown>";
+        if (event->dst != nullptr) {
+            if (event->dst->type == VPN_AT_HOST) {
+                dst_str = std::string(event->dst->host.name.data, event->dst->host.name.size);
+                tracelog(m_logger, "[ROUTE] ConnReq id={} dst=HOST:{} app={}",
+                         event->id, dst_str, safe_to_string_view(event->app_name));
+            } else if (event->dst->type == VPN_AT_ADDR) {
+                SocketAddress sa;
+                memcpy(&sa, &event->dst->addr, sizeof(SocketAddressStorage));
+                dst_str = sa.str();
+                tracelog(m_logger, "[ROUTE] ConnReq id={} dst=ADDR:{} app={}",
+                         event->id, dst_str, safe_to_string_view(event->app_name));
             }
         }
+
+        // Check if destination should be blocked (domains and IPs)
+        VpnConnectAction action = VPN_CA_DEFAULT;
+        if (!m_config.blocked.empty() && event->dst != nullptr) {
+            if (event->dst->type == VPN_AT_HOST) {
+                std::string_view host{event->dst->host.name.data, event->dst->host.name.size};
+                if (!host.empty() && m_blocked_filter.match_domain(host) == DFMS_EXCLUSION) {
+                    action = VPN_CA_REJECT;
+                    infolog(m_logger, "[ROUTE] BLOCKED domain: {}", host);
+                }
+            } else if (event->dst->type == VPN_AT_ADDR) {
+                SocketAddress addr;
+                memcpy(&addr, &event->dst->addr, sizeof(SocketAddressStorage));
+                SockAddrTag tag{addr};
+                if (m_blocked_filter.match_tag(tag).status == DFMS_EXCLUSION) {
+                    action = VPN_CA_REJECT;
+                    infolog(m_logger, "[ROUTE] BLOCKED IP: {}", addr.str());
+                }
+            }
+        }
+        // Process-based routing (after blocked check)
+        if (action == VPN_CA_DEFAULT && event->app_name != nullptr
+                && (!m_process_direct.empty() || !m_process_proxy.empty() || !m_process_block.empty())) {
+            std::string app = event->app_name;
+            // Extract just the executable name (after last path separator)
+            if (auto pos = app.rfind('\\'); pos != std::string::npos) {
+                app = app.substr(pos + 1);
+            }
+            if (auto pos = app.rfind('/'); pos != std::string::npos) {
+                app = app.substr(pos + 1);
+            }
+            // Lowercase for case-insensitive comparison
+            std::transform(app.begin(), app.end(), app.begin(), ::tolower);
+
+            if (!m_process_block.empty() && m_process_block.contains(app)) {
+                action = VPN_CA_REJECT;
+                infolog(m_logger, "[ROUTE] BLOCKED process: {}", app);
+            } else if (!m_process_direct.empty() && m_process_direct.contains(app)) {
+                action = VPN_CA_FORCE_BYPASS;
+                infolog(m_logger, "[ROUTE] DIRECT process: {}", app);
+            } else if (!m_process_proxy.empty() && m_process_proxy.contains(app)) {
+                action = VPN_CA_FORCE_REDIRECT;
+                infolog(m_logger, "[ROUTE] PROXY process: {}", app);
+            }
+        }
+
+        // Log final routing decision
+        const char *action_names[] = {"DEFAULT", "PROXY", "BYPASS", "REJECT", "FORCE_BYPASS", "FORCE_REDIRECT"};
+        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})",
+                 dst_str, action_names[action], safe_to_string_view(event->app_name));
+
         info->action = action;
         info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
         task_context->info = info;
