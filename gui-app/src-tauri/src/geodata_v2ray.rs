@@ -58,7 +58,7 @@ pub struct GeoDataStatus {
     pub downloaded: bool,
     pub geoip_exists: bool,
     pub geosite_exists: bool,
-    pub version: Option<String>,
+    pub release_tag: Option<String>,
     pub downloaded_at: Option<String>,
     pub geoip_categories_count: usize,
     pub geosite_categories_count: usize,
@@ -71,7 +71,18 @@ pub struct GeoDataIndex {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeoUpdateCheck {
+    pub update_available: bool,
+    pub current_tag: Option<String>,
+    pub latest_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct GeoDataMeta {
+    #[serde(default)]
+    release_tag: Option<String>,
+    // Legacy compat
+    #[serde(default)]
     version: Option<String>,
     downloaded_at: String,
 }
@@ -337,6 +348,7 @@ fn format_geo_domain(domain: &GeoDomain) -> String {
 
 const GEOIP_URL: &str = "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat";
 const GEOSITE_URL: &str = "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat";
+const RELEASES_API: &str = "https://api.github.com/repos/runetfreedom/russia-v2ray-rules-dat/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 struct GeoDataProgressPayload {
@@ -347,7 +359,7 @@ struct GeoDataProgressPayload {
     step: String,
 }
 
-/// Download a file with progress events
+/// Download a file with progress and retry
 async fn download_with_progress(
     app: &tauri::AppHandle,
     client: &reqwest::Client,
@@ -355,19 +367,60 @@ async fn download_with_progress(
     file_name: &str,
     dest: std::path::PathBuf,
 ) -> Result<Vec<u8>, String> {
+    let max_retries = 3;
+    let mut last_error = String::new();
+
+    for attempt in 1..=max_retries {
+        eprintln!("[geodata] Downloading {file_name} (attempt {attempt}/{max_retries})...");
+        app.emit("geodata-progress", GeoDataProgressPayload {
+            file: file_name.into(), downloaded_bytes: 0, total_bytes: 0, percent: 0,
+            step: if attempt > 1 {
+                format!("Повтор загрузки {file_name} ({attempt}/{max_retries})...")
+            } else {
+                "Подключение...".into()
+            },
+        }).ok();
+
+        match download_single_attempt(app, client, url, file_name).await {
+            Ok(buffer) => {
+                std::fs::write(&dest, &buffer)
+                    .map_err(|e| format!("Не удалось сохранить {file_name}: {e}"))?;
+                eprintln!("[geodata] {file_name} saved ({} bytes)", buffer.len());
+
+                app.emit("geodata-progress", GeoDataProgressPayload {
+                    file: file_name.into(), downloaded_bytes: buffer.len() as u64,
+                    total_bytes: buffer.len() as u64, percent: 100,
+                    step: format!("{file_name} скачан"),
+                }).ok();
+
+                return Ok(buffer);
+            }
+            Err(e) => {
+                eprintln!("[geodata] Attempt {attempt} failed: {e}");
+                last_error = e;
+                if attempt < max_retries {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+
+    Err(format!("Не удалось скачать {file_name} после {max_retries} попыток: {last_error}"))
+}
+
+async fn download_single_attempt(
+    app: &tauri::AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+    file_name: &str,
+) -> Result<Vec<u8>, String> {
     use futures_util::StreamExt;
 
-    eprintln!("[geodata] Downloading {file_name} from {url}...");
-    app.emit("geodata-progress", GeoDataProgressPayload {
-        file: file_name.into(), downloaded_bytes: 0, total_bytes: 0, percent: 0,
-        step: format!("Подключение к серверу..."),
-    }).ok();
-
     let resp = client.get(url).send().await
-        .map_err(|e| format!("Не удалось скачать {file_name}: {e}"))?;
+        .map_err(|e| format!("{e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("{file_name}: HTTP {}", resp.status()));
+        return Err(format!("HTTP {}", resp.status()));
     }
 
     let total = resp.content_length().unwrap_or(0);
@@ -377,7 +430,7 @@ async fn download_with_progress(
     let mut last_percent: u8 = 0;
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Ошибка загрузки {file_name}: {e}"))?;
+        let chunk = chunk.map_err(|e| format!("{e}"))?;
         downloaded += chunk.len() as u64;
         buffer.extend_from_slice(&chunk);
 
@@ -400,18 +453,6 @@ async fn download_with_progress(
         }
     }
 
-    std::fs::write(&dest, &buffer)
-        .map_err(|e| format!("Не удалось сохранить {file_name}: {e}"))?;
-    eprintln!("[geodata] {file_name} saved ({} bytes)", buffer.len());
-
-    app.emit("geodata-progress", GeoDataProgressPayload {
-        file: file_name.into(),
-        downloaded_bytes: downloaded,
-        total_bytes: total,
-        percent: 100,
-        step: format!("{file_name} скачан"),
-    }).ok();
-
     Ok(buffer)
 }
 
@@ -421,19 +462,29 @@ pub async fn download_geodata(
     state: tauri::State<'_, Arc<GeoDataState>>,
 ) -> Result<GeoDataStatus, String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_secs(600))
+        .connect_timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("Ошибка HTTP клиента: {e}"))?;
 
-    // Download geoip.dat with progress
-    let geoip_bytes = download_with_progress(
-        &app, &client, GEOIP_URL, "geoip.dat", geoip_dat_path()
-    ).await?;
+    // Download only missing files
+    let geoip_path = geoip_dat_path();
+    let geosite_path = geosite_dat_path();
+    let need_geoip = !geoip_path.exists();
+    let need_geosite = !geosite_path.exists();
+    let need_both = !need_geoip && !need_geosite; // Force update — redownload both
 
-    // Download geosite.dat with progress
-    let geosite_bytes = download_with_progress(
-        &app, &client, GEOSITE_URL, "geosite.dat", geosite_dat_path()
-    ).await?;
+    let geoip_bytes = if need_geoip || need_both {
+        download_with_progress(&app, &client, GEOIP_URL, "geoip.dat", geoip_path.clone()).await?
+    } else {
+        std::fs::read(&geoip_path).unwrap_or_default()
+    };
+
+    let geosite_bytes = if need_geosite || need_both {
+        download_with_progress(&app, &client, GEOSITE_URL, "geosite.dat", geosite_path.clone()).await?
+    } else {
+        std::fs::read(&geosite_path).unwrap_or_default()
+    };
 
     // Parsing step
     app.emit("geodata-progress", GeoDataProgressPayload {
@@ -441,9 +492,26 @@ pub async fn download_geodata(
         step: "Парсинг категорий...".into(),
     }).ok();
 
+    // Fetch release tag from GitHub API
+    let release_tag = match client.get(RELEASES_API)
+        .header("User-Agent", "TrustTunnel")
+        .timeout(std::time::Duration::from_secs(10))
+        .send().await
+    {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                json.get("tag_name").and_then(|v| v.as_str()).map(String::from)
+            } else { None }
+        }
+        Err(_) => None,
+    };
+
+    eprintln!("[geodata] Release tag: {:?}", release_tag);
+
     // Save metadata
     let meta = GeoDataMeta {
-        version: None,
+        release_tag: release_tag.clone(),
+        version: release_tag, // legacy compat
         downloaded_at: chrono_now(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&meta) {
@@ -470,9 +538,11 @@ fn get_geodata_status_inner(state: &GeoDataState) -> Result<GeoDataStatus, Strin
     let geoip_exists = geoip_dat_path().exists();
     let geosite_exists = geosite_dat_path().exists();
 
-    let (version, downloaded_at) = if let Ok(content) = std::fs::read_to_string(geodata_meta_path()) {
+    let (release_tag, downloaded_at) = if let Ok(content) = std::fs::read_to_string(geodata_meta_path()) {
         if let Ok(meta) = serde_json::from_str::<GeoDataMeta>(&content) {
-            (meta.version, Some(meta.downloaded_at))
+            // Use release_tag, fallback to legacy version field
+            let tag = meta.release_tag.or(meta.version);
+            (tag, Some(meta.downloaded_at))
         } else {
             (None, None)
         }
@@ -487,7 +557,7 @@ fn get_geodata_status_inner(state: &GeoDataState) -> Result<GeoDataStatus, Strin
         downloaded: geoip_exists && geosite_exists,
         geoip_exists,
         geosite_exists,
-        version,
+        release_tag,
         downloaded_at,
         geoip_categories_count: geoip_count,
         geosite_categories_count: geosite_count,
@@ -599,10 +669,109 @@ pub fn resolve_geosite(state: &GeoDataState, category: &str) -> Result<Vec<Strin
     Ok(domains)
 }
 
+/// Check if geodata update is available by comparing release tags
+#[tauri::command]
+pub async fn check_geodata_updates(
+    state: tauri::State<'_, Arc<GeoDataState>>,
+) -> Result<GeoUpdateCheck, String> {
+    // Get current tag from meta
+    let current_tag = if let Ok(content) = std::fs::read_to_string(geodata_meta_path()) {
+        serde_json::from_str::<GeoDataMeta>(&content)
+            .ok()
+            .and_then(|m| m.release_tag.or(m.version))
+    } else {
+        None
+    };
+
+    // Fetch latest tag from GitHub API
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP error: {e}"))?;
+
+    let resp = client.get(RELEASES_API)
+        .header("User-Agent", "TrustTunnel")
+        .send().await
+        .map_err(|e| format!("Не удалось проверить обновления: {e}"))?;
+
+    let json: serde_json::Value = resp.json().await
+        .map_err(|e| format!("Ошибка парсинга ответа: {e}"))?;
+
+    let latest_tag = json.get("tag_name")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let update_available = match (&current_tag, &latest_tag) {
+        (Some(current), Some(latest)) => current != latest,
+        (None, Some(_)) => true,   // never downloaded
+        _ => false,
+    };
+
+    // Also refresh category counts if data is loaded
+    let _ = get_geodata_status_inner(&state);
+
+    eprintln!("[geodata] Update check: current={:?}, latest={:?}, available={}", current_tag, latest_tag, update_available);
+
+    Ok(GeoUpdateCheck {
+        update_available,
+        current_tag,
+        latest_tag,
+    })
+}
+
 fn chrono_now() -> String {
-    // Return unix timestamp in milliseconds (JS Date expects ms)
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     format!("{}", duration.as_millis())
+}
+
+// ─── File System Watcher ────────────────────────────
+// Watches geodata/ directory for changes and emits "geodata-files-changed" event.
+
+pub fn start_geodata_watcher(app: tauri::AppHandle, state: Arc<GeoDataState>) {
+    use notify::{Watcher, RecursiveMode, Event, EventKind};
+
+    let dir = geodata_dir();
+    eprintln!("[geodata] Starting file watcher on {}", dir.display());
+
+    std::thread::spawn(move || {
+        let app_handle = app.clone();
+        let state_ref = state.clone();
+
+        let mut watcher = match notify::recommended_watcher(
+            move |res: Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    match event.kind {
+                        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
+                            // Debounce: check actual file state
+                            let status = get_geodata_status_inner(&state_ref).ok();
+                            if let Some(s) = status {
+                                app_handle.emit("geodata-files-changed", s).ok();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            },
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[geodata] Failed to create watcher: {e}");
+                return;
+            }
+        };
+
+        if let Err(e) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
+            eprintln!("[geodata] Failed to watch directory: {e}");
+            return;
+        }
+
+        eprintln!("[geodata] File watcher active");
+
+        // Keep thread alive — watcher drops when thread exits
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    });
 }

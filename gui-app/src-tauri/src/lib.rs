@@ -1036,6 +1036,10 @@ pub fn run() {
             let is_conn_for_monitor = Arc::clone(&app.state::<AppState>().is_connected);
             connectivity::start_monitor(app.handle().clone(), is_conn_for_monitor);
 
+            // Start geodata file watcher
+            let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
+            geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
+
             // Listen for vpn-status events to update tray icon color
             use tauri::Listener;
             let app_handle = app.handle().clone();
@@ -1115,6 +1119,7 @@ pub fn run() {
             geodata::load_group_cache,
             geodata_v2ray::download_geodata,
             geodata_v2ray::get_geodata_status,
+            geodata_v2ray::check_geodata_updates,
             geodata_v2ray::load_geodata_categories,
             routing_rules::load_routing_rules,
             routing_rules::save_routing_rules,

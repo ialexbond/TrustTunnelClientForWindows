@@ -85,14 +85,11 @@ export function RoutingBlockCard({
         >
           {t(config.titleKey)}
         </span>
-        <Badge variant={config.badgeVariant} size="sm">
-          {entries.length}
-        </Badge>
         <ChevronDown
           className="w-4 h-4 transition-transform shrink-0"
           style={{
             color: "var(--color-text-muted)",
-            transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+            transform: collapsed ? "rotate(0deg)" : "rotate(180deg)",
           }}
         />
       </button>
