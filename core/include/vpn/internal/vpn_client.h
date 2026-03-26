@@ -172,6 +172,7 @@ public:
     IdGenerator upstream_conn_id_generator{};           // connection id generator for server-side connections
     std::optional<VpnDnsResolveId> dns_health_check_id; // ID of the resolve for a DNS upstream health check
     DomainFilter domain_filter;                         // decides if connection should be bypassed over VPN
+    DomainFilter blocked_filter;                        // domains/IPs to block completely (NXDOMAIN + reject)
     std::set<event_loop::AutoTaskId> deferred_tasks;
     std::unique_ptr<EndpointConnector> endpoint_connector; // connects to endpoint using given upstream(s)
     std::optional<std::string> tmp_files_base_path;        // directory where some temporary files will be stored

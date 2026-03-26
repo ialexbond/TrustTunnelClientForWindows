@@ -200,6 +200,9 @@ async fn vpn_disconnect(
             .map_err(|e| format!("Failed to stop sidecar: {e}"))?;
     }
 
+    // Clean up hosts file blocked entries on disconnect
+    routing_rules::cleanup_hosts_block().ok();
+
     app.emit(
         "vpn-status",
         VpnStatusPayload {
@@ -622,17 +625,30 @@ fn read_client_config(config_path: String) -> Result<serde_json::Value, String> 
 
 #[tauri::command]
 fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
-    // Read existing exclusions before overwriting — they are managed by RoutingPanel
-    // via save_exclusion_list and must not be lost when SettingsPanel saves.
-    let existing_exclusions: Vec<String> = std::fs::read_to_string(&config_path)
+    // Read existing routing keys before overwriting — they are managed by RoutingPanel
+    // via resolve_and_apply and must not be lost when SettingsPanel saves.
+    let existing_doc: Option<toml_edit::DocumentMut> = std::fs::read_to_string(&config_path)
         .ok()
-        .and_then(|c| c.parse::<toml_edit::DocumentMut>().ok())
+        .and_then(|c| c.parse::<toml_edit::DocumentMut>().ok());
+
+    // Preserve routing-managed keys
+    let existing_exclusions: Vec<String> = existing_doc.as_ref()
         .and_then(|doc| {
             doc.get("exclusions")
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         })
         .unwrap_or_default();
+
+    let routing_keys_to_preserve: Vec<(&str, Option<String>)> = {
+        let keys = ["exclusions_file", "blocked_file",
+                     "process_direct_file", "process_proxy_file", "process_block_file"];
+        keys.iter().map(|&k| {
+            let val = existing_doc.as_ref()
+                .and_then(|doc| doc.get(k).and_then(|v| v.as_str()).map(String::from));
+            (k, val)
+        }).collect()
+    };
 
     // Convert JSON back to toml::Value then serialize
     let toml_val: toml::Value = serde_json::from_value(config)
@@ -656,6 +672,13 @@ fn save_client_config(config_path: String, config: serde_json::Value) -> Result<
                 arr.push(d.as_str());
             }
             doc["exclusions"] = toml_edit::value(arr);
+        }
+
+        // Restore routing file paths managed by RoutingPanel
+        for (key, val) in &routing_keys_to_preserve {
+            if let Some(v) = val {
+                doc[*key] = toml_edit::value(v.as_str());
+            }
         }
 
         // Ensure DHCP ports (67, 68) are always in killswitch_allow_ports
@@ -1127,6 +1150,8 @@ pub fn run() {
             routing_rules::import_routing_rules,
             routing_rules::migrate_legacy_exclusions,
             routing_rules::resolve_and_apply,
+            routing_rules::update_vpn_mode,
+            routing_rules::cleanup_hosts_block,
             processes::list_running_processes,
             ping_endpoint,
             speedtest_run,
@@ -1141,6 +1166,8 @@ pub fn run() {
                     kill_sidecar_from_state(&state);
                 }
                 kill_all_sidecar_processes();
+                // Clean up hosts file blocked entries
+                routing_rules::cleanup_hosts_block().ok();
             }
         });
 }

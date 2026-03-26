@@ -555,6 +555,7 @@ function App() {
               onConnect={handleConnect}
               onDisconnect={handleDisconnect}
               onReconnect={handleReconnect}
+              onVpnModeChange={setVpnMode}
             />
           </div>
 
