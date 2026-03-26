@@ -366,6 +366,13 @@
     "duplicateEntry": "This entry already exists",
     "removeEntry": "Remove entry",
 
+    "validation": {
+      "needsDot": "Enter a full domain (e.g. example.com)",
+      "invalidCyrillic": "Cyrillic domain must include a dot (e.g. сайт.рф)",
+      "invalidDomain": "Invalid domain",
+      "invalidFormat": "Allowed: domain, IP, CIDR, geoip:, geosite:"
+    },
+
     "moveTo_direct": "Move to Direct",
     "moveTo_proxy": "Move to VPN",
     "moveTo_block": "Move to Block",
@@ -374,9 +381,12 @@
     "geodataDescription": "GeoIP and GeoSite databases for country and category-based routing.",
     "geodataReady": "Ready",
     "geodataMissing": "Not downloaded",
-    "geodataVersion": "Version",
-    "geodataDate": "Date",
-    "downloadGeodata": "Download",
+    "geodataUpdateAvailable": "Update available",
+    "geodataUpToDate": "Up to date",
+    "checkUpdates": "Check for updates",
+    "checkingUpdates": "Checking...",
+    "downloading": "Downloading...",
+    "downloadGeodata": "Download geodata",
     "updateGeodata": "Update",
     "downloadGeoDataFirst": "Download geodata first",
     "noMatchingCategories": "No matches",
@@ -388,6 +398,7 @@
     "processExcludeDescription": "Selected processes will bypass the VPN.",
     "processOnlyDescription": "Only selected processes will use the VPN.",
     "addProcess": "Add process",
+    "browseExe": "Browse",
     "removeProcess": "Remove process",
     "selectProcesses": "Select processes",
     "searchProcess": "Search by name...",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Globe, FileText, Download } from "lucide-react";
 
@@ -23,9 +23,14 @@ export function GeoAutocomplete({
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const filtered = categories.filter((cat) =>
-    cat.toLowerCase().includes(query.toLowerCase())
-  ).slice(0, 20);
+  // Sort alphabetically + smart word-boundary search
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    const sorted = [...categories].sort((a, b) => a.localeCompare(b));
+    if (!q) return sorted.slice(0, 50);
+
+    return sorted.filter((cat) => cat.toLowerCase().startsWith(q)).slice(0, 50);
+  }, [categories, query]);
 
   // Reset index when query changes
   useEffect(() => {
@@ -113,27 +118,31 @@ export function GeoAutocomplete({
       style={{
         backgroundColor: "var(--color-bg-elevated)",
         borderColor: "var(--color-border)",
-        maxHeight: "240px",
+        maxHeight: "280px",
       }}
     >
       {filtered.map((cat, idx) => (
-        <button
+        <div
           key={cat}
-          type="button"
-          className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
+          role="option"
+          aria-selected={idx === activeIndex}
+          className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer select-none transition-colors"
           style={{
             backgroundColor: idx === activeIndex ? "var(--color-bg-hover)" : "transparent",
             color: "var(--color-text-primary)",
           }}
           onMouseEnter={() => setActiveIndex(idx)}
-          onClick={() => {
+          onMouseDown={(e) => {
+            // Use mousedown instead of click to fire before input blur
+            e.preventDefault();
+            e.stopPropagation();
             onSelect(`${prefix}:${cat}`);
             onClose();
           }}
         >
           <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--color-text-muted)" }} />
           <span className="text-xs font-mono truncate">{cat}</span>
-        </button>
+        </div>
       ))}
     </div>
   );
