@@ -366,6 +366,13 @@
     "duplicateEntry": "Такая запись уже существует",
     "removeEntry": "Удалить запись",
 
+    "validation": {
+      "needsDot": "Введите полный домен (например, example.com)",
+      "invalidCyrillic": "Кириллический домен должен содержать точку (например, сайт.рф)",
+      "invalidDomain": "Некорректный домен",
+      "invalidFormat": "Допустимы: домен, IP, CIDR, geoip:, geosite:"
+    },
+
     "moveTo_direct": "Переместить в Напрямую",
     "moveTo_proxy": "Переместить в VPN",
     "moveTo_block": "Переместить в Блокировку",
@@ -374,9 +381,12 @@
     "geodataDescription": "GeoIP и GeoSite базы для маршрутизации по странам и категориям.",
     "geodataReady": "Загружено",
     "geodataMissing": "Не загружено",
-    "geodataVersion": "Версия",
-    "geodataDate": "Дата",
-    "downloadGeodata": "Скачать",
+    "geodataUpdateAvailable": "Обновление",
+    "geodataUpToDate": "Актуальная версия",
+    "checkUpdates": "Проверить обновления",
+    "checkingUpdates": "Проверка...",
+    "downloading": "Загрузка...",
+    "downloadGeodata": "Скачать геоданные",
     "updateGeodata": "Обновить",
     "downloadGeoDataFirst": "Сначала скачайте геоданные",
     "noMatchingCategories": "Нет совпадений",
@@ -388,6 +398,7 @@
     "processExcludeDescription": "Выбранные процессы будут работать напрямую, без VPN.",
     "processOnlyDescription": "Только выбранные процессы будут использовать VPN.",
     "addProcess": "Добавить процесс",
+    "browseExe": "Обзор",
     "removeProcess": "Удалить процесс",
     "selectProcesses": "Выберите процессы",
     "searchProcess": "Поиск по имени...",

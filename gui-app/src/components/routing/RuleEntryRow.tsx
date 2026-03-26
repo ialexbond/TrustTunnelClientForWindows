@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { Globe, FileText, Server, Monitor, Folder, Trash2, ArrowRight } from "lucide-react";
-import { Badge } from "../../shared/ui";
 import type { RuleEntry, RouteAction } from "./useRoutingState";
 
 interface RuleEntryRowProps {
@@ -19,13 +18,22 @@ const typeIcons: Record<string, typeof Globe> = {
   iplist_group: Folder,
 };
 
-const typeBadgeVariant: Record<string, "default" | "success" | "warning" | "danger" | "accent"> = {
-  domain: "default",
-  ip: "accent",
-  cidr: "accent",
-  geoip: "success",
-  geosite: "warning",
-  iplist_group: "default",
+const typeBadgeBg: Record<string, string> = {
+  domain: "var(--color-bg-hover)",
+  ip: "rgba(99, 102, 241, 0.15)",
+  cidr: "rgba(99, 102, 241, 0.15)",
+  geoip: "rgba(16, 185, 129, 0.15)",
+  geosite: "rgba(245, 158, 11, 0.15)",
+  iplist_group: "var(--color-bg-hover)",
+};
+
+const typeBadgeColor: Record<string, string> = {
+  domain: "var(--color-text-secondary)",
+  ip: "var(--color-accent-400)",
+  cidr: "var(--color-accent-400)",
+  geoip: "var(--color-success-400)",
+  geosite: "var(--color-warning-400)",
+  iplist_group: "var(--color-text-secondary)",
 };
 
 const moveTargets: Record<RouteAction, RouteAction[]> = {
@@ -52,14 +60,22 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
         style={{ color: "var(--color-text-muted)" }}
       />
       <span
+        className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[9px] font-semibold uppercase tracking-wide px-1 py-0.5"
+        style={{
+          width: "58px",
+          textAlign: "center",
+          backgroundColor: typeBadgeBg[entry.type] || "var(--color-bg-hover)",
+          color: typeBadgeColor[entry.type] || "var(--color-text-secondary)",
+        }}
+      >
+        {entry.type}
+      </span>
+      <span
         className="flex-1 text-xs font-mono truncate"
         style={{ color: "var(--color-text-primary)" }}
       >
         {entry.value}
       </span>
-      <Badge variant={typeBadgeVariant[entry.type]} size="sm">
-        {entry.type}
-      </Badge>
 
       {/* Move buttons */}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
