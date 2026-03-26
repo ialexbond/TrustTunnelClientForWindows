@@ -269,44 +269,39 @@ pub async fn resolve_and_apply(
     // Resolve blocked entries
     let blocked_entries = resolve_entries(&rules.block, &state)?;
 
-    // Determine vpn_mode
-    // If user has both direct and proxy entries, use general mode
-    // (direct = exclusions, proxy = covered by default tunnel behavior)
-    let has_direct = !direct_entries.is_empty();
-    let has_proxy = !proxy_entries.is_empty();
-
-    let vpn_mode = if has_proxy && !has_direct {
-        "selective" // Only proxy entries → selective mode (only listed goes through VPN)
+    // Read the vpn_mode chosen by the user in Settings (don't override it!)
+    let vpn_mode = if !config_path.is_empty() {
+        std::fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|c| c.parse::<DocumentMut>().ok())
+            .and_then(|doc| doc.get("vpn_mode").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_else(|| "general".to_string())
     } else {
-        "general" // Default: everything through VPN except direct entries
+        "general".to_string()
     };
 
-    // Build exclusions file content
+    // Build exclusions file content based on vpn_mode:
+    // - "general": everything through VPN, EXCEPT direct entries (they bypass)
+    //   → exclusions = direct entries
+    // - "selective": everything direct, EXCEPT proxy entries (they go through VPN)
+    //   → exclusions = proxy entries
     let exclusions_content = if vpn_mode == "selective" {
-        // In selective mode, proxy entries are the "exclusions" (what goes through VPN)
-        proxy_entries.join("\n")
+        proxy_entries.iter()
     } else {
-        // In general mode, direct entries are the "exclusions" (what bypasses VPN)
-        direct_entries.join("\n")
-    };
-
-    // Build blocked file content — also resolve domains to IPs for CONNECT-level blocking
-    let mut blocked_with_ips = blocked_entries.clone();
-    for entry in &blocked_entries {
-        // If it's a domain (not IP/CIDR), resolve it to IPs
-        if !entry.contains('/') && entry.parse::<std::net::IpAddr>().is_err() {
-            if let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&(entry.as_str(), 80)) {
-                for addr in addrs {
-                    let ip = addr.ip().to_string();
-                    if !blocked_with_ips.contains(&ip) {
-                        eprintln!("[routing] Resolved blocked domain {} -> {}", entry, ip);
-                        blocked_with_ips.push(ip);
-                    }
-                }
-            }
-        }
+        direct_entries.iter()
     }
-    let blocked_content = blocked_with_ips.join("\n");
+    .filter(|e| !e.is_empty())
+    .cloned()
+    .collect::<Vec<_>>()
+    .join("\n");
+
+    // Build blocked file content — domains/IPs/CIDRs for C++ core DNS-level blocking.
+    // No DNS resolution needed — the VPN core blocks at DNS query level (match_domain).
+    let blocked_content = blocked_entries.iter()
+        .filter(|e| !e.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
 
     // Write resolved files
     std::fs::write(exclusions_file_path(), &exclusions_content)
@@ -337,17 +332,19 @@ pub async fn resolve_and_apply(
         );
     }
 
-    // Build the exclusions list for TOML inline array
+    // Build the exclusions list (same as file content, used for logging)
     let exclusions_for_toml: Vec<String> = if vpn_mode == "selective" {
         proxy_entries.clone()
     } else {
         direct_entries.clone()
     };
 
-    // Update TOML config with inline arrays + file paths
+    // Update TOML config — preserve vpn_mode from Settings, write file paths
     if !config_path.is_empty() {
-        update_toml_config(&config_path, vpn_mode, &exclusions_for_toml, &blocked_entries)?;
+        update_toml_config(&config_path, &vpn_mode, &exclusions_for_toml, &blocked_entries)?;
     }
+
+    // Blocking is handled at VPN core DNS level (dns_handler.cpp) — no hosts file needed
 
     Ok(())
 }
@@ -449,8 +446,8 @@ fn resolve_process_rules(rules: &RoutingRules) -> (Vec<String>, Vec<String>, Vec
     (direct, proxy, block)
 }
 
-/// Update TOML config with resolved routing rules
-/// Uses BOTH inline arrays AND file paths for compatibility with old and new binaries
+/// Update TOML config with resolved routing rules.
+/// Uses file paths for exclusions and blocked lists (C++ core reads from files).
 fn update_toml_config(
     config_path: &str,
     vpn_mode: &str,
@@ -466,29 +463,172 @@ fn update_toml_config(
     // Set vpn_mode
     doc["vpn_mode"] = value(vpn_mode);
 
-    // Write exclusions INLINE in TOML array (works with ALL binary versions)
-    let mut exc_arr = Array::new();
-    for entry in exclusions {
-        exc_arr.push(entry.as_str());
-    }
-    doc["exclusions"] = value(exc_arr);
+    // Exclusions: empty inline array + file path (avoids duplication, C++ core reads both)
+    doc["exclusions"] = value(Array::new());
+    doc["exclusions_file"] = value(exclusions_file_path().to_string_lossy().as_ref());
 
-    // Remove any file-based fields that old binaries don't support
+    // Blocked: file-based only (C++ core only supports blocked_file, not inline blocked)
     doc.remove("blocked");
-    doc.remove("exclusions_file");
-    doc.remove("blocked_file");
-    doc.remove("process_direct_file");
-    doc.remove("process_proxy_file");
-    doc.remove("process_block_file");
+    if !blocked.is_empty() {
+        doc["blocked_file"] = value(blocked_file_path().to_string_lossy().as_ref());
+    } else {
+        doc.remove("blocked_file");
+    }
+
+    // Process filter files: write paths if files have content
+    let process_files: [(&str, PathBuf); 3] = [
+        ("process_direct_file", process_direct_file_path()),
+        ("process_proxy_file", process_proxy_file_path()),
+        ("process_block_file", process_block_file_path()),
+    ];
+    for (key, path) in &process_files {
+        let has_content = path.exists()
+            && std::fs::read_to_string(path)
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+        if has_content {
+            doc[*key] = value(path.to_string_lossy().as_ref());
+        } else {
+            doc.remove(*key);
+        }
+    }
 
     std::fs::write(config_path, doc.to_string())
         .map_err(|e| format!("Failed to write config: {e}"))?;
 
     eprintln!(
-        "[routing] TOML updated: vpn_mode={}, exclusions={} inline, blocked={} inline",
-        vpn_mode, exclusions.len(), blocked.len()
+        "[routing] TOML updated: vpn_mode={}, exclusions_file={}, blocked_file={}",
+        vpn_mode,
+        exclusions.len(),
+        if blocked.is_empty() { "none" } else { "set" }
     );
     Ok(())
+}
+
+/// Update vpn_mode in TOML config without touching other fields
+#[tauri::command]
+pub fn update_vpn_mode(config_path: String, mode: String) -> Result<(), String> {
+    if config_path.is_empty() {
+        return Err("No config path".into());
+    }
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {e}"))?;
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Failed to parse config: {e}"))?;
+
+    doc["vpn_mode"] = value(mode.as_str());
+
+    std::fs::write(&config_path, doc.to_string())
+        .map_err(|e| format!("Failed to write config: {e}"))?;
+
+    eprintln!("[routing] vpn_mode updated to: {}", mode);
+    Ok(())
+}
+
+// ─── Hosts file blocking ────────────────────────────
+
+const HOSTS_MARKER_BEGIN: &str = "# >>> TrustTunnel-blocked BEGIN";
+const HOSTS_MARKER_END: &str = "# >>> TrustTunnel-blocked END";
+
+fn hosts_file_path() -> PathBuf {
+    PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
+}
+
+/// Add blocked domains to Windows hosts file (0.0.0.0 → blocks at OS level)
+fn apply_hosts_block(domains: &[String]) -> Result<(), String> {
+    // First clean any existing entries
+    cleanup_hosts_block_inner()?;
+
+    if domains.is_empty() {
+        return Ok(());
+    }
+
+    // Deduplicate domain names (skip IPs, CIDRs — hosts file only handles domains)
+    let mut domain_set = HashSet::new();
+    for d in domains {
+        let d = d.trim();
+        if d.is_empty() || d.contains('/') || d.parse::<std::net::IpAddr>().is_ok() {
+            continue;
+        }
+        domain_set.insert(d.to_lowercase());
+    }
+
+    if domain_set.is_empty() {
+        return Ok(());
+    }
+
+    let mut block = String::new();
+    block.push_str("\n");
+    block.push_str(HOSTS_MARKER_BEGIN);
+    block.push_str("\n");
+    for domain in &domain_set {
+        block.push_str(&format!("0.0.0.0 {domain}\n"));
+        block.push_str(&format!("::0 {domain}\n"));
+    }
+    block.push_str(HOSTS_MARKER_END);
+    block.push_str("\n");
+
+    let hosts = hosts_file_path();
+    let existing = std::fs::read_to_string(&hosts)
+        .unwrap_or_default();
+
+    let mut content = existing;
+    content.push_str(&block);
+
+    std::fs::write(&hosts, &content)
+        .map_err(|e| format!("Failed to write hosts file: {e}"))?;
+
+    eprintln!("[routing] Hosts file: blocked {} domains", domain_set.len());
+    Ok(())
+}
+
+fn cleanup_hosts_block_inner() -> Result<(), String> {
+    let hosts = hosts_file_path();
+    let content = match std::fs::read_to_string(&hosts) {
+        Ok(c) => c,
+        Err(_) => return Ok(()), // No hosts file = nothing to clean
+    };
+
+    if !content.contains(HOSTS_MARKER_BEGIN) {
+        return Ok(());
+    }
+
+    let mut result = String::with_capacity(content.len());
+    let mut skip = false;
+    for line in content.lines() {
+        if line.trim() == HOSTS_MARKER_BEGIN {
+            skip = true;
+            continue;
+        }
+        if line.trim() == HOSTS_MARKER_END {
+            skip = false;
+            continue;
+        }
+        if !skip {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    // Remove trailing empty lines we may have added
+    let trimmed = result.trim_end_matches('\n');
+    let mut final_content = trimmed.to_string();
+    if !final_content.is_empty() {
+        final_content.push('\n');
+    }
+
+    std::fs::write(&hosts, &final_content)
+        .map_err(|e| format!("Failed to clean hosts file: {e}"))?;
+
+    eprintln!("[routing] Hosts file: cleaned TrustTunnel entries");
+    Ok(())
+}
+
+/// Public cleanup — called on VPN disconnect and app exit
+#[tauri::command]
+pub fn cleanup_hosts_block() -> Result<(), String> {
+    cleanup_hosts_block_inner()
 }
 
 /// Simple UUID v4 generator (no external dependency)
