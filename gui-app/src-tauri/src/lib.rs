@@ -1,5 +1,8 @@
 mod connectivity;
 mod geodata;
+mod geodata_v2ray;
+mod processes;
+mod routing_rules;
 mod sidecar;
 mod ssh_deploy;
 
@@ -965,6 +968,7 @@ pub fn run() {
             is_connected: Arc::new(Mutex::new(false)),
             tray_notified: Arc::new(Mutex::new(false)),
         })
+        .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .setup(|app| {
             // Open devtools in release builds
             #[cfg(feature = "devtools")]
@@ -1109,6 +1113,16 @@ pub fn run() {
             geodata::load_active_groups,
             geodata::save_active_groups,
             geodata::load_group_cache,
+            geodata_v2ray::download_geodata,
+            geodata_v2ray::get_geodata_status,
+            geodata_v2ray::load_geodata_categories,
+            routing_rules::load_routing_rules,
+            routing_rules::save_routing_rules,
+            routing_rules::export_routing_rules,
+            routing_rules::import_routing_rules,
+            routing_rules::migrate_legacy_exclusions,
+            routing_rules::resolve_and_apply,
+            processes::list_running_processes,
             ping_endpoint,
             speedtest_run,
             self_update
