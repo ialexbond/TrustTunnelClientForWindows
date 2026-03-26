@@ -60,6 +60,11 @@ fn group_cache_path(group_id: &str) -> std::path::PathBuf {
     cache_dir.join(format!("{group_id}.json"))
 }
 
+/// Public accessor for group_cache_path (used by routing_rules module)
+pub fn group_cache_path_pub(group_id: &str) -> std::path::PathBuf {
+    group_cache_path(group_id)
+}
+
 #[tauri::command]
 pub fn load_exclusion_json() -> Result<Vec<String>, String> {
     let path = exclusions_json_path();
