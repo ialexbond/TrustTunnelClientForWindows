@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, Loader2, Cpu } from "lucide-react";
+import { Search, Loader2, Cpu, Check } from "lucide-react";
 import { Modal, Button } from "../../shared/ui";
 import type { ProcessInfo } from "./useRoutingState";
 
@@ -28,7 +28,6 @@ export function ProcessPickerModal({
   const alreadySet = useMemo(() => new Set(alreadyAdded), [alreadyAdded]);
 
   const filtered = useMemo(() => {
-    // Deduplicate by name
     const seen = new Set<string>();
     const unique: ProcessInfo[] = [];
     for (const p of processes) {
@@ -74,13 +73,16 @@ export function ProcessPickerModal({
   return (
     <Modal open={open} onClose={handleClose}>
       <div
-        className="w-[400px] max-h-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
-        style={{ backgroundColor: "var(--color-bg-elevated)" }}
+        className="w-[420px] max-h-[520px] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+        style={{
+          backgroundColor: "var(--color-bg-elevated)",
+          border: "1px solid var(--color-border)",
+        }}
       >
         {/* Header */}
         <div className="px-5 pt-5 pb-3">
           <h3
-            className="text-base font-semibold mb-3"
+            className="text-sm font-semibold mb-3"
             style={{ color: "var(--color-text-primary)" }}
           >
             {t("routing.selectProcesses")}
@@ -97,7 +99,7 @@ export function ProcessPickerModal({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("routing.searchProcess")}
-              className="w-full pl-9 pr-3 py-2.5 rounded-[var(--radius-lg)] text-sm outline-none transition-colors placeholder:opacity-40"
+              className="w-full pl-9 pr-3 py-2 rounded-[var(--radius-lg)] text-xs outline-none transition-colors placeholder:opacity-40"
               style={{
                 backgroundColor: "var(--color-input-bg)",
                 border: "1px solid var(--color-input-border)",
@@ -111,7 +113,7 @@ export function ProcessPickerModal({
         {/* Process list */}
         <div
           className="flex-1 overflow-y-auto px-3 pb-2"
-          style={{ minHeight: "200px", maxHeight: "300px" }}
+          style={{ minHeight: "200px", maxHeight: "320px" }}
         >
           {loading ? (
             <div className="flex items-center justify-center py-8">
@@ -131,54 +133,46 @@ export function ProcessPickerModal({
               {filtered.map((proc) => {
                 const isAdded = alreadySet.has(proc.name);
                 const isSelected = selected.has(proc.name);
-                const isDisabled = isAdded;
+                const checked = isSelected || isAdded;
 
                 return (
                   <button
                     key={proc.name}
                     type="button"
-                    disabled={isDisabled}
+                    disabled={isAdded}
                     onClick={() => toggleProcess(proc.name)}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors disabled:opacity-40"
                     style={{
                       backgroundColor: isSelected
-                        ? "rgba(99, 102, 241, 0.1)"
+                        ? "rgba(99, 102, 241, 0.08)"
                         : "transparent",
                     }}
                   >
                     {/* Checkbox */}
                     <div
-                      className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors"
+                      className="w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors"
                       style={{
-                        borderColor: isSelected || isAdded
+                        borderColor: checked
                           ? "var(--color-accent-500)"
-                          : "var(--color-border-strong)",
-                        backgroundColor: isSelected || isAdded
+                          : "var(--color-border)",
+                        backgroundColor: checked
                           ? "var(--color-accent-500)"
-                          : "transparent",
+                          : "var(--color-input-bg)",
                       }}
                     >
-                      {(isSelected || isAdded) && (
-                        <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none">
-                          <path
-                            d="M2 6l3 3 5-5"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      )}
+                      {checked && <Check className="w-3 h-3 text-white" />}
                     </div>
 
-                    <Cpu
-                      className="w-3.5 h-3.5 shrink-0"
-                      style={{ color: "var(--color-text-muted)" }}
-                    />
+                    <div
+                      className="w-6 h-6 rounded flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: "var(--color-bg-hover)" }}
+                    >
+                      <Cpu className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />
+                    </div>
 
                     <div className="flex-1 min-w-0">
                       <span
-                        className="text-xs font-medium block truncate"
+                        className="text-xs block truncate"
                         style={{ color: "var(--color-text-primary)" }}
                       >
                         {proc.name}
@@ -195,8 +189,11 @@ export function ProcessPickerModal({
 
                     {isAdded && (
                       <span
-                        className="text-[10px] shrink-0"
-                        style={{ color: "var(--color-text-muted)" }}
+                        className="text-[10px] shrink-0 px-1.5 py-0.5 rounded"
+                        style={{
+                          color: "var(--color-text-muted)",
+                          backgroundColor: "var(--color-bg-hover)",
+                        }}
                       >
                         {t("routing.alreadyAdded")}
                       </span>
@@ -210,27 +207,21 @@ export function ProcessPickerModal({
 
         {/* Footer */}
         <div
-          className="flex items-center justify-between px-5 py-3 border-t"
+          className="flex items-center justify-end gap-2 px-5 py-3 border-t"
           style={{ borderColor: "var(--color-border)" }}
         >
-          <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
-            {selected.size > 0
-              ? t("routing.selectedCount", { count: selected.size })
-              : ""}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={handleClose}>
-              {t("buttons.cancel")}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={selected.size === 0}
-              onClick={handleConfirm}
-            >
-              {t("routing.addSelected")}
-            </Button>
-          </div>
+          <Button variant="ghost" size="sm" onClick={handleClose}>
+            {t("buttons.cancel")}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={selected.size === 0}
+            onClick={handleConfirm}
+          >
+            {t("routing.addSelected")}
+            {selected.size > 0 && ` (${selected.size})`}
+          </Button>
         </div>
       </div>
     </Modal>

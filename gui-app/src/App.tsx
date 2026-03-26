@@ -545,12 +545,15 @@ function App() {
           </div>
 
           {/* Routing */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "routing" ? "flex" : "none" }}>
-            {statusPanelNode}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
             <RoutingPanel
               configPath={config.configPath}
               status={status}
               vpnMode={vpnMode}
+              connectedSince={connectedSince}
+              vpnError={error}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
               onReconnect={handleReconnect}
             />
           </div>

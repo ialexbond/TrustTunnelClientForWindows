@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { Database, Download, RefreshCw, Loader2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { Database, Download, RefreshCw, Check, Loader2 } from "lucide-react";
 import { Card, CardHeader, Badge, Button } from "../../shared/ui";
 import type { GeoDataStatus as GeoDataStatusType } from "./useRoutingState";
 
@@ -13,6 +14,12 @@ interface GeoDataProgressPayload {
   step: string;
 }
 
+interface GeoUpdateCheck {
+  update_available: boolean;
+  current_tag: string | null;
+  latest_tag: string | null;
+}
+
 interface GeoDataStatusProps {
   status: GeoDataStatusType;
   downloading: boolean;
@@ -22,6 +29,8 @@ interface GeoDataStatusProps {
 export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataStatusProps) {
   const { t } = useTranslation();
   const [progress, setProgress] = useState<GeoDataProgressPayload | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<GeoUpdateCheck | null>(null);
+  const [checking, setChecking] = useState(false);
 
   // Listen for progress events
   useEffect(() => {
@@ -29,25 +38,68 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
     listen<GeoDataProgressPayload>("geodata-progress", (event) => {
       setProgress(event.payload);
     }).then((fn) => { unlisten = fn; });
-
     return () => { unlisten?.(); };
   }, []);
 
   // Clear progress when download finishes
   useEffect(() => {
     if (!downloading) {
-      const timer = setTimeout(() => setProgress(null), 3000);
+      const timer = setTimeout(() => setProgress(null), 2000);
       return () => clearTimeout(timer);
     }
   }, [downloading]);
 
-  const badgeVariant: "success" | "warning" | "danger" = status.downloaded
-    ? "success"
-    : "danger";
+  // After download completes, reset update check
+  useEffect(() => {
+    if (!downloading && updateCheck?.update_available) {
+      setUpdateCheck(null);
+    }
+  }, [downloading, updateCheck]);
 
-  const badgeLabel = status.downloaded
-    ? t("routing.geodataReady")
-    : t("routing.geodataMissing");
+  // Check for updates on mount if already downloaded
+  useEffect(() => {
+    if (status.downloaded && !updateCheck && !checking) {
+      checkUpdates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.downloaded]);
+
+  const checkUpdates = useCallback(async () => {
+    setChecking(true);
+    try {
+      const result = await invoke<GeoUpdateCheck>("check_geodata_updates");
+      setUpdateCheck(result);
+    } catch (e) {
+      console.error("Update check failed:", e);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  // Format release tag for display: "202603260521" → "26.03.2026"
+  const formatTag = (tag: string): string => {
+    if (tag.length === 12) {
+      const y = tag.slice(0, 4);
+      const m = tag.slice(4, 6);
+      const d = tag.slice(6, 8);
+      return `${d}.${m}.${y}`;
+    }
+    return tag;
+  };
+
+  // Determine button state
+  const isUpToDate = status.downloaded && updateCheck && !updateCheck.update_available;
+  const hasUpdate = status.downloaded && updateCheck?.update_available;
+  const notDownloaded = !status.downloaded;
+
+  // Badge
+  const badgeVariant: "success" | "warning" | "danger" =
+    hasUpdate ? "warning" : status.downloaded ? "success" : "danger";
+  const badgeLabel = hasUpdate
+    ? t("routing.geodataUpdateAvailable", "Доступно обновление")
+    : status.downloaded
+      ? t("routing.geodataReady")
+      : t("routing.geodataMissing");
 
   return (
     <Card padding="md">
@@ -79,7 +131,7 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
             </span>
             {status.geoip_categories_count > 0 && (
               <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                ({status.geoip_categories_count} {t("routing.categories")})
+                ({status.geoip_categories_count})
               </span>
             )}
           </div>
@@ -97,79 +149,108 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
             </span>
             {status.geosite_categories_count > 0 && (
               <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                ({status.geosite_categories_count} {t("routing.categories")})
+                ({status.geosite_categories_count})
               </span>
             )}
           </div>
-        </div>
 
-        {status.downloaded && (
-          <div className="flex items-center gap-3">
-            {status.version && (
-              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                {t("routing.geodataVersion")}: {status.version}
-              </span>
-            )}
-            {status.downloaded_at && (
-              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                {t("routing.geodataDate")}: {new Date(Number(status.downloaded_at)).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-        )}
+          {/* Current version tag */}
+          {status.release_tag && (
+            <span className="text-[10px] ml-auto" style={{ color: "var(--color-text-muted)" }}>
+              v{formatTag(status.release_tag)}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Progress bar and status text during download */}
+      {/* Progress during download */}
       {downloading && progress && (
-        <div className="mb-3 space-y-1.5">
-          {/* Progress bar */}
-          {progress.total_bytes > 0 && (
-            <div
-              className="w-full h-1.5 rounded-full overflow-hidden"
-              style={{ backgroundColor: "var(--color-bg-primary)" }}
-            >
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${progress.percent}%`,
-                  backgroundColor: "var(--color-accent)",
-                }}
-              />
-            </div>
-          )}
-          {/* Step text */}
-          <p
-            className="text-[11px] font-mono"
-            style={{ color: "var(--color-text-secondary)" }}
+        <div className="mb-3">
+          <div
+            className="w-full h-1 rounded-full overflow-hidden"
+            style={{ backgroundColor: "var(--color-bg-hover)" }}
           >
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${progress.percent}%`,
+                backgroundColor: "var(--color-accent-500)",
+              }}
+            />
+          </div>
+          <p className="text-[10px] mt-1" style={{ color: "var(--color-text-muted)" }}>
             {progress.step}
           </p>
         </div>
       )}
 
-      {/* Download / Update button */}
-      <Button
-        variant={status.downloaded ? "secondary" : "primary"}
-        size="sm"
-        loading={downloading}
-        icon={
-          downloading ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : status.downloaded ? (
-            <RefreshCw className="w-3.5 h-3.5" />
-          ) : (
-            <Download className="w-3.5 h-3.5" />
-          )
+      {/* Action button */}
+      {(() => {
+        // Downloading in progress
+        if (downloading) {
+          return (
+            <Button variant="primary" size="sm" fullWidth loading disabled>
+              {t("routing.downloading", "Загрузка...")}
+            </Button>
+          );
         }
-        onClick={onDownload}
-        disabled={downloading}
-      >
-        {downloading
-          ? (progress?.step || t("routing.downloading"))
-          : status.downloaded
-            ? t("routing.updateGeodata")
-            : t("routing.downloadGeodata")}
-      </Button>
+
+        // Not downloaded — show download button
+        if (!status.downloaded) {
+          return (
+            <Button
+              variant="primary"
+              size="sm"
+              fullWidth
+              icon={<Download className="w-3.5 h-3.5" />}
+              onClick={onDownload}
+            >
+              {t("routing.downloadGeodata")}
+            </Button>
+          );
+        }
+
+        // Downloaded + update available
+        if (updateCheck?.update_available && updateCheck.latest_tag) {
+          return (
+            <Button
+              variant="primary"
+              size="sm"
+              fullWidth
+              icon={<Download className="w-3.5 h-3.5" />}
+              onClick={onDownload}
+            >
+              {`${t("routing.updateGeodata")} → v${formatTag(updateCheck.latest_tag)}`}
+            </Button>
+          );
+        }
+
+        // Downloaded + confirmed up to date
+        if (updateCheck && !updateCheck.update_available) {
+          return (
+            <Button variant="secondary" size="sm" fullWidth disabled icon={<Check className="w-3.5 h-3.5" />}>
+              {t("routing.geodataUpToDate", "Актуальная версия")}
+            </Button>
+          );
+        }
+
+        // Downloaded + checking or not yet checked — show check button
+        return (
+          <Button
+            variant="secondary"
+            size="sm"
+            fullWidth
+            loading={checking}
+            icon={<RefreshCw className="w-3.5 h-3.5" />}
+            onClick={checkUpdates}
+            disabled={checking}
+          >
+            {checking
+              ? t("routing.checkingUpdates", "Проверка...")
+              : t("routing.checkUpdates", "Проверить обновления")}
+          </Button>
+        );
+      })()}
     </Card>
   );
 }
