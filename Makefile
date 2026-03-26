@@ -43,11 +43,21 @@ init:
 	git config core.hooksPath ./scripts/hooks
 
 .PHONY: bootstrap_deps
-## Export all the required conan packages to the local cache
+## Export all the required conan packages to the local cache.
+## Skips if all dependencies are already resolved in the local Conan cache.
 bootstrap_deps:
+	@if conan graph info . --profile:host=default >/dev/null 2>&1; then \
+		echo "Conan dependencies already bootstrapped, skipping."; \
+	else \
+		$(MAKE) do_bootstrap_deps; \
+	fi
+
+.PHONY: do_bootstrap_deps
 ifeq ($(SKIP_VENV),1)
+do_bootstrap_deps:
 	./scripts/bootstrap_conan_deps.py
 else
+do_bootstrap_deps:
 	python3 -m venv env && \
 	. env/bin/activate && \
 	pip install -r requirements.txt && \
@@ -125,10 +135,20 @@ clang-tidy: compile_commands
 ## Check c++ code formatting with clangd-tidy.
 .PHONY: clangd-tidy
 clangd-tidy: compile_commands
+ifeq ($(SKIP_VENV),1)
 	jq -r '.[] | select(.file | endswith(".cpp")) | .file' $(COMPILE_COMMANDS) \
 		| grep -vE '(^|/)(third-party)(/|$$)' \
 		| sort -u \
 		| xargs clangd-tidy -p $(BUILD_DIR) --tqdm -j$(NPROC)
+else
+	python3 -m venv env && \
+	. env/bin/activate && \
+	pip install -r requirements.txt && \
+	jq -r '.[] | select(.file | endswith(".cpp")) | .file' $(COMPILE_COMMANDS) \
+		| grep -vE '(^|/)(third-party)(/|$$)' \
+		| sort -u \
+		| xargs clangd-tidy -p $(BUILD_DIR) --tqdm -j$(NPROC)
+endif
 
 ## Lint markdown files.
 ## `markdownlint-cli` should be installed:
