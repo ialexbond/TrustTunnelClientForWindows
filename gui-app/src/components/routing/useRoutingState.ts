@@ -135,6 +135,7 @@ export interface UseRoutingStateReturn {
   // Save & Apply
   handleSave: (reconnect?: boolean) => Promise<void>;
   isVpnActive: boolean;
+  markDirty: () => void;
 
   // Snackbar
   successQueue: string[];
@@ -586,6 +587,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     geodataDownloading,
     handleSave,
     isVpnActive,
+    markDirty: useCallback(() => setDirty(true), []),
     successQueue,
     shiftSuccess,
     isDuplicate,
