@@ -32,7 +32,7 @@ export interface GeoDataStatus {
   downloaded: boolean;
   geoip_exists: boolean;
   geosite_exists: boolean;
-  version?: string;
+  release_tag?: string;
   downloaded_at?: string;
   geoip_categories_count: number;
   geosite_categories_count: number;
@@ -88,8 +88,12 @@ function rawToRuleEntry(raw: string): RuleEntry {
 // Hook
 // ═══════════════════════════════════════════════════════
 
+export type VpnStatus = "connected" | "connecting" | "disconnected" | "recovering" | "error";
+
 export interface UseRoutingStateOptions {
   configPath: string;
+  status: VpnStatus;
+  onReconnect: () => Promise<void>;
 }
 
 export interface UseRoutingStateReturn {
@@ -128,8 +132,9 @@ export interface UseRoutingStateReturn {
   downloadGeoData: () => Promise<void>;
   geodataDownloading: boolean;
 
-  // Apply
-  resolveAndApply: () => Promise<void>;
+  // Save & Apply
+  handleSave: (reconnect?: boolean) => Promise<void>;
+  isVpnActive: boolean;
 
   // Snackbar
   successQueue: string[];
@@ -160,7 +165,8 @@ const emptyGeoIndex: GeoDataIndex = {
   geosite: [],
 };
 
-export function useRoutingState({ configPath }: UseRoutingStateOptions): UseRoutingStateReturn {
+export function useRoutingState({ configPath, status, onReconnect }: UseRoutingStateOptions): UseRoutingStateReturn {
+  const isVpnActive = status === "connected" || status === "connecting";
   const [rules, setRules] = useState<RoutingRules>(emptyRules);
   const [geodataStatus, setGeodataStatus] = useState<GeoDataStatus>(emptyGeoStatus);
   const [geodataCategories, setGeodataCategories] = useState<GeoDataIndex>(emptyGeoIndex);
@@ -250,6 +256,21 @@ export function useRoutingState({ configPath }: UseRoutingStateOptions): UseRout
     load();
     loadGeoStatus();
   }, [load, loadGeoStatus]);
+
+  // Listen for geodata file changes (fs watcher from Rust)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<GeoDataStatus>("geodata-files-changed", (event) => {
+        setGeodataStatus(event.payload);
+        // Reload categories if files appeared
+        if (event.payload.downloaded) {
+          loadGeoStatus();
+        }
+      }).then((fn) => { unlisten = fn; });
+    });
+    return () => { unlisten?.(); };
+  }, [loadGeoStatus]);
 
   // ─── Dirty tracking ────────────────────────────────
 
@@ -484,9 +505,25 @@ export function useRoutingState({ configPath }: UseRoutingStateOptions): UseRout
     }
   }, [loadGeoStatus, pushSuccess]);
 
-  // ─── Resolve & Apply ───────────────────────────────
+  // ─── Silent save (auto-save when VPN inactive) ─────
 
-  const resolveAndApply = useCallback(async () => {
+  const silentSave = useCallback(async () => {
+    if (!configPath) return;
+    try {
+      const payload = toBackendPayload(rules);
+      await invoke("save_routing_rules", { rules: payload });
+      await invoke("resolve_and_apply", { configPath, rules: payload });
+      baselineRef.current = computeSnapshot(rules);
+      setDirty(false);
+      pushSuccess("Настройки сохранены");
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
+
+  // ─── Manual save (with reconnect) ─────────────────
+
+  const handleSave = useCallback(async (reconnect = false) => {
     if (!configPath) return;
     setApplying(true);
     setError("");
@@ -496,13 +533,32 @@ export function useRoutingState({ configPath }: UseRoutingStateOptions): UseRout
       await invoke("resolve_and_apply", { configPath, rules: payload });
       baselineRef.current = computeSnapshot(rules);
       setDirty(false);
-      pushSuccess("Правила применены");
+
+      if (reconnect && isVpnActive) {
+        pushSuccess("Переподключение...");
+        await onReconnect();
+      } else {
+        pushSuccess("Настройки сохранены");
+      }
     } catch (e) {
       setError(String(e));
     } finally {
       setApplying(false);
     }
-  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
+  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload, isVpnActive, onReconnect]);
+
+  // ─── Auto-save when VPN not active ────────────────
+
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!dirty || !configPath) return;
+    if (isVpnActive) return; // don't auto-save when VPN is on
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      silentSave();
+    }, 1200);
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
+  }, [dirty, configPath, isVpnActive, silentSave]);
 
   return {
     rules,
@@ -528,7 +584,8 @@ export function useRoutingState({ configPath }: UseRoutingStateOptions): UseRout
     importRules,
     downloadGeoData,
     geodataDownloading,
-    resolveAndApply,
+    handleSave,
+    isVpnActive,
     successQueue,
     shiftSuccess,
     isDuplicate,

@@ -184,7 +184,11 @@
 }
 
 
-/* Borders */
+/* Borders — ensure all .border elements use theme token, not Tailwind default */
+.border {
+  border-color: var(--color-border);
+}
+
 [data-theme="light"] .border-white\/10,
 [data-theme="light"] .border-white\/5 {
   border-color: var(--color-border) !important;

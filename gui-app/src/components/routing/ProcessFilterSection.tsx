@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Cpu, Plus, X } from "lucide-react";
-import { Card, CardHeader, Toggle, Button, Badge } from "../../shared/ui";
+import { open } from "@tauri-apps/plugin-dialog";
+import { Cpu, Plus, X, FolderOpen, Filter, AppWindow } from "lucide-react";
+import { Card, CardHeader, Toggle, Button } from "../../shared/ui";
 import { ProcessPickerModal } from "./ProcessPickerModal";
 import type { ProcessInfo } from "./useRoutingState";
 
@@ -41,18 +42,29 @@ export function ProcessFilterSection({
     setPickerOpen(false);
   };
 
+  const handleBrowse = async () => {
+    const file = await open({
+      filters: [{ name: "Executable", extensions: ["exe"] }],
+      multiple: false,
+    });
+    if (file) {
+      // Extract filename from path
+      const path = typeof file === "string" ? file : file;
+      const sep = path.includes("/") ? "/" : "\\";
+      const filename = path.split(sep).pop() || path;
+      if (filename && !processes.includes(filename)) {
+        onAdd(filename);
+      }
+    }
+  };
+
   return (
     <>
       <Card padding="md">
         <CardHeader
           title={t("routing.processFilterTitle")}
           description={t("routing.processFilterDescription")}
-          icon={<Cpu className="w-4 h-4" />}
-          action={
-            <Badge variant={processes.length > 0 ? "accent" : "default"} size="sm">
-              {processes.length}
-            </Badge>
-          }
+          icon={<Filter className="w-4 h-4" />}
         />
 
         {/* Mode toggle */}
@@ -69,21 +81,21 @@ export function ProcessFilterSection({
               ? t("routing.processExcludeDescription")
               : t("routing.processOnlyDescription")
           }
-          icon={<Cpu className="w-3.5 h-3.5" />}
+          icon={<AppWindow className="w-3.5 h-3.5" />}
         />
 
         {/* Process list */}
         {processes.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {processes.map((proc) => (
+          <div className="mt-3 rounded-[var(--radius-lg)] overflow-hidden border" style={{ borderColor: "var(--color-border)" }}>
+            {processes.map((proc, idx) => (
               <div
                 key={proc}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg group hover:bg-[var(--color-bg-hover)] transition-colors"
+                className="flex items-center gap-3 px-3 py-2.5 group transition-colors"
+                style={{
+                  backgroundColor: idx % 2 === 0 ? "transparent" : "var(--color-bg-hover)",
+                  borderBottom: idx < processes.length - 1 ? "1px solid var(--color-border)" : "none",
+                }}
               >
-                <Cpu
-                  className="w-3.5 h-3.5 shrink-0"
-                  style={{ color: "var(--color-text-muted)" }}
-                />
                 <span
                   className="flex-1 text-xs font-mono truncate"
                   style={{ color: "var(--color-text-primary)" }}
@@ -92,18 +104,19 @@ export function ProcessFilterSection({
                 </span>
                 <button
                   onClick={() => onRemove(proc)}
-                  className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-[rgba(239,68,68,0.1)] transition-all"
+                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                  style={{ color: "var(--color-danger-400)" }}
                   title={t("routing.removeProcess")}
                 >
-                  <X className="w-3.5 h-3.5" style={{ color: "var(--color-danger-400)" }} />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             ))}
           </div>
         )}
 
-        {/* Add button */}
-        <div className="mt-3">
+        {/* Action buttons */}
+        <div className="mt-3 flex gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -111,6 +124,14 @@ export function ProcessFilterSection({
             onClick={handleOpenPicker}
           >
             {t("routing.addProcess")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<FolderOpen className="w-3.5 h-3.5" />}
+            onClick={handleBrowse}
+          >
+            {t("routing.browseExe", "Обзор")}
           </Button>
         </div>
       </Card>

@@ -1,51 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, GitBranch, RefreshCw, AlertCircle } from "lucide-react";
+import {
+  Loader2, GitBranch, Save, Download, Upload,
+  Wifi, WifiOff, Clock, Power, Zap, Globe, Ban,
+} from "lucide-react";
 import type { VpnStatus } from "../App";
+import { Card } from "../shared/ui/Card";
+import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { SnackBar } from "../shared/ui/SnackBar";
-import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
+import { formatUptime } from "../shared/utils/uptime";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
 import { RoutingBlockCard } from "./routing/RoutingBlockCard";
 import { ProcessFilterSection } from "./routing/ProcessFilterSection";
-import { ExportImportButtons } from "./routing/ExportImportButtons";
 
 interface RoutingPanelProps {
   configPath: string;
   status: VpnStatus;
+  connectedSince: Date | null;
+  vpnError: string | null;
+  onConnect: () => void;
+  onDisconnect: () => void;
   onReconnect: () => Promise<void>;
   vpnMode?: string;
 }
 
-function RoutingPanel({ configPath, status, onReconnect, vpnMode: _vpnMode }: RoutingPanelProps) {
+function RoutingPanel({ configPath, status, connectedSince, onConnect, onDisconnect, onReconnect }: RoutingPanelProps) {
   const { t } = useTranslation();
-  const state = useRoutingState({ configPath });
-  const [showReconnectConfirm, setShowReconnectConfirm] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
+  const state = useRoutingState({ configPath, status, onReconnect });
 
-  const isActive = status === "connected" || status === "connecting" || status === "recovering";
+  // Uptime ticker
+  const [, setTick] = useState(0);
+  const isConnected = status === "connected";
+  const isLoading = status === "connecting" || status === "disconnecting" || status === "recovering";
 
-  // Handle apply: save + optionally reconnect
-  const handleApply = async () => {
-    await state.resolveAndApply();
-    if (isActive) {
-      setShowReconnectConfirm(true);
-    }
-  };
+  useEffect(() => {
+    if (!isConnected || !connectedSince) return;
+    const iv = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(iv);
+  }, [isConnected, connectedSince]);
 
-  const handleReconnectConfirm = async () => {
-    setReconnecting(true);
-    try {
-      await onReconnect();
-    } finally {
-      setReconnecting(false);
-      setShowReconnectConfirm(false);
-    }
-  };
+  const saveLabel = state.applying
+    ? t("status.saving")
+    : t("buttons.save_and_reconnect");
 
-  // Loading state
   if (!configPath) {
     return (
       <div
@@ -70,40 +70,135 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode: _vpnMode }: Ro
     );
   }
 
+  // Status badge config (same as ConnectionOverview)
+  const statusVariant = isConnected ? "success" : isLoading ? "warning" : "default";
+  const statusLabel = isConnected
+    ? t("status.connected")
+    : t(`status.${status === "connecting" ? "connecting_short" : status === "disconnecting" ? "disconnecting_short" : status === "recovering" ? "recovering_short" : status}`);
+  const statusIcon = isLoading
+    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+    : isConnected
+      ? <Wifi className="w-3.5 h-3.5" />
+      : <WifiOff className="w-3.5 h-3.5" />;
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
         {/* Error */}
+        {/* Connection block — identical layout to dashboard ConnectionOverview */}
+        <Card padding="md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Badge variant={statusVariant} size="md" icon={statusIcon}>
+                {statusLabel}
+              </Badge>
+
+              {isConnected && connectedSince && (
+                <div className="flex items-center gap-1 text-xs tabular-nums" style={{ color: "var(--color-text-muted)", minWidth: "5.5em" }}>
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{formatUptime(connectedSince)}</span>
+                </div>
+              )}
+
+              {/* Filter counters instead of protocol/mode */}
+              <div className="flex items-center gap-3 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                <div className="flex items-center gap-1">
+                  <Zap className="w-3.5 h-3.5" style={{ color: "var(--color-success-400)" }} />
+                  <span>{state.rules.direct.length}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Globe className="w-3.5 h-3.5" style={{ color: "var(--color-accent-400)" }} />
+                  <span>{state.rules.proxy.length}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Ban className="w-3.5 h-3.5" style={{ color: "var(--color-danger-400)" }} />
+                  <span>{state.rules.block.length}</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              {isLoading ? (
+                <Button variant="warning" size="sm" disabled loading>
+                  {statusLabel}
+                </Button>
+              ) : isConnected ? (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={<Power className="w-3.5 h-3.5" />}
+                  onClick={onDisconnect}
+                >
+                  {t("buttons.disconnect")}
+                </Button>
+              ) : (
+                <Button
+                  variant="success"
+                  size="sm"
+                  icon={<Power className="w-3.5 h-3.5" />}
+                  onClick={onConnect}
+                >
+                  {t("buttons.connect")}
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* Error — shown below connection block */}
         {state.error && (
           <ErrorBanner message={state.error} />
         )}
 
-        {/* Dirty indicator */}
-        {state.dirty && (
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-lg)]"
-            style={{
-              backgroundColor: "rgba(245, 158, 11, 0.08)",
-              border: "1px solid rgba(245, 158, 11, 0.25)",
-            }}
-          >
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--color-warning-400)" }} />
-            <p className="flex-1 text-[11px]" style={{ color: "var(--color-warning-400)" }}>
-              {isActive
-                ? t("routing.unsavedChangesReconnect")
-                : t("routing.unsavedChanges")}
-            </p>
-          </div>
-        )}
-
-        {/* 1. GeoData Status */}
+        {/* GeoData Status */}
         <GeoDataStatusCard
           status={state.geodataStatus}
           downloading={state.geodataDownloading}
           onDownload={state.downloadGeoData}
         />
 
-        {/* 2. Routing Blocks */}
+        {/* Save & Reconnect + Export/Import */}
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            className="flex-1"
+            icon={<Save className="w-3.5 h-3.5" />}
+            loading={state.applying}
+            disabled={!state.isVpnActive || !state.dirty}
+            onClick={() => state.handleSave(true)}
+          >
+            {saveLabel}
+          </Button>
+          <button
+            onClick={state.exportRules}
+            disabled={state.saving || state.applying}
+            className="px-3 py-2 rounded-[var(--radius-lg)] transition-colors disabled:opacity-40"
+            style={{
+              backgroundColor: "var(--color-bg-card)",
+              border: "1px solid var(--color-border)",
+              color: "var(--color-text-secondary)",
+            }}
+            title={t("routing.exportRules")}
+          >
+            <Upload className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={state.importRules}
+            disabled={state.saving || state.applying}
+            className="px-3 py-2 rounded-[var(--radius-lg)] transition-colors disabled:opacity-40"
+            style={{
+              backgroundColor: "var(--color-bg-card)",
+              border: "1px solid var(--color-border)",
+              color: "var(--color-text-secondary)",
+            }}
+            title={t("routing.importRules")}
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Routing Blocks */}
         <RoutingBlockCard
           action="direct"
           entries={state.rules.direct}
@@ -134,7 +229,7 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode: _vpnMode }: Ro
           onMove={state.moveEntry}
         />
 
-        {/* 3. Process Filter */}
+        {/* Process Filter */}
         <ProcessFilterSection
           processMode={state.rules.process_mode}
           processes={state.rules.processes}
@@ -145,42 +240,7 @@ function RoutingPanel({ configPath, status, onReconnect, vpnMode: _vpnMode }: Ro
           onRemove={state.removeProcess}
           onLoadProcesses={state.loadProcessList}
         />
-
-        {/* 4. Export / Import */}
-        <ExportImportButtons
-          onExport={state.exportRules}
-          onImport={state.importRules}
-          disabled={state.saving || state.applying}
-        />
-
-        {/* 5. Apply button */}
-        <Button
-          variant="primary"
-          size="md"
-          fullWidth
-          icon={<RefreshCw className="w-4 h-4" />}
-          loading={state.applying}
-          disabled={!state.dirty || state.saving}
-          onClick={handleApply}
-        >
-          {state.applying
-            ? t("routing.applying")
-            : t("routing.applyChanges")}
-        </Button>
       </div>
-
-      {/* Reconnect confirmation dialog */}
-      <ConfirmDialog
-        open={showReconnectConfirm}
-        title={t("routing.reconnectTitle")}
-        message={t("routing.reconnectMessage")}
-        confirmLabel={t("routing.reconnectConfirm")}
-        cancelLabel={t("buttons.cancel")}
-        variant="warning"
-        onConfirm={handleReconnectConfirm}
-        onCancel={() => setShowReconnectConfirm(false)}
-        loading={reconnecting}
-      />
 
       {/* SnackBar */}
       <SnackBar
