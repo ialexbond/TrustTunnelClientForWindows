@@ -304,38 +304,20 @@ input::-ms-clear {
   display: none;
 }
 
-/* ── Scrollbar (overlay — does not take layout space) ── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ── Scrollbar hidden — content width never shifts ── */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* Scrollbar gutter: always reserves space so content never shifts */
 .scroll-overlay {
   overflow-y: auto;
-  scrollbar-gutter: stable;
 }
 
-/* Non-scrolling container that matches scroll-overlay gutter alignment */
+/* Non-scrolling container */
 .scroll-gutter-match {
   overflow-y: auto;
-  scrollbar-gutter: stable;
   max-height: 100%;
 }

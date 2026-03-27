@@ -29,7 +29,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             ref={ref}
             type={visible ? "text" : "password"}
             className={`
-              w-full rounded-[var(--radius-lg)] py-2.5 text-sm pr-10
+              w-full rounded-[var(--radius-lg)] h-8 text-xs pr-10
               transition-colors outline-none
               placeholder:opacity-40
               disabled:opacity-50 disabled:cursor-not-allowed

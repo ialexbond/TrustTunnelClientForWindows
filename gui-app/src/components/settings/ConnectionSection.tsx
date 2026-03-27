@@ -31,15 +31,14 @@ export function ConnectionSection({ state }: Props) {
               value={localPath}
               readOnly
               placeholder="trusttunnel_client.toml"
-              className="!py-1.5 text-xs"
+              className=""
             />
           </div>
           <button
             onClick={browseConfig}
             title={t("buttons.select_file")}
-            className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-lg)] px-2.5 transition-colors"
+            className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-lg)] px-2.5 h-8 transition-colors"
             style={{
-              height: 30,
               backgroundColor: "var(--color-bg-hover)",
               border: "1px solid var(--color-border)",
               color: "var(--color-text-primary)",
@@ -50,9 +49,8 @@ export function ConnectionSection({ state }: Props) {
           <button
             onClick={clearConfig}
             title={t("buttons.delete")}
-            className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-lg)] px-2.5 transition-colors"
+            className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-lg)] px-2.5 h-8 transition-colors"
             style={{
-              height: 30,
               backgroundColor: "rgba(239,68,68,0.08)",
               border: "1px solid rgba(239,68,68,0.25)",
               color: "var(--color-danger-500)",
@@ -74,7 +72,7 @@ export function ConnectionSection({ state }: Props) {
               value={config.endpoint?.hostname || ""}
               readOnly
               disabled
-              className="!py-1.5 text-xs"
+              className=""
             />
           </div>
           <div>
@@ -85,7 +83,7 @@ export function ConnectionSection({ state }: Props) {
               value={config.endpoint?.username || ""}
               readOnly
               disabled
-              className="!py-1.5 text-xs"
+              className=""
             />
           </div>
           <div>
@@ -97,7 +95,7 @@ export function ConnectionSection({ state }: Props) {
               readOnly
               disabled
               showIcon={false}
-              className="!py-1.5 text-xs"
+              className=""
             />
           </div>
         </div>

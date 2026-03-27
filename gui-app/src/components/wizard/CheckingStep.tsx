@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import { StepBar } from "./StepBar";
+import { Button } from "../../shared/ui/Button";
 import type { WizardState } from "./useWizardState";
 
 export function CheckingStep(w: WizardState) {
@@ -18,15 +19,13 @@ export function CheckingStep(w: WizardState) {
               {t('wizard.checking.description')}
             </p>
           </div>
-          <button
-            onClick={() => w.setWizardStep("server")}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-            style={{ color: "var(--color-text-secondary)" }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => w.cancelCheck()}
           >
             {t('buttons.cancel')}
-          </button>
+          </Button>
         </div>
       </div>
     </>

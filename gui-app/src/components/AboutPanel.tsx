@@ -140,7 +140,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 <button
                   onClick={handleSelfUpdate}
                   disabled={!updateInfo.downloadUrl}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
                   style={{ backgroundColor: "rgba(16, 185, 129, 0.1)", color: "var(--color-success-500)" }}
                 >
                   <ArrowUpCircle className="w-3.5 h-3.5" />
@@ -148,7 +148,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 </button>
                 <button
                   onClick={onOpenDownload}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                  className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
                   style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
                   title="Скачать вручную из браузера"
                 >
@@ -174,7 +174,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           <button
             onClick={onCheckUpdates}
             disabled={updateInfo.checking || updating}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-bg-hover)",
               color: "var(--color-text-primary)",

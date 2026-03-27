@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import {
   XCircle, AlertTriangle, ChevronUp, ChevronDown, Copy, ClipboardCheck,
 } from "lucide-react";
+import { Button } from "../../shared/ui/Button";
 import type { WizardState } from "./useWizardState";
 
 export function ErrorStep(w: WizardState) {
@@ -95,15 +96,9 @@ export function ErrorStep(w: WizardState) {
               {t('wizard.error.reinstall_description')}
             </p>
             <div className="flex gap-2">
-              <button
-                onClick={() => w.setWizardStep("server")}
-                className="flex-1 px-3 py-2 rounded-xl text-xs transition-all"
-                style={{ color: "var(--color-text-secondary)" }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-              >
+              <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
                 {t('buttons.cancel')}
-              </button>
+              </Button>
               <button
                 onClick={() => { w.setFetchRetryCount(0); w.saveField("wizardMode", ""); w.setWizardStep("endpoint"); }}
                 className="flex-1 px-3 py-2 rounded-xl text-xs font-medium transition-all"
@@ -115,22 +110,16 @@ export function ErrorStep(w: WizardState) {
           </div>
         ) : (
           <div className="flex gap-2 justify-center">
-            <button
-              onClick={() => w.setWizardStep(w.isFetchMode ? "server" : "endpoint")}
-              className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-              style={{ color: "var(--color-text-secondary)" }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-            >
+            <Button variant="ghost" size="sm" onClick={() => w.setWizardStep(w.isFetchMode ? "server" : "endpoint")}>
               {w.isFetchMode ? t('buttons.back') : t('wizard.error.back_to_settings')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={w.isFetchMode ? () => w.handleFetchConfig() : w.handleDeploy}
-              className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
-              style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
             >
               {t('buttons.retry')}
-            </button>
+            </Button>
           </div>
         )}
       </div>

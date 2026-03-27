@@ -40,7 +40,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           <select
             ref={ref}
             className={`
-              w-full rounded-[var(--radius-lg)] px-3 py-2.5 text-sm
+              w-full rounded-[var(--radius-lg)] px-3 h-8 text-xs
               appearance-none cursor-pointer
               transition-colors outline-none
               disabled:opacity-50 disabled:cursor-not-allowed
