@@ -92,14 +92,7 @@ endif ()
 
 set(RUST_WORKSPACE_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/rust_workspace)
 set(DEEPLINK_FFI_STATICLIB_NAME ${CMAKE_STATIC_LIBRARY_PREFIX}trusttunnel_deeplink_ffi${CMAKE_STATIC_LIBRARY_SUFFIX})
-if (APPLE)
-    # On Apple, use cdylib (.dylib) to avoid duplicate Rust std symbols with libquiche.a.
-    # A cdylib encapsulates Rust std inside the dynamic library, so symbols don't leak
-    # into the global namespace and can't conflict with libquiche.a's bundled copy.
-    set(DEEPLINK_FFI_LIBNAME libtrusttunnel_deeplink_ffi.dylib)
-else ()
-    set(DEEPLINK_FFI_LIBNAME ${DEEPLINK_FFI_STATICLIB_NAME})
-endif ()
+set(DEEPLINK_FFI_LIBNAME ${DEEPLINK_FFI_STATICLIB_NAME})
 
 set(CARGO_ENV_RUSTFLAGS "RUSTFLAGS=")
 if (ANDROID)
@@ -249,20 +242,7 @@ else ()
     add_dependencies(run_setup_wizard setup_wizard)
 endif ()
 
-if (APPLE)
-    # Fix the dylib install name before anything links against it, so the consuming
-    # framework records @rpath/... instead of the absolute build path.
-    ExternalProject_Add_Step(${DEEPLINK_FFI_BUILD_TARGET} fix_dylib_install_name
-            DEPENDEES build
-            DEPENDERS install
-            ALWAYS TRUE
-            COMMAND install_name_tool -id @rpath/libtrusttunnel_deeplink_ffi.dylib ${DEEPLINK_FFI_LIBFILE}
-            COMMENT "Setting install name for libtrusttunnel_deeplink_ffi.dylib"
-    )
-    add_library(trusttunnel_deeplink_ffi SHARED IMPORTED GLOBAL)
-else ()
-    add_library(trusttunnel_deeplink_ffi STATIC IMPORTED GLOBAL)
-endif ()
+add_library(trusttunnel_deeplink_ffi STATIC IMPORTED GLOBAL)
 set_target_properties(trusttunnel_deeplink_ffi PROPERTIES
     IMPORTED_LOCATION "${DEEPLINK_FFI_LIBFILE}"
     INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/deeplink-ffi/include"
