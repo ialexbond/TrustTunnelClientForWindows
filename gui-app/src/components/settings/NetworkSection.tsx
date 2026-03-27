@@ -63,7 +63,6 @@ export function NetworkSection({ state }: Props) {
                 updateField("dns_upstreams", arr);
               }}
               placeholder="8.8.8.8:53 / tls://1.1.1.1 / https://dns.example/dns-query"
-              className="!py-1.5 text-xs"
               fullWidth
             />
             <Button

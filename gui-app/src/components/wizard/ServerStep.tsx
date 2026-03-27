@@ -80,31 +80,23 @@ export function ServerStep(w: WizardState) {
               <label className="block text-xs font-medium mb-2" style={{ color: "var(--color-text-secondary)" }}>
                 {t("control.auth_method")}
               </label>
-              <div className="flex gap-2">
-                <button
+              <div className="grid grid-cols-2 gap-1.5">
+                <Button
+                  variant={authMode === "password" ? "primary" : "secondary"}
+                  size="sm"
+                  icon={<Key className="w-3.5 h-3.5" />}
                   onClick={() => setAuthMode("password")}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-medium transition-all duration-200"
-                  style={{
-                    backgroundColor: authMode === "password" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
-                    color: authMode === "password" ? "white" : "var(--color-text-secondary)",
-                    border: `1px solid ${authMode === "password" ? "var(--color-accent-500)" : "var(--color-border)"}`,
-                  }}
                 >
-                  <Key className="w-3.5 h-3.5" />
                   {t("control.auth_password")}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant={authMode === "key" ? "primary" : "secondary"}
+                  size="sm"
+                  icon={<FileKey className="w-3.5 h-3.5" />}
                   onClick={() => setAuthMode("key")}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-medium transition-all duration-200"
-                  style={{
-                    backgroundColor: authMode === "key" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
-                    color: authMode === "key" ? "white" : "var(--color-text-secondary)",
-                    border: `1px solid ${authMode === "key" ? "var(--color-accent-500)" : "var(--color-border)"}`,
-                  }}
                 >
-                  <FileKey className="w-3.5 h-3.5" />
                   {t("control.auth_key")}
-                </button>
+                </Button>
               </div>
             </div>
 

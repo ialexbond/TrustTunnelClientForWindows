@@ -127,7 +127,15 @@
   "settings": {
     "tunnel": { "title": "Tunnel" },
     "security": { "title": "Security" },
-    "network": { "title": "Network" }
+    "network": { "title": "Network" },
+    "experimental": {
+      "title": "Experimental Features",
+      "description": "Features under development. May be unstable.",
+      "block_routing": "Site Blocking",
+      "block_routing_desc": "Show blocking section in routing.",
+      "process_filter": "Process Filtering",
+      "process_filter_desc": "Show process filter in routing."
+    }
   },
   "vpn_modes": {
     "general": "Proxy",
@@ -221,6 +229,9 @@
       "service_running": "running",
       "service_stopped": "not running",
       "users_on_server": "Users on server",
+      "added_users": "Added users",
+      "continue_as": "Continue as {{user}}",
+      "select_user_prompt": "Select a user",
       "select_user_for_config": "Select a user to save config",
       "saving_config": "Saving...",
       "save_config": "Save",
@@ -296,7 +307,8 @@
     },
     "deploying": {
       "title": "Installing TrustTunnel...",
-      "description": "This may take a few minutes"
+      "description": "This may take a few minutes",
+      "cancelling": "Cancelling installation..."
     },
     "fetching": {
       "title": "Fetching config from server...",
@@ -443,6 +455,7 @@
     "no_config": "No configuration loaded",
     "disconnected_title": "Dashboard",
     "connect_to_see": "Connect to VPN to see monitoring data",
+    "server_title": "Server",
     "server_stats": "Server",
     "server_stats_hint": "Connect via Control Panel to see server stats",
     "go_to_control": "Control Panel",

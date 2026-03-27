@@ -13,6 +13,7 @@ import RoutingPanel from "./components/RoutingPanel";
 import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
 import DashboardPanel from "./components/DashboardPanel";
+import { ExperimentalSection } from "./components/settings/ExperimentalSection";
 
 export type VpnStatus =
   | "disconnected"
@@ -560,23 +561,22 @@ function App() {
           </div>
 
           {/* Logs */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "logs" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden scroll-gutter-match" style={{ display: activePage === "logs" ? "flex" : "none" }}>
             {statusPanelNode}
-            <LogPanel
-              logs={vpnLogs}
-              onClear={() => setVpnLogs([])}
-              fullWidth
-            />
+            <div className="flex-1 overflow-hidden px-4 pb-3">
+              <LogPanel
+                logs={vpnLogs}
+                onClear={() => setVpnLogs([])}
+                fullWidth
+              />
+            </div>
           </div>
 
-          {/* App Settings (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+          {/* App Settings */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
             {statusPanelNode}
-            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-1">{i18n.t("tabs.appSettings")}</p>
-                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
-              </div>
+            <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
+              <ExperimentalSection />
             </div>
           </div>
 

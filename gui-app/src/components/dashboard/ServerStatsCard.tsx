@@ -98,7 +98,12 @@ function UsageBar({ percent }: { percent: number }) {
 export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
   const { t } = useTranslation();
   const [hasCreds, setHasCreds] = useState(() => !!readSshCreds());
-  const [stats, setStats] = useState<ServerStats | null>(null);
+  const [stats, setStats] = useState<ServerStats | null>(() => {
+    try {
+      const cached = sessionStorage.getItem("tt_server_stats");
+      return cached ? JSON.parse(cached) : null;
+    } catch { return null; }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialFetchDone = useRef(false);
@@ -113,6 +118,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
             setStats(null);
             setError(null);
             initialFetchDone.current = false;
+            try { sessionStorage.removeItem("tt_server_stats"); } catch {}
           }
           return has;
         }
@@ -125,7 +131,8 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
   const fetchStats = useCallback(async () => {
     const c = readSshCreds();
     if (!c) return;
-    setLoading(true);
+    // Only show loader if we have no cached data yet
+    if (!stats) setLoading(true);
     setError(null);
     try {
       const result = await invoke<ServerStats>("server_get_stats", {
@@ -136,6 +143,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
         keyPath: c.keyPath || null,
       });
       setStats(result);
+      try { sessionStorage.setItem("tt_server_stats", JSON.stringify(result)); } catch {}
     } catch (e) {
       setError(String(e));
     } finally {

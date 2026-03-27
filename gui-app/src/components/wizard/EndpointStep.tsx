@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { StepBar } from "./StepBar";
 import { Toggle } from "../../shared/ui/Toggle";
+import { Button } from "../../shared/ui/Button";
 import type { WizardState } from "./useWizardState";
 
 export function EndpointStep(w: WizardState) {
@@ -286,24 +287,19 @@ export function EndpointStep(w: WizardState) {
           )}
 
           <div className="flex gap-2 pt-1">
-            <button
-              onClick={() => { const goBack = w.cameFromFound || w.serverInfo?.installed ? "found" : "server"; w.setCameFromFound(false); w.setWizardStep(goBack); }}
-              className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-              style={{ color: "var(--color-text-secondary)" }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-            >
+            <Button variant="ghost" size="sm" onClick={() => { const goBack = w.cameFromFound || w.serverInfo?.installed ? "found" : "server"; w.setCameFromFound(false); w.setWizardStep(goBack); }}>
               {t('buttons.back')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              className="flex-1"
+              icon={<Rocket className="w-4 h-4" />}
               onClick={w.handleDeploy}
               disabled={!w.canDeploy}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
             >
-              <Rocket className="w-4 h-4" />
               {t('buttons.install')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
