@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -8,8 +7,9 @@
 #include <gtest/gtest.h>
 
 #include "common/logger.h"
-#include "net/utils.h"
+#include "mock_ping_sockets.h"
 #include "ping.h"
+#include "vpn/platform.h"
 #include "vpn/utils.h"
 
 using namespace ag;
@@ -36,17 +36,16 @@ struct TestCtxRounds {
     bool finished = false;
 };
 
-class PingTest : public testing::Test {
+class PingOfflineTest : public testing::Test {
 public:
-    PingTest() {
+    PingOfflineTest() {
         ag::Logger::set_log_level(ag::LOG_LEVEL_TRACE);
     }
 
     DeclPtr<VpnEventLoop, &vpn_event_loop_destroy> loop{vpn_event_loop_create()};
     DeclPtr<VpnNetworkManager, &vpn_network_manager_destroy> network_manager{vpn_network_manager_get()};
 
-    void run_event_loop() { // NOLINT(readability-make-member-function-const)
-        // just not to hang
+    void run_event_loop() {
         vpn_event_loop_exit(loop.get(), Millis(2 * DEFAULT_PING_TIMEOUT_MS));
         vpn_event_loop_run(loop.get());
     }
@@ -66,12 +65,19 @@ public:
         ctx.base = vpn_event_loop_get_base(this->loop.get());
         return ctx;
     }
+
+    void SetUp() override {
+        test::mock_ping_sockets::reset();
+    }
+
+    void TearDown() override {
+        test::mock_ping_sockets::reset();
+    }
 };
 
-TEST_F(PingTest, Single) {
+TEST_F(PingOfflineTest, Single) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
             {"1.1.1.1:443", PING_OK},
-            {"[::1]:12", PING_SOCKET_ERROR},
             {"8.8.8.8:80", PING_TIMEDOUT},
             {"127.0.0.1:12", PING_SOCKET_ERROR},
     };
@@ -80,6 +86,9 @@ TEST_F(PingTest, Single) {
     for (const auto &i : TEST_DATA) {
         addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i.first), .name = i.first});
     }
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[0].address), 0);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[1].address), ag::utils::AG_ETIMEDOUT);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[2].address), ag::utils::AG_ECONNREFUSED);
 
     TestCtx test_ctx = generate_test_ctx();
     PingInfo info = {
@@ -109,18 +118,7 @@ TEST_F(PingTest, Single) {
 
     for (const auto &i : TEST_DATA) {
         ASSERT_EQ(test_ctx.results.count(i.first), 1) << i.first;
-#ifndef _WIN32
         ASSERT_EQ(test_ctx.results[i.first].status, i.second) << i.first;
-#else
-        if (i.second != PING_OK) {
-            // on windows refused error returns after about 2 seconds, so
-            // depending on configuration here might be PING_TIMEDOUT or
-            // PING_SOCKET_ERROR status code
-            ASSERT_TRUE(test_ctx.results[i.first].status != PING_OK) << i.first;
-        } else {
-            ASSERT_EQ(test_ctx.results[i.first].status, i.second) << i.first;
-        }
-#endif
         ASSERT_EQ(test_ctx.results[i.first].ping, test_ctx.ping.get()) << i.first;
     }
 
@@ -128,23 +126,21 @@ TEST_F(PingTest, Single) {
     ASSERT_TRUE(test_ctx.finished);
 }
 
-TEST_F(PingTest, Timeout) {
+TEST_F(PingOfflineTest, Timeout) {
     static const char *const TEST_DATA[] = {
             "94.140.14.200:443",
             "94.140.14.222:443",
-#ifndef IPV6_UNAVAILABLE
             "[2a10:50c0::42]:443",
             "[2a10:50c0::43]:443",
-#endif
     };
-
-    TestCtx test_ctx = generate_test_ctx();
 
     std::vector<VpnEndpoint> addresses;
     for (const auto &i : TEST_DATA) {
         addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i), .name = i});
+        test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses.back().address), ag::utils::AG_ETIMEDOUT);
     }
 
+    TestCtx test_ctx = generate_test_ctx();
     PingInfo info = {
             .loop = test_ctx.loop,
             .network_manager = test_ctx.network_manager,
@@ -174,21 +170,16 @@ TEST_F(PingTest, Timeout) {
         ASSERT_EQ(test_ctx.results.count(i), 1) << i;
         ASSERT_EQ(test_ctx.results[i].status, PING_TIMEDOUT) << i;
         ASSERT_EQ(test_ctx.results[i].ping, test_ctx.ping.get()) << i;
-        ASSERT_TRUE(test_ctx.finished);
     }
 
     ASSERT_EQ(test_ctx.results.size(), std::size(TEST_DATA));
     ASSERT_TRUE(test_ctx.finished);
 }
 
-TEST_F(PingTest, Multiple) {
+TEST_F(PingOfflineTest, Multiple) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
             {"1.1.1.1:443", PING_OK},
             {"8.8.8.8:80", PING_TIMEDOUT},
-#ifndef _WIN32
-            {"[::1]:12", PING_SOCKET_ERROR},
-            {"127.0.0.1:12", PING_SOCKET_ERROR},
-#endif
             {"0.0.0.0:12", PING_SOCKET_ERROR},
     };
     static constexpr uint32_t TIMEOUT = 1500;
@@ -196,12 +187,20 @@ TEST_F(PingTest, Multiple) {
     std::vector<TestCtx> contexts;
     for (const auto &i : TEST_DATA) {
         VpnEndpoint addr{.address = sockaddr_from_str(i.first), .name = i.first};
+        if (i.second == PING_OK) {
+            test::mock_ping_sockets::set_tcp_error(SocketAddress(addr.address), 0);
+        } else if (i.second == PING_TIMEDOUT) {
+            test::mock_ping_sockets::set_tcp_error(SocketAddress(addr.address), ag::utils::AG_ETIMEDOUT);
+        } else {
+            test::mock_ping_sockets::set_tcp_error(SocketAddress(addr.address), ag::utils::AG_ECONNREFUSED);
+        }
+
         TestCtx &test_ctx = contexts.emplace_back(generate_test_ctx());
         PingInfo info = {
                 .loop = test_ctx.loop,
                 .network_manager = test_ctx.network_manager,
                 .endpoints = {&addr, 1},
-                .timeout_ms = TIMEOUT, /* windows will refuse connection to ::1 after 2 s*/
+                .timeout_ms = TIMEOUT,
                 .nrounds = 1,
         };
         test_ctx.ping.reset(ping_start(&info,
@@ -209,12 +208,12 @@ TEST_F(PingTest, Multiple) {
                         [](void *ctx, const PingResult *result) {
                             auto *contexts = (std::vector<TestCtx> *) ctx;
 
-                            auto i = std::ranges::find_if(*contexts, [ping = result->ping](const TestCtx &item) {
+                            auto found = std::ranges::find_if(*contexts, [ping = result->ping](const TestCtx &item) {
                                 return ping == item.ping.get();
                             });
-                            assert(i != contexts->end());
+                            assert(found != contexts->end());
 
-                            TestCtx *test_ctx = &*i;
+                            TestCtx *test_ctx = &*found;
                             if (result->status == PING_FINISHED) {
                                 test_ctx->finished = true;
                                 if (std::ranges::all_of(*contexts, [](const TestCtx &item) {
@@ -234,7 +233,6 @@ TEST_F(PingTest, Multiple) {
     run_event_loop();
 
     ASSERT_EQ(contexts.size(), std::size(TEST_DATA));
-
     for (size_t i = 0; i < std::size(TEST_DATA); ++i) {
         TestCtx &test_ctx = contexts[i];
         std::string addr_str = TEST_DATA[i].first;
@@ -246,7 +244,7 @@ TEST_F(PingTest, Multiple) {
     }
 }
 
-TEST_F(PingTest, AllAddressesInvalid) {
+TEST_F(PingOfflineTest, AllAddressesInvalid) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
             {"0.0.0.0:12", PING_SOCKET_ERROR},
             {"[::]:12", PING_SOCKET_ERROR},
@@ -255,6 +253,7 @@ TEST_F(PingTest, AllAddressesInvalid) {
     std::vector<VpnEndpoint> addresses;
     for (const auto &i : TEST_DATA) {
         addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i.first), .name = i.first});
+        test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses.back().address), ag::utils::AG_ECONNREFUSED);
     }
 
     TestCtx test_ctx = generate_test_ctx();
@@ -285,17 +284,16 @@ TEST_F(PingTest, AllAddressesInvalid) {
 
     ASSERT_EQ(test_ctx.results.size(), std::size(TEST_DATA));
     for (const auto &i : TEST_DATA) {
+        ASSERT_EQ(test_ctx.results.count(i.first), 1) << i.first;
         ASSERT_EQ(test_ctx.results[i.first].status, i.second) << i.first;
         ASSERT_EQ(test_ctx.results[i.first].ping, test_ctx.ping.get()) << i.first;
-        ASSERT_TRUE(test_ctx.finished) << i.first;
     }
+    ASSERT_TRUE(test_ctx.finished);
 }
 
-TEST_F(PingTest, DestroyInProgressPingAfterCallback) {
+TEST_F(PingOfflineTest, DestroyInProgressPingAfterCallback) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
             {"1.1.1.1:443", PING_OK},
-            {"[::1]:12", PING_SOCKET_ERROR},
-            {"8.8.8.8:80", PING_TIMEDOUT},
             {"127.0.0.7:12", PING_SOCKET_ERROR},
     };
 
@@ -303,6 +301,8 @@ TEST_F(PingTest, DestroyInProgressPingAfterCallback) {
     for (const auto &i : TEST_DATA) {
         addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i.first), .name = i.first});
     }
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[0].address), 0);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[1].address), ag::utils::AG_ECONNREFUSED);
 
     TestCtx test_ctx = generate_test_ctx();
     PingInfo info = {
@@ -323,9 +323,9 @@ TEST_F(PingTest, DestroyInProgressPingAfterCallback) {
                                             .arg = test_ctx,
                                             .action =
                                                     [](void *arg, TaskId) {
-                                                        auto *ctx = (TestCtx *) arg;
-                                                        ctx->ping.reset();
-                                                        vpn_event_loop_exit(ctx->loop, Secs(1));
+                                                        auto *local_ctx = (TestCtx *) arg;
+                                                        local_ctx->ping.reset();
+                                                        vpn_event_loop_exit(local_ctx->loop, Secs(1));
                                                     },
                                     })
                                     .release();
@@ -350,10 +350,9 @@ TEST_F(PingTest, DestroyInProgressPingAfterCallback) {
     ASSERT_TRUE(test_ctx.cancelled);
 }
 
-TEST_F(PingTest, DestroyInProgressPing) {
+TEST_F(PingOfflineTest, DestroyInProgressPing) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
-            {"[::1]:12", PING_SOCKET_ERROR},
-            {"127.0.0.7:12", PING_SOCKET_ERROR},
+            {"1.1.1.1:443", PING_OK},
             {"8.8.8.8:80", PING_TIMEDOUT},
     };
 
@@ -361,6 +360,8 @@ TEST_F(PingTest, DestroyInProgressPing) {
     for (const auto &i : TEST_DATA) {
         addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i.first), .name = i.first});
     }
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[0].address), 0);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[1].address), ag::utils::AG_ETIMEDOUT);
 
     TestCtx test_ctx = generate_test_ctx();
     PingInfo info = {
@@ -376,9 +377,9 @@ TEST_F(PingTest, DestroyInProgressPing) {
                     .arg = &test_ctx,
                     .action =
                             [](void *arg, TaskId) {
-                                auto *ctx = (TestCtx *) arg;
-                                ctx->ping.reset();
-                                vpn_event_loop_exit(ctx->loop, Secs(1));
+                                auto *local_ctx = (TestCtx *) arg;
+                                local_ctx->ping.reset();
+                                vpn_event_loop_exit(local_ctx->loop, Secs(1));
                             },
             })
             .release();
@@ -388,7 +389,6 @@ TEST_F(PingTest, DestroyInProgressPing) {
                     [](void *ctx, const PingResult *result) {
                         auto *test_ctx = (TestCtx *) ctx;
 
-                        // This means "callback called" for this test
                         if (!test_ctx->cancelled) {
                             test_ctx->cancelled = true;
                         }
@@ -409,10 +409,9 @@ TEST_F(PingTest, DestroyInProgressPing) {
     ASSERT_EQ(0, test_ctx.results.size());
 }
 
-TEST_F(PingTest, MultipleRounds) {
+TEST_F(PingOfflineTest, MultipleRounds) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
             {"1.1.1.1:443", PING_OK},
-            {"[::1]:12", PING_SOCKET_ERROR},
             {"8.8.8.8:80", PING_TIMEDOUT},
             {"127.0.0.1:12", PING_SOCKET_ERROR},
     };
@@ -422,6 +421,9 @@ TEST_F(PingTest, MultipleRounds) {
     for (const auto &i : TEST_DATA) {
         addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i.first), .name = i.first});
     }
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[0].address), 0);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[1].address), ag::utils::AG_ETIMEDOUT);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[2].address), ag::utils::AG_ECONNREFUSED);
 
     TestCtxRounds test_ctx = generate_test_ctx_rounds();
     PingInfo info = {
@@ -451,21 +453,9 @@ TEST_F(PingTest, MultipleRounds) {
 
     for (const auto &i : TEST_DATA) {
         ASSERT_EQ(test_ctx.results.count(i.first), 1) << i.first;
-        // There multiple rounds but callback is invoked only once for endpoint.
         ASSERT_EQ(test_ctx.results[i.first].size(), 1) << i.first;
         for (const auto &r : test_ctx.results[i.first]) {
-#ifndef _WIN32
             ASSERT_EQ(r.status, i.second) << i.first;
-#else
-            if (i.second != PING_OK) {
-                // on windows refused error returns after about 2 seconds, so
-                // depending on configuration here might be PING_TIMEDOUT or
-                // PING_SOCKET_ERROR status code
-                ASSERT_TRUE(r.status != PING_OK) << i.first;
-            } else {
-                ASSERT_EQ(r.status, i.second) << i.first;
-            }
-#endif
             ASSERT_EQ(r.ping, test_ctx.ping.get()) << i.first;
         }
     }
@@ -474,33 +464,31 @@ TEST_F(PingTest, MultipleRounds) {
     ASSERT_TRUE(test_ctx.finished);
 }
 
-#ifdef __MACH__
-// Need a machine with more than one usable interface (loopback and tunnels are
-// excluded on purpose)
-TEST_F(PingTest, DISABLED_QueryAllInterfaces) {
-    static const std::pair<const char *, PingStatus> TEST_DATA[] = {
-            {"1.1.1.1:443", PING_OK},
+TEST_F(PingOfflineTest, LocalhostClosedPortIsNotPingOk) {
+    static const char *const TEST_DATA[] = {
+            "127.0.0.1:1",
+            "[::1]:1",
     };
 
     std::vector<VpnEndpoint> addresses;
     for (const auto &i : TEST_DATA) {
-        addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i.first), .name = i.first});
+        addresses.push_back(VpnEndpoint{.address = sockaddr_from_str(i), .name = i});
     }
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[0].address), ag::utils::AG_ETIMEDOUT);
+    test::mock_ping_sockets::set_tcp_error(SocketAddress(addresses[1].address), ag::utils::AG_ECONNREFUSED);
 
-    TestCtxRounds test_ctx = generate_test_ctx_rounds();
-    std::vector<uint32_t> interfaces = collect_operable_network_interfaces();
+    TestCtx test_ctx = generate_test_ctx();
     PingInfo info = {
             .loop = test_ctx.loop,
             .network_manager = test_ctx.network_manager,
             .endpoints = {addresses.data(), addresses.size()},
             .timeout_ms = SHORT_PING_TIMEOUT_MS,
-            .interfaces_to_query = {interfaces.data(), interfaces.size()},
             .nrounds = 1,
     };
     test_ctx.ping.reset(ping_start(&info,
             {
                     [](void *ctx, const PingResult *result) {
-                        auto *test_ctx = (TestCtxRounds *) ctx;
+                        auto *test_ctx = (TestCtx *) ctx;
 
                         if (result->status == PING_FINISHED) {
                             test_ctx->finished = true;
@@ -508,25 +496,17 @@ TEST_F(PingTest, DISABLED_QueryAllInterfaces) {
                             return;
                         }
 
-                        test_ctx->results[SocketAddress(result->endpoint->address).str()].emplace_back(*result);
+                        test_ctx->results[SocketAddress(result->endpoint->address).str()] = *result;
                     },
                     &test_ctx,
             }));
 
     run_event_loop();
 
-    for (const auto &i : TEST_DATA) {
-        ASSERT_EQ(test_ctx.results.count(i.first), 1) << i.first;
-        // More than one interface should have been used
-        ASSERT_GT(test_ctx.results[i.first].size(), 1) << i.first;
-        auto it = std::ranges::find_if(test_ctx.results[i.first], [](const PingResult &result) {
-            return result.status == PING_OK;
-        });
-        // At least one should be successful
-        ASSERT_NE(test_ctx.results[i.first].end(), it) << i.first;
-    }
-
     ASSERT_EQ(test_ctx.results.size(), std::size(TEST_DATA));
+    for (const auto &i : TEST_DATA) {
+        ASSERT_EQ(test_ctx.results.count(i), 1) << i;
+        ASSERT_NE(test_ctx.results[i].status, PING_OK) << i;
+    }
     ASSERT_TRUE(test_ctx.finished);
 }
-#endif // __MACH__
