@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Button } from "../../shared/ui/Button";
 import { StepBar } from "./StepBar";
 import { STEPS_ORDER, getStepLabels } from "./types";
 import type { WizardState } from "./useWizardState";
@@ -56,6 +57,16 @@ export function DeployingStep(w: WizardState) {
               );
             })}
           </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            fullWidth
+            onClick={w.handleCancelDeploy}
+            loading={w.cancellingDeploy}
+          >
+            {w.cancellingDeploy ? t('wizard.deploying.cancelling') : t('buttons.cancel')}
+          </Button>
         </div>
       </div>
     </>

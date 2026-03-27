@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, ChevronRight, Download, Plug } from "lucide-react";
+import { Button } from "../../shared/ui/Button";
 import type { WizardState } from "./useWizardState";
 
 export function DoneStep(w: WizardState) {
@@ -30,47 +31,44 @@ export function DoneStep(w: WizardState) {
         )}
 
         <div className="space-y-2 w-full">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
+            fullWidth
+            icon={<ChevronRight className="w-4 h-4" />}
             onClick={() => { w.setWizardStep("welcome"); w.onSetupComplete(w.configPath); }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all active:scale-95"
-            style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
           >
             {t('wizard.done.go_to_panel')}
-            <ChevronRight className="w-4 h-4" />
-          </button>
+          </Button>
           {w.configPath && (
-            <button
+            <Button
+              variant="success"
+              size="sm"
+              fullWidth
+              icon={<Plug className="w-4 h-4" />}
               onClick={() => {
                 localStorage.setItem("tt_navigate_after_setup", "settings");
                 w.setWizardStep("welcome");
                 w.onSetupComplete(w.configPath);
               }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all active:scale-95"
-              style={{ backgroundColor: "var(--color-success-500)", color: "white" }}
             >
-              <Plug className="w-4 h-4" />
               {t('wizard.done.go_to_connection')}
-            </button>
+            </Button>
           )}
           {w.configPath && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
+              fullWidth
+              icon={<Download className="w-4 h-4" />}
               onClick={w.handleSaveAs}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
-              style={{ backgroundColor: "var(--color-bg-hover)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
             >
-              <Download className="w-4 h-4" />
               {t('buttons.save_as')}
-            </button>
+            </Button>
           )}
-          <button
-            onClick={() => w.setWizardStep("welcome")}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-            style={{ color: "var(--color-text-secondary)" }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-          >
+          <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("welcome")}>
             {t('wizard.done.to_home')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

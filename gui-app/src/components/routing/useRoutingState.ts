@@ -204,14 +204,17 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       // Backend returns RoutingRules with RuleEntry[] (not string[])
       const raw = await invoke<RoutingRules>("load_routing_rules");
 
-      // Ensure each entry has an id (backend may return uuid)
-      const ensureIds = (entries: RuleEntry[]): RuleEntry[] =>
-        (entries || []).map((e) => ({ ...e, id: e.id || nextId() }));
+      // Ensure each entry has an id and strip prefix from value
+      const normalizeEntries = (entries: RuleEntry[]): RuleEntry[] =>
+        (entries || []).map((e) => {
+          const { type, value } = parseEntryValue(e.value);
+          return { ...e, id: e.id || nextId(), type, value };
+        });
 
       const loaded: RoutingRules = {
-        direct: ensureIds(raw.direct),
-        proxy: ensureIds(raw.proxy),
-        block: ensureIds(raw.block),
+        direct: normalizeEntries(raw.direct),
+        proxy: normalizeEntries(raw.proxy),
+        block: normalizeEntries(raw.block),
         process_mode: raw.process_mode || "exclude",
         processes: raw.processes || [],
       };
@@ -471,13 +474,16 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       const raw = await invoke<RoutingRules | null>("import_routing_rules");
       if (!raw) return; // User cancelled
 
-      const ensureIds = (entries: RuleEntry[]): RuleEntry[] =>
-        (entries || []).map((e) => ({ ...e, id: e.id || nextId() }));
+      const normalizeEntries = (entries: RuleEntry[]): RuleEntry[] =>
+        (entries || []).map((e) => {
+          const { type, value } = parseEntryValue(e.value);
+          return { ...e, id: e.id || nextId(), type, value };
+        });
 
       const imported: RoutingRules = {
-        direct: ensureIds(raw.direct),
-        proxy: ensureIds(raw.proxy),
-        block: ensureIds(raw.block),
+        direct: normalizeEntries(raw.direct),
+        proxy: normalizeEntries(raw.proxy),
+        block: normalizeEntries(raw.block),
         process_mode: raw.process_mode || "exclude",
         processes: raw.processes || [],
       };
