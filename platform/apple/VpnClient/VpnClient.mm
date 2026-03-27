@@ -236,7 +236,7 @@ static void NSData_VpnPacket_destructor(void *arg, uint8_t *) {
         };
 
         std::string bound_if;
-        if (const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&trusttunnel_config->listener)) {
+        if (const auto *tun = std::get_if<ag::TrustTunnelConfig::TunListener>(&trusttunnel_config->listener)) {
             bound_if = tun->bound_if;
         }
 
