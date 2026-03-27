@@ -3,19 +3,19 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Loader2, GitBranch, Save, Download, Upload,
-  Wifi, WifiOff, Clock, Power, Zap, Globe, Ban, Shield, Route,
+  Zap, Globe, Ban, Shield, Route,
 } from "lucide-react";
 import type { VpnStatus } from "../App";
 import { Card } from "../shared/ui/Card";
-import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { SnackBar } from "../shared/ui/SnackBar";
-import { formatUptime } from "../shared/utils/uptime";
+import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
 import { RoutingBlockCard } from "./routing/RoutingBlockCard";
 import { ProcessFilterSection } from "./routing/ProcessFilterSection";
+import { useFeatureToggles } from "../shared/hooks/useFeatureToggles";
 
 interface RoutingPanelProps {
   configPath: string;
@@ -29,9 +29,10 @@ interface RoutingPanelProps {
   onVpnModeChange?: (mode: string) => void;
 }
 
-function RoutingPanel({ configPath, status, connectedSince, onConnect, onDisconnect, onReconnect, vpnMode = "general", onVpnModeChange }: RoutingPanelProps) {
+function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect, onDisconnect, onReconnect, vpnMode = "general", onVpnModeChange }: RoutingPanelProps) {
   const { t } = useTranslation();
   const state = useRoutingState({ configPath, status, onReconnect });
+  const { toggles } = useFeatureToggles();
 
   // VPN mode change handler — writes to TOML config, marks dirty, notifies parent
   const handleVpnModeChange = async (mode: string) => {
@@ -84,81 +85,17 @@ function RoutingPanel({ configPath, status, connectedSince, onConnect, onDisconn
     );
   }
 
-  // Status badge config (same as ConnectionOverview)
-  const statusVariant = isConnected ? "success" : isLoading ? "warning" : "default";
-  const statusLabel = isConnected
-    ? t("status.connected")
-    : t(`status.${status === "connecting" ? "connecting_short" : status === "disconnecting" ? "disconnecting_short" : status === "recovering" ? "recovering_short" : status}`);
-  const statusIcon = isLoading
-    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-    : isConnected
-      ? <Wifi className="w-3.5 h-3.5" />
-      : <WifiOff className="w-3.5 h-3.5" />;
-
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      <StatusPanel
+        status={status}
+        error={vpnError}
+        connectedSince={connectedSince}
+        onConnect={onConnect}
+        onDisconnect={onDisconnect}
+      />
+
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-        {/* Error */}
-        {/* Connection block — identical layout to dashboard ConnectionOverview */}
-        <Card padding="md">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Badge variant={statusVariant} size="md" icon={statusIcon}>
-                {statusLabel}
-              </Badge>
-
-              {isConnected && connectedSince && (
-                <div className="flex items-center gap-1 text-xs tabular-nums" style={{ color: "var(--color-text-muted)", minWidth: "5.5em" }}>
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>{formatUptime(connectedSince)}</span>
-                </div>
-              )}
-
-              {/* Filter counters instead of protocol/mode */}
-              <div className="flex items-center gap-3 text-xs" style={{ color: "var(--color-text-muted)" }}>
-                <div className="flex items-center gap-1">
-                  <Zap className="w-3.5 h-3.5" style={{ color: "var(--color-success-400)" }} />
-                  <span>{state.rules.direct.length}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Globe className="w-3.5 h-3.5" style={{ color: "var(--color-accent-400)" }} />
-                  <span>{state.rules.proxy.length}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Ban className="w-3.5 h-3.5" style={{ color: "var(--color-danger-400)" }} />
-                  <span>{state.rules.block.length}</span>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              {isLoading ? (
-                <Button variant="warning" size="sm" disabled loading>
-                  {statusLabel}
-                </Button>
-              ) : isConnected ? (
-                <Button
-                  variant="danger"
-                  size="sm"
-                  icon={<Power className="w-3.5 h-3.5" />}
-                  onClick={onDisconnect}
-                >
-                  {t("buttons.disconnect")}
-                </Button>
-              ) : (
-                <Button
-                  variant="success"
-                  size="sm"
-                  icon={<Power className="w-3.5 h-3.5" />}
-                  onClick={onConnect}
-                >
-                  {t("buttons.connect")}
-                </Button>
-              )}
-            </div>
-          </div>
-        </Card>
-
         {/* Error — shown below connection block */}
         {state.error && (
           <ErrorBanner message={state.error} />
@@ -264,6 +201,8 @@ function RoutingPanel({ configPath, status, connectedSince, onConnect, onDisconn
           onMove={state.moveEntry}
         />
 
+        {/* Блокировка сайтов — экспериментальная функция, включается в Настройках */}
+        {toggles.blockRouting && (
         <RoutingBlockCard
           action="block"
           entries={state.rules.block}
@@ -273,8 +212,10 @@ function RoutingPanel({ configPath, status, connectedSince, onConnect, onDisconn
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
         />
+        )}
 
-        {/* Process Filter */}
+        {/* Фильтрация по процессам — экспериментальная функция, включается в Настройках */}
+        {toggles.processFilter && (
         <ProcessFilterSection
           processMode={state.rules.process_mode}
           processes={state.rules.processes}
@@ -285,6 +226,7 @@ function RoutingPanel({ configPath, status, connectedSince, onConnect, onDisconn
           onRemove={state.removeProcess}
           onLoadProcesses={state.loadProcessList}
         />
+        )}
       </div>
 
       {/* SnackBar */}

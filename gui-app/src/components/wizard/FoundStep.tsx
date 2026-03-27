@@ -1,11 +1,37 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import {
   User, Download, Loader2, XCircle, Server, ChevronRight,
   PackageCheck, FolderOpen, RefreshCw, Trash2, Eye, EyeOff, UserPlus,
+  QrCode, Link2, X,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { Button } from "../../shared/ui/Button";
+import { Tooltip } from "../../shared/ui/Tooltip";
+import { Modal } from "../../shared/ui/Modal";
 import { StepBar } from "./StepBar";
 import type { WizardState } from "./useWizardState";
+
+// ── Icon button helper (same pattern as UsersSection) ──
+function IconBtn({ tooltip, onClick, disabled, loading, color, children }: {
+  tooltip: string; onClick: () => void; disabled?: boolean; loading?: boolean;
+  color?: string; children: React.ReactNode;
+}) {
+  return (
+    <Tooltip text={tooltip}>
+      <button
+        onClick={onClick}
+        disabled={disabled || loading}
+        className="p-1 rounded transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+        style={{ color: color || "var(--color-text-muted)" }}
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : children}
+      </button>
+    </Tooltip>
+  );
+}
 
 // ─── Fetch mode: show users only, save config ──────────────
 function FoundFetchMode(w: WizardState) {
@@ -34,24 +60,16 @@ function FoundFetchMode(w: WizardState) {
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
             >
               <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{u}</span>
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => w.handleSaveConfigDirect(u)}
                 disabled={!!w.savingConfigFor}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80 disabled:opacity-40"
-                style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+                loading={w.savingConfigFor === u}
+                icon={<Download className="w-3 h-3" />}
               >
-                {w.savingConfigFor === u ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    {t('wizard.found.saving_config')}
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3 h-3" />
-                    {t('wizard.found.save_config')}
-                  </>
-                )}
-              </button>
+                {w.savingConfigFor === u ? t('wizard.found.saving_config') : t('wizard.found.save_config')}
+              </Button>
             </div>
           ))}
         </div>
@@ -60,15 +78,9 @@ function FoundFetchMode(w: WizardState) {
           <p className="text-xs" style={{ color: "var(--color-danger-500)" }}>{w.errorMessage}</p>
         )}
 
-        <button
-          onClick={() => w.setWizardStep("welcome")}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-          style={{ color: "var(--color-text-secondary)" }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-        >
+        <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("welcome")}>
           {t('wizard.found.to_home')}
-        </button>
+        </Button>
       </>
     );
   }
@@ -86,23 +98,18 @@ function FoundFetchMode(w: WizardState) {
           </p>
         </div>
         <div className="flex gap-2 w-full">
-          <button
-            onClick={() => w.setWizardStep("server")}
-            className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-            style={{ color: "var(--color-text-secondary)" }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-          >
+          <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
             {t('buttons.back')}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            className="flex-1"
+            icon={<ChevronRight className="w-4 h-4" />}
             onClick={() => { w.saveField("wizardMode", ""); w.setWizardStep("server"); }}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
-            style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
           >
             {t('wizard.found.setup_server')}
-            <ChevronRight className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </>
     );
@@ -132,23 +139,18 @@ function FoundFetchMode(w: WizardState) {
         )}
       </div>
       <div className="flex gap-2 w-full">
-        <button
-          onClick={() => w.setWizardStep("server")}
-          className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-          style={{ color: "var(--color-text-secondary)" }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-        >
+        <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
           {t('buttons.back')}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          className="flex-1"
+          icon={<ChevronRight className="w-4 h-4" />}
           onClick={() => { w.saveField("wizardMode", ""); w.setWizardStep("server"); }}
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
-          style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
         >
           {t('wizard.found.setup_server')}
-          <ChevronRight className="w-4 h-4" />
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -159,7 +161,46 @@ function FoundSetupMode(w: WizardState) {
   const { t } = useTranslation();
   const isInstalled = w.serverInfo?.installed;
 
+  // QR popup state
+  const [qrUser, setQrUser] = useState<string | null>(null);
+  const [qrLink, setQrLink] = useState("");
+  const [qrLoading, setQrLoading] = useState(false);
+  const [linkLoadingUser, setLinkLoadingUser] = useState<string | null>(null);
+
+  const sshParams = {
+    host: w.host,
+    port: parseInt(w.port),
+    user: w.sshUser,
+    password: w.sshPassword,
+    keyPath: w.sshKeyPath || undefined,
+  };
+
+  const getDeeplink = async (username: string): Promise<string> => {
+    return invoke<string>("server_export_config_deeplink", { ...sshParams, clientName: username });
+  };
+
+  const handleShowQR = async (username: string) => {
+    setQrUser(username);
+    setQrLink("");
+    setQrLoading(true);
+    try {
+      const link = await getDeeplink(username);
+      setQrLink(link);
+    } catch { setQrUser(null); }
+    finally { setQrLoading(false); }
+  };
+
+  const handleCopyLink = async (username: string) => {
+    setLinkLoadingUser(username);
+    try {
+      const link = await getDeeplink(username);
+      await navigator.clipboard.writeText(link);
+    } catch { /* ignore */ }
+    finally { setLinkLoadingUser(null); }
+  };
+
   if (isInstalled) {
+    const users = w.serverInfo?.users ?? [];
     return (
       <>
         <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
@@ -183,53 +224,56 @@ function FoundSetupMode(w: WizardState) {
           </p>
         </div>
 
-        {/* ── Users on server ── */}
-        {w.serverInfo?.users && w.serverInfo.users.length > 0 && (
+        {/* ── Users (same layout as UsersSection in dashboard) ── */}
+        {users.length > 0 && (
           <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
             <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
               <User className="w-3.5 h-3.5" />
-              {t('wizard.found.users_on_server')}
+              {t('wizard.found.added_users')}
             </p>
-            <div className="space-y-1">
-              {w.serverInfo.users.map((u) => {
+            <div>
+              {users.map((u, idx) => {
                 const isSelected = w.selectedUser === u;
+                const isLast = idx === users.length - 1;
                 return (
-                  <div key={u} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg transition-colors"
-                    style={{ backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent", border: isSelected ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent" }}
-                    onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
-                    onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
-                  >
-                    <button
+                  <div key={u}>
+                    <div
                       onClick={() => w.setSelectedUser(u)}
-                      className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                      className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
+                      style={{ backgroundColor: isSelected ? "rgba(99, 102, 241, 0.08)" : "transparent" }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                     >
-                      <div className="w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center"
-                        style={{ borderColor: isSelected ? "var(--color-accent-500)" : "var(--color-border)" }}
-                      >
-                        {isSelected && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />}
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0"
+                          style={{ border: `2px solid ${isSelected ? "var(--color-accent-500)" : "var(--color-border)"}` }}
+                        >
+                          {isSelected && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />}
+                        </div>
+                        <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                       </div>
-                      <span className="text-xs truncate" style={{ color: isSelected ? "var(--color-accent-500)" : "var(--color-text-secondary)" }}>{u}</span>
-                    </button>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        onClick={() => w.handleSaveConfigDirect(u)}
-                        disabled={!!w.savingConfigFor}
-                        className="p-1.5 rounded-lg transition-all hover:opacity-70 disabled:opacity-40"
-                        style={{ color: "var(--color-accent-500)" }}
-                        title={t('wizard.found.save_config_tooltip')}
-                      >
-                        {w.savingConfigFor === u ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                      </button>
-                      <button
-                        onClick={() => !w.deletingUser && w.setConfirmDeleteUser(u)}
-                        disabled={!!w.deletingUser}
-                        className="p-1.5 rounded-lg transition-all hover:opacity-70 disabled:opacity-40"
-                        style={{ color: "var(--color-danger-500)" }}
-                        title={t('wizard.found.delete_user_tooltip')}
-                      >
-                        {w.deletingUser === u ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                      </button>
+                      <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <IconBtn tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
+                          <QrCode className="w-3.5 h-3.5" />
+                        </IconBtn>
+                        <IconBtn tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
+                          <Link2 className="w-3.5 h-3.5" />
+                        </IconBtn>
+                        <IconBtn tooltip={t("server.users.export_tooltip")} onClick={() => w.handleSaveConfigDirect(u)} loading={w.savingConfigFor === u}>
+                          <Download className="w-3.5 h-3.5" />
+                        </IconBtn>
+                        <IconBtn
+                          tooltip={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
+                          onClick={() => w.setConfirmDeleteUser(u)}
+                          disabled={users.length <= 1 || !!w.deletingUser}
+                          loading={w.deletingUser === u}
+                          color="var(--color-danger-400)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </IconBtn>
+                      </div>
                     </div>
+                    {!isLast && <div className="mx-3 my-1" style={{ borderBottom: "1px solid var(--color-border)" }} />}
                   </div>
                 );
               })}
@@ -244,6 +288,28 @@ function FoundSetupMode(w: WizardState) {
             />
           </div>
         )}
+
+        {/* QR Code popup */}
+        <Modal open={!!qrUser} onClose={() => setQrUser(null)} closeOnBackdrop>
+          <div className="max-w-xs w-full mx-4 p-6 rounded-2xl shadow-2xl text-center" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+            {qrLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-accent-500)" }} />
+              </div>
+            ) : qrLink ? (
+              <>
+                <div className="flex justify-center mb-4">
+                  <QRCodeSVG value={qrLink} size={200} bgColor="transparent" fgColor="currentColor" level="M" style={{ color: "var(--color-text-primary)", opacity: 0.85 }} />
+                </div>
+                <p className="text-xs font-medium mb-1" style={{ color: "var(--color-text-primary)" }}>{qrUser}</p>
+                <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t("server.export.scan_qr")}</p>
+              </>
+            ) : null}
+            <button onClick={() => setQrUser(null)} className="absolute top-3 right-3 p-1 rounded-full transition-opacity hover:opacity-70" style={{ color: "var(--color-text-muted)" }}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </Modal>
 
         {/* ── Add new user ── */}
         <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
@@ -261,7 +327,7 @@ function FoundSetupMode(w: WizardState) {
                 placeholder={t('wizard.found.username_placeholder')}
                 value={w.newUsername}
                 onChange={(e) => w.setNewUsername(e.target.value.replace(/\s/g, ""))}
-                className="w-full px-3 py-1.5 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                className="w-full px-3 h-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
               />
               {w.newUsername.trim() && w.serverInfo?.users?.includes(w.newUsername.trim()) && (
                 <p className="text-[10px] mt-0.5" style={{ color: "var(--color-danger-500)" }}>
@@ -275,7 +341,7 @@ function FoundSetupMode(w: WizardState) {
                 placeholder={t('wizard.found.password_placeholder')}
                 value={w.newPassword}
                 onChange={(e) => w.setNewPassword(e.target.value)}
-                className="w-full px-3 py-1.5 pr-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                className="w-full px-3 h-8 pr-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
               />
               <button
                 type="button"
@@ -285,63 +351,42 @@ function FoundSetupMode(w: WizardState) {
                 {w.showNewPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
               </button>
             </div>
-            <button
+            <Button
+              variant="primary"
+              size="sm"
+              fullWidth
               onClick={w.handleAddUser}
               disabled={w.addingUser || !w.newUsername.trim() || !w.newPassword.trim() || !!w.serverInfo?.users?.includes(w.newUsername.trim())}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+              loading={w.addingUser}
+              icon={<UserPlus className="w-3.5 h-3.5" />}
             >
-              {w.addingUser ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  {t('wizard.found.adding_user')}
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-3.5 h-3.5" />
-                  {t('wizard.found.add_btn')}
-                </>
-              )}
-            </button>
+              {w.addingUser ? t('wizard.found.adding_user') : t('wizard.found.add_btn')}
+            </Button>
           </div>
         </div>
 
-        {/* Continue button */}
-        <button
+        {/* Continue as user button */}
+        <Button
+          variant={w.selectedUser ? "primary" : "secondary"}
+          size="sm"
+          fullWidth
           onClick={() => { if (w.selectedUser) w.handleFetchConfig(w.selectedUser); }}
           disabled={!w.selectedUser}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
+          icon={<ChevronRight className="w-4 h-4" />}
         >
-          {t('wizard.found.continue_btn')}
-          <ChevronRight className="w-4 h-4" />
-        </button>
+          {w.selectedUser ? t('wizard.found.continue_as', { user: w.selectedUser }) : t('wizard.found.select_user_prompt')}
+        </Button>
 
         <div className="space-y-2 pt-1">
-          <button
-            onClick={w.handleSkip}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
-            style={{ backgroundColor: "var(--color-bg-hover)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
-          >
-            <FolderOpen className="w-4 h-4" />
+          <Button variant="secondary" size="sm" fullWidth icon={<FolderOpen className="w-4 h-4" />} onClick={w.handleSkip}>
             {t('wizard.found.skip_have_config')}
-          </button>
-          <button
-            onClick={() => { w.setCameFromFound(true); w.setWizardStep("endpoint"); }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
-            style={{ backgroundColor: "var(--color-bg-hover)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="secondary" size="sm" fullWidth icon={<RefreshCw className="w-3.5 h-3.5" />} onClick={() => { w.setCameFromFound(true); w.setWizardStep("endpoint"); }}>
             {t('wizard.found.reinstall_tt')}
-          </button>
-          <button
-            onClick={() => w.setConfirmUninstall(true)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97] hover:opacity-80"
-            style={{ backgroundColor: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", color: "var(--color-danger-500)" }}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="danger-outline" size="sm" fullWidth icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => w.setConfirmUninstall(true)}>
             {t('wizard.found.delete_tt')}
-          </button>
+          </Button>
         </div>
         <ConfirmDialog
           open={w.confirmUninstall}
@@ -373,15 +418,9 @@ function FoundSetupMode(w: WizardState) {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => w.setWizardStep("server")}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-          style={{ color: "var(--color-text-secondary)" }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-        >
+        <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
           {t('buttons.back')}
-        </button>
+        </Button>
       </>
     );
   }
@@ -399,23 +438,18 @@ function FoundSetupMode(w: WizardState) {
         </p>
       </div>
       <div className="flex gap-2 w-full">
-        <button
-          onClick={() => w.setWizardStep("server")}
-          className="px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-          style={{ color: "var(--color-text-secondary)" }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-        >
+        <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
           {t('buttons.back')}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          className="flex-1"
+          icon={<ChevronRight className="w-4 h-4" />}
           onClick={() => w.setWizardStep("endpoint")}
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
-          style={{ backgroundColor: "var(--color-accent-500)", color: "white" }}
         >
           {t('wizard.found.continue_setup')}
-          <ChevronRight className="w-4 h-4" />
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -437,15 +471,9 @@ export function FoundStep(w: WizardState) {
             <>
               <FoundSetupMode {...w} />
               {isInstalled && (
-                <button
-                  onClick={() => w.setWizardStep("server")}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm transition-all active:scale-[0.97]"
-                  style={{ color: "var(--color-text-secondary)" }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-                >
+                <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
                   {t('buttons.back')}
-                </button>
+                </Button>
               )}
             </>
           )}

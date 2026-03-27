@@ -120,6 +120,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
 
   // Tracks current operation so the event listener only reacts to relevant events
   const operationRef = useRef<"deploy" | "fetch" | "uninstall" | null>(null);
+  const checkCancelledRef = useRef(false);
 
   // ── Save config for a user — fetch + save dialog without leaving current screen ──
   const [savingConfigFor, setSavingConfigFor] = useState<string | null>(null);
@@ -208,6 +209,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   // ── Action handlers ──
 
   const handleCheckServer = async () => {
+    checkCancelledRef.current = false;
     setWizardStep("checking");
     setCheckError("");
     setServerInfo(null);
@@ -219,6 +221,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
       });
+      if (checkCancelledRef.current) return;
       setServerInfo(result);
       if (result.installed) {
         setWizardStep("found");
@@ -228,10 +231,16 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         setWizardStep("endpoint");
       }
     } catch (e) {
+      if (checkCancelledRef.current) return;
       setCheckError(String(e));
       setWizardStep("found");
       setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
     }
+  };
+
+  const cancelCheck = () => {
+    checkCancelledRef.current = true;
+    setWizardStep("server");
   };
 
   const handleUninstall = async () => {
@@ -250,12 +259,34 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         keyPath: sshKeyPath || undefined,
       });
       operationRef.current = null;
-      setWizardStep("endpoint");
+      setServerInfo(null);
+      setWizardStep("server");
     } catch (e) {
       operationRef.current = null;
       setErrorMessage(String(e));
       setWizardStep("error");
     }
+  };
+
+  const [cancellingDeploy, setCancellingDeploy] = useState(false);
+
+  const handleCancelDeploy = async () => {
+    setCancellingDeploy(true);
+    try {
+      await invoke("uninstall_server", {
+        host,
+        port: parseInt(port),
+        user: sshUser,
+        password: sshPassword,
+        keyPath: sshKeyPath || undefined,
+      });
+    } catch {
+      // Uninstall failed (e.g. no internet) — just go back anyway
+    }
+    operationRef.current = null;
+    setCancellingDeploy(false);
+    setServerInfo(null);
+    setWizardStep("server");
   };
 
   const handleDeploy = async () => {
@@ -520,7 +551,10 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
 
     // Actions
     handleCheckServer,
+    cancelCheck,
     handleUninstall,
+    handleCancelDeploy,
+    cancellingDeploy,
     handleDeploy,
     handleSkip,
     handleFetchConfig,

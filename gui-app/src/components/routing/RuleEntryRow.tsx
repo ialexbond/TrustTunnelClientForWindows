@@ -37,9 +37,9 @@ const typeBadgeColor: Record<string, string> = {
 };
 
 const moveTargets: Record<RouteAction, RouteAction[]> = {
-  direct: ["proxy", "block"],
-  proxy: ["direct", "block"],
-  block: ["direct", "proxy"],
+  direct: ["proxy"],
+  proxy: ["direct"],
+  block: ["direct", "proxy"], // block card hidden, but keep for data integrity
 };
 
 const actionColors: Record<RouteAction, string> = {

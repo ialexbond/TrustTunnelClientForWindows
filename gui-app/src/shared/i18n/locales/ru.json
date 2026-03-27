@@ -127,7 +127,15 @@
   "settings": {
     "tunnel": { "title": "Туннель" },
     "security": { "title": "Безопасность" },
-    "network": { "title": "Сеть" }
+    "network": { "title": "Сеть" },
+    "experimental": {
+      "title": "Экспериментальные функции",
+      "description": "Функции в разработке. Могут быть нестабильны.",
+      "block_routing": "Блокировка сайтов",
+      "block_routing_desc": "Показать блок блокировки в маршрутизации.",
+      "process_filter": "Фильтрация по процессам",
+      "process_filter_desc": "Показать фильтр процессов в маршрутизации."
+    }
   },
   "vpn_modes": {
     "general": "Всё через VPN",
@@ -221,6 +229,9 @@
       "service_running": "работает",
       "service_stopped": "не запущен",
       "users_on_server": "Пользователи на сервере",
+      "added_users": "Добавленные пользователи",
+      "continue_as": "Продолжить как {{user}}",
+      "select_user_prompt": "Выберите пользователя",
       "select_user_for_config": "Выберите пользователя для сохранения конфига",
       "saving_config": "Сохранение...",
       "save_config": "Сохранить",
@@ -296,7 +307,8 @@
     },
     "deploying": {
       "title": "Устанавливаем TrustTunnel...",
-      "description": "Это может занять несколько минут"
+      "description": "Это может занять несколько минут",
+      "cancelling": "Отмена установки..."
     },
     "fetching": {
       "title": "Получаем конфиг с сервера...",
@@ -443,6 +455,7 @@
     "no_config": "Конфигурация не загружена",
     "disconnected_title": "Дашборд",
     "connect_to_see": "Подключитесь к VPN для отображения данных мониторинга",
+    "server_title": "Сервер",
     "server_stats": "Сервер",
     "server_stats_hint": "Войдите в Панель управления для получения статистики сервера",
     "go_to_control": "Панель управления",
