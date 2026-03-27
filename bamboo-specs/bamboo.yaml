@@ -5,6 +5,8 @@
 ---
   !include 'run-tests.yaml'
 ---
+  !include 'run-live-unit-tests.yaml'
+---
   !include 'run-integration-test.yaml'
 ---
   !include 'upload-conan-recipes.yaml'

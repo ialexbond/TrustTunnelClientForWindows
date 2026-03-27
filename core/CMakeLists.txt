@@ -89,12 +89,13 @@ target_link_libraries(mock_dns_server vpnlibs_core)
 
 link_libraries(gtest::gtest)
 include(${VPN_LIB_DIR}/cmake/add_unit_test.cmake)
+include(${VPN_LIB_DIR}/cmake/add_live_test.cmake)
 set(TEST_EXTRA_INCLUDES ${VPNCORE_SRC_DIR} ${THIRD_PARTY_DIR}/klib)
 
 # do not link `VpnClient` tests against the mocked library as it mocks `VpnClient` also
 add_unit_test(test_vpn_client_fsm "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 target_link_libraries(test_vpn_client_fsm PRIVATE vpnlibs_core)
-add_unit_test(test_vpn_client_live "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
+add_live_test(test_vpn_client_live "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 target_link_libraries(test_vpn_client_live PRIVATE vpnlibs_core)
 add_unit_test(test_dns_routing "${TEST_DIR}" "${TEST_EXTRA_INCLUDES}" TRUE TRUE)
 target_link_libraries(test_dns_routing PRIVATE vpnlibs_core mock_dns_server)
