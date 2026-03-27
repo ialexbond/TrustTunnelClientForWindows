@@ -7,6 +7,8 @@ project(vpn_libs C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 
+option(VPNLIBS_ENABLE_LIVE_TESTS "Register live tests in CTest" OFF)
+
 find_package(quiche)
 if (NOT quiche_DIR)
     set(DISABLE_HTTP3 ON)
