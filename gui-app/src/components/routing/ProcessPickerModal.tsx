@@ -99,7 +99,7 @@ export function ProcessPickerModal({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("routing.searchProcess")}
-              className="w-full pl-9 pr-3 py-2 rounded-[var(--radius-lg)] text-xs outline-none transition-colors placeholder:opacity-40"
+              className="w-full pl-9 pr-3 h-8 rounded-[var(--radius-lg)] text-xs outline-none transition-colors placeholder:opacity-40"
               style={{
                 backgroundColor: "var(--color-input-bg)",
                 border: "1px solid var(--color-input-border)",

@@ -304,7 +304,7 @@ export function UsersSection({ state }: Props) {
               placeholder={t("server.users.username_placeholder")}
               error={usernameError ? t(usernameError) : undefined}
               disabled={isAdding}
-              className="text-[11px] !py-1.5"
+              className=""
             />
             <PasswordInput
               value={newPassword}
@@ -312,7 +312,7 @@ export function UsersSection({ state }: Props) {
               placeholder={t("server.users.password_placeholder")}
               showIcon={false}
               disabled={isAdding}
-              className="text-[11px] !py-1.5"
+              className=""
             />
             <Button
               variant="success"

@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Wifi,
@@ -9,7 +9,6 @@ import {
   Power,
 } from "lucide-react";
 import type { VpnStatus } from "../App";
-import { Card } from "../shared/ui/Card";
 import { Button } from "../shared/ui/Button";
 import { Badge } from "../shared/ui/Badge";
 import { formatUptime } from "../shared/utils/uptime";
@@ -20,42 +19,6 @@ interface StatusPanelProps {
   connectedSince: Date | null;
   onConnect: () => void;
   onDisconnect: () => void;
-}
-
-function getStatusConfig(status: VpnStatus, t: (key: string) => string) {
-  const configs: Record<VpnStatus, { label: string; icon: ReactNode; badgeVariant: "success" | "warning" | "danger" | "default" }> = {
-    disconnected: {
-      label: t("status.disconnected"),
-      icon: <WifiOff className="w-8 h-8" />,
-      badgeVariant: "default",
-    },
-    connecting: {
-      label: t("status.connecting_short"),
-      icon: <Loader2 className="w-8 h-8 animate-spin" />,
-      badgeVariant: "warning",
-    },
-    connected: {
-      label: t("status.connected"),
-      icon: <Wifi className="w-8 h-8" />,
-      badgeVariant: "success",
-    },
-    disconnecting: {
-      label: t("status.disconnecting_short"),
-      icon: <Loader2 className="w-8 h-8 animate-spin" />,
-      badgeVariant: "warning",
-    },
-    recovering: {
-      label: t("status.recovering_short"),
-      icon: <Loader2 className="w-8 h-8 animate-spin" />,
-      badgeVariant: "warning",
-    },
-    error: {
-      label: t("status.error"),
-      icon: <AlertTriangle className="w-8 h-8" />,
-      badgeVariant: "danger",
-    },
-  };
-  return configs[status];
 }
 
 function UptimeCounter({ since }: { since: Date }) {
@@ -75,72 +38,59 @@ function StatusPanel({
   onDisconnect,
 }: StatusPanelProps) {
   const { t } = useTranslation();
-  const cfg = getStatusConfig(status, t);
 
   const isLoading = status === "connecting" || status === "disconnecting" || status === "recovering";
+  const isConnected = status === "connected";
+
+  const statusVariant: "success" | "warning" | "danger" | "default" =
+    isConnected ? "success" : isLoading ? "warning" : status === "error" ? "danger" : "default";
+
+  const statusLabel = isConnected
+    ? t("status.connected")
+    : status === "connecting"
+      ? t("status.connecting_short")
+      : status === "disconnecting"
+        ? t("status.disconnecting_short")
+        : status === "recovering"
+          ? t("status.recovering_short")
+          : status === "error"
+            ? t("status.error")
+            : t("status.disconnected");
+
+  const statusIcon = isLoading
+    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+    : status === "error"
+      ? <AlertTriangle className="w-3.5 h-3.5" />
+      : isConnected
+        ? <Wifi className="w-3.5 h-3.5" />
+        : <WifiOff className="w-3.5 h-3.5" />;
 
   return (
-    <Card padding="lg">
-      <div className="flex items-center justify-between">
+    <div className="pt-3 pb-0">
+      <div className="flex items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          {/* Icon container */}
-          <div
-            className="p-3 rounded-[var(--radius-lg)]"
-            style={{
-              backgroundColor: "var(--color-bg-elevated)",
-              border: "1px solid var(--color-border)",
-              color: status === "connected"
-                ? "var(--color-success-500)"
-                : status === "error"
-                  ? "var(--color-danger-500)"
-                  : isLoading
-                    ? "var(--color-warning-500)"
-                    : "var(--color-text-muted)",
-            }}
-          >
-            {cfg.icon}
-          </div>
+          <Badge variant={statusVariant} size="md" icon={statusIcon}>
+            {statusLabel}
+          </Badge>
 
-          {/* Status info */}
-          <div>
-            <div className="flex items-center gap-2">
-              <Badge variant={cfg.badgeVariant} size="sm">
-                {cfg.label}
-              </Badge>
+          {isConnected && connectedSince && (
+            <div className="flex items-center gap-1 text-xs tabular-nums" style={{ color: "var(--color-text-muted)", minWidth: "5.5em" }}>
+              <Clock className="w-3.5 h-3.5" />
+              <UptimeCounter since={connectedSince} />
             </div>
-            {connectedSince && status === "connected" && (
-              <div className="flex items-center gap-1 text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
-                <Clock className="w-3 h-3" />
-                <UptimeCounter since={connectedSince} />
-              </div>
-            )}
-            {error && (
-              <p
-                className="text-[11px] mt-1 max-w-sm break-words line-clamp-3"
-                style={{ color: "var(--color-danger-400)" }}
-                title={error}
-              >
-                {error}
-              </p>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Action button */}
         <div>
           {isLoading ? (
-            <Button variant="warning" size="lg" disabled loading>
-              {status === "connecting"
-                ? t("status.connecting")
-                : status === "disconnecting"
-                  ? t("status.disconnecting")
-                  : t("status.recovering")}
+            <Button variant="warning" size="sm" disabled loading>
+              {statusLabel}
             </Button>
-          ) : status === "connected" ? (
+          ) : isConnected ? (
             <Button
               variant="danger"
-              size="lg"
-              icon={<Power className="w-4 h-4" />}
+              size="sm"
+              icon={<Power className="w-3.5 h-3.5" />}
               onClick={onDisconnect}
             >
               {t("buttons.disconnect")}
@@ -148,8 +98,8 @@ function StatusPanel({
           ) : (
             <Button
               variant="success"
-              size="lg"
-              icon={<Power className="w-4 h-4" />}
+              size="sm"
+              icon={<Power className="w-3.5 h-3.5" />}
               onClick={onConnect}
             >
               {t("buttons.connect")}
@@ -158,7 +108,18 @@ function StatusPanel({
         </div>
       </div>
 
-    </Card>
+      {error && (
+        <p
+          className="text-[11px] mt-1.5 px-4 max-w-sm break-words line-clamp-3"
+          style={{ color: "var(--color-danger-400)" }}
+          title={error}
+        >
+          {error}
+        </p>
+      )}
+
+      <div className="mt-2 border-b" style={{ borderColor: "var(--color-border)" }} />
+    </div>
   );
 }
 

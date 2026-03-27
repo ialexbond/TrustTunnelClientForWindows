@@ -34,12 +34,12 @@ function SettingsPanel(props: SettingsPanelProps) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {/* StatusPanel — sticky at top */}
+      {props.statusPanel}
+
       {/* Scrollable content — padding inside scroll area, scrollbar to window edge */}
       {config ? (
         <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-          {/* StatusPanel — scrolls with content */}
-          {props.statusPanel}
-
           {/* Error */}
           {error && (
             <ErrorBanner message={error} onDismiss={() => setError("")} />
