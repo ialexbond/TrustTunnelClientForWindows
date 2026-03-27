@@ -695,7 +695,7 @@ static int ssl_verify_callback(const char *host_name, const sockaddr *host_ip, c
     const Vpn *vpn = (Vpn *) arg;
 
     int result = 0;
-    VpnVerifyCertificateEvent event = {ctx.cert, ctx.chain, 0};
+    VpnVerifyCertificateEvent event = {ctx.cert, ctx.chain, ctx.verification_type, 0};
     vpn->handler.func(vpn->handler.arg, VPN_EVENT_VERIFY_CERTIFICATE, &event);
     if (event.result == 0) {
         result = 1;
