@@ -9,9 +9,6 @@ import {
   GitBranch,
   ScrollText,
   Info,
-  Globe,
-  Moon,
-  Sun,
   Shield,
 } from "lucide-react";
 
@@ -29,10 +26,6 @@ interface SidebarProps {
   activePage: SidebarPage;
   onPageChange: (page: SidebarPage) => void;
   hasConfig: boolean;
-  theme: "dark" | "light";
-  onThemeToggle: () => void;
-  language: string;
-  onLanguageToggle: () => void;
 }
 
 interface NavItem {
@@ -56,10 +49,6 @@ export function Sidebar({
   activePage,
   onPageChange,
   hasConfig,
-  theme,
-  onThemeToggle,
-  language,
-  onLanguageToggle,
 }: SidebarProps) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -169,44 +158,6 @@ export function Sidebar({
         >
           <Info className="w-[18px] h-[18px] shrink-0" />
           {expanded && <span className="text-[13px] font-medium truncate whitespace-nowrap">{t("tabs.about")}</span>}
-        </button>
-
-        {/* Language toggle */}
-        <button
-          onClick={onLanguageToggle}
-          title={!expanded ? (language === "ru" ? "English" : "Русский") : undefined}
-          className={`
-            flex items-center gap-2.5 rounded-[var(--radius-md)]
-            ${expanded ? "px-3 py-2" : "px-0 py-2 justify-center"}
-          `}
-          style={{ color: "var(--color-text-secondary)", transition: "background-color 150ms ease" }}
-        >
-          <Globe className="w-[18px] h-[18px] shrink-0" />
-          {expanded && (
-            <span className="text-[13px] font-medium whitespace-nowrap">{language === "ru" ? "English" : "Русский"}</span>
-          )}
-        </button>
-
-        {/* Theme toggle */}
-        <button
-          onClick={onThemeToggle}
-          title={!expanded ? (theme === "dark" ? "Light theme" : "Dark theme") : undefined}
-          className={`
-            flex items-center gap-2.5 rounded-[var(--radius-md)]
-            ${expanded ? "px-3 py-2" : "px-0 py-2 justify-center"}
-          `}
-          style={{ color: "var(--color-text-secondary)", transition: "background-color 150ms ease" }}
-        >
-          {theme === "dark" ? (
-            <Sun className="w-[18px] h-[18px] shrink-0" />
-          ) : (
-            <Moon className="w-[18px] h-[18px] shrink-0" />
-          )}
-          {expanded && (
-            <span className="text-[13px] font-medium whitespace-nowrap">
-              {theme === "dark" ? "Light" : "Dark"}
-            </span>
-          )}
         </button>
       </div>
       </div>

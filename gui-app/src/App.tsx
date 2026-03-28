@@ -355,10 +355,6 @@ function App() {
           setActivePage(page);
         }}
         hasConfig={hasConfig}
-        theme={theme}
-        onThemeToggle={toggleTheme}
-        language={i18n.language}
-        onLanguageToggle={toggleLanguage}
       />
 
       {/* Main content */}
