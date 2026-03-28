@@ -50,7 +50,10 @@ function SettingsPanel(props: SettingsPanelProps) {
             icon={<Save className="w-3.5 h-3.5" />}
             loading={saving}
             disabled={!isVpnActive || !state.dirty}
-            onClick={() => state.handleSave(true)}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("tt-peer-save"));
+              state.handleSave(true);
+            }}
           >
             {saveLabel}
           </Button>
