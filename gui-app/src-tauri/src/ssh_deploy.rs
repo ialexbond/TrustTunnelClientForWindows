@@ -4,6 +4,23 @@ use russh::ChannelMsg;
 use serde::Deserialize;
 use tauri::Emitter;
 
+// ─── SSH connection parameters ─────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SshParams {
+    pub host: String,
+    pub port: u16,
+    pub ssh_user: String,
+    pub ssh_password: String,
+    pub key_path: Option<String>,
+}
+
+impl SshParams {
+    pub async fn connect(&self) -> Result<client::Handle<SshHandler>, String> {
+        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref()).await
+    }
+}
+
 // ─── Portable data directory (next to exe) ─────────
 
 pub fn portable_data_dir() -> std::path::PathBuf {
@@ -58,7 +75,7 @@ fn default_true() -> bool { true }
 
 // ─── SSH Handler ───────────────────────────────────
 
-struct SshHandler;
+pub struct SshHandler;
 
 #[async_trait::async_trait]
 impl client::Handler for SshHandler {
@@ -378,16 +395,12 @@ echo "Configuration files created successfully"
 
 pub async fn deploy_server(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     settings: EndpointSettings,
 ) -> Result<String, String> {
     // ── Step 1: SSH Connect + Authenticate ──
     emit_step(app, "connect", "progress", "Подключение к серверу...");
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+    let handle = params.connect().await
         .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Подключено к серверу");
     emit_step(app, "auth", "ok", "Авторизация успешна");
@@ -641,7 +654,7 @@ pub async fn deploy_server(
         format!("{}:{}", settings.domain, settings.listen_address.split(':').last().unwrap_or("443"))
     } else {
         let port = settings.listen_address.split(':').last().unwrap_or("443");
-        format!("{host}:{port}")
+        format!("{}:{port}", params.host)
     };
 
     let export_cmd = format!(
@@ -729,13 +742,9 @@ excluded_routes = []
 
 pub async fn diagnose_server(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<String, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let mut report = String::new();
 
@@ -790,13 +799,9 @@ pub async fn diagnose_server(
 /// Returns JSON: { installed: bool, version: String, service_active: bool }
 pub async fn check_server_installation(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<serde_json::Value, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     // Check for binary
     let (bin_check, _bin_code) = exec_command(
@@ -852,15 +857,11 @@ pub async fn check_server_installation(
 /// Completely remove TrustTunnel from the server.
 pub async fn uninstall_server(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<(), String> {
     emit_step(app, "uninstall", "progress", "Подключение к серверу...");
 
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+    let handle = params.connect().await
         .map_err(|e| { emit_step(app, "uninstall", "error", &e); e })?;
 
     // Determine sudo
@@ -934,15 +935,11 @@ fi
 /// export the client config via trusttunnel_endpoint, and save it locally.
 pub async fn fetch_server_config(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     client_name: String,
 ) -> Result<String, String> {
     emit_step(app, "connect", "progress", "Подключение к серверу...");
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+    let handle = params.connect().await
         .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Подключено к серверу");
     emit_step(app, "auth", "ok", "Авторизация успешна");
@@ -992,7 +989,7 @@ pub async fn fetch_server_config(
     let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
         format!("{endpoint_hostname}:{listen_port}")
     } else {
-        format!("{host}:{listen_port}")
+        format!("{}:{listen_port}", params.host)
     };
 
     emit_step(app, "export", "progress", "Экспорт клиентского конфига...");
@@ -1057,9 +1054,10 @@ pub async fn fetch_server_config(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let server_host = &params.host;
     let client_toml = format!(
         r#"# TrustTunnel Client Configuration
-# Fetched from server {host}
+# Fetched from server {server_host}
 
 loglevel = "info"
 vpn_mode = "general"
@@ -1111,16 +1109,12 @@ excluded_routes = []
 /// restart the service, export the client config, and save it locally.
 pub async fn add_server_user(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     vpn_username: String,
     vpn_password: String,
 ) -> Result<String, String> {
     emit_step(app, "connect", "progress", "Подключение к серверу...");
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await
+    let handle = params.connect().await
         .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Подключено к серверу");
     emit_step(app, "auth", "ok", "Авторизация успешна");
@@ -1237,13 +1231,9 @@ pub fn check_process_conflict() -> Option<String> {
 /// Restart the TrustTunnel service on the remote server.
 pub async fn server_restart_service(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1262,13 +1252,9 @@ pub async fn server_restart_service(
 /// Stop the TrustTunnel service on the remote server.
 pub async fn server_stop_service(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1287,13 +1273,9 @@ pub async fn server_stop_service(
 /// Start the TrustTunnel service on the remote server.
 pub async fn server_start_service(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1312,13 +1294,9 @@ pub async fn server_start_service(
 /// Reboot the remote server (fire and forget).
 pub async fn server_reboot(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1332,13 +1310,9 @@ pub async fn server_reboot(
 /// Fetch service logs from the remote server.
 pub async fn server_get_logs(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<String, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1358,14 +1332,10 @@ pub async fn server_get_logs(
 /// Remove a VPN user from credentials.toml on the remote server and restart the service.
 pub async fn server_remove_user(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     vpn_username: String,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1443,14 +1413,10 @@ pub async fn server_get_available_versions() -> Result<Vec<String>, String> {
 /// Upgrade TrustTunnel on the remote server to a specific version.
 pub async fn server_upgrade(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     version: String,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1489,13 +1455,9 @@ pub async fn server_upgrade(
 /// Get server resource stats: CPU, RAM, disk, active VPN connections.
 pub async fn server_get_stats(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<serde_json::Value, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     // Single compound command to minimize SSH roundtrips
     // CPU: two /proc/stat samples 1s apart for actual current usage
@@ -1642,13 +1604,9 @@ pub fn kill_existing_process() -> Result<(), String> {
 /// Read the raw vpn.toml configuration from the remote server.
 pub async fn get_server_config(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<String, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1674,13 +1632,9 @@ pub async fn get_server_config(
 /// Fetch TLS certificate information from the remote server.
 pub async fn get_cert_info(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<serde_json::Value, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1761,13 +1715,9 @@ pub async fn get_cert_info(
 /// Force-renew the TLS certificate via certbot and restart the service.
 pub async fn renew_cert(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
 ) -> Result<String, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1793,14 +1743,10 @@ pub async fn renew_cert(
 /// Export a client configuration as a deeplink URL from the remote server.
 pub async fn export_config_deeplink(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     client_name: String,
 ) -> Result<String, String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
@@ -1826,7 +1772,7 @@ pub async fn export_config_deeplink(
     let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
         format!("{endpoint_hostname}:{listen_port}")
     } else {
-        format!("{host}:{listen_port}")
+        format!("{}:{listen_port}", params.host)
     };
 
     let export_cmd = format!(
@@ -1856,15 +1802,11 @@ pub async fn export_config_deeplink(
 /// Toggle a boolean feature in vpn.toml (ping_enable, speedtest_enable, ipv6_available)
 pub async fn update_config_feature(
     app: &tauri::AppHandle,
-    host: String,
-    port: u16,
-    ssh_user: String,
-    ssh_password: String,
-    key_path: Option<String>,
+    params: SshParams,
     feature: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let handle = ssh_connect(&host, port, &ssh_user, &ssh_password, key_path.as_deref()).await?;
+    let handle = params.connect().await?;
 
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };

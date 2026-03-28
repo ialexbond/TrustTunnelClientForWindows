@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use toml_edit::{value, Array, DocumentMut};
+use uuid::Uuid;
 
 // ─── Data model ─────────────────────────────────────
 
@@ -229,7 +230,7 @@ pub fn migrate_legacy_exclusions(config_path: String) -> Result<RoutingRules, St
                 "domain"
             };
             RuleEntry {
-                id: uuid_v4(),
+                id: Uuid::new_v4().to_string(),
                 entry_type: entry_type.to_string(),
                 value: d.clone(),
                 label: None,
@@ -631,21 +632,3 @@ pub fn cleanup_hosts_block() -> Result<(), String> {
     cleanup_hosts_block_inner()
 }
 
-/// Simple UUID v4 generator (no external dependency)
-fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    // Not cryptographically secure, but fine for UI keys
-    let r = t ^ (t >> 17) ^ (t << 13);
-    format!(
-        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
-        (r & 0xFFFFFFFF) as u32,
-        ((r >> 32) & 0xFFFF) as u16,
-        ((r >> 48) & 0x0FFF) as u16,
-        (((r >> 60) & 0x3F) | 0x80) as u16 | (((r >> 66) & 0xFF) as u16) << 8,
-        (r >> 74) & 0xFFFFFFFFFFFF,
-    )
-}
