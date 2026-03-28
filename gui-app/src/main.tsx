@@ -22,7 +22,7 @@ document.addEventListener("contextmenu", (e) => {
 });
 
 // React Error Boundary to catch rendering errors without crashing the page
-class ErrorBoundary extends React.Component<
+export class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error: string }
 > {
