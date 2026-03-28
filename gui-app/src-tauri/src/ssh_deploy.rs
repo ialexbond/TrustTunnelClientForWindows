@@ -391,34 +391,27 @@ echo "Configuration files created successfully"
     )
 }
 
-// ─── Main Deploy Function ──────────────────────────
+// ─── Deploy Sub-steps ──────────────────────────────
 
-pub async fn deploy_server(
+/// Check OS, architecture, root/sudo availability.
+/// Returns the sudo prefix string ("" for root, "sudo " otherwise).
+async fn deploy_check_env(
+    handle: &client::Handle<SshHandler>,
     app: &tauri::AppHandle,
-    params: SshParams,
-    settings: EndpointSettings,
 ) -> Result<String, String> {
-    // ── Step 1: SSH Connect + Authenticate ──
-    emit_step(app, "connect", "progress", "Подключение к серверу...");
-    let handle = params.connect().await
-        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
-    emit_step(app, "connect", "ok", "Подключено к серверу");
-    emit_step(app, "auth", "ok", "Авторизация успешна");
-
-    // ── Step 3: Check environment ──
     emit_step(app, "check", "progress", "Проверка сервера...");
 
     let (os_info, _) = exec_command(
-        &handle,
+        handle,
         app,
         "cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"' || echo 'Unknown OS'",
     )
     .await?;
 
-    let (arch_info, _) = exec_command(&handle, app, "uname -m").await?;
+    let (arch_info, _) = exec_command(handle, app, "uname -m").await?;
 
     // Check if running as root
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
+    let (whoami, _) = exec_command(handle, app, "whoami").await?;
     let is_root = whoami.trim() == "root";
 
     emit_log(
@@ -434,7 +427,7 @@ pub async fn deploy_server(
 
     if !is_root {
         // Check if sudo is available without password
-        let (_, sudo_code) = exec_command(&handle, app, "sudo -n true 2>/dev/null").await?;
+        let (_, sudo_code) = exec_command(handle, app, "sudo -n true 2>/dev/null").await?;
         if sudo_code != 0 {
             let msg = "Нужны права root. Подключитесь как root или настройте sudo без пароля.";
             emit_step(app, "check", "error", msg);
@@ -446,7 +439,15 @@ pub async fn deploy_server(
 
     emit_step(app, "check", "ok", "Сервер готов");
 
-    // ── Step 3.5: Update system packages ──
+    Ok(sudo.to_string())
+}
+
+/// Update system packages (apt/dnf/yum).
+async fn deploy_update_packages(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<(), String> {
     emit_step(app, "update", "progress", "Обновление системных пакетов...");
 
     let update_cmd = format!(
@@ -464,27 +465,34 @@ pub async fn deploy_server(
          fi"
     );
 
-    let (_, update_code) = exec_command(&handle, app, &update_cmd).await?;
+    let (_, update_code) = exec_command(handle, app, &update_cmd).await?;
 
     if update_code != 0 {
         emit_log(app, "warn", "Failed to update packages. Continuing installation...");
     }
 
     emit_step(app, "update", "ok", "Система обновлена");
+    Ok(())
+}
 
-    // ── Step 4: Install TrustTunnel Endpoint ──
+/// Download and install the TrustTunnel Endpoint binary.
+async fn deploy_install_binary(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<(), String> {
     emit_step(app, "install", "progress", "Установка TrustTunnel Endpoint...");
 
     // Stop existing service if running (ignore errors)
     let stop_cmd = format!("{sudo}systemctl stop trusttunnel 2>/dev/null; sleep 1; true");
-    exec_command(&handle, app, &stop_cmd).await.ok();
+    exec_command(handle, app, &stop_cmd).await.ok();
 
     // Use -a y flag to auto-answer interactive prompts (built into the install script)
     let install_cmd = format!(
         "curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh -o /tmp/tt_install.sh && {sudo}sh /tmp/tt_install.sh -a y -v && rm -f /tmp/tt_install.sh"
     );
 
-    let (_, install_code) = exec_command(&handle, app, &install_cmd).await?;
+    let (_, install_code) = exec_command(handle, app, &install_cmd).await?;
 
     if install_code != 0 {
         let msg = format!("Установка завершилась с ошибкой (код {install_code})");
@@ -494,7 +502,7 @@ pub async fn deploy_server(
 
     // Verify installation
     let (_, verify_code) = exec_command(
-        &handle,
+        handle,
         app,
         "test -f /opt/trusttunnel/setup_wizard && test -f /opt/trusttunnel/trusttunnel_endpoint",
     )
@@ -507,8 +515,16 @@ pub async fn deploy_server(
     }
 
     emit_step(app, "install", "ok", "TrustTunnel Endpoint установлен");
+    Ok(())
+}
 
-    // ── Step 5: Create config files directly (no TTY needed) ──
+/// Create config files and TLS certificates, then run pre-flight check.
+async fn deploy_configure(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    settings: &EndpointSettings,
+    sudo: &str,
+) -> Result<(), String> {
     emit_step(app, "configure", "progress", "Создание конфигурации Endpoint...");
 
     // Validate domain for Let's Encrypt before attempting
@@ -534,9 +550,9 @@ pub async fn deploy_server(
         }
     }
 
-    let configure_cmd = build_configure_commands(&settings, sudo);
+    let configure_cmd = build_configure_commands(settings, sudo);
 
-    let (_, cfg_code) = exec_command(&handle, app, &configure_cmd).await?;
+    let (_, cfg_code) = exec_command(handle, app, &configure_cmd).await?;
 
     if cfg_code != 0 {
         let msg = "SSH_CONFIG_CREATE_FAILED";
@@ -546,7 +562,7 @@ pub async fn deploy_server(
 
     // Verify certs were created
     let (cert_check, cert_code) = exec_command(
-        &handle, app,
+        handle, app,
         "test -f /opt/trusttunnel/certs/cert.pem && test -f /opt/trusttunnel/certs/key.pem && echo OK"
     ).await?;
 
@@ -559,7 +575,7 @@ pub async fn deploy_server(
 
     // Pre-flight: run endpoint briefly to verify config is valid
     let (preflight, _preflight_code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("cd /opt/trusttunnel && timeout 2 {sudo}./trusttunnel_endpoint vpn.toml hosts.toml 2>&1 || true")
     ).await?;
     emit_log(app, "debug", &format!("Pre-flight output: {preflight}"));
@@ -572,8 +588,16 @@ pub async fn deploy_server(
     }
 
     emit_step(app, "configure", "ok", "Конфигурация Endpoint создана и проверена");
+    Ok(())
+}
 
-    // ── Step 6: Start systemd service ──
+/// Set up and start the systemd service, verify it is running.
+async fn deploy_start_service(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    settings: &EndpointSettings,
+    sudo: &str,
+) -> Result<(), String> {
     emit_step(app, "service", "progress", "Запуск сервиса...");
 
     // Stop existing service first, then copy template and restart
@@ -585,7 +609,7 @@ pub async fn deploy_server(
          {sudo}systemctl enable --now trusttunnel"
     );
 
-    let (_, svc_code) = exec_command(&handle, app, &service_cmds).await?;
+    let (_, svc_code) = exec_command(handle, app, &service_cmds).await?;
 
     if svc_code != 0 {
         emit_log(app, "warn", "Failed to start systemd service. Manual setup may be needed.");
@@ -596,7 +620,7 @@ pub async fn deploy_server(
 
     // Check service status
     let (svc_status, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}systemctl is-active trusttunnel 2>&1")
     ).await?;
     let is_active = svc_status.trim() == "active";
@@ -604,7 +628,7 @@ pub async fn deploy_server(
     if !is_active {
         // Get journal logs to diagnose the issue
         let (journal, _) = exec_command(
-            &handle, app,
+            handle, app,
             &format!("{sudo}journalctl -u trusttunnel --no-pager -n 30 2>&1")
         ).await?;
         emit_log(app, "error", &format!("Сервис не запустился. Статус: {}", svc_status.trim()));
@@ -614,14 +638,14 @@ pub async fn deploy_server(
 
         // Also check the service file contents for debugging
         let (svc_file, _) = exec_command(
-            &handle, app,
+            handle, app,
             "cat /etc/systemd/system/trusttunnel.service 2>&1"
         ).await?;
         emit_log(app, "debug", &format!("Service file:\n{svc_file}"));
 
         // Check what config files exist
         let (ls_output, _) = exec_command(
-            &handle, app,
+            handle, app,
             "ls -la /opt/trusttunnel/*.toml /opt/trusttunnel/certs/ 2>&1"
         ).await?;
         emit_log(app, "debug", &format!("Config files:\n{ls_output}"));
@@ -634,7 +658,7 @@ pub async fn deploy_server(
     // Check if the port is actually listening
     let listen_port = settings.listen_address.split(':').last().unwrap_or("443");
     let (port_check, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("ss -tlnp | grep :{listen_port} || echo 'PORT_NOT_LISTENING'")
     ).await?;
 
@@ -645,8 +669,18 @@ pub async fn deploy_server(
     }
 
     emit_step(app, "service", "ok", "Сервис запущен и работает");
+    Ok(())
+}
 
-    // ── Step 7: Generate client config via trusttunnel_endpoint export ──
+/// Export client config from the endpoint binary and save it locally.
+/// Returns the path to the saved config file.
+async fn deploy_export_config(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    params: &SshParams,
+    settings: &EndpointSettings,
+    sudo: &str,
+) -> Result<String, String> {
     emit_step(app, "export", "progress", "Генерация клиентского конфига...");
 
     // Use the endpoint's own export to get proper config with certificate PEM
@@ -664,7 +698,7 @@ pub async fn deploy_server(
         addr = export_address,
     );
 
-    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
+    let (export_output, export_code) = exec_command(handle, app, &export_cmd).await?;
 
     if export_code != 0 || export_output.trim().is_empty() {
         emit_log(app, "error", &format!("Export failed (code {export_code}): {export_output}"));
@@ -711,7 +745,7 @@ excluded_routes = []
     emit_log(app, "debug", &format!("Generated client config:\n{client_toml}"));
     emit_step(app, "export", "ok", "Конфиг сгенерирован");
 
-    // ── Step 8: Save config locally (portable — next to exe) ──
+    // ── Save config locally (portable — next to exe) ──
     emit_step(app, "save", "progress", "Сохранение конфигурации...");
 
     let config_dir = portable_data_dir();
@@ -726,6 +760,41 @@ excluded_routes = []
     let config_path_str = client_config_path.to_string_lossy().to_string();
     emit_log(app, "info", &format!("Конфиг сохранён: {config_path_str}"));
     emit_step(app, "save", "ok", "Конфигурация сохранена");
+
+    Ok(config_path_str)
+}
+
+// ─── Main Deploy Function ──────────────────────────
+
+pub async fn deploy_server(
+    app: &tauri::AppHandle,
+    params: SshParams,
+    settings: EndpointSettings,
+) -> Result<String, String> {
+    // ── Step 1: SSH Connect + Authenticate ──
+    emit_step(app, "connect", "progress", "Подключение к серверу...");
+    let handle = params.connect().await
+        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
+    emit_step(app, "connect", "ok", "Подключено к серверу");
+    emit_step(app, "auth", "ok", "Авторизация успешна");
+
+    // ── Step 2: Check environment ──
+    let sudo = deploy_check_env(&handle, app).await?;
+
+    // ── Step 3: Update system packages ──
+    deploy_update_packages(&handle, app, &sudo).await?;
+
+    // ── Step 4: Install TrustTunnel Endpoint ──
+    deploy_install_binary(&handle, app, &sudo).await?;
+
+    // ── Step 5: Create config files + TLS certs ──
+    deploy_configure(&handle, app, &settings, &sudo).await?;
+
+    // ── Step 6: Start systemd service ──
+    deploy_start_service(&handle, app, &settings, &sudo).await?;
+
+    // ── Step 7: Export client config + save locally ──
+    let config_path_str = deploy_export_config(&handle, app, &params, &settings, &sudo).await?;
 
     // ── Disconnect ──
     handle
