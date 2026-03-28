@@ -145,12 +145,16 @@ function App() {
       localStorage.removeItem("tt_active_tab");
       localStorage.removeItem("tt_connected_since");
 
-      invoke<string | null>("auto_detect_config").then((detected) => {
-        if (detected) {
-          setConfig(prev => ({ ...prev, configPath: detected }));
-          if (activePage === "server") setActivePage("settings");
-        }
-      }).catch(() => {});
+      // Skip auto-detect if user explicitly cleared config
+      const wasCleared = localStorage.getItem("tt_config_cleared");
+      if (!wasCleared) {
+        invoke<string | null>("auto_detect_config").then((detected) => {
+          if (detected) {
+            setConfig(prev => ({ ...prev, configPath: detected }));
+            if (activePage === "server") setActivePage("settings");
+          }
+        }).catch(() => {});
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -248,6 +252,7 @@ function App() {
   const handleSetupComplete = useCallback((configPath: string) => {
     setConfig((prev) => ({ ...prev, configPath }));
     localStorage.setItem("tt_config_path", configPath);
+    localStorage.removeItem("tt_config_cleared"); // re-enable auto-detect for future
 
     // Copy SSH credentials from wizard to control panel storage
     try {
@@ -301,6 +306,7 @@ function App() {
     }
     setConfig({ configPath: "", logLevel: "info" });
     localStorage.removeItem("tt_config_path");
+    localStorage.setItem("tt_config_cleared", "true"); // prevent auto-detect on restart
     try {
       const raw = localStorage.getItem("trusttunnel_wizard");
       const obj = raw ? JSON.parse(raw) : {};

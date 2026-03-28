@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowDown, ArrowUp, RefreshCw, Loader2, Gauge, AlertTriangle } from "lucide-react";
+import { ArrowDown, ArrowUp, RefreshCw, Loader2, Gauge } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { SnackBar } from "../../shared/ui/SnackBar";
 import type { SpeedResult } from "./useDashboardState";
 
 interface SpeedTestCardProps {
@@ -15,6 +18,14 @@ interface SpeedTestCardProps {
 export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }: SpeedTestCardProps) {
   const { t } = useTranslation();
   const unit = t("units.mbps", "Mbps");
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+
+  // Push error to snackbar when error prop changes
+  useEffect(() => {
+    if (error && !testing) {
+      pushSuccess(t("dashboard.speed_test_failed", "Speed test failed. Try again later."), "error");
+    }
+  }, [error, testing]);
 
   return (
     <Card padding="md" className="flex-1">
@@ -33,12 +44,7 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
           </Button>
         }
       />
-      {error && !testing ? (
-        <div className="flex items-center gap-2 text-xs py-4 px-1" style={{ color: "var(--color-danger-500)" }}>
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">{t("dashboard.speed_test_failed", "Speed test failed. Try again later.")}</span>
-        </div>
-      ) : !speed ? (
+      {!speed ? (
         <div
           className="flex items-center justify-center text-xs py-4"
           style={{ color: "var(--color-text-muted)" }}
@@ -69,6 +75,7 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
           </div>
         </div>
       )}
+      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </Card>
   );
 }

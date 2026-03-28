@@ -226,7 +226,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       setDirty(false);
     } catch (e) {
       console.error("Failed to load routing rules:", e);
-      setError(String(e));
+      pushSuccess(String(e), "error");
     } finally {
       setLoading(false);
     }
@@ -444,7 +444,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       pushSuccess("Правила сохранены");
     } catch (e) {
       console.error("Failed to save routing rules:", e);
-      setError(String(e));
+      pushSuccess(String(e), "error");
     } finally {
       setSaving(false);
     }
@@ -461,7 +461,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
         pushSuccess("Правила экспортированы");
       }
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     }
   }, [rules, pushSuccess, toBackendPayload]);
 
@@ -488,7 +488,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       markDirty(imported);
       pushSuccess("Правила импортированы");
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     }
   }, [markDirty, pushSuccess]);
 
@@ -500,9 +500,9 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     try {
       await invoke("download_geodata");
       await loadGeoStatus();
-      pushSuccess("GeoData downloaded");
+      pushSuccess("Гео-данные загружены");
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     } finally {
       setGeodataDownloading(false);
     }
@@ -520,7 +520,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       setDirty(false);
       pushSuccess("Настройки сохранены");
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     }
   }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
 
@@ -544,7 +544,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
         pushSuccess("Настройки сохранены");
       }
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     } finally {
       setApplying(false);
     }

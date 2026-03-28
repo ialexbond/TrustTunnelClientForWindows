@@ -64,7 +64,6 @@ function parseTomlConfig(raw: string): ParsedConfig {
 export function ConfigSection({ state }: Props) {
   const { t } = useTranslation();
   const { sshParams, setActionResult, configRaw: preloadedConfig, setConfigRaw: setPreloadedConfig } = state;
-  const [configError, setConfigError] = useState("");
   const [showFull, setShowFull] = useState(false);
   const [togglingFeatures, setTogglingFeatures] = useState<Set<string>>(new Set());
   // Local overrides: optimistic UI — shows new value immediately after server confirms
@@ -77,9 +76,8 @@ export function ConfigSection({ state }: Props) {
     try {
       const raw = await invoke<string>("server_get_config", sshParams);
       setPreloadedConfig(raw);
-      setConfigError("");
     } catch (e) {
-      setConfigError(String(e));
+      state.pushSuccess(String(e), "error");
     }
   };
 
@@ -125,17 +123,7 @@ export function ConfigSection({ state }: Props) {
   const parsed = configRaw ? parseTomlConfig(configRaw) : null;
 
   // If no config data yet, don't render
-  if (!configRaw && !configError) return null;
-
-  if (configError) {
-    return (
-      <Card>
-        <CardHeader title={t("server.config.title")} icon={<Settings className="w-3.5 h-3.5" />} />
-        <p className="text-[11px]" style={{ color: "var(--color-danger-500)" }}>{configError}</p>
-        <Button variant="secondary" size="sm" onClick={loadConfig} className="mt-2">{t("server.actions.retry")}</Button>
-      </Card>
-    );
-  }
+  if (!configRaw) return null;
 
   if (!parsed) return null;
 
