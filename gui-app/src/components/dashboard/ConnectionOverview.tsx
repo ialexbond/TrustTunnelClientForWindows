@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Wifi, Loader2, Clock, Activity, Shield, Globe, Power } from "lucide-react";
-import type { VpnStatus } from "../../App";
+import type { VpnStatus } from "../../shared/types";
 import type { ClientConfig } from "../settings/useSettingsState";
 import { Card } from "../../shared/ui/Card";
 import { Badge } from "../../shared/ui/Badge";

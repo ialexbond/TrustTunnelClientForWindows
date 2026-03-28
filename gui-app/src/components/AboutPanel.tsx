@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Shield, Github, Download, RefreshCw, Loader2, CheckCircle2, Sparkles, ArrowUpCircle } from "lucide-react";
-import type { UpdateInfo } from "../App";
+import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
 
 interface AboutPanelProps {

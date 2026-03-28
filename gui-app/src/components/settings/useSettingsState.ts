@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { VpnConfig, VpnStatus } from "../../App";
+import type { VpnConfig, VpnStatus } from "../../shared/types";
 import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
 import { useAutoSave } from "../../shared/hooks/useAutoSave";
 
