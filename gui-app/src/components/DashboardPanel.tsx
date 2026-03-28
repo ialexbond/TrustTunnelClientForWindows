@@ -50,7 +50,7 @@ export default function DashboardPanel({
   // ── Connected: full dashboard with StatusPanel ──
   if (isConnected) {
     return (
-      <div className="h-full flex flex-col overflow-hidden px-4">
+      <div className="h-full flex flex-col overflow-hidden">
         <StatusPanel
           status={status}
           error={null}
@@ -59,7 +59,7 @@ export default function DashboardPanel({
           onDisconnect={onDisconnect}
         />
 
-        <div className="flex flex-col gap-3 flex-1 overflow-y-auto py-3">
+        <div className="flex flex-col gap-3 flex-1 overflow-y-auto py-3 px-4">
           <PingChart
             pingHistory={dashboard.pingHistory}
             avgPing={dashboard.avgPing}

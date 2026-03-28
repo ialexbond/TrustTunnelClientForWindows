@@ -66,8 +66,8 @@ function StatusPanel({
         : <WifiOff className="w-3.5 h-3.5" />;
 
   return (
-    <div className="pt-3 pb-0">
-      <div className="flex items-center justify-between px-4">
+    <div className="pt-3 pb-0 px-4">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Badge variant={statusVariant} size="md" icon={statusIcon}>
             {statusLabel}
@@ -110,7 +110,7 @@ function StatusPanel({
 
       {error && (
         <p
-          className="text-[11px] mt-1.5 px-4 max-w-sm break-words line-clamp-3"
+          className="text-[11px] mt-1.5 max-w-sm break-words line-clamp-3"
           style={{ color: "var(--color-danger-400)" }}
           title={error}
         >
