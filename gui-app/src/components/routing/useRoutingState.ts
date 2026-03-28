@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { useAutoSave } from "../../shared/hooks/useAutoSave";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -181,13 +183,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
   const [applying, setApplying] = useState(false);
   const [geodataDownloading, setGeodataDownloading] = useState(false);
 
-  const [successQueue, setSuccessQueue] = useState<string[]>([]);
-  const shiftSuccess = useCallback(() => {
-    setSuccessQueue((q) => q.slice(1));
-  }, []);
-  const pushSuccess = useCallback((msg: string) => {
-    setSuccessQueue((q) => [...q, msg]);
-  }, []);
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   const baselineRef = useRef<string>("");
 
@@ -556,16 +552,12 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
 
   // ─── Auto-save when VPN not active ────────────────
 
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!dirty || !configPath) return;
-    if (isVpnActive) return; // don't auto-save when VPN is on
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      silentSave();
-    }, 1200);
-    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
-  }, [dirty, configPath, isVpnActive, silentSave]);
+  useAutoSave({
+    dirty,
+    canSave: !!configPath,
+    isActive: isVpnActive,
+    onSave: silentSave,
+  });
 
   return {
     rules,
