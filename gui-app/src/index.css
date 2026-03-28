@@ -316,6 +316,40 @@ input::-ms-clear {
   overflow-y: auto;
 }
 
+/* Thin visible scrollbar for log panels */
+.scroll-visible {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.scroll-visible::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.scroll-visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.scroll-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.scroll-visible::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+[data-theme="light"] .scroll-visible {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+[data-theme="light"] .scroll-visible::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+[data-theme="light"] .scroll-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
 /* Non-scrolling container */
 .scroll-gutter-match {
   overflow-y: auto;

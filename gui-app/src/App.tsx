@@ -13,7 +13,8 @@ import RoutingPanel from "./components/RoutingPanel";
 import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
 import DashboardPanel from "./components/DashboardPanel";
-import { ExperimentalSection } from "./components/settings/ExperimentalSection";
+import AppSettingsPanel from "./components/AppSettingsPanel";
+import type { ThemeMode } from "./components/settings/AppearanceSection";
 
 export type VpnStatus =
   | "disconnected"
@@ -62,24 +63,62 @@ function compareVersions(a: string, b: string): number {
 function App() {
   const { i18n } = useTranslation();
 
-  // ─── Theme ───
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    return (localStorage.getItem("tt_theme") as "dark" | "light") || "dark";
+  // ─── Theme (system / dark / light) ───
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    return (localStorage.getItem("tt_theme") as ThemeMode) || "system";
   });
+
+  // Resolve effective theme from mode
+  const getEffectiveTheme = useCallback((mode: ThemeMode): "dark" | "light" => {
+    if (mode === "system") {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    return mode;
+  }, []);
+
+  const [theme, setTheme] = useState<"dark" | "light">(() => getEffectiveTheme(
+    (localStorage.getItem("tt_theme") as ThemeMode) || "system"
+  ));
+
+  // Apply theme to DOM
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("tt_theme", theme);
   }, [theme]);
+
+  // Listen for system theme changes when mode is "system"
+  useEffect(() => {
+    localStorage.setItem("tt_theme", themeMode);
+    setTheme(getEffectiveTheme(themeMode));
+
+    if (themeMode !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? "dark" : "light");
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [themeMode, getEffectiveTheme]);
+
+  const handleThemeChange = useCallback((mode: ThemeMode) => {
+    setThemeMode(mode);
+  }, []);
+
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+    setThemeMode((prev) => {
+      if (prev === "dark") return "light";
+      if (prev === "light") return "system";
+      return "dark";
+    });
   }, []);
 
   // ─── Language ───
+  const handleLanguageChange = useCallback((lang: string) => {
+    i18n.changeLanguage(lang);
+    localStorage.setItem("tt_language", lang);
+  }, [i18n]);
+
   const toggleLanguage = useCallback(() => {
     const next = i18n.language === "ru" ? "en" : "ru";
-    i18n.changeLanguage(next);
-    localStorage.setItem("tt_language", next);
-  }, [i18n]);
+    handleLanguageChange(next);
+  }, [i18n, handleLanguageChange]);
 
   // ─── Navigation ───
   const [activePage, setActivePage] = useState<SidebarPage>(() => {
@@ -200,6 +239,31 @@ function App() {
       localStorage.removeItem("tt_connected_since");
     }
   }, [connectedSince]);
+
+  // Window visibility is handled by Rust setup (checks .start_minimized flag file)
+  // No JS-side show/hide needed — Rust runs before WebView loads
+
+  // ─── Auto-connect on startup ───
+  const autoConnectDone = useRef(false);
+  useEffect(() => {
+    if (autoConnectDone.current) return;
+    if (localStorage.getItem("tt_auto_connect") !== "true") return;
+    if (!config.configPath) return;
+    if (status !== "disconnected") return;
+    autoConnectDone.current = true;
+    const timer = setTimeout(() => {
+      invoke("vpn_connect", {
+        configPath: config.configPath,
+        logLevel: config.logLevel,
+      }).catch((e) => {
+        setError(String(e));
+        setStatus("error");
+      });
+      setStatus("connecting");
+    }, 1500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.configPath]);
 
   // ─── VPN status sync ───
   useEffect(() => {
@@ -432,7 +496,14 @@ function App() {
   const [settingsKey, setSettingsKey] = useState(0);
   const wizardResetRef = useRef<(() => void) | null>(null);
 
-  const handleClearConfig = useCallback(() => {
+  const handleClearConfig = useCallback(async () => {
+    // Disconnect VPN first if running
+    if (status === "connected" || status === "connecting") {
+      try {
+        setStatus("disconnecting");
+        await invoke("vpn_disconnect");
+      } catch { /* ignore */ }
+    }
     setConfig({ configPath: "", logLevel: "info" });
     localStorage.removeItem("tt_config_path");
     try {
@@ -446,7 +517,7 @@ function App() {
       localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
     } catch { /* ignore */ }
     setWizardKey(k => k + 1);
-  }, []);
+  }, [status]);
 
   // Reset scroll on page change
   useEffect(() => {
@@ -561,23 +632,27 @@ function App() {
           </div>
 
           {/* Logs */}
-          <div className="h-full flex flex-col overflow-hidden scroll-gutter-match" style={{ display: activePage === "logs" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "logs" ? "flex" : "none" }}>
             {statusPanelNode}
-            <div className="flex-1 overflow-hidden px-4 pb-3">
+            <div className="flex-1 overflow-hidden py-3 px-4">
               <LogPanel
                 logs={vpnLogs}
                 onClear={() => setVpnLogs([])}
-                fullWidth
+                isConnected={status === "connected"}
               />
             </div>
           </div>
 
           {/* App Settings */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
-            {statusPanelNode}
-            <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-              <ExperimentalSection />
-            </div>
+            <AppSettingsPanel
+              theme={themeMode}
+              onThemeChange={handleThemeChange}
+              language={i18n.language}
+              onLanguageChange={handleLanguageChange}
+              hasConfig={!!config.configPath}
+              statusPanel={statusPanelNode}
+            />
           </div>
 
           {/* About */}
