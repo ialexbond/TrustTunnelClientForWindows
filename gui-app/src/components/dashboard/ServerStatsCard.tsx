@@ -8,6 +8,8 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { formatBytes } from "../../shared/utils/uptime";
 import { deobfuscate } from "../../shared/utils/obfuscation";
+import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { SnackBar } from "../../shared/ui/SnackBar";
 
 interface SshCredentials {
   host: string;
@@ -95,7 +97,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
     } catch { return null; }
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
   const initialFetchDone = useRef(false);
 
   // Watch for SSH creds appearing/disappearing (not object identity)
@@ -106,7 +108,6 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
         if (prev !== has) {
           if (!has) {
             setStats(null);
-            setError(null);
             initialFetchDone.current = false;
             try { sessionStorage.removeItem("tt_server_stats"); } catch {}
           }
@@ -123,7 +124,6 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
     if (!c) return;
     // Only show loader if we have no cached data yet
     if (!stats) setLoading(true);
-    setError(null);
     try {
       const result = await invoke<ServerStats>("server_get_stats", {
         host: c.host,
@@ -135,7 +135,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
       setStats(result);
       try { sessionStorage.setItem("tt_server_stats", JSON.stringify(result)); } catch {}
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     } finally {
       setLoading(false);
     }
@@ -197,24 +197,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
     );
   }
 
-  if (error && !stats) {
-    return (
-      <Card padding="md">
-        <CardHeader
-          title={t("dashboard.server_stats", "Server")}
-          icon={<Server className="w-4 h-4" />}
-          action={
-            <Button variant="ghost" size="sm" icon={<RefreshCw className="w-3.5 h-3.5" />} onClick={fetchStats}>
-              {t("buttons.retry")}
-            </Button>
-          }
-        />
-        <p className="text-xs py-2" style={{ color: "var(--color-danger-400)" }}>{error}</p>
-      </Card>
-    );
-  }
-
-  if (!stats) return null;
+  if (!stats) return <SnackBar messages={successQueue} onShown={shiftSuccess} />;
 
   const memPercent = stats.mem_total > 0 ? (stats.mem_used / stats.mem_total) * 100 : 0;
   const diskPercent = stats.disk_total > 0 ? (stats.disk_used / stats.disk_total) * 100 : 0;
@@ -287,6 +270,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
         </div>
 
       </div>
+      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </Card>
   );
 }

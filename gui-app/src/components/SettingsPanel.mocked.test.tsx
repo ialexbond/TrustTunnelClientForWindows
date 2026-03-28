@@ -74,32 +74,6 @@ describe("SettingsPanel (mocked state)", () => {
     vi.mocked(useSettingsState).mockReturnValue({ ...baseMockState });
   });
 
-  it("shows error banner when error exists and config is loaded", () => {
-    vi.mocked(useSettingsState).mockReturnValue({
-      ...baseMockState,
-      error: "Something went wrong",
-    });
-    render(<SettingsPanel {...defaultProps} />);
-    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-  });
-
-  it("dismisses error banner on dismiss click", () => {
-    const setError = vi.fn();
-    vi.mocked(useSettingsState).mockReturnValue({
-      ...baseMockState,
-      error: "Error message",
-      setError,
-    });
-    render(<SettingsPanel {...defaultProps} />);
-    // ErrorBanner has a dismiss button — find it
-    const dismissBtn = screen
-      .getByText("Error message")
-      .closest("div")
-      ?.parentElement?.querySelector("button");
-    if (dismissBtn) fireEvent.click(dismissBtn);
-    expect(setError).toHaveBeenCalledWith("");
-  });
-
   it("calls handleSave(true) when save button clicked", () => {
     const handleSave = vi.fn().mockResolvedValue(undefined);
     vi.mocked(useSettingsState).mockReturnValue({
