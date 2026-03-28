@@ -7,6 +7,7 @@ import {
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { formatBytes } from "../../shared/utils/uptime";
+import { deobfuscate } from "../../shared/utils/obfuscation";
 
 interface SshCredentials {
   host: string;
@@ -32,17 +33,6 @@ interface ServerStats {
 
 interface ServerStatsCardProps {
   onNavigateToControl: () => void;
-}
-
-function deobfuscate(value: string): string {
-  if (value.startsWith("b64:")) {
-    try {
-      return decodeURIComponent(escape(atob(value.slice(4))));
-    } catch {
-      return value;
-    }
-  }
-  return value;
 }
 
 function readSshCreds(): SshCredentials | null {
