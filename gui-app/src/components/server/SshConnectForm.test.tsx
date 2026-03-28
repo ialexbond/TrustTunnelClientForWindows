@@ -78,9 +78,9 @@ describe("SshConnectForm", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
-      // Error should be displayed somewhere in the form
-      const errorEl = document.querySelector("[style*='color: var(--color-danger-400)']");
-      expect(errorEl).toBeInTheDocument();
+      // Error should be displayed in a snackbar (AlertTriangle icon present)
+      const snackbar = document.querySelector("[class*='fixed bottom']");
+      expect(snackbar).toBeInTheDocument();
     });
 
     expect(onConnect).not.toHaveBeenCalled();
@@ -153,8 +153,9 @@ describe("SshConnectForm", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
-      const errorEl = document.querySelector("[style*='color: var(--color-danger-400)']");
-      expect(errorEl).toBeInTheDocument();
+      // Error should appear in a snackbar
+      const snackbar = document.querySelector("[class*='fixed bottom']");
+      expect(snackbar).toBeInTheDocument();
     });
   });
 
@@ -165,10 +166,11 @@ describe("SshConnectForm", () => {
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
     fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "pass" } });
 
-    // First attempt - error
+    // First attempt - error (shown as snackbar)
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
     await waitFor(() => {
-      expect(document.querySelector("[style*='color: var(--color-danger-400)']")).toBeInTheDocument();
+      const snackbar = document.querySelector("[class*='fixed bottom']");
+      expect(snackbar).toBeInTheDocument();
     });
 
     // Second attempt - success

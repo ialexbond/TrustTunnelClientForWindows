@@ -23,6 +23,35 @@ function normalize(msg: SnackMessage): { text: string; type: "success" | "error"
   return { text: msg.text, type: msg.type ?? "success" };
 }
 
+/** Sub-component: renders a single error snackbar item with truncation-aware Copy button */
+function ErrorSnackText({ text, onCopy }: { text: string; onCopy: () => void }) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    setTruncated(el.scrollHeight > el.clientHeight);
+  }, [text]);
+
+  return (
+    <>
+      <span ref={textRef} className="line-clamp-3">
+        {text}
+      </span>
+      {truncated && (
+        <button
+          className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+          title="Copy"
+          onClick={onCopy}
+        >
+          <Copy className="w-3.5 h-3.5" style={{ color: "var(--color-text-secondary)" }} />
+        </button>
+      )}
+    </>
+  );
+}
+
 export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) {
   const [items, setItems] = useState<SnackItem[]>([]);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -59,6 +88,29 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
 
     for (let i = seenCount.current; i < newCount; i++) {
       const { text, type } = normalize(messages[i]);
+
+      // Task 1b: When a success message arrives, dismiss all existing error snackbars
+      if (type === "success") {
+        setItems(prev => {
+          const updated = prev.map(s =>
+            s.type === "error" && s.phase !== "exit" ? { ...s, phase: "exit" as const } : s,
+          );
+          // Schedule removal of exiting errors
+          updated.forEach(s => {
+            if (s.type === "error" && s.phase === "exit") {
+              const timer = timersRef.current.get(s.id);
+              if (timer) {
+                clearTimeout(timer);
+                timersRef.current.delete(s.id);
+              }
+              setTimeout(() => {
+                setItems(p => p.filter(x => x.id !== s.id));
+              }, 400);
+            }
+          });
+          return updated;
+        });
+      }
 
       // Check for duplicate that is still visible
       const existing = items.find(
@@ -153,30 +205,25 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
             />
           )}
 
-          <span
-            className={item.type === "success" ? "truncate" : "line-clamp-3"}
-            style={item.type === "success" ? { whiteSpace: "nowrap" } : undefined}
-          >
-            {item.text}
-          </span>
+          {item.type === "success" ? (
+            <span className="truncate" style={{ whiteSpace: "nowrap" }}>
+              {item.text}
+            </span>
+          ) : (
+            <ErrorSnackText
+              text={item.text}
+              onCopy={() => navigator.clipboard.writeText(item.text)}
+            />
+          )}
 
           {item.type === "error" && (
-            <>
-              <button
-                className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
-                title="Copy"
-                onClick={() => navigator.clipboard.writeText(item.text)}
-              >
-                <Copy className="w-3.5 h-3.5" style={{ color: "var(--color-text-secondary)" }} />
-              </button>
-              <button
-                className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
-                title="Close"
-                onClick={() => dismiss(item.id)}
-              >
-                <X className="w-3.5 h-3.5" style={{ color: "var(--color-text-secondary)" }} />
-              </button>
-            </>
+            <button
+              className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+              title="Close"
+              onClick={() => dismiss(item.id)}
+            >
+              <X className="w-3.5 h-3.5" style={{ color: "var(--color-text-secondary)" }} />
+            </button>
           )}
         </div>
       ))}

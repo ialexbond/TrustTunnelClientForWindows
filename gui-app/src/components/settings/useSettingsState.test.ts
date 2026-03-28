@@ -176,7 +176,9 @@ describe("useSettingsState", () => {
       await result.current.handleSave();
     });
 
-    expect(result.current.error).toBe("Error: write failed");
+    expect(result.current.successQueue).toContainEqual(
+      expect.objectContaining({ text: "Error: write failed", type: "error" }),
+    );
     expect(result.current.saving).toBe(false);
   });
 
@@ -343,7 +345,9 @@ describe("useSettingsState", () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(result.current.error).toBe("Error: file not found");
+    expect(result.current.successQueue).toContainEqual(
+      expect.objectContaining({ text: "Error: file not found", type: "error" }),
+    );
     expect(result.current.config).toBeNull();
   });
 });
