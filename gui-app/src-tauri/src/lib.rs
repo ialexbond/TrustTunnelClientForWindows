@@ -730,7 +730,8 @@ fn save_client_config(config_path: String, config: serde_json::Value) -> Result<
 
     let routing_keys_to_preserve: Vec<(&str, Option<String>)> = {
         let keys = ["exclusions_file", "blocked_file",
-                     "process_direct_file", "process_proxy_file", "process_block_file"];
+                     "process_direct_file", "process_proxy_file", "process_block_file",
+                     "vpn_mode"];
         keys.iter().map(|&k| {
             let val = existing_doc.as_ref()
                 .and_then(|doc| doc.get(k).and_then(|v| v.as_str()).map(String::from));
