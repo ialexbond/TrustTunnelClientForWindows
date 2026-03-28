@@ -96,11 +96,6 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
       />
 
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-        {/* Error — shown below connection block */}
-        {state.error && (
-          <ErrorBanner message={state.error} />
-        )}
-
         {/* GeoData Status */}
         <GeoDataStatusCard
           status={state.geodataStatus}

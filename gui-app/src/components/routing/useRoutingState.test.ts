@@ -103,7 +103,9 @@ describe("useRoutingState", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.error).toBe("File not found");
+    expect(result.current.successQueue).toContainEqual(
+      expect.objectContaining({ text: "File not found", type: "error" }),
+    );
   });
 
   it("does not load when configPath is empty", async () => {
@@ -444,7 +446,9 @@ describe("useRoutingState", () => {
       await result.current.save();
     });
 
-    expect(result.current.error).toBe("Disk full");
+    expect(result.current.successQueue).toContainEqual(
+      expect.objectContaining({ text: "Disk full", type: "error" }),
+    );
   });
 
   it("save pushes success message to queue", async () => {

@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { Shield, Github, Download, RefreshCw, Loader2, CheckCircle2, Sparkles, ArrowUpCircle } from "lucide-react";
 import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
+import { useSuccessQueue } from "../shared/hooks/useSuccessQueue";
+import { SnackBar } from "../shared/ui/SnackBar";
 
 interface AboutPanelProps {
   updateInfo: UpdateInfo;
@@ -20,7 +22,7 @@ interface UpdateProgressPayload {
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
-  const [updateError, setUpdateError] = useState("");
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   useEffect(() => {
     const unlisten = listen<UpdateProgressPayload>("update-progress", (event) => {
@@ -32,12 +34,11 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   const handleSelfUpdate = async () => {
     if (!updateInfo.downloadUrl) return;
     setUpdating(true);
-    setUpdateError("");
     setUpdateProgress({ stage: "download", percent: 0, message: "Подготовка..." });
     try {
       await invoke("self_update", { downloadUrl: updateInfo.downloadUrl });
     } catch (e) {
-      setUpdateError(String(e));
+      pushSuccess(String(e), "error");
       setUpdating(false);
       setUpdateProgress(null);
     }
@@ -155,9 +156,6 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                   <Download className="w-3.5 h-3.5" />
                 </button>
               </div>
-              {updateError && (
-                <p className="text-[11px] break-words" style={{ color: "var(--color-danger-500)" }}>{updateError}</p>
-              )}
             </div>
           ) : (
             <div
@@ -211,6 +209,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           </span>
         </div>
       </div>
+      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </div>
   );
 }

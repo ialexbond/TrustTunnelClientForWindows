@@ -90,17 +90,17 @@ describe("ServerStatsCard", () => {
     });
   });
 
-  it("shows error state and retry button on fetch failure", async () => {
+  it("shows snackbar error on fetch failure", async () => {
     localStorage.setItem("trusttunnel_control_ssh", sshCreds);
     mockInvoke.mockRejectedValueOnce(new Error("SSH connection failed"));
 
     render(<ServerStatsCard {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Error: SSH connection failed")).toBeInTheDocument();
+      // Error now displayed via SnackBar (fixed bottom snackbar)
+      const snackbar = document.querySelector("[class*='fixed bottom']");
+      expect(snackbar).toBeInTheDocument();
     });
-
-    expect(screen.getByText("Попробовать снова")).toBeInTheDocument();
   });
 
   it("displays cached stats from sessionStorage", () => {
