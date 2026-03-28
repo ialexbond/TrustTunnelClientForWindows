@@ -26,7 +26,6 @@ export function ExportSection({ state }: Props) {
   const [selectedUser, setSelectedUser] = useState("");
   const [generating, setGenerating] = useState(false);
   const [deeplink, setDeeplink] = useState("");
-  const [exportError, setExportError] = useState("");
   const [copied, setCopied] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const userDropdownRef = useRef<HTMLDivElement>(null);
@@ -48,7 +47,6 @@ export function ExportSection({ state }: Props) {
   const handleGenerate = async () => {
     if (!selectedUser) return;
     setGenerating(true);
-    setExportError("");
     setDeeplink("");
 
     try {
@@ -58,7 +56,7 @@ export function ExportSection({ state }: Props) {
       });
       setDeeplink(link);
     } catch (e) {
-      setExportError(String(e));
+      state.pushSuccess(String(e), "error");
     } finally {
       setGenerating(false);
     }
@@ -132,7 +130,7 @@ export function ExportSection({ state }: Props) {
                     return (
                       <button
                         key={u}
-                        onClick={() => { setSelectedUser(u); setUserDropdownOpen(false); setDeeplink(""); setExportError(""); }}
+                        onClick={() => { setSelectedUser(u); setUserDropdownOpen(false); setDeeplink(""); }}
                         className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                         style={{
                           backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
@@ -163,13 +161,6 @@ export function ExportSection({ state }: Props) {
         >
           {generating ? t("server.export.generating") : t("server.export.generate")}
         </Button>
-
-        {/* Error */}
-        {exportError && (
-          <p className="text-[11px]" style={{ color: "var(--color-danger-500)" }}>
-            {t("server.export.error", { error: exportError })}
-          </p>
-        )}
 
         {/* Deeplink result with QR code */}
         <div

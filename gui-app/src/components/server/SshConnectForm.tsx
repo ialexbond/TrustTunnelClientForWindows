@@ -2,11 +2,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Server, Loader2, AlertCircle, Lock, Key, FileKey } from "lucide-react";
+import { Server, Loader2, Lock, Key, FileKey } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
 import { translateSshError } from "../../shared/utils/translateSshError";
+import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { SnackBar } from "../../shared/ui/SnackBar";
 
 export interface SshCredentials {
   host: string;
@@ -35,7 +37,7 @@ export function SshConnectForm({ onConnect }: Props) {
   const [keyPath, setKeyPath] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("password");
   const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState("");
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   const handleSelectKey = async () => {
     try {
@@ -61,7 +63,6 @@ export function SshConnectForm({ onConnect }: Props) {
   const handleConnect = async () => {
     if (!isValid) return;
     setConnecting(true);
-    setError("");
 
     try {
       const params: Record<string, unknown> = {
@@ -96,7 +97,7 @@ export function SshConnectForm({ onConnect }: Props) {
 
       onConnect(creds);
     } catch (e) {
-      setError(translateSshError(String(e), t));
+      pushSuccess(translateSshError(String(e), t), "error");
     } finally {
       setConnecting(false);
     }
@@ -219,17 +220,6 @@ export function SshConnectForm({ onConnect }: Props) {
             </div>
           )}
 
-          {/* Error */}
-          {error && (
-            <div
-              className="flex items-start gap-2 p-3 rounded-[var(--radius-md)]"
-              style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)" }}
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "var(--color-danger-400)" }} />
-              <p className="text-[11px]" style={{ color: "var(--color-danger-400)" }}>{error}</p>
-            </div>
-          )}
-
           {/* Connect button */}
           <Button
             variant="primary"
@@ -250,6 +240,7 @@ export function SshConnectForm({ onConnect }: Props) {
           </div>
         </div>
       </div>
+      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </div>
   );
 }

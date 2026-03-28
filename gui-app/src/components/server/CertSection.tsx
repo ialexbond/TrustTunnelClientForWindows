@@ -135,7 +135,6 @@ export function CertSection({ state }: Props) {
   const { t, i18n } = useTranslation();
   const { sshParams, setActionResult, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
 
-  const [certError, setCertError] = useState("");
   const [renewLoading, setRenewLoading] = useState(false);
   const [renewStatus, setRenewStatus] = useState<string>("");
   const [confirmRenew, setConfirmRenew] = useState(false);
@@ -143,12 +142,11 @@ export function CertSection({ state }: Props) {
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;
 
   const loadCert = async () => {
-    setCertError("");
     try {
       const raw = await invoke<unknown>("server_get_cert_info", sshParams);
       setPreloadedCert(raw);
     } catch (e) {
-      setCertError(String(e));
+      state.pushSuccess(String(e), "error");
     }
   };
 
@@ -185,18 +183,6 @@ export function CertSection({ state }: Props) {
         return <Badge variant="default" size="sm">{t("server.cert.unknown")}</Badge>;
     }
   };
-
-  if (!certInfo && !certError) return null;
-
-  if (certError) {
-    return (
-      <Card>
-        <CardHeader title={t("server.cert.title")} icon={<ShieldCheck className="w-3.5 h-3.5" />} />
-        <p className="text-[11px]" style={{ color: "var(--color-danger-500)" }}>{certError}</p>
-        <Button variant="secondary" size="sm" onClick={loadCert} className="mt-2">{t("server.actions.retry")}</Button>
-      </Card>
-    );
-  }
 
   if (!certInfo) return null;
 

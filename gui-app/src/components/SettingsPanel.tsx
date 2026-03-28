@@ -40,11 +40,6 @@ function SettingsPanel(props: SettingsPanelProps) {
       {/* Scrollable content — padding inside scroll area, scrollbar to window edge */}
       {config ? (
         <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-          {/* Error */}
-          {error && (
-            <ErrorBanner message={error} onDismiss={() => setError("")} />
-          )}
-
           <ConnectionSection state={state} />
 
           {/* Save & Reconnect — always visible, active only when VPN on + dirty */}

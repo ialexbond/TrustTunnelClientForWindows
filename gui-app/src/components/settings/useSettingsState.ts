@@ -95,8 +95,15 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   // ─── Dirty tracking ───
+  // Normalize config for comparison: strip empty strings from arrays (e.g. dns_upstreams)
+  // so that adding an empty input field doesn't trigger auto-save
+  const normalizeForSnapshot = (cfg: Record<string, unknown>): string => {
+    return JSON.stringify(cfg, (_key, value) =>
+      Array.isArray(value) ? value.filter((v: unknown) => v !== "") : value
+    );
+  };
   const savedSnapshot = useRef<string>("");
-  const dirty = config ? JSON.stringify(config) !== savedSnapshot.current : false;
+  const dirty = config ? normalizeForSnapshot(config as Record<string, unknown>) !== savedSnapshot.current : false;
 
   // ─── Sync path from parent ───
   useEffect(() => {
@@ -118,9 +125,9 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         configPath: localPath,
       });
       setConfig(data);
-      savedSnapshot.current = JSON.stringify(data);
+      savedSnapshot.current = normalizeForSnapshot(data as Record<string, unknown>);
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localPath, reloadKey]);
@@ -160,11 +167,11 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         configPath: localPath,
         config: configToSave,
       });
-      savedSnapshot.current = JSON.stringify(config);
+      savedSnapshot.current = normalizeForSnapshot(config as Record<string, unknown>);
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
       pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     }
   }, [config, localPath, onConfigChange, pushSuccess, t]);
 
@@ -185,7 +192,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         configPath: localPath,
         config: configToSave,
       });
-      savedSnapshot.current = JSON.stringify(config);
+      savedSnapshot.current = normalizeForSnapshot(config as Record<string, unknown>);
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
 
       if (reconnect && (status === "connected" || status === "connecting")) {
@@ -195,7 +202,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
       }
     } catch (e) {
-      setError(String(e));
+      pushSuccess(String(e), "error");
     } finally {
       setSaving(false);
     }

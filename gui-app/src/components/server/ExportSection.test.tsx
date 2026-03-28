@@ -158,15 +158,16 @@ describe("ExportSection", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("trusttunnel://config/xyz");
   });
 
-  it("shows error message when generation fails", async () => {
+  it("calls pushSuccess with error when generation fails", async () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("SSH timeout"));
-    const state = makeState();
+    const pushSuccess = vi.fn();
+    const state = makeState({ pushSuccess });
     render(<ExportSection state={state} />);
     fireEvent.click(screen.getByText(i18n.t("server.export.select_user")));
     fireEvent.click(screen.getByText("alice"));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("server.export.generate")) }));
     await waitFor(() => {
-      expect(screen.getByText(i18n.t("server.export.error", { error: "Error: SSH timeout" }))).toBeInTheDocument();
+      expect(pushSuccess).toHaveBeenCalledWith("Error: SSH timeout", "error");
     });
   });
 
