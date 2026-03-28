@@ -30,3 +30,4 @@ build_log.txt
 TrustTunnel-Portable/
 TrustTunnel-v*-portable-*/
 exclusions.json
+gui-app/coverage/
