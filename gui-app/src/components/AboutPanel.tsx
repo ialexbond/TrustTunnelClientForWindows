@@ -59,26 +59,30 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   const version = updateInfo.currentVersion || "2.0.0";
 
   return (
-    <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-      <div className="max-w-md w-full space-y-6">
+    <div className="flex-1 overflow-y-auto py-3 space-y-4">
 
-        {/* Hero — logo, name, version */}
-        <div className="flex flex-col items-center gap-2 pt-2">
+        {/* Header */}
+        <div
+          className="rounded-xl p-4 flex items-center gap-4"
+          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+        >
           <div
-            className="p-3.5 rounded-2xl shadow-lg"
+            className="p-3 rounded-xl shrink-0"
             style={{ background: "linear-gradient(135deg, var(--color-accent-500), var(--color-accent-400))" }}
           >
-            <Shield className="w-10 h-10 text-white" />
+            <Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-wide mt-1" style={{ color: "var(--color-text-primary)" }}>
-            TrustTunnel
-          </h1>
-          <span
-            className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
-            style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
-          >
-            v{version} · Windows
-          </span>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-bold" style={{ color: "var(--color-text-primary)" }}>
+              TrustTunnel
+            </h1>
+            <span
+              className="text-[11px] font-mono"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              v{version} · Windows
+            </span>
+          </div>
         </div>
 
         {/* Update card */}
@@ -203,7 +207,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
         </div>
 
         {/* Footer links */}
-        <div className="flex items-center justify-center gap-3 pb-2">
+        <div className="flex items-center gap-3 pb-2">
           <button
             onClick={() => open("https://github.com/ialexbond/TrustTunnelClient")}
             className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
@@ -218,7 +222,6 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             {t("about.copyright", { year: new Date().getFullYear() })}
           </span>
         </div>
-      </div>
       <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </div>
   );
