@@ -142,7 +142,10 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
               icon={<Save className="w-3.5 h-3.5" />}
               loading={state.applying}
               disabled={!state.isVpnActive || !state.dirty}
-              onClick={() => state.handleSave(true)}
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("tt-peer-save"));
+                state.handleSave(true);
+              }}
             >
               {saveLabel}
             </Button>

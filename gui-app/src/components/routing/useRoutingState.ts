@@ -550,6 +550,13 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     }
   }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload, isVpnActive, onReconnect]);
 
+  // ─── Peer-save: when Settings panel saves, save our rules too ───
+  useEffect(() => {
+    const handler = () => { if (dirty) silentSave(); };
+    window.addEventListener("tt-peer-save", handler);
+    return () => window.removeEventListener("tt-peer-save", handler);
+  }, [dirty, silentSave]);
+
   // ─── Auto-save when VPN not active ────────────────
 
   useAutoSave({

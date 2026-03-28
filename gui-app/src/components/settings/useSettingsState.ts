@@ -221,6 +221,13 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     }
   }, [status, pushSuccess, t]);
 
+  // ─── Peer-save: when Routing panel saves, save our config too ───
+  useEffect(() => {
+    const handler = () => { if (dirty) silentSave(); };
+    window.addEventListener("tt-peer-save", handler);
+    return () => window.removeEventListener("tt-peer-save", handler);
+  }, [dirty, silentSave]);
+
   // ─── Auto-save when VPN not active (silent, no UI) ───
   useAutoSave({
     dirty,
