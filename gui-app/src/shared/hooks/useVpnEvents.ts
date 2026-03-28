@@ -130,18 +130,17 @@ export function useVpnEvents({
     return () => { unlisten.then((f) => f()); };
   }, [reconnectResolve]);
 
-  // ─── Conflicting VPN adapter warning ───
+  // ─── Conflicting VPN adapter warning (log only, non-blocking) ───
   useEffect(() => {
     const unlisten = listen<{ adapters: string[]; message: string }>(
       "vpn-adapter-conflict",
       (event) => {
-        const { adapters, message } = event.payload;
-        traceLog(`WARNING: Conflicting adapters detected: ${adapters.join(", ")}`);
-        setError(i18n.t("errors.adapter_conflict", { adapters: adapters.join(", ") }));
+        const { adapters } = event.payload;
+        traceLog(`WARNING: Conflicting adapters detected: ${adapters.join(", ")}. If connection fails, disable them.`);
       },
     );
     return () => { unlisten.then((f) => f()); };
-  }, [i18n, setError]);
+  }, []);
 
   // ─── VPN log collector + error detection ───
   useEffect(() => {
