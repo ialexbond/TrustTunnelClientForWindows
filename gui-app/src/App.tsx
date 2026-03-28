@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
@@ -14,39 +12,13 @@ import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
 import DashboardPanel from "./components/DashboardPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
-import type { ThemeMode } from "./components/settings/AppearanceSection";
+import { useTheme } from "./shared/hooks/useTheme";
+import { useLanguage } from "./shared/hooks/useLanguage";
+import { useVpnEvents } from "./shared/hooks/useVpnEvents";
+import type { VpnStatus, VpnConfig, LogEntry, UpdateInfo } from "./shared/types";
 
-export type VpnStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "disconnecting"
-  | "recovering"
-  | "error";
-
-export interface UpdateInfo {
-  available: boolean;
-  latestVersion: string;
-  currentVersion: string;
-  downloadUrl: string;
-  releaseNotes: string;
-  checking: boolean;
-}
-
-export interface VpnConfig {
-  configPath: string;
-  logLevel: string;
-}
-
-export interface LogEntry {
-  timestamp: string;
-  level: string;
-  message: string;
-}
-
-/** @deprecated Use SidebarPage instead — kept for backward compat with Header.tsx */
-export type AppTab = "setup" | "settings" | "routing" | "about";
-
+// Re-export types for backward compatibility
+export type { VpnStatus, UpdateInfo, VpnConfig, LogEntry, AppTab } from "./shared/types";
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);
@@ -61,64 +33,11 @@ function compareVersions(a: string, b: string): number {
 }
 
 function App() {
-  const { i18n } = useTranslation();
-
-  // ─── Theme (system / dark / light) ───
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    return (localStorage.getItem("tt_theme") as ThemeMode) || "system";
-  });
-
-  // Resolve effective theme from mode
-  const getEffectiveTheme = useCallback((mode: ThemeMode): "dark" | "light" => {
-    if (mode === "system") {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    }
-    return mode;
-  }, []);
-
-  const [theme, setTheme] = useState<"dark" | "light">(() => getEffectiveTheme(
-    (localStorage.getItem("tt_theme") as ThemeMode) || "system"
-  ));
-
-  // Apply theme to DOM
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
-  // Listen for system theme changes when mode is "system"
-  useEffect(() => {
-    localStorage.setItem("tt_theme", themeMode);
-    setTheme(getEffectiveTheme(themeMode));
-
-    if (themeMode !== "system") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? "dark" : "light");
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, [themeMode, getEffectiveTheme]);
-
-  const handleThemeChange = useCallback((mode: ThemeMode) => {
-    setThemeMode(mode);
-  }, []);
-
-  const toggleTheme = useCallback(() => {
-    setThemeMode((prev) => {
-      if (prev === "dark") return "light";
-      if (prev === "light") return "system";
-      return "dark";
-    });
-  }, []);
+  // ─── Theme ───
+  const { theme, themeMode, handleThemeChange, toggleTheme } = useTheme();
 
   // ─── Language ───
-  const handleLanguageChange = useCallback((lang: string) => {
-    i18n.changeLanguage(lang);
-    localStorage.setItem("tt_language", lang);
-  }, [i18n]);
-
-  const toggleLanguage = useCallback(() => {
-    const next = i18n.language === "ru" ? "en" : "ru";
-    handleLanguageChange(next);
-  }, [i18n, handleLanguageChange]);
+  const { i18n, handleLanguageChange, toggleLanguage } = useLanguage();
 
   // ─── Navigation ───
   const [activePage, setActivePage] = useState<SidebarPage>(() => {
@@ -149,7 +68,6 @@ function App() {
   const [vpnMode, setVpnMode] = useState<string>("general");
   const [vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
 
-  // SSH data is now managed by ControlPanelPage via trusttunnel_control_ssh localStorage
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
@@ -192,6 +110,18 @@ function App() {
   }, []);
 
   useEffect(() => { checkForUpdates(true); }, [checkForUpdates]);
+
+  // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
+  const reconnectResolve = useRef<(() => void) | null>(null);
+
+  useVpnEvents({
+    i18n,
+    setStatus,
+    setError,
+    setConnectedSince,
+    setVpnLogs,
+    reconnectResolve,
+  });
 
   // ─── Config validation on startup ───
   useEffect(() => {
@@ -240,9 +170,6 @@ function App() {
     }
   }, [connectedSince]);
 
-  // Window visibility is handled by Rust setup (checks .start_minimized flag file)
-  // No JS-side show/hide needed — Rust runs before WebView loads
-
   // ─── Auto-connect on startup ───
   const autoConnectDone = useRef(false);
   useEffect(() => {
@@ -264,86 +191,6 @@ function App() {
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.configPath]);
-
-  // ─── VPN status sync ───
-  useEffect(() => {
-    invoke<string>("check_vpn_status").then((backendStatus) => {
-      if (backendStatus === "connected") {
-        setStatus("connected");
-        setConnectedSince((prev) => prev ?? new Date());
-      } else if (backendStatus === "connecting") {
-        setStatus("connecting");
-        setConnectedSince(null);
-      } else {
-        setStatus("disconnected");
-        setConnectedSince(null);
-      }
-    }).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const unlistenStatus = listen<{ status: VpnStatus; error?: string }>(
-      "vpn-status",
-      (event) => {
-        setStatus((prev) => {
-          if (prev === "recovering" && event.payload.status === "disconnected") {
-            return prev;
-          }
-          return event.payload.status;
-        });
-        if (event.payload.error) {
-          setError(event.payload.error);
-        }
-        if (event.payload.status === "connected") {
-          setConnectedSince(new Date());
-        } else if (event.payload.status === "disconnected") {
-          setConnectedSince(null);
-        }
-      },
-    );
-    return () => { unlistenStatus.then((f) => f()); };
-  }, []);
-
-  // ─── Auto-reconnect on internet loss ───
-  useEffect(() => {
-    const unlistenInternet = listen<{ online: boolean; action?: string }>(
-      "internet-status",
-      async (event) => {
-        const { online, action } = event.payload;
-
-        if (!online && action === "disconnect") {
-          console.warn("[connectivity] Internet lost — disconnecting VPN, waiting for adapter...");
-          setStatus("recovering");
-          setError(i18n.t("errors.internet_lost_disconnecting"));
-          try {
-            await invoke("vpn_disconnect");
-          } catch (e) {
-            console.error("[connectivity] Disconnect failed:", e);
-          }
-        } else if (online && action === "reconnect") {
-          console.warn("[connectivity] Adapter back online — reconnecting VPN");
-          setError(i18n.t("messages.network_restored_reconnecting"));
-          const savedPath = localStorage.getItem("tt_config_path");
-          const savedLevel = localStorage.getItem("tt_log_level") || "info";
-          if (savedPath) {
-            try {
-              setStatus("connecting");
-              await invoke("vpn_connect", { configPath: savedPath, logLevel: savedLevel });
-              setError(null);
-            } catch (e) {
-              console.error("[connectivity] Reconnect failed:", e);
-              setError(i18n.t("errors.reconnection_failed", { error: String(e) }));
-              setStatus("error");
-            }
-          }
-        } else if (!online && action === "give_up") {
-          setError(i18n.t("errors.network_recovery_timeout"));
-          setStatus("disconnected");
-        }
-      },
-    );
-    return () => { unlistenInternet.then((f) => f()); };
-  }, [i18n]);
 
   // ─── VPN Actions ───
   const handleConnect = useCallback(async () => {
@@ -373,58 +220,6 @@ function App() {
       setError(String(e));
     }
   }, []);
-
-  // ─── Proper async reconnect (no setTimeout hack) ───
-  const reconnectResolve = useRef<(() => void) | null>(null);
-
-  // Listen for disconnect confirmation to complete reconnect
-  useEffect(() => {
-    const unlisten = listen<{ status: VpnStatus }>("vpn-status", (event) => {
-      if (event.payload.status === "disconnected" && reconnectResolve.current) {
-        const resolve = reconnectResolve.current;
-        reconnectResolve.current = null;
-        resolve();
-      }
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, []);
-
-  // ─── VPN log collector + error detection ───
-  useEffect(() => {
-    const unlisten = listen<{ message: string; source: string }>("vpn-log", (event) => {
-      const msg = event.payload.message.trim();
-      if (!msg) return;
-      const now = new Date();
-      const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-      const level = event.payload.source === "stderr" ? "error" : "info";
-      setVpnLogs(prev => {
-        const next = [...prev, { timestamp: ts, level, message: msg }];
-        return next.length > 500 ? next.slice(-500) : next;
-      });
-
-      // ── Detect known errors and show user-friendly messages ──
-      if (msg.includes("Authorization Required")) {
-        setError(i18n.t("errors.auth_required", "Ошибка авторизации: логин или пароль неверны. Обновите конфиг с сервера через Панель управления."));
-        setStatus("error");
-      } else if (msg.includes("WintunCreateAdapter") && msg.includes("cannot find")) {
-        setError(i18n.t("errors.wintun_missing", "Не удалось создать VPN-адаптер. Запустите приложение от имени администратора."));
-        setStatus("error");
-      } else if (msg.includes("Failed to create listener")) {
-        setError(i18n.t("errors.listener_failed", "Не удалось запустить VPN-туннель. Проверьте права администратора и наличие wintun.dll."));
-        setStatus("error");
-      } else if (msg.includes("Connection refused") || msg.includes("connection refused")) {
-        setError(i18n.t("errors.connection_refused", "Сервер отклонил подключение. Проверьте, запущен ли VPN-сервис на сервере."));
-        setStatus("error");
-      } else if (msg.includes("timed out") || msg.includes("Timed out")) {
-        // Don't override status for non-fatal timeouts (like wintun device query)
-        if (msg.includes("Failed to setup adapter")) {
-          setError(i18n.t("errors.adapter_timeout", "Таймаут создания VPN-адаптера. Перезапустите приложение от имени администратора."));
-          setStatus("error");
-        }
-      }
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, [i18n]);
 
   const handleReconnect = useCallback(async () => {
     if (status !== "connected" && status !== "connecting") return;

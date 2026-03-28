@@ -1,6 +1,6 @@
 import { Settings, FolderOpen } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { VpnConfig } from "../App";
+import type { VpnConfig } from "../shared/types";
 
 interface ConfigPanelProps {
   config: VpnConfig;

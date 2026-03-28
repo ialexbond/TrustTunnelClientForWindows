@@ -4,7 +4,7 @@ import { Terminal, Trash2, Copy, Check, Search, ScrollText, X } from "lucide-rea
 import { Button } from "../shared/ui/Button";
 import { Card, CardHeader } from "../shared/ui/Card";
 import { Select } from "../shared/ui/Select";
-import type { LogEntry } from "../App";
+import type { LogEntry } from "../shared/types";
 
 interface LogPanelProps {
   logs: LogEntry[];

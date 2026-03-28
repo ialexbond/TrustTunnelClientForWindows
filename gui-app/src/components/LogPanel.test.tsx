@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import i18n from "../shared/i18n";
 import LogPanel from "./LogPanel";
-import type { LogEntry } from "../App";
+import type { LogEntry } from "../shared/types";
 
 describe("LogPanel", () => {
   const sampleLogs: LogEntry[] = [

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { open } from "@tauri-apps/plugin-dialog";
 import ConfigPanel from "./ConfigPanel";
-import type { VpnConfig } from "../App";
+import type { VpnConfig } from "../shared/types";
 
 describe("ConfigPanel", () => {
   const defaultConfig: VpnConfig = {
