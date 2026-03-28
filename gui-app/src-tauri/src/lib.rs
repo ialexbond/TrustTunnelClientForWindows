@@ -26,6 +26,34 @@ fn kill_all_sidecar_processes() {
         .output();
 }
 
+/// Detect conflicting VPN/TUN adapters that may block WinTUN creation.
+/// Returns a list of adapter names that look like they belong to other VPN software.
+#[cfg(windows)]
+fn detect_conflicting_adapters() -> Vec<String> {
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Get-NetAdapter -IncludeHidden | Where-Object { \
+                $_.InterfaceDescription -match 'WireGuard|Wintun|TAP-Windows|tun|Amnezia|OpenVPN' -and \
+                $_.InterfaceDescription -notmatch 'TrustTunnel' \
+            } | Select-Object -ExpandProperty Name"
+        ])
+        .creation_flags(0x08000000)
+        .output();
+    match output {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        }
+        Err(_) => vec![],
+    }
+}
+
+#[cfg(not(windows))]
+fn detect_conflicting_adapters() -> Vec<String> { vec![] }
+
 /// Kill the sidecar stored in AppState, if any.
 fn kill_sidecar_from_state(state: &AppState) {
     if let Ok(mut guard) = state.sidecar_child.lock() {
@@ -139,6 +167,23 @@ async fn vpn_connect(
     kill_all_sidecar_processes();
     // Give OS a moment to release the adapter
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Warn about conflicting VPN adapters from other software
+    let conflicts = detect_conflicting_adapters();
+    if !conflicts.is_empty() {
+        let names = conflicts.join(", ");
+        let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
+        eprintln!("[vpn_connect] {warn_msg}");
+        app.emit("vpn-log", VpnLogPayload {
+            message: warn_msg.clone(),
+            level: "warn".into(),
+        }).ok();
+        // Also emit as a warning event the frontend can display as snackbar
+        app.emit("vpn-adapter-conflict", serde_json::json!({
+            "adapters": conflicts,
+            "message": warn_msg,
+        })).ok();
+    }
 
     app.emit("vpn-log", VpnLogPayload {
         message: "Spawning trusttunnel_client process...".into(),
