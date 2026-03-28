@@ -401,7 +401,7 @@ function App() {
           </div>
 
           {/* Dashboard */}
-          <div className="h-full flex flex-col py-3 overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
             <DashboardPanel
               status={status}
               connectedSince={connectedSince}
@@ -453,7 +453,7 @@ function App() {
           </div>
 
           {/* About */}
-          <div className="h-full flex flex-col overflow-hidden px-4 scroll-gutter-match" style={{ display: activePage === "about" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "about" ? "flex" : "none" }}>
             {statusPanelNode}
             <AboutPanel
               updateInfo={updateInfo}

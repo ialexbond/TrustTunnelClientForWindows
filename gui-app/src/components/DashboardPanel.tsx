@@ -50,7 +50,7 @@ export default function DashboardPanel({
   // ── Connected: full dashboard with StatusPanel ──
   if (isConnected) {
     return (
-      <div className="h-full flex flex-col overflow-hidden">
+      <div className="h-full flex flex-col overflow-hidden px-4">
         <StatusPanel
           status={status}
           error={null}
