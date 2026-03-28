@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Server, Globe, Hash, User, Plug, Key, FileKey } from "lucide-react";
+import { Server, Globe, Hash, User, Plug, Key, FileKey, Lock } from "lucide-react";
 import { StepBar } from "./StepBar";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
@@ -34,18 +34,31 @@ export function ServerStep(w: WizardState) {
   return (
     <>
       <StepBar step={w.step} isFetchMode={w.isFetchMode} />
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-sm w-full space-y-4">
-          <div className="text-center space-y-1">
-            <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
-              <Server className="w-5 h-5" style={{ color: "var(--color-accent-500)" }} />
+      <div className="flex-1 flex items-center justify-center py-8">
+        <div className="w-full max-w-md">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <div
+              className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3"
+              style={{ backgroundColor: "rgba(99, 102, 241, 0.15)" }}
+            >
+              <Server className="w-6 h-6" style={{ color: "var(--color-accent-400)" }} />
             </div>
-            <h2 className="text-lg font-bold">{t('wizard.server.title')}</h2>
-            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t('wizard.server.description')}</p>
+            <h2 className="text-lg font-bold mb-1" style={{ color: "var(--color-text-primary)" }}>
+              {t('wizard.server.title')}
+            </h2>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+              {t('wizard.server.description')}
+            </p>
           </div>
 
-          <div className="space-y-3">
-            <div className="flex gap-2 items-end">
+          {/* Form card */}
+          <div
+            className="rounded-[var(--radius-xl)] p-5 space-y-4"
+            style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+          >
+            {/* Host + Port */}
+            <div className="flex gap-3 items-end">
               <div className="flex-1">
                 <Input
                   label={t('wizard.server.server_ip_label')}
@@ -56,7 +69,7 @@ export function ServerStep(w: WizardState) {
                   autoFocus
                 />
               </div>
-              <div className="w-24">
+              <div className="w-20">
                 <Input
                   label={t('labels.port')}
                   icon={<Hash className="w-3.5 h-3.5" />}
@@ -67,6 +80,7 @@ export function ServerStep(w: WizardState) {
               </div>
             </div>
 
+            {/* Username */}
             <Input
               label={t('labels.username')}
               icon={<User className="w-3.5 h-3.5" />}
@@ -100,6 +114,7 @@ export function ServerStep(w: WizardState) {
               </div>
             </div>
 
+            {/* Password or Key selector */}
             {authMode === "password" ? (
               <PasswordInput
                 label={t('labels.ssh_password')}
@@ -141,24 +156,33 @@ export function ServerStep(w: WizardState) {
                 )}
               </div>
             )}
-          </div>
 
-          <div className="flex gap-2 pt-1">
-            <Button
-              variant="ghost"
-              onClick={() => { w.saveField("wizardMode", ""); w.setWizardStep("welcome"); }}
-            >
-              {t('buttons.back')}
-            </Button>
-            <Button
-              variant="primary"
-              fullWidth
-              icon={<Plug className="w-4 h-4" />}
-              onClick={w.handleCheckServer}
-              disabled={!w.canGoToEndpoint}
-            >
-              {t('wizard.server.check_connection')}
-            </Button>
+            {/* Action buttons */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="ghost"
+                onClick={() => { w.saveField("wizardMode", ""); w.setWizardStep("welcome"); }}
+              >
+                {t('buttons.back')}
+              </Button>
+              <Button
+                variant="primary"
+                fullWidth
+                icon={<Plug className="w-4 h-4" />}
+                onClick={w.handleCheckServer}
+                disabled={!w.canGoToEndpoint}
+              >
+                {t('wizard.server.check_connection')}
+              </Button>
+            </div>
+
+            {/* Security note */}
+            <div className="flex items-center justify-center gap-1.5">
+              <Lock className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />
+              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+                {t("control.remember")}
+              </span>
+            </div>
           </div>
         </div>
       </div>
