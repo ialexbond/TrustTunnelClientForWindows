@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "../../src/test/tauri-mock";
 import Header from "./Header";
-import type { AppTab, VpnStatus } from "../App";
+import type { AppTab, VpnStatus } from "../shared/types";
 
 describe("Header", () => {
   const defaultProps = {
