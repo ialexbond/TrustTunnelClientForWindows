@@ -135,6 +135,23 @@
       "block_routing_desc": "Show blocking section in routing.",
       "process_filter": "Process Filtering",
       "process_filter_desc": "Show process filter in routing."
+    },
+    "app": {
+      "general_title": "General",
+      "general_description": "Application startup behavior",
+      "autostart": "Launch at system startup",
+      "autostart_desc": "Start TrustTunnel when Windows starts",
+      "start_minimized": "Start minimized",
+      "start_minimized_desc": "Hide window on launch, show only tray icon",
+      "auto_connect": "Auto-connect",
+      "auto_connect_desc": "Connect to VPN automatically on startup",
+      "auto_connect_no_config": "Load a VPN configuration first",
+      "appearance_title": "Appearance",
+      "theme": "Theme",
+      "theme_system": "System",
+      "theme_dark": "Dark",
+      "theme_light": "Light",
+      "language": "Language"
     }
   },
   "vpn_modes": {
@@ -447,6 +464,7 @@
     "speed_test": "Speed Test",
     "run_test": "Test",
     "run_speed_test": "Run speed test",
+    "speed_test_failed": "Speed test failed. Try again later.",
     "session": "Session",
     "uptime": "Uptime",
     "errors": "Errors",
@@ -677,5 +695,12 @@
     "certRenewFailed": "Failed to renew certificate (code {{code}}). Check logs.",
     "mkdirFailed": "Failed to create directory: {{detail}}",
     "killProcessFailed": "Failed to terminate process: {{detail}}"
+  },
+  "logs_panel": {
+    "filter_all": "All",
+    "search_placeholder": "Search logs...",
+    "no_matching": "No logs matching filter",
+    "no_logs_yet": "Waiting for logs...",
+    "logs_appear_on_connect": "Logs will appear after connecting..."
   }
 }
