@@ -86,6 +86,30 @@ struct AppState {
 }
 
 #[tauri::command]
+fn set_start_minimized(enabled: bool) -> Result<(), String> {
+    let flag_path = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("no parent dir")?
+        .join(".start_minimized");
+    if enabled {
+        std::fs::write(&flag_path, "1").map_err(|e| e.to_string())?;
+    } else {
+        let _ = std::fs::remove_file(&flag_path);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_start_minimized() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
 async fn vpn_connect(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -983,8 +1007,16 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::new()
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::SIZE
+                | tauri_plugin_window_state::StateFlags::POSITION
+                | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                | tauri_plugin_window_state::StateFlags::FULLSCREEN
+            )
+            .build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(AppState {
             sidecar_child: Arc::new(Mutex::new(None)),
             disconnecting: Arc::new(Mutex::new(false)),
@@ -993,6 +1025,18 @@ pub fn run() {
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .setup(|app| {
+            // Show window unless start_minimized flag file exists next to exe
+            if let Some(window) = app.get_webview_window("main") {
+                let start_minimized = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
+                    .map(|p| p.exists())
+                    .unwrap_or(false);
+                if !start_minimized {
+                    window.show().ok();
+                }
+            }
+
             // Open devtools in release builds
             #[cfg(feature = "devtools")]
             if let Some(window) = app.get_webview_window("main") {
@@ -1099,6 +1143,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            set_start_minimized,
+            get_start_minimized,
             vpn_connect,
             vpn_disconnect,
             check_vpn_status,

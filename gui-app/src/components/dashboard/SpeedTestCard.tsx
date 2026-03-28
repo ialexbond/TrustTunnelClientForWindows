@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ArrowDown, ArrowUp, RefreshCw, Loader2, Gauge } from "lucide-react";
+import { ArrowDown, ArrowUp, RefreshCw, Loader2, Gauge, AlertTriangle } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import type { SpeedResult } from "./useDashboardState";
@@ -7,11 +7,12 @@ import type { SpeedResult } from "./useDashboardState";
 interface SpeedTestCardProps {
   speed: SpeedResult | null;
   testing: boolean;
+  error: string | null;
   onRunTest: () => void;
   isConnected: boolean;
 }
 
-export function SpeedTestCard({ speed, testing, onRunTest, isConnected }: SpeedTestCardProps) {
+export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }: SpeedTestCardProps) {
   const { t } = useTranslation();
   const unit = t("units.mbps", "Mbps");
 
@@ -32,7 +33,12 @@ export function SpeedTestCard({ speed, testing, onRunTest, isConnected }: SpeedT
           </Button>
         }
       />
-      {!speed ? (
+      {error && !testing ? (
+        <div className="flex items-center gap-2 text-xs py-4 px-1" style={{ color: "var(--color-danger-500)" }}>
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">{t("dashboard.speed_test_failed", "Speed test failed. Try again later.")}</span>
+        </div>
+      ) : !speed ? (
         <div
           className="flex items-center justify-center text-xs py-4"
           style={{ color: "var(--color-text-muted)" }}
