@@ -118,7 +118,7 @@ function StatusPanel({
         </p>
       )}
 
-      <div className="mt-2 border-b" style={{ borderColor: "var(--color-border)" }} />
+      <div className="-mx-4 mt-2 border-b" style={{ borderColor: "var(--color-border)" }} />
     </div>
   );
 }

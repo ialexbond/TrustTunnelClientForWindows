@@ -59,7 +59,7 @@ export default function DashboardPanel({
           onDisconnect={onDisconnect}
         />
 
-        <div className="flex flex-col gap-3 flex-1 overflow-y-auto px-0 py-3">
+        <div className="flex flex-col gap-3 flex-1 overflow-y-auto py-3">
           <PingChart
             pingHistory={dashboard.pingHistory}
             avgPing={dashboard.avgPing}
