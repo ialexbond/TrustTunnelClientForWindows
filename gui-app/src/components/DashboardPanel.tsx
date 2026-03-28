@@ -70,6 +70,7 @@ export default function DashboardPanel({
             <SpeedTestCard
               speed={dashboard.speed}
               testing={dashboard.speedTesting}
+              error={dashboard.speedError}
               onRunTest={dashboard.runSpeedTest}
               isConnected={isConnected}
             />

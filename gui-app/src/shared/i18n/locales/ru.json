@@ -135,6 +135,23 @@
       "block_routing_desc": "Показать блок блокировки в маршрутизации.",
       "process_filter": "Фильтрация по процессам",
       "process_filter_desc": "Показать фильтр процессов в маршрутизации."
+    },
+    "app": {
+      "general_title": "Основные",
+      "general_description": "Поведение при запуске приложения",
+      "autostart": "Запускать вместе с системой",
+      "autostart_desc": "Запускать TrustTunnel при старте Windows",
+      "start_minimized": "Запускать в свёрнутом режиме",
+      "start_minimized_desc": "Скрывать окно при запуске, показывать только в трее",
+      "auto_connect": "Подключаться автоматически",
+      "auto_connect_desc": "Автоматически подключаться к VPN при запуске",
+      "auto_connect_no_config": "Сначала загрузите конфигурацию VPN",
+      "appearance_title": "Оформление",
+      "theme": "Тема оформления",
+      "theme_system": "Системная",
+      "theme_dark": "Тёмная",
+      "theme_light": "Светлая",
+      "language": "Язык интерфейса"
     }
   },
   "vpn_modes": {
@@ -447,6 +464,7 @@
     "speed_test": "Тест скорости",
     "run_test": "Тест",
     "run_speed_test": "Запустите тест скорости",
+    "speed_test_failed": "Не удалось выполнить тест. Попробуйте позже.",
     "session": "Сессия",
     "uptime": "Время работы",
     "errors": "Ошибки",
@@ -686,5 +704,12 @@
     "certRenewFailed": "Не удалось обновить сертификат (код {{code}}). Проверьте логи.",
     "mkdirFailed": "Не удалось создать директорию: {{detail}}",
     "killProcessFailed": "Не удалось завершить процесс: {{detail}}"
+  },
+  "logs_panel": {
+    "filter_all": "Все",
+    "search_placeholder": "Поиск по логам...",
+    "no_matching": "Нет логов по фильтру",
+    "no_logs_yet": "Ожидание логов...",
+    "logs_appear_on_connect": "Логи появятся после подключения..."
   }
 }

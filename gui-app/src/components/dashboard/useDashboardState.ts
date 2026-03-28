@@ -24,6 +24,7 @@ export interface DashboardState {
   // Speed test
   speed: SpeedResult | null;
   speedTesting: boolean;
+  speedError: string | null;
   runSpeedTest: () => void;
 
   // Session stats
@@ -45,6 +46,7 @@ export function useDashboardState(
   const [currentPing, setCurrentPing] = useState<number | null>(null);
   const [speed, setSpeed] = useState<SpeedResult | null>(null);
   const [speedTesting, setSpeedTesting] = useState(false);
+  const [speedError, setSpeedError] = useState<string | null>(null);
   const [recoveryCount, setRecoveryCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
   const [clientConfig, setClientConfig] = useState<ClientConfig | null>(null);
@@ -126,11 +128,12 @@ export function useDashboardState(
   const runSpeedTest = useCallback(async () => {
     if (speedTesting || !isConnected) return;
     setSpeedTesting(true);
+    setSpeedError(null);
     try {
       const result = await invoke<{ download_mbps: number; upload_mbps: number }>("speedtest_run");
       setSpeed({ ...result, timestamp: Date.now() });
-    } catch {
-      // keep previous
+    } catch (e) {
+      setSpeedError(String(e));
     } finally {
       setSpeedTesting(false);
     }
@@ -147,6 +150,7 @@ export function useDashboardState(
     avgPing,
     speed,
     speedTesting,
+    speedError,
     runSpeedTest,
     recoveryCount,
     errorCount,
