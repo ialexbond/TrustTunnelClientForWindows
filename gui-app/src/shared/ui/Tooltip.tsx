@@ -61,7 +61,7 @@ export function Tooltip({ text, children, maxWidth = 224, delay = 400 }: Tooltip
         createPortal(
           <div
             ref={positionTip}
-            className="fixed z-[9999] px-2.5 py-2 rounded-[var(--radius-md)] shadow-lg pointer-events-none"
+            className="fixed z-[9500] px-2.5 py-2 rounded-[var(--radius-md)] shadow-lg pointer-events-none"
             style={{
               visibility: "hidden",
               maxWidth,

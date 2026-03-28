@@ -42,10 +42,10 @@ export function useServerState(props: ServerPanelProps) {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<ActionResult>(null);
-  const [successQueue, setSuccessQueue] = useState<string[]>([]);
+  const [successQueue, setSuccessQueue] = useState<(string | { text: string; type?: "success" | "error" })[]>([]);
 
-  const pushSuccess = useCallback((msg: string) => {
-    setSuccessQueue(prev => [...prev, msg]);
+  const pushSuccess = useCallback((msg: string, type: "success" | "error" = "success") => {
+    setSuccessQueue(prev => [...prev, { text: msg, type }]);
   }, []);
   const shiftSuccess = useCallback(() => {
     setSuccessQueue(prev => prev.slice(1));
