@@ -486,7 +486,7 @@ describe("useRoutingState", () => {
     const exportIdx = callOrder.lastIndexOf("export_routing_rules");
     expect(saveIdx).toBeLessThan(exportIdx);
 
-    expect(result.current.successQueue).toContain("Правила экспортированы");
+    expect(result.current.successQueue).toContainEqual(expect.objectContaining({ text: "Правила экспортированы" }));
   });
 
   it("importRules loads imported data and marks dirty", async () => {
@@ -524,7 +524,7 @@ describe("useRoutingState", () => {
     expect(result.current.rules.process_mode).toBe("only");
     expect(result.current.rules.processes).toEqual(["firefox.exe"]);
     expect(result.current.dirty).toBe(true);
-    expect(result.current.successQueue).toContain("Правила импортированы");
+    expect(result.current.successQueue).toContainEqual(expect.objectContaining({ text: "Правила импортированы" }));
   });
 
   it("importRules does nothing when user cancels (null returned)", async () => {

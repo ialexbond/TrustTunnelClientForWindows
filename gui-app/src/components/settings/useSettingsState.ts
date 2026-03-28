@@ -56,7 +56,7 @@ export interface SettingsState {
   localPath: string;
   dirty: boolean;
   status: VpnStatus;
-  successQueue: string[];
+  successQueue: (string | { text: string; type?: "success" | "error" })[];
 
   setLocalPath: (path: string) => void;
   setError: (msg: string) => void;

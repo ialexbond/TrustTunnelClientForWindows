@@ -68,6 +68,7 @@ export function ExportSection({ state }: Props) {
     navigator.clipboard.writeText(deeplink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    state.pushSuccess(t("server.export.copied", "Скопировано"));
   };
 
   const truncateLink = (link: string, maxLen = 60) =>
