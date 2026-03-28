@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { WizardStep, DeployStep, DeployLog, ServerInfo } from "./types";
+import { deobfuscate } from "../../shared/utils/obfuscation";
 
 // ─── localStorage helpers ──────────────────────────
 const STORAGE_KEY = "trusttunnel_wizard";
@@ -30,13 +31,6 @@ function saveField(key: string, value: unknown) {
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch { /* ignore */ }
-}
-
-function deobfuscate(val: string): string {
-  if (val.startsWith("b64:")) {
-    try { return decodeURIComponent(escape(atob(val.slice(4)))); } catch { return val; }
-  }
-  return val;
 }
 
 // ─── Hook ──────────────────────────────────────────

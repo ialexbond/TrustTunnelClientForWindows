@@ -1,20 +1,10 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
 import { Button } from "../shared/ui/Button";
 import { LogOut } from "lucide-react";
-
-function deobfuscate(value: string): string {
-  if (value.startsWith("b64:")) {
-    try {
-      return decodeURIComponent(escape(atob(value.slice(4))));
-    } catch {
-      return value;
-    }
-  }
-  return value;
-}
+import { deobfuscate } from "../shared/utils/obfuscation";
 
 function readStoredCredentials(): SshCredentials | null {
   try {
@@ -44,14 +34,15 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   const { t } = useTranslation();
   const [creds, setCreds] = useState<SshCredentials | null>(readStoredCredentials);
   const [refreshKey, setRefreshKey] = useState(0);
+  const lastTsRef = useRef<string | null>(null);
 
   // Watch for a "force refresh" signal from the wizard (timestamp changes)
   useEffect(() => {
     const interval = setInterval(() => {
       const ts = localStorage.getItem("trusttunnel_control_refresh");
-      const lastTs = (interval as any).__lastTs;
+      const lastTs = lastTsRef.current;
       if (ts && ts !== lastTs) {
-        (interval as any).__lastTs = ts;
+        lastTsRef.current = ts;
         const fresh = readStoredCredentials();
         if (fresh) {
           setCreds(fresh);

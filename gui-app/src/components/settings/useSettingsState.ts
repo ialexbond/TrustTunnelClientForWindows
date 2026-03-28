@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { VpnConfig, VpnStatus } from "../../App";
+import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { useAutoSave } from "../../shared/hooks/useAutoSave";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -90,13 +92,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   const [reloadKey, setReloadKey] = useState(0);
 
   // ─── SnackBar queue ───
-  const [successQueue, setSuccessQueue] = useState<string[]>([]);
-  const pushSuccess = useCallback((msg: string) => {
-    setSuccessQueue(prev => [...prev, msg]);
-  }, []);
-  const shiftSuccess = useCallback(() => {
-    setSuccessQueue(prev => prev.slice(1));
-  }, []);
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   // ─── Dirty tracking ───
   const savedSnapshot = useRef<string>("");
@@ -219,16 +215,12 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   }, [status, pushSuccess, t]);
 
   // ─── Auto-save when VPN not active (silent, no UI) ───
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!dirty || !config || !localPath) return;
-    if (status === "connected" || status === "connecting") return;
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      silentSave();
-    }, 1200);
-    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
-  }, [dirty, config, localPath, status, silentSave]);
+  useAutoSave({
+    dirty,
+    canSave: !!config && !!localPath,
+    isActive: status === "connected" || status === "connecting",
+    onSave: silentSave,
+  });
 
   // ─── Browse for config file ───
   const browseConfig = useCallback(async () => {
