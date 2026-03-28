@@ -278,12 +278,13 @@ async fn deploy_server(
     key_path: Option<String>,
     settings: ssh_deploy::EndpointSettings,
 ) -> Result<String, String> {
-    ssh_deploy::deploy_server(&app, host, port, user, password, key_path, settings).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::deploy_server(&app, params, settings).await
 }
 
 #[tauri::command]
 fn check_vpn_status(state: tauri::State<'_, AppState>) -> String {
-    let guard = state.sidecar_child.lock().unwrap();
+    let guard = state.sidecar_child.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() {
         let connected = state.is_connected.lock().map(|g| *g).unwrap_or(false);
         if connected { "connected" } else { "connecting" }.to_string()
@@ -301,7 +302,8 @@ async fn diagnose_server(
     password: String,
     key_path: Option<String>,
 ) -> Result<String, String> {
-    ssh_deploy::diagnose_server(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::diagnose_server(&app, params).await
 }
 
 #[tauri::command]
@@ -323,7 +325,8 @@ async fn check_server_installation(
     password: String,
     key_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    ssh_deploy::check_server_installation(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::check_server_installation(&app, params).await
 }
 
 #[tauri::command]
@@ -335,7 +338,8 @@ async fn uninstall_server(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
-    ssh_deploy::uninstall_server(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::uninstall_server(&app, params).await
 }
 
 #[tauri::command]
@@ -348,7 +352,8 @@ async fn fetch_server_config(
     key_path: Option<String>,
     client_name: String,
 ) -> Result<String, String> {
-    ssh_deploy::fetch_server_config(&app, host, port, user, password, key_path, client_name).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::fetch_server_config(&app, params, client_name).await
 }
 
 #[tauri::command]
@@ -362,7 +367,8 @@ async fn add_server_user(
     vpn_username: String,
     vpn_password: String,
 ) -> Result<String, String> {
-    ssh_deploy::add_server_user(&app, host, port, user, password, key_path, vpn_username, vpn_password).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::add_server_user(&app, params, vpn_username, vpn_password).await
 }
 
 #[tauri::command]
@@ -374,7 +380,8 @@ async fn server_restart_service(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
-    ssh_deploy::server_restart_service(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_restart_service(&app, params).await
 }
 
 #[tauri::command]
@@ -386,7 +393,8 @@ async fn server_stop_service(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
-    ssh_deploy::server_stop_service(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_stop_service(&app, params).await
 }
 
 #[tauri::command]
@@ -398,7 +406,8 @@ async fn server_start_service(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
-    ssh_deploy::server_start_service(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_start_service(&app, params).await
 }
 
 #[tauri::command]
@@ -410,7 +419,8 @@ async fn server_reboot(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
-    ssh_deploy::server_reboot(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_reboot(&app, params).await
 }
 
 #[tauri::command]
@@ -422,7 +432,8 @@ async fn server_get_logs(
     password: String,
     key_path: Option<String>,
 ) -> Result<String, String> {
-    ssh_deploy::server_get_logs(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_get_logs(&app, params).await
 }
 
 #[tauri::command]
@@ -435,7 +446,8 @@ async fn server_remove_user(
     key_path: Option<String>,
     vpn_username: String,
 ) -> Result<(), String> {
-    ssh_deploy::server_remove_user(&app, host, port, user, password, key_path, vpn_username).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_remove_user(&app, params, vpn_username).await
 }
 
 #[tauri::command]
@@ -447,7 +459,8 @@ async fn server_get_config(
     password: String,
     key_path: Option<String>,
 ) -> Result<String, String> {
-    ssh_deploy::get_server_config(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::get_server_config(&app, params).await
 }
 
 #[tauri::command]
@@ -459,7 +472,8 @@ async fn server_get_cert_info(
     password: String,
     key_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    ssh_deploy::get_cert_info(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::get_cert_info(&app, params).await
 }
 
 #[tauri::command]
@@ -471,7 +485,8 @@ async fn server_renew_cert(
     password: String,
     key_path: Option<String>,
 ) -> Result<String, String> {
-    ssh_deploy::renew_cert(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::renew_cert(&app, params).await
 }
 
 #[tauri::command]
@@ -485,7 +500,8 @@ async fn server_update_config_feature(
     feature: String,
     enabled: bool,
 ) -> Result<(), String> {
-    ssh_deploy::update_config_feature(&app, host, port, user, password, key_path, feature, enabled).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::update_config_feature(&app, params, feature, enabled).await
 }
 
 #[tauri::command]
@@ -498,7 +514,8 @@ async fn server_export_config_deeplink(
     key_path: Option<String>,
     client_name: String,
 ) -> Result<String, String> {
-    ssh_deploy::export_config_deeplink(&app, host, port, user, password, key_path, client_name).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::export_config_deeplink(&app, params, client_name).await
 }
 
 #[tauri::command]
@@ -510,7 +527,8 @@ async fn server_get_stats(
     password: String,
     key_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    ssh_deploy::server_get_stats(&app, host, port, user, password, key_path).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_get_stats(&app, params).await
 }
 
 #[tauri::command]
@@ -528,7 +546,8 @@ async fn server_upgrade(
     key_path: Option<String>,
     version: String,
 ) -> Result<(), String> {
-    ssh_deploy::server_upgrade(&app, host, port, user, password, key_path, version).await
+    let params = ssh_deploy::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+    ssh_deploy::server_upgrade(&app, params, version).await
 }
 
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
