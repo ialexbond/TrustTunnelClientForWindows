@@ -44,12 +44,12 @@ describe("AboutPanel", () => {
 
   it("renders about description", () => {
     render(<AboutPanel {...defaultProps} />);
-    expect(screen.getByText("О программе")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("about.description"))).toBeInTheDocument();
   });
 
   it("renders vibe-coding mention", () => {
     render(<AboutPanel {...defaultProps} />);
-    expect(screen.getByText("вайб-кодинга")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("about.vibe_coding"))).toBeInTheDocument();
   });
 
   it("renders GitHub link", () => {
@@ -338,8 +338,8 @@ describe("AboutPanel", () => {
 
   // ─── Updates section heading ───
 
-  it("renders updates section heading", () => {
+  it("renders copyright line", () => {
     render(<AboutPanel {...defaultProps} />);
-    expect(screen.getByText("Обновления")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("about.copyright", { year: new Date().getFullYear() }))).toBeInTheDocument();
   });
 });

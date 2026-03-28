@@ -9,10 +9,6 @@ describe("Sidebar", () => {
     activePage: "server" as SidebarPage,
     onPageChange: vi.fn(),
     hasConfig: true,
-    theme: "dark" as const,
-    onThemeToggle: vi.fn(),
-    language: "ru",
-    onLanguageToggle: vi.fn(),
   };
 
   beforeEach(() => {
@@ -22,21 +18,19 @@ describe("Sidebar", () => {
 
   it("renders TrustTunnel logo icon", () => {
     const { container } = render(<Sidebar {...defaultProps} />);
-    // Shield icon exists
     expect(container.querySelector("aside")).toBeInTheDocument();
   });
 
   it("renders all navigation items as buttons", () => {
     const { container } = render(<Sidebar {...defaultProps} />);
-    // 7 nav items + about + language + theme = 10 buttons
+    // 7 nav items + about = 8 buttons (no theme/language)
     const buttons = container.querySelectorAll("button");
-    expect(buttons.length).toBe(10);
+    expect(buttons.length).toBe(8);
   });
 
   it("calls onPageChange when a nav item is clicked", () => {
     const onPageChange = vi.fn();
     const { container } = render(<Sidebar {...defaultProps} onPageChange={onPageChange} />);
-    // Click the second nav button (control)
     const buttons = container.querySelectorAll("nav button");
     fireEvent.click(buttons[1]); // "control" item
     expect(onPageChange).toHaveBeenCalledWith("control");
@@ -47,14 +41,12 @@ describe("Sidebar", () => {
     const { container } = render(
       <Sidebar {...defaultProps} hasConfig={false} onPageChange={onPageChange} />,
     );
-    // Settings requires config - find it by its disabled state
     const navButtons = container.querySelectorAll("nav button");
     // Items requiring config: settings (idx 2), dashboard (idx 3), routing (idx 4), logs (idx 5)
     expect(navButtons[2]).toBeDisabled();
     expect(navButtons[3]).toBeDisabled();
     expect(navButtons[4]).toBeDisabled();
     expect(navButtons[5]).toBeDisabled();
-
     // Items NOT requiring config should be enabled
     expect(navButtons[0]).not.toBeDisabled(); // server
     expect(navButtons[1]).not.toBeDisabled(); // control
@@ -74,29 +66,8 @@ describe("Sidebar", () => {
   it("active page button has distinct background", () => {
     const { container } = render(<Sidebar {...defaultProps} activePage="server" />);
     const navButtons = container.querySelectorAll("nav button");
-    // First button (server) should have active background
     expect(navButtons[0].style.backgroundColor).toBe("var(--color-bg-active)");
-    // Second button (control) should be transparent
     expect(navButtons[1].style.backgroundColor).toBe("transparent");
-  });
-
-  it("calls onThemeToggle when theme button is clicked", () => {
-    const onThemeToggle = vi.fn();
-    const { container } = render(<Sidebar {...defaultProps} onThemeToggle={onThemeToggle} />);
-    // Theme toggle is the last button in the bottom section
-    const bottomButtons = container.querySelectorAll("aside > div > div:last-child button");
-    // Last button in bottom section is theme
-    fireEvent.click(bottomButtons[bottomButtons.length - 1]);
-    expect(onThemeToggle).toHaveBeenCalledOnce();
-  });
-
-  it("calls onLanguageToggle when language button is clicked", () => {
-    const onLanguageToggle = vi.fn();
-    const { container } = render(<Sidebar {...defaultProps} onLanguageToggle={onLanguageToggle} />);
-    // Language toggle is the second-to-last button in the bottom section
-    const bottomButtons = container.querySelectorAll("aside > div > div:last-child button");
-    fireEvent.click(bottomButtons[1]); // language button (after about)
-    expect(onLanguageToggle).toHaveBeenCalledOnce();
   });
 
   it("about button navigates to about page", () => {
@@ -137,7 +108,6 @@ describe("Sidebar", () => {
     fireEvent.mouseEnter(aside);
     expect(screen.getByText("TrustTunnel")).toBeInTheDocument();
     fireEvent.mouseLeave(aside);
-    // Wait for the 300ms delay, wrapped in act since it triggers state update
     act(() => {
       vi.advanceTimersByTime(300);
     });
@@ -150,7 +120,6 @@ describe("Sidebar", () => {
   it("disabled items have opacity-30 class", () => {
     const { container } = render(<Sidebar {...defaultProps} hasConfig={false} />);
     const navButtons = container.querySelectorAll("nav button");
-    // Settings (idx 2) should be disabled with opacity
     expect(navButtons[2].className).toContain("opacity-30");
     expect(navButtons[2].className).toContain("cursor-not-allowed");
   });
@@ -158,40 +127,7 @@ describe("Sidebar", () => {
   it("enabled items do not have opacity-30 class", () => {
     const { container } = render(<Sidebar {...defaultProps} hasConfig={true} />);
     const navButtons = container.querySelectorAll("nav button");
-    // Server (idx 0) should not have opacity-30
     expect(navButtons[0].className).not.toContain("opacity-30");
-  });
-
-  // ── Theme toggle text ──
-
-  it("shows Light text for dark theme when expanded", () => {
-    render(<Sidebar {...defaultProps} theme="dark" />);
-    const aside = screen.getByRole("complementary");
-    fireEvent.mouseEnter(aside);
-    expect(screen.getByText("Light")).toBeInTheDocument();
-  });
-
-  it("shows Dark text for light theme when expanded", () => {
-    render(<Sidebar {...defaultProps} theme="light" />);
-    const aside = screen.getByRole("complementary");
-    fireEvent.mouseEnter(aside);
-    expect(screen.getByText("Dark")).toBeInTheDocument();
-  });
-
-  // ── Language toggle text ──
-
-  it("shows English when language is ru and expanded", () => {
-    render(<Sidebar {...defaultProps} language="ru" />);
-    const aside = screen.getByRole("complementary");
-    fireEvent.mouseEnter(aside);
-    expect(screen.getByText("English")).toBeInTheDocument();
-  });
-
-  it("shows Русский when language is en and expanded", () => {
-    render(<Sidebar {...defaultProps} language="en" />);
-    const aside = screen.getByRole("complementary");
-    fireEvent.mouseEnter(aside);
-    expect(screen.getByText("Русский")).toBeInTheDocument();
   });
 
   // ── Active page styling ──
@@ -223,7 +159,6 @@ describe("Sidebar", () => {
   it("nav buttons have title attributes when collapsed", () => {
     const { container } = render(<Sidebar {...defaultProps} />);
     const navButtons = container.querySelectorAll("nav button");
-    // When collapsed, buttons should have title for tooltip
     expect(navButtons[0].getAttribute("title")).toBe(i18n.t("tabs.installation"));
   });
 
