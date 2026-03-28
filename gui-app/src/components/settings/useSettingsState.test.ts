@@ -317,8 +317,8 @@ describe("useSettingsState", () => {
 
     // successQueue may already have status-change messages, so check our messages are present
     const queue = result.current.successQueue;
-    expect(queue).toContain("msg1");
-    expect(queue).toContain("msg2");
+    expect(queue).toContainEqual(expect.objectContaining({ text: "msg1" }));
+    expect(queue).toContainEqual(expect.objectContaining({ text: "msg2" }));
 
     act(() => {
       result.current.shiftSuccess();

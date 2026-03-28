@@ -1,56 +1,102 @@
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { CheckCircle2, AlertTriangle, X, Copy } from "lucide-react";
+
+type SnackMessage = string | { text: string; type?: "success" | "error" };
 
 interface SnackItem {
   id: number;
-  message: string;
+  text: string;
+  type: "success" | "error";
   phase: "enter" | "visible" | "exit";
 }
 
 let _nextId = 0;
 
 interface SnackBarProps {
-  messages: string[];
+  messages: SnackMessage[];
   onShown: () => void;
   duration?: number;
 }
 
-export function SnackBar({ messages, onShown, duration = 2500 }: SnackBarProps) {
+function normalize(msg: SnackMessage): { text: string; type: "success" | "error" } {
+  if (typeof msg === "string") return { text: msg, type: "success" };
+  return { text: msg.text, type: msg.type ?? "success" };
+}
+
+export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) {
   const [items, setItems] = useState<SnackItem[]>([]);
+  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const seenCount = useRef(0);
 
+  const dismiss = useCallback((id: number) => {
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
+    setItems(prev => prev.map(s => (s.id === id ? { ...s, phase: "exit" } : s)));
+    setTimeout(() => {
+      setItems(prev => prev.filter(s => s.id !== id));
+    }, 400);
+  }, []);
+
+  const scheduleDismiss = useCallback(
+    (id: number) => {
+      const old = timersRef.current.get(id);
+      if (old) clearTimeout(old);
+      const t = setTimeout(() => {
+        timersRef.current.delete(id);
+        dismiss(id);
+      }, duration);
+      timersRef.current.set(id, t);
+    },
+    [duration, dismiss],
+  );
+
   useEffect(() => {
-    // How many new messages appeared since last render
     const newCount = messages.length;
     if (newCount <= 0 || seenCount.current >= newCount) return;
 
-    // Process all new messages
     for (let i = seenCount.current; i < newCount; i++) {
-      const msg = messages[i];
+      const { text, type } = normalize(messages[i]);
+
+      // Check for duplicate that is still visible
+      const existing = items.find(
+        (s) => s.text === text && s.type === type && s.phase !== "exit",
+      );
+
+      if (existing) {
+        // Reset timer for success; errors have no auto-dismiss
+        if (type === "success") {
+          scheduleDismiss(existing.id);
+        }
+        onShown();
+        seenCount.current = i + 1;
+        continue;
+      }
+
       const id = ++_nextId;
 
-      setItems(prev => [...prev, { id, message: msg, phase: "enter" }]);
+      setItems(prev => [...prev, { id, text, type, phase: "enter" }]);
 
-      // Enter → visible
+      // Enter -> visible
       setTimeout(() => {
-        setItems(prev => prev.map(s => s.id === id ? { ...s, phase: "visible" } : s));
+        setItems(prev =>
+          prev.map(s => (s.id === id ? { ...s, phase: "visible" } : s)),
+        );
       }, 30);
 
-      // Visible → exit (fade out in place, keep in DOM)
-      setTimeout(() => {
-        setItems(prev => prev.map(s => s.id === id ? { ...s, phase: "exit" } : s));
-        // After all are "exit", clear the whole stack
-        setTimeout(() => {
-          setItems(prev => {
-            if (prev.every(s => s.phase === "exit")) return [];
-            return prev;
-          });
-        }, 400);
-      }, duration);
+      // Auto-dismiss only for success
+      if (type === "success") {
+        scheduleDismiss(id);
+      }
+
+      onShown();
     }
 
     seenCount.current = newCount;
-  }, [messages, duration]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, duration, onShown, scheduleDismiss]);
 
   // Reset counter when parent clears the queue
   useEffect(() => {
@@ -59,21 +105,20 @@ export function SnackBar({ messages, onShown, duration = 2500 }: SnackBarProps) 
     }
   }, [messages.length]);
 
-  // Periodically clear consumed messages from parent (batch, not per-message)
+  // Cleanup all timers on unmount
   useEffect(() => {
-    if (messages.length === 0) return;
-    const timer = setTimeout(() => {
-      for (let i = 0; i < messages.length; i++) onShown();
-    }, 100);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+    const map = timersRef.current;
+    return () => {
+      map.forEach((t) => clearTimeout(t));
+      map.clear();
+    };
+  }, []);
 
   if (items.length === 0) return null;
 
   return (
     <div
-      className="fixed bottom-4 left-1/2 z-[9999] flex flex-col-reverse items-center gap-2 pointer-events-none"
+      className="fixed bottom-4 left-1/2 z-[10000] flex flex-col-reverse items-center gap-2 pointer-events-none"
       style={{ transform: "translateX(-50%)", transition: "all 0.3s ease" }}
     >
       {items.map((item) => (
@@ -85,19 +130,54 @@ export function SnackBar({ messages, onShown, duration = 2500 }: SnackBarProps) 
             color: "var(--color-text-primary)",
             border: "1px solid var(--color-border)",
             opacity: item.phase === "visible" ? 1 : 0,
-            transform: item.phase === "visible"
-              ? "translateY(0)"
-              : item.phase === "enter"
-                ? "translateY(15px)"
-                : "translateY(0)",
+            transform:
+              item.phase === "visible"
+                ? "translateY(0)"
+                : item.phase === "enter"
+                  ? "translateY(15px)"
+                  : "translateY(0)",
             pointerEvents: item.phase === "exit" ? "none" : undefined,
             transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
             maxWidth: "90vw",
-            whiteSpace: "nowrap",
           }}
         >
-          <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
-          <span className="truncate">{item.message}</span>
+          {item.type === "success" ? (
+            <CheckCircle2
+              className="w-4 h-4 shrink-0"
+              style={{ color: "var(--color-success-500)" }}
+            />
+          ) : (
+            <AlertTriangle
+              className="w-4 h-4 shrink-0"
+              style={{ color: "var(--color-error, #f97316)" }}
+            />
+          )}
+
+          <span
+            className={item.type === "success" ? "truncate" : "line-clamp-3"}
+            style={item.type === "success" ? { whiteSpace: "nowrap" } : undefined}
+          >
+            {item.text}
+          </span>
+
+          {item.type === "error" && (
+            <>
+              <button
+                className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+                title="Copy"
+                onClick={() => navigator.clipboard.writeText(item.text)}
+              >
+                <Copy className="w-3.5 h-3.5" style={{ color: "var(--color-text-secondary)" }} />
+              </button>
+              <button
+                className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+                title="Close"
+                onClick={() => dismiss(item.id)}
+              >
+                <X className="w-3.5 h-3.5" style={{ color: "var(--color-text-secondary)" }} />
+              </button>
+            </>
+          )}
         </div>
       ))}
     </div>

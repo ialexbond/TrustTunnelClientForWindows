@@ -41,6 +41,7 @@ export function DangerZoneSection({ state }: Props) {
       await invoke("uninstall_server", sshParams);
       setConfirmUninstall(false);
       state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
+      state.pushSuccess(t("server.danger.uninstalled", "VPN удалён с сервера"));
     } catch (e) {
       setActionResult({ type: "error", message: String(e) });
       setConfirmUninstall(false);
