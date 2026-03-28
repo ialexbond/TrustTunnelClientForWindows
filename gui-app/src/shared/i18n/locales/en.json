@@ -182,7 +182,8 @@
     "wintun_missing": "Failed to create VPN adapter. Run the application as administrator.",
     "listener_failed": "Failed to start VPN tunnel. Check administrator rights and wintun.dll presence.",
     "connection_refused": "Server refused connection. Check if VPN service is running on the server.",
-    "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator."
+    "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
+    "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them."
   },
   "confirmations": {
     "irreversible_action": "Are you sure? This action is irreversible."

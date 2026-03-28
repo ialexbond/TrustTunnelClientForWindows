@@ -21,6 +21,15 @@ export function useVpnEvents({
   setVpnLogs,
   reconnectResolve,
 }: UseVpnEventsParams) {
+  // ─── Helper: write trace log visible in Log Panel ───
+  const traceLog = (msg: string) => {
+    const now = new Date();
+    const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+    setVpnLogs(prev => {
+      const next = [...prev, { timestamp: ts, level: "info", message: `[connectivity] ${msg}` }];
+      return next.length > 500 ? next.slice(-500) : next;
+    });
+  };
   // ─── VPN status sync on mount ───
   useEffect(() => {
     invoke<string>("check_vpn_status").then((backendStatus) => {
@@ -42,6 +51,7 @@ export function useVpnEvents({
     const unlistenStatus = listen<{ status: VpnStatus; error?: string }>(
       "vpn-status",
       (event) => {
+        traceLog(`vpn-status: ${event.payload.status}${event.payload.error ? ` error=${event.payload.error}` : ""}`);
         setStatus((prev) => {
           if (prev === "recovering" && event.payload.status === "disconnected") {
             return prev;
@@ -67,18 +77,20 @@ export function useVpnEvents({
       "internet-status",
       async (event) => {
         const { online, action } = event.payload;
+        traceLog(`event: online=${online}, action=${action ?? "none"}`);
 
         if (!online && action === "disconnect") {
-          console.warn("[connectivity] Internet lost — disconnecting VPN, waiting for adapter...");
+          traceLog("Internet lost — disconnecting VPN, waiting for adapter...");
           setStatus("recovering");
           setError(i18n.t("errors.internet_lost_disconnecting"));
           try {
             await invoke("vpn_disconnect");
+            traceLog("VPN disconnected successfully");
           } catch (e) {
-            console.error("[connectivity] Disconnect failed:", e);
+            traceLog(`Disconnect failed: ${e}`);
           }
         } else if (online && action === "reconnect") {
-          console.warn("[connectivity] Adapter back online — reconnecting VPN");
+          traceLog("Adapter back online — reconnecting VPN");
           setError(i18n.t("messages.network_restored_reconnecting"));
           const savedPath = localStorage.getItem("tt_config_path");
           const savedLevel = localStorage.getItem("tt_log_level") || "info";
@@ -86,14 +98,18 @@ export function useVpnEvents({
             try {
               setStatus("connecting");
               await invoke("vpn_connect", { configPath: savedPath, logLevel: savedLevel });
+              traceLog("VPN reconnected successfully");
               setError(null);
             } catch (e) {
-              console.error("[connectivity] Reconnect failed:", e);
+              traceLog(`Reconnect failed: ${e}`);
               setError(i18n.t("errors.reconnection_failed", { error: String(e) }));
               setStatus("error");
             }
+          } else {
+            traceLog("No saved config path — cannot reconnect");
           }
         } else if (!online && action === "give_up") {
+          traceLog("Gave up waiting for network recovery");
           setError(i18n.t("errors.network_recovery_timeout"));
           setStatus("disconnected");
         }
@@ -113,6 +129,19 @@ export function useVpnEvents({
     });
     return () => { unlisten.then((f) => f()); };
   }, [reconnectResolve]);
+
+  // ─── Conflicting VPN adapter warning ───
+  useEffect(() => {
+    const unlisten = listen<{ adapters: string[]; message: string }>(
+      "vpn-adapter-conflict",
+      (event) => {
+        const { adapters, message } = event.payload;
+        traceLog(`WARNING: Conflicting adapters detected: ${adapters.join(", ")}`);
+        setError(i18n.t("errors.adapter_conflict", { adapters: adapters.join(", ") }));
+      },
+    );
+    return () => { unlisten.then((f) => f()); };
+  }, [i18n, setError]);
 
   // ─── VPN log collector + error detection ───
   useEffect(() => {
