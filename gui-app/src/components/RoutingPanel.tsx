@@ -5,7 +5,7 @@ import {
   Loader2, GitBranch, Save, Download, Upload,
   Zap, Globe, Ban, Shield, Route,
 } from "lucide-react";
-import type { VpnStatus } from "../App";
+import type { VpnStatus } from "../shared/types";
 import { Card } from "../shared/ui/Card";
 import { Button } from "../shared/ui/Button";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";

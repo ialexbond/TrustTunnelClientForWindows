@@ -1,9 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { Palette } from "lucide-react";
+import type { ThemeMode } from "../../shared/types";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Select } from "../../shared/ui/Select";
 
-export type ThemeMode = "system" | "dark" | "light";
+export type { ThemeMode } from "../../shared/types";
 
 interface Props {
   theme: ThemeMode;

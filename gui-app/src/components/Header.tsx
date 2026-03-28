@@ -1,5 +1,5 @@
 import { Shield, Wand2, Settings, GitBranch, Info, Download } from "lucide-react";
-import type { AppTab, UpdateInfo, VpnStatus } from "../App";
+import type { AppTab, UpdateInfo, VpnStatus } from "../shared/types";
 
 interface HeaderProps {
   activeTab: AppTab;
