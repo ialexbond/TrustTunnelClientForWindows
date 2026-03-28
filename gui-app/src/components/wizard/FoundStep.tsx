@@ -11,6 +11,8 @@ import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Button } from "../../shared/ui/Button";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { Modal } from "../../shared/ui/Modal";
+import { SnackBar } from "../../shared/ui/SnackBar";
+import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
 import { StepBar } from "./StepBar";
 import type { WizardState } from "./useWizardState";
 
@@ -34,7 +36,7 @@ function IconBtn({ tooltip, onClick, disabled, loading, color, children }: {
 }
 
 // ─── Fetch mode: show users only, save config ──────────────
-function FoundFetchMode(w: WizardState) {
+function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void }) {
   const { t } = useTranslation();
   const isInstalled = w.serverInfo?.installed;
   const users = w.serverInfo?.users || [];
@@ -63,7 +65,7 @@ function FoundFetchMode(w: WizardState) {
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => w.handleSaveConfigDirect(u)}
+                onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }}
                 disabled={!!w.savingConfigFor}
                 loading={w.savingConfigFor === u}
                 icon={<Download className="w-3 h-3" />}
@@ -157,7 +159,7 @@ function FoundFetchMode(w: WizardState) {
 }
 
 // ─── Setup mode: TT installed or not ──────────────
-function FoundSetupMode(w: WizardState) {
+function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void }) {
   const { t } = useTranslation();
   const isInstalled = w.serverInfo?.installed;
 
@@ -195,6 +197,7 @@ function FoundSetupMode(w: WizardState) {
     try {
       const link = await getDeeplink(username);
       await navigator.clipboard.writeText(link);
+      w.pushSuccess(t("wizard.link_copied", "Скопировано"));
     } catch { /* ignore */ }
     finally { setLinkLoadingUser(null); }
   };
@@ -259,7 +262,7 @@ function FoundSetupMode(w: WizardState) {
                         <IconBtn tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
                           <Link2 className="w-3.5 h-3.5" />
                         </IconBtn>
-                        <IconBtn tooltip={t("server.users.export_tooltip")} onClick={() => w.handleSaveConfigDirect(u)} loading={w.savingConfigFor === u}>
+                        <IconBtn tooltip={t("server.users.export_tooltip")} onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }} loading={w.savingConfigFor === u}>
                           <Download className="w-3.5 h-3.5" />
                         </IconBtn>
                         <IconBtn
@@ -283,7 +286,7 @@ function FoundSetupMode(w: WizardState) {
               title={t('wizard.found.confirm_delete_title')}
               message={t('wizard.found.confirm_delete_message', { user: w.confirmDeleteUser })}
               confirmLabel={t('buttons.confirm_delete')}
-              onConfirm={() => w.confirmDeleteUser && w.handleDeleteUser(w.confirmDeleteUser)}
+              onConfirm={async () => { if (w.confirmDeleteUser) { await w.handleDeleteUser(w.confirmDeleteUser); w.pushSuccess(t("wizard.user_deleted", "Пользователь удалён")); } }}
               onCancel={() => w.setConfirmDeleteUser(null)}
             />
           </div>
@@ -355,7 +358,7 @@ function FoundSetupMode(w: WizardState) {
               variant="primary"
               size="sm"
               fullWidth
-              onClick={w.handleAddUser}
+              onClick={async () => { await w.handleAddUser(); w.pushSuccess(t("wizard.user_added", "Пользователь добавлен")); }}
               disabled={w.addingUser || !w.newUsername.trim() || !w.newPassword.trim() || !!w.serverInfo?.users?.includes(w.newUsername.trim())}
               loading={w.addingUser}
               icon={<UserPlus className="w-3.5 h-3.5" />}
@@ -459,6 +462,7 @@ function FoundSetupMode(w: WizardState) {
 export function FoundStep(w: WizardState) {
   const { t } = useTranslation();
   const isInstalled = w.serverInfo?.installed;
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   return (
     <>
@@ -466,10 +470,10 @@ export function FoundStep(w: WizardState) {
       <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
         <div className="max-w-sm w-full text-center space-y-5 my-auto">
           {w.isFetchMode ? (
-            <FoundFetchMode {...w} />
+            <FoundFetchMode {...w} pushSuccess={pushSuccess} />
           ) : (
             <>
-              <FoundSetupMode {...w} />
+              <FoundSetupMode {...w} pushSuccess={pushSuccess} />
               {isInstalled && (
                 <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
                   {t('buttons.back')}
@@ -479,6 +483,7 @@ export function FoundStep(w: WizardState) {
           )}
         </div>
       </div>
+      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </>
   );
 }

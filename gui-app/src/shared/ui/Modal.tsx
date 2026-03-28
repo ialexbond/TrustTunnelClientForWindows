@@ -40,7 +40,7 @@ export function Modal({
         left: "-50px",
         right: "-50px",
         bottom: "-50px",
-        zIndex: 9999,
+        zIndex: 9000,
         backgroundColor: "rgba(0,0,0,0.4)",
         backdropFilter: "blur(6px)",
       }}
