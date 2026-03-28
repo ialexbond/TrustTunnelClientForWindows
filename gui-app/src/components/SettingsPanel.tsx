@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Save } from "lucide-react";
-import type { VpnConfig, VpnStatus } from "../App";
+import type { VpnConfig, VpnStatus } from "../shared/types";
 import { Button } from "../shared/ui/Button";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { SnackBar } from "../shared/ui/SnackBar";

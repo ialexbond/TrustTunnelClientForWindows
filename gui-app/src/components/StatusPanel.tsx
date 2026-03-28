@@ -8,7 +8,7 @@ import {
   Clock,
   Power,
 } from "lucide-react";
-import type { VpnStatus } from "../App";
+import type { VpnStatus } from "../shared/types";
 import { Button } from "../shared/ui/Button";
 import { Badge } from "../shared/ui/Badge";
 import { formatUptime } from "../shared/utils/uptime";

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { VpnStatus } from "../../App";
+import type { VpnStatus } from "../../shared/types";
 import type { ClientConfig } from "../settings/useSettingsState";
 
 export interface PingPoint {

@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import RoutingPanel from "./RoutingPanel";
-import type { VpnStatus } from "../App";
+import type { VpnStatus } from "../shared/types";
 
 describe("RoutingPanel", () => {
   const defaultProps = {

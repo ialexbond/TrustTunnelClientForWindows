@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { BarChart3, Power, Loader2, Server, LogIn } from "lucide-react";
-import type { VpnStatus } from "../App";
+import type { VpnStatus } from "../shared/types";
 import StatusPanel from "./StatusPanel";
 import { PingChart } from "./dashboard/PingChart";
 import { SpeedTestCard } from "./dashboard/SpeedTestCard";
