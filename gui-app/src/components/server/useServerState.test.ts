@@ -139,7 +139,7 @@ describe("useServerState", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith("restart_service", expect.anything());
     // Success message pushed to queue
-    expect(result.current.successQueue).toContain("Service restarted");
+    expect(result.current.successQueue).toContainEqual(expect.objectContaining({ text: "Service restarted" }));
   });
 
   // ── runAction error ────────────────────────────────
@@ -260,13 +260,16 @@ describe("useServerState", () => {
       result.current.pushSuccess("msg2");
     });
 
-    expect(result.current.successQueue).toEqual(["msg1", "msg2"]);
+    expect(result.current.successQueue).toEqual([
+      { text: "msg1", type: "success" },
+      { text: "msg2", type: "success" },
+    ]);
 
     act(() => {
       result.current.shiftSuccess();
     });
 
-    expect(result.current.successQueue).toEqual(["msg2"]);
+    expect(result.current.successQueue).toEqual([{ text: "msg2", type: "success" }]);
   });
 
   // ── Optimistic user state updates ──────────────────

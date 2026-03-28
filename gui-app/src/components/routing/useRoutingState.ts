@@ -140,7 +140,7 @@ export interface UseRoutingStateReturn {
   markDirty: () => void;
 
   // Snackbar
-  successQueue: string[];
+  successQueue: (string | { text: string; type?: "success" | "error" })[];
   shiftSuccess: () => void;
 
   // Duplicate check

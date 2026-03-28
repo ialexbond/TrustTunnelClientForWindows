@@ -4,6 +4,8 @@ import { Terminal, Trash2, Copy, Check, Search, ScrollText, X } from "lucide-rea
 import { Button } from "../shared/ui/Button";
 import { Card, CardHeader } from "../shared/ui/Card";
 import { Select } from "../shared/ui/Select";
+import { SnackBar } from "../shared/ui/SnackBar";
+import { useSuccessQueue } from "../shared/hooks/useSuccessQueue";
 import type { LogEntry } from "../shared/types";
 
 interface LogPanelProps {
@@ -28,6 +30,7 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
   const [copied, setCopied] = useState(false);
   const [levelFilter, setLevelFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   const levelOptions = useMemo(
     () =>
@@ -62,14 +65,16 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      pushSuccess(t("logs.copied", "Логи скопированы"));
     });
-  }, [filteredLogs]);
+  }, [filteredLogs, pushSuccess, t]);
 
   const emptyMessage = logs.length === 0
     ? (isConnected ? t("logs_panel.no_logs_yet") : t("logs_panel.logs_appear_on_connect"))
     : t("logs_panel.no_matching");
 
   return (
+    <>
     <Card padding="none" className="flex-1 flex flex-col min-h-0 h-full">
       {/* Header */}
       <div className="px-4 pt-4">
@@ -193,6 +198,8 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
         )}
       </div>
     </Card>
+    <SnackBar messages={successQueue} onShown={shiftSuccess} />
+    </>
   );
 }
 
