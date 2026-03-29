@@ -5987,6 +5987,7 @@ name = "trusttunnel"
 version = "2.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures-util",
  "notify",
  "reqwest",
@@ -6007,6 +6008,7 @@ dependencies = [
  "toml 0.8.2",
  "toml_edit 0.22.27",
  "uuid",
+ "winreg 0.55.0",
 ]
 
 [[package]]

@@ -1,4 +1,3 @@
-import { useState, useRef, useEffect, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,6 +11,8 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
+import { colors } from "../../shared/ui/colors";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -34,30 +35,7 @@ export function VersionSection({ state }: Props) {
     runAction,
   } = state;
 
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({});
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [dropdownOpen]);
-
-  const handleOpenDropdown = () => {
-    if (!dropdownOpen && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setDropdownStyle({ position: "fixed", top: rect.bottom + 4, left: rect.left, width: rect.width, zIndex: 40 });
-    }
-    setDropdownOpen(!dropdownOpen);
-  };
+  const dropdown = useDropdownPortal();
 
   if (!serverInfo) return null;
 
@@ -97,11 +75,11 @@ export function VersionSection({ state }: Props) {
       {/* Custom dropdown + install button */}
       {availableVersions.length > 0 && (
         <div className="flex gap-2 items-center">
-          <div className="relative" ref={dropdownRef} style={{ width: "240px" }}>
+          <div className="relative" ref={dropdown.containerRef} style={{ width: "240px" }}>
             {/* Trigger button */}
             <button
-              ref={triggerRef}
-              onClick={handleOpenDropdown}
+              ref={dropdown.triggerRef}
+              onClick={dropdown.toggle}
               className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none"
               style={{
                 backgroundColor: "var(--color-bg-elevated)",
@@ -115,20 +93,21 @@ export function VersionSection({ state }: Props) {
                 className="w-3.5 h-3.5 shrink-0 transition-transform duration-200"
                 style={{
                   color: "var(--color-text-muted)",
-                  transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                  transform: dropdown.open ? "rotate(180deg)" : "rotate(0deg)",
                 }}
               />
             </button>
 
             {/* Dropdown menu — portal so it renders under sidebar */}
-            {dropdownOpen && createPortal(
+            {dropdown.open && createPortal(
               <div
+                ref={dropdown.portalRef}
                 style={{
-                  ...dropdownStyle,
+                  ...dropdown.style,
                   backgroundColor: "var(--color-bg-elevated)",
                   border: "1px solid var(--color-border)",
                   borderRadius: "var(--radius-lg)",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+                  boxShadow: colors.dropdownShadow,
                   overflow: "hidden",
                 }}
               >
@@ -140,10 +119,10 @@ export function VersionSection({ state }: Props) {
                     return (
                       <button
                         key={v}
-                        onClick={() => { setSelectedVersion(v); setDropdownOpen(false); }}
+                        onClick={() => { setSelectedVersion(v); dropdown.close(); }}
                         className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                         style={{
-                          backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
+                          backgroundColor: isSelected ? colors.accentBg : "transparent",
                           color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
                         }}
                         onMouseEnter={(e) => {

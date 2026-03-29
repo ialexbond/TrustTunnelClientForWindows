@@ -155,7 +155,7 @@ describe("useDashboardState", () => {
     });
 
     expect(result.current.speedTesting).toBe(false);
-    expect(result.current.speedError).toBe("Error: network timeout");
+    expect(result.current.speedError).toBe("network timeout");
   });
 
   // ─── Connected status triggers ping polling ───

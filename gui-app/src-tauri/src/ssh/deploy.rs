@@ -3,7 +3,7 @@ use super::*;
 /// Build the shell command that directly creates all TrustTunnel config files.
 /// This bypasses setup_wizard entirely (no TTY required).
 fn build_configure_commands(settings: &EndpointSettings, sudo: &str) -> String {
-    let dir = "/opt/trusttunnel";
+    let dir = ENDPOINT_DIR;
     let hostname = if !settings.domain.is_empty() {
         settings.domain.clone()
     } else {
@@ -283,12 +283,12 @@ async fn deploy_install_binary(
     let (_, verify_code) = exec_command(
         handle,
         app,
-        "test -f /opt/trusttunnel/setup_wizard && test -f /opt/trusttunnel/trusttunnel_endpoint",
+        &format!("test -f {dir}/setup_wizard && test -f {bin}", dir = ENDPOINT_DIR, bin = ENDPOINT_BINARY),
     )
     .await?;
 
     if verify_code != 0 {
-        let msg = "TrustTunnel files not found in /opt/trusttunnel/ after installation";
+        let msg = &format!("TrustTunnel files not found in {dir}/ after installation", dir = ENDPOINT_DIR);
         emit_step(app, "install", "error", msg);
         return Err(msg.into());
     }
@@ -342,7 +342,7 @@ async fn deploy_configure(
     // Verify certs were created
     let (cert_check, cert_code) = exec_command(
         handle, app,
-        "test -f /opt/trusttunnel/certs/cert.pem && test -f /opt/trusttunnel/certs/key.pem && echo OK"
+        &format!("test -f {dir}/certs/cert.pem && test -f {dir}/certs/key.pem && echo OK", dir = ENDPOINT_DIR)
     ).await?;
 
     if cert_code != 0 || !cert_check.contains("OK") {
@@ -355,7 +355,7 @@ async fn deploy_configure(
     // Pre-flight: run endpoint briefly to verify config is valid
     let (preflight, _preflight_code) = exec_command(
         handle, app,
-        &format!("cd /opt/trusttunnel && timeout 2 {sudo}./trusttunnel_endpoint vpn.toml hosts.toml 2>&1 || true")
+        &format!("cd {dir} && timeout 2 {sudo}./{svc} vpn.toml hosts.toml 2>&1 || true", dir = ENDPOINT_DIR, svc = ENDPOINT_SERVICE)
     ).await?;
     emit_log(app, "debug", &format!("Pre-flight output: {preflight}"));
 
@@ -382,10 +382,11 @@ async fn deploy_start_service(
     // Stop existing service first, then copy template and restart
     let service_cmds = format!(
         "{sudo}systemctl stop trusttunnel 2>/dev/null; \
-         cd /opt/trusttunnel && \
+         cd {dir} && \
          {sudo}cp -f trusttunnel.service.template /etc/systemd/system/trusttunnel.service 2>/dev/null; \
          {sudo}systemctl daemon-reload && \
-         {sudo}systemctl enable --now trusttunnel"
+         {sudo}systemctl enable --now trusttunnel",
+        dir = ENDPOINT_DIR
     );
 
     let (_, svc_code) = exec_command(handle, app, &service_cmds).await?;
@@ -425,7 +426,7 @@ async fn deploy_start_service(
         // Check what config files exist
         let (ls_output, _) = exec_command(
             handle, app,
-            "ls -la /opt/trusttunnel/*.toml /opt/trusttunnel/certs/ 2>&1"
+            &format!("ls -la {dir}/*.toml {dir}/certs/ 2>&1", dir = ENDPOINT_DIR)
         ).await?;
         emit_log(app, "debug", &format!("Config files:\n{ls_output}"));
 
@@ -471,7 +472,9 @@ async fn deploy_export_config(
     };
 
     let export_cmd = format!(
-        "cd /opt/trusttunnel && {sudo}./trusttunnel_endpoint vpn.toml hosts.toml -c {user} -a {addr} --format toml 2>&1",
+        "cd {dir} && {sudo}./{svc} vpn.toml hosts.toml -c {user} -a {addr} --format toml 2>&1",
+        dir = ENDPOINT_DIR,
+        svc = ENDPOINT_SERVICE,
         sudo = sudo,
         user = settings.vpn_username,
         addr = export_address,
@@ -610,9 +613,9 @@ pub async fn diagnose_server(
     report.push_str(&format!("\n=== Listening ports ===\n{ports}\n"));
 
     // Config files
-    let (ls, _) = exec_command(&handle, app, "ls -la /opt/trusttunnel/ 2>&1").await
+    let (ls, _) = exec_command(&handle, app, &format!("ls -la {dir}/ 2>&1", dir = ENDPOINT_DIR)).await
         .unwrap_or(("unknown".into(), -1));
-    report.push_str(&format!("\n=== /opt/trusttunnel/ ===\n{ls}\n"));
+    report.push_str(&format!("\n=== {dir}/ ===\n{ls}\n", dir = ENDPOINT_DIR));
 
     // Service file
     let (svc, _) = exec_command(&handle, app, "cat /etc/systemd/system/trusttunnel.service 2>&1").await
@@ -620,17 +623,17 @@ pub async fn diagnose_server(
     report.push_str(&format!("\n=== Service file ===\n{svc}\n"));
 
     // vpn.toml
-    let (vpn_cfg, _) = exec_command(&handle, app, "cat /opt/trusttunnel/vpn.toml 2>&1").await
+    let (vpn_cfg, _) = exec_command(&handle, app, &format!("cat {cfg} 2>&1", cfg = ENDPOINT_CONFIG)).await
         .unwrap_or(("not found".into(), -1));
     report.push_str(&format!("\n=== vpn.toml ===\n{vpn_cfg}\n"));
 
     // hosts.toml
-    let (hosts_cfg, _) = exec_command(&handle, app, "cat /opt/trusttunnel/hosts.toml 2>&1").await
+    let (hosts_cfg, _) = exec_command(&handle, app, &format!("cat {dir}/hosts.toml 2>&1", dir = ENDPOINT_DIR)).await
         .unwrap_or(("not found".into(), -1));
     report.push_str(&format!("\n=== hosts.toml ===\n{hosts_cfg}\n"));
 
     // Certs
-    let (certs, _) = exec_command(&handle, app, "ls -la /opt/trusttunnel/certs/ 2>&1").await
+    let (certs, _) = exec_command(&handle, app, &format!("ls -la {dir}/certs/ 2>&1", dir = ENDPOINT_DIR)).await
         .unwrap_or(("not found".into(), -1));
     report.push_str(&format!("\n=== Certs ===\n{certs}\n"));
 

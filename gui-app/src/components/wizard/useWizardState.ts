@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { WizardStep, DeployStep, DeployLog, ServerInfo } from "./types";
 import { deobfuscate } from "../../shared/utils/obfuscation";
+import { formatError } from "../../shared/utils/formatError";
 
 // ─── localStorage helpers ──────────────────────────
 const STORAGE_KEY = "trusttunnel_wizard";
@@ -236,7 +237,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       }
     } catch (e) {
       if (checkCancelledRef.current) return;
-      setCheckError(String(e));
+      setCheckError(formatError(e));
       setWizardStep("found");
       setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
     }
@@ -267,7 +268,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       setWizardStep("server");
     } catch (e) {
       operationRef.current = null;
-      setErrorMessage(String(e));
+      setErrorMessage(formatError(e));
       setWizardStep("error");
     }
   };
@@ -331,7 +332,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       });
       setConfigPath(result);
     } catch (e) {
-      setErrorMessage((prev) => prev || String(e));
+      setErrorMessage((prev) => prev || formatError(e));
       setWizardStep("error");
     } finally {
       operationRef.current = null;
@@ -377,7 +378,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       setFetchRetryCount(0);
     } catch (e) {
       setFetchRetryCount((c) => c + 1);
-      setErrorMessage((prev) => prev || String(e));
+      setErrorMessage((prev) => prev || formatError(e));
       setWizardStep("error");
     } finally {
       operationRef.current = null;
@@ -406,7 +407,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         } catch { /* fallback: config already saved to app dir */ }
       }
     } catch (e) {
-      setErrorMessage(String(e));
+      setErrorMessage(formatError(e));
     } finally {
       setSavingConfigFor(null);
     }
@@ -440,7 +441,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       setNewUsername("");
       setNewPassword("");
     } catch (e) {
-      setErrorMessage(String(e));
+      setErrorMessage(formatError(e));
     } finally {
       setAddingUser(false);
     }
@@ -469,7 +470,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         setServerInfo(result);
       } catch { /* keep current */ }
     } catch (e) {
-      setErrorMessage(String(e));
+      setErrorMessage(formatError(e));
     } finally {
       setDeletingUser(null);
     }

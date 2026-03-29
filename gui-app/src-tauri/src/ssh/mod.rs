@@ -20,6 +20,12 @@ pub use server::{
 };
 pub use process::{check_process_conflict, kill_existing_process};
 
+// ── Server path constants ──
+pub const ENDPOINT_DIR: &str = "/opt/trusttunnel";
+pub const ENDPOINT_BINARY: &str = "/opt/trusttunnel/trusttunnel_endpoint";
+pub const ENDPOINT_CONFIG: &str = "/opt/trusttunnel/vpn.toml";
+pub const ENDPOINT_SERVICE: &str = "trusttunnel_endpoint";
+
 // ─── SSH connection parameters ─────────────────────
 
 #[derive(Debug, Clone, Deserialize)]

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { VpnStatus, LogEntry } from "../types";
 import type { i18n as I18nType } from "i18next";
+import { formatError } from "../utils/formatError";
 
 interface UseVpnEventsParams {
   i18n: I18nType;
@@ -58,17 +59,29 @@ export function useVpnEvents({
           if (prev === "recovering" && event.payload.status === "disconnected") {
             return prev;
           }
+
+          // Show appropriate snackbar based on transition
+          if (event.payload.status === "connected") {
+            setConnectedSince(new Date());
+            pushSuccess?.(i18n.t("messages.vpn_connected", "VPN connected"));
+          } else if (event.payload.status === "disconnected") {
+            setConnectedSince(null);
+            if (prev === "connecting") {
+              // Was trying to connect → connection failed
+              pushSuccess?.(
+                event.payload.error || i18n.t("errors.connection_failed", "Connection failed"),
+                "error"
+              );
+            } else if (prev === "connected" && !reconnectResolve.current) {
+              // Was connected → normal disconnect (not part of reconnect)
+              pushSuccess?.(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+            }
+          }
+
           return event.payload.status;
         });
         if (event.payload.error) {
           setError(event.payload.error);
-        }
-        if (event.payload.status === "connected") {
-          setConnectedSince(new Date());
-          pushSuccess?.(i18n.t("messages.vpn_connected", "VPN connected"));
-        } else if (event.payload.status === "disconnected") {
-          setConnectedSince(null);
-          pushSuccess?.(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
         }
       },
     );
@@ -106,7 +119,7 @@ export function useVpnEvents({
               setError(null);
             } catch (e) {
               traceLog(`Reconnect failed: ${e}`);
-              setError(i18n.t("errors.reconnection_failed", { error: String(e) }));
+              setError(i18n.t("errors.reconnection_failed", { error: formatError(e) }));
               setStatus("error");
             }
           } else {

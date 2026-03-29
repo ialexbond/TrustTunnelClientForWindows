@@ -125,8 +125,22 @@
     "mtu": "Размер MTU (576–9000). Меньшие значения надёжнее на плохих каналах, большие — быстрее."
   },
   "settings": {
-    "tunnel": { "title": "Туннель", "listenerMode": "Режим прослушивания", "socksAddress": "Адрес SOCKS5" },
-    "security": { "title": "Безопасность" },
+    "tunnel": {
+      "title": "Туннель",
+      "listenerMode": "Режим прослушивания",
+      "socksAddress": "Адрес SOCKS5",
+      "socks_username": "Логин",
+      "socks_password": "Пароль",
+      "socks_username_placeholder": "Необязательно",
+      "socks_password_placeholder": "Необязательно",
+      "socks_auth_hint": "Авторизация для SOCKS5 прокси. Оставьте пустым если прокси только для вас."
+    },
+    "security": {
+      "title": "Безопасность",
+      "custom_sni": "Подмена SNI",
+      "custom_sni_description": "Маскирует TLS-обращение под другой домен для обхода DPI. Оставьте пустым для стандартного SNI.",
+      "custom_sni_warning": "С Let's Encrypt сертификатом подмена SNI может вызвать ошибку подключения — сертификат не совпадёт с подменённым доменом."
+    },
     "network": { "title": "Сеть" },
     "experimental": {
       "title": "Экспериментальные функции",
@@ -227,6 +241,8 @@
       "fetch_description": "Подключиться к уже настроенному серверу и загрузить VPN-конфигурацию",
       "skip": "У меня есть конфиг-файл",
       "skip_description": "Загрузить существующий .toml файл конфигурации с диска",
+      "import_config": "Импорт конфигурации",
+      "import_description": "Импортировать конфиг из файла, ссылки или буфера обмена",
       "use_existing_config": "У меня есть конфиг",
       "requirements_header": "Для настройки сервера потребуется:",
       "requirement_linux": "• Linux-сервер (Ubuntu 22+, Debian 11+) с SSH-доступом",
@@ -360,6 +376,21 @@
       "back_to_settings": "Назад к настройкам",
       "reinstall_prompt": "Хотите переустановить VPN на сервере?",
       "reinstall_description": "Копирование конфига не удалось повторно. Можно переустановить VPN с нуля."
+    },
+    "import": {
+      "title": "Импорт конфигурации",
+      "from_file": "Из файла",
+      "from_file_desc": "Выберите .toml файл конфигурации с диска",
+      "from_link": "По ссылке",
+      "from_link_desc": "Вставьте trusttunnel:// ссылку",
+      "from_clipboard": "Из буфера обмена",
+      "from_clipboard_desc": "Вставить конфиг или ссылку из буфера",
+      "link_label": "Ссылка на конфигурацию",
+      "import_button": "Импортировать",
+      "paste_clipboard": "Вставить",
+      "invalid_link": "Неверная ссылка. Используйте формат trusttunnel://...",
+      "clipboard_invalid": "В буфере нет конфигурации TrustTunnel или ссылки",
+      "clipboard_error": "Не удалось прочитать буфер обмена"
     }
   },
   "routing": {
@@ -726,6 +757,8 @@
     "search_placeholder": "Поиск по логам...",
     "no_matching": "Нет логов по фильтру",
     "no_logs_yet": "Ожидание логов...",
-    "logs_appear_on_connect": "Логи появятся после подключения..."
+    "logs_appear_on_connect": "Логи появятся после подключения...",
+    "sidecar_level": "Уровень записи",
+    "display_filter": "Фильтр"
   }
 }

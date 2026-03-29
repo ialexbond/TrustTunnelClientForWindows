@@ -9,6 +9,8 @@ import { Button } from "../../shared/ui/Button";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
 import { SnackBar } from "../../shared/ui/SnackBar";
+import { colors } from "../../shared/ui/colors";
+import { formatError } from "../../shared/utils/formatError";
 
 export interface SshCredentials {
   host: string;
@@ -95,7 +97,7 @@ export function SshConnectForm({ onConnect }: Props) {
 
       onConnect(creds);
     } catch (e) {
-      pushSuccess(translateSshError(String(e), t), "error");
+      pushSuccess(translateSshError(formatError(e), t), "error");
     } finally {
       setConnecting(false);
     }
@@ -108,7 +110,7 @@ export function SshConnectForm({ onConnect }: Props) {
         <div className="text-center mb-6">
           <div
             className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3"
-            style={{ backgroundColor: "rgba(99, 102, 241, 0.15)" }}
+            style={{ backgroundColor: colors.accentLogoGlow }}
           >
             <Server className="w-6 h-6" style={{ color: "var(--color-accent-400)" }} />
           </div>

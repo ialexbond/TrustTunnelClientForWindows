@@ -125,8 +125,22 @@
     "mtu": "MTU size (576–9000). Lower values are more reliable on poor connections, higher values improve throughput."
   },
   "settings": {
-    "tunnel": { "title": "Tunnel", "listenerMode": "Listener Mode", "socksAddress": "SOCKS5 Address" },
-    "security": { "title": "Security" },
+    "tunnel": {
+      "title": "Tunnel",
+      "listenerMode": "Listener Mode",
+      "socksAddress": "SOCKS5 Address",
+      "socks_username": "Username",
+      "socks_password": "Password",
+      "socks_username_placeholder": "Optional",
+      "socks_password_placeholder": "Optional",
+      "socks_auth_hint": "SOCKS5 proxy authentication. Leave empty if the proxy is only for you."
+    },
+    "security": {
+      "title": "Security",
+      "custom_sni": "Custom SNI",
+      "custom_sni_description": "Masks TLS connection as another domain to bypass DPI. Leave empty for standard SNI.",
+      "custom_sni_warning": "With Let's Encrypt certificate, custom SNI may cause connection failure — certificate won't match the spoofed domain."
+    },
     "network": { "title": "Network" },
     "experimental": {
       "title": "Experimental Features",
@@ -227,6 +241,8 @@
       "fetch_description": "Connect to an already configured server and download your VPN configuration",
       "skip": "I Have a Config File",
       "skip_description": "Load an existing .toml configuration file from disk",
+      "import_config": "Import Configuration",
+      "import_description": "Import config from file, link, or clipboard",
       "use_existing_config": "I have a config",
       "requirements_header": "Server setup requires:",
       "requirement_linux": "• Linux server (Ubuntu 22+, Debian 11+) with SSH access",
@@ -360,6 +376,21 @@
       "back_to_settings": "Back to settings",
       "reinstall_prompt": "Would you like to reinstall VPN on the server?",
       "reinstall_description": "Config fetching failed again. You can reinstall VPN from scratch."
+    },
+    "import": {
+      "title": "Import Configuration",
+      "from_file": "From file",
+      "from_file_desc": "Select a .toml configuration file from disk",
+      "from_link": "From link",
+      "from_link_desc": "Paste a trusttunnel:// link",
+      "from_clipboard": "From clipboard",
+      "from_clipboard_desc": "Paste config or link from clipboard",
+      "link_label": "Configuration link",
+      "import_button": "Import",
+      "paste_clipboard": "Paste",
+      "invalid_link": "Invalid link. Use trusttunnel://... format",
+      "clipboard_invalid": "No TrustTunnel config or link found in clipboard",
+      "clipboard_error": "Failed to read clipboard"
     }
   },
   "routing": {
@@ -639,8 +670,17 @@
       "days_left": "{{days}} days left",
       "expired": "Expired",
       "years": "{{count}}y",
+      "years_one": "{{count}} year",
+      "years_few": "{{count}} years",
+      "years_many": "{{count}} years",
       "months": "{{count}}mo",
-      "days": "{{count}}d"
+      "months_one": "{{count}} month",
+      "months_few": "{{count}} months",
+      "months_many": "{{count}} months",
+      "days": "{{count}}d",
+      "days_one": "{{count}} day",
+      "days_few": "{{count}} days",
+      "days_many": "{{count}} days"
     },
     "export": {
       "title": "Export Configuration",
@@ -717,6 +757,8 @@
     "search_placeholder": "Search logs...",
     "no_matching": "No logs matching filter",
     "no_logs_yet": "Waiting for logs...",
-    "logs_appear_on_connect": "Logs will appear after connecting..."
+    "logs_appear_on_connect": "Logs will appear after connecting...",
+    "sidecar_level": "Recording level",
+    "display_filter": "Filter"
   }
 }
