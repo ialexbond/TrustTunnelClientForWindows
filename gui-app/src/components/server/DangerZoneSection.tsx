@@ -8,6 +8,7 @@ import {
 import { CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -43,7 +44,7 @@ export function DangerZoneSection({ state }: Props) {
       state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
       state.pushSuccess(t("server.danger.uninstalled", "VPN удалён с сервера"));
     } catch (e) {
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
       setConfirmUninstall(false);
     } finally {
       setUninstallLoading(false);

@@ -90,7 +90,7 @@ pub async fn self_update(
                 "-NoProfile", "-Command",
                 &format!("(Get-FileHash -Path '{}' -Algorithm SHA256).Hash", zip_for_hash),
             ])
-            .creation_flags(0x08000000)
+            .creation_flags(crate::sidecar::CREATE_NO_WINDOW)
             .output()
             .await
             .map_err(|e| format!("Checksum verification failed: {e}"))?;
@@ -121,7 +121,7 @@ pub async fn self_update(
                 extract_dir_str, zip_path_str, extract_dir_str
             ),
         ])
-        .creation_flags(0x08000000)
+        .creation_flags(crate::sidecar::CREATE_NO_WINDOW)
         .output()
         .await
         .map_err(|e| format!("Extract failed: {e}"))?;
@@ -215,7 +215,7 @@ del "{vbs_path_str}" >nul 2>&1
 
     std::process::Command::new("wscript.exe")
         .arg(&vbs_path)
-        .creation_flags(0x08000000)
+        .creation_flags(crate::sidecar::CREATE_NO_WINDOW)
         .spawn()
         .map_err(|e| format!("Cannot launch updater: {e}"))?;
 

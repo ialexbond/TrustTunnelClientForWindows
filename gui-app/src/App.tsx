@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
 import StatusPanel from "./components/StatusPanel";
@@ -13,29 +12,20 @@ import AboutPanel from "./components/AboutPanel";
 import DashboardPanel from "./components/DashboardPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
 import { PanelErrorBoundary } from "./shared/ui/PanelErrorBoundary";
+import { formatError } from "./shared/utils/formatError";
 import { VpnProvider } from "./shared/context/VpnContext";
 import { useKeyboardShortcuts } from "./shared/hooks/useKeyboardShortcuts";
 import { useTheme } from "./shared/hooks/useTheme";
 import { useLanguage } from "./shared/hooks/useLanguage";
 import { useVpnEvents } from "./shared/hooks/useVpnEvents";
 import { useSuccessQueue } from "./shared/hooks/useSuccessQueue";
+import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
+import { useVpnActions } from "./shared/hooks/useVpnActions";
 import { SnackBar } from "./shared/ui/SnackBar";
-import type { VpnStatus, VpnConfig, LogEntry, UpdateInfo } from "./shared/types";
+import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 // Re-export types for backward compatibility
 export type { VpnStatus, UpdateInfo, VpnConfig, LogEntry, AppTab } from "./shared/types";
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na > nb) return 1;
-    if (na < nb) return -1;
-  }
-  return 0;
-}
 
 function App() {
   // ─── Theme ───
@@ -79,57 +69,7 @@ function App() {
   });
 
   // ─── Update check ───
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
-    available: false, latestVersion: "", currentVersion: "",
-    downloadUrl: "", sha256: "", releaseNotes: "", checking: false,
-  });
-
-  const checkForUpdates = useCallback(async (_silent = false) => {
-    setUpdateInfo(prev => ({ ...prev, checking: true }));
-    try {
-      const currentVersion = await getVersion();
-      const res = await fetch(
-        "https://api.github.com/repos/ialexbond/TrustTunnelClientForWindows/releases/latest",
-        { headers: { "Accept": "application/vnd.github.v3+json" } }
-      );
-      if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
-      const data = await res.json();
-      const latestTag = (data.tag_name || "").replace(/^v\.?/, "");
-      const isNewer = compareVersions(latestTag, currentVersion) > 0;
-      const assets = data.assets || [];
-      const asset =
-        assets.find((a: { name: string }) => a.name.endsWith(".zip")) ||
-        assets.find((a: { name: string }) => a.name.endsWith(".exe") || a.name.endsWith(".msi"));
-      // Look for SHA256 checksum: either a .sha256 asset or a pattern in release notes
-      const sha256Asset = assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
-      let sha256 = "";
-      if (sha256Asset) {
-        try {
-          const hashRes = await fetch(sha256Asset.browser_download_url);
-          if (hashRes.ok) sha256 = (await hashRes.text()).trim().split(/\s/)[0];
-        } catch { /* checksum fetch is optional */ }
-      } else {
-        // Try to extract from release notes: "SHA256: <hex>" pattern
-        const match = (data.body || "").match(/SHA256:\s*([a-fA-F0-9]{64})/);
-        if (match) sha256 = match[1];
-      }
-
-      setUpdateInfo({
-        available: isNewer,
-        latestVersion: latestTag,
-        currentVersion,
-        downloadUrl: asset?.browser_download_url || data.html_url || "",
-        sha256,
-        releaseNotes: data.body || "",
-        checking: false,
-      });
-    } catch (e) {
-      console.warn("Update check failed:", e);
-      setUpdateInfo(prev => ({ ...prev, checking: false }));
-    }
-  }, []);
-
-  useEffect(() => { checkForUpdates(true); }, [checkForUpdates]);
+  const { updateInfo, checkForUpdates } = useUpdateChecker();
 
   // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
   const reconnectResolve = useRef<(() => void) | null>(null);
@@ -144,6 +84,9 @@ function App() {
     reconnectResolve,
     pushSuccess,
   });
+
+  // Deep-link state (used by ImportConfigModal in WelcomeStep, future installer support)
+  // For portable builds, deep-link is manual only (paste URL in import modal)
 
   // ─── Config validation on startup ───
   useEffect(() => {
@@ -209,7 +152,7 @@ function App() {
         configPath: config.configPath,
         logLevel: config.logLevel,
       }).catch((e) => {
-        setError(String(e));
+        setError(formatError(e));
         setStatus("error");
       });
       setStatus("connecting");
@@ -219,56 +162,14 @@ function App() {
   }, [config.configPath]);
 
   // ─── VPN Actions ───
-  const handleConnect = useCallback(async () => {
-    if (!config.configPath) {
-      setError(i18n.t("messages.config_required"));
-      setStatus("error");
-      return;
-    }
-    try {
-      setError(null);
-      setStatus("connecting");
-      await invoke("vpn_connect", {
-        configPath: config.configPath,
-        logLevel: config.logLevel,
-      });
-    } catch (e) {
-      setError(String(e));
-      setStatus("error");
-    }
-  }, [config, i18n]);
-
-  const handleDisconnect = useCallback(async () => {
-    try {
-      setStatus("disconnecting");
-      await invoke("vpn_disconnect");
-    } catch (e) {
-      setError(String(e));
-    }
-  }, []);
-
-  const handleReconnect = useCallback(async () => {
-    if (status !== "connected" && status !== "connecting") return;
-
-    // Disconnect and wait for actual disconnected status
-    await handleDisconnect();
-    await new Promise<void>((resolve) => {
-      reconnectResolve.current = resolve;
-      // Safety timeout: if disconnect event never comes, resolve after 5s
-      setTimeout(() => {
-        if (reconnectResolve.current === resolve) {
-          reconnectResolve.current = null;
-          resolve();
-        }
-      }, 5000);
-    });
-
-    // Small delay to let the sidecar process fully terminate
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Now reconnect
-    await handleConnect();
-  }, [status, handleDisconnect, handleConnect]);
+  const { handleConnect, handleDisconnect, handleReconnect } = useVpnActions({
+    config,
+    status,
+    setStatus,
+    setError,
+    i18n,
+    reconnectResolve,
+  });
 
   // ─── Setup / Config ───
   const handleSetupComplete = useCallback((configPath: string) => {
@@ -410,7 +311,7 @@ function App() {
 
           {/* Control Panel — SSH form or ServerPanel */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
-            <PanelErrorBoundary panelName="Control Panel">
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Control Panel">
             <ControlPanelPage
               key={controlKey}
               onConfigExported={(path) => {
@@ -431,7 +332,7 @@ function App() {
 
           {/* Settings */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
-            <PanelErrorBoundary panelName="Settings">
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Settings">
             <SettingsPanel
               key={settingsKey}
               configPath={config.configPath}
@@ -448,7 +349,7 @@ function App() {
 
           {/* Dashboard */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
-            <PanelErrorBoundary panelName="Dashboard">
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Dashboard">
             <DashboardPanel
               status={status}
               connectedSince={connectedSince}
@@ -463,7 +364,7 @@ function App() {
 
           {/* Routing */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
-            <PanelErrorBoundary panelName="Routing">
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Routing">
             <RoutingPanel
               configPath={config.configPath}
               status={status}
@@ -515,6 +416,7 @@ function App() {
       </div>
     </div>
     <SnackBar messages={successQueue} onShown={shiftSuccess} />
+
     </VpnProvider>
   );
 }

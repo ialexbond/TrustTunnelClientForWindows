@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Shield, Server, Download, FileText, Info } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
+import { colors } from "../../shared/ui/colors";
+import { ImportConfigModal } from "./ImportConfigModal";
 import type { WizardState } from "./useWizardState";
 
-export function WelcomeStep({ setWizardStep, handleSkip, saveField }: WizardState) {
+export function WelcomeStep({ setWizardStep, handleSkip, saveField, onSetupComplete }: WizardState) {
+  const [importOpen, setImportOpen] = useState(false);
   const { t } = useTranslation();
 
   return (
@@ -42,7 +46,7 @@ export function WelcomeStep({ setWizardStep, handleSkip, saveField }: WizardStat
             onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
             style={{
               backgroundColor: "rgba(99, 102, 241, 0.06)",
-              borderColor: "rgba(99, 102, 241, 0.2)",
+              borderColor: colors.accentBorder,
             }}
           >
             <div className="flex items-start gap-3">
@@ -73,7 +77,7 @@ export function WelcomeStep({ setWizardStep, handleSkip, saveField }: WizardStat
             <div className="flex items-start gap-3">
               <div
                 className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5"
-                style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}
+                style={{ backgroundColor: colors.accentBg }}
               >
                 <Download className="w-4.5 h-4.5" style={{ color: "var(--color-accent-500)" }} />
               </div>
@@ -88,12 +92,12 @@ export function WelcomeStep({ setWizardStep, handleSkip, saveField }: WizardStat
             </div>
           </Card>
 
-          {/* Card 3: Use Existing Config */}
+          {/* Card 3: Import Config */}
           <Card
             hover
             padding="md"
             className="cursor-pointer group active:scale-[0.98] transition-all duration-200"
-            onClick={handleSkip}
+            onClick={() => setImportOpen(true)}
           >
             <div className="flex items-start gap-3">
               <div
@@ -104,14 +108,20 @@ export function WelcomeStep({ setWizardStep, handleSkip, saveField }: WizardStat
               </div>
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
-                  {t('wizard.welcome.skip')}
+                  {t('wizard.welcome.import_config')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
-                  {t('wizard.welcome.skip_description')}
+                  {t('wizard.welcome.import_description')}
                 </p>
               </div>
             </div>
           </Card>
+
+          <ImportConfigModal
+            open={importOpen}
+            onClose={() => setImportOpen(false)}
+            onImported={(path) => onSetupComplete(path)}
+          />
         </div>
 
         {/* Requirements info banner */}
