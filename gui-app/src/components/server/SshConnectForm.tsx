@@ -84,16 +84,14 @@ export function SshConnectForm({ onConnect }: Props) {
         password: authMode === "password" ? password : "",
         keyPath: authMode === "key" ? keyPath : undefined,
       };
-      localStorage.setItem(
-        "trusttunnel_control_ssh",
-        JSON.stringify({
-          host: creds.host,
-          port: creds.port,
-          user: creds.user,
-          password: creds.password ? obfuscate(creds.password) : "",
-          keyPath: creds.keyPath || "",
-        })
-      );
+      // Store credentials in Rust backend (file-based, not localStorage)
+      await invoke("save_ssh_credentials", {
+        host: creds.host,
+        port: creds.port,
+        user: creds.user,
+        password: creds.password ? obfuscate(creds.password) : "",
+        keyPath: creds.keyPath || null,
+      });
 
       onConnect(creds);
     } catch (e) {
@@ -195,7 +193,7 @@ export function SshConnectForm({ onConnect }: Props) {
               </label>
               <div className="flex gap-2">
                 <div
-                  className="flex-1 flex items-center px-3 py-2.5 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
+                  className="flex-1 flex items-center px-3 h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
                   style={{
                     backgroundColor: "var(--color-input-bg)",
                     border: "1px solid var(--color-input-border)",

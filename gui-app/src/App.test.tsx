@@ -1151,7 +1151,7 @@ describe("App", () => {
     expect(localStorage.getItem("tt_config_path")).toBe("/new/config.json");
   });
 
-  it("handleSetupComplete copies SSH credentials from wizard storage", async () => {
+  it("handleSetupComplete copies SSH credentials from wizard storage via invoke", async () => {
     await act(async () => {
       render(<App />);
     });
@@ -1170,9 +1170,14 @@ describe("App", () => {
       setupWizardProps.onSetupComplete("/new/config.json");
     });
 
-    const sshData = JSON.parse(localStorage.getItem("trusttunnel_control_ssh") || "{}");
-    expect(sshData.host).toBe("1.2.3.4");
-    expect(sshData.user).toBe("admin");
+    // Now saves via invoke("save_ssh_credentials") instead of localStorage
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("save_ssh_credentials", {
+      host: "1.2.3.4",
+      port: "22",
+      user: "admin",
+      password: "obfuscated_pass",
+      keyPath: null,
+    });
   });
 
   it("handleSetupComplete navigates to settings when tt_navigate_after_setup is 'settings'", async () => {

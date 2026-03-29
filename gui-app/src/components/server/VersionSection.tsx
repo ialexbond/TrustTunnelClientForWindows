@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -34,7 +35,9 @@ export function VersionSection({ state }: Props) {
   } = state;
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -47,6 +50,14 @@ export function VersionSection({ state }: Props) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
+
+  const handleOpenDropdown = () => {
+    if (!dropdownOpen && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropdownStyle({ position: "fixed", top: rect.bottom + 4, left: rect.left, width: rect.width, zIndex: 40 });
+    }
+    setDropdownOpen(!dropdownOpen);
+  };
 
   if (!serverInfo) return null;
 
@@ -89,7 +100,8 @@ export function VersionSection({ state }: Props) {
           <div className="relative" ref={dropdownRef} style={{ width: "240px" }}>
             {/* Trigger button */}
             <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
+              ref={triggerRef}
+              onClick={handleOpenDropdown}
               className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none"
               style={{
                 backgroundColor: "var(--color-bg-elevated)",
@@ -108,17 +120,19 @@ export function VersionSection({ state }: Props) {
               />
             </button>
 
-            {/* Dropdown menu */}
-            {dropdownOpen && (
+            {/* Dropdown menu — portal so it renders under sidebar */}
+            {dropdownOpen && createPortal(
               <div
-                className="absolute z-50 mt-1 w-full max-h-52 overflow-hidden rounded-[var(--radius-lg)] shadow-xl"
                 style={{
+                  ...dropdownStyle,
                   backgroundColor: "var(--color-bg-elevated)",
                   border: "1px solid var(--color-border)",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  borderRadius: "var(--radius-lg)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+                  overflow: "hidden",
                 }}
               >
-                <div className="max-h-52 overflow-y-auto" style={{ padding: "4px 4px 4px 4px" }}>
+                <div className="max-h-52 overflow-y-auto" style={{ padding: "4px" }}>
                   {availableVersions.map((v, i) => {
                     const vClean = stripV(v);
                     const isSelected = v === selectedVersion;
@@ -152,7 +166,8 @@ export function VersionSection({ state }: Props) {
                     );
                   })}
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
 

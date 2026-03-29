@@ -207,12 +207,12 @@ export function CertSection({ state }: Props) {
         {certInfo.domain && (
           <div className="flex items-center justify-between">
             <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.domain")}</span>
-            <code
-              className="text-[11px] px-1.5 py-0.5 rounded-[var(--radius-sm)] font-mono"
-              style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-primary)" }}
+            <Badge
+              variant={certInfo.certType === "lets_encrypt" ? "success" : certInfo.certType === "self_signed" ? "warning" : "default"}
+              size="sm"
             >
               {certInfo.domain}
-            </code>
+            </Badge>
           </div>
         )}
 

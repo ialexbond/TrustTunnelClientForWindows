@@ -1,4 +1,4 @@
-use crate::ssh_deploy::portable_data_dir;
+use crate::ssh::portable_data_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -375,22 +375,22 @@ async fn download_with_progress(
         app.emit("geodata-progress", GeoDataProgressPayload {
             file: file_name.into(), downloaded_bytes: 0, total_bytes: 0, percent: 0,
             step: if attempt > 1 {
-                format!("Повтор загрузки {file_name} ({attempt}/{max_retries})...")
+                format!("Retry {file_name} ({attempt}/{max_retries})...")
             } else {
-                "Подключение...".into()
+                "Connecting...".into()
             },
         }).ok();
 
         match download_single_attempt(app, client, url, file_name).await {
             Ok(buffer) => {
                 std::fs::write(&dest, &buffer)
-                    .map_err(|e| format!("Не удалось сохранить {file_name}: {e}"))?;
+                    .map_err(|e| format!("Failed to save {file_name}: {e}"))?;
                 eprintln!("[geodata] {file_name} saved ({} bytes)", buffer.len());
 
                 app.emit("geodata-progress", GeoDataProgressPayload {
                     file: file_name.into(), downloaded_bytes: buffer.len() as u64,
                     total_bytes: buffer.len() as u64, percent: 100,
-                    step: format!("{file_name} скачан"),
+                    step: format!("{file_name} downloaded"),
                 }).ok();
 
                 return Ok(buffer);
@@ -405,7 +405,7 @@ async fn download_with_progress(
         }
     }
 
-    Err(format!("Не удалось скачать {file_name} после {max_retries} попыток: {last_error}"))
+    Err(format!("Failed to download {file_name} after {max_retries} attempts: {last_error}"))
 }
 
 async fn download_single_attempt(
@@ -445,9 +445,9 @@ async fn download_single_attempt(
                 total_bytes: total,
                 percent,
                 step: if total > 0 {
-                    format!("{file_name}: {mb:.1} / {total_mb:.1} МБ ({percent}%)")
+                    format!("{file_name}: {mb:.1} / {total_mb:.1} MB ({percent}%)")
                 } else {
-                    format!("{file_name}: {mb:.1} МБ...")
+                    format!("{file_name}: {mb:.1} MB...")
                 },
             }).ok();
         }
@@ -465,7 +465,7 @@ pub async fn download_geodata(
         .timeout(std::time::Duration::from_secs(600))
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()
-        .map_err(|e| format!("Ошибка HTTP клиента: {e}"))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     // Download only missing files
     let geoip_path = geoip_dat_path();
@@ -489,7 +489,7 @@ pub async fn download_geodata(
     // Parsing step
     app.emit("geodata-progress", GeoDataProgressPayload {
         file: "".into(), downloaded_bytes: 0, total_bytes: 0, percent: 100,
-        step: "Парсинг категорий...".into(),
+        step: "Parsing categories...".into(),
     }).ok();
 
     // Fetch release tag from GitHub API
@@ -523,7 +523,7 @@ pub async fn download_geodata(
 
     app.emit("geodata-progress", GeoDataProgressPayload {
         file: "".into(), downloaded_bytes: 0, total_bytes: 0, percent: 100,
-        step: "Готово!".into(),
+        step: "Done!".into(),
     }).ok();
 
     get_geodata_status_inner(&state)
@@ -692,10 +692,10 @@ pub async fn check_geodata_updates(
     let resp = client.get(RELEASES_API)
         .header("User-Agent", "TrustTunnel")
         .send().await
-        .map_err(|e| format!("Не удалось проверить обновления: {e}"))?;
+        .map_err(|e| format!("Failed to check for updates: {e}"))?;
 
     let json: serde_json::Value = resp.json().await
-        .map_err(|e| format!("Ошибка парсинга ответа: {e}"))?;
+        .map_err(|e| format!("Failed to parse response: {e}"))?;
 
     let latest_tag = json.get("tag_name")
         .and_then(|v| v.as_str())

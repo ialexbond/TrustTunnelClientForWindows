@@ -49,21 +49,6 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
     }
   }, [downloading]);
 
-  // After download completes, reset update check
-  useEffect(() => {
-    if (!downloading && updateCheck?.update_available) {
-      setUpdateCheck(null);
-    }
-  }, [downloading, updateCheck]);
-
-  // Check for updates on mount if already downloaded
-  useEffect(() => {
-    if (status.downloaded && !updateCheck && !checking) {
-      checkUpdates();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status.downloaded]);
-
   const checkUpdates = useCallback(async () => {
     setChecking(true);
     try {
@@ -75,6 +60,48 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
       setChecking(false);
     }
   }, []);
+
+  // After download completes, reset update check and re-check
+  const [wasDownloading, setWasDownloading] = useState(false);
+  useEffect(() => {
+    if (downloading) {
+      setWasDownloading(true);
+    } else if (wasDownloading) {
+      setWasDownloading(false);
+      setUpdateCheck(null);
+      // Re-check for updates after download completes
+      checkUpdates();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downloading]);
+
+  // Check for updates on mount if already downloaded
+  useEffect(() => {
+    if (status.downloaded && !updateCheck && !checking) {
+      checkUpdates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.downloaded]);
+
+  // Auto-check for updates every 30 minutes
+  useEffect(() => {
+    if (!status.downloaded) return;
+    const interval = setInterval(() => {
+      checkUpdates();
+    }, 30 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [status.downloaded, checkUpdates]);
+
+  // Translate progress step strings from Rust to i18n
+  const translateStep = (step: string): string => {
+    if (step === "Connecting...") return t("routing.geodata.connecting");
+    if (step === "Done!") return t("routing.geodata.done");
+    if (step === "Parsing categories...") return t("routing.geodata.parsing");
+    if (step.includes("downloaded")) return t("routing.geodata.downloaded", { file: step.split(" ")[0] });
+    if (step.includes("Retry")) return t("routing.geodata.retry");
+    if (step.includes("MB")) return step;
+    return step;
+  };
 
   // Format release tag for display: "202603260521" → "26.03.2026"
   const formatTag = (tag: string): string => {
@@ -179,7 +206,7 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
             />
           </div>
           <p className="text-[10px] mt-1" style={{ color: "var(--color-text-muted)" }}>
-            {progress.step}
+            {translateStep(progress.step)}
           </p>
         </div>
       )}

@@ -90,7 +90,7 @@ function rawToRuleEntry(raw: string): RuleEntry {
 // Hook
 // ═══════════════════════════════════════════════════════
 
-export type VpnStatus = "connected" | "connecting" | "disconnected" | "recovering" | "error";
+export type VpnStatus = "connected" | "connecting" | "disconnected" | "disconnecting" | "recovering" | "error";
 
 export interface UseRoutingStateOptions {
   configPath: string;

@@ -1,6 +1,6 @@
 use crate::geodata::group_cache_path_pub;
 use crate::geodata_v2ray::{self, GeoDataState};
-use crate::ssh_deploy::portable_data_dir;
+use crate::ssh::portable_data_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -371,7 +371,7 @@ fn resolve_entries(
                 match geodata_v2ray::resolve_geoip(state, category) {
                     Ok(cidrs) => cidrs,
                     Err(e) => {
-                        eprintln!("[routing] Предупреждение: не удалось резолвить geoip:{} — {}. Пропускаю.", category, e);
+                        eprintln!("[routing] Warning: failed to resolve geoip:{} — {}. Skipping.", category, e);
                         Vec::new()
                     }
                 }
@@ -384,7 +384,7 @@ fn resolve_entries(
                 match geodata_v2ray::resolve_geosite(state, category) {
                     Ok(domains) => domains,
                     Err(e) => {
-                        eprintln!("[routing] Предупреждение: не удалось резолвить geosite:{} — {}. Пропускаю.", category, e);
+                        eprintln!("[routing] Warning: failed to resolve geosite:{} — {}. Skipping.", category, e);
                         Vec::new()
                     }
                 }

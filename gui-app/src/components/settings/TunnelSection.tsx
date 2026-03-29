@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Cable, Minus, Plus, HelpCircle } from "lucide-react";
+import { Cable, Minus, Plus, HelpCircle, Globe, Shield } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { Input } from "../../shared/ui/Input";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import type { SettingsState } from "./useSettingsState";
 
@@ -16,6 +17,8 @@ export function TunnelSection({ state }: Props) {
 
   const protocol = config.endpoint?.upstream_protocol || "http2";
   const mtu = config.listener?.tun?.mtu_size || 1280;
+  const listenerMode = config.listener?.socks ? "socks" : "tun";
+  const socksAddress = config.listener?.socks?.address || "127.0.0.1:1080";
 
   return (
     <Card padding="md">
@@ -23,6 +26,59 @@ export function TunnelSection({ state }: Props) {
         icon={<Cable className="w-4 h-4" />}
         title={t("settings.tunnel.title")}
       />
+
+      {/* Listener Mode: TUN vs SOCKS5 */}
+      <div className="mb-3">
+        <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+          {t("settings.tunnel.listenerMode")}
+        </label>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button
+            variant={listenerMode === "tun" ? "primary" : "secondary"}
+            size="sm"
+            icon={<Shield className="w-3 h-3" />}
+            onClick={() => {
+              if (listenerMode === "socks") {
+                // Switch to TUN: remove socks, ensure tun exists
+                updateField("listener.socks", undefined);
+                if (!config.listener?.tun) {
+                  updateField("listener.tun.mtu_size", 1280);
+                  updateField("listener.tun.change_system_dns", true);
+                }
+              }
+            }}
+          >
+            TUN
+          </Button>
+          <Button
+            variant={listenerMode === "socks" ? "primary" : "secondary"}
+            size="sm"
+            icon={<Globe className="w-3 h-3" />}
+            onClick={() => {
+              if (listenerMode === "tun") {
+                // Switch to SOCKS5: add socks config
+                updateField("listener.socks.address", "127.0.0.1:1080");
+              }
+            }}
+          >
+            SOCKS5
+          </Button>
+        </div>
+      </div>
+
+      {/* SOCKS5 address (only in socks mode) */}
+      {listenerMode === "socks" && (
+        <div className="mb-3">
+          <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+            {t("settings.tunnel.socksAddress")}
+          </label>
+          <Input
+            value={socksAddress}
+            onChange={(e) => updateField("listener.socks.address", e.target.value)}
+            placeholder="127.0.0.1:1080"
+          />
+        </div>
+      )}
 
       {/* Protocol + MTU */}
       <div className="grid grid-cols-2 gap-3">
