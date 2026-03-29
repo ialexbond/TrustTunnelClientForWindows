@@ -15,6 +15,7 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { colors } from "../../shared/ui/colors";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -149,8 +150,8 @@ export function ServerStatusSection({ state }: Props) {
               style={{
                 backgroundColor: serverInfo.serviceActive ? "var(--color-success-500)" : "var(--color-danger-500)",
                 boxShadow: serverInfo.serviceActive
-                  ? "0 0 12px rgba(16, 185, 129, 0.6)"
-                  : "0 0 12px rgba(239, 68, 68, 0.4)",
+                  ? colors.successGlow
+                  : colors.dangerGlow,
               }}
             />
             <span className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>

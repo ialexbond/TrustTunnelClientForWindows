@@ -17,6 +17,8 @@ import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
 import { useSuccessQueue } from "../shared/hooks/useSuccessQueue";
 import { SnackBar } from "../shared/ui/SnackBar";
+import { colors } from "../shared/ui/colors";
+import { formatError } from "../shared/utils/formatError";
 
 interface AboutPanelProps {
   updateInfo: UpdateInfo;
@@ -53,7 +55,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
         expectedSha256: updateInfo.sha256 || null,
       });
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
       setUpdating(false);
       setUpdateProgress(null);
     }
@@ -94,7 +96,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             <div className="space-y-2">
               <div
                 className="flex items-center gap-3 rounded-lg p-3"
-                style={{ backgroundColor: "rgba(99, 102, 241, 0.08)", border: "1px solid rgba(99, 102, 241, 0.2)" }}
+                style={{ backgroundColor: colors.accentBgSubtle, border: `1px solid ${colors.accentBorder}` }}
               >
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-accent-500)" }} />
                 <p className="text-xs font-medium" style={{ color: "var(--color-accent-500)" }}>
@@ -113,7 +115,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             <div className="space-y-2.5">
               <div
                 className="flex items-center gap-2.5 rounded-lg p-2.5"
-                style={{ backgroundColor: "rgba(16, 185, 129, 0.06)", border: "1px solid rgba(16, 185, 129, 0.15)" }}
+                style={{ backgroundColor: colors.successBgSubtle, border: `1px solid ${colors.successBorder}` }}
               >
                 <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
                 <div className="flex-1 min-w-0">
@@ -132,7 +134,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                   onClick={handleSelfUpdate}
                   disabled={!updateInfo.downloadUrl}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: "rgba(16, 185, 129, 0.1)", color: "var(--color-success-500)" }}
+                  style={{ backgroundColor: colors.successBg, color: "var(--color-success-500)" }}
                 >
                   <ArrowUpCircle className="w-3.5 h-3.5" />
                   {t("buttons.auto_update")}

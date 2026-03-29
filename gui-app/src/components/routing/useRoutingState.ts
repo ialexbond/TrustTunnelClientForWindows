@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
 import { useAutoSave } from "../../shared/hooks/useAutoSave";
+import { formatError } from "../../shared/utils/formatError";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -226,7 +227,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       setDirty(false);
     } catch (e) {
       console.error("Failed to load routing rules:", e);
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     } finally {
       setLoading(false);
     }
@@ -444,7 +445,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       pushSuccess("Правила сохранены");
     } catch (e) {
       console.error("Failed to save routing rules:", e);
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     } finally {
       setSaving(false);
     }
@@ -461,7 +462,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
         pushSuccess("Правила экспортированы");
       }
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     }
   }, [rules, pushSuccess, toBackendPayload]);
 
@@ -488,7 +489,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       markDirty(imported);
       pushSuccess("Правила импортированы");
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     }
   }, [markDirty, pushSuccess]);
 
@@ -502,7 +503,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       await loadGeoStatus();
       pushSuccess("Гео-данные загружены");
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     } finally {
       setGeodataDownloading(false);
     }
@@ -520,7 +521,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       setDirty(false);
       pushSuccess("Настройки сохранены");
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     }
   }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
 
@@ -537,14 +538,12 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       baselineRef.current = computeSnapshot(rules);
       setDirty(false);
 
+      pushSuccess("Настройки сохранены");
       if (reconnect && isVpnActive) {
-        pushSuccess("Переподключение...");
         await onReconnect();
-      } else {
-        pushSuccess("Настройки сохранены");
       }
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     } finally {
       setApplying(false);
     }

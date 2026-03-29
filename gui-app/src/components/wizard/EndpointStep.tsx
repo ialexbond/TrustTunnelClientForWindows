@@ -7,6 +7,7 @@ import {
 import { StepBar } from "./StepBar";
 import { Toggle } from "../../shared/ui/Toggle";
 import { Button } from "../../shared/ui/Button";
+import { colors } from "../../shared/ui/colors";
 import type { WizardState } from "./useWizardState";
 
 export function EndpointStep(w: WizardState) {
@@ -18,7 +19,7 @@ export function EndpointStep(w: WizardState) {
       <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
         <div className="max-w-sm w-full space-y-3">
           <div className="text-center space-y-1">
-            <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+            <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: colors.accentBg }}>
               <Settings className="w-5 h-5" style={{ color: "var(--color-accent-500)" }} />
             </div>
             <h2 className="text-lg font-bold">{t('wizard.endpoint.title')}</h2>
@@ -108,7 +109,7 @@ export function EndpointStep(w: WizardState) {
                 className="p-2 rounded-xl text-xs text-left transition-all"
                 style={
                   w.certType === "provided"
-                    ? { border: "1px solid rgba(99, 102, 241, 0.4)", backgroundColor: "rgba(99, 102, 241, 0.08)", color: "var(--color-text-primary)" }
+                    ? { border: "1px solid rgba(99, 102, 241, 0.4)", backgroundColor: colors.accentBgSubtle, color: "var(--color-text-primary)" }
                     : { border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }
                 }
               >
@@ -122,7 +123,7 @@ export function EndpointStep(w: WizardState) {
 
             {/* Self-signed warning */}
             {w.certType === "selfsigned" && (
-              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ backgroundColor: colors.warningBg, border: `1px solid ${colors.warningBorder}` }}>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
                 <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-warning-500)" }}>
                   {t('wizard.endpoint.self_signed_warning')}
