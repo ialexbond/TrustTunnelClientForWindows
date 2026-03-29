@@ -58,6 +58,7 @@ export function SecuritySection({ state }: Props) {
           labelExtra={<TooltipIcon text={t("tooltips.post_quantum_detailed")} />}
         />
       </div>
+
     </Card>
   );
 }

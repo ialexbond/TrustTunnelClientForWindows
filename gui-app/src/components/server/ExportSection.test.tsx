@@ -167,7 +167,7 @@ describe("ExportSection", () => {
     fireEvent.click(screen.getByText("alice"));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("server.export.generate")) }));
     await waitFor(() => {
-      expect(pushSuccess).toHaveBeenCalledWith("Error: SSH timeout", "error");
+      expect(pushSuccess).toHaveBeenCalledWith("SSH timeout", "error");
     });
   });
 

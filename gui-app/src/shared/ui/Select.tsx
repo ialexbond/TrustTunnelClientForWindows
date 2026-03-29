@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
+import { useDropdownPortal } from "../hooks/useDropdownPortal";
+import { colors } from "./colors";
 
 interface SelectOption {
   value: string;
@@ -30,38 +32,9 @@ export function Select({
   disabled = false,
   className = "",
 }: SelectProps) {
-  const [open, setOpen] = useState(false);
-  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
-  const ref = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const { open, style: dropdownStyle, containerRef, triggerRef, portalRef, toggle, close } = useDropdownPortal();
 
   const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const handleOpen = () => {
-    if (disabled) return;
-    if (!open && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      setDropdownStyle({
-        position: "fixed",
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
-        zIndex: 40,
-      });
-    }
-    setOpen(!open);
-  };
 
   return (
     <div className={fullWidth ? "w-full" : ""}>
@@ -75,11 +48,11 @@ export function Select({
           {description}
         </p>
       )}
-      <div className={`relative ${className}`} ref={ref}>
+      <div className={`relative ${className}`} ref={containerRef}>
         <button
-          ref={buttonRef}
+          ref={triggerRef}
           type="button"
-          onClick={handleOpen}
+          onClick={() => { if (!disabled) toggle(); }}
           className={`
             flex items-center justify-between gap-2 rounded-[var(--radius-lg)] px-3 h-8 text-xs
             cursor-pointer transition-colors outline-none
@@ -113,18 +86,19 @@ export function Select({
 
         {open && createPortal(
           <div
+            ref={portalRef}
             style={{
               ...dropdownStyle,
               zIndex: 40,
               backgroundColor: "var(--color-bg-elevated)",
               border: "1px solid var(--color-border)",
               borderRadius: "var(--radius-lg)",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+              boxShadow: colors.dropdownShadow,
               minWidth: 120,
               overflow: "hidden",
             }}
           >
-            <div className="max-h-48 overflow-y-auto" style={{ padding: "4px" }}>
+            <div className="max-h-48 overflow-y-auto space-y-0.5" style={{ padding: "4px" }}>
               {options.map((opt) => {
                 const isSelected = opt.value === value;
                 return (
@@ -133,11 +107,11 @@ export function Select({
                     type="button"
                     onClick={() => {
                       onChange?.({ target: { value: opt.value } });
-                      setOpen(false);
+                      close();
                     }}
                     className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                     style={{
-                      backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
+                      backgroundColor: isSelected ? colors.accentBg : "transparent",
                       color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
                     }}
                     onMouseEnter={(e) => {

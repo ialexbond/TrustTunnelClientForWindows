@@ -99,7 +99,7 @@ describe("DiagnosticsSection", () => {
     fireEvent.click(runBtn);
     await waitFor(() => {
       expect(state.setDiagResult).toHaveBeenCalledWith(
-        i18n.t("server.diagnostics.error", { error: "Error: connection lost" })
+        i18n.t("server.diagnostics.error", { error: "connection lost" })
       );
     });
     expect(state.setDiagLoading).toHaveBeenCalledWith(false);

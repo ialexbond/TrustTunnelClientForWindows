@@ -28,7 +28,7 @@ describe("WelcomeStep", () => {
     render(<WelcomeStep {...w} />);
     expect(screen.getByText(i18n.t("wizard.welcome.setup_new"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("wizard.welcome.fetch_config"))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t("wizard.welcome.skip"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.welcome.import_config"))).toBeInTheDocument();
   });
 
   it("setup-new card navigates to server step", () => {
@@ -51,12 +51,14 @@ describe("WelcomeStep", () => {
     expect(setWizardStep).toHaveBeenCalledWith("server");
   });
 
-  it("skip card calls handleSkip", () => {
-    const handleSkip = vi.fn();
-    const w = makeWizardState({ handleSkip });
+  it("import card opens import modal", () => {
+    const w = makeWizardState();
     render(<WelcomeStep {...w} />);
-    fireEvent.click(screen.getByText(i18n.t("wizard.welcome.skip")));
-    expect(handleSkip).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByText(i18n.t("wizard.welcome.import_config")));
+    // Modal should appear with import options
+    expect(screen.getByText(i18n.t("wizard.import.from_file"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.import.from_link"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.import.from_clipboard"))).toBeInTheDocument();
   });
 
   it("shows system requirements section", () => {

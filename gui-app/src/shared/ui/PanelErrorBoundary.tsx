@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 
 interface State {
   hasError: boolean;
@@ -10,13 +10,14 @@ interface State {
 interface Props {
   children: React.ReactNode;
   panelName?: string;
+  onNavigateHome?: () => void;
 }
 
 class PanelErrorBoundaryInner extends React.Component<
-  Props & { t: (key: string, opts?: Record<string, string>) => string },
+  Props & { t: (key: string, opts?: Record<string, string>) => string; onNavigateHome?: () => void },
   State
 > {
-  constructor(props: Props & { t: (key: string, opts?: Record<string, string>) => string }) {
+  constructor(props: Props & { t: (key: string, opts?: Record<string, string>) => string; onNavigateHome?: () => void }) {
     super(props);
     this.state = { hasError: false, error: "" };
   }
@@ -42,19 +43,39 @@ class PanelErrorBoundaryInner extends React.Component<
           <pre className="text-xs opacity-60 max-w-md overflow-auto whitespace-pre-wrap">
             {this.state.error}
           </pre>
-          <button
-            onClick={() => this.setState({ hasError: false, error: "" })}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm"
-            style={{
-              background: "var(--color-bg-tertiary)",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border)",
-              cursor: "pointer",
-            }}
-          >
-            <RefreshCw className="w-4 h-4" />
-            {t("errors.retry")}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => this.setState({ hasError: false, error: "" })}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm"
+              style={{
+                background: "var(--color-bg-tertiary)",
+                color: "var(--color-text-primary)",
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+              }}
+            >
+              <RefreshCw className="w-4 h-4" />
+              {t("errors.retry")}
+            </button>
+            {this.props.onNavigateHome && (
+              <button
+                onClick={() => {
+                  this.setState({ hasError: false, error: "" });
+                  this.props.onNavigateHome?.();
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm"
+                style={{
+                  background: "var(--color-bg-tertiary)",
+                  color: "var(--color-text-muted)",
+                  border: "1px solid var(--color-border)",
+                  cursor: "pointer",
+                }}
+              >
+                <Home className="w-4 h-4" />
+                {t("errors.go_home", "На главную")}
+              </button>
+            )}
+          </div>
         </div>
       );
     }
@@ -62,10 +83,10 @@ class PanelErrorBoundaryInner extends React.Component<
   }
 }
 
-export function PanelErrorBoundary({ children, panelName }: Props) {
+export function PanelErrorBoundary({ children, panelName, onNavigateHome }: Props) {
   const { t } = useTranslation();
   return (
-    <PanelErrorBoundaryInner t={t} panelName={panelName}>
+    <PanelErrorBoundaryInner t={t} panelName={panelName} onNavigateHome={onNavigateHome}>
       {children}
     </PanelErrorBoundaryInner>
   );

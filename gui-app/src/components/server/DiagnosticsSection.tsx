@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -33,7 +34,7 @@ export function DiagnosticsSection({ state }: Props) {
       const result = await invoke<string>("diagnose_server", sshParams);
       setDiagResult(result);
     } catch (e) {
-      setDiagResult(t("server.diagnostics.error", { error: String(e) }));
+      setDiagResult(t("server.diagnostics.error", { error: formatError(e) }));
     } finally {
       setDiagLoading(false);
     }

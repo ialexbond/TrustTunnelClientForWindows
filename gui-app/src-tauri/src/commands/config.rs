@@ -172,6 +172,11 @@ pub fn read_client_config(config_path: String) -> Result<serde_json::Value, Stri
 
 #[tauri::command]
 pub fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
+    // Safety: refuse to save config that's missing [endpoint] — would break the sidecar
+    if config.get("endpoint").and_then(|e| e.as_object()).map_or(true, |e| e.is_empty()) {
+        return Err("Refusing to save: endpoint section is missing or empty".into());
+    }
+
     // Read existing routing keys before overwriting — they are managed by RoutingPanel
     // via resolve_and_apply and must not be lost when SettingsPanel saves.
     let existing_doc: Option<toml_edit::DocumentMut> = std::fs::read_to_string(&config_path)
@@ -235,6 +240,24 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
         ports.push(67);
         ports.push(68);
         doc["killswitch_allow_ports"] = toml_edit::value(ports);
+
+        // Remove empty custom_sni — sidecar may interpret "" as "empty SNI"
+        if let Some(endpoint) = doc.get_mut("endpoint").and_then(|e| e.as_table_mut()) {
+            if let Some(sni) = endpoint.get("custom_sni") {
+                if sni.as_str().map_or(false, |s| s.is_empty()) {
+                    endpoint.remove("custom_sni");
+                }
+            }
+        }
+
+        // Safety: ensure only one listener type exists (sidecar crashes with both)
+        if let Some(listener) = doc.get_mut("listener").and_then(|l| l.as_table_mut()) {
+            let has_socks = listener.contains_key("socks");
+            let has_tun = listener.contains_key("tun");
+            if has_socks && has_tun {
+                listener.remove("tun"); // socks takes priority
+            }
+        }
 
         std::fs::write(&config_path, doc.to_string())
             .map_err(|e| format!("Failed to write config back: {e}"))?;

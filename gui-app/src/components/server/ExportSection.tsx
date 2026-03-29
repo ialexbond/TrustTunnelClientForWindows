@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type CSSProperties } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -14,6 +14,9 @@ import { QRCodeSVG } from "qrcode.react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
+import { colors } from "../../shared/ui/colors";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -28,30 +31,7 @@ export function ExportSection({ state }: Props) {
   const [generating, setGenerating] = useState(false);
   const [deeplink, setDeeplink] = useState("");
   const [copied, setCopied] = useState(false);
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-  const [userDropdownStyle, setUserDropdownStyle] = useState<CSSProperties>({});
-  const userDropdownRef = useRef<HTMLDivElement>(null);
-  const userTriggerRef = useRef<HTMLButtonElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!userDropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
-        setUserDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [userDropdownOpen]);
-
-  const handleOpenUserDropdown = () => {
-    if (!userDropdownOpen && userTriggerRef.current) {
-      const rect = userTriggerRef.current.getBoundingClientRect();
-      setUserDropdownStyle({ position: "fixed", top: rect.bottom + 4, left: rect.left, width: rect.width, zIndex: 40 });
-    }
-    setUserDropdownOpen(!userDropdownOpen);
-  };
+  const userDropdown = useDropdownPortal();
 
   const users = serverInfo?.users ?? [];
 
@@ -67,7 +47,7 @@ export function ExportSection({ state }: Props) {
       });
       setDeeplink(link);
     } catch (e) {
-      state.pushSuccess(String(e), "error");
+      state.pushSuccess(formatError(e), "error");
     } finally {
       setGenerating(false);
     }
@@ -106,10 +86,10 @@ export function ExportSection({ state }: Props) {
           <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--color-text-secondary)" }}>
             {t("server.export.user")}
           </label>
-          <div className="relative" ref={userDropdownRef}>
+          <div className="relative" ref={userDropdown.containerRef}>
             <button
-              ref={userTriggerRef}
-              onClick={handleOpenUserDropdown}
+              ref={userDropdown.triggerRef}
+              onClick={userDropdown.toggle}
               className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none"
               style={{
                 backgroundColor: "var(--color-bg-elevated)",
@@ -123,18 +103,19 @@ export function ExportSection({ state }: Props) {
                 className="w-3.5 h-3.5 shrink-0 transition-transform duration-200"
                 style={{
                   color: "var(--color-text-muted)",
-                  transform: userDropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                  transform: userDropdown.open ? "rotate(180deg)" : "rotate(0deg)",
                 }}
               />
             </button>
-            {userDropdownOpen && createPortal(
+            {userDropdown.open && createPortal(
               <div
+                ref={userDropdown.portalRef}
                 style={{
-                  ...userDropdownStyle,
+                  ...userDropdown.style,
                   backgroundColor: "var(--color-bg-elevated)",
                   border: "1px solid var(--color-border)",
                   borderRadius: "var(--radius-lg)",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+                  boxShadow: colors.dropdownShadow,
                   overflow: "hidden",
                 }}
               >
@@ -144,10 +125,10 @@ export function ExportSection({ state }: Props) {
                     return (
                       <button
                         key={u}
-                        onClick={() => { setSelectedUser(u); setUserDropdownOpen(false); setDeeplink(""); }}
+                        onClick={() => { setSelectedUser(u); userDropdown.close(); setDeeplink(""); }}
                         className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                         style={{
-                          backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
+                          backgroundColor: isSelected ? colors.accentBg : "transparent",
                           color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
                         }}
                         onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--color-bg-hover)"; }}

@@ -2,38 +2,20 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  User, Download, Loader2, XCircle, Server, ChevronRight,
-  PackageCheck, FolderOpen, RefreshCw, Trash2, Eye, EyeOff, UserPlus,
-  QrCode, Link2, X,
+  User, Download, XCircle, Server, ChevronRight,
+  PackageCheck, FolderOpen, RefreshCw, Trash2,
+  QrCode, Link2,
 } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Button } from "../../shared/ui/Button";
-import { Tooltip } from "../../shared/ui/Tooltip";
-import { Modal } from "../../shared/ui/Modal";
+import { IconButton } from "../../shared/ui/IconButton";
 import { SnackBar } from "../../shared/ui/SnackBar";
+import { colors } from "../../shared/ui/colors";
 import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { UserQRModal } from "./UserQRModal";
+import { AddUserForm } from "./AddUserForm";
 import { StepBar } from "./StepBar";
 import type { WizardState } from "./useWizardState";
-
-// ── Icon button helper (same pattern as UsersSection) ──
-function IconBtn({ tooltip, onClick, disabled, loading, color, children }: {
-  tooltip: string; onClick: () => void; disabled?: boolean; loading?: boolean;
-  color?: string; children: React.ReactNode;
-}) {
-  return (
-    <Tooltip text={tooltip}>
-      <button
-        onClick={onClick}
-        disabled={disabled || loading}
-        className="p-1 rounded transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-        style={{ color: color || "var(--color-text-muted)" }}
-      >
-        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : children}
-      </button>
-    </Tooltip>
-  );
-}
 
 // ─── Fetch mode: show users only, save config ──────────────
 function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void }) {
@@ -44,7 +26,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (isInstalled && users.length > 0) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(16, 185, 129, 0.1)" }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.successBg }}>
           <User className="w-7 h-7" style={{ color: "var(--color-success-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -90,7 +72,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (isInstalled && users.length === 0) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.warningBg }}>
           <User className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -120,7 +102,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
   // Not installed or error in fetch mode
   return (
     <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(239, 68, 68, 0.08)" }}>
+      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.dangerBg }}>
         <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
       </div>
       <div className="space-y-1.5">
@@ -206,7 +188,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     const users = w.serverInfo?.users ?? [];
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.warningBg }}>
           <PackageCheck className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -243,7 +225,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                     <div
                       onClick={() => w.setSelectedUser(u)}
                       className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
-                      style={{ backgroundColor: isSelected ? "rgba(99, 102, 241, 0.08)" : "transparent" }}
+                      style={{ backgroundColor: isSelected ? colors.accentBgSubtle : "transparent" }}
                       onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
                       onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                     >
@@ -256,16 +238,16 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                         <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                       </div>
                       <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                        <IconBtn tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
+                        <IconButton tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
                           <QrCode className="w-3.5 h-3.5" />
-                        </IconBtn>
-                        <IconBtn tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
+                        </IconButton>
+                        <IconButton tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
                           <Link2 className="w-3.5 h-3.5" />
-                        </IconBtn>
-                        <IconBtn tooltip={t("server.users.export_tooltip")} onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }} loading={w.savingConfigFor === u}>
+                        </IconButton>
+                        <IconButton tooltip={t("server.users.export_tooltip")} onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }} loading={w.savingConfigFor === u}>
                           <Download className="w-3.5 h-3.5" />
-                        </IconBtn>
-                        <IconBtn
+                        </IconButton>
+                        <IconButton
                           tooltip={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
                           onClick={() => w.setConfirmDeleteUser(u)}
                           disabled={users.length <= 1 || !!w.deletingUser}
@@ -273,7 +255,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                           color="var(--color-danger-400)"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                        </IconBtn>
+                        </IconButton>
                       </div>
                     </div>
                     {!isLast && <div className="mx-3 my-1" style={{ borderBottom: "1px solid var(--color-border)" }} />}
@@ -293,80 +275,10 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
         )}
 
         {/* QR Code popup */}
-        <Modal open={!!qrUser} onClose={() => setQrUser(null)} closeOnBackdrop>
-          <div className="max-w-xs w-full mx-4 p-6 rounded-2xl shadow-2xl text-center" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-            {qrLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-accent-500)" }} />
-              </div>
-            ) : qrLink ? (
-              <>
-                <div className="flex justify-center mb-4">
-                  <QRCodeSVG value={qrLink} size={200} bgColor="transparent" fgColor="currentColor" level="M" style={{ color: "var(--color-text-primary)", opacity: 0.85 }} />
-                </div>
-                <p className="text-xs font-medium mb-1" style={{ color: "var(--color-text-primary)" }}>{qrUser}</p>
-                <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t("server.export.scan_qr")}</p>
-              </>
-            ) : null}
-            <button onClick={() => setQrUser(null)} className="absolute top-3 right-3 p-1 rounded-full transition-opacity hover:opacity-70" style={{ color: "var(--color-text-muted)" }}>
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </Modal>
+        <UserQRModal qrUser={qrUser} qrLink={qrLink} qrLoading={qrLoading} onClose={() => setQrUser(null)} />
 
         {/* ── Add new user ── */}
-        <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-          <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
-            <UserPlus className="w-3.5 h-3.5" />
-            {t('wizard.found.add_user')}
-          </p>
-          <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
-            {t('wizard.found.add_user_description')}
-          </p>
-          <div className="space-y-1.5">
-            <div>
-              <input
-                type="text"
-                placeholder={t('wizard.found.username_placeholder')}
-                value={w.newUsername}
-                onChange={(e) => w.setNewUsername(e.target.value.replace(/\s/g, ""))}
-                className="w-full px-3 h-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-              />
-              {w.newUsername.trim() && w.serverInfo?.users?.includes(w.newUsername.trim()) && (
-                <p className="text-[10px] mt-0.5" style={{ color: "var(--color-danger-500)" }}>
-                  {t('wizard.found.user_already_exists')}
-                </p>
-              )}
-            </div>
-            <div className="relative">
-              <input
-                type={w.showNewPassword ? "text" : "password"}
-                placeholder={t('wizard.found.password_placeholder')}
-                value={w.newPassword}
-                onChange={(e) => w.setNewPassword(e.target.value)}
-                className="w-full px-3 h-8 pr-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-              />
-              <button
-                type="button"
-                onClick={() => w.setShowNewPassword(!w.showNewPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 transition-colors" style={{ color: "var(--color-text-muted)" }}
-              >
-                {w.showNewPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-              </button>
-            </div>
-            <Button
-              variant="primary"
-              size="sm"
-              fullWidth
-              onClick={async () => { await w.handleAddUser(); w.pushSuccess(t("wizard.user_added", "Пользователь добавлен")); }}
-              disabled={w.addingUser || !w.newUsername.trim() || !w.newPassword.trim() || !!w.serverInfo?.users?.includes(w.newUsername.trim())}
-              loading={w.addingUser}
-              icon={<UserPlus className="w-3.5 h-3.5" />}
-            >
-              {w.addingUser ? t('wizard.found.adding_user') : t('wizard.found.add_btn')}
-            </Button>
-          </div>
-        </div>
+        <AddUserForm w={w} onUserAdded={() => w.pushSuccess(t("wizard.user_added", "Пользователь добавлен"))} />
 
         {/* Continue as user button */}
         <Button
@@ -407,7 +319,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (w.checkError) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(239, 68, 68, 0.08)" }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.dangerBg }}>
           <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -431,7 +343,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   // Server ready, TT not installed
   return (
     <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.accentBg }}>
         <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
       </div>
       <div className="space-y-1.5">

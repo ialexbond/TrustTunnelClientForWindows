@@ -45,6 +45,8 @@ export function TunnelSection({ state }: Props) {
                   updateField("listener.tun.mtu_size", 1280);
                   updateField("listener.tun.change_system_dns", true);
                 }
+                // Force save immediately so config file is clean before next connect
+                setTimeout(() => state.handleSave(), 100);
               }
             }}
           >
@@ -56,8 +58,11 @@ export function TunnelSection({ state }: Props) {
             icon={<Globe className="w-3 h-3" />}
             onClick={() => {
               if (listenerMode === "tun") {
-                // Switch to SOCKS5: add socks config
+                // Switch to SOCKS5: remove tun, add socks
+                updateField("listener.tun", undefined);
                 updateField("listener.socks.address", "127.0.0.1:1080");
+                // Force save immediately so config file is clean before next connect
+                setTimeout(() => state.handleSave(), 100);
               }
             }}
           >
@@ -66,17 +71,39 @@ export function TunnelSection({ state }: Props) {
         </div>
       </div>
 
-      {/* SOCKS5 address (only in socks mode) */}
+      {/* SOCKS5 settings (only in socks mode) */}
       {listenerMode === "socks" && (
-        <div className="mb-3">
-          <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
-            {t("settings.tunnel.socksAddress")}
-          </label>
-          <Input
-            value={socksAddress}
-            onChange={(e) => updateField("listener.socks.address", e.target.value)}
-            placeholder="127.0.0.1:1080"
-          />
+        <div className="mb-3 space-y-2">
+          <div>
+            <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+              {t("settings.tunnel.socksAddress")}
+            </label>
+            <Input
+              value={socksAddress}
+              onChange={(e) => {
+                const filtered = e.target.value.replace(/[^0-9.:]/g, "");
+                updateField("listener.socks.address", filtered || "127.0.0.1:1080");
+              }}
+              placeholder="127.0.0.1:1080"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              label={t("settings.tunnel.socks_username")}
+              value={config.listener?.socks?.username || ""}
+              onChange={(e) => updateField("listener.socks.username", e.target.value || undefined)}
+              placeholder={t("settings.tunnel.socks_username_placeholder")}
+            />
+            <Input
+              label={t("settings.tunnel.socks_password")}
+              value={config.listener?.socks?.password || ""}
+              onChange={(e) => updateField("listener.socks.password", e.target.value || undefined)}
+              placeholder={t("settings.tunnel.socks_password_placeholder")}
+            />
+          </div>
+          <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+            {t("settings.tunnel.socks_auth_hint")}
+          </p>
         </div>
       )}
 

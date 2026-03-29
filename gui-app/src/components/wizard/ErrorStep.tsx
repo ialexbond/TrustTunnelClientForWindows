@@ -3,6 +3,7 @@ import {
   XCircle, AlertTriangle, ChevronUp, ChevronDown, Copy, ClipboardCheck,
 } from "lucide-react";
 import { Button } from "../../shared/ui/Button";
+import { colors } from "../../shared/ui/colors";
 import type { WizardState } from "./useWizardState";
 
 export function ErrorStep(w: WizardState) {
@@ -45,7 +46,7 @@ export function ErrorStep(w: WizardState) {
         </div>
 
         {hints.length > 0 && (
-          <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "rgba(245, 158, 11, 0.05)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+          <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "rgba(245, 158, 11, 0.05)", border: `1px solid ${colors.warningBorder}` }}>
             <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               {t('wizard.error.possible_cause')}
@@ -88,7 +89,7 @@ export function ErrorStep(w: WizardState) {
         )}
 
         {showReinstallPrompt ? (
-          <div className="p-3 rounded-xl space-y-2.5" style={{ backgroundColor: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
+          <div className="p-3 rounded-xl space-y-2.5" style={{ backgroundColor: colors.warningBg, border: "1px solid rgba(245, 158, 11, 0.2)" }}>
             <p className="text-xs font-medium" style={{ color: "var(--color-warning-500)" }}>
               {t('wizard.error.reinstall_prompt')}
             </p>
@@ -102,7 +103,7 @@ export function ErrorStep(w: WizardState) {
               <button
                 onClick={() => { w.setFetchRetryCount(0); w.saveField("wizardMode", ""); w.setWizardStep("endpoint"); }}
                 className="flex-1 px-3 py-2 rounded-xl text-xs font-medium transition-all"
-                style={{ backgroundColor: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "var(--color-warning-500)" }}
+                style={{ backgroundColor: colors.warningBg, border: "1px solid rgba(245, 158, 11, 0.3)", color: "var(--color-warning-500)" }}
               >
                 {t('buttons.confirm_reinstall')}
               </button>

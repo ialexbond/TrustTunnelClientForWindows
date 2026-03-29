@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { VpnStatus } from "../../shared/types";
 import type { ClientConfig } from "../settings/useSettingsState";
+import { formatError } from "../../shared/utils/formatError";
 
 export interface PingPoint {
   time: number;
@@ -133,7 +134,7 @@ export function useDashboardState(
       const result = await invoke<{ download_mbps: number; upload_mbps: number }>("speedtest_run");
       setSpeed({ ...result, timestamp: Date.now() });
     } catch (e) {
-      setSpeedError(String(e));
+      setSpeedError(formatError(e));
     } finally {
       setSpeedTesting(false);
     }
