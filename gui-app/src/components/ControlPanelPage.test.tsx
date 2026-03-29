@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
+import type { Mock } from "vitest";
 import i18n from "../shared/i18n";
 import { ControlPanelPage } from "./ControlPanelPage";
 
@@ -34,6 +36,27 @@ vi.mock("./server/SshConnectForm", () => ({
   ),
 }));
 
+const mockInvoke = vi.mocked(invoke);
+
+/** Helper: configure invoke mock to return given creds from load_ssh_credentials */
+function mockCredsLoaded(creds: { host: string; port?: string; user?: string; password?: string; keyPath?: string } | null) {
+  mockInvoke.mockImplementation(async (cmd: string) => {
+    if (cmd === "load_ssh_credentials") {
+      if (!creds) return null;
+      return {
+        host: creds.host,
+        port: creds.port || "22",
+        user: creds.user || "root",
+        password: creds.password || "",
+        keyPath: creds.keyPath || "",
+      } as any;
+    }
+    if (cmd === "clear_ssh_credentials") return null as any;
+    if (cmd === "save_ssh_credentials") return null as any;
+    return null as any;
+  });
+}
+
 describe("ControlPanelPage", () => {
   const defaultProps = {
     onConfigExported: vi.fn(),
@@ -46,72 +69,79 @@ describe("ControlPanelPage", () => {
     i18n.changeLanguage("ru");
     localStorage.clear();
     vi.useFakeTimers();
+    // Default: no creds
+    mockCredsLoaded(null);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("renders SSH connect form when no creds in localStorage", () => {
-    render(<ControlPanelPage {...defaultProps} />);
+  it("renders SSH connect form when no creds", async () => {
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
     expect(screen.queryByTestId("server-panel")).not.toBeInTheDocument();
   });
 
-  it("renders ServerPanel when SSH creds exist in localStorage", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({
-        host: "10.0.0.1",
-        port: "22",
-        user: "root",
-        password: "secret",
-      })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("renders ServerPanel when SSH creds exist", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      port: "22",
+      user: "root",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("ssh-connect-form")).not.toBeInTheDocument();
   });
 
-  it("shows disconnect button when connected", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({
-        host: "10.0.0.1",
-        port: "22",
-        user: "root",
-        password: "secret",
-      })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("shows disconnect button when connected", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      port: "22",
+      user: "root",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     const btn = screen.getByRole("button", { name: /Сменить сервер/i });
     expect(btn).toBeInTheDocument();
   });
 
-  it("disconnect button clears creds and shows SSH form", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({
-        host: "10.0.0.1",
-        port: "22",
-        user: "root",
-        password: "secret",
-      })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("disconnect button clears creds and shows SSH form", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      port: "22",
+      user: "root",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
 
     const btn = screen.getByRole("button", { name: /Сменить сервер/i });
-    fireEvent.click(btn);
+    await act(async () => {
+      fireEvent.click(btn);
+    });
 
-    expect(localStorage.getItem("trusttunnel_control_ssh")).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith("clear_ssh_credentials");
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
 
-  it("connecting via SshConnectForm shows ServerPanel", () => {
-    render(<ControlPanelPage {...defaultProps} />);
+  it("connecting via SshConnectForm shows ServerPanel", async () => {
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("mock-connect-btn"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-connect-btn"));
+    });
 
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
     expect(screen.getByText(/host=1\.2\.3\.4/)).toBeInTheDocument();
@@ -119,142 +149,158 @@ describe("ControlPanelPage", () => {
 
   // ── b64 deobfuscation of stored creds ──
 
-  it("deobfuscates b64-prefixed password from localStorage", () => {
+  it("deobfuscates b64-prefixed password from backend", async () => {
     // "pass123" in base64 = "cGFzczEyMw=="
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({
-        host: "10.0.0.1",
-        port: "22",
-        user: "root",
-        password: "b64:cGFzczEyMw==",
-      })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      port: "22",
+      user: "root",
+      password: "b64:cGFzczEyMw==",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
 
-  it("handles invalid b64 password gracefully (returns raw value)", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({
-        host: "10.0.0.1",
-        port: "22",
-        user: "root",
-        password: "b64:!!!invalid!!!",
-      })
-    );
+  it("handles invalid b64 password gracefully (returns raw value)", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      port: "22",
+      user: "root",
+      password: "b64:!!!invalid!!!",
+    });
     // Should not crash — deobfuscate returns raw value on decode failure
-    render(<ControlPanelPage {...defaultProps} />);
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
 
-  it("returns null for invalid JSON in localStorage", () => {
-    localStorage.setItem("trusttunnel_control_ssh", "not-json");
-    render(<ControlPanelPage {...defaultProps} />);
+  it("returns null when load_ssh_credentials throws", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_ssh_credentials") throw new Error("backend error");
+      return null as any;
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
 
-  it("returns null for creds missing host", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ port: "22", user: "root" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("returns null for creds missing host", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_ssh_credentials") return { host: "", port: "22", user: "root", password: "pass", keyPath: "" } as any;
+      return null as any;
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
 
-  it("returns null for creds missing both password and keyPath", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", port: "22", user: "root" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("returns null for creds missing both password and keyPath", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_ssh_credentials") return { host: "10.0.0.1", port: "22", user: "root", password: "", keyPath: "" } as any;
+      return null as any;
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
 
-  it("reads creds with keyPath instead of password", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", keyPath: "/home/.ssh/id_rsa" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("reads creds with keyPath instead of password", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      keyPath: "/home/.ssh/id_rsa",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
 
-  it("uses default port and user when not specified", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", password: "secret" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("uses default port and user when not specified", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
 
   // ── Disconnect clears refresh signal too ──
 
-  it("disconnect also clears trusttunnel_control_refresh", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", password: "secret" })
-    );
+  it("disconnect also clears trusttunnel_control_refresh", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      password: "secret",
+    });
     localStorage.setItem("trusttunnel_control_refresh", "12345");
-    render(<ControlPanelPage {...defaultProps} />);
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
 
-    fireEvent.click(screen.getByRole("button", { name: /Сменить сервер/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Сменить сервер/i }));
+    });
 
-    expect(localStorage.getItem("trusttunnel_control_ssh")).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith("clear_ssh_credentials");
     expect(localStorage.getItem("trusttunnel_control_refresh")).toBeNull();
   });
 
   // ── Refresh signal polling ──
 
-  it("picks up new creds when trusttunnel_control_refresh changes", () => {
-    render(<ControlPanelPage {...defaultProps} />);
+  it("picks up new creds when trusttunnel_control_refresh changes", async () => {
+    vi.useRealTimers();
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
 
-    // Simulate wizard storing creds and setting refresh signal
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "5.5.5.5", password: "newpass" })
-    );
+    // Now mock that creds are available and set refresh signal
+    mockCredsLoaded({ host: "5.5.5.5", password: "newpass" });
     localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
 
-    // Advance timer to trigger the polling interval
-    act(() => {
-      vi.advanceTimersByTime(600);
-    });
-
-    expect(screen.getByTestId("server-panel")).toBeInTheDocument();
+    // Wait for the polling interval to pick up the new creds
+    await waitFor(() => {
+      expect(screen.getByTestId("server-panel")).toBeInTheDocument();
+    }, { timeout: 3000 });
   });
 
-  it("shows SSH form when creds removed via refresh signal", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", password: "secret" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("shows SSH form when creds removed via refresh signal", async () => {
+    vi.useRealTimers();
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
 
     // Simulate creds removal + refresh signal
-    localStorage.removeItem("trusttunnel_control_ssh");
+    mockCredsLoaded(null);
     localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
 
-    act(() => {
-      vi.advanceTimersByTime(600);
-    });
-
-    expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
+    }, { timeout: 3000 });
   });
 
   // ── Config export callback triggers onNavigateToSettings ──
 
-  it("onConfigExported and onNavigateToSettings called on export", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", password: "secret" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("onConfigExported and onNavigateToSettings called on export", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
 
     fireEvent.click(screen.getByTestId("mock-export-btn"));
 
@@ -262,13 +308,15 @@ describe("ControlPanelPage", () => {
     expect(defaultProps.onNavigateToSettings).toHaveBeenCalled();
   });
 
-  it("onConfigExported works without onNavigateToSettings prop", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", password: "secret" })
-    );
+  it("onConfigExported works without onNavigateToSettings prop", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      password: "secret",
+    });
     const props = { onConfigExported: vi.fn(), onSwitchToSetup: vi.fn() };
-    render(<ControlPanelPage {...props} />);
+    await act(async () => {
+      render(<ControlPanelPage {...props} />);
+    });
 
     fireEvent.click(screen.getByTestId("mock-export-btn"));
 
@@ -277,16 +325,20 @@ describe("ControlPanelPage", () => {
 
   // ── ServerPanel disconnect callback ──
 
-  it("disconnect via ServerPanel callback clears creds", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({ host: "10.0.0.1", password: "secret" })
-    );
-    render(<ControlPanelPage {...defaultProps} />);
+  it("disconnect via ServerPanel callback clears creds", async () => {
+    mockCredsLoaded({
+      host: "10.0.0.1",
+      password: "secret",
+    });
+    await act(async () => {
+      render(<ControlPanelPage {...defaultProps} />);
+    });
 
-    fireEvent.click(screen.getByTestId("mock-disconnect-btn"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-disconnect-btn"));
+    });
 
-    expect(localStorage.getItem("trusttunnel_control_ssh")).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith("clear_ssh_credentials");
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
 });

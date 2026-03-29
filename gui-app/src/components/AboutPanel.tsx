@@ -48,7 +48,10 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
     setUpdating(true);
     setUpdateProgress({ stage: "download", percent: 0, message: t("status.preparing") });
     try {
-      await invoke("self_update", { downloadUrl: updateInfo.downloadUrl });
+      await invoke("self_update", {
+        downloadUrl: updateInfo.downloadUrl,
+        expectedSha256: updateInfo.sha256 || null,
+      });
     } catch (e) {
       pushSuccess(String(e), "error");
       setUpdating(false);

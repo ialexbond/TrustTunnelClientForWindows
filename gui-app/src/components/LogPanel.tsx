@@ -44,7 +44,12 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
   const filteredLogs = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return logs.filter((log) => {
-      if (levelFilter !== "all" && log.level !== levelFilter) return false;
+      if (levelFilter !== "all") {
+        const hierarchy = ["trace", "debug", "info", "warn", "error"];
+        const filterIdx = hierarchy.indexOf(levelFilter);
+        const logIdx = hierarchy.indexOf(log.level);
+        if (logIdx < filterIdx) return false;
+      }
       if (q && !log.message.toLowerCase().includes(q)) return false;
       return true;
     });

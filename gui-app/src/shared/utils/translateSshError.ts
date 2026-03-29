@@ -16,6 +16,8 @@ export function translateSshError(error: string, t: TFunction): string {
       return t("sshErrors.timeout", { target: parts[1] || "" });
     case "SSH_CONNECT_FAILED":
       return t("sshErrors.connectFailed", { detail: parts[1] || "" });
+    case "SSH_HOST_KEY_CHANGED":
+      return t("sshErrors.hostKeyChanged");
     case "SSH_CHANNEL_FAILED":
       return t("sshErrors.channelFailed", { detail: parts[1] || "" });
     case "SSH_EXEC_FAILED":

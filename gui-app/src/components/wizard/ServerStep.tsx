@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Server, Globe, Hash, User, Plug, Key, FileKey, Lock } from "lucide-react";
+import { Server, Plug, Key, FileKey, Lock } from "lucide-react";
 import { StepBar } from "./StepBar";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
@@ -61,8 +61,7 @@ export function ServerStep(w: WizardState) {
             <div className="flex gap-3 items-end">
               <div className="flex-1">
                 <Input
-                  label={t('wizard.server.server_ip_label')}
-                  icon={<Globe className="w-3.5 h-3.5" />}
+                  label={t('labels.server_ip')}
                   value={w.host}
                   onChange={(e) => w.setHost(e.target.value)}
                   placeholder="123.45.67.89"
@@ -72,9 +71,8 @@ export function ServerStep(w: WizardState) {
               <div className="w-20">
                 <Input
                   label={t('labels.port')}
-                  icon={<Hash className="w-3.5 h-3.5" />}
                   value={w.port}
-                  onChange={(e) => w.setPort(e.target.value)}
+                  onChange={(e) => w.setPort(e.target.value.replace(/\D/g, ""))}
                   placeholder="22"
                 />
               </div>
@@ -83,7 +81,6 @@ export function ServerStep(w: WizardState) {
             {/* Username */}
             <Input
               label={t('labels.username')}
-              icon={<User className="w-3.5 h-3.5" />}
               value={w.sshUser}
               onChange={(e) => w.setSshUser(e.target.value)}
               placeholder="root"
@@ -132,7 +129,7 @@ export function ServerStep(w: WizardState) {
                 </label>
                 <div className="flex gap-2">
                   <div
-                    className="flex-1 flex items-center px-3 py-2.5 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
+                    className="flex-1 flex items-center px-3 h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
                     style={{
                       backgroundColor: "var(--color-input-bg)",
                       border: "1px solid var(--color-input-border)",

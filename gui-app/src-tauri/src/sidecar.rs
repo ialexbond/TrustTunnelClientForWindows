@@ -89,20 +89,24 @@ pub async fn spawn_trusttunnel(
                         let err_msg = if let Some(pos) = trimmed.find("Failed parsing configuration") {
                             &trimmed[pos..]
                         } else {
-                            "Ошибка разбора конфигурации. Проверьте файл .toml"
+                            "Configuration parse error. Check your .toml file"
                         };
                         app_handle
                             .emit(
                                 "vpn-status",
                                 serde_json::json!({
                                     "status": "error",
-                                    "error": format!("⚠ Ошибка конфигурации: {err_msg}"),
+                                    "error": format!("Config error: {err_msg}"),
                                 }),
                             )
                             .ok();
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    // Clear PID file — process is gone
+                    let pid_path = crate::ssh::portable_data_dir().join(".sidecar.pid");
+                    let _ = std::fs::remove_file(&pid_path);
+
                     let was_connected = is_connected.lock().map(|g| *g).unwrap_or(false);
                     if let Ok(mut g) = is_connected.lock() { *g = false; }
                     let exit_code = payload.code.unwrap_or(-1);
@@ -115,7 +119,7 @@ pub async fn spawn_trusttunnel(
                         // VPN was working but dropped — not a startup error
                         ("disconnected", None)
                     } else {
-                        ("error", Some(format!("Процесс завершился с кодом {exit_code}")))
+                        ("error", Some(format!("Process exited with code {exit_code}")))
                     };
 
                     // Clear the sidecar child so VPN can be reconnected

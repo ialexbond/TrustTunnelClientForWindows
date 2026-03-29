@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -28,7 +29,9 @@ export function ExportSection({ state }: Props) {
   const [deeplink, setDeeplink] = useState("");
   const [copied, setCopied] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [userDropdownStyle, setUserDropdownStyle] = useState<CSSProperties>({});
   const userDropdownRef = useRef<HTMLDivElement>(null);
+  const userTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Close on outside click
   useEffect(() => {
@@ -41,6 +44,14 @@ export function ExportSection({ state }: Props) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [userDropdownOpen]);
+
+  const handleOpenUserDropdown = () => {
+    if (!userDropdownOpen && userTriggerRef.current) {
+      const rect = userTriggerRef.current.getBoundingClientRect();
+      setUserDropdownStyle({ position: "fixed", top: rect.bottom + 4, left: rect.left, width: rect.width, zIndex: 40 });
+    }
+    setUserDropdownOpen(!userDropdownOpen);
+  };
 
   const users = serverInfo?.users ?? [];
 
@@ -97,7 +108,8 @@ export function ExportSection({ state }: Props) {
           </label>
           <div className="relative" ref={userDropdownRef}>
             <button
-              onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+              ref={userTriggerRef}
+              onClick={handleOpenUserDropdown}
               className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none"
               style={{
                 backgroundColor: "var(--color-bg-elevated)",
@@ -115,13 +127,15 @@ export function ExportSection({ state }: Props) {
                 }}
               />
             </button>
-            {userDropdownOpen && (
+            {userDropdownOpen && createPortal(
               <div
-                className="absolute z-50 mt-1 w-full overflow-hidden rounded-[var(--radius-lg)] shadow-xl"
                 style={{
+                  ...userDropdownStyle,
                   backgroundColor: "var(--color-bg-elevated)",
                   border: "1px solid var(--color-border)",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  borderRadius: "var(--radius-lg)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+                  overflow: "hidden",
                 }}
               >
                 <div className="max-h-40 overflow-y-auto" style={{ padding: "4px" }}>
@@ -145,7 +159,8 @@ export function ExportSection({ state }: Props) {
                     );
                   })}
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>

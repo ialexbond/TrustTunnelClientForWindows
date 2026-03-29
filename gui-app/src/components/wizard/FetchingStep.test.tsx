@@ -39,7 +39,7 @@ describe("FetchingStep", () => {
       },
     });
     render(<FetchingStep {...w} />);
-    expect(screen.getByText("Connecting to server...")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.steps.connect"))).toBeInTheDocument();
   });
 
   it("renders step with ok status", () => {
@@ -51,7 +51,7 @@ describe("FetchingStep", () => {
       },
     });
     render(<FetchingStep {...w} />);
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.steps.connect"))).toBeInTheDocument();
   });
 
   it("renders step with error status", () => {

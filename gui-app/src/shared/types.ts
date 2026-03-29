@@ -11,6 +11,7 @@ export interface UpdateInfo {
   latestVersion: string;
   currentVersion: string;
   downloadUrl: string;
+  sha256?: string;
   releaseNotes: string;
   checking: boolean;
 }

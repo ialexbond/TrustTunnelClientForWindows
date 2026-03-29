@@ -37,12 +37,10 @@ interface ServerStatsCardProps {
   onNavigateToControl: () => void;
 }
 
-function readSshCreds(): SshCredentials | null {
+async function readSshCreds(): Promise<SshCredentials | null> {
   try {
-    const raw = localStorage.getItem("trusttunnel_control_ssh");
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj.host || (!obj.password && !obj.keyPath)) return null;
+    const obj = await invoke<{ host: string; port: string; user: string; password: string; keyPath: string } | null>("load_ssh_credentials");
+    if (!obj || !obj.host || (!obj.password && !obj.keyPath)) return null;
     return {
       host: obj.host,
       port: obj.port || "22",
@@ -89,7 +87,12 @@ function UsageBar({ percent }: { percent: number }) {
 
 export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
   const { t } = useTranslation();
-  const [hasCreds, setHasCreds] = useState(() => !!readSshCreds());
+  const [hasCreds, setHasCreds] = useState(false);
+
+  // Load initial creds state
+  useEffect(() => {
+    readSshCreds().then((c) => setHasCreds(!!c));
+  }, []);
   const [stats, setStats] = useState<ServerStats | null>(() => {
     try {
       const cached = sessionStorage.getItem("tt_server_stats");
@@ -103,24 +106,26 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
   // Watch for SSH creds appearing/disappearing (not object identity)
   useEffect(() => {
     const iv = setInterval(() => {
-      const has = !!readSshCreds();
-      setHasCreds((prev) => {
-        if (prev !== has) {
-          if (!has) {
-            setStats(null);
-            initialFetchDone.current = false;
-            try { sessionStorage.removeItem("tt_server_stats"); } catch {}
+      readSshCreds().then((c) => {
+        const has = !!c;
+        setHasCreds((prev) => {
+          if (prev !== has) {
+            if (!has) {
+              setStats(null);
+              initialFetchDone.current = false;
+              try { sessionStorage.removeItem("tt_server_stats"); } catch {}
+            }
+            return has;
           }
-          return has;
-        }
-        return prev;
+          return prev;
+        });
       });
     }, 1000);
     return () => clearInterval(iv);
   }, []);
 
   const fetchStats = useCallback(async () => {
-    const c = readSshCreds();
+    const c = await readSshCreds();
     if (!c) return;
     // Only show loader if we have no cached data yet
     if (!stats) setLoading(true);

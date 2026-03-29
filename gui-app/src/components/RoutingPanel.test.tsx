@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
@@ -19,6 +19,7 @@ describe("RoutingPanel", () => {
   };
 
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     i18n.changeLanguage("ru");
     localStorage.clear();
@@ -52,8 +53,15 @@ describe("RoutingPanel", () => {
       if (cmd === "update_vpn_mode") {
         return null;
       }
+      if (cmd === "check_geodata_updates") {
+        return { update_available: false, current_tag: null, latest_tag: null };
+      }
       return null;
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows no-config message when configPath is empty", () => {
@@ -187,6 +195,9 @@ describe("RoutingPanel", () => {
       if (cmd === "update_vpn_mode") {
         throw new Error("Update failed");
       }
+      if (cmd === "check_geodata_updates") {
+        return { update_available: false, current_tag: null, latest_tag: null };
+      }
       return null;
     });
 
@@ -256,6 +267,9 @@ describe("RoutingPanel", () => {
       }
       if (cmd === "get_geodata_categories") {
         return { geoip: [], geosite: [] };
+      }
+      if (cmd === "check_geodata_updates") {
+        return { update_available: false, current_tag: null, latest_tag: null };
       }
       return null;
     });
@@ -328,6 +342,9 @@ describe("RoutingPanel", () => {
       }
       if (cmd === "get_geodata_categories") {
         return { geoip: ["cn", "ru"], geosite: ["google", "facebook"] };
+      }
+      if (cmd === "check_geodata_updates") {
+        return { update_available: false, current_tag: null, latest_tag: null };
       }
       return null;
     });

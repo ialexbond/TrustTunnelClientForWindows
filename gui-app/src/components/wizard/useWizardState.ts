@@ -114,6 +114,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
 
   // Tracks current operation so the event listener only reacts to relevant events
   const operationRef = useRef<"deploy" | "fetch" | "uninstall" | null>(null);
+  const operationIdRef = useRef(0);
   const checkCancelledRef = useRef(false);
 
   // ── Save config for a user — fetch + save dialog without leaving current screen ──
@@ -172,8 +173,15 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   }, [deployLogs, showLogs]);
 
   // ── Tauri event listeners ──
+  // activeOpIdRef holds the opId that was set when the current deploy/fetch started.
+  // When cancel increments operationIdRef, stale events are ignored.
+  const activeOpIdRef = useRef(0);
+
   useEffect(() => {
     const unlistenStep = listen<DeployStep>("deploy-step", (event) => {
+      // Ignore events from a cancelled/previous operation
+      if (activeOpIdRef.current !== operationIdRef.current) return;
+
       const { step: s, status, message } = event.payload;
       setDeploySteps((prev) => ({ ...prev, [s]: { step: s, status, message } }));
 
@@ -190,6 +198,8 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
     });
 
     const unlistenLog = listen<DeployLog>("deploy-log", (event) => {
+      // Ignore logs from a cancelled/previous operation
+      if (activeOpIdRef.current !== operationIdRef.current) return;
       setDeployLogs((prev) => [...prev.slice(-300), event.payload]);
     });
 
@@ -265,6 +275,8 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   const [cancellingDeploy, setCancellingDeploy] = useState(false);
 
   const handleCancelDeploy = async () => {
+    // Increment operationId so stale deploy-step events are ignored
+    operationIdRef.current += 1;
     setCancellingDeploy(true);
     try {
       await invoke("uninstall_server", {
@@ -279,11 +291,16 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
     }
     operationRef.current = null;
     setCancellingDeploy(false);
+    setDeploySteps({});
+    setDeployLogs([]);
+    setErrorMessage("");
     setServerInfo(null);
     setWizardStep("server");
   };
 
   const handleDeploy = async () => {
+    operationIdRef.current += 1;
+    activeOpIdRef.current = operationIdRef.current;
     operationRef.current = "deploy";
     setWizardStep("deploying");
     setDeploySteps({});
@@ -339,6 +356,8 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   };
 
   const handleFetchConfig = async (forUser?: string) => {
+    operationIdRef.current += 1;
+    activeOpIdRef.current = operationIdRef.current;
     operationRef.current = "fetch";
     setWizardStep("fetching");
     setDeploySteps({});

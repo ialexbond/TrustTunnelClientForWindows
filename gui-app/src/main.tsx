@@ -9,8 +9,10 @@ import "./shared/i18n";
 document.addEventListener("keydown", (e) => {
   if (
     e.key === "F5" ||
+    e.key === "F12" ||
     (e.ctrlKey && e.key === "r") ||
-    (e.ctrlKey && e.shiftKey && e.key === "R")
+    (e.ctrlKey && e.shiftKey && e.key === "R") ||
+    (e.ctrlKey && e.shiftKey && e.key === "I")
   ) {
     e.preventDefault();
   }
@@ -41,9 +43,13 @@ export class ErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
+      // Bilingual fallback — i18n may not be loaded when global boundary triggers
+      const lang = navigator.language.startsWith("ru") ? "ru" : "en";
+      const title = lang === "ru" ? "Произошла ошибка в интерфейсе" : "A UI error occurred";
+      const retry = lang === "ru" ? "Попробовать снова" : "Try again";
       return (
         <div style={{ padding: 32, color: "#ef4444", fontFamily: "monospace" }}>
-          <h2>Произошла ошибка в интерфейсе</h2>
+          <h2>{title}</h2>
           <pre style={{ whiteSpace: "pre-wrap" }}>{this.state.error}</pre>
           <button
             onClick={() => this.setState({ hasError: false, error: "" })}
@@ -52,7 +58,7 @@ export class ErrorBoundary extends React.Component<
               background: "#333", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
             }}
           >
-            Попробовать снова
+            {retry}
           </button>
         </div>
       );

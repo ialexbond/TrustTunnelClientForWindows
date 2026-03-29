@@ -201,6 +201,7 @@ describe("AboutPanel", () => {
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("self_update", {
         downloadUrl: "https://example.com/update.zip",
+        expectedSha256: null,
       });
     });
   });

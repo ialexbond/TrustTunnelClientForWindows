@@ -1,9 +1,10 @@
-import { useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ScrollText,
   Copy,
+  Check,
   ChevronUp,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
@@ -25,6 +26,7 @@ function colorizeLogLine(line: string): { color: string } {
 
 export function LogsSection({ state }: Props) {
   const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
   const {
     serverLogs,
     setServerLogs,
@@ -61,7 +63,8 @@ export function LogsSection({ state }: Props) {
   const handleCopy = () => {
     navigator.clipboard.writeText(serverLogs);
     state.pushSuccess(t("server.logs.copied"));
-    // Note: state is the full prop object from parent
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleCollapse = () => {
@@ -88,7 +91,7 @@ export function LogsSection({ state }: Props) {
         </Button>
         {showLogs && serverLogs && (
           <>
-            <Button variant="secondary" size="sm" icon={<Copy className="w-3.5 h-3.5" />} onClick={handleCopy}>
+            <Button variant="secondary" size="sm" icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} onClick={handleCopy}>
               {t("server.logs.copy")}
             </Button>
             <Button variant="secondary" size="sm" icon={<ChevronUp className="w-3.5 h-3.5" />} onClick={handleCollapse}>
