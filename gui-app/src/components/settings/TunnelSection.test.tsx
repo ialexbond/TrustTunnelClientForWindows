@@ -118,9 +118,10 @@ describe("TunnelSection", () => {
     render(<TunnelSection state={state} />);
     const buttons = screen.getAllByRole("button");
     // Minus button is the first non-protocol button
-    // Protocol buttons: HTTP/2 (index 0), HTTP/3 (index 1)
-    // MTU buttons: Minus (index 2), Plus (index 3)
-    const mtuMinusButton = buttons[2];
+    // TUN/SOCKS5 buttons: TUN (index 0), SOCKS5 (index 1)
+    // Protocol buttons: HTTP/2 (index 2), HTTP/3 (index 3)
+    // MTU buttons: Minus (index 4), Plus (index 5)
+    const mtuMinusButton = buttons[4];
     fireEvent.click(mtuMinusButton);
     expect(state.updateField).toHaveBeenCalledWith("listener.tun.mtu_size", 1270);
   });
@@ -139,7 +140,7 @@ describe("TunnelSection", () => {
     });
     render(<TunnelSection state={state} />);
     const buttons = screen.getAllByRole("button");
-    const mtuMinusButton = buttons[2];
+    const mtuMinusButton = buttons[4];
     fireEvent.click(mtuMinusButton);
     expect(state.updateField).toHaveBeenCalledWith("listener.tun.mtu_size", 576);
   });

@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { BarChart3, Power, Loader2, Server, LogIn } from "lucide-react";
 import type { VpnStatus } from "../shared/types";
@@ -21,15 +23,14 @@ interface DashboardPanelProps {
   onNavigateToControl: () => void;
 }
 
-function hasSshCreds(): boolean {
-  try {
-    const raw = localStorage.getItem("trusttunnel_control_ssh");
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    return !!(obj.host && (obj.password || obj.keyPath));
-  } catch {
-    return false;
-  }
+function useHasSshCreds(): boolean {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    invoke<{ host: string; password: string; keyPath: string } | null>("load_ssh_credentials")
+      .then((obj) => setHas(!!(obj && obj.host && (obj.password || obj.keyPath))))
+      .catch(() => setHas(false));
+  }, []);
+  return has;
 }
 
 export default function DashboardPanel({
@@ -45,7 +46,7 @@ export default function DashboardPanel({
   const dashboard = useDashboardState(status, configPath, connectedSince);
   const isConnected = status === "connected";
   const isLoading = status === "connecting" || status === "disconnecting" || status === "recovering";
-  const sshConnected = hasSshCreds();
+  const sshConnected = useHasSshCreds();
 
   // ── Connected: full dashboard with StatusPanel ──
   if (isConnected) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import DashboardPanel from "./DashboardPanel";
 
@@ -71,6 +72,11 @@ describe("DashboardPanel", () => {
     vi.clearAllMocks();
     i18n.changeLanguage("ru");
     localStorage.clear();
+    // Default: no SSH creds
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "load_ssh_credentials") return null as any;
+      return null as any;
+    });
   });
 
   it("renders without crashing in disconnected state", () => {
@@ -99,18 +105,23 @@ describe("DashboardPanel", () => {
     expect(serverTitle).toBeInTheDocument();
   });
 
-  it("renders ServerStatsCard when SSH creds exist", () => {
-    localStorage.setItem(
-      "trusttunnel_control_ssh",
-      JSON.stringify({
+  it("renders ServerStatsCard when SSH creds exist", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "load_ssh_credentials") return {
         host: "10.0.0.1",
         port: "22",
         user: "root",
         password: "secret",
-      })
-    );
-    render(<DashboardPanel {...defaultProps} />);
-    expect(screen.getByTestId("server-stats-card")).toBeInTheDocument();
+        keyPath: "",
+      } as any;
+      return null as any;
+    });
+    await act(async () => {
+      render(<DashboardPanel {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("server-stats-card")).toBeInTheDocument();
+    });
   });
 
   it("renders full dashboard sections when connected", () => {

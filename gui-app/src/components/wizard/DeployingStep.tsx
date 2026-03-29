@@ -51,7 +51,7 @@ export function DeployingStep(w: WizardState) {
                         : "var(--color-danger-500)"
                     }}
                   >
-                    {step.message}
+                    {step.status === "error" ? step.message : stepLabels[stepId]}
                   </span>
                 </div>
               );

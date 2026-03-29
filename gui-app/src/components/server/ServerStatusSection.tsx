@@ -80,7 +80,7 @@ export function ServerStatusSection({ state }: Props) {
           setRebooting(false);
           setRebootCountdown(0);
           // Clear SSH creds → ControlPanelPage shows SSH form
-          localStorage.removeItem("trusttunnel_control_ssh");
+          invoke("clear_ssh_credentials").catch(() => {});
           localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
         }
       }

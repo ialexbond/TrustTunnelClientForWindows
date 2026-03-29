@@ -28,11 +28,16 @@ export interface ClientConfig {
     [key: string]: unknown;
   };
   listener: {
-    tun: {
+    tun?: {
       mtu_size: number;
       change_system_dns: boolean;
       included_routes: string[];
       excluded_routes: string[];
+    };
+    socks?: {
+      address: string;
+      username?: string;
+      password?: string;
     };
   };
   dns_upstreams?: string[];
@@ -144,9 +149,16 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       const parts = path.split(".");
       let obj = clone;
       for (let i = 0; i < parts.length - 1; i++) {
+        if (obj[parts[i]] == null || typeof obj[parts[i]] !== "object") {
+          obj[parts[i]] = {};
+        }
         obj = obj[parts[i]];
       }
-      obj[parts[parts.length - 1]] = value;
+      if (value === undefined) {
+        delete obj[parts[parts.length - 1]];
+      } else {
+        obj[parts[parts.length - 1]] = value;
+      }
       setConfig(clone);
     },
     [config]
