@@ -1,5 +1,5 @@
 ﻿use toml_edit::{DocumentMut, value, Array};
-use crate::ssh_deploy::portable_data_dir;
+use crate::ssh::portable_data_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -13,24 +13,24 @@ const WHITELIST_URLS: &[&str] = &[
 
 const IPLIST_BASE_URL: &str = "https://iplist.opencck.org";
 
-/// Available iplist.opencck.org groups with Russian labels
+/// Available iplist.opencck.org groups (English labels — frontend localizes via i18n)
 const IPLIST_GROUPS: &[(&str, &str)] = &[
-    ("anime", "Аниме"),
-    ("art", "Арт"),
-    ("casino", "Казино"),
+    ("anime", "Anime"),
+    ("art", "Art"),
+    ("casino", "Casino"),
     ("discord", "Discord"),
-    ("education", "Обучение"),
-    ("games", "Игры"),
+    ("education", "Education"),
+    ("games", "Games"),
     ("jetbrains", "JetBrains"),
-    ("messengers", "Мессенджеры"),
-    ("music", "Музыка"),
-    ("news", "Новости"),
+    ("messengers", "Messengers"),
+    ("music", "Music"),
+    ("news", "News"),
     ("porn", "18+"),
-    ("shop", "Магазины"),
-    ("socials", "Соцсети"),
-    ("tools", "Инструменты"),
-    ("torrent", "Торренты"),
-    ("video", "Видео"),
+    ("shop", "Shopping"),
+    ("socials", "Social Media"),
+    ("tools", "Tools"),
+    ("torrent", "Torrents"),
+    ("video", "Video"),
     ("youtube", "YouTube"),
 ];
 
@@ -166,7 +166,7 @@ pub async fn fetch_whitelist_domains() -> Result<Vec<String>, String> {
     }
 
     if all.is_empty() {
-        return Err("Не удалось загрузить домены ни из одного источника".into());
+        return Err("Failed to load domains from any source".into());
     }
 
     let mut domains: Vec<String> = all.into_iter().collect();

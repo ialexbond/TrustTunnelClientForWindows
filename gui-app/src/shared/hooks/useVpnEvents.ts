@@ -11,6 +11,7 @@ interface UseVpnEventsParams {
   setConnectedSince: React.Dispatch<React.SetStateAction<Date | null>>;
   setVpnLogs: React.Dispatch<React.SetStateAction<LogEntry[]>>;
   reconnectResolve: React.MutableRefObject<(() => void) | null>;
+  pushSuccess?: (msg: string, type?: "success" | "error") => void;
 }
 
 export function useVpnEvents({
@@ -20,6 +21,7 @@ export function useVpnEvents({
   setConnectedSince,
   setVpnLogs,
   reconnectResolve,
+  pushSuccess,
 }: UseVpnEventsParams) {
   // ─── Helper: write trace log visible in Log Panel ───
   const traceLog = (msg: string) => {
@@ -63,8 +65,10 @@ export function useVpnEvents({
         }
         if (event.payload.status === "connected") {
           setConnectedSince(new Date());
+          pushSuccess?.(i18n.t("messages.vpn_connected", "VPN connected"));
         } else if (event.payload.status === "disconnected") {
           setConnectedSince(null);
+          pushSuccess?.(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
         }
       },
     );

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
@@ -12,9 +12,14 @@ import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
 import DashboardPanel from "./components/DashboardPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
+import { PanelErrorBoundary } from "./shared/ui/PanelErrorBoundary";
+import { VpnProvider } from "./shared/context/VpnContext";
+import { useKeyboardShortcuts } from "./shared/hooks/useKeyboardShortcuts";
 import { useTheme } from "./shared/hooks/useTheme";
 import { useLanguage } from "./shared/hooks/useLanguage";
 import { useVpnEvents } from "./shared/hooks/useVpnEvents";
+import { useSuccessQueue } from "./shared/hooks/useSuccessQueue";
+import { SnackBar } from "./shared/ui/SnackBar";
 import type { VpnStatus, VpnConfig, LogEntry, UpdateInfo } from "./shared/types";
 
 // Re-export types for backward compatibility
@@ -76,7 +81,7 @@ function App() {
   // ─── Update check ───
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     available: false, latestVersion: "", currentVersion: "",
-    downloadUrl: "", releaseNotes: "", checking: false,
+    downloadUrl: "", sha256: "", releaseNotes: "", checking: false,
   });
 
   const checkForUpdates = useCallback(async (_silent = false) => {
@@ -89,17 +94,32 @@ function App() {
       );
       if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
       const data = await res.json();
-      const latestTag = (data.tag_name || "").replace(/^v/, "");
+      const latestTag = (data.tag_name || "").replace(/^v\.?/, "");
       const isNewer = compareVersions(latestTag, currentVersion) > 0;
       const assets = data.assets || [];
       const asset =
         assets.find((a: { name: string }) => a.name.endsWith(".zip")) ||
         assets.find((a: { name: string }) => a.name.endsWith(".exe") || a.name.endsWith(".msi"));
+      // Look for SHA256 checksum: either a .sha256 asset or a pattern in release notes
+      const sha256Asset = assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
+      let sha256 = "";
+      if (sha256Asset) {
+        try {
+          const hashRes = await fetch(sha256Asset.browser_download_url);
+          if (hashRes.ok) sha256 = (await hashRes.text()).trim().split(/\s/)[0];
+        } catch { /* checksum fetch is optional */ }
+      } else {
+        // Try to extract from release notes: "SHA256: <hex>" pattern
+        const match = (data.body || "").match(/SHA256:\s*([a-fA-F0-9]{64})/);
+        if (match) sha256 = match[1];
+      }
+
       setUpdateInfo({
         available: isNewer,
         latestVersion: latestTag,
         currentVersion,
         downloadUrl: asset?.browser_download_url || data.html_url || "",
+        sha256,
         releaseNotes: data.body || "",
         checking: false,
       });
@@ -113,6 +133,7 @@ function App() {
 
   // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
   const reconnectResolve = useRef<(() => void) | null>(null);
+  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
 
   useVpnEvents({
     i18n,
@@ -121,6 +142,7 @@ function App() {
     setConnectedSince,
     setVpnLogs,
     reconnectResolve,
+    pushSuccess,
   });
 
   // ─── Config validation on startup ───
@@ -254,22 +276,19 @@ function App() {
     localStorage.setItem("tt_config_path", configPath);
     localStorage.removeItem("tt_config_cleared"); // re-enable auto-detect for future
 
-    // Copy SSH credentials from wizard to control panel storage
+    // Copy SSH credentials from wizard to Rust backend storage (not localStorage)
     try {
       const raw = localStorage.getItem("trusttunnel_wizard");
       if (raw) {
         const obj = JSON.parse(raw);
         if (obj.host && (obj.sshPassword || obj.sshKeyPath)) {
-          localStorage.setItem(
-            "trusttunnel_control_ssh",
-            JSON.stringify({
-              host: obj.host,
-              port: obj.port || "22",
-              user: obj.sshUser || "root",
-              password: obj.sshPassword || "", // Already obfuscated
-              keyPath: obj.sshKeyPath || "",
-            })
-          );
+          invoke("save_ssh_credentials", {
+            host: obj.host,
+            port: obj.port || "22",
+            user: obj.sshUser || "root",
+            password: obj.sshPassword || "", // Already obfuscated
+            keyPath: obj.sshKeyPath || null,
+          }).catch(() => {});
         }
       }
     } catch { /* ignore */ }
@@ -327,8 +346,29 @@ function App() {
     });
   }, [activePage]);
 
+  // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..8 = navigate, etc.)
+  useKeyboardShortcuts({
+    onToggleConnect: useCallback(() => {
+      if (status === "connected") handleDisconnect();
+      else if (status === "disconnected" && config.configPath) handleConnect();
+    }, [status, config.configPath, handleConnect, handleDisconnect]),
+    onNavigate: setActivePage as (page: string) => void,
+    onToggleTheme: toggleTheme,
+    onToggleLanguage: toggleLanguage,
+  });
+
   const hasConfig = !!config.configPath;
   const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
+
+  const vpnContextValue = useMemo(() => ({
+    status,
+    connectedSince,
+    configPath: config.configPath,
+    vpnMode,
+    onConnect: handleConnect,
+    onDisconnect: handleDisconnect,
+    onReconnect: handleReconnect,
+  }), [status, connectedSince, config.configPath, vpnMode, handleConnect, handleDisconnect, handleReconnect]);
 
   const statusPanelNode = showStatusPanel ? (
     <StatusPanel
@@ -341,6 +381,7 @@ function App() {
   ) : null;
 
   return (
+    <VpnProvider value={vpnContextValue}>
     <div
       className="h-screen flex"
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
@@ -355,6 +396,7 @@ function App() {
           setActivePage(page);
         }}
         hasConfig={hasConfig}
+        hasUpdate={updateInfo.available}
       />
 
       {/* Main content */}
@@ -368,6 +410,7 @@ function App() {
 
           {/* Control Panel — SSH form or ServerPanel */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
+            <PanelErrorBoundary panelName="Control Panel">
             <ControlPanelPage
               key={controlKey}
               onConfigExported={(path) => {
@@ -383,10 +426,12 @@ function App() {
                 setActivePage("settings");
               }}
             />
+            </PanelErrorBoundary>
           </div>
 
           {/* Settings */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
+            <PanelErrorBoundary panelName="Settings">
             <SettingsPanel
               key={settingsKey}
               configPath={config.configPath}
@@ -398,10 +443,12 @@ function App() {
               onVpnModeChange={setVpnMode}
               statusPanel={statusPanelNode}
             />
+            </PanelErrorBoundary>
           </div>
 
           {/* Dashboard */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+            <PanelErrorBoundary panelName="Dashboard">
             <DashboardPanel
               status={status}
               connectedSince={connectedSince}
@@ -411,10 +458,12 @@ function App() {
               onDisconnect={handleDisconnect}
               onNavigateToControl={() => setActivePage("control")}
             />
+            </PanelErrorBoundary>
           </div>
 
           {/* Routing */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+            <PanelErrorBoundary panelName="Routing">
             <RoutingPanel
               configPath={config.configPath}
               status={status}
@@ -426,6 +475,7 @@ function App() {
               onReconnect={handleReconnect}
               onVpnModeChange={setVpnMode}
             />
+            </PanelErrorBoundary>
           </div>
 
           {/* Logs */}
@@ -464,6 +514,8 @@ function App() {
         </div>
       </div>
     </div>
+    <SnackBar messages={successQueue} onShown={shiftSuccess} />
+    </VpnProvider>
   );
 }
 

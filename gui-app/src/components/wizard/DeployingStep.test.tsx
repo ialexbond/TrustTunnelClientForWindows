@@ -34,7 +34,7 @@ describe("DeployingStep", () => {
     });
     const { container } = render(<DeployingStep {...w} />);
     expect(container.querySelector(".animate-spin")).toBeInTheDocument();
-    expect(screen.getByText("Connecting...")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.steps.connect"))).toBeInTheDocument();
   });
 
   it("renders step with ok status (checkmark)", () => {
@@ -45,7 +45,7 @@ describe("DeployingStep", () => {
       },
     });
     render(<DeployingStep {...w} />);
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.steps.connect"))).toBeInTheDocument();
   });
 
   it("renders step with error status", () => {
