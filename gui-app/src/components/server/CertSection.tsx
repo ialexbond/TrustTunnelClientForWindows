@@ -11,6 +11,7 @@ import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -146,7 +147,7 @@ export function CertSection({ state }: Props) {
       const raw = await invoke<unknown>("server_get_cert_info", sshParams);
       setPreloadedCert(raw);
     } catch (e) {
-      state.pushSuccess(String(e), "error");
+      state.pushSuccess(formatError(e), "error");
     }
   };
 
@@ -165,7 +166,7 @@ export function CertSection({ state }: Props) {
       state.pushSuccess(t("server.cert.renewed"));
     } catch (e) {
       setRenewStatus("");
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setRenewLoading(false);
     }

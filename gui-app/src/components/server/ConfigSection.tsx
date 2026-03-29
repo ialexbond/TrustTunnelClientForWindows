@@ -10,6 +10,7 @@ import {
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -77,7 +78,7 @@ export function ConfigSection({ state }: Props) {
       const raw = await invoke<string>("server_get_config", sshParams);
       setPreloadedConfig(raw);
     } catch (e) {
-      state.pushSuccess(String(e), "error");
+      state.pushSuccess(formatError(e), "error");
     }
   };
 
@@ -108,7 +109,7 @@ export function ConfigSection({ state }: Props) {
     } catch (e) {
       // Rollback: remove override so it shows original value
       setLocalOverrides(prev => { const next = { ...prev }; delete next[feature]; return next; });
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setTogglingFeatures(prev => { const next = new Set(prev); next.delete(feature); return next; });
       activeTogglesRef.current -= 1;

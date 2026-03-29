@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
+import { formatError } from "../../shared/utils/formatError";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -127,7 +128,7 @@ export function useServerState(props: ServerPanelProps) {
       }
     } catch (e) {
       if (!silent) {
-        setError(translateSshError(String(e), t));
+        setError(translateSshError(formatError(e), t));
         setServerInfo(null);
       }
     } finally {
@@ -151,7 +152,7 @@ export function useServerState(props: ServerPanelProps) {
         await loadServerInfo(true);
         pushSuccess(successMessage || t('server.actions.success_generic'));
       } catch (e) {
-        setActionResult({ type: "error", message: translateSshError(String(e), t) });
+        setActionResult({ type: "error", message: translateSshError(formatError(e), t) });
       } finally {
         setActionLoading(null);
       }

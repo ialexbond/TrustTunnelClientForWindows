@@ -6,6 +6,7 @@ import { StepBar } from "./StepBar";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
+import { colors } from "../../shared/ui/colors";
 import type { WizardState } from "./useWizardState";
 
 type AuthMode = "password" | "key";
@@ -40,7 +41,7 @@ export function ServerStep(w: WizardState) {
           <div className="text-center mb-6">
             <div
               className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3"
-              style={{ backgroundColor: "rgba(99, 102, 241, 0.15)" }}
+              style={{ backgroundColor: colors.accentLogoGlow }}
             >
               <Server className="w-6 h-6" style={{ color: "var(--color-accent-400)" }} />
             </div>

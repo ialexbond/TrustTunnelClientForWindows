@@ -52,7 +52,7 @@ pub fn kill_stale_sidecar() {
             eprintln!("[cleanup] Killing stale sidecar PID {pid}");
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/PID", &pid.to_string()])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .creation_flags(crate::sidecar::CREATE_NO_WINDOW) // CREATE_NO_WINDOW
                 .output();
         }
         let _ = std::fs::remove_file(&pid_path);
@@ -70,7 +70,7 @@ fn detect_conflicting_adapters() -> Vec<String> {
                 $_.InterfaceDescription -notmatch 'TrustTunnel' \
             } | Select-Object -ExpandProperty Name"
         ])
-        .creation_flags(0x08000000)
+        .creation_flags(crate::sidecar::CREATE_NO_WINDOW)
         .output();
     match output {
         Ok(out) => {

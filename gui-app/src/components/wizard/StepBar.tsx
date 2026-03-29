@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { colors } from "../../shared/ui/colors";
 import type { WizardStep } from "./types";
 
 interface StepBarProps {
@@ -52,9 +53,9 @@ export function StepBar({ step, isFetchMode }: StepBarProps) {
             className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors"
             style={
               i < currentIdx
-                ? { backgroundColor: "rgba(16, 185, 129, 0.1)", color: "var(--color-success-500)" }
+                ? { backgroundColor: colors.successBg, color: "var(--color-success-500)" }
                 : i === currentIdx
-                ? { backgroundColor: "rgba(99, 102, 241, 0.15)", color: "var(--color-accent-500)", boxShadow: "0 0 0 2px rgba(99, 102, 241, 0.5)" }
+                ? { backgroundColor: colors.accentLogoGlow, color: "var(--color-accent-500)", boxShadow: "0 0 0 2px rgba(99, 102, 241, 0.5)" }
                 : { backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }
             }
           >

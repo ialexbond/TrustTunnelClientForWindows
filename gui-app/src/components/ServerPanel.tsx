@@ -10,6 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "../shared/ui/Button";
+import { colors } from "../shared/ui/colors";
 import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 import { SnackBar } from "../shared/ui/SnackBar";
 import { useServerState } from "./server/useServerState";
@@ -138,7 +139,7 @@ export function ServerPanel(props: ServerPanelProps) {
         <div className="max-w-sm w-full text-center space-y-4">
           <div
             className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: "rgba(245, 158, 11, 0.1)" }}
+            style={{ backgroundColor: colors.warningBg }}
           >
             <AlertTriangle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
           </div>

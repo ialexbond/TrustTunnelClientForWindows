@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { VpnConfig, VpnStatus } from "../../shared/types";
 import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
 import { useAutoSave } from "../../shared/hooks/useAutoSave";
+import { formatError } from "../../shared/utils/formatError";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -132,7 +133,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       setConfig(data);
       savedSnapshot.current = normalizeForSnapshot(data as Record<string, unknown>);
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localPath, reloadKey]);
@@ -164,17 +165,27 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     [config]
   );
 
+  // ─── Build config for saving (preserve only active listener) ───
+  const buildConfigToSave = useCallback(() => {
+    if (!config) return config;
+    const clone = { ...config };
+    if (config.listener?.socks) {
+      // SOCKS5 mode — only socks, no tun
+      clone.listener = { socks: config.listener.socks };
+    } else {
+      // TUN mode — ensure change_system_dns is true
+      clone.listener = {
+        tun: { ...config.listener?.tun, change_system_dns: true },
+      };
+    }
+    return clone;
+  }, [config]);
+
   // ─── Silent save (for auto-save — subtle snackbar, no saving spinner) ───
   const silentSave = useCallback(async () => {
     if (!config || !localPath) return;
     try {
-      const configToSave = {
-        ...config,
-        listener: {
-          ...config.listener,
-          tun: { ...config.listener?.tun, change_system_dns: true },
-        },
-      };
+      const configToSave = buildConfigToSave();
       await invoke("save_client_config", {
         configPath: localPath,
         config: configToSave,
@@ -183,9 +194,9 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
       pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     }
-  }, [config, localPath, onConfigChange, pushSuccess, t]);
+  }, [config, localPath, buildConfigToSave, onConfigChange, pushSuccess, t]);
 
   // ─── Manual save (with UI feedback, snackbar, reconnect) ───
   const handleSave = useCallback(async (reconnect = false) => {
@@ -193,45 +204,25 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     setSaving(true);
     setError("");
     try {
-      const configToSave = {
-        ...config,
-        listener: {
-          ...config.listener,
-          tun: { ...config.listener?.tun, change_system_dns: true },
-        },
-      };
+      const configToSave = buildConfigToSave();
       await invoke("save_client_config", {
         configPath: localPath,
         config: configToSave,
       });
       savedSnapshot.current = normalizeForSnapshot(config as Record<string, unknown>);
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
+      setSaving(false);
+
+      pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
 
       if (reconnect && (status === "connected" || status === "connecting")) {
-        pushSuccess(t("messages.reconnecting", "Переподключение..."));
         await onReconnect();
-      } else {
-        pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
       }
     } catch (e) {
-      pushSuccess(String(e), "error");
-    } finally {
+      pushSuccess(formatError(e), "error");
       setSaving(false);
     }
-  }, [config, localPath, onConfigChange, status, onReconnect, pushSuccess, t]);
-
-  // ─── SnackBar on VPN status change ───
-  const prevStatus = useRef<VpnStatus>(status);
-  useEffect(() => {
-    if (prevStatus.current === status) return;
-    const prev = prevStatus.current;
-    prevStatus.current = status;
-    if (status === "connected" && prev !== "connected") {
-      pushSuccess(t("status.connected"));
-    } else if (status === "disconnected" && prev !== "disconnected") {
-      pushSuccess(t("status.disconnected"));
-    }
-  }, [status, pushSuccess, t]);
+  }, [config, localPath, buildConfigToSave, onConfigChange, status, onReconnect, pushSuccess, t]);
 
   // ─── Peer-save: when Routing panel saves, save our config too ───
   useEffect(() => {

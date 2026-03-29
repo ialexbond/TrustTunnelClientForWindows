@@ -11,6 +11,7 @@ import {
   Info,
   Shield,
 } from "lucide-react";
+import { colors } from "../../shared/ui/colors";
 
 export type SidebarPage =
   | "server"
@@ -96,7 +97,7 @@ export function Sidebar({
         style={{ borderColor: "var(--color-border)", height: 52 }}
         data-tauri-drag-region
       >
-        <div className="p-1.5 rounded-lg shrink-0" style={{ backgroundColor: "rgba(99, 102, 241, 0.15)" }}>
+        <div className="p-1.5 rounded-lg shrink-0" style={{ backgroundColor: colors.accentLogoGlow }}>
           <Shield className="w-5 h-5" style={{ color: "var(--color-accent-400)" }} />
         </div>
         {expanded && (

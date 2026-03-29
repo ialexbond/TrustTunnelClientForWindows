@@ -10,6 +10,7 @@ import { formatBytes } from "../../shared/utils/uptime";
 import { deobfuscate } from "../../shared/utils/obfuscation";
 import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
 import { SnackBar } from "../../shared/ui/SnackBar";
+import { formatError } from "../../shared/utils/formatError";
 
 interface SshCredentials {
   host: string;
@@ -140,7 +141,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
       setStats(result);
       try { sessionStorage.setItem("tt_server_stats", JSON.stringify(result)); } catch {}
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSuccess(formatError(e), "error");
     } finally {
       setLoading(false);
     }

@@ -3,6 +3,9 @@ use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 pub struct SidecarChild {
     pub child: CommandChild,
     pub disconnecting: Arc<Mutex<bool>>,

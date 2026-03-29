@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -54,7 +55,7 @@ export function LogsSection({ state }: Props) {
       const logs = await invoke<string>("server_get_logs", sshParams);
       setServerLogs(logs);
     } catch (e) {
-      setServerLogs(t("server.logs.error", { error: String(e) }));
+      setServerLogs(t("server.logs.error", { error: formatError(e) }));
     } finally {
       setLogsLoading(false);
     }

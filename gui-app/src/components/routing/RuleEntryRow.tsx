@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Globe, FileText, Server, Monitor, Folder, Trash2, ArrowRight } from "lucide-react";
+import { colors } from "../../shared/ui/colors";
 import type { RuleEntry, RouteAction } from "./useRoutingState";
 
 interface RuleEntryRowProps {
@@ -20,10 +21,10 @@ const typeIcons: Record<string, typeof Globe> = {
 
 const typeBadgeBg: Record<string, string> = {
   domain: "var(--color-bg-hover)",
-  ip: "rgba(99, 102, 241, 0.15)",
-  cidr: "rgba(99, 102, 241, 0.15)",
-  geoip: "rgba(16, 185, 129, 0.15)",
-  geosite: "rgba(245, 158, 11, 0.15)",
+  ip: colors.accentLogoGlow,
+  cidr: colors.accentLogoGlow,
+  geoip: colors.successBorder,
+  geosite: colors.warningBorder,
   iplist_group: "var(--color-bg-hover)",
 };
 

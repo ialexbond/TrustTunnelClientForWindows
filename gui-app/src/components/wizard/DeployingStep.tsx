@@ -58,15 +58,16 @@ export function DeployingStep(w: WizardState) {
             })}
           </div>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            fullWidth
-            onClick={w.handleCancelDeploy}
-            loading={w.cancellingDeploy}
-          >
-            {w.cancellingDeploy ? t('wizard.deploying.cancelling') : t('buttons.cancel')}
-          </Button>
+          <div className="flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={w.handleCancelDeploy}
+              loading={w.cancellingDeploy}
+            >
+              {w.cancellingDeploy ? t('wizard.deploying.cancelling') : t('buttons.cancel')}
+            </Button>
+          </div>
         </div>
       </div>
     </>

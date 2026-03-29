@@ -9,6 +9,7 @@ mod ssh;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+use tauri::Emitter;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::image::Image;
@@ -73,11 +74,15 @@ fn get_start_minimized() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // Second instance launched — focus existing window instead
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Second instance launched — focus existing window
             if let Some(w) = app.get_webview_window("main") {
                 w.show().ok();
                 w.set_focus().ok();
+            }
+            // Check if second instance was launched with a deep-link URL
+            if let Some(url) = args.iter().find(|a| a.starts_with("trusttunnel://") || a.starts_with("tt://")) {
+                app.emit("deep-link-url", serde_json::json!({ "url": url })).ok();
             }
         }))
         .plugin(tauri_plugin_shell::init())
@@ -182,6 +187,10 @@ pub fn run() {
             let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
             geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
 
+            // Deep-link URL protocol support is disabled for portable builds.
+            // For installer builds, uncomment to auto-register trusttunnel:// and tt://
+            // std::thread::spawn(|| { let _ = commands::protocol::register_url_protocols(); });
+
             // Listen for vpn-status events to update tray icon color
             use tauri::Listener;
             let app_handle = app.handle().clone();
@@ -285,7 +294,12 @@ pub fn run() {
             commands::history::get_connection_history,
             commands::history::clear_connection_history,
             commands::network::speedtest_run,
-            commands::updater::self_update
+            commands::updater::self_update,
+            commands::deeplink::decode_deeplink,
+            commands::deeplink::import_config_from_string,
+            commands::protocol::register_url_protocols,
+            commands::protocol::check_url_protocols,
+            commands::protocol::poll_pending_deeplink
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

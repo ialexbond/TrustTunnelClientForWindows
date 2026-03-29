@@ -12,6 +12,8 @@ interface LogPanelProps {
   logs: LogEntry[];
   onClear: () => void;
   isConnected?: boolean;
+  sidecarLogLevel?: string;
+  onSidecarLogLevelChange?: (level: string) => void;
 }
 
 const LOG_LEVELS = ["all", "error", "warn", "info", "debug", "trace"] as const;

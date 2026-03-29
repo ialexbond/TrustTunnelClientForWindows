@@ -33,6 +33,8 @@ tokio-stream = "0.1"
 futures-util = "0.3"
 notify = { version = "7", features = ["macos_fsevent"] }
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+winreg = "0.55"
 
 [profile.release]
 strip = true

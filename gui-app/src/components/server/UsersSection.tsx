@@ -19,8 +19,10 @@ import { Button } from "../../shared/ui/Button";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
-import { Tooltip } from "../../shared/ui/Tooltip";
+import { IconButton } from "../../shared/ui/IconButton";
 import { Modal } from "../../shared/ui/Modal";
+import { colors } from "../../shared/ui/colors";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -81,7 +83,7 @@ export function UsersSection({ state }: Props) {
       const link = await getDeeplink(username);
       setQrLink(link);
     } catch (e) {
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
       setQrUser(null);
     } finally {
       setQrLoading(false);
@@ -96,7 +98,7 @@ export function UsersSection({ state }: Props) {
       await navigator.clipboard.writeText(link);
       state.pushSuccess(t("server.users.link_copied"));
     } catch (e) {
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setLinkLoadingUser(null);
     }
@@ -123,7 +125,7 @@ export function UsersSection({ state }: Props) {
         }
       }
     } catch (e) {
-      setActionResult({ type: "error", message: t("server.users.config_export_error", { error: String(e) }) });
+      setActionResult({ type: "error", message: t("server.users.config_export_error", { error: formatError(e) }) });
     } finally {
       setExportingUser(null);
     }
@@ -140,7 +142,7 @@ export function UsersSection({ state }: Props) {
       });
       onConfigExported(path);
     } catch (e) {
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setContinueLoading(false);
     }
@@ -162,7 +164,7 @@ export function UsersSection({ state }: Props) {
       setConfirmDeleteUser(null);
       state.pushSuccess(t("server.users.user_deleted", { user: deletingUser }));
     } catch (e) {
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
       setConfirmDeleteUser(null);
     } finally {
       setDeleteLoading(false);
@@ -186,28 +188,11 @@ export function UsersSection({ state }: Props) {
       setNewPassword("");
       state.pushSuccess(t("server.users.user_added", { user: username }));
     } catch (e) {
-      setActionResult({ type: "error", message: String(e) });
+      setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setActionLoading(null);
     }
   };
-
-  // ── Icon button helper ──
-  const IconBtn = ({ tooltip, onClick, disabled, loading, color, children }: {
-    tooltip: string; onClick: () => void; disabled?: boolean; loading?: boolean;
-    color?: string; children: React.ReactNode;
-  }) => (
-    <Tooltip text={tooltip}>
-      <button
-        onClick={onClick}
-        disabled={disabled || loading}
-        className="p-1 rounded transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-        style={{ color: color || "var(--color-text-muted)" }}
-      >
-        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : children}
-      </button>
-    </Tooltip>
-  );
 
   return (
     <>
@@ -228,7 +213,7 @@ export function UsersSection({ state }: Props) {
                   onClick={() => setSelectedUser(u)}
                   className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
                   style={{
-                    backgroundColor: isSelected ? "rgba(99, 102, 241, 0.08)" : "transparent",
+                    backgroundColor: isSelected ? colors.accentBgSubtle : "transparent",
                   }}
                   onMouseEnter={(e) => {
                     if (!isSelected) (e.currentTarget as HTMLDivElement).style.backgroundColor = "var(--color-bg-hover)";
@@ -249,23 +234,23 @@ export function UsersSection({ state }: Props) {
                     <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                   </div>
                   <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                    <IconBtn tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
+                    <IconButton tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
                       <QrCode className="w-3.5 h-3.5" />
-                    </IconBtn>
-                    <IconBtn tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
+                    </IconButton>
+                    <IconButton tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
                       <Link2 className="w-3.5 h-3.5" />
-                    </IconBtn>
-                    <IconBtn tooltip={t("server.users.export_tooltip")} onClick={() => handleDownloadConfig(u)} loading={exportingUser === u}>
+                    </IconButton>
+                    <IconButton tooltip={t("server.users.export_tooltip")} onClick={() => handleDownloadConfig(u)} loading={exportingUser === u}>
                       <Download className="w-3.5 h-3.5" />
-                    </IconBtn>
-                    <IconBtn
+                    </IconButton>
+                    <IconButton
                       tooltip={serverInfo.users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
                       onClick={() => setConfirmDeleteUser(u)}
                       disabled={serverInfo.users.length <= 1}
                       color="var(--color-danger-400)"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                    </IconBtn>
+                    </IconButton>
                   </div>
                 </div>
                 {!isLast && <div className="mx-3 my-1" style={{ borderBottom: "1px solid var(--color-border)" }} />}
