@@ -125,7 +125,7 @@
     "mtu": "MTU size (576–9000). Lower values are more reliable on poor connections, higher values improve throughput."
   },
   "settings": {
-    "tunnel": { "title": "Tunnel" },
+    "tunnel": { "title": "Tunnel", "listenerMode": "Listener Mode", "socksAddress": "SOCKS5 Address" },
     "security": { "title": "Security" },
     "network": { "title": "Network" },
     "experimental": {
@@ -171,6 +171,8 @@
     "vpn_not_installed_install_prompt": "TrustTunnel is not installed on this server. Would you like to install it?",
     "network_restored_reconnecting": "Network restored. Reconnecting to VPN...",
     "logs_appear_on_connect": "Logs will appear after connecting...",
+    "vpn_connected": "VPN connected",
+    "vpn_disconnected": "VPN disconnected",
     "domain_already_exists": "Domain \"{{domain}}\" is already in the list",
     "domain_in_ru_list": "Domain \"{{domain}}\" is already included in RU domains"
   },
@@ -183,7 +185,9 @@
     "listener_failed": "Failed to start VPN tunnel. Check administrator rights and wintun.dll presence.",
     "connection_refused": "Server refused connection. Check if VPN service is running on the server.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
-    "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them."
+    "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them.",
+    "panelCrash": "An error occurred in the {{panel}} panel. Other panels still work.",
+    "retry": "Try again"
   },
   "confirmations": {
     "irreversible_action": "Are you sure? This action is irreversible."
@@ -418,6 +422,14 @@
     "downloading": "Downloading...",
     "downloadGeodata": "Download geodata",
     "updateGeodata": "Update",
+    "geodata": {
+      "connecting": "Connecting...",
+      "done": "Done!",
+      "parsing": "Parsing categories...",
+      "downloaded": "{{file}} downloaded",
+      "retry": "Retrying..."
+    },
+    "updateAvailable": "Update available!",
     "downloadGeoDataFirst": "Download geodata first",
     "noMatchingCategories": "No matches",
 
@@ -451,7 +463,7 @@
   "about": {
     "section_title": "About",
     "section_updates": "Updates",
-    "description": "TrustTunnel is a VPN protocol developed by AdGuard. This application is an unofficial Windows client that allows automatic deployment of a VPN server on a remote machine via SSH and connecting to it.",
+    "description": "VPN client for the TrustTunnel protocol. Deploy your own VPN server in one click, manage it remotely, and connect with traffic indistinguishable from regular HTTPS.",
     "vibe_coding": "Built with vibe coding — an AI assistant writes code based on natural language task descriptions.",
     "up_to_date": "You are running the latest version",
     "update_available": "Version {{version}} is available",
@@ -675,6 +687,7 @@
   "sshErrors": {
     "timeout": "Could not connect to {{target}} — connection timed out (15s)",
     "connectFailed": "SSH connection failed: {{detail}}",
+    "hostKeyChanged": "Server host key has changed! This could indicate a man-in-the-middle attack, or the server was reinstalled. Clear the host key in Server settings and try again.",
     "channelFailed": "Failed to open SSH channel: {{detail}}",
     "execFailed": "Command execution failed: {{detail}}",
     "authFailed": "Invalid SSH username or password",

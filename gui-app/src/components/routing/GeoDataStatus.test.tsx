@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { GeoDataStatusCard } from "./GeoDataStatus";
 import type { GeoDataStatus } from "./useRoutingState";
@@ -20,8 +20,19 @@ describe("GeoDataStatusCard", () => {
   let onDownload: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     i18n.changeLanguage("ru");
     onDownload = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_geodata_updates") {
+        return { update_available: false, current_tag: null, latest_tag: null };
+      }
+      return null;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders without crashing", () => {
@@ -44,9 +55,9 @@ describe("GeoDataStatusCard", () => {
     expect(screen.getByText("Скачать геоданные")).toBeInTheDocument();
   });
 
-  it("calls onDownload when download button is clicked", async () => {
+  it("calls onDownload when download button is clicked", () => {
     render(<GeoDataStatusCard status={makeStatus()} downloading={false} onDownload={onDownload} />);
-    await userEvent.click(screen.getByText("Скачать геоданные"));
+    fireEvent.click(screen.getByText("Скачать геоданные"));
     expect(onDownload).toHaveBeenCalledTimes(1);
   });
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 
 interface SelectOption {
@@ -30,7 +31,9 @@ export function Select({
   className = "",
 }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
 
@@ -44,6 +47,21 @@ export function Select({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
+
+  const handleOpen = () => {
+    if (disabled) return;
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownStyle({
+        position: "fixed",
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 40,
+      });
+    }
+    setOpen(!open);
+  };
 
   return (
     <div className={fullWidth ? "w-full" : ""}>
@@ -59,8 +77,9 @@ export function Select({
       )}
       <div className={`relative ${className}`} ref={ref}>
         <button
+          ref={buttonRef}
           type="button"
-          onClick={() => !disabled && setOpen(!open)}
+          onClick={handleOpen}
           className={`
             flex items-center justify-between gap-2 rounded-[var(--radius-lg)] px-3 h-8 text-xs
             cursor-pointer transition-colors outline-none
@@ -92,13 +111,17 @@ export function Select({
           />
         </button>
 
-        {open && (
+        {open && createPortal(
           <div
-            className="absolute z-50 mt-1 w-full min-w-[120px] overflow-hidden rounded-[var(--radius-lg)] shadow-xl"
             style={{
+              ...dropdownStyle,
+              zIndex: 40,
               backgroundColor: "var(--color-bg-elevated)",
               border: "1px solid var(--color-border)",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+              borderRadius: "var(--radius-lg)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+              minWidth: 120,
+              overflow: "hidden",
             }}
           >
             <div className="max-h-48 overflow-y-auto" style={{ padding: "4px" }}>
@@ -130,7 +153,8 @@ export function Select({
                 );
               })}
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </div>

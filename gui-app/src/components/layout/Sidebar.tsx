@@ -26,6 +26,7 @@ interface SidebarProps {
   activePage: SidebarPage;
   onPageChange: (page: SidebarPage) => void;
   hasConfig: boolean;
+  hasUpdate?: boolean;
 }
 
 interface NavItem {
@@ -49,9 +50,11 @@ export function Sidebar({
   activePage,
   onPageChange,
   hasConfig,
+  hasUpdate,
 }: SidebarProps) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Expanded = when mouse is hovering over sidebar
@@ -72,24 +75,25 @@ export function Sidebar({
       className="h-full shrink-0 select-none relative"
       style={{
         width: "var(--sidebar-width-collapsed)",
+        boxShadow: "1px 0 0 var(--color-border)",
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       <div
-        className="absolute top-0 left-0 bottom-0 h-full flex flex-col overflow-hidden border-r"
+        className="absolute top-0 left-0 bottom-0 h-full flex flex-col overflow-hidden"
         style={{
           width: expanded ? "var(--sidebar-width-expanded)" : "var(--sidebar-width-collapsed)",
           backgroundColor: "var(--color-bg-secondary)",
-          borderColor: "var(--color-border)",
+          borderRight: expanded ? "1px solid var(--color-border)" : "none",
           transition: "width 250ms ease",
           zIndex: 50,
         }}
       >
       {/* Logo */}
       <div
-        className="flex items-center gap-2.5 px-3 py-4 border-b"
-        style={{ borderColor: "var(--color-border)" }}
+        className="flex items-center gap-2.5 px-3 border-b"
+        style={{ borderColor: "var(--color-border)", height: 52 }}
         data-tauri-drag-region
       >
         <div className="p-1.5 rounded-lg shrink-0" style={{ backgroundColor: "rgba(99, 102, 241, 0.15)" }}>
@@ -106,7 +110,7 @@ export function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 flex flex-col gap-0.5 px-2 py-2 overflow-y-auto">
+      <nav className="flex-1 flex flex-col gap-0.5 pt-1 pb-2 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
           const disabled = item.requiresConfig && !hasConfig;
           const active = activePage === item.id;
@@ -117,20 +121,25 @@ export function Sidebar({
               onClick={() => !disabled && onPageChange(item.id)}
               disabled={disabled}
               title={!expanded ? t(item.labelKey) : undefined}
-              className={`
-                flex items-center gap-2.5 rounded-[var(--radius-md)]
-                ${expanded ? "px-3 py-2" : "px-0 py-2 justify-center"}
-                ${disabled ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}
-              `}
+              className={`flex items-center mx-[10px] rounded-[var(--radius-md)] ${disabled ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}`}
+              onMouseEnter={() => !disabled && setHoveredItem(item.id)}
+              onMouseLeave={() => setHoveredItem(null)}
               style={{
-                backgroundColor: active ? "var(--color-bg-active)" : "transparent",
+                height: 36,
+                backgroundColor: active
+                  ? "var(--color-bg-active)"
+                  : hoveredItem === item.id
+                  ? "var(--color-bg-hover)"
+                  : "transparent",
                 color: active ? "var(--color-text-primary)" : "var(--color-text-secondary)",
                 transition: "background-color 150ms ease, color 150ms ease",
               }}
             >
-              <span className="shrink-0">{item.icon}</span>
+              <span className="flex items-center justify-center shrink-0" style={{ width: 36, height: 36 }}>
+                {item.icon}
+              </span>
               {expanded && (
-                <span className="text-[13px] font-medium truncate whitespace-nowrap">{t(item.labelKey)}</span>
+                <span className="text-[13px] font-medium truncate whitespace-nowrap ml-1 pr-2">{t(item.labelKey)}</span>
               )}
             </button>
           );
@@ -139,25 +148,40 @@ export function Sidebar({
 
       {/* Bottom section */}
       <div
-        className="flex flex-col gap-0.5 px-2 py-2 border-t"
+        className="flex flex-col gap-0.5 py-2 border-t"
         style={{ borderColor: "var(--color-border)" }}
       >
         {/* About */}
         <button
           onClick={() => onPageChange("about")}
           title={!expanded ? t("tabs.about") : undefined}
-          className={`
-            flex items-center gap-2.5 rounded-[var(--radius-md)]
-            ${expanded ? "px-3 py-2" : "px-0 py-2 justify-center"}
-          `}
+          className="flex items-center mx-[10px] rounded-[var(--radius-md)] cursor-pointer"
+          onMouseEnter={() => setHoveredItem("about")}
+          onMouseLeave={() => setHoveredItem(null)}
           style={{
-            backgroundColor: activePage === "about" ? "var(--color-bg-active)" : "transparent",
+            height: 36,
+            backgroundColor: activePage === "about"
+              ? "var(--color-bg-active)"
+              : hoveredItem === "about"
+              ? "var(--color-bg-hover)"
+              : "transparent",
             color: activePage === "about" ? "var(--color-text-primary)" : "var(--color-text-secondary)",
             transition: "background-color 150ms ease, color 150ms ease",
           }}
         >
-          <Info className="w-[18px] h-[18px] shrink-0" />
-          {expanded && <span className="text-[13px] font-medium truncate whitespace-nowrap">{t("tabs.about")}</span>}
+          <span className="relative flex items-center justify-center shrink-0" style={{ width: 36, height: 36 }}>
+            <Info className="w-[18px] h-[18px]" />
+            {hasUpdate && (
+              <span
+                className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full"
+                style={{
+                  backgroundColor: "var(--color-success-500)",
+                  boxShadow: "0 0 8px rgba(16, 185, 129, 0.6)",
+                }}
+              />
+            )}
+          </span>
+          {expanded && <span className="text-[13px] font-medium truncate whitespace-nowrap ml-2 pr-3">{t("tabs.about")}</span>}
         </button>
       </div>
       </div>

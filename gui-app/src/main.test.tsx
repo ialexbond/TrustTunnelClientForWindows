@@ -199,7 +199,7 @@ describe("ErrorBoundary (exported from main.tsx)", () => {
         <ThrowingChild shouldThrow={true} />
       </ErrorBoundary>
     );
-    expect(screen.getByText("Произошла ошибка в интерфейсе")).toBeInTheDocument();
+    expect(screen.getByText("A UI error occurred")).toBeInTheDocument();
     expect(screen.queryByText("Child rendered OK")).not.toBeInTheDocument();
   });
 
@@ -241,13 +241,13 @@ describe("ErrorBoundary (exported from main.tsx)", () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByText("Произошла ошибка в интерфейсе")).toBeInTheDocument();
+    expect(screen.getByText("A UI error occurred")).toBeInTheDocument();
 
     shouldThrow = false;
-    fireEvent.click(screen.getByText("Попробовать снова"));
+    fireEvent.click(screen.getByText("Try again"));
 
     expect(screen.getByText("Recovered OK")).toBeInTheDocument();
-    expect(screen.queryByText("Произошла ошибка в интерфейсе")).not.toBeInTheDocument();
+    expect(screen.queryByText("A UI error occurred")).not.toBeInTheDocument();
   });
 
   it("try again button re-catches if child still throws", () => {
@@ -257,10 +257,10 @@ describe("ErrorBoundary (exported from main.tsx)", () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByText("Произошла ошибка в интерфейсе")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Попробовать снова"));
+    expect(screen.getByText("A UI error occurred")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Try again"));
     // Still throwing, so fallback appears again
-    expect(screen.getByText("Произошла ошибка в интерфейсе")).toBeInTheDocument();
+    expect(screen.getByText("A UI error occurred")).toBeInTheDocument();
   });
 
   it("renders multiple children when no error", () => {
@@ -280,7 +280,7 @@ describe("ErrorBoundary (exported from main.tsx)", () => {
         <ThrowingChild shouldThrow={true} />
       </ErrorBoundary>
     );
-    expect(screen.getByText("Произошла ошибка в интерфейсе").tagName).toBe("H2");
-    expect(screen.getByText("Попробовать снова").tagName).toBe("BUTTON");
+    expect(screen.getByText("A UI error occurred").tagName).toBe("H2");
+    expect(screen.getByText("Try again").tagName).toBe("BUTTON");
   });
 });
