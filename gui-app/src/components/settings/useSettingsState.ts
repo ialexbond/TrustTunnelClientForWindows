@@ -74,6 +74,31 @@ export interface SettingsState {
 }
 
 // ═══════════════════════════════════════════════════════
+// Deep equal for dirty tracking (ignores empty strings in arrays)
+// ═══════════════════════════════════════════════════════
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object") return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const fa = a.filter(v => v !== "");
+    const fb = b.filter(v => v !== "");
+    if (fa.length !== fb.length) return false;
+    return fa.every((v, i) => deepEqual(v, fb[i]));
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(k => k in bObj && deepEqual(aObj[k], bObj[k]));
+}
+
+// ═══════════════════════════════════════════════════════
 // Hook
 // ═══════════════════════════════════════════════════════
 
@@ -98,16 +123,9 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   // ─── SnackBar (global) ───
   const pushSuccess = useSnackBar();
 
-  // ─── Dirty tracking ───
-  // Normalize config for comparison: strip empty strings from arrays (e.g. dns_upstreams)
-  // so that adding an empty input field doesn't trigger auto-save
-  const normalizeForSnapshot = (cfg: Record<string, unknown>): string => {
-    return JSON.stringify(cfg, (_key, value) =>
-      Array.isArray(value) ? value.filter((v: unknown) => v !== "") : value
-    );
-  };
-  const savedSnapshot = useRef<string>("");
-  const dirty = config ? normalizeForSnapshot(config as Record<string, unknown>) !== savedSnapshot.current : false;
+  // ─── Dirty tracking via deep equal ───
+  const savedConfig = useRef<ClientConfig | null>(null);
+  const dirty = config !== null && savedConfig.current !== null && !deepEqual(config, savedConfig.current);
 
   // ─── Sync path from parent ───
   useEffect(() => {
@@ -116,7 +134,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     if (!configPath) {
       setConfig(null);
       setError("");
-      savedSnapshot.current = "";
+      savedConfig.current = null;
     }
   }, [configPath]);
 
@@ -129,7 +147,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         configPath: localPath,
       });
       setConfig(data);
-      savedSnapshot.current = normalizeForSnapshot(data as Record<string, unknown>);
+      savedConfig.current = JSON.parse(JSON.stringify(data));
     } catch (e) {
       pushSuccess(formatError(e), "error");
     }
@@ -188,7 +206,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         configPath: localPath,
         config: configToSave,
       });
-      savedSnapshot.current = normalizeForSnapshot(config as Record<string, unknown>);
+      savedConfig.current = JSON.parse(JSON.stringify(config));
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
       pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
     } catch (e) {
@@ -207,7 +225,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
         configPath: localPath,
         config: configToSave,
       });
-      savedSnapshot.current = normalizeForSnapshot(config as Record<string, unknown>);
+      savedConfig.current = JSON.parse(JSON.stringify(config));
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
       setSaving(false);
 

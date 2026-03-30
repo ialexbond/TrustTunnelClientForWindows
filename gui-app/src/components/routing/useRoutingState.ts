@@ -96,6 +96,7 @@ export type VpnStatus = "connected" | "connecting" | "disconnected" | "disconnec
 export interface UseRoutingStateOptions {
   configPath: string;
   status: VpnStatus;
+  vpnMode: string;
   onReconnect: () => Promise<void>;
 }
 
@@ -165,7 +166,7 @@ const emptyGeoIndex: GeoDataIndex = {
   geosite: [],
 };
 
-export function useRoutingState({ configPath, status, onReconnect }: UseRoutingStateOptions): UseRoutingStateReturn {
+export function useRoutingState({ configPath, status, vpnMode, onReconnect }: UseRoutingStateOptions): UseRoutingStateReturn {
   const isVpnActive = status === "connected" || status === "connecting";
   const [rules, setRules] = useState<RoutingRules>(emptyRules);
   const [geodataStatus, setGeodataStatus] = useState<GeoDataStatus>(emptyGeoStatus);
@@ -183,6 +184,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
   const pushSuccess = useSnackBar();
 
   const baselineRef = useRef<string>("");
+  const baselineVpnModeRef = useRef<string>(vpnMode);
 
   // ─── Load ───────────────────────────────────────────
 
@@ -220,6 +222,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
         process_mode: loaded.process_mode,
         processes: loaded.processes.sort(),
       });
+      baselineVpnModeRef.current = vpnMode;
       setDirty(false);
     } catch (e) {
       console.error("Failed to load routing rules:", e);
@@ -282,12 +285,21 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
   }, []);
 
   const markDirty = useCallback(
-    (newRules: RoutingRules) => {
-      const snap = computeSnapshot(newRules);
-      setDirty(snap !== baselineRef.current);
+    (newRules?: RoutingRules) => {
+      const r = newRules || rules;
+      const rulesChanged = computeSnapshot(r) !== baselineRef.current;
+      const modeChanged = vpnMode !== baselineVpnModeRef.current;
+      setDirty(rulesChanged || modeChanged);
     },
-    [computeSnapshot]
+    [computeSnapshot, rules, vpnMode]
   );
+
+  // Recalculate dirty when vpnMode changes externally
+  useEffect(() => {
+    const rulesChanged = computeSnapshot(rules) !== baselineRef.current;
+    const modeChanged = vpnMode !== baselineVpnModeRef.current;
+    setDirty(rulesChanged || modeChanged);
+  }, [vpnMode, rules, computeSnapshot]);
 
   // ─── CRUD ──────────────────────────────────────────
 
@@ -437,6 +449,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     try {
       await invoke("save_routing_rules", { rules: toBackendPayload(rules) });
       baselineRef.current = computeSnapshot(rules);
+      baselineVpnModeRef.current = vpnMode;
       setDirty(false);
       pushSuccess("Правила сохранены");
     } catch (e) {
@@ -514,12 +527,13 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       await invoke("save_routing_rules", { rules: payload });
       await invoke("resolve_and_apply", { configPath, rules: payload });
       baselineRef.current = computeSnapshot(rules);
+      baselineVpnModeRef.current = vpnMode;
       setDirty(false);
       pushSuccess("Настройки сохранены");
     } catch (e) {
       pushSuccess(formatError(e), "error");
     }
-  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
+  }, [configPath, rules, vpnMode, computeSnapshot, pushSuccess, toBackendPayload]);
 
   // ─── Manual save (with reconnect) ─────────────────
 
@@ -532,6 +546,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
       await invoke("save_routing_rules", { rules: payload });
       await invoke("resolve_and_apply", { configPath, rules: payload });
       baselineRef.current = computeSnapshot(rules);
+      baselineVpnModeRef.current = vpnMode;
       setDirty(false);
 
       pushSuccess("Настройки сохранены");
@@ -543,7 +558,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     } finally {
       setApplying(false);
     }
-  }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload, isVpnActive, onReconnect]);
+  }, [configPath, rules, vpnMode, computeSnapshot, pushSuccess, toBackendPayload, isVpnActive, onReconnect]);
 
   // ─── Peer-save: when Settings panel saves, save our rules too ───
   useEffect(() => {
@@ -587,7 +602,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     geodataDownloading,
     handleSave,
     isVpnActive,
-    markDirty: useCallback(() => setDirty(true), []),
+    markDirty: useCallback(() => markDirty(), [markDirty]),
     isDuplicate,
   };
 }

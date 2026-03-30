@@ -45,8 +45,6 @@ export function TunnelSection({ state }: Props) {
                   updateField("listener.tun.mtu_size", 1280);
                   updateField("listener.tun.change_system_dns", true);
                 }
-                // Force save immediately so config file is clean before next connect
-                setTimeout(() => state.handleSave(), 100);
               }
             }}
           >
@@ -61,8 +59,6 @@ export function TunnelSection({ state }: Props) {
                 // Switch to SOCKS5: remove tun, add socks
                 updateField("listener.tun", undefined);
                 updateField("listener.socks.address", "127.0.0.1:1080");
-                // Force save immediately so config file is clean before next connect
-                setTimeout(() => state.handleSave(), 100);
               }
             }}
           >
