@@ -22,5 +22,20 @@ export default defineConfig(async () => ({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: true,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/**/*.d.ts",
+        "src/test/**",
+        "src/vite-env.d.ts",
+        "src/shared/i18n/locales/**",
+        "src/components/wizard/types.ts",
+        "src/shared/ui/index.ts",
+        "src/shared/styles/**",
+      ],
+    },
   },
 }));

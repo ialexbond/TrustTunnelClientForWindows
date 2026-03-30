@@ -21,8 +21,17 @@ cmake/conan_provider.cmake
 webview_data/
 geodata/
 routing_rules.json
+build_log.txt
+build_*.bat
+build_*.ps1
+build_output.log
+gui-app/src-tauri/vcruntime*.dll
+
+# Claude Code local files
+.claude/
 
 # Portable build folders (any version)
 TrustTunnel-Portable/
 TrustTunnel-v*-portable-*/
 exclusions.json
+gui-app/coverage/

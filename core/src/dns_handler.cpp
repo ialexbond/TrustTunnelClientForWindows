@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/logger.h"
+#include "common/net_utils.h"
 #include "common/utils.h"
 #include "net/dns_utils.h"
 #include "vpn/internal/vpn_client.h"
@@ -132,7 +133,7 @@ void ag::DnsHandlerServerUpstreamBase::close_session() {
 
 uint64_t ag::DnsHandlerServerUpstreamBase::open_connection(
         const TunnelAddressPair *addr, int proto, std::string_view app_name) {
-    if (addr->dstport() != dns_utils::PLAIN_DNS_PORT_NUMBER) {
+    if (addr->dstport() != utils::PLAIN_DNS_PORT_NUMBER) {
         assert(0);
         return NON_ID;
     }
@@ -889,6 +890,13 @@ void ag::DnsHandler::on_dns_request(const ConnectionInfo &info, U8View message) 
         }
         log_handler(this, dbg, "{} qname: {} dropped: not connected, kill switch enabled", info, request.name);
         return;
+    }
+
+    // Check blocked filter first — drop DNS query (NXDOMAIN) for blocked domains
+    DomainFilterMatchStatus blocked_status = ServerUpstream::vpn->blocked_filter.match_domain(request.name);
+    if (blocked_status == DFMS_EXCLUSION) {
+        log_handler(this, dbg, "{} qname: {} BLOCKED — dropping DNS query", info, request.name);
+        return; // Simply don't forward → client gets no response → connection fails
     }
 
     DomainFilterMatchStatus status = ServerUpstream::vpn->domain_filter.match_domain(request.name);

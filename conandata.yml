@@ -1337,3 +1337,11 @@ commit_hash:
     hash: "008d07b875dd7d1e1c081be252f02a3153b91dc6"
   "1.0.28":
     hash: "0dea5f931a6fc1df317a9f58a855589f807412fd"
+  "1.0.29":
+    hash: "1f900c9dfa1e483c3390583dcbedb4221e48daa6"
+  "1.0.30":
+    hash: "b7f406807bebe8ef22b1894f912c73ba3dcd5928"
+  "1.0.31":
+    hash: "60e52309526d6ddea71afac6d38f5ae40ba1e02f"
+  "1.0.32":
+    hash: "428a14353c630048a8d339e8f0dbb7d505b87a40"

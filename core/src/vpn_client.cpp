@@ -262,6 +262,13 @@ VpnError VpnClient::init(const VpnSettings *settings) {
     this->kill_switch_on = settings->killswitch_enabled;
     update_exclusions(settings->mode, {settings->exclusions.data, settings->exclusions.size});
 
+    // Initialize blocked filter (domains/IPs to reject completely)
+    if (settings->blocked.data != nullptr && settings->blocked.size > 0) {
+        this->blocked_filter.update_exclusions(VPN_MODE_GENERAL,
+                {settings->blocked.data, settings->blocked.size});
+        log_client(this, info, "Blocked filter initialized ({} bytes)", settings->blocked.size);
+    }
+
     if (settings->tmp_files_base_path != nullptr) {
         this->tmp_files_base_path = settings->tmp_files_base_path;
         if (this->tmp_files_base_path->back() == '/') {

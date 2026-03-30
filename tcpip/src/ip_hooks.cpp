@@ -1,6 +1,8 @@
 #include "vpn/platform.h"
 
 #include <lwip/ip.h>
+#include <lwip/ip4_frag.h>
+#include <lwip/ip6_frag.h>
 #include <lwip/ip_addr.h>
 #include <lwip/tcp.h>
 #include <lwip/udp.h>
@@ -48,6 +50,17 @@ int ip4_input_hook(struct pbuf *p, struct netif *inp) {
     if ((header_len > p->len) || (header_len < IP_HLEN)) {
         return PASS_PACKET_TO_LWIP(p, 0);
     }
+    // Reassemble IP fragments before processing. Non-first fragments lack transport
+    // headers, so the hook cannot read ports from them. Manually call ip4_reass to reassemble
+    // fragmented packets and when reassembly completes, reprocess the full packet via
+    // netif->input so it re-enters the hook as a non-fragmented packet.
+    if ((IPH_OFFSET(iphdr) & PP_HTONS(IP_OFFMASK | IP_MF)) != 0) {
+        struct pbuf *reassembled = ip4_reass(p); // takes ownership of p
+        if (reassembled != nullptr) {
+            inp->input(reassembled, inp);
+        }
+        return true; // p was consumed by ip4_reass
+    }
     pbuf_header_force(p, -(s16_t) header_len);
     // Process payload
     switch (IPH_PROTO(iphdr)) {
@@ -89,7 +102,6 @@ int ip6_input_hook(struct pbuf *p, struct netif *inp) {
         case IP6_NEXTH_HOPBYHOP:
         case IP6_NEXTH_DESTOPTS:
         case IP6_NEXTH_ROUTING:
-        case IP6_NEXTH_FRAGMENT:
             if (p->len == 0) {
                 return PASS_PACKET_TO_LWIP(p, header_len);
             }
@@ -97,12 +109,30 @@ int ip6_input_hook(struct pbuf *p, struct netif *inp) {
             nexth = *((u8_t *) p->payload);
             // Get the header length
             hlen = 8 * (1 + *((u8_t *) p->payload + 1));
-            if (hlen < p->len) {
+            if (hlen > p->len) {
                 return PASS_PACKET_TO_LWIP(p, header_len);
             }
             header_len += hlen;
             pbuf_header_force(p, -(s16_t) hlen);
             break;
+        case IP6_NEXTH_FRAGMENT: {
+            if (p->len < sizeof(struct ip6_frag_hdr)) {
+                return PASS_PACKET_TO_LWIP(p, header_len);
+            }
+            // Set up ip_data globals required by ip6_reass.
+            // p->payload points to the Fragment Extension Header.
+            ip_data.current_ip6_header = ip6hdr;
+            ip_data.current_ip_header_tot_len = header_len;
+            ip_addr_copy_from_ip6_packed(ip_data.current_iphdr_src, ip6hdr->src);
+            ip_addr_copy_from_ip6_packed(ip_data.current_iphdr_dest, ip6hdr->dest);
+            ip_data.current_netif = inp;
+            ip_data.current_input_netif = inp;
+            struct pbuf *reassembled = ip6_reass(p); // takes ownership of p
+            if (reassembled != nullptr) {
+                inp->input(reassembled, inp);
+            }
+            return true; // p was consumed by ip6_reass
+        }
         default:
             goto options_done;
         }

@@ -1,9 +1,23 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Shield, Github, Download, RefreshCw, Loader2, CheckCircle2, Sparkles, ArrowUpCircle } from "lucide-react";
-import type { UpdateInfo } from "../App";
+import {
+  Shield,
+  Github,
+  Download,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
+  ArrowUpCircle,
+  Heart,
+  ExternalLink,
+} from "lucide-react";
+import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
+import { useSnackBar } from "../shared/ui/SnackBarContext";
+import { colors } from "../shared/ui/colors";
+import { formatError } from "../shared/utils/formatError";
 
 interface AboutPanelProps {
   updateInfo: UpdateInfo;
@@ -18,9 +32,10 @@ interface UpdateProgressPayload {
 }
 
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
+  const { t } = useTranslation();
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
-  const [updateError, setUpdateError] = useState("");
+  const pushSuccess = useSnackBar();
 
   useEffect(() => {
     const unlisten = listen<UpdateProgressPayload>("update-progress", (event) => {
@@ -32,86 +47,70 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   const handleSelfUpdate = async () => {
     if (!updateInfo.downloadUrl) return;
     setUpdating(true);
-    setUpdateError("");
-    setUpdateProgress({ stage: "download", percent: 0, message: "Подготовка..." });
+    setUpdateProgress({ stage: "download", percent: 0, message: t("status.preparing") });
     try {
-      await invoke("self_update", { downloadUrl: updateInfo.downloadUrl });
+      await invoke("self_update", {
+        downloadUrl: updateInfo.downloadUrl,
+        expectedSha256: updateInfo.sha256 || null,
+      });
     } catch (e) {
-      setUpdateError(String(e));
+      pushSuccess(formatError(e), "error");
       setUpdating(false);
       setUpdateProgress(null);
     }
   };
 
+  const version = updateInfo.currentVersion || "2.0.0";
+
   return (
-    <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-      <div className="max-w-lg w-full space-y-5">
+    <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">
 
+      <div className="w-full max-w-sm space-y-5">
         {/* Logo + Name */}
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex flex-col items-center gap-2">
           <div
-            className="p-4 rounded-2xl"
-            style={{ backgroundColor: "var(--color-accent-500)", boxShadow: "0 8px 24px rgba(99, 102, 241, 0.25)" }}
+            className="p-3.5 rounded-2xl shadow-lg"
+            style={{ background: "linear-gradient(135deg, var(--color-accent-500), var(--color-accent-400))" }}
           >
-            <Shield className="w-12 h-12 text-white" />
+            <Shield className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-wide" style={{ color: "var(--color-text-primary)" }}>
-            TrustTunnel
-          </h1>
-          <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-            Client for Windows · v{updateInfo.currentVersion || "2.0.0"}
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-xl font-bold tracking-wide" style={{ color: "var(--color-text-primary)" }}>
+              TrustTunnel
+            </h1>
+            <span
+              className="text-[10px] font-bold px-2 py-0.5 rounded"
+              style={{ backgroundColor: colors.accentBg, color: "var(--color-accent-500)" }}
+            >
+              PRO
+            </span>
+          </div>
+          <span
+            className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
+            style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
+          >
+            v{version} · Windows
+          </span>
         </div>
 
-        {/* Description */}
+        {/* Update card */}
         <div
-          className="rounded-xl p-5 space-y-3"
+          className="rounded-xl p-4 space-y-3"
           style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
         >
-          <h2 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
-            О программе
-          </h2>
-          <p className="text-xs leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
-            TrustTunnel — VPN-протокол, разработанный компанией AdGuard.
-            Данное приложение — неофициальный клиент для Windows,
-            позволяющий автоматически развернуть VPN-сервер на удалённой машине
-            через SSH и подключиться к нему.
-          </p>
-          <div
-            className="flex items-start gap-2 rounded-lg p-3 mt-2"
-            style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
-          >
-            <Sparkles className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "var(--color-accent-400)" }} />
-            <p className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
-              Клиентское приложение было полностью создано
-              с помощью <span className="font-medium" style={{ color: "var(--color-accent-500)" }}>вайб-кодинга</span> —
-              метода разработки, при котором AI-ассистент пишет код
-              на основе описания задач на естественном языке.
-            </p>
-          </div>
-        </div>
-
-        {/* Update section */}
-        <div
-          className="rounded-xl p-5 space-y-3"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-        >
-          <h2 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
-            Обновления
-          </h2>
-
           {updating && updateProgress ? (
+            /* Downloading */
             <div className="space-y-2">
               <div
                 className="flex items-center gap-3 rounded-lg p-3"
-                style={{ backgroundColor: "rgba(99, 102, 241, 0.08)", border: "1px solid rgba(99, 102, 241, 0.2)" }}
+                style={{ backgroundColor: colors.accentBgSubtle, border: `1px solid ${colors.accentBorder}` }}
               >
-                <Loader2 className="w-5 h-5 animate-spin shrink-0" style={{ color: "var(--color-accent-500)" }} />
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-accent-500)" }} />
                 <p className="text-xs font-medium" style={{ color: "var(--color-accent-500)" }}>
                   {updateProgress.message}
                 </p>
               </div>
-              <div className="w-full rounded-full h-1.5 overflow-hidden" style={{ backgroundColor: "var(--color-bg-hover)" }}>
+              <div className="w-full rounded-full h-1 overflow-hidden" style={{ backgroundColor: "var(--color-bg-hover)" }}>
                 <div
                   className="h-full rounded-full transition-all duration-300"
                   style={{ width: `${updateProgress.percent}%`, backgroundColor: "var(--color-accent-500)" }}
@@ -119,18 +118,19 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
               </div>
             </div>
           ) : updateInfo.available ? (
-            <div className="space-y-2">
+            /* Update available */
+            <div className="space-y-2.5">
               <div
-                className="flex items-center gap-3 rounded-lg p-3"
-                style={{ backgroundColor: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.2)" }}
+                className="flex items-center gap-2.5 rounded-lg p-2.5"
+                style={{ backgroundColor: colors.successBgSubtle, border: `1px solid ${colors.successBorder}` }}
               >
-                <Download className="w-5 h-5 shrink-0" style={{ color: "var(--color-success-500)" }} />
+                <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>
-                    Доступна версия {updateInfo.latestVersion}
+                    {t("about.update_available", { version: updateInfo.latestVersion })}
                   </p>
                   {updateInfo.releaseNotes && (
-                    <p className="text-[11px] mt-1 truncate" style={{ color: "var(--color-text-muted)" }}>
+                    <p className="text-[11px] mt-0.5 truncate" style={{ color: "var(--color-text-muted)" }}>
                       {updateInfo.releaseNotes.split("\n")[0]}
                     </p>
                   )}
@@ -140,33 +140,31 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 <button
                   onClick={handleSelfUpdate}
                   disabled={!updateInfo.downloadUrl}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: "rgba(16, 185, 129, 0.1)", color: "var(--color-success-500)" }}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                  style={{ backgroundColor: colors.successBg, color: "var(--color-success-500)" }}
                 >
                   <ArrowUpCircle className="w-3.5 h-3.5" />
-                  Обновить автоматически
+                  {t("buttons.auto_update")}
                 </button>
                 <button
                   onClick={onOpenDownload}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                  className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
                   style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
-                  title="Скачать вручную из браузера"
+                  title={t("buttons.download_from_browser")}
                 >
                   <Download className="w-3.5 h-3.5" />
                 </button>
               </div>
-              {updateError && (
-                <p className="text-[11px] break-words" style={{ color: "var(--color-danger-500)" }}>{updateError}</p>
-              )}
             </div>
           ) : (
+            /* Up to date */
             <div
-              className="flex items-center gap-3 rounded-lg p-3"
+              className="flex items-center gap-2.5 rounded-lg p-2.5"
               style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
             >
-              <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: "var(--color-success-500)" }} />
+              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
               <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                У вас установлена актуальная версия
+                {t("about.up_to_date")}
               </p>
             </div>
           )}
@@ -174,7 +172,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           <button
             onClick={onCheckUpdates}
             disabled={updateInfo.checking || updating}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-1.5 px-4 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-bg-hover)",
               color: "var(--color-text-primary)",
@@ -184,30 +182,52 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             {updateInfo.checking ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Проверка...
+                {t("status.checking")}
               </>
             ) : (
               <>
                 <RefreshCw className="w-3.5 h-3.5" />
-                Проверить обновления
+                {t("buttons.check_updates")}
               </>
             )}
           </button>
         </div>
 
-        {/* Links */}
-        <div className="flex items-center justify-center gap-4">
+        {/* About description — compact */}
+        <div
+          className="rounded-xl p-4 text-xs leading-relaxed"
+          style={{
+            backgroundColor: "var(--color-bg-surface)",
+            border: "1px solid var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <p>{t("about.description")}</p>
+          <div
+            className="flex items-start gap-2 rounded-lg p-2.5 mt-3"
+            style={{ backgroundColor: "var(--color-bg-elevated)" }}
+          >
+            <Heart className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-accent-400)" }} />
+            <p className="text-[11px] leading-relaxed">
+              {t("about.vibe_coding")}
+            </p>
+          </div>
+        </div>
+
+        {/* Footer links */}
+        <div className="flex items-center justify-center gap-3">
           <button
             onClick={() => open("https://github.com/ialexbond/TrustTunnelClient")}
-            className="flex items-center gap-1.5 text-xs transition-colors"
+            className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
             style={{ color: "var(--color-text-muted)" }}
           >
-            <Github className="w-3.5 h-3.5" />
+            <Github className="w-3 h-3" />
             GitHub
+            <ExternalLink className="w-2.5 h-2.5 opacity-50" />
           </button>
-          <span style={{ color: "var(--color-border-active)" }}>|</span>
+          <span style={{ color: "var(--color-border)" }}>·</span>
           <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
-            Протокол &copy; AdGuard · Клиент &copy; {new Date().getFullYear()} ialexbond
+            {t("about.copyright", { year: new Date().getFullYear() })}
           </span>
         </div>
       </div>

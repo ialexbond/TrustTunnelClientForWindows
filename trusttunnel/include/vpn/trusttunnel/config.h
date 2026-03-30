@@ -40,6 +40,7 @@ struct TrustTunnelConfig {
     };
 
     struct TunListener {
+        std::string adapter_name;
         std::vector<std::string> included_routes;
         std::vector<std::string> excluded_routes;
         uint32_t mtu_size = 0;
@@ -64,6 +65,12 @@ struct TrustTunnelConfig {
     std::string blocked;
     /// Path to a plain-text file (one entry per line) with entries to be blocked.
     std::string blocked_file;
+    /// Newline-separated process names to bypass VPN (direct access).
+    std::string process_direct;
+    /// Newline-separated process names to route through VPN.
+    std::string process_proxy;
+    /// Newline-separated process names to block entirely.
+    std::string process_block;
     std::optional<std::string> ssl_session_storage_path;
     std::vector<std::string> dns_upstreams;
     Location location;
