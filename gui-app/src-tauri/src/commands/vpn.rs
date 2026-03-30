@@ -6,6 +6,7 @@ use std::os::windows::process::CommandExt;
 
 use crate::sidecar;
 use crate::routing_rules;
+use crate::geodata_v2ray::GeoDataState;
 use crate::ssh;
 
 /// Shared application state for VPN lifecycle management.
@@ -100,6 +101,7 @@ pub fn kill_sidecar_from_state(state: &AppState) {
 pub async fn vpn_connect(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    geodata_state: tauri::State<'_, Arc<GeoDataState>>,
     config_path: String,
     log_level: String,
 ) -> Result<(), String> {
@@ -148,6 +150,16 @@ pub async fn vpn_connect(
         message: "Spawning trusttunnel_client process...".into(),
         level: "info".into(),
     }).ok();
+
+    // Resolve routing rules and write config files before starting sidecar
+    let rules = routing_rules::load_routing_rules().unwrap_or_default();
+    if let Err(e) = routing_rules::resolve_and_apply_inner(&config_path, &rules, geodata_state.as_ref()) {
+        eprintln!("[vpn_connect] Warning: failed to resolve routing rules: {e}");
+        app.emit("vpn-log", VpnLogPayload {
+            message: format!("Warning: routing rules resolve failed: {e}"),
+            level: "warn".into(),
+        }).ok();
+    }
 
     // Reset flags for new connection
     if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
