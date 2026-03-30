@@ -1,5 +1,5 @@
 ﻿use toml_edit::{DocumentMut, value, Array};
-use crate::ssh_deploy::portable_data_dir;
+use crate::portable_data_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -58,6 +58,11 @@ fn group_cache_path(group_id: &str) -> std::path::PathBuf {
     let cache_dir = portable_data_dir().join("group_cache");
     std::fs::create_dir_all(&cache_dir).ok();
     cache_dir.join(format!("{group_id}.json"))
+}
+
+/// Public accessor for group_cache_path (used by routing_rules module)
+pub fn group_cache_path_pub(group_id: &str) -> std::path::PathBuf {
+    group_cache_path(group_id)
 }
 
 #[tauri::command]

@@ -35,12 +35,12 @@ fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
             _ => "disconnected",
         };
         let tooltip = match status {
-            "connected" => "TrustTunnel — Connected",
-            "connecting" => "TrustTunnel — Connecting...",
-            "recovering" => "TrustTunnel — Reconnecting...",
-            "disconnecting" => "TrustTunnel — Disconnecting...",
-            "error" => "TrustTunnel — Error",
-            _ => "TrustTunnel — Disconnected",
+            "connected" => "TrustTunnel Pro — Connected",
+            "connecting" => "TrustTunnel Pro — Connecting...",
+            "recovering" => "TrustTunnel Pro — Reconnecting...",
+            "disconnecting" => "TrustTunnel Pro — Disconnecting...",
+            "error" => "TrustTunnel Pro — Error",
+            _ => "TrustTunnel Pro — Disconnected",
         };
         tray.set_icon(Some(load_tray_icon(icon_status))).ok();
         tray.set_tooltip(Some(tooltip)).ok();
@@ -137,7 +137,7 @@ pub fn run() {
             // Create tray icon with ID so we can update it later
             TrayIconBuilder::with_id("main-tray")
                 .icon(initial_icon)
-                .tooltip("TrustTunnel — Disconnected")
+                .tooltip("TrustTunnel Pro — Disconnected")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
@@ -218,7 +218,7 @@ pub fn run() {
                         use tauri_plugin_notification::NotificationExt;
                         window.app_handle().notification()
                             .builder()
-                            .title("TrustTunnel")
+                            .title("TrustTunnel Pro")
                             .body("App minimized to tray. Click the icon to open.")
                             .show()
                             .ok();
