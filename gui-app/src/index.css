@@ -84,6 +84,15 @@
     border-color: var(--color-accent-500);
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
   }
+
+  /* Hide native password reveal button (Edge/Chrome) to avoid double eye icon */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
+  input::-webkit-credentials-auto-fill-button {
+    display: none !important;
+  }
 }
 
 /* ── Theme-aware overrides for legacy Tailwind classes ── */
@@ -175,7 +184,11 @@
 }
 
 
-/* Borders */
+/* Borders — ensure all .border elements use theme token, not Tailwind default */
+.border {
+  border-color: var(--color-border);
+}
+
 [data-theme="light"] .border-white\/10,
 [data-theme="light"] .border-white\/5 {
   border-color: var(--color-border) !important;
@@ -285,25 +298,60 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Hide native password reveal (Edge/IE) — we have our own toggle */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
 }
 
-::-webkit-scrollbar-track {
+/* ── Scrollbar hidden — content width never shifts ── */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-overlay {
+  overflow-y: auto;
+}
+
+/* Thin visible scrollbar for log panels */
+.scroll-visible {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.scroll-visible::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.scroll-visible::-webkit-scrollbar-track {
   background: transparent;
 }
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
 }
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+.scroll-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.scroll-visible::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+[data-theme="light"] .scroll-visible {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+[data-theme="light"] .scroll-visible::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+[data-theme="light"] .scroll-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
-::-webkit-scrollbar-corner {
-  background: transparent;
+/* Non-scrolling container */
+.scroll-gutter-match {
+  overflow-y: auto;
+  max-height: 100%;
 }
