@@ -1,7 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { SnackBarProvider } from "./shared/ui/SnackBarContext";
+import "./shared/styles/tokens.css";
 import "./index.css";
+import "./shared/i18n";
 
 // Block F5, Ctrl+R reload shortcuts
 document.addEventListener("keydown", (e) => {
@@ -39,9 +42,12 @@ class ErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
+      const lang = navigator.language.startsWith("ru") ? "ru" : "en";
+      const title = lang === "ru" ? "Произошла ошибка в интерфейсе" : "A UI error occurred";
+      const retry = lang === "ru" ? "Попробовать снова" : "Try again";
       return (
         <div style={{ padding: 32, color: "#ef4444", fontFamily: "monospace" }}>
-          <h2>Произошла ошибка в интерфейсе</h2>
+          <h2>{title}</h2>
           <pre style={{ whiteSpace: "pre-wrap" }}>{this.state.error}</pre>
           <button
             onClick={() => this.setState({ hasError: false, error: "" })}
@@ -50,7 +56,7 @@ class ErrorBoundary extends React.Component<
               background: "#333", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
             }}
           >
-            Попробовать снова
+            {retry}
           </button>
         </div>
       );
@@ -72,7 +78,9 @@ window.addEventListener("unhandledrejection", (e) => {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <SnackBarProvider>
+        <App />
+      </SnackBarProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );

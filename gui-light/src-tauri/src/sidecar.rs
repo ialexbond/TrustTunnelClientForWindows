@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::io::Write;
 use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -29,6 +30,25 @@ pub async fn spawn_trusttunnel(
 
     let app_handle = app.clone();
     let disc_for_child = Arc::clone(&disconnecting);
+
+    // Open log file if logging is enabled
+    let log_file: Option<Arc<Mutex<std::fs::File>>> = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join(".enable_logs")))
+        .filter(|p| p.exists())
+        .and_then(|_| {
+            let log_path = std::env::current_exe()
+                .ok()?
+                .parent()?
+                .join("trusttunnel.log");
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+                .ok()
+        })
+        .map(|f| Arc::new(Mutex::new(f)));
+
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
@@ -36,6 +56,13 @@ pub async fn spawn_trusttunnel(
                     let line_str = String::from_utf8_lossy(&line);
                     let trimmed = line_str.trim();
                     eprintln!("[sidecar stdout] {trimmed}");
+
+                    // Write to log file if enabled
+                    if let Some(ref file) = log_file {
+                        if let Ok(mut f) = file.lock() {
+                            let _ = writeln!(f, "{trimmed}");
+                        }
+                    }
                     app_handle
                         .emit(
                             "vpn-log",

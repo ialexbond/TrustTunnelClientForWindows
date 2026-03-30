@@ -1,7 +1,9 @@
+mod commands;
 mod connectivity;
 mod geodata;
+mod geodata_v2ray;
+mod routing_rules;
 mod sidecar;
-mod ssh_deploy;
 
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -14,9 +16,16 @@ use tauri::RunEvent;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+/// Portable data directory: same folder as the executable.
+/// Standalone helper replacing the old ssh_deploy::portable_data_dir.
+pub fn portable_data_dir() -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    exe.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+}
+
 /// Force-kill ALL trusttunnel_client.exe processes system-wide.
 /// Called before connecting and on app exit to avoid stale WinTUN locks.
-fn kill_all_sidecar_processes() {
+pub fn kill_all_sidecar_processes() {
     let _ = std::process::Command::new("taskkill")
         .args(["/F", "/IM", "trusttunnel_client.exe"])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
@@ -51,12 +60,12 @@ fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
             _ => "disconnected",
         };
         let tooltip = match status {
-            "connected" => "TrustTunnel — Подключен",
-            "connecting" => "TrustTunnel — Подключение...",
-            "recovering" => "TrustTunnel — Переподключение...",
-            "disconnecting" => "TrustTunnel — Отключение...",
-            "error" => "TrustTunnel — Ошибка",
-            _ => "TrustTunnel — Отключен",
+            "connected" => "TrustTunnel Light — Подключен",
+            "connecting" => "TrustTunnel Light — Подключение...",
+            "recovering" => "TrustTunnel Light — Переподключение...",
+            "disconnecting" => "TrustTunnel Light — Отключение...",
+            "error" => "TrustTunnel Light — Ошибка",
+            _ => "TrustTunnel Light — Отключен",
         };
         tray.set_icon(Some(load_tray_icon(icon_status))).ok();
         tray.set_tooltip(Some(tooltip)).ok();
@@ -80,6 +89,54 @@ struct AppState {
     disconnecting: Arc<Mutex<bool>>,
     is_connected: Arc<Mutex<bool>>,
     tray_notified: Arc<Mutex<bool>>,
+}
+
+#[tauri::command]
+fn set_start_minimized(enabled: bool) -> Result<(), String> {
+    let flag_path = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("no parent dir")?
+        .join(".start_minimized");
+    if enabled {
+        std::fs::write(&flag_path, "1").map_err(|e| e.to_string())?;
+    } else {
+        let _ = std::fs::remove_file(&flag_path);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_start_minimized() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_logging_enabled(enabled: bool) -> Result<(), String> {
+    let flag_path = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("no parent dir")?
+        .join(".enable_logs");
+    if enabled {
+        std::fs::write(&flag_path, "1").map_err(|e| e.to_string())?;
+    } else {
+        let _ = std::fs::remove_file(&flag_path);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_logging_enabled() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join(".enable_logs")))
+        .map(|p| p.exists())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -239,18 +296,6 @@ async fn test_sidecar(
 }
 
 #[tauri::command]
-async fn deploy_server(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    password: String,
-    settings: ssh_deploy::EndpointSettings,
-) -> Result<String, String> {
-    ssh_deploy::deploy_server(&app, host, port, user, password, settings).await
-}
-
-#[tauri::command]
 fn check_vpn_status(state: tauri::State<'_, AppState>) -> String {
     let guard = state.sidecar_child.lock().unwrap();
     if guard.is_some() {
@@ -259,221 +304,6 @@ fn check_vpn_status(state: tauri::State<'_, AppState>) -> String {
     } else {
         "disconnected".to_string()
     }
-}
-
-#[tauri::command]
-async fn diagnose_server(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    password: String,
-) -> Result<String, String> {
-    ssh_deploy::diagnose_server(&app, host, port, user, password).await
-}
-
-#[tauri::command]
-fn check_process_conflict() -> Option<String> {
-    ssh_deploy::check_process_conflict()
-}
-
-#[tauri::command]
-fn kill_existing_process() -> Result<(), String> {
-    ssh_deploy::kill_existing_process()
-}
-
-#[tauri::command]
-async fn check_server_installation(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    password: String,
-) -> Result<serde_json::Value, String> {
-    ssh_deploy::check_server_installation(&app, host, port, user, password).await
-}
-
-#[tauri::command]
-async fn uninstall_server(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    password: String,
-) -> Result<(), String> {
-    ssh_deploy::uninstall_server(&app, host, port, user, password).await
-}
-
-#[tauri::command]
-async fn fetch_server_config(
-    app: tauri::AppHandle,
-    host: String,
-    port: u16,
-    user: String,
-    password: String,
-    client_name: String,
-) -> Result<String, String> {
-    ssh_deploy::fetch_server_config(&app, host, port, user, password, client_name).await
-}
-
-/// Copy a config file into the app directory (next to the executable).
-/// Returns the new path. If the file is already in the app dir, returns it as-is.
-#[tauri::command]
-fn copy_config_to_app_dir(source_path: String) -> Result<String, String> {
-    let src = std::path::Path::new(&source_path);
-    if !src.exists() {
-        return Err(format!("Source file does not exist: {source_path}"));
-    }
-    let exe = std::env::current_exe().map_err(|e| format!("Cannot find exe path: {e}"))?;
-    let app_dir = exe.parent().ok_or("Cannot determine app directory")?;
-    let src_dir = src.parent().unwrap_or(std::path::Path::new(""));
-
-    // Already in app dir — no copy needed
-    if src_dir == app_dir {
-        return Ok(source_path);
-    }
-
-    let file_name = src
-        .file_name()
-        .ok_or("Cannot determine file name")?;
-    let dest = app_dir.join(file_name);
-
-    std::fs::copy(src, &dest)
-        .map_err(|e| format!("Failed to copy config: {e}"))?;
-
-    Ok(dest.to_string_lossy().to_string())
-}
-
-/// Find .toml config files next to the executable
-#[tauri::command]
-fn auto_detect_config() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    for entry in std::fs::read_dir(dir).ok()? {
-        if let Ok(e) = entry {
-            let path = e.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("toml")
-                && path.file_name().and_then(|s| s.to_str()) != Some("Cargo.toml")
-            {
-                // Verify it looks like a trusttunnel config (has [endpoint] or [listener])
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if content.contains("[endpoint]") || content.contains("[listener") {
-                        return Some(path.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-#[tauri::command]
-fn read_client_config(config_path: String) -> Result<serde_json::Value, String> {
-    let content = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {e}"))?;
-    let table: toml::Value = match content.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            // Attempt recovery: strip all exclusions blocks and re-parse
-            eprintln!("[config] Parse error: {e}. Attempting recovery by stripping exclusions...");
-            let mut lines: Vec<&str> = Vec::new();
-            let mut skip = false;
-            for line in content.lines() {
-                let t = line.trim();
-                if t.starts_with("exclusions") && t.contains('[') {
-                    skip = true;
-                    continue;
-                }
-                if skip {
-                    if t == "]" { skip = false; continue; }
-                    if t.starts_with('"') || t.is_empty() || t.starts_with('#') { continue; }
-                    skip = false;
-                }
-                lines.push(line);
-            }
-            let fixed = lines.join("\n");
-            // Write the fixed config back to disk so future reads succeed
-            if let Ok(parsed) = fixed.parse::<toml::Value>() {
-                let _ = std::fs::write(&config_path, &fixed);
-                eprintln!("[config] Recovery successful, fixed config saved");
-                parsed
-            } else {
-                return Err(format!("Failed to parse TOML: {e}"));
-            }
-        }
-    };
-    // Auto-patch: ensure killswitch_allow_ports includes DHCP ports (67, 68)
-    // so Kill Switch doesn't block DHCP lease renewal on existing configs
-    if table.get("killswitch_allow_ports").is_none() {
-        if let Ok(mut doc) = std::fs::read_to_string(&config_path)
-            .unwrap_or_default()
-            .parse::<toml_edit::DocumentMut>()
-        {
-            let mut ports = toml_edit::Array::new();
-            ports.push(67);
-            ports.push(68);
-            doc["killswitch_allow_ports"] = toml_edit::value(ports);
-            let _ = std::fs::write(&config_path, doc.to_string());
-            eprintln!("[config] Auto-patched: added killswitch_allow_ports = [67, 68]");
-        }
-    }
-
-    // Convert toml::Value to serde_json::Value
-    let json = serde_json::to_value(&table)
-        .map_err(|e| format!("Failed to convert: {e}"))?;
-    Ok(json)
-}
-
-#[tauri::command]
-fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
-    // Read existing exclusions before overwriting — they are managed by RoutingPanel
-    // via save_exclusion_list and must not be lost when SettingsPanel saves.
-    let existing_exclusions: Vec<String> = std::fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|c| c.parse::<toml_edit::DocumentMut>().ok())
-        .and_then(|doc| {
-            doc.get("exclusions")
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        })
-        .unwrap_or_default();
-
-    // Convert JSON back to toml::Value then serialize
-    let toml_val: toml::Value = serde_json::from_value(config)
-        .map_err(|e| format!("Failed to convert config: {e}"))?;
-    let content = toml::to_string_pretty(&toml_val)
-        .map_err(|e| format!("Failed to serialize TOML: {e}"))?;
-    std::fs::write(&config_path, &content)
-        .map_err(|e| format!("Failed to write config: {e}"))?;
-
-    // Re-apply exclusions and ensure killswitch_allow_ports includes DHCP
-    {
-        let fresh = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to re-read config: {e}"))?;
-        let mut doc: toml_edit::DocumentMut = fresh
-            .parse()
-            .map_err(|e: toml_edit::TomlError| format!("Failed to re-parse config: {e}"))?;
-
-        if !existing_exclusions.is_empty() {
-            let mut arr = toml_edit::Array::new();
-            for d in &existing_exclusions {
-                arr.push(d.as_str());
-            }
-            doc["exclusions"] = toml_edit::value(arr);
-        }
-
-        // Ensure DHCP ports (67, 68) are always in killswitch_allow_ports
-        // so Kill Switch doesn't block DHCP lease renewal
-        let mut ports = toml_edit::Array::new();
-        ports.push(67);
-        ports.push(68);
-        doc["killswitch_allow_ports"] = toml_edit::value(ports);
-
-        std::fs::write(&config_path, doc.to_string())
-            .map_err(|e| format!("Failed to write config back: {e}"))?;
-    }
-
-    Ok(())
 }
 
 /// Run a simple speed test using Cloudflare endpoints.
@@ -559,220 +389,45 @@ async fn ping_endpoint(host: String, port: u16) -> i64 {
     }
 }
 
-#[derive(Clone, Serialize)]
-struct UpdateProgress {
-    stage: String,
-    percent: u32,
-    message: String,
-}
-
-/// Self-update: download new ZIP, extract, create updater script, restart.
-#[tauri::command]
-async fn self_update(
-    app: tauri::AppHandle,
-    download_url: String,
-) -> Result<(), String> {
-    use std::io::Write;
-    use tokio::io::AsyncWriteExt;
-
-    let emit = |stage: &str, percent: u32, msg: &str| {
-        app.emit("update-progress", UpdateProgress {
-            stage: stage.to_string(),
-            percent,
-            message: msg.to_string(),
-        }).ok();
-    };
-
-    emit("download", 0, "Начинаем загрузку...");
-
-    // Determine paths
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Cannot determine exe path: {e}"))?;
-    let app_dir = exe_path.parent()
-        .ok_or("Cannot determine app directory")?;
-    let temp_dir = std::env::temp_dir();
-    let zip_path = temp_dir.join("trusttunnel_update.zip");
-    let extract_dir = temp_dir.join("trusttunnel_update");
-
-    // Clean up previous update artifacts
-    let _ = std::fs::remove_file(&zip_path);
-    let _ = std::fs::remove_dir_all(&extract_dir);
-
-    // Download the ZIP with progress
-    emit("download", 5, "Подключение к серверу...");
-    let client = reqwest::Client::new();
-    let resp = client.get(&download_url)
-        .header("User-Agent", "TrustTunnel-Updater")
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Download HTTP error: {}", resp.status()));
-    }
-
-    let total_size = resp.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut file = tokio::fs::File::create(&zip_path)
-        .await
-        .map_err(|e| format!("Cannot create temp file: {e}"))?;
-
-    let mut stream = resp.bytes_stream();
-    use tokio_stream::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Download error: {e}"))?;
-        file.write_all(&chunk).await.map_err(|e| format!("Write error: {e}"))?;
-        downloaded += chunk.len() as u64;
-        if total_size > 0 {
-            let pct = ((downloaded as f64 / total_size as f64) * 80.0) as u32 + 5;
-            emit("download", pct.min(85), &format!("Загрузка: {:.1} МБ / {:.1} МБ",
-                downloaded as f64 / 1_048_576.0,
-                total_size as f64 / 1_048_576.0));
-        }
-    }
-    file.flush().await.ok();
-    drop(file);
-
-    emit("extract", 88, "Распаковка обновления...");
-
-    // Extract ZIP using PowerShell
-    let extract_dir_str = extract_dir.to_string_lossy().to_string();
-    let zip_path_str = zip_path.to_string_lossy().to_string();
-    let ps_output = tokio::process::Command::new("powershell")
-        .args([
-            "-NoProfile", "-Command",
-            &format!(
-                "Remove-Item '{}' -Recurse -Force -ErrorAction SilentlyContinue; \
-                 Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-                extract_dir_str, zip_path_str, extract_dir_str
-            ),
-        ])
-        .creation_flags(0x08000000)
-        .output()
-        .await
-        .map_err(|e| format!("Extract failed: {e}"))?;
-
-    if !ps_output.status.success() {
-        let err = String::from_utf8_lossy(&ps_output.stderr);
-        return Err(format!("Extraction failed: {err}"));
-    }
-
-    // Find the extracted files — could be in a subfolder
-    let source_dir = {
-        let mut src = extract_dir.clone();
-        // If there's a single subfolder, use that
-        if let Ok(mut entries) = std::fs::read_dir(&extract_dir) {
-            let first = entries.next();
-            let second = entries.next();
-            if second.is_none() {
-                if let Some(Ok(entry)) = first {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        src = entry.path();
-                    }
-                }
-            }
-        }
-        src
-    };
-
-    // Verify the extracted folder has trusttunnel.exe
-    if !source_dir.join("trusttunnel.exe").exists() {
-        return Err("Обновление не содержит trusttunnel.exe. Архив повреждён?".into());
-    }
-
-    emit("install", 92, "Подготовка к установке...");
-
-    // Create the updater batch script
-    let bat_path = temp_dir.join("trusttunnel_updater.bat");
-    let pid = std::process::id();
-    let app_dir_str = app_dir.to_string_lossy().to_string();
-    let source_dir_str = source_dir.to_string_lossy().to_string();
-    let vbs_path_str = temp_dir.join("trusttunnel_updater.vbs").to_string_lossy().to_string();
-    let bat_content = format!(
-        r#"@echo off
-title TrustTunnel Updater
-echo Waiting for TrustTunnel to exit (PID {pid})...
-:waitloop
-tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto waitloop
-)
-echo Copying update files...
-xcopy /Y /E /I "{source_dir_str}\*" "{app_dir_str}\" >nul 2>&1
-if errorlevel 1 (
-    echo Copy failed! Please update manually.
-    pause
-    exit /b 1
-)
-echo Starting updated version...
-start "" "{app_dir_str}\TrustTunnel.exe"
-echo Cleaning up temp files...
-rd /s /q "{extract_dir_str}" >nul 2>&1
-del "{zip_path_str}" >nul 2>&1
-del "{vbs_path_str}" >nul 2>&1
-(goto) 2>nul & del "%~f0"
-"#
-    );
-
-    {
-        let mut bat_file = std::fs::File::create(&bat_path)
-            .map_err(|e| format!("Cannot create updater script: {e}"))?;
-        bat_file.write_all(bat_content.as_bytes())
-            .map_err(|e| format!("Cannot write updater script: {e}"))?;
-    }
-
-    emit("install", 96, "Запуск обновления, приложение перезапустится...");
-
-    // Kill VPN sidecar before exit
-    if let Some(state) = app.try_state::<AppState>() {
-        kill_sidecar_from_state(&state);
-    }
-    kill_all_sidecar_processes();
-
-    // Launch the updater bat completely hidden via a VBS wrapper
-    let vbs_path = temp_dir.join("trusttunnel_updater.vbs");
-    let vbs_content = format!(
-        "CreateObject(\"Wscript.Shell\").Run \"{}\", 0, False",
-        bat_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\"\"")
-    );
-    std::fs::write(&vbs_path, &vbs_content)
-        .map_err(|e| format!("Cannot create VBS launcher: {e}"))?;
-
-    std::process::Command::new("wscript.exe")
-        .arg(&vbs_path)
-        .creation_flags(0x08000000)
-        .spawn()
-        .map_err(|e| format!("Cannot launch updater: {e}"))?;
-
-    // Give the bat a moment to start, then exit the app
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    app.exit(0);
-
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // Second instance launched — focus existing window instead
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Second instance launched — focus existing window
             if let Some(w) = app.get_webview_window("main") {
                 w.show().ok();
                 w.set_focus().ok();
+            }
+            // Check if second instance was launched with a deep-link URL
+            if let Some(url) = args.iter().find(|a| a.starts_with("trusttunnel://") || a.starts_with("tt://")) {
+                app.emit("deep-link-url", serde_json::json!({ "url": url })).ok();
             }
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(AppState {
             sidecar_child: Arc::new(Mutex::new(None)),
             disconnecting: Arc::new(Mutex::new(false)),
             is_connected: Arc::new(Mutex::new(false)),
             tray_notified: Arc::new(Mutex::new(false)),
         })
+        .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .setup(|app| {
+            // Show window unless start_minimized flag file exists next to exe
+            if let Some(window) = app.get_webview_window("main") {
+                let start_minimized = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
+                    .map(|p| p.exists())
+                    .unwrap_or(false);
+                if !start_minimized {
+                    window.show().ok();
+                }
+            }
+
             // Build tray context menu
             let show_item = MenuItemBuilder::with_id("show", "Показать").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Выход").build(app)?;
@@ -788,7 +443,7 @@ pub fn run() {
             // Create tray icon with ID so we can update it later
             TrayIconBuilder::with_id("main-tray")
                 .icon(initial_icon)
-                .tooltip("TrustTunnel — Отключен")
+                .tooltip("TrustTunnel Light — Отключен")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
@@ -834,6 +489,10 @@ pub fn run() {
             let is_conn_for_monitor = Arc::clone(&app.state::<AppState>().is_connected);
             connectivity::start_monitor(app.handle().clone(), is_conn_for_monitor);
 
+            // Start geodata file watcher
+            let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
+            geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
+
             // Listen for vpn-status events to update tray icon color
             use tauri::Listener;
             let app_handle = app.handle().clone();
@@ -861,7 +520,7 @@ pub fn run() {
                         use tauri_plugin_notification::NotificationExt;
                         window.app_handle().notification()
                             .builder()
-                            .title("TrustTunnel")
+                            .title("TrustTunnel Light")
                             .body("Приложение свёрнуто в трей. Нажмите на иконку, чтобы открыть.")
                             .show()
                             .ok();
@@ -874,17 +533,21 @@ pub fn run() {
             vpn_disconnect,
             check_vpn_status,
             test_sidecar,
-            deploy_server,
-            diagnose_server,
-            check_process_conflict,
-            kill_existing_process,
-            copy_config_to_app_dir,
-            auto_detect_config,
-            read_client_config,
-            save_client_config,
-            check_server_installation,
-            uninstall_server,
-            fetch_server_config,
+            set_start_minimized,
+            set_logging_enabled,
+            get_logging_enabled,
+            get_start_minimized,
+            commands::config::copy_file,
+            commands::config::copy_config_to_app_dir,
+            commands::config::auto_detect_config,
+            commands::config::config_file_exists,
+            commands::config::watch_config_file,
+            commands::config::unwatch_config_file,
+            commands::config::read_client_config,
+            commands::config::save_client_config,
+            commands::deeplink::decode_deeplink,
+            commands::deeplink::import_config_from_string,
+            commands::updater::self_update,
             geodata::load_exclusion_list,
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,
@@ -895,9 +558,20 @@ pub fn run() {
             geodata::load_active_groups,
             geodata::save_active_groups,
             geodata::load_group_cache,
+            geodata_v2ray::download_geodata,
+            geodata_v2ray::get_geodata_status,
+            geodata_v2ray::check_geodata_updates,
+            geodata_v2ray::load_geodata_categories,
+            routing_rules::load_routing_rules,
+            routing_rules::save_routing_rules,
+            routing_rules::export_routing_rules,
+            routing_rules::import_routing_rules,
+            routing_rules::migrate_legacy_exclusions,
+            routing_rules::resolve_and_apply,
+            routing_rules::update_vpn_mode,
+            routing_rules::cleanup_hosts_block,
             ping_endpoint,
             speedtest_run,
-            self_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -908,6 +582,8 @@ pub fn run() {
                     kill_sidecar_from_state(&state);
                 }
                 kill_all_sidecar_processes();
+                // Clean up hosts file blocked entries
+                routing_rules::cleanup_hosts_block().ok();
             }
         });
 }
