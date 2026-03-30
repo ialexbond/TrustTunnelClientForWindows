@@ -1,82 +1,38 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
 import StatusPanel from "./components/StatusPanel";
 import SetupWizard from "./components/SetupWizard";
-import { ServerPanel } from "./components/ServerPanel";
+import { ControlPanelPage } from "./components/ControlPanelPage";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
+import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
+import DashboardPanel from "./components/DashboardPanel";
+import AppSettingsPanel from "./components/AppSettingsPanel";
+import { PanelErrorBoundary } from "./shared/ui/PanelErrorBoundary";
+import { formatError } from "./shared/utils/formatError";
+import { VpnProvider } from "./shared/context/VpnContext";
+import { useKeyboardShortcuts } from "./shared/hooks/useKeyboardShortcuts";
+import { useTheme } from "./shared/hooks/useTheme";
+import { useLanguage } from "./shared/hooks/useLanguage";
+import { useVpnEvents } from "./shared/hooks/useVpnEvents";
+import { useSnackBar } from "./shared/ui/SnackBarContext";
+import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
+import { useVpnActions } from "./shared/hooks/useVpnActions";
+import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
-export type VpnStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "disconnecting"
-  | "recovering"
-  | "error";
-
-export interface UpdateInfo {
-  available: boolean;
-  latestVersion: string;
-  currentVersion: string;
-  downloadUrl: string;
-  releaseNotes: string;
-  checking: boolean;
-}
-
-export interface VpnConfig {
-  configPath: string;
-  logLevel: string;
-}
-
-export interface LogEntry {
-  timestamp: string;
-  level: string;
-  message: string;
-}
-
-/** @deprecated Use SidebarPage instead — kept for backward compat with Header.tsx */
-export type AppTab = "setup" | "settings" | "routing" | "about";
-
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na > nb) return 1;
-    if (na < nb) return -1;
-  }
-  return 0;
-}
+// Re-export types for backward compatibility
+export type { VpnStatus, UpdateInfo, VpnConfig, LogEntry, AppTab } from "./shared/types";
 
 function App() {
-  const { i18n } = useTranslation();
-
   // ─── Theme ───
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    return (localStorage.getItem("tt_theme") as "dark" | "light") || "dark";
-  });
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("tt_theme", theme);
-  }, [theme]);
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
-  }, []);
+  const { theme, themeMode, handleThemeChange, toggleTheme } = useTheme();
 
   // ─── Language ───
-  const toggleLanguage = useCallback(() => {
-    const next = i18n.language === "ru" ? "en" : "ru";
-    i18n.changeLanguage(next);
-    localStorage.setItem("tt_language", next);
-  }, [i18n]);
+  const { i18n, handleLanguageChange, toggleLanguage } = useLanguage();
 
   // ─── Navigation ───
   const [activePage, setActivePage] = useState<SidebarPage>(() => {
@@ -105,62 +61,32 @@ function App() {
   });
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
+  const [vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
 
-  // ─── SSH data for ServerPanel (read from wizard localStorage) ───
-  const sshData = (() => {
-    try {
-      const raw = localStorage.getItem("trusttunnel_wizard");
-      const obj = raw ? JSON.parse(raw) : {};
-      return {
-        host: obj.host || "",
-        port: obj.port || "22",
-        user: obj.sshUser || "root",
-        password: obj.sshPassword || "",
-      };
-    } catch { return { host: "", port: "22", user: "root", password: "" }; }
-  })();
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
   });
 
   // ─── Update check ───
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
-    available: false, latestVersion: "", currentVersion: "",
-    downloadUrl: "", releaseNotes: "", checking: false,
+  const { updateInfo, checkForUpdates } = useUpdateChecker();
+
+  // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
+  const reconnectResolve = useRef<(() => void) | null>(null);
+  const pushSuccess = useSnackBar();
+
+  useVpnEvents({
+    i18n,
+    setStatus,
+    setError,
+    setConnectedSince,
+    setVpnLogs,
+    reconnectResolve,
+    pushSuccess,
   });
 
-  const checkForUpdates = useCallback(async (_silent = false) => {
-    setUpdateInfo(prev => ({ ...prev, checking: true }));
-    try {
-      const currentVersion = await getVersion();
-      const res = await fetch(
-        "https://api.github.com/repos/ialexbond/TrustTunnelClientForWindows/releases/latest",
-        { headers: { "Accept": "application/vnd.github.v3+json" } }
-      );
-      if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
-      const data = await res.json();
-      const latestTag = (data.tag_name || "").replace(/^v/, "");
-      const isNewer = compareVersions(latestTag, currentVersion) > 0;
-      const assets = data.assets || [];
-      const asset =
-        assets.find((a: { name: string }) => a.name.endsWith(".zip")) ||
-        assets.find((a: { name: string }) => a.name.endsWith(".exe") || a.name.endsWith(".msi"));
-      setUpdateInfo({
-        available: isNewer,
-        latestVersion: latestTag,
-        currentVersion,
-        downloadUrl: asset?.browser_download_url || data.html_url || "",
-        releaseNotes: data.body || "",
-        checking: false,
-      });
-    } catch (e) {
-      console.warn("Update check failed:", e);
-      setUpdateInfo(prev => ({ ...prev, checking: false }));
-    }
-  }, []);
-
-  useEffect(() => { checkForUpdates(true); }, [checkForUpdates]);
+  // Deep-link state (used by ImportConfigModal in WelcomeStep, future installer support)
+  // For portable builds, deep-link is manual only (paste URL in import modal)
 
   // ─── Config validation on startup ───
   useEffect(() => {
@@ -184,15 +110,50 @@ function App() {
       localStorage.removeItem("tt_active_tab");
       localStorage.removeItem("tt_connected_since");
 
-      invoke<string | null>("auto_detect_config").then((detected) => {
-        if (detected) {
-          setConfig(prev => ({ ...prev, configPath: detected }));
-          if (activePage === "server") setActivePage("settings");
-        }
-      }).catch(() => {});
+      // Skip auto-detect if user explicitly cleared config
+      const wasCleared = localStorage.getItem("tt_config_cleared");
+      if (!wasCleared) {
+        invoke<string | null>("auto_detect_config").then((detected) => {
+          if (detected) {
+            setConfig(prev => ({ ...prev, configPath: detected }));
+            if (activePage === "server") setActivePage("settings");
+          }
+        }).catch(() => {});
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ─── Watch config file for external deletion ───
+  useEffect(() => {
+    if (config.configPath) {
+      invoke("watch_config_file", { configPath: config.configPath }).catch(() => {});
+    }
+    return () => { invoke("unwatch_config_file").catch(() => {}); };
+  }, [config.configPath]);
+
+  useEffect(() => {
+    const unlisten = listen<{ exists: boolean; path: string }>("config-file-changed", (event) => {
+      const { exists, path } = event.payload;
+      if (!exists && path === config.configPath) {
+        // Config file was deleted externally
+        localStorage.removeItem("tt_config_path");
+        setConfig({ configPath: "", logLevel: "info" });
+        setActivePage("server");
+        setWizardKey(k => k + 1);
+        pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
+      } else if (exists && !config.configPath) {
+        // Config file appeared — reload it (dismisses error snackbar via success message)
+        setConfig({ configPath: path, logLevel: "info" });
+        localStorage.setItem("tt_config_path", path);
+        setSettingsKey(k => k + 1);
+        setActivePage("settings");
+        pushSuccess(i18n.t("messages.config_file_restored", "Config loaded"));
+      }
+    });
+    return () => { unlisten.then(f => f()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.configPath]);
 
   // ─── Persist state ───
   useEffect(() => { localStorage.setItem("tt_active_page", activePage); }, [activePage]);
@@ -209,158 +170,72 @@ function App() {
     }
   }, [connectedSince]);
 
-  // ─── VPN status sync ───
+  // ─── Auto-connect on startup ───
+  const autoConnectDone = useRef(false);
   useEffect(() => {
-    invoke<string>("check_vpn_status").then((backendStatus) => {
-      if (backendStatus === "connected") {
-        setStatus("connected");
-        setConnectedSince((prev) => prev ?? new Date());
-      } else if (backendStatus === "connecting") {
-        setStatus("connecting");
-        setConnectedSince(null);
-      } else {
-        setStatus("disconnected");
-        setConnectedSince(null);
-      }
-    }).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const unlistenStatus = listen<{ status: VpnStatus; error?: string }>(
-      "vpn-status",
-      (event) => {
-        setStatus((prev) => {
-          if (prev === "recovering" && event.payload.status === "disconnected") {
-            return prev;
-          }
-          return event.payload.status;
-        });
-        if (event.payload.error) {
-          setError(event.payload.error);
-        }
-        if (event.payload.status === "connected") {
-          setConnectedSince(new Date());
-        } else if (event.payload.status === "disconnected") {
-          setConnectedSince(null);
-        }
-      },
-    );
-    return () => { unlistenStatus.then((f) => f()); };
-  }, []);
-
-  // ─── Auto-reconnect on internet loss ───
-  useEffect(() => {
-    const unlistenInternet = listen<{ online: boolean; action?: string }>(
-      "internet-status",
-      async (event) => {
-        const { online, action } = event.payload;
-
-        if (!online && action === "disconnect") {
-          console.warn("[connectivity] Internet lost — disconnecting VPN, waiting for adapter...");
-          setStatus("recovering");
-          setError(i18n.t("errors.internet_lost_disconnecting"));
-          try {
-            await invoke("vpn_disconnect");
-          } catch (e) {
-            console.error("[connectivity] Disconnect failed:", e);
-          }
-        } else if (online && action === "reconnect") {
-          console.warn("[connectivity] Adapter back online — reconnecting VPN");
-          setError(i18n.t("messages.network_restored_reconnecting"));
-          const savedPath = localStorage.getItem("tt_config_path");
-          const savedLevel = localStorage.getItem("tt_log_level") || "info";
-          if (savedPath) {
-            try {
-              setStatus("connecting");
-              await invoke("vpn_connect", { configPath: savedPath, logLevel: savedLevel });
-              setError(null);
-            } catch (e) {
-              console.error("[connectivity] Reconnect failed:", e);
-              setError(i18n.t("errors.reconnection_failed", { error: String(e) }));
-              setStatus("error");
-            }
-          }
-        } else if (!online && action === "give_up") {
-          setError(i18n.t("errors.network_recovery_timeout"));
-          setStatus("disconnected");
-        }
-      },
-    );
-    return () => { unlistenInternet.then((f) => f()); };
-  }, [i18n]);
-
-  // ─── VPN Actions ───
-  const handleConnect = useCallback(async () => {
-    if (!config.configPath) {
-      setError(i18n.t("messages.config_required"));
-      setStatus("error");
-      return;
-    }
-    try {
-      setError(null);
-      setStatus("connecting");
-      await invoke("vpn_connect", {
+    if (autoConnectDone.current) return;
+    if (localStorage.getItem("tt_auto_connect") !== "true") return;
+    if (!config.configPath) return;
+    if (status !== "disconnected") return;
+    autoConnectDone.current = true;
+    const timer = setTimeout(() => {
+      invoke("vpn_connect", {
         configPath: config.configPath,
         logLevel: config.logLevel,
+      }).catch((e) => {
+        setError(formatError(e));
+        setStatus("error");
       });
-    } catch (e) {
-      setError(String(e));
-      setStatus("error");
-    }
-  }, [config, i18n]);
+      setStatus("connecting");
+    }, 1500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.configPath]);
 
-  const handleDisconnect = useCallback(async () => {
-    try {
-      setStatus("disconnecting");
-      await invoke("vpn_disconnect");
-    } catch (e) {
-      setError(String(e));
-    }
-  }, []);
-
-  // ─── Proper async reconnect (no setTimeout hack) ───
-  const reconnectResolve = useRef<(() => void) | null>(null);
-
-  // Listen for disconnect confirmation to complete reconnect
-  useEffect(() => {
-    const unlisten = listen<{ status: VpnStatus }>("vpn-status", (event) => {
-      if (event.payload.status === "disconnected" && reconnectResolve.current) {
-        const resolve = reconnectResolve.current;
-        reconnectResolve.current = null;
-        resolve();
-      }
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, []);
-
-  const handleReconnect = useCallback(async () => {
-    if (status !== "connected" && status !== "connecting") return;
-
-    // Disconnect and wait for actual disconnected status
-    await handleDisconnect();
-    await new Promise<void>((resolve) => {
-      reconnectResolve.current = resolve;
-      // Safety timeout: if disconnect event never comes, resolve after 5s
-      setTimeout(() => {
-        if (reconnectResolve.current === resolve) {
-          reconnectResolve.current = null;
-          resolve();
-        }
-      }, 5000);
-    });
-
-    // Small delay to let the sidecar process fully terminate
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Now reconnect
-    await handleConnect();
-  }, [status, handleDisconnect, handleConnect]);
+  // ─── VPN Actions ───
+  const { handleConnect, handleDisconnect, handleReconnect } = useVpnActions({
+    config,
+    status,
+    setStatus,
+    setError,
+    i18n,
+    reconnectResolve,
+  });
 
   // ─── Setup / Config ───
   const handleSetupComplete = useCallback((configPath: string) => {
     setConfig((prev) => ({ ...prev, configPath }));
     localStorage.setItem("tt_config_path", configPath);
-    setActivePage("settings");
+    localStorage.removeItem("tt_config_cleared"); // re-enable auto-detect for future
+
+    // Copy SSH credentials from wizard to Rust backend storage (not localStorage)
+    try {
+      const raw = localStorage.getItem("trusttunnel_wizard");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj.host && (obj.sshPassword || obj.sshKeyPath)) {
+          invoke("save_ssh_credentials", {
+            host: obj.host,
+            port: obj.port || "22",
+            user: obj.sshUser || "root",
+            password: obj.sshPassword || "", // Already obfuscated
+            keyPath: obj.sshKeyPath || null,
+          }).catch(() => {});
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Check if user wants to go to settings instead of control panel
+    const navigateTo = localStorage.getItem("tt_navigate_after_setup");
+    localStorage.removeItem("tt_navigate_after_setup");
+
+    if (navigateTo === "settings") {
+      setSettingsKey(k => k + 1);
+      setActivePage("settings");
+    } else {
+      setControlKey(k => k + 1);
+      setActivePage("control");
+    }
   }, []);
 
   const handleSwitchToSetup = useCallback(() => {
@@ -368,10 +243,21 @@ function App() {
   }, []);
 
   const [wizardKey, setWizardKey] = useState(0);
+  const [controlKey, setControlKey] = useState(0);
+  const [settingsKey, setSettingsKey] = useState(0);
+  const wizardResetRef = useRef<(() => void) | null>(null);
 
-  const handleClearConfig = useCallback(() => {
+  const handleClearConfig = useCallback(async () => {
+    // Disconnect VPN first if running
+    if (status === "connected" || status === "connecting") {
+      try {
+        setStatus("disconnecting");
+        await invoke("vpn_disconnect");
+      } catch { /* ignore */ }
+    }
     setConfig({ configPath: "", logLevel: "info" });
     localStorage.removeItem("tt_config_path");
+    localStorage.setItem("tt_config_cleared", "true"); // prevent auto-detect on restart
     try {
       const raw = localStorage.getItem("trusttunnel_wizard");
       const obj = raw ? JSON.parse(raw) : {};
@@ -383,7 +269,7 @@ function App() {
       localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
     } catch { /* ignore */ }
     setWizardKey(k => k + 1);
-  }, []);
+  }, [status]);
 
   // Reset scroll on page change
   useEffect(() => {
@@ -392,10 +278,42 @@ function App() {
     });
   }, [activePage]);
 
+  // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..8 = navigate, etc.)
+  useKeyboardShortcuts({
+    onToggleConnect: useCallback(() => {
+      if (status === "connected") handleDisconnect();
+      else if (status === "disconnected" && config.configPath) handleConnect();
+    }, [status, config.configPath, handleConnect, handleDisconnect]),
+    onNavigate: setActivePage as (page: string) => void,
+    onToggleTheme: toggleTheme,
+    onToggleLanguage: toggleLanguage,
+  });
+
   const hasConfig = !!config.configPath;
-  const showStatusPanel = hasConfig && activePage !== "server";
+  const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
+
+  const vpnContextValue = useMemo(() => ({
+    status,
+    connectedSince,
+    configPath: config.configPath,
+    vpnMode,
+    onConnect: handleConnect,
+    onDisconnect: handleDisconnect,
+    onReconnect: handleReconnect,
+  }), [status, connectedSince, config.configPath, vpnMode, handleConnect, handleDisconnect, handleReconnect]);
+
+  const statusPanelNode = showStatusPanel ? (
+    <StatusPanel
+      status={status}
+      error={error}
+      connectedSince={connectedSince}
+      onConnect={handleConnect}
+      onDisconnect={handleDisconnect}
+    />
+  ) : null;
 
   return (
+    <VpnProvider value={vpnContextValue}>
     <div
       className="h-screen flex"
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
@@ -403,99 +321,122 @@ function App() {
       {/* Sidebar */}
       <Sidebar
         activePage={activePage}
-        onPageChange={setActivePage}
+        onPageChange={(page) => {
+          if (page === "server" && wizardResetRef.current) {
+            wizardResetRef.current();
+          }
+          setActivePage(page);
+        }}
         hasConfig={hasConfig}
-        theme={theme}
-        onThemeToggle={toggleTheme}
-        language={i18n.language}
-        onLanguageToggle={toggleLanguage}
+        hasUpdate={updateInfo.available}
       />
 
       {/* Main content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Global StatusPanel — always visible (except server page without config) */}
-        {showStatusPanel && (
-          <div className="shrink-0 px-4 pt-3">
-            <StatusPanel
-              status={status}
-              error={error}
-              connectedSince={connectedSince}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-              configPath={config.configPath}
-            />
-          </div>
-        )}
-
         {/* Page content */}
-        <div className="flex-1 min-h-0 px-4">
-          {/* Server/Setup — show ServerPanel if configured, otherwise SetupWizard */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "server" ? "flex" : "none" }}>
-            {hasConfig && sshData.host && sshData.password ? (
-              <ServerPanel
-                host={sshData.host}
-                port={sshData.port}
-                sshUser={sshData.user}
-                sshPassword={sshData.password}
-                onSwitchToSetup={() => { handleClearConfig(); }}
-                onClearConfig={handleClearConfig}
-                onConfigExported={(path) => {
-                  setConfig(prev => ({ ...prev, configPath: path }));
-                  localStorage.setItem("tt_config_path", path);
-                }}
-              />
-            ) : (
-              <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} />
-            )}
+        <div className="flex-1 min-h-0">
+          {/* Installation (SetupWizard) — always shows wizard */}
+          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "server" ? "flex" : "none" }}>
+            <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
+          </div>
+
+          {/* Control Panel — SSH form or ServerPanel */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Control Panel">
+            <ControlPanelPage
+              key={controlKey}
+              onConfigExported={(path) => {
+                setConfig(prev => ({ ...prev, configPath: path }));
+                localStorage.setItem("tt_config_path", path);
+                setSettingsKey(k => k + 1);
+              }}
+              onSwitchToSetup={() => {
+                setWizardKey(k => k + 1);
+                setActivePage("server");
+              }}
+              onNavigateToSettings={() => {
+                setActivePage("settings");
+              }}
+            />
+            </PanelErrorBoundary>
           </div>
 
           {/* Settings */}
-          <div className="h-full flex flex-col gap-2 py-3 overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
-            <div className="flex-1 min-h-0">
-              <SettingsPanel
-                configPath={config.configPath}
-                onConfigChange={setConfig}
-                status={status}
-                onReconnect={handleReconnect}
-                onSwitchToSetup={handleSwitchToSetup}
-                onClearConfig={handleClearConfig}
-                onVpnModeChange={setVpnMode}
-              />
-            </div>
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Settings">
+            <SettingsPanel
+              key={settingsKey}
+              configPath={config.configPath}
+              onConfigChange={setConfig}
+              status={status}
+              onReconnect={handleReconnect}
+              onSwitchToSetup={handleSwitchToSetup}
+              onClearConfig={handleClearConfig}
+              onVpnModeChange={setVpnMode}
+              statusPanel={statusPanelNode}
+            />
+            </PanelErrorBoundary>
           </div>
 
-          {/* Dashboard (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
-            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-1">Dashboard</p>
-                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
-              </div>
-            </div>
+          {/* Dashboard */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Dashboard">
+            <DashboardPanel
+              status={status}
+              connectedSince={connectedSince}
+              configPath={config.configPath}
+              vpnMode={vpnMode}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onNavigateToControl={() => setActivePage("control")}
+            />
+            </PanelErrorBoundary>
           </div>
 
           {/* Routing */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
+            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Routing">
             <RoutingPanel
               configPath={config.configPath}
               status={status}
               vpnMode={vpnMode}
+              connectedSince={connectedSince}
+              vpnError={error}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
               onReconnect={handleReconnect}
+              onVpnModeChange={setVpnMode}
             />
+            </PanelErrorBoundary>
           </div>
 
-          {/* Logs (placeholder) */}
-          <div className="h-full flex flex-col py-3 overflow-hidden" style={{ display: activePage === "logs" ? "flex" : "none" }}>
-            <div className="flex-1 flex items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-1">Logs</p>
-                <p className="text-xs">{i18n.t("messages.coming_soon")}</p>
-              </div>
+          {/* Logs */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "logs" ? "flex" : "none" }}>
+            {statusPanelNode}
+            <div className="flex-1 overflow-hidden py-3 px-4">
+              <LogPanel
+                logs={vpnLogs}
+                onClear={() => setVpnLogs([])}
+                isConnected={status === "connected"}
+              />
             </div>
+          </div>
+
+          {/* App Settings */}
+          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
+            <AppSettingsPanel
+              theme={themeMode}
+              onThemeChange={handleThemeChange}
+              language={i18n.language}
+              onLanguageChange={handleLanguageChange}
+              hasConfig={!!config.configPath}
+              statusPanel={statusPanelNode}
+            />
           </div>
 
           {/* About */}
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "about" ? "flex" : "none" }}>
+            {statusPanelNode}
             <AboutPanel
               updateInfo={updateInfo}
               onCheckUpdates={() => checkForUpdates(false)}
@@ -505,6 +446,8 @@ function App() {
         </div>
       </div>
     </div>
+
+    </VpnProvider>
   );
 }
 

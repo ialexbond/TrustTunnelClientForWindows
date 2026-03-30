@@ -1,8 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
+#include <sstream>
 #include <thread>
+#include <unordered_set>
 
 #include "common/autofd.h"
 #include "common/logger.h"
@@ -114,6 +117,9 @@ private:
     std::optional<Logger::LogToFile> m_logtofile;
     VpnCallbacks m_callbacks;
     DomainFilter m_blocked_filter;
+    std::unordered_set<std::string> m_process_direct;
+    std::unordered_set<std::string> m_process_proxy;
+    std::unordered_set<std::string> m_process_block;
 #ifdef _WIN32
     HMODULE m_wintun;
 #endif
