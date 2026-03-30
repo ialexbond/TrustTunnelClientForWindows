@@ -6,8 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Input } from "../../shared/ui/Input";
-import { SnackBar } from "../../shared/ui/SnackBar";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { colors } from "../../shared/ui/colors";
 
 interface ImportConfigModalProps {
@@ -23,7 +22,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
   const [linkValue, setLinkValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   const resetState = () => {
     setLinkValue("");
@@ -212,7 +211,6 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
         </div>
       </div>
     </Modal>
-    <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </>
   );
 }

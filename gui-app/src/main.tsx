@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { SnackBarProvider } from "./shared/ui/SnackBarContext";
 import "./shared/styles/tokens.css";
 import "./index.css";
 import "./shared/i18n";
@@ -80,7 +81,9 @@ window.addEventListener("unhandledrejection", (e) => {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <SnackBarProvider>
+        <App />
+      </SnackBarProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );

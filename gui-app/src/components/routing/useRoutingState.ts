@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useAutoSave } from "../../shared/hooks/useAutoSave";
 import { formatError } from "../../shared/utils/formatError";
 
@@ -140,10 +140,6 @@ export interface UseRoutingStateReturn {
   isVpnActive: boolean;
   markDirty: () => void;
 
-  // Snackbar
-  successQueue: (string | { text: string; type?: "success" | "error" })[];
-  shiftSuccess: () => void;
-
   // Duplicate check
   isDuplicate: (action: RouteAction, value: string) => boolean;
 }
@@ -184,7 +180,7 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
   const [applying, setApplying] = useState(false);
   const [geodataDownloading, setGeodataDownloading] = useState(false);
 
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   const baselineRef = useRef<string>("");
 
@@ -592,8 +588,6 @@ export function useRoutingState({ configPath, status, onReconnect }: UseRoutingS
     handleSave,
     isVpnActive,
     markDirty: useCallback(() => setDirty(true), []),
-    successQueue,
-    shiftSuccess,
     isDuplicate,
   };
 }

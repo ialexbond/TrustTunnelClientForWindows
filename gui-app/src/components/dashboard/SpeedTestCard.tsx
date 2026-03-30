@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp, RefreshCw, Loader2, Gauge } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
-import { SnackBar } from "../../shared/ui/SnackBar";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import type { SpeedResult } from "./useDashboardState";
 
 interface SpeedTestCardProps {
@@ -18,7 +17,7 @@ interface SpeedTestCardProps {
 export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }: SpeedTestCardProps) {
   const { t } = useTranslation();
   const unit = t("units.mbps", "Mbps");
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   // Push error to snackbar when error prop changes
   useEffect(() => {
@@ -75,7 +74,6 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
           </div>
         </div>
       )}
-      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </Card>
   );
 }
