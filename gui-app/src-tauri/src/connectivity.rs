@@ -1,11 +1,17 @@
+use std::net::ToSocketAddrs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Emitter;
+use tokio::net::TcpStream;
 
 /// Periodically check internet connectivity while VPN is connected.
 /// Emits "internet-status" events with { online: bool } payload.
 /// When internet drops, waits for the primary network adapter to come back
 /// before signaling the frontend to reconnect.
+///
+/// Uses multiple check methods to avoid false positives:
+/// 1. TCP connect to well-known endpoints (doesn't depend on VPN routing rules)
+/// 2. HTTP captive portal endpoints as fallback
 pub fn start_monitor(
     app: tauri::AppHandle,
     is_connected: Arc<Mutex<bool>>,
@@ -13,11 +19,11 @@ pub fn start_monitor(
     tauri::async_runtime::spawn(async move {
         let mut consecutive_failures: u32 = 0;
         let mut was_online = true;
-        // Wait a bit before starting checks (let VPN establish)
-        tokio::time::sleep(Duration::from_secs(15)).await;
+        // Wait a bit before starting checks (let VPN fully establish)
+        tokio::time::sleep(Duration::from_secs(30)).await;
 
         loop {
-            tokio::time::sleep(Duration::from_secs(15)).await;
+            tokio::time::sleep(Duration::from_secs(20)).await;
 
             // Only check when VPN is connected
             let vpn_up = is_connected.lock().map(|g| *g).unwrap_or(false);
@@ -38,9 +44,10 @@ pub fn start_monitor(
                 was_online = true;
             } else {
                 consecutive_failures += 1;
-                eprintln!("[connectivity] Check failed ({consecutive_failures}/3)");
-                // Declare offline after 3 consecutive failures (~45 seconds)
-                if consecutive_failures >= 3 && was_online {
+                eprintln!("[connectivity] Check failed ({consecutive_failures}/4)");
+                // Declare offline after 4 consecutive failures (~80+ seconds)
+                // to avoid false positives from transient network hiccups
+                if consecutive_failures >= 4 && was_online {
                     eprintln!("[connectivity] Internet appears down — telling frontend to disconnect VPN");
                     was_online = false;
 
@@ -51,8 +58,6 @@ pub fn start_monitor(
                     })).ok();
 
                     // Now wait for the physical network adapter to come back
-                    // VPN is being disconnected by frontend, so is_connected will go false
-                    // We poll until basic connectivity (without VPN) is restored
                     eprintln!("[connectivity] Waiting for network adapter to recover...");
                     let mut adapter_wait = 0u32;
                     loop {
@@ -90,14 +95,40 @@ pub fn start_monitor(
     });
 }
 
-/// Check internet connectivity via lightweight HTTP endpoints.
+/// Check internet connectivity using multiple methods.
+/// Returns true if ANY method succeeds — prevents false "offline" from VPN routing.
 async fn check_connectivity() -> bool {
-    let endpoints = [
-        "https://clients3.google.com/generate_204",
-        "https://cp.cloudflare.com",
+    // Method 1: TCP connect to well-known reliable hosts on port 443.
+    // This works even when VPN routing doesn't allow HTTP to these hosts,
+    // because TCP SYN/ACK proves the network path is alive.
+    let tcp_targets = [
+        ("1.1.1.1", 443),       // Cloudflare DNS
+        ("8.8.8.8", 443),       // Google DNS
+        ("208.67.222.222", 443), // OpenDNS
     ];
 
-    for url in endpoints {
+    for (host, port) in tcp_targets {
+        if let Ok(addr) = format!("{host}:{port}").to_socket_addrs() {
+            for a in addr {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(4),
+                    TcpStream::connect(a),
+                ).await;
+                if let Ok(Ok(_)) = result {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Method 2: HTTP captive portal endpoints (fallback)
+    let http_endpoints = [
+        "https://clients3.google.com/generate_204",
+        "https://cp.cloudflare.com",
+        "http://www.msftconnecttest.com/connecttest.txt",
+    ];
+
+    for url in http_endpoints {
         let result = tokio::time::timeout(
             Duration::from_secs(5),
             reqwest::get(url),
@@ -116,9 +147,18 @@ async fn check_connectivity() -> bool {
 }
 
 /// Check if the physical network adapter has connectivity (without VPN).
-/// Uses a simple DNS resolution + TCP check to verify the adapter is up.
+/// Uses a simple TCP connect + HTTP check to verify the adapter is up.
 async fn check_adapter_online() -> bool {
-    // After VPN disconnect, try to reach a simple endpoint over plain internet
+    // Quick TCP check first
+    let tcp_result = tokio::time::timeout(
+        Duration::from_secs(3),
+        TcpStream::connect("1.1.1.1:443"),
+    ).await;
+    if let Ok(Ok(_)) = tcp_result {
+        return true;
+    }
+
+    // Fallback: HTTP captive portal
     let result = tokio::time::timeout(
         Duration::from_secs(5),
         reqwest::get("http://clients3.google.com/generate_204"),

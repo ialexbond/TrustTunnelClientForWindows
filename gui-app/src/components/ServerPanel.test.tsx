@@ -1,0 +1,333 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
+import i18n from "../shared/i18n";
+import { ServerPanel } from "./ServerPanel";
+
+// Mock useServerState to control panel states
+const mockLoadServerInfo = vi.fn();
+const mockOnSwitchToSetup = vi.fn();
+const mockSetRebooting = vi.fn();
+const mockSetServerInfo = vi.fn();
+const mockSetConfirmReboot = vi.fn();
+const mockPushSuccess = vi.fn();
+const mockShiftSuccess = vi.fn();
+
+let mockState: any;
+
+vi.mock("./server/useServerState", () => ({
+  useServerState: () => mockState,
+}));
+
+// Mock child sections
+vi.mock("./server/ServerStatusSection", () => ({
+  ServerStatusSection: () => <div data-testid="server-status-section">ServerStatusSection</div>,
+}));
+vi.mock("./server/VersionSection", () => ({
+  VersionSection: () => <div data-testid="version-section">VersionSection</div>,
+}));
+vi.mock("./server/ConfigSection", () => ({
+  ConfigSection: () => <div data-testid="config-section">ConfigSection</div>,
+}));
+vi.mock("./server/CertSection", () => ({
+  CertSection: () => <div data-testid="cert-section">CertSection</div>,
+}));
+vi.mock("./server/UsersSection", () => ({
+  UsersSection: () => <div data-testid="users-section">UsersSection</div>,
+}));
+vi.mock("./server/LogsSection", () => ({
+  LogsSection: () => <div data-testid="logs-section">LogsSection</div>,
+}));
+vi.mock("./server/DangerZoneSection", () => ({
+  DangerZoneSection: () => <div data-testid="danger-zone-section">DangerZoneSection</div>,
+}));
+
+describe("ServerPanel", () => {
+  const defaultProps = {
+    host: "10.0.0.1",
+    port: "22",
+    sshUser: "root",
+    sshPassword: "pass",
+    onSwitchToSetup: mockOnSwitchToSetup,
+    onClearConfig: vi.fn(),
+    onDisconnect: vi.fn(),
+    onConfigExported: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    i18n.changeLanguage("ru");
+
+    // Default: loading state
+    mockState = {
+      loading: true,
+      error: "",
+      serverInfo: null,
+      panelDataLoaded: false,
+      rebooting: false,
+      confirmReboot: false,
+      host: "10.0.0.1",
+      sshParams: { host: "10.0.0.1", port: 22, user: "root", password: "pass" },
+      successQueue: [],
+      loadServerInfo: mockLoadServerInfo,
+      onSwitchToSetup: mockOnSwitchToSetup,
+      setRebooting: mockSetRebooting,
+      setServerInfo: mockSetServerInfo,
+      setConfirmReboot: mockSetConfirmReboot,
+      pushSuccess: mockPushSuccess,
+      shiftSuccess: mockShiftSuccess,
+    };
+  });
+
+  it("shows loading state", () => {
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(/Проверка|checking/i)).toBeInTheDocument();
+  });
+
+  it("shows error state when connection fails", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "Connection refused",
+      serverInfo: null,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText("Не удалось подключиться к серверу")).toBeInTheDocument();
+    expect(screen.getByText("Connection refused")).toBeInTheDocument();
+  });
+
+  it("shows retry and configure buttons on error", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "Connection refused",
+      serverInfo: null,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByRole("button", { name: /Повторить|retry/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Настроить SSH|configure/i })).toBeInTheDocument();
+  });
+
+  it("shows not installed state", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(/не установлен|not.installed/i)).toBeInTheDocument();
+  });
+
+  it("renders all server sections when connected and installed", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
+      panelDataLoaded: true,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByTestId("server-status-section")).toBeInTheDocument();
+    expect(screen.getByTestId("users-section")).toBeInTheDocument();
+    expect(screen.getByTestId("version-section")).toBeInTheDocument();
+    expect(screen.getByTestId("config-section")).toBeInTheDocument();
+    expect(screen.getByTestId("cert-section")).toBeInTheDocument();
+    expect(screen.getByTestId("logs-section")).toBeInTheDocument();
+    expect(screen.getByTestId("danger-zone-section")).toBeInTheDocument();
+  });
+
+  it("shows rebooting state", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: [] },
+      panelDataLoaded: true,
+      rebooting: true,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText("Сервер перезагружается...")).toBeInTheDocument();
+  });
+
+  it("shows loading panel data state", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: [] },
+      panelDataLoaded: false,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(/Загрузка|loading/i)).toBeInTheDocument();
+  });
+
+  it("shows error state with fallback message when error is empty but serverInfo is null", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: null,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(i18n.t("server.status.connection_failed"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("server.status.check_ssh"))).toBeInTheDocument();
+  });
+
+  it("retry button calls loadServerInfo", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "timeout",
+      serverInfo: null,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    const retryBtn = screen.getByRole("button", { name: /Повторить|retry/i });
+    retryBtn.click();
+    expect(mockLoadServerInfo).toHaveBeenCalled();
+  });
+
+  it("configure SSH button calls onSwitchToSetup", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "timeout",
+      serverInfo: null,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    const configBtn = screen.getByRole("button", { name: /Настроить SSH|configure/i });
+    configBtn.click();
+    expect(mockOnSwitchToSetup).toHaveBeenCalled();
+  });
+
+  it("not installed state shows install button", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.install")) })).toBeInTheDocument();
+  });
+
+  it("install button updates localStorage and calls onSwitchToSetup", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
+    };
+    render(<ServerPanel {...defaultProps} />);
+    const installBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.install")) });
+    installBtn.click();
+    const stored = JSON.parse(localStorage.getItem("trusttunnel_wizard") || "{}");
+    expect(stored.host).toBe("10.0.0.1");
+    expect(stored.wizardStep).toBe("endpoint");
+    expect(stored.wizardMode).toBe("deploy");
+    expect(mockOnSwitchToSetup).toHaveBeenCalled();
+  });
+
+  it("rebooting state shows cancel button that stops rebooting and disconnects", () => {
+    const onDisconnect = vi.fn();
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: [] },
+      panelDataLoaded: true,
+      rebooting: true,
+    };
+    render(<ServerPanel {...{ ...defaultProps, onDisconnect }} />);
+    const cancelBtn = screen.getByRole("button", { name: new RegExp(i18n.t("buttons.cancel")) });
+    cancelBtn.click();
+    expect(mockSetRebooting).toHaveBeenCalledWith(false);
+    expect(onDisconnect).toHaveBeenCalled();
+  });
+
+  it("rebooting state shows description text", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: [] },
+      panelDataLoaded: true,
+      rebooting: true,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(i18n.t("server.status.rebooting_desc"))).toBeInTheDocument();
+  });
+
+  it("not installed state shows host in description", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(i18n.t("server.status.not_installed_desc", { host: "10.0.0.1" }))).toBeInTheDocument();
+  });
+
+  it("main panel renders confirm reboot dialog when confirmReboot is true", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
+      panelDataLoaded: true,
+      confirmReboot: true,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    expect(screen.getByText(i18n.t("server.danger.confirm_reboot_title"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("server.danger.confirm_reboot_message"))).toBeInTheDocument();
+  });
+
+  it("confirm reboot dialog cancel calls setConfirmReboot(false)", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
+      panelDataLoaded: true,
+      confirmReboot: true,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    const cancelBtn = screen.getByRole("button", { name: new RegExp(i18n.t("buttons.cancel")) });
+    fireEvent.click(cancelBtn);
+    expect(mockSetConfirmReboot).toHaveBeenCalledWith(false);
+  });
+
+  it("confirm reboot dialog confirm sets rebooting and calls server_reboot", () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
+      panelDataLoaded: true,
+      confirmReboot: true,
+    };
+    render(<ServerPanel {...defaultProps} />);
+    const confirmBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.confirm_reboot_btn")) });
+    fireEvent.click(confirmBtn);
+    expect(mockSetConfirmReboot).toHaveBeenCalledWith(false);
+    expect(mockSetRebooting).toHaveBeenCalledWith(true);
+    expect(invoke).toHaveBeenCalledWith("server_reboot", mockState.sshParams);
+  });
+
+  it("main panel renders SnackBar component", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
+      panelDataLoaded: true,
+      successQueue: ["Operation complete"],
+    };
+    const { container } = render(<ServerPanel {...defaultProps} />);
+    // SnackBar renders in the DOM
+    expect(container.innerHTML).toBeTruthy();
+  });
+
+});

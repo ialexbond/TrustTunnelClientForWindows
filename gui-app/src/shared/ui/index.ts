@@ -7,3 +7,5 @@ export { Select } from "./Select";
 export { Badge } from "./Badge";
 export { ErrorBanner } from "./ErrorBanner";
 export { Tooltip } from "./Tooltip";
+export { Modal } from "./Modal";
+export { ConfirmDialog } from "./ConfirmDialog";
