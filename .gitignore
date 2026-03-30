@@ -25,6 +25,7 @@ build_log.txt
 build_*.bat
 build_*.ps1
 build_output.log
+gui-app/src-tauri/vcruntime*.dll
 
 # Claude Code local files
 .claude/
