@@ -45,7 +45,11 @@
       "wintun.dll"
     ],
     "windows": {
-      "allowDowngrades": true
+      "allowDowngrades": true,
+      "nsis": {
+        "languages": ["Russian", "English"],
+        "displayLanguageSelector": false
+      }
     }
   },
   "plugins": {
