@@ -251,28 +251,25 @@ pub fn migrate_legacy_exclusions(config_path: String) -> Result<RoutingRules, St
     Ok(rules)
 }
 
-/// Resolve all rules and generate config files for sidecar
-#[tauri::command]
-pub async fn resolve_and_apply(
-    config_path: String,
-    rules: RoutingRules,
-    state: tauri::State<'_, Arc<GeoDataState>>,
+/// Core logic: resolve all rules and generate config files for sidecar.
+/// Called both from the Tauri command and from vpn_connect before sidecar spawn.
+pub fn resolve_and_apply_inner(
+    config_path: &str,
+    rules: &RoutingRules,
+    state: &GeoDataState,
 ) -> Result<(), String> {
     eprintln!("[routing] Resolving rules and generating config files...");
 
-    // Save rules first
-    save_routing_rules(rules.clone())?;
-
     // Resolve direct entries
-    let direct_entries = resolve_entries(&rules.direct, &state)?;
+    let direct_entries = resolve_entries(&rules.direct, state)?;
     // Resolve proxy entries (these also go to exclusions in selective mode)
-    let proxy_entries = resolve_entries(&rules.proxy, &state)?;
+    let proxy_entries = resolve_entries(&rules.proxy, state)?;
     // Resolve blocked entries
-    let blocked_entries = resolve_entries(&rules.block, &state)?;
+    let blocked_entries = resolve_entries(&rules.block, state)?;
 
     // Read the vpn_mode chosen by the user in Settings (don't override it!)
     let vpn_mode = if !config_path.is_empty() {
-        std::fs::read_to_string(&config_path)
+        std::fs::read_to_string(config_path)
             .ok()
             .and_then(|c| c.parse::<DocumentMut>().ok())
             .and_then(|doc| doc.get("vpn_mode").and_then(|v| v.as_str()).map(String::from))
@@ -318,7 +315,7 @@ pub async fn resolve_and_apply(
     );
 
     // Process filter files
-    let (process_direct, process_proxy, process_block) = resolve_process_rules(&rules);
+    let (process_direct, process_proxy, process_block) = resolve_process_rules(rules);
     std::fs::write(process_direct_file_path(), process_direct.join("\n"))
         .map_err(|e| format!("Failed to write process_direct.txt: {e}"))?;
     std::fs::write(process_proxy_file_path(), process_proxy.join("\n"))
@@ -342,12 +339,25 @@ pub async fn resolve_and_apply(
 
     // Update TOML config — preserve vpn_mode from Settings, write file paths
     if !config_path.is_empty() {
-        update_toml_config(&config_path, &vpn_mode, &exclusions_for_toml, &blocked_entries)?;
+        update_toml_config(config_path, &vpn_mode, &exclusions_for_toml, &blocked_entries)?;
     }
 
     // Blocking is handled at VPN core DNS level (dns_handler.cpp) — no hosts file needed
 
     Ok(())
+}
+
+/// Resolve all rules and generate config files for sidecar (Tauri command wrapper)
+#[tauri::command]
+pub async fn resolve_and_apply(
+    config_path: String,
+    rules: RoutingRules,
+    state: tauri::State<'_, Arc<GeoDataState>>,
+) -> Result<(), String> {
+    // Save rules first
+    save_routing_rules(rules.clone())?;
+
+    resolve_and_apply_inner(&config_path, &rules, state.as_ref())
 }
 
 /// Resolve a list of rule entries into flat domain/IP/CIDR strings
@@ -465,13 +475,14 @@ fn update_toml_config(
     doc["vpn_mode"] = value(vpn_mode);
 
     // Exclusions: empty inline array + file path (avoids duplication, C++ core reads both)
+    // Use forward slashes to avoid TOML escaping issues with backslashes on Windows
     doc["exclusions"] = value(Array::new());
-    doc["exclusions_file"] = value(exclusions_file_path().to_string_lossy().as_ref());
+    doc["exclusions_file"] = value(exclusions_file_path().to_string_lossy().replace('\\', "/"));
 
     // Blocked: file-based only (C++ core only supports blocked_file, not inline blocked)
     doc.remove("blocked");
     if !blocked.is_empty() {
-        doc["blocked_file"] = value(blocked_file_path().to_string_lossy().as_ref());
+        doc["blocked_file"] = value(blocked_file_path().to_string_lossy().replace('\\', "/"));
     } else {
         doc.remove("blocked_file");
     }
@@ -488,7 +499,7 @@ fn update_toml_config(
                 .map(|s| !s.trim().is_empty())
                 .unwrap_or(false);
         if has_content {
-            doc[*key] = value(path.to_string_lossy().as_ref());
+            doc[*key] = value(path.to_string_lossy().replace('\\', "/"));
         } else {
             doc.remove(*key);
         }
