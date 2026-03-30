@@ -30,7 +30,7 @@ interface RoutingPanelProps {
 
 function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect, onDisconnect, onReconnect, vpnMode = "general", onVpnModeChange }: RoutingPanelProps) {
   const { t } = useTranslation();
-  const state = useRoutingState({ configPath, status, onReconnect });
+  const state = useRoutingState({ configPath, status, vpnMode, onReconnect });
   const { toggles } = useFeatureToggles();
 
   // VPN mode change handler — writes to TOML config, marks dirty, notifies parent
@@ -39,7 +39,6 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
     try {
       await invoke("update_vpn_mode", { configPath, mode });
       onVpnModeChange?.(mode);
-      state.markDirty(); // Activate "Save & Reconnect" button
     } catch (e) {
       console.error("Failed to update vpn_mode:", e);
     }

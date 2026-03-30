@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
 import StatusPanel from "./components/StatusPanel";
@@ -122,6 +123,37 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ─── Watch config file for external deletion ───
+  useEffect(() => {
+    if (config.configPath) {
+      invoke("watch_config_file", { configPath: config.configPath }).catch(() => {});
+    }
+    return () => { invoke("unwatch_config_file").catch(() => {}); };
+  }, [config.configPath]);
+
+  useEffect(() => {
+    const unlisten = listen<{ exists: boolean; path: string }>("config-file-changed", (event) => {
+      const { exists, path } = event.payload;
+      if (!exists && path === config.configPath) {
+        // Config file was deleted externally
+        localStorage.removeItem("tt_config_path");
+        setConfig({ configPath: "", logLevel: "info" });
+        setActivePage("server");
+        setWizardKey(k => k + 1);
+        pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
+      } else if (exists && !config.configPath) {
+        // Config file appeared — reload it (dismisses error snackbar via success message)
+        setConfig({ configPath: path, logLevel: "info" });
+        localStorage.setItem("tt_config_path", path);
+        setSettingsKey(k => k + 1);
+        setActivePage("settings");
+        pushSuccess(i18n.t("messages.config_file_restored", "Config loaded"));
+      }
+    });
+    return () => { unlisten.then(f => f()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.configPath]);
 
   // ─── Persist state ───
   useEffect(() => { localStorage.setItem("tt_active_page", activePage); }, [activePage]);

@@ -70,13 +70,13 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
   }, []);
 
   const scheduleDismiss = useCallback(
-    (id: number) => {
+    (id: number, customDuration?: number) => {
       const old = timersRef.current.get(id);
       if (old) clearTimeout(old);
       const t = setTimeout(() => {
         timersRef.current.delete(id);
         dismiss(id);
-      }, duration);
+      }, customDuration ?? duration);
       timersRef.current.set(id, t);
     },
     [duration, dismiss],
@@ -118,10 +118,8 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
       );
 
       if (existing) {
-        // Reset timer for success; errors have no auto-dismiss
-        if (type === "success") {
-          scheduleDismiss(existing.id);
-        }
+        // Reset timer for duplicate
+        scheduleDismiss(existing.id, type === "error" ? 5000 : undefined);
         onShown();
         seenCount.current = i + 1;
         continue;
@@ -138,10 +136,8 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
         );
       }, 30);
 
-      // Auto-dismiss only for success
-      if (type === "success") {
-        scheduleDismiss(id);
-      }
+      // Auto-dismiss: success=3s, error=5s
+      scheduleDismiss(id, type === "error" ? 5000 : undefined);
 
       onShown();
     }

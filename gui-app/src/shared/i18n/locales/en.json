@@ -179,6 +179,8 @@
     "settings_saved": "Settings saved",
     "reconnecting": "Reconnecting...",
     "config_cleared": "Configuration cleared",
+    "config_file_deleted": "Config file was deleted",
+    "config_file_restored": "Config loaded",
     "coming_soon": "In development — will be available in future updates",
     "specify_config_path": "Specify config path...",
     "vpn_not_found": "VPN not found on server",
