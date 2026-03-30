@@ -179,6 +179,8 @@
     "settings_saved": "Настройки сохранены",
     "reconnecting": "Переподключение...",
     "config_cleared": "Конфигурация очищена",
+    "config_file_deleted": "Конфиг-файл был удалён",
+    "config_file_restored": "Конфиг-файл загружен",
     "coming_soon": "В разработке — будет доступно в будущих обновлениях",
     "specify_config_path": "Укажите путь к конфигу...",
     "vpn_not_found": "VPN не найден на сервере",

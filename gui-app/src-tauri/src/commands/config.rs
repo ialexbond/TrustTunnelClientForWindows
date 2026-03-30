@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Mutex;
+use tauri::Emitter;
+
+// ─── Config file watcher state ───────────────────────────────
+
+static CONFIG_WATCHER_STOP: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
 
 // ─── Typed config for validation and defaults ──────────────────
 
@@ -105,6 +111,94 @@ pub fn auto_detect_config() -> Option<String> {
         }
     }
     None
+}
+
+#[tauri::command]
+pub fn config_file_exists(config_path: String) -> bool {
+    std::path::Path::new(&config_path).is_file()
+}
+
+/// Start watching the config file's parent directory.
+/// Emits "config-file-changed" with `{ exists: bool, path: String }` on create/remove/modify.
+#[tauri::command]
+pub fn watch_config_file(app: tauri::AppHandle, config_path: String) {
+    use notify::{Watcher, RecursiveMode, Event, EventKind};
+
+    // Stop any existing watcher
+    if let Ok(mut guard) = CONFIG_WATCHER_STOP.lock() {
+        if let Some(tx) = guard.take() {
+            tx.send(()).ok();
+        }
+    }
+
+    let path = std::path::PathBuf::from(&config_path);
+    let dir = match path.parent() {
+        Some(d) => d.to_path_buf(),
+        None => return,
+    };
+    let file_name = match path.file_name() {
+        Some(n) => n.to_os_string(),
+        None => return,
+    };
+
+    let (tx_stop, rx_stop) = std::sync::mpsc::channel::<()>();
+    if let Ok(mut guard) = CONFIG_WATCHER_STOP.lock() {
+        *guard = Some(tx_stop);
+    }
+
+    std::thread::spawn(move || {
+        let app_handle = app.clone();
+        let watched_name = file_name.clone();
+        let watched_path = config_path.clone();
+
+        let mut watcher = match notify::recommended_watcher(
+            move |res: Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    match event.kind {
+                        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
+                            // Only react to our specific file
+                            let relevant = event.paths.iter().any(|p| {
+                                p.file_name().map_or(false, |n| n == watched_name)
+                            });
+                            if relevant {
+                                let exists = std::path::Path::new(&watched_path).is_file();
+                                app_handle.emit("config-file-changed", serde_json::json!({
+                                    "exists": exists,
+                                    "path": &watched_path,
+                                })).ok();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            },
+        ) {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        if watcher.watch(&dir, RecursiveMode::NonRecursive).is_err() {
+            return;
+        }
+
+        // Keep alive until stop signal
+        loop {
+            match rx_stop.recv_timeout(std::time::Duration::from_secs(60)) {
+                Ok(()) => break,         // Stop requested
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub fn unwatch_config_file() {
+    if let Ok(mut guard) = CONFIG_WATCHER_STOP.lock() {
+        if let Some(tx) = guard.take() {
+            tx.send(()).ok();
+        }
+    }
 }
 
 #[tauri::command]
