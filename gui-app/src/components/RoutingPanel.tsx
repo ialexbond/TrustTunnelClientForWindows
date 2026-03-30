@@ -181,6 +181,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         {/* Routing Blocks */}
         <RoutingBlockCard
           action="direct"
+          vpnMode={vpnMode}
           entries={state.rules.direct}
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
@@ -191,6 +192,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
 
         <RoutingBlockCard
           action="proxy"
+          vpnMode={vpnMode}
           entries={state.rules.proxy}
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}
@@ -203,6 +205,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         {toggles.blockRouting && (
         <RoutingBlockCard
           action="block"
+          vpnMode={vpnMode}
           entries={state.rules.block}
           geodataStatus={state.geodataStatus}
           geodataCategories={state.geodataCategories}

@@ -426,6 +426,7 @@
     "blockTitle": "Block",
     "blockDescription": "Traffic to these addresses will be blocked.",
 
+    "redundantHint": "This is already the default behavior in the current mode. Entries are saved and will apply when the mode is switched.",
     "noEntries": "No entries",
     "addRulePlaceholder": "domain.com, IP, geoip:RU, geosite:category...",
     "duplicateEntry": "This entry already exists",
