@@ -8,6 +8,7 @@ import type { RuleEntry, RouteAction, GeoDataStatus, GeoDataIndex } from "./useR
 
 interface RoutingBlockCardProps {
   action: RouteAction;
+  vpnMode?: string;
   entries: RuleEntry[];
   geodataStatus: GeoDataStatus;
   geodataCategories: GeoDataIndex;
@@ -51,6 +52,7 @@ const actionConfig: Record<
 
 export function RoutingBlockCard({
   action,
+  vpnMode,
   entries,
   geodataStatus,
   geodataCategories,
@@ -60,6 +62,12 @@ export function RoutingBlockCard({
 }: RoutingBlockCardProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
+
+  // In "general" mode (all through VPN) the "proxy" block is redundant.
+  // In "selective" mode (all direct) the "direct" block is redundant.
+  const isRedundant =
+    (action === "proxy" && vpnMode === "general") ||
+    (action === "direct" && vpnMode === "selective");
   const config = actionConfig[action];
   const Icon = config.icon;
 
@@ -104,6 +112,19 @@ export function RoutingBlockCard({
           >
             {t(config.descriptionKey)}
           </p>
+
+          {/* Redundant mode hint */}
+          {isRedundant && (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1.5 mb-2 rounded text-[10px]"
+              style={{
+                backgroundColor: "var(--color-bg-hover)",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              <span>{t("routing.redundantHint")}</span>
+            </div>
+          )}
 
           {/* Entries list */}
           {entries.length > 0 ? (

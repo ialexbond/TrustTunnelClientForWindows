@@ -426,6 +426,7 @@
     "blockTitle": "Заблокировать",
     "blockDescription": "Трафик к этим адресам будет заблокирован.",
 
+    "redundantHint": "Это уже поведение по умолчанию в текущем режиме. Записи сохраняются и применятся при смене режима.",
     "noEntries": "Нет записей",
     "addRulePlaceholder": "domain.com, IP, geoip:RU, geosite:category...",
     "duplicateEntry": "Такая запись уже существует",
