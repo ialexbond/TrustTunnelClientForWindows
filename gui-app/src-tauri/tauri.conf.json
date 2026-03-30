@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "TrustTunnel",
+  "productName": "TrustTunnel Client Pro",
   "version": "2.0.0",
   "identifier": "com.trusttunnel.gui",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "TrustTunnel Client for Windows v2.0.0",
+        "title": "TrustTunnel Client for Windows Pro v2.0.0",
         "width": 1020,
         "height": 640,
         "minWidth": 768,
