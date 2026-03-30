@@ -9,9 +9,8 @@ import {
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Button } from "../../shared/ui/Button";
 import { IconButton } from "../../shared/ui/IconButton";
-import { SnackBar } from "../../shared/ui/SnackBar";
 import { colors } from "../../shared/ui/colors";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { UserQRModal } from "./UserQRModal";
 import { AddUserForm } from "./AddUserForm";
 import { StepBar } from "./StepBar";
@@ -374,7 +373,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
 export function FoundStep(w: WizardState) {
   const { t } = useTranslation();
   const isInstalled = w.serverInfo?.installed;
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   return (
     <>
@@ -395,7 +394,6 @@ export function FoundStep(w: WizardState) {
           )}
         </div>
       </div>
-      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </>
   );
 }

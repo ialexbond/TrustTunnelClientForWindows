@@ -15,8 +15,7 @@ import {
 } from "lucide-react";
 import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
-import { useSuccessQueue } from "../shared/hooks/useSuccessQueue";
-import { SnackBar } from "../shared/ui/SnackBar";
+import { useSnackBar } from "../shared/ui/SnackBarContext";
 import { colors } from "../shared/ui/colors";
 import { formatError } from "../shared/utils/formatError";
 
@@ -36,7 +35,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   const { t } = useTranslation();
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   useEffect(() => {
     const unlisten = listen<UpdateProgressPayload>("update-progress", (event) => {
@@ -224,7 +223,6 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           </span>
         </div>
       </div>
-      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </div>
   );
 }

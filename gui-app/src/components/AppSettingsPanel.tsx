@@ -1,9 +1,9 @@
-import { type ReactNode, useState, useCallback } from "react";
+import { type ReactNode, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { GeneralSection } from "./settings/GeneralSection";
 import { AppearanceSection, type ThemeMode } from "./settings/AppearanceSection";
 import { ExperimentalSection } from "./settings/ExperimentalSection";
-import { SnackBar } from "../shared/ui/SnackBar";
+import { useSnackBar } from "../shared/ui/SnackBarContext";
 
 interface Props {
   theme: ThemeMode;
@@ -23,15 +23,11 @@ export default function AppSettingsPanel({
   statusPanel,
 }: Props) {
   const { t } = useTranslation();
-  const [snackMessages, setSnackMessages] = useState<string[]>([]);
+  const pushSnack = useSnackBar();
 
   const showSaved = useCallback(() => {
-    setSnackMessages((prev) => [...prev, t("messages.settings_saved")]);
-  }, [t]);
-
-  const shiftSnack = useCallback(() => {
-    setSnackMessages((prev) => prev.slice(1));
-  }, []);
+    pushSnack(t("messages.settings_saved"));
+  }, [t, pushSnack]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -46,7 +42,6 @@ export default function AppSettingsPanel({
         />
         <ExperimentalSection />
       </div>
-      <SnackBar messages={snackMessages} onShown={shiftSnack} duration={1500} />
     </div>
   );
 }

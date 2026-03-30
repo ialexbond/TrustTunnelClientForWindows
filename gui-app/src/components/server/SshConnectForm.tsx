@@ -7,8 +7,7 @@ import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
 import { translateSshError } from "../../shared/utils/translateSshError";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
-import { SnackBar } from "../../shared/ui/SnackBar";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { colors } from "../../shared/ui/colors";
 import { formatError } from "../../shared/utils/formatError";
 
@@ -39,7 +38,7 @@ export function SshConnectForm({ onConnect }: Props) {
   const [keyPath, setKeyPath] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("password");
   const [connecting, setConnecting] = useState(false);
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   const handleSelectKey = async () => {
     try {
@@ -240,7 +239,6 @@ export function SshConnectForm({ onConnect }: Props) {
           </div>
         </div>
       </div>
-      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </div>
   );
 }

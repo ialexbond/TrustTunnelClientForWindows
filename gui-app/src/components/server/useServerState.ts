@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { formatError } from "../../shared/utils/formatError";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -43,14 +44,7 @@ export function useServerState(props: ServerPanelProps) {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<ActionResult>(null);
-  const [successQueue, setSuccessQueue] = useState<(string | { text: string; type?: "success" | "error" })[]>([]);
-
-  const pushSuccess = useCallback((msg: string, type: "success" | "error" = "success") => {
-    setSuccessQueue(prev => [...prev, { text: msg, type }]);
-  }, []);
-  const shiftSuccess = useCallback(() => {
-    setSuccessQueue(prev => prev.slice(1));
-  }, []);
+  const pushSuccess = useSnackBar();
 
   // ─── State: Users ───
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
@@ -177,6 +171,14 @@ export function useServerState(props: ServerPanelProps) {
       .catch(() => {});
   }, []);
 
+  // Once server info loads, switch selection to current installed version
+  useEffect(() => {
+    if (!serverInfo?.version || availableVersions.length === 0) return;
+    const currentV = serverInfo.version.replace(/^v/, "");
+    const match = availableVersions.find(v => v.replace(/^v/, "") === currentV);
+    if (match) setSelectedVersion(match);
+  }, [serverInfo?.version, availableVersions]);
+
   // ─── Optimistic user state updates ───
   const addUserToState = useCallback((username: string) => {
     setServerInfo(prev => prev ? { ...prev, users: [...prev.users, username] } : prev);
@@ -203,9 +205,7 @@ export function useServerState(props: ServerPanelProps) {
     actionLoading,
     actionResult,
     setActionResult,
-    successQueue,
     pushSuccess,
-    shiftSuccess,
 
     // Users
     selectedUser,

@@ -12,7 +12,6 @@ import {
 import { Button } from "../shared/ui/Button";
 import { colors } from "../shared/ui/colors";
 import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
-import { SnackBar } from "../shared/ui/SnackBar";
 import { useServerState } from "./server/useServerState";
 import { ServerStatusSection } from "./server/ServerStatusSection";
 import { VersionSection } from "./server/VersionSection";
@@ -215,7 +214,6 @@ export function ServerPanel(props: ServerPanelProps) {
             </Button>
           </div>
         </div>
-        <SnackBar messages={state.successQueue} onShown={state.shiftSuccess} duration={2500} />
       </>
     );
   }
@@ -249,12 +247,6 @@ export function ServerPanel(props: ServerPanelProps) {
           />
       </div>
 
-      {/* Success snackbar stack — bottom center, auto-dismiss */}
-      <SnackBar
-        messages={state.successQueue}
-        onShown={state.shiftSuccess}
-        duration={2500}
-      />
     </>
   );
 }

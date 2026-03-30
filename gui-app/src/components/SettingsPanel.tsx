@@ -3,7 +3,6 @@ import { Save } from "lucide-react";
 import type { VpnConfig, VpnStatus } from "../shared/types";
 import { Button } from "../shared/ui/Button";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
-import { SnackBar } from "../shared/ui/SnackBar";
 import { useSettingsState } from "./settings/useSettingsState";
 import { ConnectionSection } from "./settings/ConnectionSection";
 import { TunnelSection } from "./settings/TunnelSection";
@@ -71,12 +70,6 @@ function SettingsPanel(props: SettingsPanelProps) {
         </div>
       )}
 
-      {/* SnackBar */}
-      <SnackBar
-        messages={state.successQueue}
-        onShown={state.shiftSuccess}
-        duration={2500}
-      />
     </div>
   );
 }
