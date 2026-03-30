@@ -9,7 +9,6 @@ import type { VpnStatus } from "../shared/types";
 import { Card } from "../shared/ui/Card";
 import { Button } from "../shared/ui/Button";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
-import { SnackBar } from "../shared/ui/SnackBar";
 import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
@@ -230,12 +229,6 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         )}
       </div>
 
-      {/* SnackBar */}
-      <SnackBar
-        messages={state.successQueue}
-        onShown={state.shiftSuccess}
-        duration={2500}
-      />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { VpnConfig, VpnStatus } from "../../shared/types";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useAutoSave } from "../../shared/hooks/useAutoSave";
 import { formatError } from "../../shared/utils/formatError";
 
@@ -62,7 +62,6 @@ export interface SettingsState {
   localPath: string;
   dirty: boolean;
   status: VpnStatus;
-  successQueue: (string | { text: string; type?: "success" | "error" })[];
 
   setLocalPath: (path: string) => void;
   setError: (msg: string) => void;
@@ -70,8 +69,7 @@ export interface SettingsState {
   handleSave: (reconnect?: boolean) => Promise<void>;
   browseConfig: () => Promise<void>;
   clearConfig: () => void;
-  pushSuccess: (msg: string) => void;
-  shiftSuccess: () => void;
+  pushSuccess: (msg: string, type?: "success" | "error") => void;
   onVpnModeChange?: (mode: string) => void;
 }
 
@@ -97,8 +95,8 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   const [localPath, setLocalPath] = useState(configPath);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // ─── SnackBar queue ───
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  // ─── SnackBar (global) ───
+  const pushSuccess = useSnackBar();
 
   // ─── Dirty tracking ───
   // Normalize config for comparison: strip empty strings from arrays (e.g. dns_upstreams)
@@ -279,7 +277,6 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     localPath,
     dirty,
     status,
-    successQueue,
 
     setLocalPath,
     setError,
@@ -288,7 +285,6 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     browseConfig,
     clearConfig,
     pushSuccess,
-    shiftSuccess,
     onVpnModeChange,
   };
 }
