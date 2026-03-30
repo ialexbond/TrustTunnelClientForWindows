@@ -42,7 +42,9 @@
       "trusttunnel_client"
     ],
     "resources": [
-      "wintun.dll"
+      "wintun.dll",
+      "vcruntime140.dll",
+      "vcruntime140_1.dll"
     ],
     "windows": {
       "allowDowngrades": true,
