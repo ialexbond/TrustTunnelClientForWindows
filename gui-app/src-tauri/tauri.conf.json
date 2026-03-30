@@ -50,7 +50,11 @@
       "allowDowngrades": true,
       "nsis": {
         "languages": ["Russian", "English"],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "customLanguageFiles": {
+          "Russian": "nsis/Russian.nsh",
+          "English": "nsis/English.nsh"
+        }
       }
     }
   },
