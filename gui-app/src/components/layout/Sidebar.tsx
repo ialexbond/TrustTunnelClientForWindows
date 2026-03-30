@@ -101,12 +101,20 @@ export function Sidebar({
           <Shield className="w-5 h-5" style={{ color: "var(--color-accent-400)" }} />
         </div>
         {expanded && (
-          <span
-            className="text-sm font-bold tracking-wide truncate whitespace-nowrap"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            TrustTunnel
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="text-sm font-bold tracking-wide truncate whitespace-nowrap"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              TrustTunnel
+            </span>
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+              style={{ backgroundColor: colors.accentBg, color: "var(--color-accent-500)" }}
+            >
+              PRO
+            </span>
+          </div>
         )}
       </div>
 

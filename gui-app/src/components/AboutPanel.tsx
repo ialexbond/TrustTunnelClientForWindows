@@ -74,9 +74,17 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           >
             <Shield className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-wide mt-1" style={{ color: "var(--color-text-primary)" }}>
-            TrustTunnel
-          </h1>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-xl font-bold tracking-wide" style={{ color: "var(--color-text-primary)" }}>
+              TrustTunnel
+            </h1>
+            <span
+              className="text-[10px] font-bold px-2 py-0.5 rounded"
+              style={{ backgroundColor: colors.accentBg, color: "var(--color-accent-500)" }}
+            >
+              PRO
+            </span>
+          </div>
           <span
             className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
             style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
