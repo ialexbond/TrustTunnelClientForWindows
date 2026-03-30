@@ -569,7 +569,8 @@
       "latest_full": "Latest version",
       "install_version": "Install",
       "install_wip": "In development. Will be available in future updates.",
-      "current_label": "(current)"
+      "current_label": "(current)",
+      "update_badge": "Update available"
     },
     "users": {
       "title": "Users",
