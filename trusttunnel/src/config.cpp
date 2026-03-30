@@ -185,6 +185,7 @@ static std::optional<TrustTunnelConfig::TunListener> parse_tun_listener_config(c
 #endif
 
     TrustTunnelConfig::TunListener tun = {
+            .adapter_name = (*tun_config)["adapter_name"].value_or<std::string>({}),
             .mtu_size = (*tun_config)["mtu_size"].value<uint32_t>().value_or(DEFAULT_MTU),
             .bound_if = std::move(bound_if),
             .change_system_dns = (*tun_config)["change_system_dns"].value_or<bool>(true),
@@ -313,6 +314,31 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
             warnlog(g_logger, "Failed to open blocked_file: {}", *bf);
         }
     }
+
+    // Load process filter files (newline-separated process names)
+    auto load_file_content = [](const toml::table &cfg, const char *key) -> std::string {
+        if (auto path = cfg[key].value<std::string>(); path.has_value() && !path->empty()) {
+            if (FILE *f = std::fopen(path->c_str(), "r"); f != nullptr) {
+                std::fseek(f, 0, SEEK_END);
+                long sz = std::ftell(f);
+                std::fseek(f, 0, SEEK_SET);
+                std::string content;
+                if (sz > 0) {
+                    content.resize(static_cast<size_t>(sz), '\0');
+                    std::fread(content.data(), 1, static_cast<size_t>(sz), f);
+                }
+                std::fclose(f);
+                infolog(g_logger, "Loaded process filter from {}: {} ({} bytes)", key, *path, sz > 0 ? sz : 0);
+                return content;
+            } else {
+                warnlog(g_logger, "Failed to open {}: {}", key, *path);
+            }
+        }
+        return {};
+    };
+    result.process_direct = load_file_content(config, "process_direct_file");
+    result.process_proxy = load_file_content(config, "process_proxy_file");
+    result.process_block = load_file_content(config, "process_block_file");
 
     if (const auto *x = config["dns_upstreams"].as_array(); x != nullptr) {
         result.dns_upstreams.reserve(x->size());

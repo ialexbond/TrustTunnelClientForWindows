@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import "../../src/test/tauri-mock";
+import i18n from "../shared/i18n";
 import StatusPanel from "./StatusPanel";
-import type { VpnStatus } from "../App";
+import type { VpnStatus } from "../shared/types";
 
 describe("StatusPanel", () => {
   const defaultProps = {
@@ -11,17 +11,17 @@ describe("StatusPanel", () => {
     connectedSince: null,
     onConnect: vi.fn(),
     onDisconnect: vi.fn(),
-    configPath: "/test/config.toml",
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    i18n.changeLanguage("ru");
   });
 
   it("renders disconnected state with connect button", () => {
     render(<StatusPanel {...defaultProps} />);
     expect(screen.getByText("Отключен")).toBeInTheDocument();
-    expect(screen.getByText("Подключить")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Подключить/ })).toBeInTheDocument();
   });
 
   it("renders connected state with disconnect button", () => {
@@ -33,29 +33,31 @@ describe("StatusPanel", () => {
       />
     );
     expect(screen.getByText("Подключен")).toBeInTheDocument();
-    expect(screen.getByText("Отключить")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Отключить/ })).toBeInTheDocument();
   });
 
   it("renders connecting state with disabled button", () => {
     render(<StatusPanel {...defaultProps} status="connecting" />);
-    const btns = screen.getAllByText("Подключение...");
-    expect(btns.length).toBeGreaterThanOrEqual(1);
-    const btn = screen.getByRole("button", { name: "Подключение..." });
+    // Status label appears in both badge and button
+    const texts = screen.getAllByText("Подключение");
+    expect(texts.length).toBe(2);
+    const btn = screen.getByRole("button", { name: /Подключение/ });
     expect(btn).toBeDisabled();
   });
 
   it("renders disconnecting state with disabled button", () => {
     render(<StatusPanel {...defaultProps} status="disconnecting" />);
-    const texts = screen.getAllByText("Отключение...");
-    expect(texts.length).toBeGreaterThanOrEqual(1);
-    const btn = screen.getByRole("button", { name: "Отключение..." });
+    const texts = screen.getAllByText("Отключение");
+    expect(texts.length).toBe(2);
+    const btn = screen.getByRole("button", { name: /Отключение/ });
     expect(btn).toBeDisabled();
   });
 
   it("renders recovering state with disabled button", () => {
     render(<StatusPanel {...defaultProps} status="recovering" />);
-    expect(screen.getByText("Ожидание сети...")).toBeInTheDocument();
-    const btn = screen.getByRole("button", { name: "Переподключение..." });
+    const texts = screen.getAllByText("Восстановление");
+    expect(texts.length).toBe(2);
+    const btn = screen.getByRole("button", { name: /Восстановление/ });
     expect(btn).toBeDisabled();
   });
 
@@ -65,12 +67,12 @@ describe("StatusPanel", () => {
     );
     expect(screen.getByText("Ошибка")).toBeInTheDocument();
     expect(screen.getByText("Test error message")).toBeInTheDocument();
-    expect(screen.getByText("Подключить")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Подключить/ })).toBeInTheDocument();
   });
 
   it("calls onConnect when connect button clicked", () => {
     render(<StatusPanel {...defaultProps} />);
-    fireEvent.click(screen.getByText("Подключить"));
+    fireEvent.click(screen.getByRole("button", { name: /Подключить/ }));
     expect(defaultProps.onConnect).toHaveBeenCalledOnce();
   });
 
@@ -82,7 +84,7 @@ describe("StatusPanel", () => {
         connectedSince={new Date()}
       />
     );
-    fireEvent.click(screen.getByText("Отключить"));
+    fireEvent.click(screen.getByRole("button", { name: /Отключить/ }));
     expect(defaultProps.onDisconnect).toHaveBeenCalledOnce();
   });
 
@@ -94,7 +96,6 @@ describe("StatusPanel", () => {
         connectedSince={new Date(Date.now() - 3661000)} // 1h 1m 1s ago
       />
     );
-    // Uptime should be approximately 01:01:01
     expect(screen.getByText(/01:01:0/)).toBeInTheDocument();
   });
 

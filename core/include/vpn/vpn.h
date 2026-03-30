@@ -489,6 +489,13 @@ typedef struct {
      */
     ag::VpnStr exclusions;
     /**
+     * Space/newline-separated list of domains, IPs and CIDRs to block.
+     * DNS queries for blocked domains will receive NXDOMAIN responses.
+     * TCP/UDP connections to blocked IPs will be rejected.
+     * Format is the same as `exclusions`.
+     */
+    ag::VpnStr blocked;
+    /**
      * Path to directory where some temporary files (like connection buffers) will be stored.
      * If null, temporary files won't be used at all.
      */
