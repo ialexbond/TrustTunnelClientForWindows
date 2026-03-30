@@ -43,7 +43,7 @@ function SetupWizard({ onSetupComplete, resetToWelcomeRef }: SetupWizardProps) {
                   {step?.status === "ok" ? t('wizard.uninstalling.success') : t('wizard.uninstalling.title')}
                 </h2>
                 <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                  {step?.message || t('wizard.uninstalling.description')}
+                  {t('wizard.uninstalling.description')}
                 </p>
               </div>
             </div>
