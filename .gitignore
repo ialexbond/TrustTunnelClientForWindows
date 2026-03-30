@@ -22,6 +22,9 @@ webview_data/
 geodata/
 routing_rules.json
 build_log.txt
+build_*.bat
+build_*.ps1
+build_output.log
 
 # Claude Code local files
 .claude/
