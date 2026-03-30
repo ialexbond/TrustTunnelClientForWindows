@@ -6,76 +6,91 @@
 </picture>
 </p>
 
-<h2 align="center">TrustTunnel Client for Windows</h2>
+<h2 align="center">TrustTunnel Client for Windows v2.0.0</h2>
 
 <p align="center">
-Графический клиент для защищённого сетевого туннелирования на базе протокола TrustTunnel.<br>
-Автоматически разворачивает сервер на удалённой машине через SSH и подключается к нему.
+Графический VPN-клиент для протокола TrustTunnel.<br>
+Две редакции: <b>Pro</b> (управление сервером + VPN) и <b>Light</b> (только VPN).
 </p>
 
 <p align="center">
-  <a href="https://github.com/ialexbond/TrustTunnelClient/releases">Скачать</a>
+  <a href="https://github.com/ialexbond/TrustTunnelClientForWindows/releases">Скачать</a>
   · <a href="https://github.com/TrustTunnel/TrustTunnel">TrustTunnel Endpoint</a>
   · <a href="#быстрый-старт">Быстрый старт</a>
 </p>
 
 ---
 
+## Две редакции
+
+### TrustTunnel Pro
+
+Полноценный клиент для администраторов: развёртывание сервера через SSH,
+управление пользователями, дашборд, логи, расширенные настройки VPN.
+
+### TrustTunnel Light
+
+Упрощённый клиент для обычных пользователей: импорт конфига,
+подключение одной кнопкой, маршрутизация. Без серверных настроек.
+
+| Функция | Pro | Light |
+|---|:---:|:---:|
+| Подключение к VPN | + | + |
+| Импорт конфигурации (файл / ссылка) | + | + |
+| Маршрутизация (GeoIP, GeoSite, домены, IP) | + | + |
+| Тема (тёмная / светлая), язык (RU / EN) | + | + |
+| Автозапуск, автоподключение, трей | + | + |
+| Проверка обновлений и автообновление | + | + |
+| Управление сервером (SSH) | + | — |
+| Установка протокола на сервер | + | — |
+| Управление пользователями VPN | + | — |
+| Дашборд (пинг, статистика сервера) | + | — |
+| Просмотр логов | + | — |
+| Настройки VPN (протокол, MTU, Kill Switch, DNS) | + | — |
+| QR-код конфигурации | + | — |
+
+---
+
 ## Что такое TrustTunnel
 
-**TrustTunnel** — использует механизмы адаптивного сетевого взаимодействия,
-включая работу поверх стандартных транспортных протоколов (HTTP/2, QUIC),
-что обеспечивает стабильность соединения в различных сетевых условиях.
+**TrustTunnel** — протокол адаптивного сетевого взаимодействия, работающий
+поверх стандартных транспортных протоколов (HTTP/2, QUIC).
 
-Ключевые характеристики протокола:
-
-- Туннелирование TCP, UDP и ICMP трафика
-- Использование стандартных сетевых протоколов для обеспечения совместимости с различными сетевыми инфраструктурами
-- Поддержка системного туннеля (TUN) и SOCKS5-прокси
-- Split tunneling — раздельная маршрутизация трафика
-- Пользовательские DNS-серверы через туннель
-
-## Что делает этот клиент
-
-**TrustTunnel Client for Windows** — это графическое desktop-приложение,
-которое позволяет:
-
-1. **Автоматически развернуть** VIP-сервер TrustTunnel на удалённом Linux-сервере
-   через SSH (нужен только IP, логин и пароль)
-2. **Подключиться** к развёрнутому серверу одним нажатием кнопки
-3. **Управлять маршрутизацией** — раздельный доступ через туннель и напрямую,
-   импорт/экспорт списков доменов
-4. **Настраивать** параметры подключения — Kill Switch,
-   Post-Quantum криптография, MTU, протокол (HTTP/2 или HTTP/3)
-5. **Автоматически обновляться** через встроенный механизм
-
-Приложение работает в **портативном режиме** — не требует установки,
-все данные хранятся рядом с исполняемым файлом. Сворачивается в системный трей.
+-   Туннелирование TCP, UDP и ICMP трафика
+-   Поддержка системного туннеля (TUN) и SOCKS5-прокси
+-   Split tunneling — раздельная маршрутизация трафика
+-   Пользовательские DNS-серверы через туннель
+-   Post-Quantum криптография (X25519MLKEM768)
 
 ---
 
 ## Быстрый старт
 
-### Что нужно
+### Требования
 
-- **Windows 10/11** (x64)
-- **Удалённый Linux-сервер** с root-доступом по SSH (Ubuntu 22+, Debian 11+)
-  — например VPS от любого хостинг-провайдера
-- Минимум **1 ядро CPU** и **512 МБ RAM** (рекомендуется 1 ГБ)
-- **Домен**, направленный на IP сервера
+-   **Windows 10/11** (x64)
+-   Права администратора (для WinTUN-адаптера)
 
-### Использование
+### Pro — для администраторов
 
-0. Арендовать сервер, купить домен, подключиться к серверу через терминал и выполнить ```sudo apt update && apt upgrade -y``` (надеюсь, в будущих обновлениях сделаю всё очень "автоматическим")
-1. Скачайте архив `TrustTunnel-v*-portable-win64.zip`
-   из [Releases](https://github.com/ialexbond/TrustTunnelClient/releases) (Проект предоставляется для исследовательских и образовательных целей.
-Использование должно осуществляться в рамках применимого законодательства.)
-2. Распакуйте в любую папку
-3. Запустите `TrustTunnel.exe` (потребуются права администратора — WinTUN нуждается в них)
-4. В мастере настройки введите данные SSH-сервера (IP, порт, логин, пароль)
-5. Настройте параметры протокола (имя пользователя, пароль, тип сертификата и т.д.)
-6. Приложение автоматически установит TrustTunnel-сервер и создаст конфигурацию
-7. Перейдите на вкладку **Настройки** и нажмите **Подключить** — готово
+1.  Арендуйте Linux-сервер (Ubuntu 22+, Debian 11+), купите домен
+2.  Скачайте `TrustTunnel-Pro-v2.0.0-portable-win64.zip`
+    из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
+3.  Распакуйте и запустите `TrustTunnel.exe`
+4.  В мастере введите SSH-данные сервера (IP, порт, логин, пароль или SSH-ключ)
+5.  Приложение установит TrustTunnel-сервер и создаст конфигурацию
+6.  Нажмите **Подключить**
+
+### Light — для пользователей
+
+1.  Получите конфиг-файл (.toml) или ссылку (tt://) от администратора
+2.  Скачайте `TrustTunnel-Light-v2.0.0-portable-win64.zip`
+    из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
+3.  Распакуйте и запустите `TrustTunnel Light.exe`
+4.  Импортируйте конфиг (файл или ссылка)
+5.  Нажмите кнопку подключения
+
+> Также доступны установщики (.exe) для обеих редакций.
 
 ---
 
@@ -83,24 +98,21 @@
 
 ```text
 ┌──────────────────────────────────────────────────┐
-│  TrustTunnel.exe (Tauri v2 + React + Tailwind)   │
-│  └── GUI: настройка, подключение, маршруты, трей │
-│      │                                           │
-│      ├── SSH Deploy (Rust) ──► удалённый сервер  │
-│      │   установка endpoint через SSH            │
-│      │                                           │
-│      ├── Self-Update ──► GitHub Releases          │
-│      │                                           │
-│      └── Sidecar: trusttunnel_client.exe (C++)   │
-│          VPN-подключение через WinTUN             │
+│  GUI (Tauri v2 + React + TypeScript + Tailwind)  │
+│                                                  │
+│  Pro: sidebar, 8 панелей, SSH-деплой             │
+│  Light: bottom nav, 4 экрана, без SSH            │
+│                                                  │
+│  Shared: UI-компоненты, хуки, i18n, tokens.css   │
+│                                                  │
+│  Sidecar: trusttunnel_client.exe (C++)           │
+│  VPN-подключение через WinTUN                    │
 └──────────────────────────────────────────────────┘
 ```
 
-- **Frontend**: React + TypeScript + Tailwind CSS
-- **Backend**: Rust (Tauri v2) — управление sidecar-процессом,
-  SSH-деплой сервера, системный трей
-- **TUN-ядро**: C++ библиотеки TrustTunnel — сетевой стек,
-  туннелирование, WinTUN-адаптер
+-   **Frontend**: React + TypeScript + Tailwind CSS
+-   **Backend**: Rust (Tauri v2) — sidecar, SSH-деплой (Pro), системный трей
+-   **VPN Core**: C++ библиотеки TrustTunnel — WinTUN-адаптер, DNS, маршрутизация
 
 ---
 
@@ -108,71 +120,33 @@
 
 ### Требования
 
-- **Node.js** >= 18
-- **Rust** >= 1.75
-- **CMake** >= 3.24
-- **Visual Studio 2022** (C++ Build Tools)
-- **Python** >= 3.10 (для Conan)
+-   **Node.js** >= 18
+-   **Rust** >= 1.75
+-   **CMake** >= 3.24
+-   **Visual Studio 2022** (C++ Build Tools)
+-   **Python** >= 3.10 (для Conan)
 
-### Шаги
+### Сборка
 
 ```bash
-# 1. Клонировать репозиторий
-git clone https://github.com/ialexbond/TrustTunnelClient.git
-cd TrustTunnelClient
+# 1. Клонировать
+git clone https://github.com/ialexbond/TrustTunnelClientForWindows.git
+cd TrustTunnelClientForWindows
 
-# 2. Собрать C++ sidecar (из корня проекта)
-build_client.bat
+# 2. Собрать C++ sidecar
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build --target trusttunnel_client
 
-# 3. Скопировать бинарник в папку Tauri sidecar
-copy build\trusttunnel\Release\trusttunnel_client.exe ^
-     gui-app\src-tauri\binaries\trusttunnel_client-x86_64-pc-windows-msvc.exe
+# 3. Скопировать sidecar для Tauri
+copy build\trusttunnel\trusttunnel_client.exe ^
+     gui-app\src-tauri\trusttunnel_client-x86_64-pc-windows-msvc.exe
 
-# 4. Установить JS-зависимости и собрать GUI
-cd gui-app
-npm install
-npm run tauri build
+# 4. Собрать Pro
+cd gui-app && npm install && npx tauri build
+
+# 5. Собрать Light
+cd ..\gui-light && npm install && npx tauri build
 ```
-
-Готовый exe: `gui-app/src-tauri/target/release/trusttunnel.exe`
-
-### Создание портативного архива
-
-```powershell
-$rel = "gui-app\src-tauri\target\release"
-mkdir TrustTunnel-Portable
-Copy-Item "$rel\trusttunnel.exe"       "TrustTunnel-Portable\TrustTunnel.exe"
-Copy-Item "$rel\trusttunnel_client.exe" "TrustTunnel-Portable\"
-Copy-Item "$rel\wintun.dll"            "TrustTunnel-Portable\"
-Copy-Item "$rel\vcruntime140.dll"      "TrustTunnel-Portable\"
-Copy-Item "$rel\vcruntime140_1.dll"    "TrustTunnel-Portable\"
-Compress-Archive "TrustTunnel-Portable\*" "TrustTunnel-portable-win64.zip"
-```
-
----
-
-## Известные ограничения
-
-- **Только Windows** — GUI-клиент поддерживает только Windows и не планируется для других платформ.
-  Приложение использует WinTUN-адаптер, UAC и системный трей, специфичные для Windows.
-
-## Известные проблемы
-
-- **Потеря сетевого подключения при активном VPN** — через неопределённое время после подключения
-  (от 30 минут до нескольких часов) может полностью отключиться интернет из-за сброса основного
-  сетевого адаптера. Проблема **не связана с данным GUI-приложением** — она воспроизводится и в
-  оригинальном CLI-клиенте TrustTunnel, то есть находится на уровне исходного кода
-  [TrustTunnel Client](https://github.com/TrustTunnel/TrustTunnelClient).
-  В качестве обходного решения в приложении реализован механизм автоматического восстановления:
-  при отключении сетевого адаптера VPN-соединение разрывается, клиент ожидает восстановления
-  сети и затем автоматически переподключается.
-
----
-
-## Планы развития
-
-- [ ] Поддержка нескольких серверов / профилей
-- [ ] Split tunneling в GUI (выбор приложений/сайтов), использование geoip\geodat
 
 ---
 
@@ -183,18 +157,18 @@ Compress-Archive "TrustTunnel-Portable\*" "TrustTunnel-portable-win64.zip"
 | GUI Framework | [Tauri v2](https://v2.tauri.app) |
 | Frontend | React + TypeScript + Tailwind CSS |
 | Backend | Rust |
-| TUN Core | C++ (TrustTunnel Client Libraries) |
+| VPN Core | C++ (TrustTunnel Client Libraries) |
 | Tunnel Driver | [WinTUN](https://www.wintun.net) |
-| SSH Deploy | [russh](https://github.com/warp-tech/russh) |
+| SSH Deploy | [russh](https://github.com/warp-tech/russh) (Pro only) |
 
 ---
 
 ## Благодарности
 
-- [AdGuard](https://adguard.com) — за разработку протокола TrustTunnel
-  и открытие исходного кода клиентских библиотек
-- Клиентское приложение создано методом **вайб-кодинга** —
-  AI-ассистент писал код на основе описания задач на естественном языке
+-   [AdGuard](https://adguard.com) — за разработку протокола TrustTunnel
+    и открытие исходного кода клиентских библиотек
+-   Клиентское приложение создано методом **вайб-кодинга** —
+    AI-ассистент писал код на основе описания задач на естественном языке
 
 ---
 
@@ -206,7 +180,7 @@ Compress-Archive "TrustTunnel-Portable\*" "TrustTunnel-portable-win64.zip"
 
 ## Ссылки
 
-- [TrustTunnel Endpoint](https://github.com/TrustTunnel/TrustTunnel) —
-  серверная часть протокола
-- [TrustTunnel CLI Client](trusttunnel/README.md) —
-  справка по консольному клиенту (C++)
+-   [TrustTunnel Endpoint](https://github.com/TrustTunnel/TrustTunnel) —
+    серверная часть протокола
+-   [TrustTunnel CLI Client](trusttunnel/README.md) —
+    справка по консольному клиенту (C++)
