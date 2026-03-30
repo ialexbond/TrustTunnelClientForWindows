@@ -18,10 +18,9 @@ import { useKeyboardShortcuts } from "./shared/hooks/useKeyboardShortcuts";
 import { useTheme } from "./shared/hooks/useTheme";
 import { useLanguage } from "./shared/hooks/useLanguage";
 import { useVpnEvents } from "./shared/hooks/useVpnEvents";
-import { useSuccessQueue } from "./shared/hooks/useSuccessQueue";
+import { useSnackBar } from "./shared/ui/SnackBarContext";
 import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
-import { SnackBar } from "./shared/ui/SnackBar";
 import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 // Re-export types for backward compatibility
@@ -73,7 +72,7 @@ function App() {
 
   // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
   const reconnectResolve = useRef<(() => void) | null>(null);
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
 
   useVpnEvents({
     i18n,
@@ -415,7 +414,6 @@ function App() {
         </div>
       </div>
     </div>
-    <SnackBar messages={successQueue} onShown={shiftSuccess} />
 
     </VpnProvider>
   );

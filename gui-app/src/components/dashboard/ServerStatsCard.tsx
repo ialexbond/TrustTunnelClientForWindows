@@ -8,8 +8,7 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { formatBytes } from "../../shared/utils/uptime";
 import { deobfuscate } from "../../shared/utils/obfuscation";
-import { useSuccessQueue } from "../../shared/hooks/useSuccessQueue";
-import { SnackBar } from "../../shared/ui/SnackBar";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { formatError } from "../../shared/utils/formatError";
 
 interface SshCredentials {
@@ -101,7 +100,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
     } catch { return null; }
   });
   const [loading, setLoading] = useState(false);
-  const { successQueue, pushSuccess, shiftSuccess } = useSuccessQueue();
+  const pushSuccess = useSnackBar();
   const initialFetchDone = useRef(false);
 
   // Watch for SSH creds appearing/disappearing (not object identity)
@@ -203,7 +202,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
     );
   }
 
-  if (!stats) return <SnackBar messages={successQueue} onShown={shiftSuccess} />;
+  if (!stats) return null;
 
   const memPercent = stats.mem_total > 0 ? (stats.mem_used / stats.mem_total) * 100 : 0;
   const diskPercent = stats.disk_total > 0 ? (stats.disk_used / stats.disk_total) * 100 : 0;
@@ -276,7 +275,6 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
         </div>
 
       </div>
-      <SnackBar messages={successQueue} onShown={shiftSuccess} />
     </Card>
   );
 }
