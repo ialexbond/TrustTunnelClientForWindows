@@ -1,3 +1,6 @@
 third-party
 fastlane
 env
+node_modules
+target
+.claude
