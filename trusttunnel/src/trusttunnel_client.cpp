@@ -28,6 +28,10 @@
 #include "AppleSleepNotifier.h"
 #endif
 
+#ifdef _WIN32
+#include <filesystem>
+#endif
+
 #ifdef __linux__
 #include <net/if.h>
 #endif
@@ -46,6 +50,16 @@ static std::function<void(SocketProtectEvent *)> get_protect_socket_callback(con
 static std::function<void(VpnVerifyCertificateEvent *)> get_verify_certificate_callback();
 static std::function<void(VpnStateChangedEvent *)> get_state_changed_callback();
 static std::function<void(VpnConnectionInfoEvent *)> get_connection_info_callback();
+
+#ifdef _WIN32
+static int service_run(const cxxopts::ParseResult *cli_args);
+static int service_uninstall();
+static int service_install(const std::string &config_path);
+static void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wait_hint);
+static bool g_svc_running = false;
+#endif
+
+int run_client(const cxxopts::ParseResult &cli_args);
 
 static void stop_trusttunnel_client() {
     keep_running = false;
@@ -108,6 +122,13 @@ int main(int argc, char **argv) {
             ("c,config", "Config file name.", cxxopts::value<std::string>()->default_value(std::string(DEFAULT_CONFIG_FILE)))
             ("l,loglevel", "Logging level. Possible values: error, warn, info, debug, trace.", cxxopts::value<std::string>()->default_value("info"))
             ("h,help", "Print usage");
+#ifdef _WIN32
+    args.add_options()
+            ("service-install", "Install as Windows service", cxxopts::value<bool>()->default_value("false"))
+            ("service-uninstall", "Uninstall Windows service", cxxopts::value<bool>()->default_value("false"));
+    args.add_options("internal")
+            ("service-run", "Run as Windows service", cxxopts::value<bool>()->default_value("false"));
+#endif
     // clang-format on
 
     auto result = args.parse(argc, argv);
@@ -117,11 +138,32 @@ int main(int argc, char **argv) {
     }
 
     if (result.count("help")) {
-        std::cout << args.help() << '\n';
+        // `{""}` mean print only options from default options group
+        std::cout << args.help({""}) << '\n';
         return 1;
     }
 
-    toml::parse_result parse_result = toml::parse_file(result["config"].as<std::string>());
+#ifdef _WIN32
+    if (result.count("service-install") && result.count("service-uninstall")) {
+        errlog(g_logger, "--service-install and --service-uninstall are mutually exclusive");
+        return 1;
+    }
+    if (result.count("service-install")) {
+        return service_install(result["config"].as<std::string>());
+    }
+    if (result.count("service-uninstall")) {
+        return service_uninstall();
+    }
+    if (result["service-run"].as<bool>()) {
+        return service_run(&result);
+    }
+#endif
+
+    return run_client(result);
+}
+
+int run_client(const cxxopts::ParseResult &cli_args) {
+    toml::parse_result parse_result = toml::parse_file(cli_args["config"].as<std::string>());
     if (!parse_result) {
         errlog(g_logger, "Failed parsing configuration: {}", parse_result.error().description());
         return 1;
@@ -133,7 +175,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     auto &config = *config_res;
-    if (!TrustTunnelCliUtils::apply_cmd_args(config, result)) {
+    if (!TrustTunnelCliUtils::apply_cmd_args(config, cli_args)) {
         return 1;
     }
     ag::Logger::set_log_level(config.loglevel);
@@ -170,6 +212,12 @@ int main(int argc, char **argv) {
         errlog(g_logger, "{}", res->str());
         return 1;
     }
+
+#ifdef _WIN32
+    if (g_svc_running) {
+        report_service_status(SERVICE_RUNNING, NO_ERROR, 0);
+    }
+#endif
 
 #ifdef __APPLE__
     auto sleep_notifier = std::make_unique<AppleSleepNotifier>(
@@ -303,3 +351,270 @@ static std::function<void(VpnConnectionInfoEvent *)> get_connection_info_callbac
         dbglog(g_logger, "{}", log_message);
     };
 }
+
+#ifdef _WIN32
+
+static constexpr std::wstring_view SERVICE_NAME = L"TrustTunnelClient";
+static constexpr std::wstring_view SERVICE_DISPLAY_NAME = L"TrustTunnel VPN Client";
+
+using ScHandle = ag::UniquePtr<std::remove_pointer_t<SC_HANDLE>, &CloseServiceHandle>;
+
+static const ag::Logger g_svc_logger("WIN_SERVICE");
+
+static SERVICE_STATUS_HANDLE g_status_handle = nullptr;
+static SERVICE_STATUS g_service_status = {};
+static std::mutex g_service_status_mutex;
+// g_svc_cli_args is safe to dereference in service_main() because StartServiceCtrlDispatcherW
+// blocks until the service stops, and the ParseResult it points to lives in main().
+static const cxxopts::ParseResult *g_svc_cli_args = nullptr;
+
+static void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wait_hint) {
+    std::lock_guard lock(g_service_status_mutex);
+    static DWORD check_point = 1;
+
+    g_service_status.dwCurrentState = current_state;
+    g_service_status.dwWin32ExitCode = win32_exit_code;
+    g_service_status.dwWaitHint = wait_hint;
+
+    if (current_state == SERVICE_START_PENDING) {
+        g_service_status.dwControlsAccepted = 0;
+    } else {
+        g_service_status.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
+    }
+
+    if (current_state == SERVICE_RUNNING || current_state == SERVICE_STOPPED) {
+        g_service_status.dwCheckPoint = 0;
+    } else {
+        g_service_status.dwCheckPoint = check_point++;
+    }
+
+    SetServiceStatus(g_status_handle, &g_service_status);
+}
+
+static void WINAPI service_ctrl_handler(DWORD ctrl_code) {
+    switch (ctrl_code) {
+    case SERVICE_CONTROL_STOP:
+    case SERVICE_CONTROL_SHUTDOWN:
+        report_service_status(SERVICE_STOP_PENDING, NO_ERROR, 5000);
+        stop_trusttunnel_client();
+        break;
+    case SERVICE_CONTROL_INTERROGATE:
+        report_service_status(g_service_status.dwCurrentState, NO_ERROR, 0);
+        break;
+    default:
+        break;
+    }
+}
+
+static void WINAPI service_main(DWORD argc, LPWSTR *argv) {
+    (void) argc;
+    (void) argv;
+    g_status_handle = RegisterServiceCtrlHandlerW(SERVICE_NAME.data(), service_ctrl_handler);
+    if (g_status_handle == nullptr) {
+        return;
+    }
+
+    g_service_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+    g_service_status.dwServiceSpecificExitCode = 0;
+
+    report_service_status(SERVICE_START_PENDING, NO_ERROR, 10000);
+
+    g_svc_running = true;
+    int result = run_client(*g_svc_cli_args);
+    g_svc_running = false;
+
+    report_service_status(SERVICE_STOPPED, result == 0 ? NO_ERROR : ERROR_SERVICE_SPECIFIC_ERROR, 0);
+}
+
+static bool validate_config(const std::string &config_path) {
+    toml::parse_result parse_result = toml::parse_file(config_path);
+    if (!parse_result) {
+        errlog(g_svc_logger, "Failed parsing configuration: {}", parse_result.error().description());
+        return false;
+    }
+
+    std::optional config_res = TrustTunnelConfig::build_config(parse_result.table());
+    if (!config_res) {
+        errlog(g_svc_logger, "Failed to parse config");
+        return false;
+    }
+    return true;
+}
+
+static std::optional<std::wstring> get_exe_path() {
+    std::wstring buf(MAX_PATH, L'\0');
+    DWORD len = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (len == 0) {
+        errlog(g_svc_logger, "GetModuleFileNameW failed: error {}", GetLastError());
+        return std::nullopt;
+    }
+    while (len == buf.size()) {
+        buf.resize(buf.size() * 2);
+        len = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (len == 0) {
+            errlog(g_svc_logger, "GetModuleFileNameW failed: error {}", GetLastError());
+            return std::nullopt;
+        }
+    }
+    buf.resize(len);
+    return buf;
+}
+
+static void print_usage_manual() {
+    std::cout << "\nService 'TrustTunnelClient' installed successfully.\n\n"
+              << "The service is configured to start automatically on boot.\n\n"
+              << "To start/stop the service:\n"
+              << "  cmd.exe:\n"
+              << "    sc start TrustTunnelClient\n"
+              << "    sc stop TrustTunnelClient\n"
+              << "  PowerShell:\n"
+              << "    Start-Service TrustTunnelClient\n"
+              << "    Stop-Service TrustTunnelClient\n\n"
+              << "To query service status:\n"
+              << "  cmd.exe:\n"
+              << "    sc query TrustTunnelClient\n"
+              << "  PowerShell:\n"
+              << "    Get-Service TrustTunnelClient\n\n"
+              << "To disable auto-start:\n"
+              << "  cmd.exe:\n"
+              << "    sc config TrustTunnelClient start= demand\n"
+              << "  PowerShell:\n"
+              << "    Set-Service TrustTunnelClient -StartupType Manual\n";
+}
+
+static int service_install(const std::string &config_path) {
+    if (!validate_config(config_path)) {
+        return 1;
+    }
+
+    std::filesystem::path abs_config = std::filesystem::absolute(config_path);
+    auto exe_path = get_exe_path();
+    if (!exe_path) {
+        return 1;
+    }
+
+    std::wstring image_path = L"\"" + *exe_path + L"\" --service-run --config \"" + abs_config.wstring() + L"\"";
+
+    ScHandle scm{OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CREATE_SERVICE)};
+    if (!scm) {
+        DWORD err = GetLastError();
+        if (err == ERROR_ACCESS_DENIED) {
+            errlog(g_svc_logger, "Administrator privileges required to install the service");
+        } else {
+            errlog(g_svc_logger, "Failed to open Service Control Manager: error {}", err);
+        }
+        return 1;
+    }
+
+    ScHandle svc{CreateServiceW(scm.get(), SERVICE_NAME.data(), SERVICE_DISPLAY_NAME.data(), SERVICE_ALL_ACCESS,
+            SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, image_path.c_str(), nullptr, nullptr,
+            nullptr, nullptr, nullptr)};
+    if (!svc) {
+        DWORD err = GetLastError();
+        if (err == ERROR_SERVICE_EXISTS) {
+            errlog(g_svc_logger, "Service is already installed. Uninstall first to reinstall.");
+        } else if (err == ERROR_ACCESS_DENIED) {
+            errlog(g_svc_logger, "Administrator privileges required to install the service");
+        } else {
+            errlog(g_svc_logger, "Failed to create service: error {}", err);
+        }
+        return 1;
+    }
+
+    wchar_t svc_description[] = L"TrustTunnel VPN client service";
+    SERVICE_DESCRIPTIONW desc = {};
+    desc.lpDescription = svc_description;
+    ChangeServiceConfig2W(svc.get(), SERVICE_CONFIG_DESCRIPTION, &desc);
+
+    if (!StartServiceW(svc.get(), 0, nullptr)) {
+        DWORD err = GetLastError();
+        warnlog(g_svc_logger, "Service installed but failed to start: error {}", err);
+    }
+
+    print_usage_manual();
+    return 0;
+}
+
+static int service_uninstall() {
+    ScHandle scm{OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT)};
+    if (!scm) {
+        DWORD err = GetLastError();
+        if (err == ERROR_ACCESS_DENIED) {
+            errlog(g_svc_logger, "Administrator privileges required to uninstall the service");
+        } else {
+            errlog(g_svc_logger, "Failed to open Service Control Manager: error {}", err);
+        }
+        return 1;
+    }
+
+    ScHandle svc{
+            OpenServiceW(scm.get(), SERVICE_NAME.data(), STANDARD_RIGHTS_DELETE | SERVICE_STOP | SERVICE_QUERY_STATUS)};
+    if (!svc) {
+        DWORD err = GetLastError();
+        if (err == ERROR_SERVICE_DOES_NOT_EXIST) {
+            errlog(g_svc_logger, "Service is not installed");
+        } else if (err == ERROR_ACCESS_DENIED) {
+            errlog(g_svc_logger, "Administrator privileges required to uninstall the service");
+        } else {
+            errlog(g_svc_logger, "Failed to open service: error {}", err);
+        }
+        return 1;
+    }
+
+    SERVICE_STATUS status = {};
+    if (QueryServiceStatus(svc.get(), &status) && status.dwCurrentState != SERVICE_STOPPED) {
+        infolog(g_svc_logger, "Stopping running service...");
+        if (!ControlService(svc.get(), SERVICE_CONTROL_STOP, &status)) {
+            DWORD err = GetLastError();
+            if (err != ERROR_SERVICE_NOT_ACTIVE) {
+                warnlog(g_svc_logger, "Failed to send stop control to service: error {}", err);
+            }
+        }
+
+        constexpr int MAX_WAIT_MS = 10000;
+        constexpr int POLL_INTERVAL_MS = 500;
+        int waited_ms = 0;
+        while (waited_ms < MAX_WAIT_MS) {
+            Sleep(POLL_INTERVAL_MS);
+            waited_ms += POLL_INTERVAL_MS;
+            if (!QueryServiceStatus(svc.get(), &status)) {
+                break;
+            }
+            if (status.dwCurrentState == SERVICE_STOPPED) {
+                break;
+            }
+        }
+        if (status.dwCurrentState != SERVICE_STOPPED) {
+            warnlog(g_svc_logger, "Service did not stop within {} seconds", MAX_WAIT_MS / 1000);
+        }
+    }
+
+    if (!DeleteService(svc.get())) {
+        DWORD err = GetLastError();
+        errlog(g_svc_logger, "Failed to delete service: error {}", err);
+        return 1;
+    }
+
+    std::cout << "Service 'TrustTunnelClient' uninstalled successfully.\n";
+    return 0;
+}
+
+static int service_run(const cxxopts::ParseResult *cli_args) {
+    g_svc_cli_args = cli_args;
+
+    wchar_t svc_name[] = L"TrustTunnelClient";
+    SERVICE_TABLE_ENTRYW dispatch_table[] = {
+            {svc_name, service_main},
+            {nullptr, nullptr},
+    };
+
+    if (!StartServiceCtrlDispatcherW(dispatch_table)) {
+        DWORD err = GetLastError();
+        errlog(g_svc_logger, "StartServiceCtrlDispatcher failed: error {}", err);
+        return 1;
+    }
+
+    return 0;
+}
+
+#endif // _WIN32
