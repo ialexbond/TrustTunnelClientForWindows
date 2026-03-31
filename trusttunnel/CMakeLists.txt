@@ -78,6 +78,10 @@ if (APPLE)
 endif ()
 
 if (WIN32)
+    target_link_libraries(trusttunnel_client Advapi32)
+endif ()
+
+if (WIN32)
     set(WIZARD_EXE_NAME setup_wizard.exe)
 else (WIN32)
     set(WIZARD_EXE_NAME setup_wizard)

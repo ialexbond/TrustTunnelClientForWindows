@@ -132,7 +132,7 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
         location.upstream_protocol = UPSTREAM_PROTO_MAP.at(*upstream_protocol);
     } else {
         errlog(g_logger, "Unexpected endpoint upstream protocol value: {}",
-                streamable_to_string(config["upstream_protocol"].node()));
+                streamable_to_string(config["upstream_protocol"]));
         return std::nullopt;
     }
 
@@ -250,7 +250,7 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
     if (auto mode = config["vpn_mode"].value<std::string_view>(); mode && VPN_MODE_MAP.contains(*mode)) {
         result.mode = VPN_MODE_MAP.at(*mode);
     } else {
-        errlog(g_logger, "Unexpected VPN mode: {}", streamable_to_string(config["vpn_mode"].node()));
+        errlog(g_logger, "Unexpected VPN mode: {}", streamable_to_string(config["vpn_mode"]));
         return std::nullopt;
     }
 
@@ -291,7 +291,7 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
 
     const toml::table *endpoint_config = config["endpoint"].as_table();
     if (endpoint_config == nullptr) {
-        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"].node()));
+        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"]));
         return std::nullopt;
     }
     if (auto endpoint = build_endpoint(*endpoint_config)) {
@@ -303,7 +303,7 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
 
     const toml::table *listener_config = config["listener"].as_table();
     if (listener_config == nullptr) {
-        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"].node()));
+        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"]));
         return std::nullopt;
     }
     if (auto listener = build_listener_config(*listener_config)) {
