@@ -48,8 +48,8 @@ TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&
     m_process_block = parse_process_list(m_config.process_block);
 
     if (!m_process_direct.empty() || !m_process_proxy.empty() || !m_process_block.empty()) {
-        infolog(m_logger, "Process filters: {} direct, {} proxy, {} block",
-                m_process_direct.size(), m_process_proxy.size(), m_process_block.size());
+        infolog(m_logger, "Process filters: {} direct, {} proxy, {} block", m_process_direct.size(),
+                m_process_proxy.size(), m_process_block.size());
     }
 
     if (!m_config.log_file_path.empty()) {
@@ -494,14 +494,14 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         if (event->dst != nullptr) {
             if (event->dst->type == VPN_AT_HOST) {
                 dst_str = std::string(event->dst->host.name.data, event->dst->host.name.size);
-                tracelog(m_logger, "[ROUTE] ConnReq id={} dst=HOST:{} app={}",
-                         event->id, dst_str, safe_to_string_view(event->app_name));
+                tracelog(m_logger, "[ROUTE] ConnReq id={} dst=HOST:{} app={}", event->id, dst_str,
+                        safe_to_string_view(event->app_name));
             } else if (event->dst->type == VPN_AT_ADDR) {
                 SocketAddress sa;
                 memcpy(&sa, &event->dst->addr, sizeof(SocketAddressStorage));
                 dst_str = sa.str();
-                tracelog(m_logger, "[ROUTE] ConnReq id={} dst=ADDR:{} app={}",
-                         event->id, dst_str, safe_to_string_view(event->app_name));
+                tracelog(m_logger, "[ROUTE] ConnReq id={} dst=ADDR:{} app={}", event->id, dst_str,
+                        safe_to_string_view(event->app_name));
             }
         }
 
@@ -552,8 +552,8 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
 
         // Log final routing decision
         const char *action_names[] = {"DEFAULT", "PROXY", "BYPASS", "REJECT", "FORCE_BYPASS", "FORCE_REDIRECT"};
-        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})",
-                 dst_str, action_names[action], safe_to_string_view(event->app_name));
+        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})", dst_str, action_names[action],
+                safe_to_string_view(event->app_name));
 
         info->action = action;
         info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
