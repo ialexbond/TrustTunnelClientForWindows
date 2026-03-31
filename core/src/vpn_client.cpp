@@ -264,8 +264,7 @@ VpnError VpnClient::init(const VpnSettings *settings) {
 
     // Initialize blocked filter (domains/IPs to reject completely)
     if (settings->blocked.data != nullptr && settings->blocked.size > 0) {
-        this->blocked_filter.update_exclusions(VPN_MODE_GENERAL,
-                {settings->blocked.data, settings->blocked.size});
+        this->blocked_filter.update_exclusions(VPN_MODE_GENERAL, {settings->blocked.data, settings->blocked.size});
         log_client(this, info, "Blocked filter initialized ({} bytes)", settings->blocked.size);
     }
 
