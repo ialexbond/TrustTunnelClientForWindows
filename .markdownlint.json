@@ -22,5 +22,7 @@
   "line-length": false,
   "no-bare-urls": false,
   "no-emphasis-as-heading": false,
-  "link-fragments": false
+  "link-fragments": false,
+  "fenced-code-language": false,
+  "table-column-style": false
 }
