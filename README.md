@@ -56,11 +56,11 @@
 **TrustTunnel** — протокол адаптивного сетевого взаимодействия, работающий
 поверх стандартных транспортных протоколов (HTTP/2, QUIC).
 
--   Туннелирование TCP, UDP и ICMP трафика
--   Поддержка системного туннеля (TUN) и SOCKS5-прокси
--   Split tunneling — раздельная маршрутизация трафика
--   Пользовательские DNS-серверы через туннель
--   Post-Quantum криптография (X25519MLKEM768)
+- Туннелирование TCP, UDP и ICMP трафика
+- Поддержка системного туннеля (TUN) и SOCKS5-прокси
+- Split tunneling — раздельная маршрутизация трафика
+- Пользовательские DNS-серверы через туннель
+- Post-Quantum криптография (X25519MLKEM768)
 
 ---
 
@@ -68,27 +68,27 @@
 
 ### Требования
 
--   **Windows 10/11** (x64)
--   Права администратора (для WinTUN-адаптера)
+- **Windows 10/11** (x64)
+- Права администратора (для WinTUN-адаптера)
 
 ### Pro — для администраторов
 
-1.  Арендуйте Linux-сервер (Ubuntu 22+, Debian 11+), купите домен
-2.  Скачайте `TrustTunnel-Pro-v2.0.0-portable-win64.zip`
+1. Арендуйте Linux-сервер (Ubuntu 22+, Debian 11+), купите домен
+2. Скачайте `TrustTunnel-Pro-v2.0.0-portable-win64.zip`
     из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
-3.  Распакуйте и запустите `TrustTunnel.exe`
-4.  В мастере введите SSH-данные сервера (IP, порт, логин, пароль или SSH-ключ)
-5.  Приложение установит TrustTunnel-сервер и создаст конфигурацию
-6.  Нажмите **Подключить**
+3. Распакуйте и запустите `TrustTunnel.exe`
+4. В мастере введите SSH-данные сервера (IP, порт, логин, пароль или SSH-ключ)
+5. Приложение установит TrustTunnel-сервер и создаст конфигурацию
+6. Нажмите **Подключить**
 
 ### Light — для пользователей
 
-1.  Получите конфиг-файл (.toml) или ссылку (tt://) от администратора
-2.  Скачайте `TrustTunnel-Light-v2.0.0-portable-win64.zip`
+1. Получите конфиг-файл (.toml) или ссылку (tt://) от администратора
+2. Скачайте `TrustTunnel-Light-v2.0.0-portable-win64.zip`
     из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
-3.  Распакуйте и запустите `TrustTunnel Light.exe`
-4.  Импортируйте конфиг (файл или ссылка)
-5.  Нажмите кнопку подключения
+3. Распакуйте и запустите `TrustTunnel Light.exe`
+4. Импортируйте конфиг (файл или ссылка)
+5. Нажмите кнопку подключения
 
 > Также доступны установщики (.exe) для обеих редакций.
 
@@ -110,9 +110,9 @@
 └──────────────────────────────────────────────────┘
 ```
 
--   **Frontend**: React + TypeScript + Tailwind CSS
--   **Backend**: Rust (Tauri v2) — sidecar, SSH-деплой (Pro), системный трей
--   **VPN Core**: C++ библиотеки TrustTunnel — WinTUN-адаптер, DNS, маршрутизация
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Backend**: Rust (Tauri v2) — sidecar, SSH-деплой (Pro), системный трей
+- **VPN Core**: C++ библиотеки TrustTunnel — WinTUN-адаптер, DNS, маршрутизация
 
 ---
 
@@ -120,11 +120,11 @@
 
 ### Требования
 
--   **Node.js** >= 18
--   **Rust** >= 1.75
--   **CMake** >= 3.24
--   **Visual Studio 2022** (C++ Build Tools)
--   **Python** >= 3.10 (для Conan)
+- **Node.js** >= 18
+- **Rust** >= 1.75
+- **CMake** >= 3.24
+- **Visual Studio 2022** (C++ Build Tools)
+- **Python** >= 3.10 (для Conan)
 
 ### Сборка
 
@@ -165,9 +165,9 @@ cd ..\gui-light && npm install && npx tauri build
 
 ## Благодарности
 
--   [AdGuard](https://adguard.com) — за разработку протокола TrustTunnel
+- [AdGuard](https://adguard.com) — за разработку протокола TrustTunnel
     и открытие исходного кода клиентских библиотек
--   Клиентское приложение создано методом **вайб-кодинга** —
+- Клиентское приложение создано методом **вайб-кодинга** —
     AI-ассистент писал код на основе описания задач на естественном языке
 
 ---
@@ -180,7 +180,7 @@ cd ..\gui-light && npm install && npx tauri build
 
 ## Ссылки
 
--   [TrustTunnel Endpoint](https://github.com/TrustTunnel/TrustTunnel) —
+- [TrustTunnel Endpoint](https://github.com/TrustTunnel/TrustTunnel) —
     серверная часть протокола
--   [TrustTunnel CLI Client](trusttunnel/README.md) —
+- [TrustTunnel CLI Client](trusttunnel/README.md) —
     справка по консольному клиенту (C++)
