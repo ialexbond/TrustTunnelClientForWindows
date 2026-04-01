@@ -418,6 +418,9 @@ pub fn run() {
         .setup(|app| {
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {
+                // Force decorations off (window-state plugin may restore old value)
+                window.set_decorations(false).ok();
+
                 let start_minimized = std::env::current_exe()
                     .ok()
                     .and_then(|exe| exe.parent().map(|d| d.join(".start_minimized")))
