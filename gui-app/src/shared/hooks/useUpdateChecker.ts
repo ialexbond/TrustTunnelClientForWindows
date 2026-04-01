@@ -45,8 +45,11 @@ export function useUpdateChecker() {
       // Find setup.exe matching this edition (Pro)
       const asset = assets.find((a: { name: string }) => ASSET_PATTERN.test(a.name));
 
-      // Look for SHA256 checksum: .sha256 asset or pattern in release notes
-      const sha256Asset = assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
+      // Look for SHA256 checksum: matching .sha256 asset or pattern in release notes
+      const sha256Asset = asset
+        ? assets.find((a: { name: string }) => a.name === asset.name + ".sha256")
+          || assets.find((a: { name: string }) => a.name.endsWith(".sha256") && ASSET_PATTERN.test(a.name.replace(".sha256", "")))
+        : assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
       let sha256 = "";
       if (sha256Asset) {
         try {
