@@ -190,23 +190,48 @@ del "{vbs_str}" >nul 2>&1
     let loader_content = format!(
         "Add-Type -AssemblyName System.Windows.Forms\n\
          Add-Type -AssemblyName System.Drawing\n\
-         $f=New-Object Windows.Forms.Form; $f.FormBorderStyle='None'; $f.Size=New-Object Drawing.Size(320,90)\n\
-         $f.StartPosition='CenterScreen'; $f.TopMost=$true; $f.ShowInTaskbar=$false\n\
+         $f=New-Object Windows.Forms.Form\n\
+         $f.FormBorderStyle='None'\n\
+         $f.Size=New-Object Drawing.Size(320,90)\n\
+         $f.StartPosition='CenterScreen'\n\
+         $f.TopMost=$true\n\
+         $f.ShowInTaskbar=$false\n\
          $f.BackColor=[Drawing.Color]::FromArgb({bg})\n\
-         $l=New-Object Windows.Forms.Label; $l.Text='{loader_text}'\n\
-         $l.ForeColor=[Drawing.Color]::FromArgb({fg}); $l.Font=New-Object Drawing.Font('Segoe UI Semibold',11)\n\
-         $l.AutoSize=$true; $l.Location=New-Object Drawing.Point(20,14); $f.Controls.Add($l)\n\
-         $s=New-Object Windows.Forms.Label; $s.Text='{wait_text}'\n\
-         $s.ForeColor=[Drawing.Color]::FromArgb({sub_c}); $s.Font=New-Object Drawing.Font('Segoe UI',8.5)\n\
-         $s.AutoSize=$true; $s.Location=New-Object Drawing.Point(20,58); $f.Controls.Add($s)\n\
-         $bg=New-Object Windows.Forms.Panel; $bg.BackColor=[Drawing.Color]::FromArgb({bar_bg})\n\
-         $bg.Size=New-Object Drawing.Size(280,3); $bg.Location=New-Object Drawing.Point(20,46); $f.Controls.Add($bg)\n\
-         $b=New-Object Windows.Forms.Panel; $b.BackColor=[Drawing.Color]::FromArgb(99,102,241)\n\
-         $b.Size=New-Object Drawing.Size(80,3); $b.Location=New-Object Drawing.Point(20,46); $f.Controls.Add($b); $b.BringToFront()\n\
-         $t=New-Object Windows.Forms.Timer; $t.Interval=30; $script:d=1; $script:x=0\n\
-         $t.Add_Tick({{$script:x+=$script:d*4; if($script:x -gt 200){{$script:d=-1}}; if($script:x -lt 0){{$script:d=1;$script:x=0}}; $b.Location=New-Object Drawing.Point((20+$script:x),46); $b.Size=New-Object Drawing.Size(80,3); [Windows.Forms.Application]::DoEvents()}})\n\
-         $t.Start(); $f.Show(); [Windows.Forms.Application]::DoEvents()\n\
-         Start-Sleep -Seconds 30; $f.Close()\n\
+         $l=New-Object Windows.Forms.Label\n\
+         $l.Text='{loader_text}'\n\
+         $l.ForeColor=[Drawing.Color]::FromArgb({fg})\n\
+         $l.Font=New-Object Drawing.Font('Segoe UI Semibold',11)\n\
+         $l.AutoSize=$true\n\
+         $l.Location=New-Object Drawing.Point(20,14)\n\
+         $f.Controls.Add($l)\n\
+         $s=New-Object Windows.Forms.Label\n\
+         $s.Text='{wait_text}'\n\
+         $s.ForeColor=[Drawing.Color]::FromArgb({sub_c})\n\
+         $s.Font=New-Object Drawing.Font('Segoe UI',8.5)\n\
+         $s.AutoSize=$true\n\
+         $s.Location=New-Object Drawing.Point(20,58)\n\
+         $f.Controls.Add($s)\n\
+         $bgp=New-Object Windows.Forms.Panel\n\
+         $bgp.BackColor=[Drawing.Color]::FromArgb({bar_bg})\n\
+         $bgp.Size=New-Object Drawing.Size(280,3)\n\
+         $bgp.Location=New-Object Drawing.Point(20,46)\n\
+         $f.Controls.Add($bgp)\n\
+         $b=New-Object Windows.Forms.Panel\n\
+         $b.BackColor=[Drawing.Color]::FromArgb(99,102,241)\n\
+         $b.Size=New-Object Drawing.Size(80,3)\n\
+         $b.Location=New-Object Drawing.Point(20,46)\n\
+         $f.Controls.Add($b)\n\
+         $b.BringToFront()\n\
+         $script:d=1; $script:x=0\n\
+         $anim=New-Object Windows.Forms.Timer\n\
+         $anim.Interval=30\n\
+         $anim.Add_Tick({{$script:x+=$script:d*4; if($script:x -gt 200){{$script:d=-1}}; if($script:x -lt 0){{$script:d=1;$script:x=0}}; $b.Location=New-Object Drawing.Point((20+$script:x),46); $b.Size=New-Object Drawing.Size(80,3)}})\n\
+         $anim.Start()\n\
+         $close=New-Object Windows.Forms.Timer\n\
+         $close.Interval=30000\n\
+         $close.Add_Tick({{$f.Close()}})\n\
+         $close.Start()\n\
+         $f.ShowDialog()\n\
          Remove-Item $MyInvocation.MyCommand.Path -Force -EA 0\n"
     );
     std::fs::write(&loader_ps, &loader_content).ok();
