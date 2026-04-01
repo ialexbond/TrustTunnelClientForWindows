@@ -1,10 +1,8 @@
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use tauri::Emitter;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Clone, Serialize)]
 struct UpdateProgress {
@@ -13,43 +11,51 @@ struct UpdateProgress {
     message: String,
 }
 
-/// Self-update: download new ZIP, verify checksum, extract, create updater script, restart.
+/// Self-update: download NSIS setup.exe, verify checksum, launch silent install, restart.
 #[tauri::command]
 pub async fn self_update(
     app: tauri::AppHandle,
     download_url: String,
     expected_sha256: Option<String>,
+    language: Option<String>,
+    theme: Option<String>,
 ) -> Result<(), String> {
-    use std::io::Write;
+    use std::io::Write as StdWrite;
     use tokio::io::AsyncWriteExt;
 
     let emit = |stage: &str, percent: u32, msg: &str| {
-        app.emit("update-progress", UpdateProgress {
-            stage: stage.to_string(),
-            percent,
-            message: msg.to_string(),
-        }).ok();
+        app.emit(
+            "update-progress",
+            UpdateProgress {
+                stage: stage.to_string(),
+                percent,
+                message: msg.to_string(),
+            },
+        )
+        .ok();
     };
 
-    emit("download", 0, "Starting download...");
+    let _lang = language.as_deref().unwrap_or("ru");
+    let _theme = theme.as_deref().unwrap_or("dark");
 
-    // Determine paths
+    emit("download", 0, "update.starting");
+
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("Cannot determine exe path: {e}"))?;
-    let app_dir = exe_path.parent()
+    let app_dir = exe_path
+        .parent()
         .ok_or("Cannot determine app directory")?;
     let temp_dir = std::env::temp_dir();
-    let zip_path = temp_dir.join("trusttunnel_update.zip");
-    let extract_dir = temp_dir.join("trusttunnel_update");
+    let setup_path = temp_dir.join("trusttunnel_setup.exe");
 
-    // Clean up previous update artifacts
-    let _ = std::fs::remove_file(&zip_path);
-    let _ = std::fs::remove_dir_all(&extract_dir);
+    // Clean up previous update artifact
+    let _ = std::fs::remove_file(&setup_path);
 
-    // Download the ZIP with progress
-    emit("download", 5, "Connecting to server...");
+    // Download setup.exe with progress
+    emit("download", 5, "update.connecting");
     let client = reqwest::Client::new();
-    let resp = client.get(&download_url)
+    let resp = client
+        .get(&download_url)
         .header("User-Agent", "TrustTunnel-Updater")
         .send()
         .await
@@ -61,7 +67,7 @@ pub async fn self_update(
 
     let total_size = resp.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
-    let mut file = tokio::fs::File::create(&zip_path)
+    let mut file = tokio::fs::File::create(&setup_path)
         .await
         .map_err(|e| format!("Cannot create temp file: {e}"))?;
 
@@ -69,99 +75,59 @@ pub async fn self_update(
     use tokio_stream::StreamExt;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {e}"))?;
-        file.write_all(&chunk).await.map_err(|e| format!("Write error: {e}"))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Write error: {e}"))?;
         downloaded += chunk.len() as u64;
         if total_size > 0 {
             let pct = ((downloaded as f64 / total_size as f64) * 80.0) as u32 + 5;
-            emit("download", pct.min(85), &format!("Downloading: {:.1} MB / {:.1} MB",
-                downloaded as f64 / 1_048_576.0,
-                total_size as f64 / 1_048_576.0));
+            emit(
+                "download",
+                pct.min(85),
+                &format!(
+                    "update.downloading|{:.1}|{:.1}",
+                    downloaded as f64 / 1_048_576.0,
+                    total_size as f64 / 1_048_576.0
+                ),
+            );
         }
     }
     file.flush().await.ok();
     drop(file);
 
-    // Verify SHA256 checksum if provided
+    // Verify SHA256 checksum using Rust sha2 crate
     if let Some(ref expected) = expected_sha256 {
-        emit("verify", 86, "Verifying file integrity...");
-        let zip_for_hash = zip_path.to_string_lossy().to_string();
-        let hash_output = tokio::process::Command::new("powershell")
-            .args([
-                "-NoProfile", "-Command",
-                &format!("(Get-FileHash -Path '{}' -Algorithm SHA256).Hash", zip_for_hash),
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .await
-            .map_err(|e| format!("Checksum verification failed: {e}"))?;
-
-        let actual_hash = String::from_utf8_lossy(&hash_output.stdout).trim().to_string();
-        if !actual_hash.eq_ignore_ascii_case(expected) {
-            let _ = std::fs::remove_file(&zip_path);
+        emit("verify", 88, "update.verifying");
+        let bytes =
+            std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
+        let hash = Sha256::digest(&bytes);
+        let actual = format!("{:x}", hash);
+        if !actual.eq_ignore_ascii_case(expected) {
+            let _ = std::fs::remove_file(&setup_path);
             return Err(format!(
-                "Checksum mismatch! Expected: {expected}, Got: {actual_hash}. Download may be corrupted or tampered with."
+                "Checksum mismatch! Expected: {expected}, Got: {actual}. Download may be corrupted or tampered with."
             ));
         }
-        eprintln!("[self_update] SHA256 verified: {actual_hash}");
+        eprintln!("[self_update] SHA256 verified: {actual}");
     } else {
         eprintln!("[self_update] WARNING: No checksum provided, skipping integrity verification");
     }
 
-    emit("extract", 88, "Extracting update...");
+    emit("install", 92, "update.preparing");
 
-    // Extract ZIP using PowerShell
-    let extract_dir_str = extract_dir.to_string_lossy().to_string();
-    let zip_path_str = zip_path.to_string_lossy().to_string();
-    let ps_output = tokio::process::Command::new("powershell")
-        .args([
-            "-NoProfile", "-Command",
-            &format!(
-                "Remove-Item '{}' -Recurse -Force -ErrorAction SilentlyContinue; \
-                 Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-                extract_dir_str, zip_path_str, extract_dir_str
-            ),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .await
-        .map_err(|e| format!("Extract failed: {e}"))?;
+    // Kill VPN sidecar before exit
+    crate::kill_all_sidecar_processes();
 
-    if !ps_output.status.success() {
-        let err = String::from_utf8_lossy(&ps_output.stderr);
-        return Err(format!("Extraction failed: {err}"));
-    }
+    emit("install", 96, "update.launching");
 
-    // Find the extracted files — could be in a subfolder
-    let source_dir = {
-        let mut src = extract_dir.clone();
-        // If there's a single subfolder, use that
-        if let Ok(mut entries) = std::fs::read_dir(&extract_dir) {
-            let first = entries.next();
-            let second = entries.next();
-            if second.is_none() {
-                if let Some(Ok(entry)) = first {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        src = entry.path();
-                    }
-                }
-            }
-        }
-        src
-    };
-
-    // Verify the extracted folder has trusttunnel.exe
-    if !source_dir.join("trusttunnel.exe").exists() {
-        return Err("Update does not contain trusttunnel.exe. Archive corrupted?".into());
-    }
-
-    emit("install", 92, "Preparing to install...");
-
-    // Create the updater batch script
+    // Create updater batch script: run setup /S → wait → launch app
     let bat_path = temp_dir.join("trusttunnel_updater.bat");
     let pid = std::process::id();
-    let app_dir_str = app_dir.to_string_lossy().to_string();
-    let source_dir_str = source_dir.to_string_lossy().to_string();
-    let vbs_path_str = temp_dir.join("trusttunnel_updater.vbs").to_string_lossy().to_string();
+    let app_exe = app_dir.join(exe_path.file_name().unwrap_or_default());
+    let setup_str = setup_path.to_string_lossy();
+    let app_str = app_exe.to_string_lossy();
+    let vbs_path = temp_dir.join("trusttunnel_updater.vbs");
+
     let bat_content = format!(
         r#"@echo off
 title TrustTunnel Updater
@@ -172,51 +138,85 @@ if not errorlevel 1 (
     timeout /t 1 /nobreak >nul
     goto waitloop
 )
-echo Copying update files...
-xcopy /Y /E /I "{source_dir_str}\*" "{app_dir_str}\" >nul 2>&1
-if errorlevel 1 (
-    echo Copy failed! Please update manually.
-    pause
-    exit /b 1
-)
-echo Starting updated version...
-start "" "{app_dir_str}\TrustTunnel.exe"
-echo Cleaning up temp files...
-rd /s /q "{extract_dir_str}" >nul 2>&1
-del "{zip_path_str}" >nul 2>&1
-del "{vbs_path_str}" >nul 2>&1
+echo Installing update...
+"{setup_str}" /S
+echo Starting TrustTunnel...
+timeout /t 2 /nobreak >nul
+start "" "{app_str}"
+echo Cleaning up...
+del "{vbs_str}" >nul 2>&1
 (goto) 2>nul & del "%~f0"
-"#
+"#,
+        vbs_str = vbs_path.to_string_lossy(),
     );
 
     {
         let mut bat_file = std::fs::File::create(&bat_path)
             .map_err(|e| format!("Cannot create updater script: {e}"))?;
-        bat_file.write_all(bat_content.as_bytes())
+        bat_file
+            .write_all(bat_content.as_bytes())
             .map_err(|e| format!("Cannot write updater script: {e}"))?;
     }
 
-    emit("install", 96, "Launching updater, app will restart...");
-
-    // Kill VPN sidecar before exit
-    crate::kill_all_sidecar_processes();
-
-    // Launch the updater bat completely hidden via a VBS wrapper
-    let vbs_path = temp_dir.join("trusttunnel_updater.vbs");
+    // Launch bat hidden via VBS wrapper
     let vbs_content = format!(
         "CreateObject(\"Wscript.Shell\").Run \"{}\", 0, False",
-        bat_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\"\"")
+        bat_path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\"\"")
     );
     std::fs::write(&vbs_path, &vbs_content)
         .map_err(|e| format!("Cannot create VBS launcher: {e}"))?;
 
     std::process::Command::new("wscript.exe")
         .arg(&vbs_path)
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(0x08000000)
         .spawn()
         .map_err(|e| format!("Cannot launch updater: {e}"))?;
 
-    // Give the bat a moment to start, then exit the app
+    // Launch a small loader window (parallel to bat, cosmetic only)
+    let is_ru = _lang != "en";
+    let is_light = _theme == "light";
+    let loader_text = if is_ru { "Обновление TrustTunnel..." } else { "Updating TrustTunnel..." };
+    let wait_text = if is_ru { "Подождите..." } else { "Please wait..." };
+    let (bg, fg, sub_c, bar_bg) = if is_light {
+        ("245,246,250", "26,26,46", "100,100,120", "220,220,230")
+    } else {
+        ("24,24,31", "240,240,245", "120,120,140", "40,40,50")
+    };
+
+    let loader_ps = temp_dir.join("trusttunnel_loader.ps1");
+    let loader_content = format!(
+        "Add-Type -AssemblyName System.Windows.Forms\n\
+         Add-Type -AssemblyName System.Drawing\n\
+         $f=New-Object Windows.Forms.Form; $f.FormBorderStyle='None'; $f.Size=New-Object Drawing.Size(320,90)\n\
+         $f.StartPosition='CenterScreen'; $f.TopMost=$true; $f.ShowInTaskbar=$false\n\
+         $f.BackColor=[Drawing.Color]::FromArgb({bg})\n\
+         $l=New-Object Windows.Forms.Label; $l.Text='{loader_text}'\n\
+         $l.ForeColor=[Drawing.Color]::FromArgb({fg}); $l.Font=New-Object Drawing.Font('Segoe UI Semibold',11)\n\
+         $l.AutoSize=$true; $l.Location=New-Object Drawing.Point(20,14); $f.Controls.Add($l)\n\
+         $s=New-Object Windows.Forms.Label; $s.Text='{wait_text}'\n\
+         $s.ForeColor=[Drawing.Color]::FromArgb({sub_c}); $s.Font=New-Object Drawing.Font('Segoe UI',8.5)\n\
+         $s.AutoSize=$true; $s.Location=New-Object Drawing.Point(20,58); $f.Controls.Add($s)\n\
+         $bg=New-Object Windows.Forms.Panel; $bg.BackColor=[Drawing.Color]::FromArgb({bar_bg})\n\
+         $bg.Size=New-Object Drawing.Size(280,3); $bg.Location=New-Object Drawing.Point(20,46); $f.Controls.Add($bg)\n\
+         $b=New-Object Windows.Forms.Panel; $b.BackColor=[Drawing.Color]::FromArgb(99,102,241)\n\
+         $b.Size=New-Object Drawing.Size(80,3); $b.Location=New-Object Drawing.Point(20,46); $f.Controls.Add($b); $b.BringToFront()\n\
+         $t=New-Object Windows.Forms.Timer; $t.Interval=30; $script:d=1; $script:x=0\n\
+         $t.Add_Tick({{$script:x+=$script:d*4; if($script:x -gt 200){{$script:d=-1}}; if($script:x -lt 0){{$script:d=1;$script:x=0}}; $b.Location=New-Object Drawing.Point((20+$script:x),46); $b.Size=New-Object Drawing.Size(80,3); [Windows.Forms.Application]::DoEvents()}})\n\
+         $t.Start(); $f.Show(); [Windows.Forms.Application]::DoEvents()\n\
+         Start-Sleep -Seconds 30; $f.Close()\n\
+         Remove-Item $MyInvocation.MyCommand.Path -Force -EA 0\n"
+    );
+    std::fs::write(&loader_ps, &loader_content).ok();
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", &loader_ps.to_string_lossy()])
+        .creation_flags(0x08000000)
+        .spawn()
+        .ok(); // Non-critical — if loader fails, update still works
+
+    // Give bat a moment to start, then exit
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     app.exit(0);
 
