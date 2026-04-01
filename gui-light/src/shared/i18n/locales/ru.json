@@ -511,6 +511,14 @@
     "update_available": "Доступна версия {{version}}",
     "copyright": "Протокол © AdGuard · Клиент © {{year}} ialexbond"
   },
+  "update": {
+    "starting": "Начинаем загрузку...",
+    "connecting": "Подключение к серверу...",
+    "downloading": "Загрузка: {{downloaded}} МБ / {{total}} МБ",
+    "verifying": "Проверка целостности...",
+    "preparing": "Подготовка к установке...",
+    "launching": "Запуск установщика..."
+  },
   "units": {
     "mbps": "Мбит/с"
   },

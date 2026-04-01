@@ -503,6 +503,14 @@
     "update_available": "Version {{version}} is available",
     "copyright": "Protocol © AdGuard · Client © {{year}} ialexbond"
   },
+  "update": {
+    "starting": "Starting download...",
+    "connecting": "Connecting to server...",
+    "downloading": "Downloading: {{downloaded}} MB / {{total}} MB",
+    "verifying": "Verifying file integrity...",
+    "preparing": "Preparing to install...",
+    "launching": "Launching installer..."
+  },
   "units": {
     "mbps": "Mbps"
   },
