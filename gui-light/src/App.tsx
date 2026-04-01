@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { WindowControls } from "./components/WindowControls";
 import { BottomNav } from "./components/BottomNav";
 import VpnScreen from "./components/VpnScreen";
 import RoutingScreen from "./components/RoutingScreen";
@@ -180,19 +181,23 @@ function App() {
     >
       {/* Title bar — draggable */}
       <div
-        className="flex items-center justify-center shrink-0 py-2"
+        className="flex items-center shrink-0"
         data-tauri-drag-region
-        style={{ borderBottom: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-secondary)" }}
+        style={{ height: 32, borderBottom: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-secondary)" }}
       >
-        <span className="text-xs font-bold tracking-wide" style={{ color: "var(--color-text-secondary)" }} data-tauri-drag-region>
-          TrustTunnel
-        </span>
-        <span
-          className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded"
-          style={{ backgroundColor: "rgba(99, 102, 241, 0.1)", color: "var(--color-accent-500)" }}
-        >
-          LIGHT
-        </span>
+        <div className="flex items-center gap-1.5 pl-3" data-tauri-drag-region>
+          <span className="text-xs font-bold tracking-wide" style={{ color: "var(--color-text-secondary)" }} data-tauri-drag-region>
+            TrustTunnel
+          </span>
+          <span
+            className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: "rgba(99, 102, 241, 0.1)", color: "var(--color-accent-500)" }}
+          >
+            LIGHT
+          </span>
+        </div>
+        <div className="flex-1" data-tauri-drag-region />
+        <WindowControls />
       </div>
 
       <div className="flex-1 min-h-0 w-full">
