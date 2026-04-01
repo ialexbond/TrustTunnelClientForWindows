@@ -4351,6 +4351,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-pemfile"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c"
+dependencies = [
+ "base64 0.21.7",
+]
+
+[[package]]
 name = "rustls-pki-types"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5984,7 +5993,7 @@ dependencies = [
 
 [[package]]
 name = "trusttunnel"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5995,6 +6004,7 @@ dependencies = [
  "russh-keys",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -6007,8 +6017,28 @@ dependencies = [
  "tokio-stream",
  "toml 0.8.2",
  "toml_edit 0.22.27",
+ "trusttunnel-settings",
  "uuid",
  "winreg 0.55.0",
+]
+
+[[package]]
+name = "trusttunnel-deeplink"
+version = "0.1.0"
+source = "git+https://github.com/TrustTunnel/TrustTunnel?tag=v1.0.13#18258db85f5c157652c98b8a04823133948528df"
+dependencies = [
+ "base64 0.21.7",
+ "hex",
+ "rustls-pemfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "trusttunnel-settings"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "trusttunnel-deeplink",
 ]
 
 [[package]]
