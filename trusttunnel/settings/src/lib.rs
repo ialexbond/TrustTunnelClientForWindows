@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+pub use trusttunnel_deeplink;
 use trusttunnel_deeplink::DeepLinkConfig;
 
 /// Endpoint connection settings. Shared by `setup_wizard` and `deeplink-ffi`.
