@@ -22,6 +22,7 @@ import { useVpnEvents } from "./shared/hooks/useVpnEvents";
 import { useSnackBar } from "./shared/ui/SnackBarContext";
 import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
+import { WindowControls } from "./components/layout/WindowControls";
 import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 // Re-export types for backward compatibility
@@ -315,9 +316,36 @@ function App() {
   return (
     <VpnProvider value={vpnContextValue}>
     <div
-      className="h-screen flex"
+      className="h-screen flex flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
     >
+      {/* Custom titlebar */}
+      <div
+        className="flex items-center shrink-0"
+        data-tauri-drag-region
+        style={{
+          height: 32,
+          backgroundColor: "var(--color-bg-secondary)",
+          borderBottom: "1px solid var(--color-border)",
+        }}
+      >
+        <div className="flex items-center gap-1.5 pl-3" data-tauri-drag-region>
+          <span className="text-xs font-bold tracking-wide" style={{ color: "var(--color-text-secondary)" }} data-tauri-drag-region>
+            TrustTunnel
+          </span>
+          <span
+            className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: "rgba(99, 102, 241, 0.1)", color: "var(--color-accent-500)" }}
+          >
+            PRO
+          </span>
+        </div>
+        <div className="flex-1" data-tauri-drag-region />
+        <WindowControls />
+      </div>
+
+      {/* App body */}
+      <div className="flex-1 min-h-0 flex">
       {/* Sidebar */}
       <Sidebar
         activePage={activePage}
@@ -445,6 +473,7 @@ function App() {
           </div>
         </div>
       </div>
+      </div>{/* /App body */}
     </div>
 
     </VpnProvider>
