@@ -2,9 +2,17 @@ import { useState, useCallback, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import type { UpdateInfo } from "../types";
 
+// Asset name pattern for this edition (Light)
+const ASSET_PATTERN = /Light.*setup.*\.exe$/i;
+
+// Background check interval: 6 hours
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
+  // Strip pre-release suffixes: "2.1.1-test" → "2.1.1"
+  const clean = (v: string) => v.replace(/-.*$/, "");
+  const pa = clean(a).split(".").map(Number);
+  const pb = clean(b).split(".").map(Number);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const na = pa[i] || 0;
     const nb = pb[i] || 0;
@@ -33,11 +41,15 @@ export function useUpdateChecker() {
       const latestTag = (data.tag_name || "").replace(/^v\.?/, "");
       const isNewer = compareVersions(latestTag, currentVersion) > 0;
       const assets = data.assets || [];
-      const asset =
-        assets.find((a: { name: string }) => a.name.endsWith(".zip")) ||
-        assets.find((a: { name: string }) => a.name.endsWith(".exe") || a.name.endsWith(".msi"));
-      // Look for SHA256 checksum: either a .sha256 asset or a pattern in release notes
-      const sha256Asset = assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
+
+      // Find setup.exe matching this edition (Light)
+      const asset = assets.find((a: { name: string }) => ASSET_PATTERN.test(a.name));
+
+      // Look for SHA256 checksum: matching .sha256 asset or pattern in release notes
+      const sha256Asset = asset
+        ? assets.find((a: { name: string }) => a.name === asset.name + ".sha256")
+          || assets.find((a: { name: string }) => a.name.endsWith(".sha256") && ASSET_PATTERN.test(a.name.replace(".sha256", "")))
+        : assets.find((a: { name: string }) => a.name.endsWith(".sha256"));
       let sha256 = "";
       if (sha256Asset) {
         try {
@@ -45,7 +57,6 @@ export function useUpdateChecker() {
           if (hashRes.ok) sha256 = (await hashRes.text()).trim().split(/\s/)[0];
         } catch { /* checksum fetch is optional */ }
       } else {
-        // Try to extract from release notes: "SHA256: <hex>" pattern
         const match = (data.body || "").match(/SHA256:\s*([a-fA-F0-9]{64})/);
         if (match) sha256 = match[1];
       }
@@ -65,7 +76,12 @@ export function useUpdateChecker() {
     }
   }, []);
 
-  useEffect(() => { checkForUpdates(true); }, [checkForUpdates]);
+  // Check on startup + periodic background check every 6 hours
+  useEffect(() => {
+    checkForUpdates(true);
+    const interval = setInterval(() => checkForUpdates(true), CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [checkForUpdates]);
 
   return { updateInfo, checkForUpdates };
 }

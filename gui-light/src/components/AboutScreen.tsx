@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -36,9 +36,22 @@ function AboutScreen({ updateInfo, onCheckUpdates, onOpenDownload }: AboutScreen
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
   const pushSuccess = useSnackBar();
 
+  // Translate update progress message keys from Rust
+  const translateProgress = useCallback((payload: UpdateProgressPayload): UpdateProgressPayload => {
+    const { message } = payload;
+    if (message.startsWith("update.downloading|")) {
+      const parts = message.split("|");
+      return { ...payload, message: t("update.downloading", { downloaded: parts[1], total: parts[2] }) };
+    }
+    if (message.startsWith("update.")) {
+      return { ...payload, message: t(message) };
+    }
+    return payload;
+  }, [t]);
+
   useEffect(() => {
     const unlisten = listen<UpdateProgressPayload>("update-progress", (event) => {
-      setUpdateProgress(event.payload);
+      setUpdateProgress(translateProgress(event.payload));
     });
     return () => {
       unlisten.then((f) => f());
@@ -53,6 +66,8 @@ function AboutScreen({ updateInfo, onCheckUpdates, onOpenDownload }: AboutScreen
       await invoke("self_update", {
         downloadUrl: updateInfo.downloadUrl,
         expectedSha256: updateInfo.sha256 || null,
+        language: localStorage.getItem("tt_language") || "ru",
+        theme: localStorage.getItem("tt_theme") || "dark",
       });
     } catch (e) {
       pushSuccess(formatError(e), "error");
@@ -61,7 +76,7 @@ function AboutScreen({ updateInfo, onCheckUpdates, onOpenDownload }: AboutScreen
     }
   };
 
-  const version = updateInfo.currentVersion || "2.0.0";
+  const version = updateInfo.currentVersion || "2.1.0";
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">
