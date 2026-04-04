@@ -1,6 +1,6 @@
 [package]
 name = "trusttunnel"
-version = "2.0.0"
+version = "2.1.0"
 description = "TrustTunnel VPN Client"
 authors = ["Alex Bond"]
 edition = "2021"
@@ -34,6 +34,8 @@ futures-util = "0.3"
 notify = { version = "7", features = ["macos_fsevent"] }
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
+sha2 = "0.10"
+trusttunnel-settings = { path = "../../trusttunnel/settings" }
 winreg = "0.55"
 
 [profile.release]

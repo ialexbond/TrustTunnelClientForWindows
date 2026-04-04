@@ -17,6 +17,27 @@
   }
 }
 
+/* Window control buttons */
+.window-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+  -webkit-app-region: no-drag;
+}
+.window-control-btn:hover {
+  color: var(--color-text-primary);
+}
+.window-control-close:hover {
+  color: #fff !important;
+}
+
 @layer components {
   /* ── Glass card: adapts to theme ── */
   .glass-card {
