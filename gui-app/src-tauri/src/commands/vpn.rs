@@ -15,6 +15,12 @@ pub struct AppState {
     pub disconnecting: Arc<Mutex<bool>>,
     pub is_connected: Arc<Mutex<bool>>,
     pub tray_notified: Arc<Mutex<bool>>,
+    /// Last-used config path for tray-initiated connect.
+    pub config_path: Arc<Mutex<Option<String>>>,
+    /// Last-used log level for tray-initiated connect.
+    pub log_level: Arc<Mutex<String>>,
+    /// Current UI locale ("ru" or "en") for tray menu text.
+    pub locale: Arc<Mutex<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -106,6 +112,10 @@ pub async fn vpn_connect(
     log_level: String,
 ) -> Result<(), String> {
     eprintln!("[vpn_connect] Called with config_path={config_path}, log_level={log_level}");
+
+    // Remember config for tray-initiated reconnect
+    if let Ok(mut cp) = state.config_path.lock() { *cp = Some(config_path.clone()); }
+    if let Ok(mut ll) = state.log_level.lock() { *ll = log_level.clone(); }
 
     // Emit log so user sees something immediately
     app.emit("vpn-log", VpnLogPayload {
