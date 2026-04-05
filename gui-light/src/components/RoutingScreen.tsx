@@ -16,6 +16,7 @@ import { Button } from "../shared/ui/Button";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
 import { RoutingBlockCard } from "./routing/RoutingBlockCard";
+import { ProcessFilterSection } from "./routing/ProcessFilterSection";
 
 interface RoutingScreenProps {
   configPath: string;
@@ -225,6 +226,18 @@ function RoutingScreen({
           onAdd={state.addEntry}
           onRemove={state.removeEntry}
           onMove={state.moveEntry}
+        />
+
+        {/* Фильтрация по процессам */}
+        <ProcessFilterSection
+          processMode={state.rules.process_mode}
+          processes={state.rules.processes}
+          processList={state.processList}
+          processListLoading={state.processListLoading}
+          onModeChange={state.setProcessMode}
+          onAdd={state.addProcess}
+          onRemove={state.removeProcess}
+          onLoadProcesses={state.loadProcessList}
         />
       </div>
     </div>
