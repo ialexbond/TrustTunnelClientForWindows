@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Cpu, Plus, X, FolderOpen, Filter, AppWindow } from "lucide-react";
+import { Plus, X, FolderOpen, Filter, AppWindow } from "lucide-react";
 import { Card, CardHeader, Toggle, Button } from "../../shared/ui";
 import { ProcessPickerModal } from "./ProcessPickerModal";
 import type { ProcessInfo } from "./useRoutingState";
@@ -43,17 +43,19 @@ export function ProcessFilterSection({
   };
 
   const handleBrowse = async () => {
-    const file = await open({
+    const files = await open({
       filters: [{ name: "Executable", extensions: ["exe"] }],
-      multiple: false,
+      multiple: true,
     });
-    if (file) {
-      // Extract filename from path
-      const path = typeof file === "string" ? file : file;
-      const sep = path.includes("/") ? "/" : "\\";
-      const filename = path.split(sep).pop() || path;
-      if (filename && !processes.includes(filename)) {
-        onAdd(filename);
+    if (files) {
+      const paths = Array.isArray(files) ? files : [files];
+      for (const filePath of paths) {
+        const p = typeof filePath === "string" ? filePath : filePath;
+        const sep = p.includes("/") ? "/" : "\\";
+        const filename = p.split(sep).pop() || p;
+        if (filename && !processes.includes(filename)) {
+          onAdd(filename);
+        }
       }
     }
   };
