@@ -2,6 +2,7 @@ mod commands;
 mod connectivity;
 mod geodata;
 mod geodata_v2ray;
+mod processes;
 mod routing_rules;
 mod sidecar;
 
@@ -573,6 +574,7 @@ pub fn run() {
             routing_rules::resolve_and_apply,
             routing_rules::update_vpn_mode,
             routing_rules::cleanup_hosts_block,
+            processes::list_running_processes,
             ping_endpoint,
             speedtest_run,
         ])
