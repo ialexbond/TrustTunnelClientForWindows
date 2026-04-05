@@ -14,7 +14,6 @@ describe("useFeatureToggles", () => {
     const { result } = renderHook(() => useFeatureToggles());
     expect(result.current.toggles).toEqual({
       blockRouting: false,
-      processFilter: false,
     });
   });
 
@@ -26,7 +25,6 @@ describe("useFeatureToggles", () => {
     });
 
     expect(result.current.toggles.blockRouting).toBe(true);
-    expect(result.current.toggles.processFilter).toBe(false);
   });
 
   it("persists to localStorage after update", () => {
@@ -38,19 +36,17 @@ describe("useFeatureToggles", () => {
 
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
     expect(stored.blockRouting).toBe(true);
-    expect(stored.processFilter).toBe(false);
   });
 
   it("loads persisted values from localStorage on init", () => {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ blockRouting: true, processFilter: true }),
+      JSON.stringify({ blockRouting: true }),
     );
 
     const { result } = renderHook(() => useFeatureToggles());
     expect(result.current.toggles).toEqual({
       blockRouting: true,
-      processFilter: true,
     });
   });
 
@@ -60,7 +56,6 @@ describe("useFeatureToggles", () => {
     const { result } = renderHook(() => useFeatureToggles());
     expect(result.current.toggles).toEqual({
       blockRouting: false,
-      processFilter: false,
     });
   });
 
@@ -70,10 +65,10 @@ describe("useFeatureToggles", () => {
 
     // Update via hookA — this dispatches the custom event
     act(() => {
-      hookA.current.update("processFilter", true);
+      hookA.current.update("blockRouting", true);
     });
 
     // hookB should have picked up the change via the event listener
-    expect(hookB.current.toggles.processFilter).toBe(true);
+    expect(hookB.current.toggles.blockRouting).toBe(true);
   });
 });
