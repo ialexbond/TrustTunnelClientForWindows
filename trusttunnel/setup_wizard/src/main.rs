@@ -166,14 +166,14 @@ Required in non-interactive mode."#),
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .conflicts_with("separate_options")
                 .conflicts_with(DEEPLINK_PARAM_NAME)
-                .help(format!("Path to the client config that was generated on endpoint\nConflicts with --{}, --{}, --{}, --{}", HOSTNAME_PARAM_NAME, CREDENTIALS_PARAM_NAME, ENDPOINT_ADDRESS_PARAM_NAME, DEEPLINK_PARAM_NAME)),
+                .help(format!("Path to the client config that was generated on endpoint\nConflicts with --{HOSTNAME_PARAM_NAME}, --{CREDENTIALS_PARAM_NAME}, --{ENDPOINT_ADDRESS_PARAM_NAME}, --{DEEPLINK_PARAM_NAME}")),
             clap::Arg::new(DEEPLINK_PARAM_NAME)
                 .long("deeplink")
                 .short('d')
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .conflicts_with("separate_options")
                 .conflicts_with(ENDPOINT_CONFIG_PARAM_NAME)
-                .help(format!("A tt:// deep-link URI containing the endpoint configuration.\nConflicts with --endpoint_config and manual options (--{}, --{}, --{}).", ENDPOINT_ADDRESS_PARAM_NAME, HOSTNAME_PARAM_NAME, CREDENTIALS_PARAM_NAME)),
+                .help(format!("A tt:// deep-link URI containing the endpoint configuration.\nConflicts with --endpoint_config and manual options (--{ENDPOINT_ADDRESS_PARAM_NAME}, --{HOSTNAME_PARAM_NAME}, --{CREDENTIALS_PARAM_NAME}).")),
         ])
         .group(
             clap::ArgGroup::new("separate_options")
@@ -303,7 +303,7 @@ fn print_completion_message(settings_path: &str) {
     println!("═══════════════════════════════════════════════════════════════");
     println!();
     println!("Configuration file created:");
-    println!("  • {}  - Client settings", settings_path);
+    println!("  • {settings_path}  - Client settings");
     println!();
     println!("───────────────────────────────────────────────────────────────");
     println!("                      Next Steps");
@@ -311,12 +311,12 @@ fn print_completion_message(settings_path: &str) {
     println!();
     println!("1. Start the client:");
     #[cfg(target_os = "windows")]
-    println!("   trusttunnel_client -c {}", settings_path);
+    println!("   trusttunnel_client -c {settings_path}");
     #[cfg(not(target_os = "windows"))]
     println!("   sudo ./trusttunnel_client -c {}", settings_path);
     println!();
     println!("2. For advanced settings (exclusions, DNS, kill switch), edit:");
-    println!("   {}", settings_path);
+    println!("   {settings_path}");
     println!();
     #[cfg(target_os = "windows")]
     println!("Note: For TUN mode, wintun.dll must be in the same directory or PATH.");
