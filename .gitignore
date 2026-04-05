@@ -38,6 +38,9 @@ installer/output/
 # Claude Code local files
 .claude/
 
+# Obsidian working notes
+memory/
+
 # Portable build folders (any version)
 TrustTunnel-Portable/
 TrustTunnel-v*-portable-*/
