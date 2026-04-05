@@ -37,6 +37,7 @@ installer/output/
 
 # Claude Code local files
 .claude/
+CLAUDE.md
 
 # Obsidian working notes
 memory/
