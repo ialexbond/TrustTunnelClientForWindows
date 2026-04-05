@@ -622,6 +622,114 @@ describe("useRoutingState", () => {
     expect(result.current.rules.processes).toEqual(["firefox.exe"]);
   });
 
+  it("loadProcessList invokes list_running_processes and populates processList", async () => {
+    const mockProcesses = [
+      { name: "chrome.exe", path: "C:\\chrome.exe" },
+      { name: "firefox.exe", path: "C:\\firefox.exe" },
+    ];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_routing_rules") return makeRules();
+      if (cmd === "get_geodata_status")
+        return { downloaded: false, geoip_exists: false, geosite_exists: false, geoip_categories_count: 0, geosite_categories_count: 0 };
+      if (cmd === "list_running_processes") return mockProcesses;
+      return null;
+    });
+
+    const { result } = renderHook(() => useRoutingState(defaultOpts));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.loadProcessList();
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("list_running_processes");
+    expect(result.current.processList).toEqual(mockProcesses);
+    expect(result.current.processListLoading).toBe(false);
+  });
+
+  it("addProcess marks dirty and save includes processes in payload", async () => {
+    setupInvokeForLoad(makeRules({ processes: [] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.addProcess("edge.exe");
+    });
+
+    expect(result.current.dirty).toBe(true);
+
+    await act(async () => {
+      await result.current.save();
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "save_routing_rules",
+      expect.objectContaining({
+        rules: expect.objectContaining({
+          processes: ["edge.exe"],
+        }),
+      }),
+    );
+  });
+
+  it("removeProcess marks dirty", async () => {
+    setupInvokeForLoad(makeRules({ processes: ["chrome.exe", "firefox.exe"] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.removeProcess("chrome.exe");
+    });
+
+    expect(result.current.dirty).toBe(true);
+    expect(result.current.rules.processes).toEqual(["firefox.exe"]);
+  });
+
+  it("process_mode is included in save payload", async () => {
+    setupInvokeForLoad(makeRules({ processes: ["test.exe"] }));
+
+    const { result } = renderHook(() =>
+      useRoutingState({ ...defaultOpts, status: "connected" }),
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.setProcessMode("only");
+    });
+
+    await act(async () => {
+      await result.current.save();
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "save_routing_rules",
+      expect.objectContaining({
+        rules: expect.objectContaining({
+          process_mode: "only",
+          processes: ["test.exe"],
+        }),
+      }),
+    );
+  });
+
   // ── successQueue ───────────────────────────────────
 
   it("shiftSuccess removes first item from queue", async () => {

@@ -213,8 +213,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         />
         )}
 
-        {/* Фильтрация по процессам — экспериментальная функция, включается в Настройках */}
-        {toggles.processFilter && (
+        {/* Фильтрация по процессам */}
         <ProcessFilterSection
           processMode={state.rules.process_mode}
           processes={state.rules.processes}
@@ -225,7 +224,6 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
           onRemove={state.removeProcess}
           onLoadProcesses={state.loadProcessList}
         />
-        )}
       </div>
 
     </div>
