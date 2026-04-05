@@ -64,8 +64,8 @@
   Delete "$TEMP\trusttunnel_updater.bat"
   Delete "$TEMP\trusttunnel_updater.vbs"
 
-  ; ── 6. Force-remove entire install directory ──────────────────
-  ;    Safety net: nuke everything that remains
-  RMDir /r "$INSTDIR"
+  ; ── 6. Remove empty install directory ─────────────────────────
+  ;    Only remove if empty (safe for reinstall — Tauri handles its own files)
+  RMDir "$INSTDIR"
 
 !macroend
