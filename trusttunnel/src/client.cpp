@@ -2,6 +2,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <magic_enum/magic_enum.hpp>
@@ -17,7 +18,121 @@
 #include "vpn/trusttunnel/config.h"
 #include "vpn/vpn.h"
 
+#ifdef _WIN32
+#include <iphlpapi.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
+
 namespace ag {
+
+#ifdef _WIN32
+// Cache PID → exe name to avoid repeated OpenProcess + QueryFullProcessImageNameW calls.
+// Cleared on VPN reconnect (new TrustTunnelClient instance).
+static std::unordered_map<DWORD, std::string> s_pid_name_cache;
+
+static std::string pid_to_exe_name(DWORD pid) {
+    auto it = s_pid_name_cache.find(pid);
+    if (it != s_pid_name_cache.end()) {
+        return it->second;
+    }
+
+    std::string result;
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (hProcess != nullptr) {
+        wchar_t path[MAX_PATH] = {};
+        DWORD path_len = MAX_PATH;
+        if (QueryFullProcessImageNameW(hProcess, 0, path, &path_len)) {
+            int needed = WideCharToMultiByte(
+                    CP_UTF8, 0, path, static_cast<int>(path_len), nullptr, 0, nullptr, nullptr);
+            if (needed > 0) {
+                result.resize(static_cast<size_t>(needed));
+                WideCharToMultiByte(
+                        CP_UTF8, 0, path, static_cast<int>(path_len), result.data(), needed, nullptr, nullptr);
+            }
+        }
+        CloseHandle(hProcess);
+    }
+
+    s_pid_name_cache[pid] = result;
+    return result;
+}
+
+// Look up PID owning a local port in TCP or UDP table.
+// Uses retry loop: table size can grow between the two API calls.
+static DWORD find_pid_by_port(uint16_t local_port, int proto) {
+    if (proto == IPPROTO_TCP) {
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            DWORD size = 0;
+            GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+            if (size == 0) return 0;
+
+            std::vector<uint8_t> buf(size);
+            DWORD err = GetExtendedTcpTable(buf.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+            if (err == ERROR_INSUFFICIENT_BUFFER) continue;
+            if (err != NO_ERROR) return 0;
+
+            auto *table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID *>(buf.data());
+            for (DWORD i = 0; i < table->dwNumEntries; i++) {
+                auto &row = table->table[i];
+                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port
+                        && row.dwOwningPid > 4) {
+                    return row.dwOwningPid;
+                }
+            }
+            return 0;
+        }
+    } else if (proto == IPPROTO_UDP) {
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            DWORD size = 0;
+            GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
+            if (size == 0) return 0;
+
+            std::vector<uint8_t> buf(size);
+            DWORD err = GetExtendedUdpTable(buf.data(), &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
+            if (err == ERROR_INSUFFICIENT_BUFFER) continue;
+            if (err != NO_ERROR) return 0;
+
+            auto *table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID *>(buf.data());
+            for (DWORD i = 0; i < table->dwNumEntries; i++) {
+                auto &row = table->table[i];
+                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port
+                        && row.dwOwningPid > 4) {
+                    return row.dwOwningPid;
+                }
+            }
+            return 0;
+        }
+    }
+    return 0;
+}
+
+// Resolve source socket address → PID → process executable name.
+// Match by port only — the TUN adapter source IP differs from the physical adapter IP
+// visible in GetExtendedTcpTable, so address matching is unreliable.
+static std::string resolve_app_name_from_socket(const struct sockaddr *src, int proto) {
+    if (src == nullptr) {
+        return {};
+    }
+
+    uint16_t local_port = 0;
+    if (src->sa_family == AF_INET) {
+        local_port = ntohs(reinterpret_cast<const struct sockaddr_in *>(src)->sin_port);
+    } else if (src->sa_family == AF_INET6) {
+        local_port = ntohs(reinterpret_cast<const struct sockaddr_in6 *>(src)->sin6_port);
+    }
+    if (local_port == 0) {
+        return {};
+    }
+
+    DWORD pid = find_pid_by_port(local_port, proto);
+    if (pid == 0) {
+        return {};
+    }
+
+    return pid_to_exe_name(pid);
+}
+#endif
 
 TrustTunnelClient::TrustTunnelClient(TrustTunnelConfig &&config, VpnCallbacks &&callbacks)
         : m_config(std::move(config))
@@ -484,6 +599,7 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         struct TaskContext {
             VpnConnectionInfo *info;
             Vpn *vpn;
+            std::string owned_appname; // keeps appname alive for the async task
         };
         auto *task_context = new TaskContext;
         const VpnConnectRequestEvent *event = (VpnConnectRequestEvent *) data;
@@ -525,38 +641,59 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
             }
         }
         // Process-based routing (after blocked check)
-        if (action == VPN_CA_DEFAULT && event->app_name != nullptr
+        std::string resolved_app;
+        if (action == VPN_CA_DEFAULT
                 && (!m_process_direct.empty() || !m_process_proxy.empty() || !m_process_block.empty())) {
-            std::string app = event->app_name;
-            // Extract just the executable name (after last path separator)
-            if (auto pos = app.rfind('\\'); pos != std::string::npos) {
-                app = app.substr(pos + 1);
+            // Use app_name from event if available
+            if (event->app_name != nullptr && event->app_name[0] != '\0') {
+                resolved_app = event->app_name;
             }
-            if (auto pos = app.rfind('/'); pos != std::string::npos) {
-                app = app.substr(pos + 1);
+#ifdef _WIN32
+            // On Windows, app_name is typically empty because the TUN/lwip stack
+            // doesn't provide process info. Resolve it via GetExtendedTcpTable.
+            if (resolved_app.empty() && event->src != nullptr) {
+                resolved_app = resolve_app_name_from_socket(event->src, event->proto);
             }
-            // Lowercase for case-insensitive comparison
-            std::transform(app.begin(), app.end(), app.begin(), ::tolower);
+#endif
+            if (!resolved_app.empty()) {
+                // Extract just the executable name (after last path separator)
+                std::string app = resolved_app;
+                if (auto pos = app.rfind('\\'); pos != std::string::npos) {
+                    app = app.substr(pos + 1);
+                }
+                if (auto pos = app.rfind('/'); pos != std::string::npos) {
+                    app = app.substr(pos + 1);
+                }
+                // Lowercase for case-insensitive comparison
+                std::transform(app.begin(), app.end(), app.begin(), ::tolower);
 
-            if (!m_process_block.empty() && m_process_block.contains(app)) {
-                action = VPN_CA_REJECT;
-                infolog(m_logger, "[ROUTE] BLOCKED process: {}", app);
-            } else if (!m_process_direct.empty() && m_process_direct.contains(app)) {
-                action = VPN_CA_FORCE_BYPASS;
-                infolog(m_logger, "[ROUTE] DIRECT process: {}", app);
-            } else if (!m_process_proxy.empty() && m_process_proxy.contains(app)) {
-                action = VPN_CA_FORCE_REDIRECT;
-                infolog(m_logger, "[ROUTE] PROXY process: {}", app);
+                if (!m_process_block.empty() && m_process_block.contains(app)) {
+                    action = VPN_CA_REJECT;
+                    infolog(m_logger, "[ROUTE] BLOCKED process: {}", app);
+                } else if (!m_process_direct.empty() && m_process_direct.contains(app)) {
+                    action = VPN_CA_FORCE_BYPASS;
+                    infolog(m_logger, "[ROUTE] DIRECT process: {}", app);
+                } else if (!m_process_proxy.empty() && m_process_proxy.contains(app)) {
+                    action = VPN_CA_FORCE_REDIRECT;
+                    infolog(m_logger, "[ROUTE] PROXY process: {}", app);
+                }
             }
         }
 
         // Log final routing decision
+        std::string_view log_app = resolved_app.empty() ? safe_to_string_view(event->app_name) : resolved_app;
         const char *action_names[] = {"DEFAULT", "PROXY", "BYPASS", "REJECT", "FORCE_BYPASS", "FORCE_REDIRECT"};
-        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})", dst_str, action_names[action],
-                safe_to_string_view(event->app_name));
+        tracelog(m_logger, "[ROUTE] Decision: {} -> {} (app={})", dst_str, action_names[action], log_app);
 
         info->action = action;
-        info->appname = safe_to_string_view(event->app_name).empty() ? "trusttunnel_client" : event->app_name;
+        if (!resolved_app.empty()) {
+            task_context->owned_appname = std::move(resolved_app);
+        } else if (event->app_name != nullptr && event->app_name[0] != '\0') {
+            task_context->owned_appname = event->app_name;
+        } else {
+            task_context->owned_appname = "trusttunnel_client";
+        }
+        info->appname = task_context->owned_appname.c_str();
         task_context->info = info;
         task_context->vpn = m_vpn;
         vpn_event_loop_submit(m_extra_loop.get(),

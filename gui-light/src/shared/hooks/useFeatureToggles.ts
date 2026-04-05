@@ -10,13 +10,10 @@ const STORAGE_KEY = "tt_feature_toggles";
 export interface FeatureToggles {
   /** Show "Block" routing section */
   blockRouting: boolean;
-  /** Show "Process Filter" routing section */
-  processFilter: boolean;
 }
 
 const DEFAULTS: FeatureToggles = {
   blockRouting: false,
-  processFilter: false,
 };
 
 function load(): FeatureToggles {
