@@ -19,7 +19,7 @@ pub fn ask_for_input_raw_line(message: &str) -> String {
     use crossterm::execute;
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
-    print!("? {} › ", message);
+    print!("? {message} › ");
     std::io::stdout().flush().unwrap();
 
     enable_raw_mode().unwrap();

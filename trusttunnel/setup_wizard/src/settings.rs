@@ -317,12 +317,12 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
                     ))
                     .and_then(|x| {
                         fs::read_to_string(&x)
-                            .map_err(|e| panic!("Failed to read endpoint config file:\n{}", e))
+                            .map_err(|e| panic!("Failed to read endpoint config file:\n{e}"))
                             .ok()
                     })
                     .and_then(|x| {
                         toml::de::from_str(x.as_str())
-                            .map_err(|e| panic!("Failed to parse endpoint config:\n{}", e))
+                            .map_err(|e| panic!("Failed to parse endpoint config:\n{e}"))
                             .ok()
                     })
                 }
@@ -340,12 +340,12 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
             ))
             .and_then(|x| {
                 fs::read_to_string(&x)
-                    .map_err(|e| panic!("Failed to read endpoint config file:\n{}", e))
+                    .map_err(|e| panic!("Failed to read endpoint config file:\n{e}"))
                     .ok()
             })
             .and_then(|x| {
                 toml::de::from_str(x.as_str())
-                    .map_err(|e| panic!("Failed to parse endpoint config:\n{}", e))
+                    .map_err(|e| panic!("Failed to parse endpoint config:\n{e}"))
                     .ok()
             })
         };
@@ -457,7 +457,7 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
             .flatten()
             .and_then(parse_cert)
             .and_then(|x| {
-                ask_for_agreement(&format!("Use an existent certificate? {:?}", x)).then_some(x)
+                ask_for_agreement(&format!("Use an existent certificate? {x:?}")).then_some(x)
             })
         {
             (
@@ -804,7 +804,7 @@ fn display_and_confirm_endpoint(endpoint: &Endpoint, cert_infos: &[CertInfo]) {
 
 pub fn endpoint_from_deeplink(uri: &str) -> Endpoint {
     let config = trusttunnel_deeplink::decode(uri)
-        .unwrap_or_else(|e| panic!("Failed to decode deep-link URI: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to decode deep-link URI: {e}"));
 
     let cert_infos = config
         .certificate
@@ -813,7 +813,7 @@ pub fn endpoint_from_deeplink(uri: &str) -> Endpoint {
         .unwrap_or_default();
 
     let endpoint = trusttunnel_settings::endpoint_from_deeplink_config(config)
-        .unwrap_or_else(|e| panic!("Failed to convert deep-link config: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to convert deep-link config: {e}"));
 
     display_and_confirm_endpoint(&endpoint, &cert_infos);
 

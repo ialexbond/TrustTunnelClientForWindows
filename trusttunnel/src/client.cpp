@@ -43,8 +43,8 @@ static std::string pid_to_exe_name(DWORD pid) {
         wchar_t path[MAX_PATH] = {};
         DWORD path_len = MAX_PATH;
         if (QueryFullProcessImageNameW(hProcess, 0, path, &path_len)) {
-            int needed = WideCharToMultiByte(
-                    CP_UTF8, 0, path, static_cast<int>(path_len), nullptr, 0, nullptr, nullptr);
+            int needed =
+                    WideCharToMultiByte(CP_UTF8, 0, path, static_cast<int>(path_len), nullptr, 0, nullptr, nullptr);
             if (needed > 0) {
                 result.resize(static_cast<size_t>(needed));
                 WideCharToMultiByte(
@@ -65,18 +65,20 @@ static DWORD find_pid_by_port(uint16_t local_port, int proto) {
         for (int attempt = 0; attempt < 3; ++attempt) {
             DWORD size = 0;
             GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-            if (size == 0) return 0;
+            if (size == 0)
+                return 0;
 
             std::vector<uint8_t> buf(size);
             DWORD err = GetExtendedTcpTable(buf.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-            if (err == ERROR_INSUFFICIENT_BUFFER) continue;
-            if (err != NO_ERROR) return 0;
+            if (err == ERROR_INSUFFICIENT_BUFFER)
+                continue;
+            if (err != NO_ERROR)
+                return 0;
 
             auto *table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID *>(buf.data());
             for (DWORD i = 0; i < table->dwNumEntries; i++) {
                 auto &row = table->table[i];
-                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port
-                        && row.dwOwningPid > 4) {
+                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port && row.dwOwningPid > 4) {
                     return row.dwOwningPid;
                 }
             }
@@ -86,18 +88,20 @@ static DWORD find_pid_by_port(uint16_t local_port, int proto) {
         for (int attempt = 0; attempt < 3; ++attempt) {
             DWORD size = 0;
             GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
-            if (size == 0) return 0;
+            if (size == 0)
+                return 0;
 
             std::vector<uint8_t> buf(size);
             DWORD err = GetExtendedUdpTable(buf.data(), &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
-            if (err == ERROR_INSUFFICIENT_BUFFER) continue;
-            if (err != NO_ERROR) return 0;
+            if (err == ERROR_INSUFFICIENT_BUFFER)
+                continue;
+            if (err != NO_ERROR)
+                return 0;
 
             auto *table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID *>(buf.data());
             for (DWORD i = 0; i < table->dwNumEntries; i++) {
                 auto &row = table->table[i];
-                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port
-                        && row.dwOwningPid > 4) {
+                if (ntohs(static_cast<uint16_t>(row.dwLocalPort)) == local_port && row.dwOwningPid > 4) {
                     return row.dwOwningPid;
                 }
             }

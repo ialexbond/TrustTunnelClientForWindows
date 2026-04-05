@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 TrustTunnel Client for Windows — VPN client with two GUI editions sharing a common C++ VPN core:
+
 - **gui-app/** — Pro edition (8-panel sidebar, SSH deployment, full routing UI)
 - **gui-light/** — Light edition (4-screen bottom-nav, simplified UI)
 
@@ -38,6 +39,7 @@ Both editions are Tauri v2 apps (Rust backend + React frontend) that spawn a C++
 ## Build Commands
 
 ### C++ Core (sidecar)
+
 ```bash
 # Full build (requires MSVC Developer Command Prompt)
 make init              # Install Conan deps + setup CMake
@@ -48,6 +50,7 @@ cd build && cmake --build . --target trusttunnel_client --config RelWithDebInfo
 ```
 
 ### Tauri GUI (both editions)
+
 ```bash
 cd gui-app && npm install --legacy-peer-deps
 cd gui-app && npm run tauri build -- --bundles nsis    # NSIS installer
@@ -59,6 +62,7 @@ cd gui-light && npm run tauri dev
 ```
 
 ### Custom Installer (optional, in `installer/`)
+
 ```bash
 cd installer && cargo build --release
 ```
@@ -91,33 +95,43 @@ make lint-md           # markdownlint
 ## Key Patterns
 
 ### Sidecar Integration
+
 The C++ VPN engine runs as a separate process (`trusttunnel_client.exe`), bundled via Tauri's `externalBin`. Communication is through TOML config files, not IPC:
+
 - `gui-app/src-tauri/src/sidecar.rs` — spawn/kill management
 - `gui-app/src-tauri/src/commands/vpn.rs` — `resolve_and_apply()` writes config BEFORE spawning sidecar
 
 ### Routing Rules Engine
+
 Three-tier routing: domains/IPs → process filters → DNS-level blocking.
+
 - **Domain routing** (`routing_rules.rs`): resolves GeoIP/GeoSite databases, writes `exclusions.txt` + `blocked.txt`
 - **Process filtering** (`trusttunnel/src/client.cpp`): resolves PID via `GetExtendedTcpTable`, applies `VPN_CA_FORCE_BYPASS` / `VPN_CA_FORCE_REDIRECT`
 - **DNS blocking** (`core/src/dns_handler.cpp`): drops queries for blocked domains
 
 ### Portable Data Directory
+
 `portable_data_dir()` returns the exe's parent directory. All config/data stored alongside the binary:
+
 - `trusttunnel_client.toml` — VPN server config
 - `routing_rules.json` — user routing rules (direct/proxy/block/processes)
 - `resolved/` — pre-resolved exclusion/process filter files for C++ core
 - `geodata/` — GeoIP/GeoSite v2ray databases
 
 ### VPN Modes
+
 - **General**: all traffic through VPN, `direct` entries bypass
 - **Selective**: all traffic direct, `proxy` entries go through VPN
 - Process filters override both modes independently
 
 ### Feature Toggles
+
 Experimental features hidden behind localStorage flags (`useFeatureToggles.ts`):
+
 - `blockRouting` — DNS-level site blocking section
 
 ### Dual Edition Differences
+
 | Feature | Pro (gui-app) | Light (gui-light) |
 |---------|--------------|-------------------|
 | Window | 1020×640, sidebar | 420×680, bottom nav |
@@ -129,6 +143,7 @@ Experimental features hidden behind localStorage flags (`useFeatureToggles.ts`):
 ## Important Files
 
 ### Rust Backend (both editions share structure)
+
 - `src-tauri/src/lib.rs` — module registration, tray icon, window lifecycle
 - `src-tauri/src/commands/vpn.rs` — VPN connect/disconnect/status
 - `src-tauri/src/commands/config.rs` — config file management + fs watcher
@@ -138,6 +153,7 @@ Experimental features hidden behind localStorage flags (`useFeatureToggles.ts`):
 - `src-tauri/src/commands/updater.rs` — GitHub releases auto-update
 
 ### C++ Core
+
 - `trusttunnel/src/client.cpp` — VPN event handler, process-based routing
 - `trusttunnel/src/config.cpp` — TOML config parser, loads process filter files
 - `core/src/dns_handler.cpp` — DNS routing decision (general/selective mode)
@@ -145,6 +161,7 @@ Experimental features hidden behind localStorage flags (`useFeatureToggles.ts`):
 - `net/src/os_tunnel_win.cpp` — WinTUN adapter + WFP firewall
 
 ### Frontend
+
 - `src/App.tsx` — root component, VPN state management
 - `src/components/routing/useRoutingState.ts` — routing rules CRUD + dirty tracking
 - `src/components/routing/ProcessFilterSection.tsx` — process filter UI
@@ -152,6 +169,7 @@ Experimental features hidden behind localStorage flags (`useFeatureToggles.ts`):
 - `src/shared/i18n/locales/{ru,en}.json` — translations
 
 ### Installer
+
 - `src-tauri/nsis/installer-hooks.nsh` — pre/post-uninstall cleanup (kill sidecar, registry, data)
 - `src-tauri/nsis/{Russian,English}.nsh` — NSIS UI strings
 - `src-tauri/tauri.conf.json` — bundle config (resources, sidecar, NSIS settings)
@@ -166,6 +184,7 @@ Experimental features hidden behind localStorage flags (`useFeatureToggles.ts`):
 ## Version Management
 
 Version must be updated in 6 files simultaneously:
+
 1. `gui-app/package.json`
 2. `gui-app/src-tauri/Cargo.toml`
 3. `gui-app/src-tauri/tauri.conf.json` (version + window title)
