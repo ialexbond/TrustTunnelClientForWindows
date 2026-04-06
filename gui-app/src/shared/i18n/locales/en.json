@@ -772,5 +772,15 @@
     "logs_appear_on_connect": "Logs will appear after connecting...",
     "sidecar_level": "Recording level",
     "display_filter": "Filter"
+  },
+  "drop": {
+    "overlay_text": "Drop file here",
+    "overlay_hint": ".toml — VPN config, .json — routing rules",
+    "config_imported": "VPN config imported",
+    "routing_imported": "Routing rules imported",
+    "busy_deploying": "Cannot import during active operation",
+    "busy_connecting": "Cannot import while connecting",
+    "busy_disconnecting": "Cannot import while disconnecting",
+    "unsupported_format": "Unsupported file format. Use .toml or .json"
   }
 }

@@ -72,7 +72,7 @@ class PanelErrorBoundaryInner extends React.Component<
                 }}
               >
                 <Home className="w-4 h-4" />
-                {t("errors.go_home", "На главную")}
+                {t("errors.go_home", { defaultValue: "На главную" })}
               </button>
             )}
           </div>

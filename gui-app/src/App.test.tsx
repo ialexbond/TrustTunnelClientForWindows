@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
 import i18n from "./shared/i18n";
 import App from "./App";
+import { renderWithProviders as render } from "./test/test-utils";
 
 // Mock recharts
 vi.mock("recharts", () => ({
@@ -882,7 +883,7 @@ describe("App", () => {
       ok: true,
       json: async () => ({
         tag_name: "v2.0.0",
-        assets: [{ name: "release.zip", browser_download_url: "https://example.com/release.zip" }],
+        assets: [{ name: "TrustTunnel-Pro-v2.0.0-setup.exe", browser_download_url: "https://example.com/Pro-setup.exe" }],
         body: "New features",
         html_url: "https://github.com/releases/v2.0.0",
       }),
@@ -905,7 +906,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(aboutPanelProps.updateInfo?.available).toBe(true);
       expect(aboutPanelProps.updateInfo?.latestVersion).toBe("2.0.0");
-      expect(aboutPanelProps.updateInfo?.downloadUrl).toBe("https://example.com/release.zip");
+      expect(aboutPanelProps.updateInfo?.downloadUrl).toBe("https://example.com/Pro-setup.exe");
     });
   });
 
@@ -1476,7 +1477,7 @@ describe("App", () => {
       ok: true,
       json: async () => ({
         tag_name: "v2.0.0",
-        assets: [{ name: "installer.exe", browser_download_url: "https://example.com/installer.exe" }],
+        assets: [{ name: "TrustTunnel-Pro-setup.exe", browser_download_url: "https://example.com/Pro-setup.exe" }],
         body: "New version",
         html_url: "https://github.com/releases",
       }),
@@ -1497,7 +1498,7 @@ describe("App", () => {
     });
 
     await waitFor(() => {
-      expect(aboutPanelProps.updateInfo?.downloadUrl).toBe("https://example.com/installer.exe");
+      expect(aboutPanelProps.updateInfo?.downloadUrl).toBe("https://example.com/Pro-setup.exe");
     });
   });
 });

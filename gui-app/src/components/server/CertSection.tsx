@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -137,7 +137,7 @@ export function CertSection({ state }: Props) {
   const { sshParams, setActionResult, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
 
   const [renewLoading, setRenewLoading] = useState(false);
-  const [renewStatus, setRenewStatus] = useState<string>("");
+  const [_renewStatus, setRenewStatus] = useState<string>("");
   const [confirmRenew, setConfirmRenew] = useState(false);
 
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;

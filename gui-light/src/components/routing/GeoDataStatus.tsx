@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { Database, Download, RefreshCw, Check, Loader2 } from "lucide-react";
-import { Card, CardHeader, Badge, Button } from "../../shared/ui";
+import { Database, Download, RefreshCw, Check } from "lucide-react";
+import { Card, Badge, Button } from "../../shared/ui";
 import type { GeoDataStatus as GeoDataStatusType } from "./useRoutingState";
 
 interface GeoDataProgressPayload {
@@ -115,9 +115,7 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
   };
 
   // Determine button state
-  const isUpToDate = status.downloaded && updateCheck && !updateCheck.update_available;
   const hasUpdate = status.downloaded && updateCheck?.update_available;
-  const notDownloaded = !status.downloaded;
 
   // Badge
   const badgeVariant: "success" | "warning" | "danger" =

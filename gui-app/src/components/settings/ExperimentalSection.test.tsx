@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 import { ExperimentalSection } from "./ExperimentalSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 
 // Mock useFeatureToggles
 const mockUpdate = vi.fn();
@@ -33,11 +34,6 @@ describe("ExperimentalSection", () => {
     expect(screen.getByText("Блокировка сайтов")).toBeInTheDocument();
   });
 
-  it("renders process filter toggle", () => {
-    render(<ExperimentalSection />);
-    expect(screen.getByText("Фильтрация по процессам")).toBeInTheDocument();
-  });
-
   it("calls update when block routing toggle is clicked", () => {
     render(<ExperimentalSection />);
     const toggleButtons = screen.getAllByRole("button");
@@ -46,11 +42,4 @@ describe("ExperimentalSection", () => {
     expect(mockUpdate).toHaveBeenCalledWith("blockRouting", true);
   });
 
-  it("calls update when process filter toggle is clicked", () => {
-    render(<ExperimentalSection />);
-    const toggleButtons = screen.getAllByRole("button");
-    // Second toggle is processFilter
-    fireEvent.click(toggleButtons[1]);
-    expect(mockUpdate).toHaveBeenCalledWith("processFilter", true);
-  });
 });

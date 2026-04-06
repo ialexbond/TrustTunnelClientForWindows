@@ -25,3 +25,21 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 vi.mock("@tauri-apps/plugin-shell", () => ({
   open: vi.fn().mockResolvedValue(undefined),
 }));
+
+// Mock @tauri-apps/api/window
+vi.mock("@tauri-apps/api/window", () => {
+  const windowMock = {
+    minimize: vi.fn().mockResolvedValue(undefined),
+    toggleMaximize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    setTitle: vi.fn().mockResolvedValue(undefined),
+    show: vi.fn().mockResolvedValue(undefined),
+    hide: vi.fn().mockResolvedValue(undefined),
+    onCloseRequested: vi.fn().mockResolvedValue(() => {}),
+    listen: vi.fn().mockResolvedValue(() => {}),
+  };
+  return {
+    getCurrentWindow: vi.fn(() => windowMock),
+    Window: vi.fn(() => windowMock),
+  };
+});

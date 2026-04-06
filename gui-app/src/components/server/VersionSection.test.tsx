@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 import { VersionSection } from "./VersionSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
 
 function makeState(overrides: Partial<ServerState> = {}): ServerState {
@@ -50,8 +51,8 @@ describe("VersionSection", () => {
   it("shows version dropdown when versions are available", () => {
     const state = makeState();
     render(<VersionSection state={state} />);
-    // The dropdown trigger should be present
-    const trigger = screen.getByText(new RegExp(i18n.t("server.version.latest_full")));
+    // The dropdown trigger should show the selected version
+    const trigger = screen.getByText("v1.5.0");
     expect(trigger).toBeInTheDocument();
   });
 

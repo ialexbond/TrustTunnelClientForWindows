@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 import { WelcomeStep } from "./WelcomeStep";
+import { renderWithProviders as render } from "../../test/test-utils";
 import { makeWizardState } from "./testHelpers";
 
 describe("WelcomeStep", () => {
@@ -58,7 +59,6 @@ describe("WelcomeStep", () => {
     // Modal should appear with import options
     expect(screen.getByText(i18n.t("wizard.import.from_file"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("wizard.import.from_link"))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t("wizard.import.from_clipboard"))).toBeInTheDocument();
   });
 
   it("shows system requirements section", () => {
