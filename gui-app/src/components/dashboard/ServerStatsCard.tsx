@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Server, Cpu, MemoryStick, HardDrive, Users, Clock, RefreshCw, Loader2, LogIn,
+  Server, Cpu, MemoryStick, HardDrive, Clock, RefreshCw, Loader2, LogIn,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";

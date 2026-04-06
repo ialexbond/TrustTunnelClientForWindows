@@ -32,7 +32,7 @@ export function DangerZoneSection({ state }: Props) {
     setUninstallLoading,
     sshParams,
     onSwitchToSetup,
-    onClearConfig,
+    onClearConfig: _onClearConfig,
     setActionResult,
   } = state;
 
