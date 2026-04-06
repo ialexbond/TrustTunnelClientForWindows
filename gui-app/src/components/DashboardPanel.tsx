@@ -37,7 +37,7 @@ export default function DashboardPanel({
   status,
   connectedSince,
   configPath,
-  vpnMode,
+  vpnMode: _vpnMode,
   onConnect,
   onDisconnect,
   onNavigateToControl,

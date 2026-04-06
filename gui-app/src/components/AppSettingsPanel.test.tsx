@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import AppSettingsPanel from "./AppSettingsPanel";
+import { renderWithProviders as render } from "../test/test-utils";
 
 // Mock the autostart plugin
 vi.mock("@tauri-apps/plugin-autostart", () => ({

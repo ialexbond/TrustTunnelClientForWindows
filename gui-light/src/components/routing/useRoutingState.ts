@@ -82,11 +82,6 @@ function serializeEntry(entry: RuleEntry): string {
   }
 }
 
-function rawToRuleEntry(raw: string): RuleEntry {
-  const { type, value } = parseEntryValue(raw);
-  return { id: nextId(), type, value };
-}
-
 // ═══════════════════════════════════════════════════════
 // Hook
 // ═══════════════════════════════════════════════════════

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useServerState, type ServerInfo, type ServerPanelProps } from "./useServerState";
+import { hookWrapper as wrapper } from "../../test/test-utils";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -50,7 +51,7 @@ describe("useServerState", () => {
     // Hang the invoke so loading stays true
     mockInvoke.mockImplementation(() => new Promise(() => {}));
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     expect(result.current.serverInfo).toBeNull();
     expect(result.current.loading).toBe(true);
@@ -62,7 +63,7 @@ describe("useServerState", () => {
   it("populates serverInfo after successful load", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     // Wait for the useEffect load to finish
     await vi.waitFor(() => {
@@ -86,7 +87,7 @@ describe("useServerState", () => {
       return null;
     });
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -107,7 +108,7 @@ describe("useServerState", () => {
       return null;
     });
 
-    renderHook(() => useServerState(propsNoPass));
+    renderHook(() => useServerState(propsNoPass), { wrapper });
 
     // Give effects a tick
     await vi.waitFor(() => {});
@@ -123,7 +124,7 @@ describe("useServerState", () => {
   it("runAction calls invoke, refreshes server info, and pushes success message", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -138,8 +139,7 @@ describe("useServerState", () => {
     });
 
     expect(mockInvoke).toHaveBeenCalledWith("restart_service", expect.anything());
-    // Success message pushed to queue
-    expect(result.current.successQueue).toContainEqual(expect.objectContaining({ text: "Service restarted" }));
+    // Success message is now pushed via useSnackBar (no successQueue on the hook)
   });
 
   // ── runAction error ────────────────────────────────
@@ -147,7 +147,7 @@ describe("useServerState", () => {
   it("runAction sets actionResult error when invoke throws", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -169,7 +169,7 @@ describe("useServerState", () => {
   it("usernameError returns empty string when newUsername is blank", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -181,7 +181,7 @@ describe("useServerState", () => {
   it("usernameError detects spaces in username", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -197,7 +197,7 @@ describe("useServerState", () => {
   it("usernameError detects duplicate username", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -217,7 +217,7 @@ describe("useServerState", () => {
 
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     // Let initial load complete
     await act(async () => {
@@ -244,32 +244,19 @@ describe("useServerState", () => {
     vi.useRealTimers();
   });
 
-  // ── successQueue management ────────────────────────
+  // ── pushSuccess delegates to SnackBar ──────────────
 
-  it("pushSuccess adds to queue and shiftSuccess removes first item", async () => {
+  it("pushSuccess is a function (delegates to useSnackBar)", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
-    act(() => {
-      result.current.pushSuccess("msg1");
-      result.current.pushSuccess("msg2");
-    });
-
-    expect(result.current.successQueue).toEqual([
-      { text: "msg1", type: "success" },
-      { text: "msg2", type: "success" },
-    ]);
-
-    act(() => {
-      result.current.shiftSuccess();
-    });
-
-    expect(result.current.successQueue).toEqual([{ text: "msg2", type: "success" }]);
+    // pushSuccess now comes from useSnackBar and is a fire-and-forget function
+    expect(typeof result.current.pushSuccess).toBe("function");
   });
 
   // ── Optimistic user state updates ──────────────────
@@ -277,7 +264,7 @@ describe("useServerState", () => {
   it("addUserToState adds user optimistically", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.serverInfo).not.toBeNull();
@@ -293,7 +280,7 @@ describe("useServerState", () => {
   it("removeUserFromState removes user optimistically", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useServerState(baseProps));
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.serverInfo).not.toBeNull();

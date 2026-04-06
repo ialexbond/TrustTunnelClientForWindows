@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Emitter;
 
+use crate::routing_rules::RoutingRules;
+
 // ─── Config file watcher state ───────────────────────────────
 
 static CONFIG_WATCHER_STOP: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
@@ -358,4 +360,46 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
     }
 
     Ok(())
+}
+
+/// Result of importing a dropped file — either a VPN config or routing rules.
+#[derive(Serialize)]
+pub struct ImportDropResult {
+    pub file_type: String, // "config" | "routing"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_rules: Option<RoutingRules>,
+}
+
+/// Import a file dropped via HTML5 drag-drop (receives content, not path).
+/// Used when dragDropEnabled is false and we get file content from FileReader.
+#[tauri::command]
+pub async fn import_dropped_content(content: String, file_name: String) -> Result<ImportDropResult, String> {
+    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    match ext.as_str() {
+        "toml" => {
+            if !content.contains("[endpoint]") && !content.contains("[listener") {
+                return Err("TOML file does not appear to be a VPN config (missing [endpoint] section)".into());
+            }
+            let config_path = super::deeplink::import_config_from_string(content, "drag-drop".into()).await?;
+            Ok(ImportDropResult {
+                file_type: "config".into(),
+                config_path: Some(config_path),
+                routing_rules: None,
+            })
+        }
+        "json" => {
+            let rules: RoutingRules = serde_json::from_str(&content)
+                .map_err(|e| format!("Invalid routing rules format: {e}"))?;
+            crate::routing_rules::save_routing_rules(rules.clone())?;
+            Ok(ImportDropResult {
+                file_type: "routing".into(),
+                config_path: None,
+                routing_rules: Some(rules),
+            })
+        }
+        _ => Err(format!("Unsupported file format: .{ext}")),
+    }
 }
