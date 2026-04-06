@@ -36,6 +36,7 @@ class NetworkUtils {
                 var systemDns: SystemDns? = null
             }
             private val availableNetworks = ConcurrentHashMap<Network, NetworkProps>()
+            @Volatile
             private var vpnClient: VpnClient? = null
 
             override fun onLost(network: Network) {
