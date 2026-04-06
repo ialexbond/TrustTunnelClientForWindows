@@ -191,7 +191,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     } else {
       // TUN mode — ensure change_system_dns is true
       clone.listener = {
-        tun: { ...config.listener?.tun, change_system_dns: true },
+        tun: { ...config.listener?.tun, change_system_dns: true } as { mtu_size: number; change_system_dns: boolean; included_routes: string[]; excluded_routes: string[] },
       };
     }
     return clone;

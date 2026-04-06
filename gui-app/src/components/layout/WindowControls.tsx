@@ -11,7 +11,7 @@ export function WindowControls() {
   const handleClose = useCallback(() => appWindow.close(), []);
 
   return (
-    <div className="flex items-center h-full" style={{ WebkitAppRegion: "no-drag" as never }}>
+    <div className="flex items-center h-full" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
       {/* Minimize */}
       <button
         className="window-control-btn"

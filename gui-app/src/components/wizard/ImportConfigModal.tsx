@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Link2, Clipboard, X, Loader2 } from "lucide-react";
+import { FileText, Link2, Clipboard, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Modal } from "../../shared/ui/Modal";

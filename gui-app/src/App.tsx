@@ -22,6 +22,8 @@ import { useVpnEvents } from "./shared/hooks/useVpnEvents";
 import { useSnackBar } from "./shared/ui/SnackBarContext";
 import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
+import { useFileDrop } from "./shared/hooks/useFileDrop";
+import { DropOverlay } from "./shared/ui/DropOverlay";
 import { WindowControls } from "./components/layout/WindowControls";
 import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
@@ -30,7 +32,7 @@ export type { VpnStatus, UpdateInfo, VpnConfig, LogEntry, AppTab } from "./share
 
 function App() {
   // ─── Theme ───
-  const { theme, themeMode, handleThemeChange, toggleTheme } = useTheme();
+  const { themeMode, handleThemeChange, toggleTheme } = useTheme();
 
   // ─── Language ───
   const { i18n, handleLanguageChange, toggleLanguage } = useLanguage();
@@ -290,6 +292,27 @@ function App() {
     onToggleLanguage: toggleLanguage,
   });
 
+  // ─── File drag-and-drop ───
+  const handleDropConfig = useCallback((configPath: string) => {
+    setConfig(prev => ({ ...prev, configPath }));
+    localStorage.setItem("tt_config_path", configPath);
+    localStorage.removeItem("tt_config_cleared");
+    setSettingsKey(k => k + 1);
+    setActivePage("settings");
+  }, []);
+
+  const handleDropRouting = useCallback(() => {
+    setActivePage("routing");
+  }, []);
+
+  const { isDragging } = useFileDrop({
+    status,
+    onConfigImported: handleDropConfig,
+    onRoutingImported: handleDropRouting,
+    pushSuccess,
+    isBusy: activePage === "server", // block during setup wizard
+  });
+
   const hasConfig = !!config.configPath;
   const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
 
@@ -319,6 +342,7 @@ function App() {
       className="h-screen flex flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
     >
+      <DropOverlay isDragging={isDragging} />
       {/* Custom titlebar */}
       <div
         className="flex items-center shrink-0"

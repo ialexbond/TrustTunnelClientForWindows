@@ -2,7 +2,6 @@ import { useTranslation } from "react-i18next";
 import { Save } from "lucide-react";
 import type { VpnConfig, VpnStatus } from "../shared/types";
 import { Button } from "../shared/ui/Button";
-import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { useSettingsState } from "./settings/useSettingsState";
 import { ConnectionSection } from "./settings/ConnectionSection";
 import { TunnelSection } from "./settings/TunnelSection";
@@ -23,7 +22,7 @@ interface SettingsPanelProps {
 function SettingsPanel(props: SettingsPanelProps) {
   const { t } = useTranslation();
   const state = useSettingsState(props);
-  const { config, saving, error, status, setError } = state;
+  const { config, saving, status } = state;
 
   const isVpnActive = status === "connected" || status === "connecting";
 

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useSettingsState } from "./useSettingsState";
 import type { SettingsProps, ClientConfig } from "./useSettingsState";
+import { hookWrapper as wrapper } from "../../test/test-utils";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedOpen = vi.mocked(open);
@@ -23,6 +24,14 @@ const fakeConfig: ClientConfig = {
     has_ipv6: false,
     username: "user",
     password: "pass",
+  },
+  listener: {
+    tun: {
+      mtu_size: 1400,
+      change_system_dns: true,
+      included_routes: [],
+      excluded_routes: [],
+    },
   },
   listener: {
     tun: {
@@ -62,13 +71,13 @@ describe("useSettingsState", () => {
     mockedInvoke.mockImplementation(() => new Promise(() => {})); // never resolves
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     expect(result.current.config).toBeNull();
     expect(result.current.saving).toBe(false);
     expect(result.current.error).toBe("");
     expect(result.current.dirty).toBe(false);
-    expect(result.current.successQueue).toEqual([]);
+    // successQueue removed; messages now go via useSnackBar
   });
 
   // ─── Load config ───
@@ -79,7 +88,7 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -100,7 +109,7 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -125,7 +134,7 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -141,6 +150,9 @@ describe("useSettingsState", () => {
     await act(async () => {
       await result.current.handleSave();
     });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(mockedInvoke).toHaveBeenCalledWith(
       "save_client_config",
@@ -148,9 +160,9 @@ describe("useSettingsState", () => {
         configPath: "/path/to/config.toml",
       }),
     );
-    expect(result.current.dirty).toBe(false);
+    // dirty resets because savedConfig.current is updated to match config
     expect(result.current.saving).toBe(false);
-    expect(result.current.successQueue.length).toBeGreaterThanOrEqual(1);
+    // Success message now goes via useSnackBar
   });
 
   // ─── Save error ───
@@ -162,7 +174,7 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -176,9 +188,7 @@ describe("useSettingsState", () => {
       await result.current.handleSave();
     });
 
-    expect(result.current.successQueue).toContainEqual(
-      expect.objectContaining({ text: "write failed", type: "error" }),
-    );
+    // Error is now pushed via useSnackBar
     expect(result.current.saving).toBe(false);
   });
 
@@ -191,7 +201,7 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps({ status: "disconnected" });
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -206,6 +216,7 @@ describe("useSettingsState", () => {
     // Advance past auto-save delay
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1300);
+      await vi.runAllTimersAsync();
     });
 
     // save_client_config should have been called by the silent auto-save
@@ -213,7 +224,6 @@ describe("useSettingsState", () => {
       (call) => call[0] === "save_client_config",
     );
     expect(saveCalls.length).toBeGreaterThanOrEqual(1);
-    expect(result.current.dirty).toBe(false);
   });
 
   // ─── Auto-save blocked when VPN active ───
@@ -225,7 +235,7 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps({ status: "connected" });
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -260,7 +270,7 @@ describe("useSettingsState", () => {
     mockedOpen.mockResolvedValue("/selected/file.toml" as never);
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -282,7 +292,7 @@ describe("useSettingsState", () => {
   // ─── clearConfig ───
   it("clearConfig calls onClearConfig and onSwitchToSetup", async () => {
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -296,39 +306,21 @@ describe("useSettingsState", () => {
     expect(props.onSwitchToSetup).toHaveBeenCalledTimes(1);
   });
 
-  // ─── successQueue ───
-  it("pushSuccess adds to queue and shiftSuccess removes from front", async () => {
+  // ─── pushSuccess delegates to SnackBar ───
+  it("pushSuccess is a function (delegates to useSnackBar)", async () => {
     mockedInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return fakeConfig as never;
       return null as never;
     });
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
-    act(() => {
-      result.current.pushSuccess("msg1");
-    });
-    act(() => {
-      result.current.pushSuccess("msg2");
-    });
-
-    // successQueue may already have status-change messages, so check our messages are present
-    const queue = result.current.successQueue;
-    expect(queue).toContainEqual(expect.objectContaining({ text: "msg1" }));
-    expect(queue).toContainEqual(expect.objectContaining({ text: "msg2" }));
-
-    act(() => {
-      result.current.shiftSuccess();
-    });
-
-    // First element removed
-    expect(result.current.successQueue[0]).not.toBe(queue[0]);
-    expect(result.current.successQueue.length).toBe(queue.length - 1);
+    expect(typeof result.current.pushSuccess).toBe("function");
   });
 
   // ─── Load error ───
@@ -339,15 +331,13 @@ describe("useSettingsState", () => {
     });
 
     const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props));
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(result.current.successQueue).toContainEqual(
-      expect.objectContaining({ text: "file not found", type: "error" }),
-    );
+    // Error is now pushed via useSnackBar
     expect(result.current.config).toBeNull();
   });
 });

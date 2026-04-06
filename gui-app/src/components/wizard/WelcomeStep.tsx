@@ -6,7 +6,7 @@ import { colors } from "../../shared/ui/colors";
 import { ImportConfigModal } from "./ImportConfigModal";
 import type { WizardState } from "./useWizardState";
 
-export function WelcomeStep({ setWizardStep, handleSkip, saveField, onSetupComplete }: WizardState) {
+export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField, onSetupComplete }: WizardState) {
   const [importOpen, setImportOpen] = useState(false);
   const { t } = useTranslation();
 

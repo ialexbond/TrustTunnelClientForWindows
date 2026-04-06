@@ -21,6 +21,7 @@
         "decorations": false,
         "shadow": true,
         "transparent": false,
+        "dragDropEnabled": false,
         "visible": false,
         "skipTaskbar": false
       }

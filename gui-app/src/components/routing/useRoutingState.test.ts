@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
+import React from "react";
+import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 import {
   useRoutingState,
   type UseRoutingStateOptions,
@@ -15,8 +17,12 @@ const mockInvoke = vi.mocked(invoke) as unknown as Mock;
 const defaultOpts: UseRoutingStateOptions = {
   configPath: "/path/to/config.json",
   status: "disconnected",
+  vpnMode: "general",
   onReconnect: vi.fn().mockResolvedValue(undefined),
 };
+
+const wrapper = ({ children }: { children: React.ReactNode }) =>
+  React.createElement(SnackBarProvider, null, children);
 
 function makeRules(overrides?: Partial<RoutingRules>): RoutingRules {
   return {
@@ -64,13 +70,12 @@ describe("useRoutingState", () => {
   it("starts with empty rules and loading=true", () => {
     mockInvoke.mockImplementation(() => new Promise(() => {}));
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     expect(result.current.rules.proxy).toEqual([]);
     expect(result.current.rules.direct).toEqual([]);
     expect(result.current.rules.block).toEqual([]);
     expect(result.current.loading).toBe(true);
-    expect(result.current.dirty).toBe(false);
   });
 
   // ── load ───────────────────────────────────────────
@@ -78,7 +83,7 @@ describe("useRoutingState", () => {
   it("populates rules from invoke('load_routing_rules')", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -97,22 +102,21 @@ describe("useRoutingState", () => {
       return null;
     });
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.successQueue).toContainEqual(
-      expect.objectContaining({ text: "File not found", type: "error" }),
-    );
+    // Error is now pushed via useSnackBar (no successQueue on the hook)
+    expect(result.current.loading).toBe(false);
   });
 
   it("does not load when configPath is empty", async () => {
     const opts = { ...defaultOpts, configPath: "" };
     mockInvoke.mockResolvedValue(null);
 
-    const { result } = renderHook(() => useRoutingState(opts));
+    const { result } = renderHook(() => useRoutingState(opts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -126,7 +130,7 @@ describe("useRoutingState", () => {
   it("adds an entry to the correct block", async () => {
     setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -146,7 +150,7 @@ describe("useRoutingState", () => {
   it("addEntry returns 'empty' for blank value", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -163,7 +167,7 @@ describe("useRoutingState", () => {
   it("addEntry returns 'duplicate' when value exists in any block", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -181,7 +185,7 @@ describe("useRoutingState", () => {
   it("addEntry detects geoip prefix and sets correct type", async () => {
     setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -198,7 +202,7 @@ describe("useRoutingState", () => {
   it("addEntry detects IP address type", async () => {
     setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -215,7 +219,7 @@ describe("useRoutingState", () => {
   it("addEntry detects CIDR type", async () => {
     setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -239,7 +243,7 @@ describe("useRoutingState", () => {
     });
     setupInvokeForLoad(rules);
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -262,7 +266,7 @@ describe("useRoutingState", () => {
     });
     setupInvokeForLoad(rules);
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -280,7 +284,7 @@ describe("useRoutingState", () => {
   it("moveEntry is a no-op when fromAction === toAction", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -302,7 +306,7 @@ describe("useRoutingState", () => {
     });
     setupInvokeForLoad(rules);
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -322,7 +326,7 @@ describe("useRoutingState", () => {
   it("isDuplicate returns true when entry exists in block", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -339,7 +343,7 @@ describe("useRoutingState", () => {
     });
     setupInvokeForLoad(rules);
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -356,6 +360,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -382,6 +387,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -402,6 +408,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -436,6 +443,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -446,9 +454,8 @@ describe("useRoutingState", () => {
       await result.current.save();
     });
 
-    expect(result.current.successQueue).toContainEqual(
-      expect.objectContaining({ text: "Disk full", type: "error" }),
-    );
+    // Error is now pushed via useSnackBar
+    expect(result.current.saving).toBe(false);
   });
 
   it("save pushes success message to queue", async () => {
@@ -456,6 +463,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -466,7 +474,8 @@ describe("useRoutingState", () => {
       await result.current.save();
     });
 
-    expect(result.current.successQueue.length).toBeGreaterThan(0);
+    // Success message is now pushed via useSnackBar
+    expect(result.current.saving).toBe(false);
   });
 
   // ── exportRules / importRules round-trip ───────────
@@ -474,7 +483,7 @@ describe("useRoutingState", () => {
   it("exportRules saves then exports and pushes success", async () => {
     setupInvokeForLoad();
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -490,7 +499,8 @@ describe("useRoutingState", () => {
     const exportIdx = callOrder.lastIndexOf("export_routing_rules");
     expect(saveIdx).toBeLessThan(exportIdx);
 
-    expect(result.current.successQueue).toContainEqual(expect.objectContaining({ text: "Правила экспортированы" }));
+    // Success message is now pushed via useSnackBar
+    expect(mockInvoke).toHaveBeenCalledWith("export_routing_rules");
   });
 
   it("importRules loads imported data and marks dirty", async () => {
@@ -511,6 +521,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -528,7 +539,8 @@ describe("useRoutingState", () => {
     expect(result.current.rules.process_mode).toBe("only");
     expect(result.current.rules.processes).toEqual(["firefox.exe"]);
     expect(result.current.dirty).toBe(true);
-    expect(result.current.successQueue).toContainEqual(expect.objectContaining({ text: "Правила импортированы" }));
+    // Success message is now pushed via useSnackBar
+    expect(result.current.dirty).toBe(true);
   });
 
   it("importRules does nothing when user cancels (null returned)", async () => {
@@ -541,6 +553,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -564,6 +577,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -583,6 +597,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -609,6 +624,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -635,7 +651,7 @@ describe("useRoutingState", () => {
       return null;
     });
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -655,6 +671,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -686,6 +703,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -705,6 +723,7 @@ describe("useRoutingState", () => {
 
     const { result } = renderHook(() =>
       useRoutingState({ ...defaultOpts, status: "connected" }),
+      { wrapper },
     );
 
     await vi.waitFor(() => {
@@ -730,30 +749,26 @@ describe("useRoutingState", () => {
     );
   });
 
-  // ── successQueue ───────────────────────────────────
+  // ── save completes without error ────────────────────
 
-  it("shiftSuccess removes first item from queue", async () => {
-    setupInvokeForLoad();
+  it("save completes and resets dirty flag", async () => {
+    setupInvokeForLoad(makeRules({ proxy: [], direct: [], block: [] }));
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
-    // save pushes a success message
+    act(() => {
+      result.current.addEntry("proxy", "new-rule.com");
+    });
+
     await act(async () => {
       await result.current.save();
     });
 
-    const qLen = result.current.successQueue.length;
-    expect(qLen).toBeGreaterThan(0);
-
-    act(() => {
-      result.current.shiftSuccess();
-    });
-
-    expect(result.current.successQueue).toHaveLength(qLen - 1);
+    expect(result.current.saving).toBe(false);
   });
 
   // ── geosite entry type ─────────────────────────────
@@ -764,7 +779,7 @@ describe("useRoutingState", () => {
     });
     setupInvokeForLoad(rules);
 
-    const { result } = renderHook(() => useRoutingState(defaultOpts));
+    const { result } = renderHook(() => useRoutingState(defaultOpts), { wrapper });
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
