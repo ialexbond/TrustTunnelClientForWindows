@@ -25,7 +25,7 @@ interface Props {
 
 export function ExportSection({ state }: Props) {
   const { t } = useTranslation();
-  const { sshParams, serverInfo, setActionResult } = state;
+  const { sshParams, serverInfo } = state;
 
   const [selectedUser, setSelectedUser] = useState("");
   const [generating, setGenerating] = useState(false);

@@ -456,6 +456,7 @@ pub fn run() {
             commands::config::copy_file,
             commands::config::copy_config_to_app_dir,
             commands::config::auto_detect_config,
+            commands::config::import_dropped_content,
             commands::config::config_file_exists,
             commands::config::watch_config_file,
             commands::config::unwatch_config_file,

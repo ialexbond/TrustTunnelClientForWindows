@@ -36,7 +36,6 @@ export function LogsSection({ state }: Props) {
     logsLoading,
     setLogsLoading,
     sshParams,
-    setActionResult,
   } = state;
 
   const logsEndRef = useRef<HTMLPreElement>(null);

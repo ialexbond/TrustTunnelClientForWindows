@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Shield, Zap, Ban } from "lucide-react";
-import { Card, Badge } from "../../shared/ui";
+import { Card } from "../../shared/ui";
 import { RuleEntryRow } from "./RuleEntryRow";
 import { AddRuleInput } from "./AddRuleInput";
 import type { RuleEntry, RouteAction, GeoDataStatus, GeoDataIndex } from "./useRoutingState";

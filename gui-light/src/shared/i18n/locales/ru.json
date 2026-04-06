@@ -780,5 +780,14 @@
     "logs_appear_on_connect": "Логи появятся после подключения...",
     "sidecar_level": "Уровень записи",
     "display_filter": "Фильтр"
+  },
+  "drop": {
+    "overlay_text": "Перетащите файл сюда",
+    "overlay_hint": ".toml — конфиг VPN, .json — правила маршрутизации",
+    "config_imported": "Конфигурация VPN импортирована",
+    "routing_imported": "Правила маршрутизации импортированы",
+    "busy_connecting": "Невозможно импортировать во время подключения",
+    "busy_disconnecting": "Невозможно импортировать во время отключения",
+    "unsupported_format": "Неподдерживаемый формат файла. Используйте .toml или .json"
   }
 }

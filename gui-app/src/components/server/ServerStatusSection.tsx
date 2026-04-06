@@ -106,13 +106,6 @@ export function ServerStatusSection({ state }: Props) {
     setRefreshing(false);
   };
 
-  const handleReboot = () => {
-    setRebooting(true);
-    setPing(null);
-    state.setConfirmReboot(false);
-    invoke("server_reboot", sshParams).catch(() => {});
-  };
-
   const pingVariant = (() => {
     if (ping === null) return "default";
     if (ping <= 0) return "default";

@@ -3,12 +3,11 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Loader2, GitBranch, Save, Download, Upload,
-  Zap, Globe, Ban, Shield, Route,
+  Zap, Shield, Route,
 } from "lucide-react";
 import type { VpnStatus } from "../shared/types";
 import { Card } from "../shared/ui/Card";
 import { Button } from "../shared/ui/Button";
-import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import StatusPanel from "./StatusPanel";
 import { useRoutingState } from "./routing/useRoutingState";
 import { GeoDataStatusCard } from "./routing/GeoDataStatus";
@@ -47,8 +46,6 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
   // Uptime ticker
   const [, setTick] = useState(0);
   const isConnected = status === "connected";
-  const isLoading = status === "connecting" || status === "disconnecting" || status === "recovering";
-
   useEffect(() => {
     if (!isConnected || !connectedSince) return;
     const iv = setInterval(() => setTick((n) => n + 1), 1000);

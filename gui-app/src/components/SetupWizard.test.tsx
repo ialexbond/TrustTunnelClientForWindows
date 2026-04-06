@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import SetupWizard from "./SetupWizard";
+import { renderWithProviders as render } from "../test/test-utils";
 import { makeWizardState } from "./wizard/testHelpers";
 
 // Mock useWizardState so we can control which step is returned
@@ -126,7 +127,7 @@ describe("SetupWizard", () => {
     }));
     render(<SetupWizard {...defaultProps} />);
     expect(screen.getByText(i18n.t("wizard.uninstalling.success"))).toBeInTheDocument();
-    expect(screen.getByText("Uninstalled successfully")).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.uninstalling.description"))).toBeInTheDocument();
   });
 
   it("renders uninstalling step with default description when no message", () => {

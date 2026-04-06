@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import RoutingPanel from "./RoutingPanel";
+import { renderWithProviders as render } from "../test/test-utils";
 import type { VpnStatus } from "../shared/types";
 
 describe("RoutingPanel", () => {

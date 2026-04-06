@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import i18n from "../shared/i18n";
 import AboutPanel from "./AboutPanel";
+import { renderWithProviders as render } from "../test/test-utils";
 
 describe("AboutPanel", () => {
   const defaultProps = {
@@ -72,7 +73,7 @@ describe("AboutPanel", () => {
         updateInfo={{ ...defaultProps.updateInfo, currentVersion: "" }}
       />
     );
-    expect(screen.getByText(/v2\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/v2\.1\.0/)).toBeInTheDocument();
   });
 
   // ─── No update available ───
@@ -202,6 +203,8 @@ describe("AboutPanel", () => {
       expect(invoke).toHaveBeenCalledWith("self_update", {
         downloadUrl: "https://example.com/update.zip",
         expectedSha256: null,
+        language: expect.any(String),
+        theme: expect.any(String),
       });
     });
   });

@@ -575,12 +575,10 @@ async fn ping_endpoint(host: String, port: u16) -> i64 {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Second instance launched — focus existing window
             if let Some(w) = app.get_webview_window("main") {
                 w.show().ok();
                 w.set_focus().ok();
             }
-            // Check if second instance was launched with a deep-link URL
             if let Some(url) = args.iter().find(|a| a.starts_with("trusttunnel://") || a.starts_with("tt://")) {
                 app.emit("deep-link-url", serde_json::json!({ "url": url })).ok();
             }
@@ -605,6 +603,7 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 // Force decorations off (window-state plugin may restore old value)
                 window.set_decorations(false).ok();
+
 
                 let start_minimized = std::env::current_exe()
                     .ok()
@@ -754,6 +753,7 @@ pub fn run() {
             commands::config::copy_file,
             commands::config::copy_config_to_app_dir,
             commands::config::auto_detect_config,
+            commands::config::import_dropped_content,
             commands::config::config_file_exists,
             commands::config::watch_config_file,
             commands::config::unwatch_config_file,

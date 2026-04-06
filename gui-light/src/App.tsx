@@ -13,6 +13,8 @@ import { useTheme } from "./shared/hooks/useTheme";
 import { useLanguage } from "./shared/hooks/useLanguage";
 import { useVpnEvents } from "./shared/hooks/useVpnEvents";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
+import { useFileDrop } from "./shared/hooks/useFileDrop";
+import { DropOverlay } from "./shared/ui/DropOverlay";
 import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useSnackBar } from "./shared/ui/SnackBarContext";
 import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
@@ -21,7 +23,7 @@ export type AppTab = "vpn" | "routing" | "settings" | "about";
 
 function App() {
   // ─── Theme & Language ───
-  const { theme, themeMode, handleThemeChange } = useTheme();
+  const { themeMode, handleThemeChange } = useTheme();
   const { i18n, handleLanguageChange } = useLanguage();
   const pushSuccess = useSnackBar();
 
@@ -45,7 +47,7 @@ function App() {
   });
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
-  const [vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
+  const [_vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("ttl_connected_since");
     return saved ? new Date(saved) : null;
@@ -90,6 +92,24 @@ function App() {
 
   // ─── Update checker ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
+
+  // ─── File drag-and-drop ───
+  const handleDropConfig = useCallback((configPath: string) => {
+    setConfig(prev => ({ ...prev, configPath }));
+    localStorage.setItem("tt_config_path", configPath);
+    setActiveTab("vpn");
+  }, []);
+
+  const handleDropRouting = useCallback(() => {
+    setActiveTab("routing");
+  }, []);
+
+  const { isDragging } = useFileDrop({
+    status,
+    onConfigImported: handleDropConfig,
+    onRoutingImported: handleDropRouting,
+    pushSuccess,
+  });
 
   // ─── Config validation on startup & auto-detect ───
   useEffect(() => {
@@ -179,6 +199,7 @@ function App() {
       className="h-screen flex flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)" }}
     >
+      <DropOverlay isDragging={isDragging} />
       {/* Title bar — draggable */}
       <div
         className="flex items-center shrink-0"

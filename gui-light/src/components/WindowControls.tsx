@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, type CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const appWindow = getCurrentWindow();
@@ -11,7 +11,7 @@ export function WindowControls() {
   const handleClose = useCallback(() => appWindow.close(), []);
 
   return (
-    <div className="flex items-center h-full" style={{ WebkitAppRegion: "no-drag" as never }}>
+    <div className="flex items-center h-full" style={{ WebkitAppRegion: "no-drag" } as unknown as CSSProperties}>
       {/* Minimize */}
       <button
         className="window-control-btn"
