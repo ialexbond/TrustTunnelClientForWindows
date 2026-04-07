@@ -35,11 +35,14 @@ pub struct SshParams {
     pub ssh_user: String,
     pub ssh_password: String,
     pub key_path: Option<String>,
+    /// PEM-encoded private key content (alternative to key_path).
+    #[serde(default)]
+    pub key_data: Option<String>,
 }
 
 impl SshParams {
     pub async fn connect(&self) -> Result<client::Handle<SshHandler>, String> {
-        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref()).await
+        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref()).await
     }
 }
 
@@ -200,9 +203,10 @@ pub async fn ssh_connect(
     ssh_user: &str,
     ssh_password: &str,
     key_path: Option<&str>,
+    key_data: Option<&str>,
 ) -> Result<client::Handle<SshHandler>, String> {
     let config = Arc::new(client::Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(30)),
+        inactivity_timeout: Some(std::time::Duration::from_secs(300)),
         ..Default::default()
     });
 
@@ -224,10 +228,25 @@ pub async fn ssh_connect(
         }
     })?;
 
+    // Try key-based auth: file path or pasted PEM content
     if let Some(kp) = key_path {
         if !kp.is_empty() {
             let key = russh_keys::load_secret_key(kp, None)
                 .map_err(|e| format!("SSH_KEY_LOAD_FAILED|{kp}|{e}"))?;
+            let auth_ok = handle
+                .authenticate_publickey(ssh_user, Arc::new(key))
+                .await
+                .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
+            if !auth_ok {
+                return Err("SSH_KEY_REJECTED".into());
+            }
+            return Ok(handle);
+        }
+    }
+    if let Some(kd) = key_data {
+        if !kd.is_empty() {
+            let key = russh_keys::decode_secret_key(kd, None)
+                .map_err(|e| format!("SSH_KEY_LOAD_FAILED|pasted|{e}"))?;
             let auth_ok = handle
                 .authenticate_publickey(ssh_user, Arc::new(key))
                 .await

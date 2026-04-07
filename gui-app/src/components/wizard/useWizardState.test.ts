@@ -7,8 +7,8 @@ import type { ServerInfo } from "./types";
 
 const STORAGE_KEY = "trusttunnel_wizard";
 
-const mockInvoke = invoke as ReturnType<typeof vi.fn>;
-const mockListen = listen as ReturnType<typeof vi.fn>;
+const mockInvoke = invoke as any;
+const mockListen = listen as any;
 
 function renderWizard(overrides?: { onSetupComplete?: () => void }) {
   const onSetupComplete = overrides?.onSetupComplete ?? vi.fn();
@@ -361,14 +361,10 @@ describe("useWizardState", () => {
         result.current.setVpnPassword("vpnpass");
       });
 
-      // Capture intermediate step via a spy
-      let stepDuringDeploy: string | undefined;
-      const originalStep = result.current.step;
-
       await act(async () => {
         const deployPromise = result.current.handleDeploy();
         // The step should change to deploying immediately
-        stepDuringDeploy = result.current.step;
+        void result.current.step;
         await deployPromise;
       });
 
