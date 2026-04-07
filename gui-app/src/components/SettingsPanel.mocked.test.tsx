@@ -47,7 +47,6 @@ const baseMockState: SettingsState = {
   localPath: "/test/config.toml",
   dirty: false,
   status: "disconnected" as VpnStatus,
-  successQueue: [],
   setLocalPath: vi.fn(),
   setError: vi.fn(),
   updateField: vi.fn(),
@@ -55,7 +54,6 @@ const baseMockState: SettingsState = {
   browseConfig: vi.fn(),
   clearConfig: vi.fn(),
   pushSuccess: vi.fn(),
-  shiftSuccess: vi.fn(),
 };
 
 const defaultProps = {

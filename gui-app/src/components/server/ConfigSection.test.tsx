@@ -295,7 +295,7 @@ ipv6_available = true
   // ── Double-click prevention ──
 
   it("prevents double-click on the same toggle", async () => {
-    let resolveToggle: (() => void) | null = null;
+    let resolveToggle: any = null;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "server_update_config_feature") {
         return new Promise<void>((resolve) => { resolveToggle = resolve; });

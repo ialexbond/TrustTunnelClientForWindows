@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 // Mock react-i18next
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback: string) => fallback,
+    t: (_key: string, fallback: string) => fallback,
   }),
 }));
 

@@ -9,7 +9,7 @@ const options = [
 ];
 
 describe("Select", () => {
-  let onChange: ReturnType<typeof vi.fn>;
+  let onChange: (e: { target: { value: string } }) => void;
 
   beforeEach(() => {
     onChange = vi.fn();

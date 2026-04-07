@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import SettingsPanel from "./SettingsPanel";
