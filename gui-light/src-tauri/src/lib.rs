@@ -1,7 +1,9 @@
 mod commands;
 mod connectivity;
+mod diagnostics;
 mod geodata;
 mod geodata_v2ray;
+mod logging;
 mod processes;
 mod routing_rules;
 mod sidecar;
@@ -294,30 +296,6 @@ fn get_start_minimized() -> bool {
 }
 
 #[tauri::command]
-fn set_logging_enabled(enabled: bool) -> Result<(), String> {
-    let flag_path = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("no parent dir")?
-        .join(".enable_logs");
-    if enabled {
-        std::fs::write(&flag_path, "1").map_err(|e| e.to_string())?;
-    } else {
-        let _ = std::fs::remove_file(&flag_path);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn get_logging_enabled() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join(".enable_logs")))
-        .map(|p| p.exists())
-        .unwrap_or(false)
-}
-
-#[tauri::command]
 async fn vpn_connect(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -325,6 +303,12 @@ async fn vpn_connect(
     log_level: String,
 ) -> Result<(), String> {
     eprintln!("[vpn_connect] Called with config_path={config_path}, log_level={log_level}");
+    logging::log_app("INFO", &format!("VPN connect: config={config_path}, log_level={log_level}"));
+
+    // Write system diagnostics snapshot (if logging enabled)
+    if logging::is_logging_enabled() {
+        diagnostics::write_system_snapshot();
+    }
 
     // Remember config for tray-initiated reconnect
     if let Ok(mut cp) = state.config_path.lock() { *cp = Some(config_path.clone()); }
@@ -378,6 +362,7 @@ async fn vpn_connect(
         .map_err(|e| {
             let msg = format!("Failed to start sidecar: {e}");
             eprintln!("[vpn_connect] {msg}");
+            logging::log_app("ERROR", &msg);
             app.emit("vpn-log", VpnLogPayload {
                 message: msg.clone(),
                 level: "error".into(),
@@ -386,6 +371,7 @@ async fn vpn_connect(
         })?;
 
     eprintln!("[vpn_connect] Sidecar spawned OK, storing child handle");
+    logging::log_app("INFO", "Sidecar spawned OK");
     app.emit("vpn-log", VpnLogPayload {
         message: "Sidecar process started successfully".into(),
         level: "info".into(),
@@ -435,6 +421,8 @@ async fn vpn_disconnect(
             .await
             .map_err(|e| format!("Failed to stop sidecar: {e}"))?;
     }
+
+    logging::log_app("INFO", "VPN disconnected");
 
     app.emit(
         "vpn-status",
@@ -599,11 +587,13 @@ pub fn run() {
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .setup(|app| {
+            // Initialize file logging (if enabled via flag file)
+            logging::init_logging();
+
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {
                 // Force decorations off (window-state plugin may restore old value)
                 window.set_decorations(false).ok();
-
 
                 let start_minimized = std::env::current_exe()
                     .ok()
@@ -747,9 +737,10 @@ pub fn run() {
             check_vpn_status,
             test_sidecar,
             set_start_minimized,
-            set_logging_enabled,
-            get_logging_enabled,
             get_start_minimized,
+            logging::set_logging_enabled,
+            logging::get_logging_enabled,
+            logging::open_logs_folder,
             commands::config::copy_file,
             commands::config::copy_config_to_app_dir,
             commands::config::auto_detect_config,

@@ -39,6 +39,7 @@ pub async fn spawn_trusttunnel(
                     let line_str = String::from_utf8_lossy(&line);
                     let trimmed = line_str.trim();
                     eprintln!("[sidecar stdout] {trimmed}");
+                    crate::logging::log_sidecar(trimmed);
                     app_handle
                         .emit(
                             "vpn-log",
@@ -66,6 +67,7 @@ pub async fn spawn_trusttunnel(
                         continue;
                     }
                     eprintln!("[sidecar stderr] {trimmed}");
+                    crate::logging::log_sidecar(trimmed);
                     app_handle
                         .emit(
                             "vpn-log",
@@ -115,6 +117,7 @@ pub async fn spawn_trusttunnel(
                     let exit_code = payload.code.unwrap_or(-1);
                     let was_intentional = disconnecting.lock().map(|g| *g).unwrap_or(false);
                     eprintln!("[sidecar] Process terminated with code {exit_code} (intentional={was_intentional}, was_connected={was_connected})");
+                    crate::logging::log_app("INFO", &format!("Sidecar terminated: code={exit_code}, intentional={was_intentional}, was_connected={was_connected}"));
 
                     let (status, error_msg): (&str, Option<String>) = if was_intentional || exit_code == 0 {
                         ("disconnected", None)
