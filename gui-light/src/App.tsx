@@ -100,7 +100,10 @@ function App() {
     setActiveTab("vpn");
   }, []);
 
+  const [routingKey, setRoutingKey] = useState(0);
+
   const handleDropRouting = useCallback(() => {
+    setRoutingKey(k => k + 1);
     setActiveTab("routing");
   }, []);
 
@@ -245,6 +248,7 @@ function App() {
           style={{ display: activeTab === "routing" ? "flex" : "none" }}
         >
           <RoutingScreen
+            key={routingKey}
             configPath={config.configPath}
             status={status}
             vpnMode={vpnMode}

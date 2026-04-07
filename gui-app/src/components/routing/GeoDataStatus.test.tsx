@@ -17,7 +17,7 @@ function makeStatus(overrides: Partial<GeoDataStatus> = {}): GeoDataStatus {
 }
 
 describe("GeoDataStatusCard", () => {
-  let onDownload: ReturnType<typeof vi.fn>;
+  let onDownload: any;
 
   beforeEach(() => {
     vi.useFakeTimers();

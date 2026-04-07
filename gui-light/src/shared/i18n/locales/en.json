@@ -170,7 +170,10 @@
       "theme_system": "System",
       "theme_dark": "Dark",
       "theme_light": "Light",
-      "language": "Language"
+      "language": "Language",
+      "logging": "Collect logs",
+      "logging_desc": "Save application events and VPN engine output to files",
+      "logging_show_folder": "Show in folder"
     }
   },
   "vpn": {
@@ -748,6 +751,7 @@
     "timeout": "Could not connect to {{target}} — connection timed out (15s)",
     "connectFailed": "SSH connection failed: {{detail}}",
     "hostKeyChanged": "Server host key has changed! This could indicate a man-in-the-middle attack, or the server was reinstalled. Clear the host key in Server settings and try again.",
+    "hostKeyReset": "Host key was reset. Press Connect again.",
     "channelFailed": "Failed to open SSH channel: {{detail}}",
     "execFailed": "Command execution failed: {{detail}}",
     "authFailed": "Invalid SSH username or password",

@@ -1,7 +1,9 @@
 mod commands;
 mod connectivity;
+mod diagnostics;
 mod geodata;
 mod geodata_v2ray;
+mod logging;
 mod processes;
 mod routing_rules;
 mod sidecar;
@@ -288,6 +290,9 @@ pub fn run() {
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .setup(|app| {
+            // Initialize file logging (if enabled via flag file)
+            logging::init_logging();
+
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {
                 // Force decorations off (window-state plugin may restore old value)
@@ -441,6 +446,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_start_minimized,
             get_start_minimized,
+            logging::set_logging_enabled,
+            logging::get_logging_enabled,
+            logging::open_logs_folder,
             commands::vpn::vpn_connect,
             commands::vpn::vpn_disconnect,
             commands::vpn::check_vpn_status,

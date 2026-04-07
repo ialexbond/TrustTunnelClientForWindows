@@ -9,8 +9,8 @@ beforeAll(() => {
 });
 
 describe("GeoAutocomplete", () => {
-  let onSelect: ReturnType<typeof vi.fn>;
-  let onClose: ReturnType<typeof vi.fn>;
+  let onSelect: any;
+  let onClose: any;
 
   const categories = ["ru", "us", "cn", "de", "fr", "jp", "gb"];
 

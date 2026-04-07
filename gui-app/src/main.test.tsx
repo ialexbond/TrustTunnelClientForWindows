@@ -40,7 +40,7 @@ let capturedRenderArg: React.ReactNode | null = null;
 const mockRender = vi.fn((node: React.ReactNode) => {
   capturedRenderArg = node;
 });
-const mockCreateRoot = vi.fn(() => ({
+const mockCreateRoot = vi.fn((..._args: any[]) => ({
   render: mockRender,
 }));
 
