@@ -3,7 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import { SnackBar } from "./SnackBar";
 
 describe("SnackBar", () => {
-  let onShown: ReturnType<typeof vi.fn>;
+  let onShown: () => void;
 
   beforeEach(() => {
     vi.useFakeTimers();

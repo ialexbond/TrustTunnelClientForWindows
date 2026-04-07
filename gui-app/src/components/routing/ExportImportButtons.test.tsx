@@ -5,8 +5,8 @@ import i18n from "../../shared/i18n";
 import { ExportImportButtons } from "./ExportImportButtons";
 
 describe("ExportImportButtons", () => {
-  let onExport: ReturnType<typeof vi.fn>;
-  let onImport: ReturnType<typeof vi.fn>;
+  let onExport: any;
+  let onImport: any;
 
   beforeEach(() => {
     i18n.changeLanguage("ru");

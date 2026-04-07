@@ -22,14 +22,16 @@ vi.mock("./AddRuleInput", () => ({
 }));
 
 describe("RoutingBlockCard", () => {
-  let onAdd: ReturnType<typeof vi.fn>;
-  let onRemove: ReturnType<typeof vi.fn>;
-  let onMove: ReturnType<typeof vi.fn>;
+  let onAdd: any;
+  let onRemove: any;
+  let onMove: any;
 
   const defaultGeoStatus: GeoDataStatus = {
     downloaded: false,
     geoip_exists: false,
     geosite_exists: false,
+    geoip_categories_count: 0,
+    geosite_categories_count: 0,
   };
 
   const defaultGeoCategories: GeoDataIndex = {
