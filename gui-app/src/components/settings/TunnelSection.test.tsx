@@ -37,7 +37,6 @@ function makeState(overrides: Partial<SettingsState> = {}): SettingsState {
     localPath: "/test/config.toml",
     dirty: false,
     status: "disconnected",
-    successQueue: [],
     setLocalPath: vi.fn(),
     setError: vi.fn(),
     updateField: vi.fn(),
@@ -45,7 +44,6 @@ function makeState(overrides: Partial<SettingsState> = {}): SettingsState {
     browseConfig: vi.fn().mockResolvedValue(undefined),
     clearConfig: vi.fn(),
     pushSuccess: vi.fn(),
-    shiftSuccess: vi.fn(),
     ...overrides,
   };
 }

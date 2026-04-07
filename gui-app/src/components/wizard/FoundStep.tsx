@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Button } from "../../shared/ui/Button";
+import { translateSshError } from "../../shared/utils/translateSshError";
 import { IconButton } from "../../shared/ui/IconButton";
 import { colors } from "../../shared/ui/colors";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
@@ -58,7 +59,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
         </div>
 
         {w.errorMessage && (
-          <p className="text-xs" style={{ color: "var(--color-danger-500)" }}>{w.errorMessage}</p>
+          <p className="text-xs" style={{ color: "var(--color-danger-500)" }}>{translateSshError(w.errorMessage, t)}</p>
         )}
 
         <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("welcome")}>
@@ -116,7 +117,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
         {w.checkError && (
           <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
             <p className="text-[10px] leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
-              {w.checkError}
+              {translateSshError(w.checkError, t)}
             </p>
           </div>
         )}
@@ -314,6 +315,26 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     );
   }
 
+  // Host key was reset — show success message and back button
+  if (w.checkError === "HOST_KEY_RESET") {
+    return (
+      <>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.accentBg }}>
+          <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className="text-lg font-bold" style={{ color: "var(--color-text-primary)" }}>{t('sshErrors.hostKeyReset', 'Host key was reset. Press Connect again.')}</h2>
+          <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+            {t('wizard.found.host_key_reset_help')}
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
+          {t('buttons.back')}
+        </Button>
+      </>
+    );
+  }
+
   // Not installed
   if (w.checkError) {
     return (
@@ -328,7 +349,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
           </p>
           <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
             <p className="text-[10px] leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
-              {w.checkError}
+              {translateSshError(w.checkError, t)}
             </p>
           </div>
         </div>

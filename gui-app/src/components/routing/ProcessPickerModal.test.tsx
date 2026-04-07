@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "../../shared/i18n";
 import { ProcessPickerModal } from "./ProcessPickerModal";
 import type { ProcessInfo } from "./useRoutingState";
 
 describe("ProcessPickerModal", () => {
-  let onConfirm: ReturnType<typeof vi.fn>;
-  let onClose: ReturnType<typeof vi.fn>;
+  let onConfirm: any;
+  let onClose: any;
 
   const processList: ProcessInfo[] = [
     { name: "chrome.exe", path: "C:\\Chrome\\chrome.exe" },

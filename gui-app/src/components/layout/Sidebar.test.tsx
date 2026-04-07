@@ -66,8 +66,8 @@ describe("Sidebar", () => {
   it("active page button has distinct background", () => {
     const { container } = render(<Sidebar {...defaultProps} activePage="server" />);
     const navButtons = container.querySelectorAll("nav button");
-    expect(navButtons[0].style.backgroundColor).toBe("var(--color-bg-active)");
-    expect(navButtons[1].style.backgroundColor).toBe("transparent");
+    expect((navButtons[0] as HTMLElement).style.backgroundColor).toBe("var(--color-bg-active)");
+    expect((navButtons[1] as HTMLElement).style.backgroundColor).toBe("transparent");
   });
 
   it("about button navigates to about page", () => {
@@ -135,13 +135,13 @@ describe("Sidebar", () => {
   it("about button has active background when activePage is about", () => {
     const { container } = render(<Sidebar {...defaultProps} activePage="about" />);
     const bottomButtons = container.querySelectorAll("aside > div > div:last-child button");
-    expect(bottomButtons[0].style.backgroundColor).toBe("var(--color-bg-active)");
+    expect((bottomButtons[0] as HTMLElement).style.backgroundColor).toBe("var(--color-bg-active)");
   });
 
   it("about button has transparent background when not active", () => {
     const { container } = render(<Sidebar {...defaultProps} activePage="server" />);
     const bottomButtons = container.querySelectorAll("aside > div > div:last-child button");
-    expect(bottomButtons[0].style.backgroundColor).toBe("transparent");
+    expect((bottomButtons[0] as HTMLElement).style.backgroundColor).toBe("transparent");
   });
 
   // ── All nav items clickable when hasConfig ──
