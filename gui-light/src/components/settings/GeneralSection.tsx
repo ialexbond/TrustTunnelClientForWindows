@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { Settings, Power, EyeOff, Zap, HelpCircle } from "lucide-react";
+import { Settings, Power, EyeOff, Zap, HelpCircle, FileText, FolderOpen } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Toggle } from "../../shared/ui/Toggle";
 import { Tooltip } from "../../shared/ui/Tooltip";
@@ -51,6 +51,31 @@ export function GeneralSection({ hasConfig, onAutoConnectChange, onSaved }: Prop
       await invoke("set_start_minimized", { enabled: value });
       setStartMinimized(value);
       onSaved?.();
+    } catch {
+      // ignore
+    }
+  };
+
+  // ─── Logging (flag file via Tauri) ───
+  const [loggingEnabled, setLoggingEnabled] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>("get_logging_enabled").then(setLoggingEnabled).catch(() => {});
+  }, []);
+
+  const handleLoggingChange = async (value: boolean) => {
+    try {
+      await invoke("set_logging_enabled", { enabled: value });
+      setLoggingEnabled(value);
+      onSaved?.();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleOpenLogs = async () => {
+    try {
+      await invoke("open_logs_folder");
     } catch {
       // ignore
     }
@@ -113,6 +138,23 @@ export function GeneralSection({ hasConfig, onAutoConnectChange, onSaved }: Prop
             ) : undefined
           }
         />
+        <Toggle
+          value={loggingEnabled}
+          onChange={handleLoggingChange}
+          label={t("settings.app.logging")}
+          description={t("settings.app.logging_desc")}
+          icon={<FileText className="w-3.5 h-3.5" />}
+        />
+        {loggingEnabled && (
+          <button
+            onClick={handleOpenLogs}
+            className="flex items-center gap-1.5 ml-8 mt-1 mb-1 text-xs cursor-pointer"
+            style={{ color: "var(--color-accent)" }}
+          >
+            <FolderOpen className="w-3 h-3" />
+            {t("settings.app.logging_show_folder")}
+          </button>
+        )}
       </div>
     </Card>
   );
