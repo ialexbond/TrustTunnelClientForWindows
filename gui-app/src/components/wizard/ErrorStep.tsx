@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { Button } from "../../shared/ui/Button";
 import { colors } from "../../shared/ui/colors";
+import { translateSshError } from "../../shared/utils/translateSshError";
 import type { WizardState } from "./useWizardState";
 
 export function ErrorStep(w: WizardState) {
@@ -40,7 +41,7 @@ export function ErrorStep(w: WizardState) {
           <h2 className="text-xl font-bold" style={{ color: "var(--color-danger-500)" }}>{t('wizard.error.title')}</h2>
           <div className="max-h-32 overflow-y-auto rounded-lg p-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
             <p className="text-xs leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-text-secondary)" }}>
-              {w.errorMessage || t('wizard.error.unknown')}
+              {w.errorMessage ? translateSshError(w.errorMessage, t) : t('wizard.error.unknown')}
             </p>
           </div>
         </div>

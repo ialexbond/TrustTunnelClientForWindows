@@ -15,6 +15,9 @@ export function translateSshError(error: string, t: TFunction): string {
     case "SSH_TIMEOUT":
       return t("sshErrors.timeout", { target: parts[1] || "" });
     case "SSH_CONNECT_FAILED":
+      if ((parts[1] || "").includes("Unknown server key")) {
+        return t("sshErrors.hostKeyChanged");
+      }
       return t("sshErrors.connectFailed", { detail: parts[1] || "" });
     case "SSH_HOST_KEY_CHANGED":
       return t("sshErrors.hostKeyChanged");

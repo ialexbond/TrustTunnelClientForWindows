@@ -122,7 +122,13 @@ export function useServerState(props: ServerPanelProps) {
       }
     } catch (e) {
       if (!silent) {
-        setError(translateSshError(formatError(e), t));
+        const errStr = formatError(e);
+        if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {
+          await invoke("forget_ssh_host_key", { host, port: parseInt(port) || 22 }).catch(() => {});
+          setError(t("sshErrors.hostKeyReset", "Host key was reset. Please retry."));
+        } else {
+          setError(translateSshError(errStr, t));
+        }
         setServerInfo(null);
       }
     } finally {
