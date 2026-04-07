@@ -420,16 +420,16 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
             .as_ref()
             .and_then(|x| empty_to_none(x.custom_sni.clone()))
             .unwrap_or_default(),
-        dns_servers: endpoint_config
+        dns_upstreams: endpoint_config
             .as_ref()
-            .map(|x| x.dns_servers.clone())
+            .map(|x| x.dns_upstreams.clone())
             .or_else(|| {
                 ask_for_input::<String>(
                     &format!(
                         "{}\nDelimit by whitespace, leave empty for default.",
-                        Endpoint::doc_dns_servers()
+                        Endpoint::doc_dns_upstreams()
                     ),
-                    opt_field!(template, dns_servers)
+                    opt_field!(template, dns_upstreams)
                         .map(|v| v.join(" "))
                         .or(Some("".to_string())),
                 )
@@ -637,7 +637,7 @@ pub struct EndpointConfig {
     #[serde(default)]
     custom_sni: String,
     #[serde(default)]
-    dns_servers: Vec<String>,
+    dns_upstreams: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -731,10 +731,10 @@ impl fmt::Display for EndpointSummary<'_> {
                 .join("\n                     ")
         };
 
-        let dns_servers = if ep.dns_servers.is_empty() {
+        let dns_upstreams = if ep.dns_upstreams.is_empty() {
             "(default: AdGuard DNS unfiltered)".to_string()
         } else {
-            ep.dns_servers.join(", ")
+            ep.dns_upstreams.join(", ")
         };
 
         write!(
@@ -751,7 +751,7 @@ impl fmt::Display for EndpointSummary<'_> {
   Certificate:       {}
   Protocol:          {}
   Anti-DPI:          {}
-  DNS servers:       {}",
+  DNS upstreams:       {}",
             ep.hostname,
             addresses,
             custom_sni,
@@ -762,7 +762,7 @@ impl fmt::Display for EndpointSummary<'_> {
             cert_display,
             ep.upstream_protocol,
             if ep.anti_dpi { "yes" } else { "no" },
-            dns_servers,
+            dns_upstreams,
         )
     }
 }
@@ -859,8 +859,8 @@ mod tests {
             certificate: None,
             upstream_protocol: Protocol::Http3,
             anti_dpi: true,
-            dns_servers: vec!["tls://dns.adguard-dns.com".to_string()],
-            server_display_name: Some("Example VPN".to_string()),
+            dns_upstreams: vec!["tls://dns.adguard-dns.com".to_string()],
+            name: Some("Example VPN".to_string()),
         };
 
         let uri = trusttunnel_deeplink::encode(&config).unwrap();
