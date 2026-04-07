@@ -25,7 +25,7 @@ beforeAll(() => {
 });
 
 describe("AddRuleInput", () => {
-  let onAdd: ReturnType<typeof vi.fn>;
+  let onAdd: any;
 
   beforeEach(() => {
     i18n.changeLanguage("ru");

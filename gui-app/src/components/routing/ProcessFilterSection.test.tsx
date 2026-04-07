@@ -6,10 +6,10 @@ import { ProcessFilterSection } from "./ProcessFilterSection";
 import type { ProcessInfo } from "./useRoutingState";
 
 describe("ProcessFilterSection", () => {
-  let onModeChange: ReturnType<typeof vi.fn>;
-  let onAdd: ReturnType<typeof vi.fn>;
-  let onRemove: ReturnType<typeof vi.fn>;
-  let onLoadProcesses: ReturnType<typeof vi.fn>;
+  let onModeChange: any;
+  let onAdd: any;
+  let onRemove: any;
+  let onLoadProcesses: any;
 
   const defaultProcesses = ["chrome.exe", "firefox.exe"];
   const defaultProcessList: ProcessInfo[] = [
