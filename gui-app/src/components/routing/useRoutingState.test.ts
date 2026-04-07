@@ -7,7 +7,6 @@ import {
   useRoutingState,
   type UseRoutingStateOptions,
   type RoutingRules,
-  type RuleEntry,
 } from "./useRoutingState";
 
 // ─── Helpers ─────────────────────────────────────────

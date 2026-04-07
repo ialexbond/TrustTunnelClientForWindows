@@ -3,7 +3,6 @@ import { screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
-import { open } from "@tauri-apps/plugin-shell";
 import i18n from "./shared/i18n";
 import App from "./App";
 import { renderWithProviders as render } from "./test/test-utils";
@@ -83,11 +82,9 @@ vi.mock("./components/DashboardPanel", () => ({
   },
 }));
 
-let appSettingsPanelProps: any = {};
 vi.mock("./components/AppSettingsPanel", () => ({
   __esModule: true,
-  default: (props: any) => {
-    appSettingsPanelProps = props;
+  default: (_props: any) => {
     return <div data-testid="app-settings-panel">AppSettingsPanel</div>;
   },
 }));
@@ -111,7 +108,7 @@ const mockFetch = vi.fn().mockResolvedValue({
     html_url: "https://github.com",
   }),
 });
-global.fetch = mockFetch;
+(globalThis as any).fetch = mockFetch;
 
 // Mock window.matchMedia
 const matchMediaListeners: Array<(e: MediaQueryListEvent) => void> = [];

@@ -14,8 +14,8 @@ function makeEntry(overrides: Partial<RuleEntry> = {}): RuleEntry {
 }
 
 describe("RuleEntryRow", () => {
-  let onRemove: ReturnType<typeof vi.fn>;
-  let onMove: ReturnType<typeof vi.fn>;
+  let onRemove: any;
+  let onMove: any;
 
   beforeEach(() => {
     i18n.changeLanguage("ru");

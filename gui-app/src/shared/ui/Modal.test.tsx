@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Modal } from "./Modal";
 
 describe("Modal", () => {
-  let onClose: ReturnType<typeof vi.fn>;
+  let onClose: any;
 
   beforeEach(() => {
     onClose = vi.fn();
