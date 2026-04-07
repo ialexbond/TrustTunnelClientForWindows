@@ -248,6 +248,7 @@ function App() {
   const [wizardKey, setWizardKey] = useState(0);
   const [controlKey, setControlKey] = useState(0);
   const [settingsKey, setSettingsKey] = useState(0);
+  const [routingKey, setRoutingKey] = useState(0);
   const wizardResetRef = useRef<(() => void) | null>(null);
 
   const handleClearConfig = useCallback(async () => {
@@ -302,6 +303,7 @@ function App() {
   }, []);
 
   const handleDropRouting = useCallback(() => {
+    setRoutingKey(k => k + 1);
     setActivePage("routing");
   }, []);
 
@@ -449,6 +451,7 @@ function App() {
           <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
             <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Routing">
             <RoutingPanel
+              key={routingKey}
               configPath={config.configPath}
               status={status}
               vpnMode={vpnMode}
