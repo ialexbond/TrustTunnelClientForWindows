@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- [Feature] Support importing DNS servers and server name from deep-link.
+            The old `dns_upstreams` field is moved to `[endpoint]` section and renamed to `dns_servers`.
+            For backward compatibility, old `dns_upstreams` is still supported for old configs.
+
 ## 1.0.18
 
 Added support for updated `tt://?` deep-link format.

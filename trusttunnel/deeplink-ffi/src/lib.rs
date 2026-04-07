@@ -168,6 +168,8 @@ mod tests {
             certificate: None,
             upstream_protocol: Protocol::Http2,
             anti_dpi: false,
+            dns_servers: vec!["tls://dns.adguard-dns.com".to_string()],
+            server_display_name: Some("Example VPN".to_string()),
         };
 
         let uri = trusttunnel_deeplink::encode(&config).expect("encode should succeed");
@@ -189,6 +191,14 @@ mod tests {
         assert!(
             toml_str.contains("aabb"),
             "Output must contain client_random"
+        );
+        assert!(
+            toml_str.contains("dns.adguard-dns.com"),
+            "Output must contain dns_servers value"
+        );
+        assert!(
+            toml_str.contains("Example VPN"),
+            "Output must contain server_display_name value"
         );
     }
 }

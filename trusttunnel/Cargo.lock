@@ -949,7 +949,7 @@ dependencies = [
 [[package]]
 name = "trusttunnel-deeplink"
 version = "0.1.0"
-source = "git+https://github.com/TrustTunnel/TrustTunnel?tag=v1.0.13#18258db85f5c157652c98b8a04823133948528df"
+source = "git+https://github.com/TrustTunnel/TrustTunnel?tag=v1.0.31#99f802127562a28f542e6637d3430b3a688c0fb6"
 dependencies = [
  "base64",
  "hex",
@@ -972,6 +972,7 @@ name = "trusttunnel-settings"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "toml",
  "trusttunnel-deeplink",
 ]
 
