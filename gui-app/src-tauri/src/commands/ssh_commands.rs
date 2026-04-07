@@ -16,9 +16,10 @@ macro_rules! ssh_command {
             user: String,
             password: String,
             key_path: Option<String>,
+            key_data: Option<String>,
             $($extra_param: $extra_type,)*
         ) -> Result<impl serde::Serialize, String> {
-            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path };
+            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
             $method(&app, params $(, $extra_param)*).await
         }
     };
