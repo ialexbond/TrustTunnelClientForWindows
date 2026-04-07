@@ -136,9 +136,13 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::vpn_runner(Liste
         return make_error(ConnectResultError{}, "Failed to create listener");
     }
 
+    // Backward compatibility for legacy configs
+    const auto &effective_dns =
+            m_config.location.dns_servers.has_value() ? *m_config.location.dns_servers : m_config.legacy_dns_upstreams;
+
     std::vector<const char *> dns_upstreams;
-    dns_upstreams.reserve(m_config.dns_upstreams.size());
-    for (const std::string &upstream : m_config.dns_upstreams) {
+    dns_upstreams.reserve(effective_dns.size());
+    for (const std::string &upstream : effective_dns) {
         dns_upstreams.emplace_back(upstream.c_str());
     }
 

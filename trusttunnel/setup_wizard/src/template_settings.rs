@@ -45,9 +45,6 @@ post_quantum_group_enabled = {}
 
 {}
 exclusions = []
-
-{}
-dns_upstreams = []
 "#,
         Settings::doc_loglevel().to_toml_comment(),
         Settings::default_loglevel(),
@@ -59,7 +56,6 @@ dns_upstreams = []
         Settings::doc_post_quantum_group_enabled().to_toml_comment(),
         Settings::default_post_quantum_group_enabled(),
         Settings::doc_exclusions().to_toml_comment(),
-        Settings::doc_dns_upstreams().to_toml_comment(),
     )
 });
 
@@ -89,6 +85,9 @@ certificate = ""
 upstream_protocol = "{}"
 {}
 anti_dpi = false
+
+{}
+dns_servers = []
 "#,
         Endpoint::doc().to_toml_comment(),
         Endpoint::doc_hostname().to_toml_comment(),
@@ -104,6 +103,7 @@ anti_dpi = false
         Endpoint::doc_upstream_protocol().to_toml_comment(),
         Endpoint::default_upstream_protocol(),
         Endpoint::doc_anti_dpi().to_toml_comment(),
+        Endpoint::doc_dns_servers().to_toml_comment(),
     )
 });
 
