@@ -33,6 +33,7 @@ base64 = "0.22"
 sha2 = "0.10"
 trusttunnel-settings = { path = "../../trusttunnel/settings" }
 futures-util = "0.3"
+chrono = "0.4"
 
 [profile.release]
 strip = true
