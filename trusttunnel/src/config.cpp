@@ -150,15 +150,15 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
         }
     }
 
-    if (const auto *x = config["dns_servers"].as_array()) {
-        std::vector<std::string> dns_servers;
-        dns_servers.reserve(x->size());
+    if (const auto *x = config["dns_upstreams"].as_array()) {
+        std::vector<std::string> dns_upstreams;
+        dns_upstreams.reserve(x->size());
         for (const auto &a : *x) {
             if (std::optional addr = a.value<std::string_view>(); addr.has_value() && !addr->empty()) {
-                dns_servers.emplace_back(addr.value());
+                dns_upstreams.emplace_back(addr.value());
             }
         }
-        location.dns_servers = std::move(dns_servers);
+        location.dns_upstreams = std::move(dns_upstreams);
     }
 
     return location;
