@@ -2,9 +2,9 @@
 
 ## 1.0.45
 
-- [Feature] Support importing DNS servers and server name from deep-link.
-            The old `dns_upstreams` field is moved to `[endpoint]` section and renamed to `dns_servers`.
-            For backward compatibility, old `dns_upstreams` is still supported for old configs.
+- [Feature] Support importing DNS upstreams and server name from deep-link.
+            The `dns_upstreams` field is moved to `[endpoint]` section.
+            For backward compatibility, `dns_upstreams` in the root config section is still supported for old configs.
 
 ## 1.0.18
 

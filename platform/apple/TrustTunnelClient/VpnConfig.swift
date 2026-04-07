@@ -8,7 +8,7 @@ internal struct TunConfig: Codable {
 
 internal struct Endpoint: Codable {
     let addresses: [String]
-    let dns_servers: [String]
+    let dns_upstreams: [String]
 }
 
 internal struct VpnConfig: Codable {
