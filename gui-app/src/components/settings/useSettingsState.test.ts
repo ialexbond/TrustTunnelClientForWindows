@@ -33,14 +33,6 @@ const fakeConfig: ClientConfig = {
       excluded_routes: [],
     },
   },
-  listener: {
-    tun: {
-      mtu_size: 1400,
-      change_system_dns: true,
-      included_routes: [],
-      excluded_routes: [],
-    },
-  },
 };
 
 function makeProps(overrides: Partial<SettingsProps> = {}): SettingsProps {

@@ -3,8 +3,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ConfirmDialog", () => {
-  let onConfirm: ReturnType<typeof vi.fn>;
-  let onCancel: ReturnType<typeof vi.fn>;
+  let onConfirm: any;
+  let onCancel: any;
 
   const defaults = {
     open: true,
