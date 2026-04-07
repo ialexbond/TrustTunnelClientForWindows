@@ -105,7 +105,7 @@ The configuration file uses TOML format. Below are all available settings.
 | `killswitch_allow_ports` | array[int] | `[]` | Local ports to allow inbound connections when kill switch is active |
 | `post_quantum_group_enabled` | bool | `true` | Enable post-quantum key exchange in TLS handshakes |
 | `exclusions` | array[string] | `[]` | Domains/IPs to route specially based on `vpn_mode` |
-| `dns_upstreams` | array[string] | `[]` | DNS resolvers for queries routed through VPN |
+| `dns_upstreams` | array[string] | `[]` | **Legacy.** Kept only for backward compatibility with old configs; prefer `[endpoint].dns_servers` instead |
 
 ### Endpoint Settings (`[endpoint]`)
 
@@ -121,6 +121,7 @@ The configuration file uses TOML format. Below are all available settings.
 | `certificate` | string | `null` | Endpoint certificate in PEM format (uses system store if empty) |
 | `upstream_protocol` | string | `"http2"` | Protocol: `http2` or `http3` |
 | `anti_dpi` | bool | `false` | Enable anti-DPI (Deep Packet Inspection) measures |
+| `dns_servers` | array[string] | `[]` | DNS resolvers for queries routed through VPN. If empty, AdGuard DNS unfiltered is used |
 
 ### TUN Listener Settings (`[listener.tun]`)
 
@@ -151,9 +152,9 @@ The `exclusions` array supports the following formats:
 - **IPv6 address**: `[::1]` or `[::1]:443` or `2001:db8::1`
 - **CIDR range**: `192.168.0.0/16` or `2001:db8::/32`
 
-### DNS Upstreams Syntax
+### DNS Servers Syntax
 
-The `dns_upstreams` array supports the following formats:
+The `dns_servers` array supports the following formats:
 
 - **Plain DNS**: `8.8.8.8:53`
 - **DNS over TCP**: `tcp://8.8.8.8:53`
@@ -172,7 +173,6 @@ killswitch_enabled = true
 killswitch_allow_ports = []
 post_quantum_group_enabled = true
 exclusions = []
-dns_upstreams = ["tls://1.1.1.1"]
 
 [endpoint]
 hostname = "vpn.example.com"
@@ -183,6 +183,7 @@ password = "mypassword"
 client_random = ""
 skip_verification = false
 certificate = ""
+dns_servers = ["tls://1.1.1.1"]
 upstream_protocol = "http2"
 anti_dpi = false
 

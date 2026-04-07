@@ -39,7 +39,6 @@ fn fill_main_table(mut doc: Document, settings: &Settings) -> Document {
     doc["killswitch_enabled"] = value(settings.killswitch_enabled);
     doc["post_quantum_group_enabled"] = value(settings.post_quantum_group_enabled);
     doc["exclusions"] = value(Array::from_iter(settings.exclusions.iter()));
-    doc["dns_upstreams"] = value(Array::from_iter(settings.dns_upstreams.iter()));
 
     doc
 }
@@ -61,6 +60,7 @@ fn fill_endpoint_table(mut doc: Document, settings: &Settings) -> Document {
     endpoint["certificate"] = value(settings.endpoint.certificate.as_deref().unwrap_or_default());
     endpoint["upstream_protocol"] = value(&settings.endpoint.upstream_protocol);
     endpoint["custom_sni"] = value(&settings.endpoint.custom_sni);
+    endpoint["dns_servers"] = value(Array::from_iter(settings.endpoint.dns_servers.iter()));
 
     doc
 }
@@ -135,4 +135,72 @@ fn fill_tun_listener_table(table: &mut Table, settings: &Settings) {
     table["excluded_routes"] = value(Array::from_iter(settings.excluded_routes.iter()));
     table["mtu_size"] = value(settings.mtu_size as i64);
     table["change_system_dns"] = value(settings.change_system_dns);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{Listener, TunListener};
+    use trusttunnel_settings::Endpoint;
+
+    fn test_settings(dns_servers: Vec<String>) -> Settings {
+        Settings {
+            loglevel: "info".into(),
+            vpn_mode: "general".into(),
+            killswitch_enabled: true,
+            killswitch_allow_ports: vec![],
+            post_quantum_group_enabled: true,
+            exclusions: vec![],
+            endpoint: Endpoint {
+                hostname: "vpn.example.com".into(),
+                addresses: vec!["1.2.3.4:443".into()],
+                has_ipv6: true,
+                username: "alice".into(),
+                password: "s3cr3t".into(),
+                upstream_protocol: "http2".into(),
+                dns_servers,
+                ..Default::default()
+            },
+            listener: Listener::Tun(TunListener {
+                bound_if: "".into(),
+                included_routes: vec!["0.0.0.0/0".into()],
+                excluded_routes: vec![],
+                mtu_size: 1280,
+                change_system_dns: true,
+            }),
+        }
+    }
+
+    #[test]
+    fn compose_writes_endpoint_dns_servers() {
+        let settings = test_settings(vec!["tls://dns.adguard-dns.com".into()]);
+        let doc = compose_document(None, &settings);
+        let output = doc.to_string();
+
+        let parsed: toml::Value = output.parse().unwrap();
+        let dns = parsed["endpoint"]["dns_servers"].as_array().unwrap();
+        assert_eq!(dns.len(), 1);
+        assert_eq!(dns[0].as_str().unwrap(), "tls://dns.adguard-dns.com");
+    }
+
+    #[test]
+    fn compose_writes_empty_dns_servers() {
+        let settings = test_settings(vec![]);
+        let doc = compose_document(None, &settings);
+        let output = doc.to_string();
+
+        let parsed: toml::Value = output.parse().unwrap();
+        let dns = parsed["endpoint"]["dns_servers"].as_array().unwrap();
+        assert!(dns.is_empty());
+    }
+
+    #[test]
+    fn compose_omits_root_legacy_dns_upstreams() {
+        let settings = test_settings(vec!["tls://dns.adguard-dns.com".into()]);
+        let doc = compose_document(None, &settings);
+        let output = doc.to_string();
+
+        let parsed: toml::Value = output.parse().unwrap();
+        assert!(parsed.get("dns_upstreams").is_none());
+    }
 }

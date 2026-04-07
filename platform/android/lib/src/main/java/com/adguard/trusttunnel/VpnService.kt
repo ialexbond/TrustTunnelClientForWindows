@@ -243,7 +243,7 @@ class VpnService : android.net.VpnService(), VpnClientListener {
                 .addAddress("172.20.2.13", 32)
                 .addAddress("fdfd:29::2", 64)
                 .addDisallowedApplication(applicationContext.packageName)
-            val dnsServers = if (config.dnsUpstreams.isEmpty()) {
+            val dnsServers = if (config.endpoint.dnsServers.isEmpty()) {
                 ADGUARD_DNS_SERVERS
             } else {
                 FAKE_DNS_SERVER
