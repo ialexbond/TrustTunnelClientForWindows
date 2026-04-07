@@ -22,10 +22,15 @@ class Listener (
 )
 
 @Serializable
+class Endpoint (
+    @SerialName("dns_servers")
+    val dnsServers: List<String> = emptyList()
+)
+
+@Serializable
 class VpnServiceConfig (
     val listener: Listener,
-    @SerialName("dns_upstreams")
-    val dnsUpstreams: List<String>
+    val endpoint: Endpoint
 ) {
     companion object {
         private val LOG = LoggerManager.getLogger("VpnServiceConfig")

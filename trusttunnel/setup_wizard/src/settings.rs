@@ -103,18 +103,6 @@ Supported syntax:
       * IPv6Address/mask"#)}
         #[serde(default)]
         pub exclusions: Vec<String>,
-        #{doc(r#"DNS upstreams.
-If specified, the library intercepts and routes plain DNS queries
-going through the endpoint to the DNS resolvers.
-One of the following kinds:
-  * 8.8.8.8:53 -- plain DNS
-  * tcp://8.8.8.8:53 -- plain DNS over TCP
-  * tls://1.1.1.1 -- DNS-over-TLS
-  * https://dns.adguard.com/dns-query -- DNS-over-HTTPS
-  * sdns://... -- DNS stamp (see https://dnscrypt.info/stamps-specifications)
-  * quic://dns.adguard.com:8853 -- DNS-over-QUIC"#)}
-        #[serde(default)]
-        pub dns_upstreams: Vec<String>,
         pub endpoint: Endpoint,
         #[serde(default)]
         pub listener: Listener,
@@ -284,9 +272,6 @@ pub fn build(template: Option<&Settings>) -> Settings {
         exclusions: opt_field!(template, exclusions)
             .cloned()
             .unwrap_or_default(),
-        dns_upstreams: opt_field!(template, dns_upstreams)
-            .cloned()
-            .unwrap_or_default(),
         endpoint: build_endpoint(opt_field!(template, endpoint)),
         listener: build_listener(opt_field!(template, listener)),
     }
@@ -435,6 +420,25 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
             .as_ref()
             .and_then(|x| empty_to_none(x.custom_sni.clone()))
             .unwrap_or_default(),
+        dns_servers: endpoint_config
+            .as_ref()
+            .map(|x| x.dns_servers.clone())
+            .or_else(|| {
+                ask_for_input::<String>(
+                    &format!(
+                        "{}\nDelimit by whitespace, leave empty for default.",
+                        Endpoint::doc_dns_servers()
+                    ),
+                    opt_field!(template, dns_servers)
+                        .map(|v| v.join(" "))
+                        .or(Some("".to_string())),
+                )
+                .split_whitespace()
+                .map(String::from)
+                .collect::<Vec<String>>()
+                .into()
+            })
+            .unwrap_or_default(),
         ..Default::default()
     };
 
@@ -504,13 +508,15 @@ fn build_endpoint(template: Option<&Endpoint>) -> Endpoint {
         parse_cert(x.certificate.clone().unwrap()).expect("Couldn't parse provided certificate");
     }
 
-    x.skip_verification = x.certificate.is_none()
-        && ask_for_agreement_with_default(
-            &format!("{}\n", Endpoint::doc_skip_verification()),
-            opt_field!(template, skip_verification)
-                .cloned()
-                .unwrap_or_default(),
-        );
+    if endpoint_config.is_none() {
+        x.skip_verification = x.certificate.is_none()
+            && ask_for_agreement_with_default(
+                &format!("{}\n", Endpoint::doc_skip_verification()),
+                opt_field!(template, skip_verification)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+    }
 
     x
 }
@@ -630,6 +636,8 @@ pub struct EndpointConfig {
     anti_dpi: bool,
     #[serde(default)]
     custom_sni: String,
+    #[serde(default)]
+    dns_servers: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -723,6 +731,12 @@ impl fmt::Display for EndpointSummary<'_> {
                 .join("\n                     ")
         };
 
+        let dns_servers = if ep.dns_servers.is_empty() {
+            "(default: AdGuard DNS unfiltered)".to_string()
+        } else {
+            ep.dns_servers.join(", ")
+        };
+
         write!(
             f,
             "
@@ -736,7 +750,8 @@ impl fmt::Display for EndpointSummary<'_> {
   Skip verification: {}
   Certificate:       {}
   Protocol:          {}
-  Anti-DPI:          {}",
+  Anti-DPI:          {}
+  DNS servers:       {}",
             ep.hostname,
             addresses,
             custom_sni,
@@ -747,6 +762,7 @@ impl fmt::Display for EndpointSummary<'_> {
             cert_display,
             ep.upstream_protocol,
             if ep.anti_dpi { "yes" } else { "no" },
+            dns_servers,
         )
     }
 }
@@ -843,6 +859,8 @@ mod tests {
             certificate: None,
             upstream_protocol: Protocol::Http3,
             anti_dpi: true,
+            dns_servers: vec!["tls://dns.adguard-dns.com".to_string()],
+            server_display_name: Some("Example VPN".to_string()),
         };
 
         let uri = trusttunnel_deeplink::encode(&config).unwrap();
