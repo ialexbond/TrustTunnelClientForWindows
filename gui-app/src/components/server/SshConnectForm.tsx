@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Server, Loader2, Lock, Key, FileKey } from "lucide-react";
+import { Server, Loader2, Lock, Key, FileKey, ClipboardPaste } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
@@ -24,6 +24,7 @@ interface Props {
 }
 
 type AuthMode = "password" | "key";
+type KeyInputMode = "file" | "paste";
 
 function obfuscate(value: string): string {
   return "b64:" + btoa(unescape(encodeURIComponent(value)));
@@ -36,7 +37,9 @@ export function SshConnectForm({ onConnect }: Props) {
   const [user, setUser] = useState("root");
   const [password, setPassword] = useState("");
   const [keyPath, setKeyPath] = useState("");
+  const [keyData, setKeyData] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("password");
+  const [keyInputMode, setKeyInputMode] = useState<KeyInputMode>("file");
   const [connecting, setConnecting] = useState(false);
   const pushSuccess = useSnackBar();
 
@@ -59,7 +62,9 @@ export function SshConnectForm({ onConnect }: Props) {
 
   const isValid =
     host.trim() &&
-    (authMode === "password" ? password.trim() : keyPath.trim());
+    (authMode === "password"
+      ? password.trim()
+      : keyInputMode === "file" ? keyPath.trim() : keyData.trim());
 
   const handleConnect = async () => {
     if (!isValid) return;
@@ -72,8 +77,12 @@ export function SshConnectForm({ onConnect }: Props) {
         user: user.trim() || "root",
         password: authMode === "password" ? password : "",
       };
-      if (authMode === "key" && keyPath) {
-        params.keyPath = keyPath;
+      if (authMode === "key") {
+        if (keyInputMode === "file" && keyPath) {
+          params.keyPath = keyPath;
+        } else if (keyInputMode === "paste" && keyData.trim()) {
+          params.keyData = keyData.trim();
+        }
       }
 
       await invoke("check_server_installation", params);
@@ -96,7 +105,13 @@ export function SshConnectForm({ onConnect }: Props) {
 
       onConnect(creds);
     } catch (e) {
-      pushSuccess(translateSshError(formatError(e), t), "error");
+      const errStr = formatError(e);
+      if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {
+        await invoke("forget_ssh_host_key", { host: host.trim(), port: parseInt(port) || 22 }).catch(() => {});
+        pushSuccess(t("sshErrors.hostKeyReset", "Host key was reset. Press Connect again."));
+      } else {
+        pushSuccess(translateSshError(errStr, t), "error");
+      }
     } finally {
       setConnecting(false);
     }
@@ -179,7 +194,7 @@ export function SshConnectForm({ onConnect }: Props) {
             </div>
           </div>
 
-          {/* Password or Key selector */}
+          {/* Password or Key input */}
           {authMode === "password" ? (
             <PasswordInput
               label={t("labels.ssh_password")}
@@ -188,33 +203,74 @@ export function SshConnectForm({ onConnect }: Props) {
               placeholder="********"
             />
           ) : (
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--color-text-secondary)" }}>
-                {t("control.key_file")}
-              </label>
-              <div className="flex gap-2">
-                <div
-                  className="flex-1 flex items-center px-3 h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
+            <div className="space-y-2">
+              {/* File / Paste toggle */}
+              <div className="flex gap-1">
+                <button
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
+                  style={{
+                    backgroundColor: keyInputMode === "file" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
+                    color: keyInputMode === "file" ? "#fff" : "var(--color-text-secondary)",
+                  }}
+                  onClick={() => setKeyInputMode("file")}
+                >
+                  <FileKey className="w-3 h-3" />
+                  {t("control.key_from_file", "File")}
+                </button>
+                <button
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
+                  style={{
+                    backgroundColor: keyInputMode === "paste" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
+                    color: keyInputMode === "paste" ? "#fff" : "var(--color-text-secondary)",
+                  }}
+                  onClick={() => setKeyInputMode("paste")}
+                >
+                  <ClipboardPaste className="w-3 h-3" />
+                  {t("control.key_paste", "Paste")}
+                </button>
+              </div>
+
+              {keyInputMode === "file" ? (
+                <div>
+                  <div className="flex gap-2">
+                    <div
+                      className="flex-1 flex items-center px-3 h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
+                      style={{
+                        backgroundColor: "var(--color-input-bg)",
+                        border: "1px solid var(--color-input-border)",
+                        color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                      }}
+                      onClick={handleSelectKey}
+                    >
+                      <FileKey className="w-4 h-4 shrink-0 mr-2" style={{ color: "var(--color-text-muted)" }} />
+                      <span className="truncate text-xs">
+                        {keyPath ? keyPath.split(/[/\\]/).pop() : t("control.select_key")}
+                      </span>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={handleSelectKey}>
+                      {t("control.browse")}
+                    </Button>
+                  </div>
+                  {keyPath && (
+                    <p className="text-[10px] mt-1 truncate" style={{ color: "var(--color-text-muted)" }}>
+                      {keyPath}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  className="w-full rounded-[var(--radius-lg)] px-3 py-2 text-xs font-mono resize-none"
                   style={{
                     backgroundColor: "var(--color-input-bg)",
                     border: "1px solid var(--color-input-border)",
-                    color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                    color: "var(--color-text-primary)",
+                    height: 100,
                   }}
-                  onClick={handleSelectKey}
-                >
-                  <FileKey className="w-4 h-4 shrink-0 mr-2" style={{ color: "var(--color-text-muted)" }} />
-                  <span className="truncate text-xs">
-                    {keyPath ? keyPath.split(/[/\\]/).pop() : t("control.select_key")}
-                  </span>
-                </div>
-                <Button variant="secondary" size="sm" onClick={handleSelectKey}>
-                  {t("control.browse")}
-                </Button>
-              </div>
-              {keyPath && (
-                <p className="text-[10px] mt-1 truncate" style={{ color: "var(--color-text-muted)" }}>
-                  {keyPath}
-                </p>
+                  value={keyData}
+                  onChange={(e) => setKeyData(e.target.value)}
+                  placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
+                  spellCheck={false}
+                />
               )}
             </div>
           )}
