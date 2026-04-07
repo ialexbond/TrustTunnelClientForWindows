@@ -165,7 +165,10 @@
       "theme_system": "System",
       "theme_dark": "Dark",
       "theme_light": "Light",
-      "language": "Language"
+      "language": "Language",
+      "logging": "Collect logs",
+      "logging_desc": "Save application events and VPN engine output to files",
+      "logging_show_folder": "Show in folder"
     }
   },
   "vpn_modes": {
@@ -298,6 +301,7 @@
       "delete_tt": "Remove TrustTunnel",
       "server_unreachable": "Server unreachable",
       "connection_error_help": "Could not connect to the server via SSH. Check the address, port, username and password. The server may be unreachable from your network.",
+      "host_key_reset_help": "The server was likely reinstalled. Go back and connect again.",
       "server_ready": "Server is ready for setup",
       "not_found_can_install": "TrustTunnel not found — can install from scratch",
       "continue_setup": "Continue setup",
@@ -734,12 +738,16 @@
     "key_file": "Private key file",
     "select_key": "Select key file...",
     "select_key_title": "Select SSH Key",
-    "browse": "Browse"
+    "browse": "Browse",
+    "key_from_file": "File",
+    "key_paste": "Paste"
   },
   "sshErrors": {
     "timeout": "Could not connect to {{target}} — connection timed out (15s)",
     "connectFailed": "SSH connection failed: {{detail}}",
     "hostKeyChanged": "Server host key has changed! This could indicate a man-in-the-middle attack, or the server was reinstalled. Clear the host key in Server settings and try again.",
+    "hostKeyReset": "Host key was reset. Press Connect again.",
+    "hostKeyResetHelp": "The server was likely reinstalled. Go back and connect again.",
     "channelFailed": "Failed to open SSH channel: {{detail}}",
     "execFailed": "Command execution failed: {{detail}}",
     "authFailed": "Invalid SSH username or password",

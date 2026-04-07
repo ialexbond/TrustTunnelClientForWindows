@@ -57,6 +57,7 @@ pub fn kill_stale_sidecar() {
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             eprintln!("[cleanup] Killing stale sidecar PID {pid}");
+            crate::logging::log_app("WARN", &format!("Killing stale sidecar PID {pid}"));
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/PID", &pid.to_string()])
                 .creation_flags(crate::sidecar::CREATE_NO_WINDOW) // CREATE_NO_WINDOW
@@ -112,6 +113,12 @@ pub async fn vpn_connect(
     log_level: String,
 ) -> Result<(), String> {
     eprintln!("[vpn_connect] Called with config_path={config_path}, log_level={log_level}");
+    crate::logging::log_app("INFO", &format!("VPN connect: config={config_path}, log_level={log_level}"));
+
+    // Write system diagnostics snapshot (if logging enabled)
+    if crate::logging::is_logging_enabled() {
+        crate::diagnostics::write_system_snapshot();
+    }
 
     // Remember config for tray-initiated reconnect
     if let Ok(mut cp) = state.config_path.lock() { *cp = Some(config_path.clone()); }
@@ -145,6 +152,7 @@ pub async fn vpn_connect(
         let names = conflicts.join(", ");
         let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
         eprintln!("[vpn_connect] {warn_msg}");
+        crate::logging::log_app("WARN", &warn_msg);
         app.emit("vpn-log", VpnLogPayload {
             message: warn_msg.clone(),
             level: "warn".into(),
@@ -192,6 +200,7 @@ pub async fn vpn_connect(
         .map_err(|e| {
             let msg = format!("Failed to start sidecar: {e}");
             eprintln!("[vpn_connect] {msg}");
+            crate::logging::log_app("ERROR", &msg);
             app.emit("vpn-log", VpnLogPayload {
                 message: msg.clone(),
                 level: "error".into(),
@@ -203,6 +212,7 @@ pub async fn vpn_connect(
     save_sidecar_pid(child.child.pid());
 
     eprintln!("[vpn_connect] Sidecar spawned OK (PID {}), storing child handle", child.child.pid());
+    crate::logging::log_app("INFO", &format!("Sidecar spawned OK (PID {})", child.child.pid()));
     app.emit("vpn-log", VpnLogPayload {
         message: "Sidecar process started successfully".into(),
         level: "info".into(),
@@ -252,6 +262,8 @@ pub async fn vpn_disconnect(
             .await
             .map_err(|e| format!("Failed to stop sidecar: {e}"))?;
     }
+
+    crate::logging::log_app("INFO", "VPN disconnected");
 
     // Clean up hosts file blocked entries on disconnect
     routing_rules::cleanup_hosts_block().ok();
