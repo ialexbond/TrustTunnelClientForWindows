@@ -60,7 +60,7 @@ fn fill_endpoint_table(mut doc: Document, settings: &Settings) -> Document {
     endpoint["certificate"] = value(settings.endpoint.certificate.as_deref().unwrap_or_default());
     endpoint["upstream_protocol"] = value(&settings.endpoint.upstream_protocol);
     endpoint["custom_sni"] = value(&settings.endpoint.custom_sni);
-    endpoint["dns_servers"] = value(Array::from_iter(settings.endpoint.dns_servers.iter()));
+    endpoint["dns_upstreams"] = value(Array::from_iter(settings.endpoint.dns_upstreams.iter()));
 
     doc
 }
@@ -143,7 +143,7 @@ mod tests {
     use crate::settings::{Listener, TunListener};
     use trusttunnel_settings::Endpoint;
 
-    fn test_settings(dns_servers: Vec<String>) -> Settings {
+    fn test_settings(dns_upstreams: Vec<String>) -> Settings {
         Settings {
             loglevel: "info".into(),
             vpn_mode: "general".into(),
@@ -158,7 +158,7 @@ mod tests {
                 username: "alice".into(),
                 password: "s3cr3t".into(),
                 upstream_protocol: "http2".into(),
-                dns_servers,
+                dns_upstreams,
                 ..Default::default()
             },
             listener: Listener::Tun(TunListener {
@@ -172,25 +172,25 @@ mod tests {
     }
 
     #[test]
-    fn compose_writes_endpoint_dns_servers() {
+    fn compose_writes_endpoint_dns_upstreams() {
         let settings = test_settings(vec!["tls://dns.adguard-dns.com".into()]);
         let doc = compose_document(None, &settings);
         let output = doc.to_string();
 
         let parsed: toml::Value = output.parse().unwrap();
-        let dns = parsed["endpoint"]["dns_servers"].as_array().unwrap();
+        let dns = parsed["endpoint"]["dns_upstreams"].as_array().unwrap();
         assert_eq!(dns.len(), 1);
         assert_eq!(dns[0].as_str().unwrap(), "tls://dns.adguard-dns.com");
     }
 
     #[test]
-    fn compose_writes_empty_dns_servers() {
+    fn compose_writes_empty_dns_upstreams() {
         let settings = test_settings(vec![]);
         let doc = compose_document(None, &settings);
         let output = doc.to_string();
 
         let parsed: toml::Value = output.parse().unwrap();
-        let dns = parsed["endpoint"]["dns_servers"].as_array().unwrap();
+        let dns = parsed["endpoint"]["dns_upstreams"].as_array().unwrap();
         assert!(dns.is_empty());
     }
 

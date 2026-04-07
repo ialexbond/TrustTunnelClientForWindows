@@ -87,7 +87,7 @@ upstream_protocol = "{}"
 anti_dpi = false
 
 {}
-dns_servers = []
+dns_upstreams = []
 "#,
         Endpoint::doc().to_toml_comment(),
         Endpoint::doc_hostname().to_toml_comment(),
@@ -103,7 +103,7 @@ dns_servers = []
         Endpoint::doc_upstream_protocol().to_toml_comment(),
         Endpoint::default_upstream_protocol(),
         Endpoint::doc_anti_dpi().to_toml_comment(),
-        Endpoint::doc_dns_servers().to_toml_comment(),
+        Endpoint::doc_dns_upstreams().to_toml_comment(),
     )
 });
 

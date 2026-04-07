@@ -137,8 +137,8 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::vpn_runner(Liste
     }
 
     // Backward compatibility for legacy configs
-    const auto &effective_dns =
-            m_config.location.dns_servers.has_value() ? *m_config.location.dns_servers : m_config.legacy_dns_upstreams;
+    const auto &effective_dns = m_config.location.dns_upstreams.has_value() ? *m_config.location.dns_upstreams
+                                                                            : m_config.legacy_dns_upstreams;
 
     std::vector<const char *> dns_upstreams;
     dns_upstreams.reserve(effective_dns.size());
