@@ -63,6 +63,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   const [sshUser, setSshUser] = useState(() => loadSaved("sshUser", "root"));
   const [sshPassword, setSshPassword] = useState(() => deobfuscate(loadSaved("sshPassword", "")));
   const [sshKeyPath, setSshKeyPath] = useState(() => loadSaved("sshKeyPath", ""));
+  const [sshKeyData, setSshKeyData] = useState("");
   const [showSshPassword, setShowSshPassword] = useState(false);
 
   // ── Endpoint settings (persisted) ──
@@ -225,6 +226,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
       });
       if (checkCancelledRef.current) return;
       setServerInfo(result);
@@ -237,7 +239,13 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
       }
     } catch (e) {
       if (checkCancelledRef.current) return;
-      setCheckError(formatError(e));
+      const errStr = formatError(e);
+      if (errStr.includes("Unknown server key") || errStr.includes("HOST_KEY_CHANGED")) {
+        await invoke("forget_ssh_host_key", { host, port: parseInt(port) || 22 }).catch(() => {});
+        setCheckError("HOST_KEY_RESET");
+      } else {
+        setCheckError(errStr);
+      }
       setWizardStep("found");
       setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
     }
@@ -262,6 +270,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
       });
       operationRef.current = null;
       setServerInfo(null);
@@ -286,6 +295,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
       });
     } catch {
       // Uninstall failed (e.g. no internet) — just go back anyway
@@ -315,6 +325,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         settings: {
           listenAddress,
           vpnUsername,
@@ -372,6 +383,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         clientName: forUser || vpnUsername || "",
       });
       setConfigPath(result);
@@ -394,6 +406,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         clientName: forUser,
       });
       const fileName = `trusttunnel_${forUser}.toml`;
@@ -425,6 +438,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         vpnUsername: newUsername.trim(),
         vpnPassword: newPassword.trim(),
       });
@@ -435,6 +449,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
           user: sshUser,
           password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         });
         setServerInfo(result);
       } catch { /* keep current serverInfo */ }
@@ -457,6 +472,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
         user: sshUser,
         password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         vpnUsername: username,
       });
       try {
@@ -466,6 +482,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
           user: sshUser,
           password: sshPassword,
         keyPath: sshKeyPath || undefined,
+        keyData: sshKeyData || undefined,
         });
         setServerInfo(result);
       } catch { /* keep current */ }
@@ -492,7 +509,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   };
 
   // ── Derived state ──
-  const canGoToEndpoint = host.trim().length > 0 && (sshPassword.length > 0 || sshKeyPath.length > 0);
+  const canGoToEndpoint = host.trim().length > 0 && (sshPassword.length > 0 || sshKeyPath.length > 0 || sshKeyData.length > 0);
   const isValidEmail = (e: string) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
   const canDeploy =
     vpnUsername.trim().length > 0 &&
@@ -513,6 +530,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
     sshUser, setSshUser,
     sshPassword, setSshPassword,
     sshKeyPath, setSshKeyPath,
+    sshKeyData, setSshKeyData,
     showSshPassword, setShowSshPassword,
 
     // Endpoint settings

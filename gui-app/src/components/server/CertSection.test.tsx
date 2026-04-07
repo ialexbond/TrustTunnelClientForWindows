@@ -229,9 +229,8 @@ describe("CertSection", () => {
         autoRenew: false,
       },
     });
-    const { container } = render(<CertSection state={state} />);
+    render(<CertSection state={state} />);
     // Badge with variant="danger" renders with the danger styling
-    const badges = container.querySelectorAll('[class*="badge"]');
     // The expiry badge should exist
     expect(screen.getByText(i18n.t("server.cert.expires"))).toBeInTheDocument();
   });
