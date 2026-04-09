@@ -134,7 +134,7 @@ function formatDaysHuman(totalDays: number, lang: string): string {
 
 export function CertSection({ state }: Props) {
   const { t, i18n } = useTranslation();
-  const { sshParams, setActionResult, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
+  const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
 
   const [renewLoading, setRenewLoading] = useState(false);
   const [_renewStatus, setRenewStatus] = useState<string>("");
@@ -155,20 +155,33 @@ export function CertSection({ state }: Props) {
     setConfirmRenew(false);
     setRenewLoading(true);
     setRenewStatus(t("server.cert.renew_progress_connecting"));
+    let succeeded = false;
     try {
       setRenewStatus(t("server.cert.renew_progress_renewing"));
       await invoke("server_renew_cert", sshParams);
+      succeeded = true;
+    } catch (e) {
+      const raw = formatError(e);
+      // Translate cryptic backend codes to human-readable messages
+      let msg: string;
+      if (raw.includes("CERT_RENEW_FAILED|1")) {
+        msg = t("server.cert.error_certbot_failed");
+      } else if (raw.includes("CERT_RENEW_FAILED|2") || raw.includes("CERT_RENEW_FAILED|124")) {
+        // Exit code 2 = certbot error (often rate limit); 124 = timeout killed by `timeout` command
+        msg = t("server.cert.error_rate_limit");
+      } else {
+        msg = t("server.cert.error_generic", { detail: raw });
+      }
+      state.pushSuccess(msg, "error");
+    } finally {
+      // Always reload cert info — even if certbot returned an error (e.g. rate limit),
+      // the cert file may have been updated by a previous successful run + our copy logic.
       setRenewStatus(t("server.cert.renew_progress_reloading"));
-      // Wait a bit for the new cert to be written to disk
       await new Promise(r => setTimeout(r, 2000));
       await loadCert();
       setRenewStatus("");
-      state.pushSuccess(t("server.cert.renewed"));
-    } catch (e) {
-      setRenewStatus("");
-      setActionResult({ type: "error", message: formatError(e) });
-    } finally {
       setRenewLoading(false);
+      if (succeeded) state.pushSuccess(t("server.cert.renewed"));
     }
   };
 
@@ -240,20 +253,17 @@ export function CertSection({ state }: Props) {
           </Badge>
         </div>
 
-        {/* Renew button — only for Let's Encrypt, disabled until implemented */}
         {certInfo.certType === "lets_encrypt" && (
-          <Tooltip text={t("server.cert.renew_wip")}>
-            <div>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<RefreshCw className="w-3.5 h-3.5" />}
-                disabled
-              >
-                {t("server.cert.renew")}
-              </Button>
-            </div>
-          </Tooltip>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RefreshCw className="w-3.5 h-3.5" />}
+            loading={renewLoading}
+            disabled={renewLoading}
+            onClick={() => setConfirmRenew(true)}
+          >
+            {t("server.cert.renew")}
+          </Button>
         )}
       </div>
 

@@ -38,17 +38,17 @@ function parseTomlConfig(raw: string): ParsedConfig {
     ipv6Available: false,
   };
 
-  const listenMatch = raw.match(/listen\s*=\s*"([^"]+)"/);
+  const listenMatch = raw.match(/listen_address\s*=\s*"([^"]+)"/);
   if (listenMatch) result.listenAddr = listenMatch[1];
 
-  const tlsMatch = raw.match(/tls_handshake_timeout\s*=\s*"([^"]+)"/);
-  if (tlsMatch) result.tlsHandshake = tlsMatch[1];
+  const tlsMatch = raw.match(/tls_handshake_timeout_secs\s*=\s*(\d+)/);
+  if (tlsMatch) result.tlsHandshake = `${tlsMatch[1]}s`;
 
-  const tcpMatch = raw.match(/tcp_connection_timeout\s*=\s*"([^"]+)"/);
-  if (tcpMatch) result.tcpTimeout = tcpMatch[1];
+  const tcpMatch = raw.match(/tcp_connections_timeout_secs\s*=\s*(\d+)/);
+  if (tcpMatch) result.tcpTimeout = `${tcpMatch[1]}s`;
 
-  const udpMatch = raw.match(/udp_connection_timeout\s*=\s*"([^"]+)"/);
-  if (udpMatch) result.udpTimeout = udpMatch[1];
+  const udpMatch = raw.match(/udp_connections_timeout_secs\s*=\s*(\d+)/);
+  if (udpMatch) result.udpTimeout = `${udpMatch[1]}s`;
 
   const pingMatch = raw.match(/ping_enable\s*=\s*(true|false)/);
   if (pingMatch) result.pingEnable = pingMatch[1] === "true";

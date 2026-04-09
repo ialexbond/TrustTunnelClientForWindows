@@ -47,6 +47,26 @@ ssh_command!(server_export_config_deeplink, ssh::export_config_deeplink, client_
 ssh_command!(server_get_stats, ssh::server_get_stats);
 ssh_command!(server_upgrade, ssh::server_upgrade, version: String);
 
+// ─── Security commands ────────────────────────────────────────────
+ssh_command!(security_get_status, ssh::get_security_status);
+ssh_command!(security_install_fail2ban, ssh::install_fail2ban);
+ssh_command!(security_uninstall_fail2ban, ssh::uninstall_fail2ban);
+ssh_command!(security_start_fail2ban, ssh::start_fail2ban);
+ssh_command!(security_stop_fail2ban, ssh::stop_fail2ban);
+ssh_command!(security_start_firewall, ssh::start_firewall);
+ssh_command!(security_stop_firewall, ssh::stop_firewall);
+ssh_command!(security_fail2ban_unban, ssh::fail2ban_unban, jail: String, ip: String);
+ssh_command!(security_fail2ban_ban, ssh::fail2ban_ban, jail: String, ip: String);
+ssh_command!(security_fail2ban_set_jail, ssh::fail2ban_set_jail_config, jail: String, config: ssh::JailConfigUpdate);
+ssh_command!(security_fail2ban_tail_log, ssh::fail2ban_tail_log, lines: u32);
+ssh_command!(security_install_firewall, ssh::install_firewall, keep_http_open: bool);
+ssh_command!(security_uninstall_firewall, ssh::uninstall_firewall);
+ssh_command!(security_firewall_add_rule, ssh::firewall_add_rule, rule: ssh::NewFirewallRule);
+ssh_command!(security_firewall_delete_rule, ssh::firewall_delete_rule, number: u32);
+ssh_command!(security_firewall_set_logging, ssh::firewall_set_logging, level: String);
+ssh_command!(security_firewall_tail_log, ssh::firewall_tail_log, lines: u32);
+ssh_command!(security_firewall_set_http_port, ssh::firewall_set_http_port, open: bool);
+
 // ─── Non-macro SSH commands ────────────────────────────────────────
 
 #[tauri::command]
