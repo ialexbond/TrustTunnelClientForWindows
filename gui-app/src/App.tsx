@@ -312,7 +312,7 @@ function App() {
     onConfigImported: handleDropConfig,
     onRoutingImported: handleDropRouting,
     pushSuccess,
-    isBusy: activePage === "server", // block during setup wizard
+    isBusy: false, // drag-drop is safe on any page — import uses a separate SSH session
   });
 
   const hasConfig = !!config.configPath;
