@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 1.0.49
+
 - [Fix] Protect service socket for DNS query forwarding with securely generated password #62
 
 ## 1.0.45
