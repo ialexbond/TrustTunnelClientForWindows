@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- [Fix] Protect service socket for DNS query forwarding with securely generated password #62
+
 ## 1.0.45
 
 - [Feature] Support importing DNS upstreams and server name from deep-link.
