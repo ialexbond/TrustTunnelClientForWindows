@@ -273,9 +273,13 @@ pub async fn update_config_feature(
 
     let value = if enabled { "true" } else { "false" };
 
-    // Use sed to toggle the feature in vpn.toml
+    // Try to replace the key if it already exists; if not, append it at the top of the file
+    // (before any [section] headers). This handles both fresh configs that lack the key
+    // entirely and configs where the key was previously set.
     let cmd = format!(
-        r#"{sudo}sed -i 's/^{feature}\s*=\s*\(true\|false\)/{feature} = {value}/' {cfg}"#,
+        r#"{sudo}grep -q "^[[:space:]]*{feature}[[:space:]]*=" {cfg} && \
+           {sudo}sed -i "s/^[[:space:]]*{feature}[[:space:]]*=.*/{feature} = {value}/" {cfg} || \
+           {sudo}sed -i "1i {feature} = {value}" {cfg}"#,
         cfg = ENDPOINT_CONFIG
     );
 
@@ -286,8 +290,8 @@ pub async fn update_config_feature(
         return Err(format!("Failed to update {feature} in vpn.toml (code {code})"));
     }
 
-    // Restart TrustTunnel to apply
-    let _ = exec_command(&handle, app, &format!("{sudo}systemctl restart trusttunnel")).await;
+    // Restart TrustTunnel to apply — --no-block prevents SSH channel from hanging
+    let _ = exec_command(&handle, app, &format!("{sudo}systemctl --no-block restart trusttunnel")).await;
 
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())

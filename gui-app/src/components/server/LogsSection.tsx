@@ -6,6 +6,7 @@ import {
   Copy,
   Check,
   ChevronUp,
+  Loader2,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
@@ -83,21 +84,15 @@ export function LogsSection({ state }: Props) {
         <Button
           variant="secondary"
           size="sm"
-          icon={<ScrollText className="w-3.5 h-3.5" />}
-          loading={logsLoading}
-          onClick={handleLoadLogs}
+          icon={showLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ScrollText className="w-3.5 h-3.5" />}
+          onClick={showLogs ? handleCollapse : handleLoadLogs}
         >
-          {showLogs ? t("server.logs.refresh") : t("server.logs.load")}
+          {showLogs ? t("server.logs.collapse") : t("server.logs.load")}
         </Button>
         {showLogs && serverLogs && (
-          <>
-            <Button variant="secondary" size="sm" icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} onClick={handleCopy}>
-              {t("server.logs.copy")}
-            </Button>
-            <Button variant="secondary" size="sm" icon={<ChevronUp className="w-3.5 h-3.5" />} onClick={handleCollapse}>
-              {t("server.logs.collapse")}
-            </Button>
-          </>
+          <Button variant="ghost" size="sm" icon={<ScrollText className="w-3.5 h-3.5" />} onClick={handleLoadLogs}>
+            {t("server.logs.refresh")}
+          </Button>
         )}
       </div>
 
@@ -105,25 +100,42 @@ export function LogsSection({ state }: Props) {
         className="overflow-hidden transition-all duration-300 ease-in-out"
         style={{ maxHeight: showLogs ? "240px" : "0px", opacity: showLogs ? 1 : 0, marginTop: showLogs ? "8px" : "0px" }}
       >
-        <div className="rounded-[var(--radius-md)] overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-        <pre
-          ref={logsEndRef}
-          className="p-3 text-[10px] leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono"
-          style={{
-            backgroundColor: "var(--color-bg-primary)",
-            paddingRight: "1rem",
-          }}
-        >
-          {logsLoading ? (
-            <span style={{ color: "var(--color-text-muted)" }}>{t("server.logs.loading")}</span>
-          ) : serverLogs ? (
-            serverLogs.split("\n").map((line, i) => (
-              <span key={i} style={colorizeLogLine(line)}>{line}{"\n"}</span>
-            ))
-          ) : (
-            <span style={{ color: "var(--color-text-muted)" }}>{t("server.logs.no_data")}</span>
-          )}
-        </pre>
+        <div className="rounded-[var(--radius-md)] overflow-hidden relative" style={{ border: "1px solid var(--color-border)" }}>
+        {logsLoading ? (
+          <div className="flex items-center justify-center py-8" style={{ backgroundColor: "var(--color-bg-primary)" }}>
+            <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-text-muted)" }} />
+          </div>
+        ) : (
+          <>
+            {serverLogs && (
+              <button
+                onClick={handleCopy}
+                className="absolute top-1.5 right-1.5 p-1 rounded-[var(--radius-sm)] transition-colors z-10"
+                style={{ backgroundColor: "var(--color-bg-hover)" }}
+                title={t("server.logs.copy")}
+              >
+                {copied
+                  ? <Check className="w-3 h-3" style={{ color: "var(--color-success-500)" }} />
+                  : <Copy className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />}
+              </button>
+            )}
+            <pre
+              ref={logsEndRef}
+              className="p-3 pr-7 text-[10px] leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono scroll-overlay"
+              style={{
+                backgroundColor: "var(--color-bg-primary)",
+              }}
+            >
+              {serverLogs ? (
+                serverLogs.split("\n").map((line, i) => (
+                  <span key={i} style={colorizeLogLine(line)}>{line}{"\n"}</span>
+                ))
+              ) : (
+                <span style={{ color: "var(--color-text-muted)" }}>{t("server.logs.no_data")}</span>
+              )}
+            </pre>
+          </>
+        )}
         </div>
       </div>
     </Card>

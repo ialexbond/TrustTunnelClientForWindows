@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowUpCircle,
   Download,
@@ -9,8 +11,10 @@ import {
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
+import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
 import { colors } from "../../shared/ui/colors";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -19,6 +23,21 @@ interface Props {
 
 function stripV(v: string): string {
   return v.replace(/^v/, "");
+}
+
+const MIN_VERSION = "1.0.17";
+
+/** True if version a >= b (semver comparison). */
+function semverGte(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na > nb) return true;
+    if (na < nb) return false;
+  }
+  return true; // equal
 }
 
 export function VersionSection({ state }: Props) {
@@ -31,13 +50,19 @@ export function VersionSection({ state }: Props) {
   } = state;
 
   const dropdown = useDropdownPortal();
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [confirmUpgrade, setConfirmUpgrade] = useState(false);
 
   if (!serverInfo) return null;
+
+  // Filter out versions older than MIN_VERSION — they're unstable.
+  const filteredVersions = availableVersions.filter(v => semverGte(stripV(v), MIN_VERSION));
 
   const currentClean = stripV(serverInfo.version || "");
   const selectedClean = stripV(selectedVersion || "");
   const canInstall = selectedClean && selectedClean !== currentClean;
-  const latestClean = availableVersions.length > 0 ? stripV(availableVersions[0]) : "";
+  const isDowngrade = canInstall && !semverGte(selectedClean, currentClean);
+  const latestClean = filteredVersions.length > 0 ? stripV(filteredVersions[0]) : "";
   const hasUpdate = latestClean && latestClean !== currentClean;
 
   const getDisplayLabel = () => {
@@ -63,7 +88,7 @@ export function VersionSection({ state }: Props) {
       </div>
 
       {/* Custom dropdown + install button */}
-      {availableVersions.length > 0 && (
+      {filteredVersions.length > 0 && (
         <div className="flex gap-2 items-center">
           <div className="relative" ref={dropdown.containerRef} style={{ width: "240px" }}>
             {/* Trigger button */}
@@ -102,7 +127,7 @@ export function VersionSection({ state }: Props) {
                 }}
               >
                 <div className="max-h-52 overflow-y-auto" style={{ padding: "4px" }}>
-                  {availableVersions.map((v) => {
+                  {filteredVersions.map((v) => {
                     const vClean = stripV(v);
                     const isSelected = v === selectedVersion;
                     const isCurrent = vClean === currentClean;
@@ -135,10 +160,12 @@ export function VersionSection({ state }: Props) {
 
           {canInstall && (
             <Button
-              variant="secondary"
+              variant="primary"
               size="sm"
               icon={<Download className="w-3.5 h-3.5" />}
-              disabled
+              loading={upgradeLoading}
+              disabled={upgradeLoading}
+              onClick={() => setConfirmUpgrade(true)}
               className="shrink-0"
               style={{ height: "34px", whiteSpace: "nowrap" }}
             >
@@ -147,6 +174,41 @@ export function VersionSection({ state }: Props) {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmUpgrade}
+        title={t("server.version.confirm_title")}
+        message={t(isDowngrade ? "server.version.confirm_message_downgrade" : "server.version.confirm_message", { version: `v${selectedClean}` })}
+        confirmLabel={t("buttons.confirm")}
+        cancelLabel={t("buttons.cancel")}
+        variant={isDowngrade ? "danger" : "warning"}
+        loading={upgradeLoading}
+        onCancel={() => { if (!upgradeLoading) setConfirmUpgrade(false); }}
+        onConfirm={async () => {
+          setUpgradeLoading(true);
+          try {
+            await invoke("server_upgrade", { ...state.sshParams, version: selectedVersion });
+            setConfirmUpgrade(false);
+            state.pushSuccess(t("server.version.upgrade_success", { version: `v${selectedClean}` }));
+            // Reload server info to reflect new version
+            await state.loadServerInfo(true);
+          } catch (e) {
+            setConfirmUpgrade(false);
+            const raw = formatError(e);
+            let msg: string;
+            if (raw.includes("UPGRADE_FAILED|")) {
+              const parts = raw.split("|");
+              const hint = parts.slice(2).join("|") || "";
+              msg = t("server.version.upgrade_error", { hint });
+            } else {
+              msg = raw;
+            }
+            state.pushSuccess(msg, "error");
+          } finally {
+            setUpgradeLoading(false);
+          }
+        }}
+      />
     </Card>
   );
 }
