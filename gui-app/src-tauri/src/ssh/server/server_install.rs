@@ -210,7 +210,7 @@ pub async fn add_server_user(
 
     let (_, restart_code) = exec_command(
         &handle, app,
-        &format!("{sudo}systemctl restart trusttunnel 2>&1")
+        &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1")
     ).await?;
 
     if restart_code != 0 {
@@ -268,7 +268,7 @@ with open('{dir}/credentials.toml', 'w') as f:
     // Restart service to apply changes
     let (_, restart_code) = exec_command(
         &handle, app,
-        &format!("{sudo}systemctl restart trusttunnel 2>&1"),
+        &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1"),
     ).await?;
 
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();

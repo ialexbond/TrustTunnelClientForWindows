@@ -17,6 +17,12 @@ pub use server::{
     server_get_available_versions, server_upgrade, server_get_stats,
     get_server_config, get_cert_info, renew_cert, export_config_deeplink,
     update_config_feature,
+    get_security_status, install_fail2ban, uninstall_fail2ban,
+    start_fail2ban, stop_fail2ban, start_firewall, stop_firewall,
+    fail2ban_unban, fail2ban_ban, fail2ban_set_jail_config, fail2ban_tail_log,
+    install_firewall, uninstall_firewall, firewall_add_rule, firewall_delete_rule,
+    firewall_set_logging, firewall_tail_log, firewall_set_http_port,
+    NewFirewallRule, JailConfigUpdate,
 };
 pub use process::{check_process_conflict, kill_existing_process};
 

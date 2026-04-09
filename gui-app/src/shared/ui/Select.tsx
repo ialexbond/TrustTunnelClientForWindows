@@ -89,7 +89,7 @@ export function Select({
             ref={portalRef}
             style={{
               ...dropdownStyle,
-              zIndex: 40,
+              zIndex: 9500,
               backgroundColor: "var(--color-bg-elevated)",
               border: "1px solid var(--color-border)",
               borderRadius: "var(--radius-lg)",

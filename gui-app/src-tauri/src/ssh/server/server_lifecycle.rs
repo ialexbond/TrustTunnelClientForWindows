@@ -10,7 +10,7 @@ pub async fn server_restart_service(
     let (whoami, _) = exec_command(&handle, app, "whoami").await?;
     let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
 
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl restart trusttunnel")).await?;
+    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl --no-block restart trusttunnel")).await?;
 
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
