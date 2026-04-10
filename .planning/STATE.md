@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v2.5.0
+milestone_name: milestone
+status: planning
+stopped_at: Phase 1 context gathered
+last_updated: "2026-04-10T15:54:01.758Z"
+last_activity: 2026-04-10 — Roadmap created for v2.5.0
+progress:
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
+---
+
 # Project State
 
 ## Project Reference
@@ -19,6 +35,7 @@ Progress: [░░░░░░░░░░] 0%
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0
 - Average duration: --
 - Total execution time: --
@@ -30,6 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 | - | - | - | - |
 
 **Recent Trend:**
+
 - Last 5 plans: --
 - Trend: --
 
@@ -56,6 +74,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-10
-Stopped at: Roadmap written, no planning started yet
-Resume file: None
+Last session: 2026-04-10T15:54:01.756Z
+Stopped at: Phase 1 context gathered
+Resume file: .planning/phases/01-connectivity-bypass/01-CONTEXT.md
