@@ -32,7 +32,7 @@
 
 ### Testing
 
-- [ ] **TEST-01**: Rust unit tests для sanitize, validators, config, deploy
+- [x] **TEST-01**: Rust unit tests для sanitize, validators, config, deploy
 - [ ] **TEST-02**: Frontend CI (GitHub Actions) для typecheck + lint + test
 - [ ] **TEST-03**: SecuritySection.tsx refactored + tested (910 строк -> sub-components)
 
@@ -66,7 +66,7 @@
 | FIX-02 | Phase 2 | Pending |
 | DRY-03 | Phase 2 | Pending |
 | PERF-01 | Phase 3 | Complete |
-| TEST-01 | Phase 4 | Pending |
+| TEST-01 | Phase 4 | Complete |
 | FIX-03 | Phase 5 | Pending |
 | PERF-02 | Phase 6 | Pending |
 | SEC-04 | Phase 7 | Pending |
