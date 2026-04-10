@@ -40,6 +40,7 @@ winreg = "0.55"
 chrono = "0.4"
 ipconfig = "0.3"
 socket2 = { version = "0.5", features = ["all"] }
+keyring = { version = "3.6", features = ["windows-native"] }
 
 [profile.release]
 strip = true
