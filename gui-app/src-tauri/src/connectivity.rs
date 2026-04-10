@@ -1,9 +1,8 @@
 use socket2::{Socket, Domain, Type, Protocol, SockAddr};
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Emitter;
-use tokio::net::TcpStream;
 
 /// Periodically check internet connectivity while VPN is connected.
 /// Emits "internet-status" events with { online: bool } payload.
@@ -123,33 +122,64 @@ fn find_physical_adapter_ip() -> Option<IpAddr> {
         .find(|ip| ip.is_ipv4())
 }
 
-/// Check internet connectivity using multiple methods.
-/// Returns true if ANY method succeeds — prevents false "offline" from VPN routing.
+/// Check internet connectivity using multiple methods, binding to the physical
+/// network adapter to bypass VPN routing. Returns true if ANY method succeeds.
 async fn check_connectivity() -> bool {
-    // Method 1: TCP connect to well-known reliable hosts on port 443.
-    // This works even when VPN routing doesn't allow HTTP to these hosts,
-    // because TCP SYN/ACK proves the network path is alive.
-    let tcp_targets = [
-        ("1.1.1.1", 443),       // Cloudflare DNS
-        ("8.8.8.8", 443),       // Google DNS
-        ("208.67.222.222", 443), // OpenDNS
-    ];
+    let physical_ip = find_physical_adapter_ip();
 
-    for (host, port) in tcp_targets {
-        if let Ok(addr) = format!("{host}:{port}").to_socket_addrs() {
-            for a in addr {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(4),
-                    TcpStream::connect(a),
-                ).await;
-                if let Ok(Ok(_)) = result {
-                    return true;
-                }
-            }
-        }
+    if let Some(ip) = physical_ip {
+        eprintln!("[connectivity] Using physical adapter: {ip}");
+    } else {
+        eprintln!("[connectivity] No physical adapter found, using default routing");
     }
 
-    // Method 2: HTTP captive portal endpoints (fallback)
+    // Method 1: TCP connect via socket2 bound to physical adapter.
+    // Uses spawn_blocking because socket2 is synchronous.
+    let tcp_ip = physical_ip;
+    let tcp_ok = tokio::task::spawn_blocking(move || {
+        let targets = [
+            SocketAddr::new([1, 1, 1, 1].into(), 443),       // Cloudflare DNS
+            SocketAddr::new([8, 8, 8, 8].into(), 443),       // Google DNS
+            SocketAddr::new([208, 67, 222, 222].into(), 443), // OpenDNS
+        ];
+
+        for target in targets {
+            let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Bind to physical adapter IP (port 0 = OS picks ephemeral port)
+            if let Some(ip) = tcp_ip {
+                if socket.bind(&SockAddr::from(SocketAddr::new(ip, 0))).is_err() {
+                    continue;
+                }
+            }
+
+            if socket
+                .connect_timeout(&SockAddr::from(target), Duration::from_secs(4))
+                .is_ok()
+            {
+                return true;
+            }
+        }
+
+        false
+    })
+    .await
+    .unwrap_or(false);
+
+    if tcp_ok {
+        return true;
+    }
+
+    // Method 2: HTTP captive portal endpoints bound to physical adapter (fallback)
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .local_address(physical_ip)
+        .build()
+        .unwrap_or_default();
+
     let http_endpoints = [
         "https://clients3.google.com/generate_204",
         "https://cp.cloudflare.com",
@@ -157,10 +187,7 @@ async fn check_connectivity() -> bool {
     ];
 
     for url in http_endpoints {
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            reqwest::get(url),
-        ).await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client.get(url).send()).await;
 
         match result {
             Ok(Ok(resp)) => {
@@ -171,26 +198,53 @@ async fn check_connectivity() -> bool {
             _ => continue,
         }
     }
+
     false
 }
 
 /// Check if the physical network adapter has connectivity (without VPN).
-/// Uses a simple TCP connect + HTTP check to verify the adapter is up.
+/// Uses TCP connect + HTTP check bound to the physical adapter IP.
 async fn check_adapter_online() -> bool {
-    // Quick TCP check first
-    let tcp_result = tokio::time::timeout(
-        Duration::from_secs(3),
-        TcpStream::connect("1.1.1.1:443"),
-    ).await;
-    if let Ok(Ok(_)) = tcp_result {
+    let physical_ip = find_physical_adapter_ip();
+
+    // Quick TCP check first via socket2 bound to physical adapter
+    let tcp_ip = physical_ip;
+    let tcp_ok = tokio::task::spawn_blocking(move || {
+        let target = SocketAddr::new([1, 1, 1, 1].into(), 443);
+        let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        if let Some(ip) = tcp_ip {
+            if socket.bind(&SockAddr::from(SocketAddr::new(ip, 0))).is_err() {
+                return false;
+            }
+        }
+
+        socket
+            .connect_timeout(&SockAddr::from(target), Duration::from_secs(3))
+            .is_ok()
+    })
+    .await
+    .unwrap_or(false);
+
+    if tcp_ok {
         return true;
     }
 
-    // Fallback: HTTP captive portal
+    // Fallback: HTTP captive portal bound to physical adapter
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .local_address(physical_ip)
+        .build()
+        .unwrap_or_default();
+
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        reqwest::get("http://clients3.google.com/generate_204"),
-    ).await;
+        client.get("http://clients3.google.com/generate_204").send(),
+    )
+    .await;
 
     match result {
         Ok(Ok(resp)) => resp.status().as_u16() == 204 || resp.status().is_success(),
