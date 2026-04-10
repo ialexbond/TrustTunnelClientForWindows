@@ -1,7 +1,10 @@
 use super::super::*;
+use super::super::sanitize::validate_client_name;
+use russh::client;
 
 /// Connect to a server where TrustTunnel is already installed,
 /// export the client config via trusttunnel_endpoint, and save it locally.
+/// NOTE: This function uses direct connect (NOT pooled) — deploy-style flow with emit_step.
 pub async fn fetch_server_config(
     app: &tauri::AppHandle,
     params: SshParams,
@@ -63,8 +66,7 @@ pub async fn fetch_server_config(
 
     emit_step(app, "export", "progress", "Exporting client config...");
 
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(&handle, app).await;
 
     // Pre-check: list available usernames from credentials.toml
     let (creds_raw, _) = exec_command(
@@ -99,6 +101,9 @@ pub async fn fetch_server_config(
         }
     }
 
+    // Validate client name before interpolating into shell command
+    validate_client_name(&name)?;
+
     let export_cmd = format!(
         "cd {dir} && {sudo}./{svc} vpn.toml hosts.toml -c {name} -a {export_address} --format toml 2>&1",
         dir = ENDPOINT_DIR, svc = ENDPOINT_SERVICE
@@ -125,29 +130,7 @@ pub async fn fetch_server_config(
         .join("\n");
 
     let server_host = &params.host;
-    let client_toml = format!(
-        r#"# TrustTunnel Client Configuration
-# Fetched from server {server_host}
-
-loglevel = "info"
-vpn_mode = "general"
-killswitch_enabled = true
-killswitch_allow_ports = [67, 68]
-post_quantum_group_enabled = true
-
-[endpoint]
-{endpoint_section}
-
-[listener.tun]
-mtu_size = 1280
-change_system_dns = true
-included_routes = ["0.0.0.0/0"]
-excluded_routes = []
-"#
-    );
-
-    // Enable anti_dpi by default
-    let client_toml = client_toml.replace("anti_dpi = false", "anti_dpi = true");
+    let client_toml = build_client_config(&endpoint_section, &format!("Fetched from server {server_host}"));
 
     emit_step(app, "export", "ok", "Config received");
 
@@ -176,21 +159,16 @@ excluded_routes = []
 /// Read the raw vpn.toml configuration from the remote server.
 pub async fn get_server_config(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     let (output, code) = exec_command(
-        &handle,
+        handle,
         app,
         &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG),
     )
     .await?;
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if code != 0 {
         return Err("SSH_READ_CONFIG_FAILED".into());
@@ -202,17 +180,14 @@ pub async fn get_server_config(
 /// Export a client configuration as a deeplink URL from the remote server.
 pub async fn export_config_deeplink(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     client_name: String,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     // Get listen address from vpn.toml
     let (listen_raw, _) = exec_command(
-        &handle,
+        handle,
         app,
         &format!(r#"{sudo}grep -oP 'listen_address\s*=\s*"\K[^"]+' {cfg} 2>/dev/null || echo '0.0.0.0:443'"#, cfg = ENDPOINT_CONFIG),
     )
@@ -220,18 +195,28 @@ pub async fn export_config_deeplink(
     let listen_addr = listen_raw.trim();
     let listen_port = listen_addr.split(':').last().unwrap_or("443");
 
-    // Try to determine hostname from hosts.toml, fallback to host IP
+    // Try to determine hostname from hosts.toml, fallback to connection host
     let (hostname_raw, _) = exec_command(
-        &handle,
+        handle,
         app,
         &format!(r#"{sudo}grep -oP 'hostname\s*=\s*"\K[^"]+' {dir}/hosts.toml 2>/dev/null | head -1"#, dir = ENDPOINT_DIR),
     )
     .await?;
     let endpoint_hostname = hostname_raw.trim();
+    // Use hostname from hosts.toml; if unavailable, the caller must provide the host
+    // via a different mechanism. Since the pool always connects to the same host,
+    // the hostname from hosts.toml is the correct fallback.
     let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
         format!("{endpoint_hostname}:{listen_port}")
     } else {
-        format!("{}:{listen_port}", params.host)
+        // Fallback: use the hostname from the server's perspective
+        let (host_raw, _) = exec_command(handle, app, "hostname -f 2>/dev/null || hostname").await.unwrap_or_default();
+        let fallback = host_raw.trim();
+        if fallback.is_empty() {
+            format!("localhost:{listen_port}")
+        } else {
+            format!("{fallback}:{listen_port}")
+        }
     };
 
     let export_cmd = format!(
@@ -239,9 +224,7 @@ pub async fn export_config_deeplink(
         dir = ENDPOINT_DIR, svc = ENDPOINT_SERVICE
     );
 
-    let (export_output, export_code) = exec_command(&handle, app, &export_cmd).await?;
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let (export_output, export_code) = exec_command(handle, app, &export_cmd).await?;
 
     if export_code != 0 || export_output.trim().is_empty() {
         return Err(format!(
@@ -262,14 +245,11 @@ pub async fn export_config_deeplink(
 /// Toggle a boolean feature in vpn.toml (ping_enable, speedtest_enable, ipv6_available)
 pub async fn update_config_feature(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     feature: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     let value = if enabled { "true" } else { "false" };
 
@@ -283,16 +263,14 @@ pub async fn update_config_feature(
         cfg = ENDPOINT_CONFIG
     );
 
-    let (_, code) = exec_command(&handle, app, &cmd).await?;
+    let (_, code) = exec_command(handle, app, &cmd).await?;
 
     if code != 0 {
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err(format!("Failed to update {feature} in vpn.toml (code {code})"));
     }
 
     // Restart TrustTunnel to apply — --no-block prevents SSH channel from hanging
-    let _ = exec_command(&handle, app, &format!("{sudo}systemctl --no-block restart trusttunnel")).await;
+    let _ = exec_command(handle, app, &format!("{sudo}systemctl --no-block restart trusttunnel")).await;
 
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
