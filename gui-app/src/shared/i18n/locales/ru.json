@@ -70,7 +70,11 @@
     "uninstall_vpn_from_server": "Удалить VPN с сервера",
     "advanced_settings": "Дополнительные настройки",
     "no": "Нет",
-    "speed_test": "Тест скорости"
+    "speed_test": "Тест скорости",
+    "close": "Закрыть"
+  },
+  "modal": {
+    "changelog_title": "Что нового в v{{version}}"
   },
   "labels": {
     "config_file": "Файл конфигурации",
@@ -941,5 +945,11 @@
     "busy_connecting": "Невозможно импортировать во время подключения",
     "busy_disconnecting": "Невозможно импортировать во время отключения",
     "unsupported_format": "Неподдерживаемый формат файла. Используйте .toml или .json"
+  },
+  "hostKey": {
+    "title": "Новый SSH-сервер",
+    "message": "Первое подключение к {{host}}.\n\nОтпечаток ключа сервера:\n{{fingerprint}}\n\nВы доверяете этому серверу?",
+    "accept": "Доверять",
+    "reject": "Отклонить"
   }
 }
