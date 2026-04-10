@@ -72,6 +72,14 @@ pub fn start_monitor(
                         tokio::time::sleep(Duration::from_secs(5)).await;
                         adapter_wait += 1;
 
+                        // If user reconnected VPN manually, exit recovery without emitting reconnect
+                        let already_reconnected = is_connected.lock().map(|g| *g).unwrap_or(false);
+                        if already_reconnected {
+                            log_app("INFO", "[connectivity] VPN reconnected externally, exiting recovery loop");
+                            recovered = true;
+                            break;
+                        }
+
                         if check_adapter_online().await {
                             eprintln!("[connectivity] Network adapter back online after {adapter_wait} checks");
                             log_app("INFO", &format!("[connectivity] Adapter recovered after {} checks", adapter_wait));
