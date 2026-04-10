@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Безопасное VPN-подключение без уязвимостей в обработке пользовательского ввода
-**Current focus:** Phase 5 — Connectivity Bypass
+**Current focus:** Phase 6 — SSH Connection Pool
 
 ## Current Milestone
 
@@ -21,7 +21,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | 2. DRY + Cleanup | COMPLETE | detect_sudo DRY, build_client_config DRY, sanitize fix, hosts path, tray.rs |
 | 3. Async Logging | COMPLETE | mpsc channel, batched writes, sanitize loop fix |
 | 4. Rust Unit Tests | COMPLETE | 54 tests: security validators, config, deploy, logging |
-| 5. Connectivity Bypass | NOT STARTED | |
+| 5. Connectivity Bypass | COMPLETE | socket2+ipconfig bind to physical adapter |
 | 6. SSH Connection Pool | NOT STARTED | |
 | 7. Keyring Migration | NOT STARTED | |
 | 8. TOFU Confirmation | NOT STARTED | |
@@ -67,6 +67,14 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 - Updated Makefile test-rust to include gui-app/src-tauri
 - Total: 54 Rust unit tests passing
 
+### Phase 5 (2026-04-10)
+- Added ipconfig 0.3 and socket2 0.5 dependencies
+- Implemented `find_physical_adapter_ip()` — filters by oper_status UP, gateway, if_type (Ethernet/WiFi), excludes VPN keywords
+- Rewrote `check_connectivity()` — socket2 TCP bind in spawn_blocking + reqwest local_address
+- Rewrote `check_adapter_online()` — same physical adapter binding pattern
+- Fallback to default routing when no physical adapter found
+- cargo check passes, start_monitor() public API unchanged
+
 ## Decisions Log
 
 | Decision | Phase | Rationale |
@@ -79,6 +87,9 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | search_from offset in sanitize loop | 3 | Prevents infinite re-matching of already-sanitized content |
 | pub(crate) for build_configure_commands | 4 | Minimal visibility increase for testability |
 | Inline #[cfg(test)] modules | 4 | Tests private functions without exposing them |
+| socket2 connect_timeout in spawn_blocking | 5 | Avoids async TcpStream complexity, clean blocking approach |
+| ipconfig crate for adapter enumeration | 5 | Windows-native, exposes if_type and oper_status |
+| Dual filter (if_type + description) for VPN exclusion | 5 | Robust: if_type catches known types, description catches edge cases |
 
 ---
-*Last updated: 2026-04-10 after Phase 4 completion*
+*Last updated: 2026-04-10 after Phase 5 completion*
