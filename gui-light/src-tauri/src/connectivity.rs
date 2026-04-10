@@ -67,6 +67,7 @@ pub fn start_monitor(
                     // We poll until basic connectivity (without VPN) is restored
                     eprintln!("[connectivity] Waiting for network adapter to recover...");
                     let mut adapter_wait = 0u32;
+                    let mut recovered = false;
                     loop {
                         tokio::time::sleep(Duration::from_secs(5)).await;
                         adapter_wait += 1;
@@ -80,6 +81,7 @@ pub fn start_monitor(
                                 "online": true,
                                 "action": "reconnect"
                             })).ok();
+                            recovered = true;
                             break;
                         }
 
@@ -97,7 +99,9 @@ pub fn start_monitor(
 
                     // Reset state for next monitoring cycle
                     consecutive_failures = 0;
-                    was_online = true;
+                    // Only mark as online if adapter actually recovered;
+                    // otherwise keep was_online=false to avoid re-triggering disconnect
+                    was_online = recovered;
                 }
             }
         }
