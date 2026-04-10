@@ -221,7 +221,7 @@ function App() {
             host: obj.host,
             port: obj.port || "22",
             user: obj.sshUser || "root",
-            password: obj.sshPassword || "", // Already obfuscated
+            password: obj.sshPassword || "",
             keyPath: obj.sshKeyPath || null,
           }).catch(() => {});
         }
