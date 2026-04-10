@@ -7,8 +7,7 @@ import {
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { formatBytes } from "../../shared/utils/uptime";
-import { deobfuscate } from "../../shared/utils/obfuscation";
-import { useSnackBar } from "../../shared/ui/SnackBarContext";
+import { useSnackBar} from "../../shared/ui/SnackBarContext";
 import { formatError } from "../../shared/utils/formatError";
 
 interface SshCredentials {
@@ -45,7 +44,7 @@ async function readSshCreds(): Promise<SshCredentials | null> {
       host: obj.host,
       port: obj.port || "22",
       user: obj.user || "root",
-      password: obj.password ? deobfuscate(obj.password) : "",
+      password: obj.password || "",
       keyPath: obj.keyPath || undefined,
     };
   } catch {

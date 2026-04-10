@@ -11,7 +11,7 @@ const sshCredsObj = {
   host: "1.2.3.4",
   port: "22",
   user: "root",
-  password: "b64:dGVzdA==",
+  password: "test",
   keyPath: "",
 };
 
