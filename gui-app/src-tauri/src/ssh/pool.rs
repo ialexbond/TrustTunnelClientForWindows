@@ -27,7 +27,7 @@ impl SshPool {
     /// Get or create a connection for the given SSH params.
     /// Reuses existing connection if same server and still alive.
     /// Disconnects old connection when switching to a different server.
-    pub async fn acquire(&self, params: &SshParams) -> Result<Arc<client::Handle<SshHandler>>, String> {
+    pub async fn acquire(&self, params: &SshParams, app: Option<tauri::AppHandle>) -> Result<Arc<client::Handle<SshHandler>>, String> {
         let key = format!("{}:{}:{}", params.host, params.port, params.ssh_user);
         let mut guard = self.inner.lock().await;
 
@@ -49,6 +49,7 @@ impl SshPool {
             &params.ssh_password,
             params.key_path.as_deref(),
             params.key_data.as_deref(),
+            app,
         ).await?;
 
         let arc = Arc::new(handle);

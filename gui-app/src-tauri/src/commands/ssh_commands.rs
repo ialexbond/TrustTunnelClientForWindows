@@ -45,7 +45,7 @@ macro_rules! ssh_pool_command {
             $($extra_param: $extra_type,)*
         ) -> Result<serde_json::Value, String> {
             let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
-            let handle = pool.acquire(&params).await?;
+            let handle = pool.acquire(&params, Some(app.clone())).await?;
             let result = $method(&app, &*handle $(, $extra_param)*).await?;
             serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
         }
@@ -95,7 +95,7 @@ pub async fn security_get_status(
     key_data: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
-    let handle = pool.acquire(&params).await?;
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
     let result = ssh::get_security_status(&app, &*handle, port).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
 }
@@ -113,7 +113,7 @@ pub async fn security_install_firewall(
     keep_http_open: bool,
 ) -> Result<serde_json::Value, String> {
     let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
-    let handle = pool.acquire(&params).await?;
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
     ssh::install_firewall(&app, &*handle, port, keep_http_open).await?;
     Ok(serde_json::Value::Null)
 }

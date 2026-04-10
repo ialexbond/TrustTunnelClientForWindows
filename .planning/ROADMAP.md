@@ -95,11 +95,15 @@ Plans:
 - [ ] Server management commands use pool; deploy uses direct connect
 
 ## Phase 7: Credential Storage — Keyring Migration
-**Status:** NOT STARTED
+**Status:** PLANNED
 **Goal:** SSH passwords in Windows Credential Manager instead of base64 JSON
 **Requires:** SEC-04
 **Depends on:** None
 **Estimated effort:** 3-4h
+**Plans:** 1 plan
+
+Plans:
+- [ ] 07-01-PLAN.md — Keyring backend (save/load/clear + migration) + frontend obfuscation removal
 
 - [ ] Add keyring crate with windows-native feature
 - [ ] Implement save/load/clear via keyring::Entry
@@ -108,11 +112,15 @@ Plans:
 - [ ] Update SshConnectForm.tsx
 
 ## Phase 8: TOFU Host Key Confirmation
-**Status:** NOT STARTED
+**Status:** PLANNED
 **Goal:** User confirms SSH host key fingerprint on first connection
 **Requires:** SEC-05
 **Depends on:** None
 **Estimated effort:** 3-4h
+**Plans:** 1 plan
+
+Plans:
+- [ ] 08-01-PLAN.md — Oneshot channel + AppHandle in SshHandler + confirm_host_key command + React dialog + i18n
 
 - [ ] Oneshot channel pattern in ssh/mod.rs
 - [ ] Emit ssh-host-key-verify event with fingerprint
@@ -121,16 +129,16 @@ Plans:
 - [ ] i18n keys for dialog (ru + en)
 
 ## Phase 9: Frontend CI + SecuritySection Refactoring
-**Status:** NOT STARTED
+**Status:** PLANNED
 **Goal:** Automated frontend quality gates; testable SecuritySection
 **Requires:** TEST-02, TEST-03
 **Depends on:** None
 **Estimated effort:** 4-5h
+**Plans:** 2 plans
 
-- [ ] Create .github/workflows/frontend.yml
-- [ ] Extract useSecurityState.ts hook
-- [ ] Split SecuritySection into Fail2banSection + FirewallSection
-- [ ] Write tests for all 3 layers
+Plans:
+- [ ] 09-01-PLAN.md — Frontend CI workflow (typecheck + lint + test for gui-app, typecheck + lint for gui-light)
+- [ ] 09-02-PLAN.md — SecuritySection refactoring: extract useSecurityState hook, split into Fail2ban/Firewall sub-components, write tests
 
 ---
 
@@ -144,12 +152,12 @@ Plans:
 | 4. Rust Unit Tests | 1/1 | Complete   | 2026-04-10 |
 | 5. Connectivity Bypass | PLANNED | FIX-03 | 2-3h |
 | 6. SSH Connection Pool | PLANNED | PERF-02 | 4-5h |
-| 7. Keyring Migration | NOT STARTED | SEC-04 | 3-4h |
-| 8. TOFU Confirmation | NOT STARTED | SEC-05 | 3-4h |
-| 9. Frontend CI + SecuritySection | NOT STARTED | TEST-02,03 | 4-5h |
+| 7. Keyring Migration | PLANNED | SEC-04 | 3-4h |
+| 8. TOFU Confirmation | PLANNED | SEC-05 | 3-4h |
+| 9. Frontend CI + SecuritySection | PLANNED | TEST-02,03 | 4-5h |
 
 **Total: ~28-35 hours**
 
 ---
 *Roadmap created: 2026-04-10*
-*Last updated: 2026-04-10 after Phase 6 planning*
+*Last updated: 2026-04-10 after Phase 9 planning*
