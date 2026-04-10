@@ -11,7 +11,7 @@ pub async fn fetch_server_config(
     client_name: String,
 ) -> Result<String, String> {
     emit_step(app, "connect", "progress", "Connecting to server...");
-    let handle = params.connect().await
+    let handle = params.connect_with_app(app.clone()).await
         .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");

@@ -550,7 +550,7 @@ pub async fn deploy_server(
 ) -> Result<String, String> {
     // ── Step 1: SSH Connect + Authenticate ──
     emit_step(app, "connect", "progress", "Connecting to server...");
-    let handle = params.connect().await
+    let handle = params.connect_with_app(app.clone()).await
         .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");
@@ -588,7 +588,7 @@ pub async fn diagnose_server(
     app: &tauri::AppHandle,
     params: SshParams,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
+    let handle = params.connect_with_app(app.clone()).await?;
 
     let mut report = String::new();
 

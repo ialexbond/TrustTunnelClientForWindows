@@ -5,7 +5,7 @@ use tauri::Manager;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use super::vpn::{AppState, kill_sidecar_from_state, kill_stale_sidecar};
+use super::vpn::{AppState, kill_sidecar_from_state};
 
 #[derive(Clone, Serialize)]
 struct UpdateProgress {
@@ -14,12 +14,30 @@ struct UpdateProgress {
     message: String,
 }
 
+/// Validate download URL is from trusted domains only.
+fn validate_download_url(url: &str) -> Result<(), String> {
+    let allowed_hosts = ["github.com", "objects.githubusercontent.com"];
+    let lower = url.to_lowercase();
+    if !lower.starts_with("https://") {
+        return Err("Download URL must use HTTPS".into());
+    }
+    // Extract host from URL
+    let host = lower.trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    if !allowed_hosts.iter().any(|d| host == *d || host.ends_with(&format!(".{d}"))) {
+        return Err(format!("Downloads only allowed from: {}", allowed_hosts.join(", ")));
+    }
+    Ok(())
+}
+
 /// Self-update: download NSIS setup.exe, verify checksum, launch silent install, restart.
 #[tauri::command]
 pub async fn self_update(
     app: tauri::AppHandle,
     download_url: String,
-    expected_sha256: Option<String>,
+    expected_sha256: String,
     language: Option<String>,
     theme: Option<String>,
 ) -> Result<(), String> {
@@ -37,6 +55,8 @@ pub async fn self_update(
         )
         .ok();
     };
+
+    validate_download_url(&download_url)?;
 
     let _lang = language.as_deref().unwrap_or("ru");
     let _theme = theme.as_deref().unwrap_or("dark");
@@ -98,31 +118,26 @@ pub async fn self_update(
     file.flush().await.ok();
     drop(file);
 
-    // Verify SHA256 checksum using Rust sha2 crate
-    if let Some(ref expected) = expected_sha256 {
-        emit("verify", 88, "update.verifying");
-        let bytes =
-            std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
-        let hash = Sha256::digest(&bytes);
-        let actual = format!("{:x}", hash);
-        if !actual.eq_ignore_ascii_case(expected) {
-            let _ = std::fs::remove_file(&setup_path);
-            return Err(format!(
-                "Checksum mismatch! Expected: {expected}, Got: {actual}. Download may be corrupted or tampered with."
-            ));
-        }
-        eprintln!("[self_update] SHA256 verified: {actual}");
-    } else {
-        eprintln!("[self_update] WARNING: No checksum provided, skipping integrity verification");
+    // Verify SHA256 checksum (mandatory)
+    emit("verify", 88, "update.verifying");
+    let bytes =
+        std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
+    let hash = Sha256::digest(&bytes);
+    let actual = format!("{:x}", hash);
+    if !actual.eq_ignore_ascii_case(&expected_sha256) {
+        let _ = std::fs::remove_file(&setup_path);
+        return Err(format!(
+            "Checksum mismatch! Expected: {expected_sha256}, Got: {actual}. Download may be corrupted or tampered with."
+        ));
     }
+    eprintln!("[self_update] SHA256 verified: {actual}");
 
     emit("install", 92, "update.preparing");
 
-    // Kill VPN sidecar before exit
+    // Kill only our own VPN sidecar before exit (not other app's processes)
     if let Some(state) = app.try_state::<AppState>() {
         kill_sidecar_from_state(&state);
     }
-    kill_stale_sidecar();
 
     emit("install", 96, "update.launching");
 
