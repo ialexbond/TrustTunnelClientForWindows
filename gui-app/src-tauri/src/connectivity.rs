@@ -11,9 +11,10 @@ use crate::logging::log_app;
 /// When internet drops, waits for the primary network adapter to come back
 /// before signaling the frontend to reconnect.
 ///
-/// Uses multiple check methods to avoid false positives:
-/// 1. TCP connect to well-known endpoints (doesn't depend on VPN routing rules)
-/// 2. HTTP captive portal endpoints as fallback
+/// Connectivity checks use the physical adapter's gateway (local subnet)
+/// instead of public IPs. This avoids routing conflicts: when VPN is active,
+/// public IPs route through the tunnel, but gateway is always on the local
+/// subnet and never routed through VPN.
 pub fn start_monitor(
     app: tauri::AppHandle,
     is_connected: Arc<Mutex<bool>>,
@@ -106,8 +107,6 @@ pub fn start_monitor(
 
                     // Reset state for next monitoring cycle
                     consecutive_failures = 0;
-                    // Only mark as online if adapter actually recovered;
-                    // otherwise keep was_online=false to avoid re-triggering disconnect
                     was_online = recovered;
                 }
             }
@@ -115,23 +114,23 @@ pub fn start_monitor(
     });
 }
 
-/// Find the local IP of the primary physical network adapter (not VPN, not loopback).
-/// Returns None if no suitable adapter found — caller should fall back to default routing.
-///
-/// NOTE: On multi-homed systems (e.g., Ethernet + WiFi both up) this returns the first
-/// matching adapter's IPv4 address. If that adapter lacks the default route, TCP bind
-/// checks may fail. The `ipconfig` crate does not expose route metrics, so we cannot
-/// distinguish the primary default-route adapter programmatically.
-fn find_physical_adapter_ip() -> Option<IpAddr> {
+/// Physical adapter info: IP address + gateway IP.
+struct AdapterInfo {
+    ip: IpAddr,
+    gateway: IpAddr,
+}
+
+/// Find the primary physical network adapter (not VPN, not loopback).
+/// Returns adapter IP + gateway IP. The gateway is on the local subnet
+/// and is always reachable without going through VPN routing.
+fn find_physical_adapter() -> Option<AdapterInfo> {
     let adapters = ipconfig::get_adapters().ok()?;
 
-    let result = adapters
+    let adapter = adapters
         .iter()
         .filter(|a| a.oper_status() == ipconfig::OperStatus::IfOperStatusUp)
         .filter(|a| !a.gateways().is_empty())
         .filter(|a| {
-            // Only physical adapter types: Ethernet (6) and WiFi (71)
-            // Excludes WinTUN (53), PPP (23), loopback, etc.
             let if_type = a.if_type();
             if_type == ipconfig::IfType::EthernetCsmacd
                 || if_type == ipconfig::IfType::Ieee80211
@@ -143,85 +142,86 @@ fn find_physical_adapter_ip() -> Option<IpAddr> {
                 && !desc.contains("virtual")
                 && !desc.contains("tap-")
         })
-        .flat_map(|a| a.ip_addresses().iter().copied())
-        .find(|ip| ip.is_ipv4());
+        .find(|a| {
+            // Must have at least one IPv4 address and one IPv4 gateway
+            a.ip_addresses().iter().any(|ip| ip.is_ipv4())
+                && a.gateways().iter().any(|gw| gw.is_ipv4())
+        })?;
 
-    if let Some(ip) = result {
-        log_app("DEBUG", &format!("[connectivity] Physical adapter found: {}", ip));
-    } else {
-        log_app("DEBUG", "[connectivity] No physical adapter found");
-    }
+    let ip = adapter.ip_addresses().iter().copied().find(|ip| ip.is_ipv4())?;
+    let gateway = adapter.gateways().iter().copied().find(|gw| gw.is_ipv4())?;
 
-    result
+    log_app("DEBUG", &format!("[connectivity] Physical adapter: ip={}, gateway={}", ip, gateway));
+    Some(AdapterInfo { ip, gateway })
 }
 
-/// Check internet connectivity using multiple methods, binding to the physical
-/// network adapter to bypass VPN routing. Returns true if ANY method succeeds.
+/// Check connectivity by probing the physical adapter's gateway.
+/// Gateway is on the local subnet — never routed through VPN.
+/// TCP connect to gateway port 80 (most routers accept it) as primary check.
+/// Falls back to public HTTP endpoints via default routing if no adapter found.
 async fn check_connectivity() -> bool {
-    let physical_ip = find_physical_adapter_ip();
+    let adapter = find_physical_adapter();
 
-    if let Some(ip) = physical_ip {
-        eprintln!("[connectivity] Using physical adapter: {ip}");
-    } else {
-        eprintln!("[connectivity] No physical adapter found, using default routing");
+    match &adapter {
+        Some(info) => {
+            eprintln!("[connectivity] Using physical adapter: {} -> gateway {}", info.ip, info.gateway);
+            log_app("DEBUG", &format!("[connectivity] Cycle: ip={}, gateway={}", info.ip, info.gateway));
+        }
+        None => {
+            eprintln!("[connectivity] No physical adapter found, using default routing");
+            log_app("DEBUG", "[connectivity] Cycle: no physical adapter");
+        }
     }
 
-    log_app("DEBUG", &format!("[connectivity] Cycle: physical_ip={:?}", physical_ip));
+    // Method 1: TCP connect to gateway via socket2 bound to physical adapter.
+    // Gateway is on local subnet — traffic never goes through VPN tunnel.
+    if let Some(ref info) = adapter {
+        let adapter_ip = info.ip;
+        let gateway_ip = info.gateway;
+        let tcp_ok = tokio::task::spawn_blocking(move || {
+            // Try gateway on common ports: 80 (HTTP), 443 (HTTPS), 53 (DNS)
+            let ports = [80u16, 443, 53];
+            for port in ports {
+                let target = SocketAddr::new(gateway_ip, port);
+                let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
 
-    // Method 1: TCP connect via socket2 bound to physical adapter.
-    // Uses spawn_blocking because socket2 is synchronous.
-    let tcp_ip = physical_ip;
-    let tcp_ok = tokio::task::spawn_blocking(move || {
-        let targets = [
-            SocketAddr::new([1, 1, 1, 1].into(), 443),       // Cloudflare DNS
-            SocketAddr::new([8, 8, 8, 8].into(), 443),       // Google DNS
-            SocketAddr::new([208, 67, 222, 222].into(), 443), // OpenDNS
-        ];
-
-        for target in targets {
-            let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            // Bind to physical adapter IP (port 0 = OS picks ephemeral port)
-            if let Some(ip) = tcp_ip {
-                if socket.bind(&SockAddr::from(SocketAddr::new(ip, 0))).is_err() {
+                // Bind to physical adapter IP
+                if socket.bind(&SockAddr::from(SocketAddr::new(adapter_ip, 0))).is_err() {
                     continue;
                 }
-            }
 
-            if socket
-                .connect_timeout(&SockAddr::from(target), Duration::from_secs(4))
-                .is_ok()
-            {
-                return true;
+                if socket
+                    .connect_timeout(&SockAddr::from(target), Duration::from_secs(3))
+                    .is_ok()
+                {
+                    return true;
+                }
             }
+            false
+        })
+        .await
+        .unwrap_or(false);
+
+        log_app("DEBUG", &format!("[connectivity] Gateway TCP result: {}", tcp_ok));
+
+        if tcp_ok {
+            return true;
         }
-
-        false
-    })
-    .await
-    .unwrap_or(false);
-
-    log_app("DEBUG", &format!("[connectivity] TCP result: {}", tcp_ok));
-
-    if tcp_ok {
-        return true;
     }
 
-    // Method 2: HTTP captive portal endpoints bound to physical adapter (fallback)
+    // Method 2: HTTP endpoints via default routing (fallback when no adapter found
+    // or gateway TCP failed — e.g. gateway blocks all TCP ports).
+    // When VPN is active these go through the tunnel, which is fine for fallback:
+    // if they succeed, internet works; if they fail, it's a real outage.
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
-        .local_address(physical_ip)
         .build()
     {
         Ok(c) => c,
-        Err(e) => {
-            log_app("WARN", &format!("[connectivity] Failed to build bound HTTP client: {e}"));
-            // A default client routes through VPN, producing false positives — skip HTTP check
-            return false;
-        }
+        Err(_) => return false,
     };
 
     let http_endpoints = [
@@ -249,49 +249,45 @@ async fn check_connectivity() -> bool {
 }
 
 /// Check if the physical network adapter has connectivity (without VPN).
-/// Uses TCP connect + HTTP check bound to the physical adapter IP.
+/// Used during adapter recovery — VPN is disconnected, so we check gateway directly.
 async fn check_adapter_online() -> bool {
-    let physical_ip = find_physical_adapter_ip();
+    let adapter = find_physical_adapter();
 
-    // Quick TCP check first via socket2 bound to physical adapter
-    let tcp_ip = physical_ip;
-    let tcp_ok = tokio::task::spawn_blocking(move || {
-        let target = SocketAddr::new([1, 1, 1, 1].into(), 443);
-        let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+    if let Some(ref info) = adapter {
+        let adapter_ip = info.ip;
+        let gateway_ip = info.gateway;
+        let tcp_ok = tokio::task::spawn_blocking(move || {
+            let target = SocketAddr::new(gateway_ip, 80);
+            let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
 
-        if let Some(ip) = tcp_ip {
-            if socket.bind(&SockAddr::from(SocketAddr::new(ip, 0))).is_err() {
+            if socket.bind(&SockAddr::from(SocketAddr::new(adapter_ip, 0))).is_err() {
                 return false;
             }
+
+            socket
+                .connect_timeout(&SockAddr::from(target), Duration::from_secs(3))
+                .is_ok()
+        })
+        .await
+        .unwrap_or(false);
+
+        log_app("DEBUG", &format!("[connectivity] adapter_online gateway TCP: {}", tcp_ok));
+
+        if tcp_ok {
+            return true;
         }
-
-        socket
-            .connect_timeout(&SockAddr::from(target), Duration::from_secs(3))
-            .is_ok()
-    })
-    .await
-    .unwrap_or(false);
-
-    log_app("DEBUG", &format!("[connectivity] adapter_online TCP: {}", tcp_ok));
-
-    if tcp_ok {
-        return true;
     }
 
-    // Fallback: HTTP captive portal bound to physical adapter
+    // Fallback: HTTP without bind (VPN is disconnected during recovery, so default routing = physical)
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
-        .local_address(physical_ip)
         .build()
     {
         Ok(c) => c,
-        Err(e) => {
-            log_app("WARN", &format!("[connectivity] Failed to build bound HTTP client: {e}"));
-            return false;
-        }
+        Err(_) => return false,
     };
 
     let result = tokio::time::timeout(
