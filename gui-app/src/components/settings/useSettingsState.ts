@@ -228,7 +228,6 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       savedConfig.current = JSON.parse(JSON.stringify(config));
       onConfigChange({ configPath: localPath, logLevel: config.loglevel });
       setSaving(false);
-
       pushSuccess(t("messages.settings_saved", "Настройки сохранены"));
 
       if (reconnect && (status === "connected" || status === "connecting")) {

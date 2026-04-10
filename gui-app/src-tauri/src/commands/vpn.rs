@@ -143,8 +143,6 @@ pub async fn vpn_connect(
 
     // Kill any stale sidecar processes that might hold the WinTUN adapter
     kill_stale_sidecar();
-    // Give OS a moment to release the adapter
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // Warn about conflicting VPN adapters from other software
     let conflicts = detect_conflicting_adapters();
@@ -182,6 +180,13 @@ pub async fn vpn_connect(
     // Reset flags for new connection
     if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
     if let Ok(mut c) = state.is_connected.lock() { *c = false; }
+
+    // Check if user cancelled during routing rules resolution
+    if state.disconnecting.lock().map(|g| *g).unwrap_or(false) {
+        eprintln!("[vpn_connect] Cancelled before sidecar spawn");
+        app.emit("vpn-status", VpnStatusPayload { status: "disconnected".into(), error: None }).ok();
+        return Ok(());
+    }
 
     // Pass Arc clones so sidecar can clear itself on termination
     let child_arc = Arc::clone(&state.sidecar_child);
@@ -245,6 +250,10 @@ pub async fn vpn_disconnect(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    // Always set disconnecting flag first — even if sidecar hasn't spawned yet.
+    // This prevents vpn_connect from spawning a sidecar after cancel.
+    if let Ok(mut d) = state.disconnecting.lock() { *d = true; }
+
     // Take child out and drop guard before async call
     let child = {
         let mut guard = state
@@ -255,9 +264,7 @@ pub async fn vpn_disconnect(
     };
 
     if let Some(child) = child {
-        // Signal intentional disconnect before killing
         if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
-        if let Ok(mut d) = state.disconnecting.lock() { *d = true; }
         sidecar::kill_sidecar(child)
             .await
             .map_err(|e| format!("Failed to stop sidecar: {e}"))?;
