@@ -58,11 +58,16 @@ open class AGPacketTunnelProvider: NEPacketTunnelProvider {
             // Clean up brackets if they exist (e.g., "[2001:db8::1]" -> "2001:db8::1")
             tunnelAddress = ipPart.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         }
+
+        if (Network.IPv4Address(tunnelAddress) == nil && Network.IPv6Address(tunnelAddress) == nil) {
+            tunnelAddress = "127.0.0.1"
+        }
+
         logger.debug("Trying to set tunnel address to \(tunnelAddress)")
         let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelAddress)
         networkSettings.ipv4Settings = ipv4Settings
         networkSettings.ipv6Settings = ipv6Settings
-        let dnsServers = vpnConfig.dns_upstreams.isEmpty
+        let dnsServers = vpnConfig.endpoint.dns_upstreams.isEmpty
             ? ADGUARD_DNS_SERVERS
             : FAKE_DNS_SERVER
         let dnsSettings = NEDNSSettings(servers: dnsServers)
