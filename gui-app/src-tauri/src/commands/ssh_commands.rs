@@ -147,10 +147,45 @@ pub fn forget_ssh_host_key(host: String, port: u16) {
     ssh::forget_known_host(&host, port);
 }
 
-// ─── SSH Credential Storage (file-based, not localStorage) ─────────
+// ─── SSH Credential Storage (keyring + JSON metadata) ────────────
+
+use base64::Engine;
+use keyring::Entry;
+
+const KEYRING_SERVICE: &str = "TrustTunnel";
 
 fn ssh_creds_path() -> std::path::PathBuf {
     ssh::portable_data_dir().join("ssh_credentials.json")
+}
+
+fn keyring_key(host: &str, port: &str, user: &str) -> String {
+    format!("ssh-{host}:{port}-{user}")
+}
+
+fn keyring_save(host: &str, port: &str, user: &str, password: &str) -> Result<(), String> {
+    let key = keyring_key(host, port, user);
+    let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
+    entry.set_password(password).map_err(|e| format!("Cannot store password: {e}"))?;
+    Ok(())
+}
+
+fn keyring_load(host: &str, port: &str, user: &str) -> Result<Option<String>, String> {
+    let key = keyring_key(host, port, user);
+    let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
+    match entry.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Cannot load password: {e}")),
+    }
+}
+
+fn keyring_clear(host: &str, port: &str, user: &str) -> Result<(), String> {
+    let key = keyring_key(host, port, user);
+    let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("Cannot clear password: {e}")),
+    }
 }
 
 #[tauri::command]
@@ -161,11 +196,15 @@ pub fn save_ssh_credentials(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
+    // Store password in Windows Credential Manager (DPAPI-backed)
+    if !password.is_empty() {
+        keyring_save(&host, &port, &user, &password)?;
+    }
+    // Store metadata only in JSON (no password)
     let data = serde_json::json!({
         "host": host,
         "port": port,
         "user": user,
-        "password": password, // already obfuscated (b64:...) by frontend
         "keyPath": key_path.unwrap_or_default(),
     });
     std::fs::write(ssh_creds_path(), serde_json::to_string_pretty(&data).unwrap_or_default())
@@ -174,13 +213,65 @@ pub fn save_ssh_credentials(
 
 #[tauri::command]
 pub fn load_ssh_credentials() -> Option<serde_json::Value> {
-    std::fs::read_to_string(ssh_creds_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+    let path = ssh_creds_path();
+    let content = std::fs::read_to_string(&path).ok()?;
+    let mut obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&content).ok()?;
+
+    let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let port = obj.get("port").and_then(|v| v.as_str()).unwrap_or("22").to_string();
+    let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("root").to_string();
+
+    // Migration: if JSON still has a "password" field, move it to keyring
+    if let Some(pwd_val) = obj.remove("password") {
+        if let Some(pwd_str) = pwd_val.as_str() {
+            if !pwd_str.is_empty() {
+                let decoded = if pwd_str.starts_with("b64:") {
+                    // Decode base64-obfuscated password
+                    base64::engine::general_purpose::STANDARD
+                        .decode(&pwd_str[4..])
+                        .ok()
+                        .and_then(|bytes| String::from_utf8(bytes).ok())
+                        .unwrap_or_else(|| pwd_str.to_string())
+                } else {
+                    // Plaintext legacy password
+                    pwd_str.to_string()
+                };
+                // Store decoded password in keyring (best-effort migration)
+                let _ = keyring_save(&host, &port, &user, &decoded);
+                // Rewrite JSON without password field
+                let _ = std::fs::write(&path, serde_json::to_string_pretty(&obj).unwrap_or_default());
+            }
+        }
+    }
+
+    // Load password from keyring
+    let password = keyring_load(&host, &port, &user).ok().flatten().unwrap_or_default();
+
+    // Return combined object with password from keyring + metadata from JSON
+    let mut result = serde_json::Map::new();
+    result.insert("host".into(), serde_json::Value::String(host));
+    result.insert("port".into(), serde_json::Value::String(port));
+    result.insert("user".into(), serde_json::Value::String(user));
+    result.insert("password".into(), serde_json::Value::String(password));
+    result.insert(
+        "keyPath".into(),
+        obj.get("keyPath").cloned().unwrap_or(serde_json::Value::String(String::new())),
+    );
+
+    Some(serde_json::Value::Object(result))
 }
 
 #[tauri::command]
 pub fn clear_ssh_credentials() {
+    // Read JSON to get host/port/user for keyring cleanup
+    if let Ok(content) = std::fs::read_to_string(ssh_creds_path()) {
+        if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content) {
+            let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default();
+            let port = obj.get("port").and_then(|v| v.as_str()).unwrap_or("22");
+            let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("root");
+            let _ = keyring_clear(host, port, user);
+        }
+    }
     let _ = std::fs::remove_file(ssh_creds_path());
 }
 
