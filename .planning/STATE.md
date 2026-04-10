@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Безопасное VPN-подключение без уязвимостей в обработке пользовательского ввода
-**Current focus:** Phase 3 — Async Logging
+**Current focus:** Phase 5 — Connectivity Bypass
 
 ## Current Milestone
 
@@ -20,7 +20,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | 1. SSH Injection + Self-Update | COMPLETE | sanitize.rs, heredoc fix, SHA256 mandatory |
 | 2. DRY + Cleanup | COMPLETE | detect_sudo DRY, build_client_config DRY, sanitize fix, hosts path, tray.rs |
 | 3. Async Logging | COMPLETE | mpsc channel, batched writes, sanitize loop fix |
-| 4. Rust Unit Tests | NOT STARTED | |
+| 4. Rust Unit Tests | COMPLETE | 54 tests: security validators, config, deploy, logging |
 | 5. Connectivity Bypass | NOT STARTED | |
 | 6. SSH Connection Pool | NOT STARTED | |
 | 7. Keyring Migration | NOT STARTED | |
@@ -57,6 +57,16 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 - Added 3 unit tests for sanitize function
 - cargo check passes, 21 tests passing (3 logging + 18 sanitize)
 
+### Phase 4 (2026-04-10)
+- Added 17 tests for is_safe_*() validators in server_security.rs (injection, boundary)
+- Added 8 tests for ClientConfig: validate, defaults, DHCP ports, unknown keys, round-trip
+- Added 5 tests for build_configure_commands: backslash escaping, heredoc, cert types
+- Added 3 new logging tests: all SENSITIVE_KEYS, case-insensitive, quoted boundaries
+- Changed build_configure_commands to pub(crate) for testability
+- Added tauri/test feature flag to Cargo.toml
+- Updated Makefile test-rust to include gui-app/src-tauri
+- Total: 54 Rust unit tests passing
+
 ## Decisions Log
 
 | Decision | Phase | Rationale |
@@ -67,7 +77,8 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | Mutex<Option<Sender>> over OnceLock | 3 | OnceLock is set-once, cannot support reinit_logging |
 | Drop-based shutdown over Shutdown sentinel | 3 | Simpler: drop sender closes channel, writer drains and exits |
 | search_from offset in sanitize loop | 3 | Prevents infinite re-matching of already-sanitized content |
+| pub(crate) for build_configure_commands | 4 | Minimal visibility increase for testability |
+| Inline #[cfg(test)] modules | 4 | Tests private functions without exposing them |
 
 ---
-*Last updated: 2026-04-10 after Phase 3 completion*
-*Last updated: 2026-04-10 after Phase 2 completion*
+*Last updated: 2026-04-10 after Phase 4 completion*

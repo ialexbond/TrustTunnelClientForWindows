@@ -47,10 +47,10 @@ Plans:
 **Goal:** Add unit tests for security-critical Rust functions
 **Requires:** TEST-01
 **Estimated effort:** 3-4h
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 04-01-PLAN.md — Tests for server_security validators, ClientConfig, deploy commands, logging sanitize
+- [x] 04-01-PLAN.md — Tests for server_security validators, ClientConfig, deploy commands, logging sanitize
 
 - [ ] Add tauri/test feature to Cargo.toml
 - [ ] Tests for sanitize() in logging.rs
@@ -133,7 +133,7 @@ Plans:
 | 1. SSH Injection + Self-Update | COMPLETE | SEC-01,02,03 | 3-4h |
 | 2. DRY + Cleanup | PLANNED | DRY-01,02,03 FIX-01,02 | 2-3h |
 | 3. Async Logging | PLANNED | PERF-01 | 2-3h |
-| 4. Rust Unit Tests | PLANNED | TEST-01 | 3-4h |
+| 4. Rust Unit Tests | 1/1 | Complete   | 2026-04-10 |
 | 5. Connectivity Bypass | NOT STARTED | FIX-03 | 2-3h |
 | 6. SSH Connection Pool | NOT STARTED | PERF-02 | 4-5h |
 | 7. Keyring Migration | NOT STARTED | SEC-04 | 3-4h |
