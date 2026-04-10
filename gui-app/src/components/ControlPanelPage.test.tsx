@@ -146,30 +146,15 @@ describe("ControlPanelPage", () => {
     expect(screen.getByText(/host=1\.2\.3\.4/)).toBeInTheDocument();
   });
 
-  // ── b64 deobfuscation of stored creds ──
+  // ── plaintext password from backend (keyring) ──
 
-  it("deobfuscates b64-prefixed password from backend", async () => {
-    // "pass123" in base64 = "cGFzczEyMw=="
+  it("loads plaintext password from backend", async () => {
     mockCredsLoaded({
       host: "10.0.0.1",
       port: "22",
       user: "root",
-      password: "b64:cGFzczEyMw==",
+      password: "pass123",
     });
-    await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
-    });
-    expect(screen.getByTestId("server-panel")).toBeInTheDocument();
-  });
-
-  it("handles invalid b64 password gracefully (returns raw value)", async () => {
-    mockCredsLoaded({
-      host: "10.0.0.1",
-      port: "22",
-      user: "root",
-      password: "b64:!!!invalid!!!",
-    });
-    // Should not crash — deobfuscate returns raw value on decode failure
     await act(async () => {
       render(<ControlPanelPage {...defaultProps} />);
     });

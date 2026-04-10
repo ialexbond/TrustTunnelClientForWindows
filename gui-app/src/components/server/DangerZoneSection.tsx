@@ -15,14 +15,6 @@ interface Props {
   state: ServerState;
 }
 
-function obfuscate(value: string): string {
-  try {
-    return "b64:" + btoa(unescape(encodeURIComponent(value)));
-  } catch {
-    return value;
-  }
-}
-
 export function DangerZoneSection({ state }: Props) {
   const { t } = useTranslation();
   const {
@@ -59,7 +51,7 @@ export function DangerZoneSection({ state }: Props) {
       obj.host = state.host;
       obj.port = sshParams.port.toString();
       obj.sshUser = sshParams.user;
-      obj.sshPassword = obfuscate(sshParams.password);
+      obj.sshPassword = sshParams.password;
       if (sshParams.keyPath) obj.sshKeyPath = sshParams.keyPath;
       obj.wizardStep = "endpoint";
       obj.wizardMode = "deploy";

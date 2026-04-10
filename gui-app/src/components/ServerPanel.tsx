@@ -160,7 +160,7 @@ export function ServerPanel(props: ServerPanelProps) {
                 obj.host = state.host;
                 obj.port = state.sshParams.port.toString();
                 obj.sshUser = state.sshParams.user;
-                obj.sshPassword = state.sshParams.password ? "b64:" + btoa(unescape(encodeURIComponent(state.sshParams.password))) : "";
+                obj.sshPassword = state.sshParams.password || "";
                 if (state.sshParams.keyPath) obj.sshKeyPath = state.sshParams.keyPath;
                 obj.wizardStep = "endpoint";
                 obj.wizardMode = "deploy";
