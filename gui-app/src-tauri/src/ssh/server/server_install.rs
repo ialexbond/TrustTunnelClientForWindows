@@ -9,7 +9,7 @@ pub async fn check_server_installation(
     app: &tauri::AppHandle,
     params: SshParams,
 ) -> Result<serde_json::Value, String> {
-    let handle = params.connect().await?;
+    let handle = params.connect_with_app(app.clone()).await?;
 
     // Check for binary
     let (bin_check, _bin_code) = exec_command(
@@ -69,7 +69,7 @@ pub async fn uninstall_server(
 ) -> Result<(), String> {
     emit_step(app, "uninstall", "progress", "Connecting to server...");
 
-    let handle = params.connect().await
+    let handle = params.connect_with_app(app.clone()).await
         .map_err(|e| { emit_step(app, "uninstall", "error", &e); e })?;
 
     // Determine sudo

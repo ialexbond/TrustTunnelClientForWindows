@@ -544,7 +544,13 @@ const HOSTS_MARKER_BEGIN: &str = "# >>> TrustTunnel-blocked BEGIN";
 const HOSTS_MARKER_END: &str = "# >>> TrustTunnel-blocked END";
 
 fn hosts_file_path() -> PathBuf {
-    PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
+    let system_root = std::env::var("SystemRoot")
+        .unwrap_or_else(|_| r"C:\Windows".to_string());
+    PathBuf::from(system_root)
+        .join("System32")
+        .join("drivers")
+        .join("etc")
+        .join("hosts")
 }
 
 /// Add blocked domains to Windows hosts file (0.0.0.0 → blocks at OS level)

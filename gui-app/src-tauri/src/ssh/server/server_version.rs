@@ -1,4 +1,5 @@
 use super::super::*;
+use super::super::sanitize::validate_version;
 
 /// Fetch available TrustTunnel versions from GitHub releases API.
 pub async fn server_get_available_versions() -> Result<Vec<String>, String> {
@@ -36,10 +37,12 @@ pub async fn server_upgrade(
     params: SshParams,
     version: String,
 ) -> Result<(), String> {
-    let handle = params.connect().await?;
+    // Validate version before interpolating into shell command
+    validate_version(&version)?;
 
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let handle = params.connect_with_app(app.clone()).await?;
+
+    let sudo = detect_sudo(&handle, app).await;
 
     // Stop existing service before upgrade
     let _ = exec_command(&handle, app, &format!("{sudo}systemctl stop trusttunnel 2>/dev/null; sleep 1; true")).await;

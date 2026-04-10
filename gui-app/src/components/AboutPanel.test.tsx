@@ -195,6 +195,7 @@ describe("AboutPanel", () => {
           available: true,
           latestVersion: "2.0.0",
           downloadUrl: "https://example.com/update.zip",
+          sha256: "abc123def456",
         }}
       />
     );
@@ -202,7 +203,7 @@ describe("AboutPanel", () => {
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("self_update", {
         downloadUrl: "https://example.com/update.zip",
-        expectedSha256: null,
+        expectedSha256: "abc123def456",
         language: expect.any(String),
         theme: expect.any(String),
       });
@@ -221,6 +222,7 @@ describe("AboutPanel", () => {
           available: true,
           latestVersion: "2.0.0",
           downloadUrl: "https://example.com/update.zip",
+          sha256: "abc123",
         }}
       />
     );
@@ -240,6 +242,7 @@ describe("AboutPanel", () => {
           available: true,
           latestVersion: "2.0.0",
           downloadUrl: "https://example.com/update.zip",
+          sha256: "abc123",
         }}
       />
     );
@@ -262,6 +265,7 @@ describe("AboutPanel", () => {
           available: true,
           latestVersion: "2.0.0",
           downloadUrl: "https://example.com/update.zip",
+          sha256: "abc123",
         }}
       />
     );
@@ -308,6 +312,7 @@ describe("AboutPanel", () => {
           available: true,
           latestVersion: "2.0.0",
           downloadUrl: "https://example.com/update.zip",
+          sha256: "abc123",
         }}
       />
     );
@@ -329,6 +334,7 @@ describe("AboutPanel", () => {
           available: true,
           latestVersion: "2.0.0",
           downloadUrl: "https://example.com/update.zip",
+          sha256: "abc123",
         }}
       />
     );
