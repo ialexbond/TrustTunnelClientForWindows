@@ -1,4 +1,6 @@
 pub mod deploy;
+pub mod pool;
+pub mod sanitize;
 pub mod server;
 pub mod process;
 
@@ -24,6 +26,7 @@ pub use server::{
     firewall_set_logging, firewall_tail_log, firewall_set_http_port,
     NewFirewallRule, JailConfigUpdate,
 };
+pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
 
 // ── Server path constants ──
@@ -169,6 +172,46 @@ impl client::Handler for SshHandler {
             }
         }
     }
+}
+
+// ─── Shared SSH helpers ──────────────────────────────
+
+/// Detect whether the SSH session is root. Returns "" if root, "sudo " otherwise.
+pub async fn detect_sudo(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+) -> &'static str {
+    let (whoami, _) = exec_command(handle, app, "whoami")
+        .await
+        .unwrap_or_default();
+    if whoami.trim() == "root" { "" } else { "sudo " }
+}
+
+/// Build a complete client TOML config wrapping an endpoint section.
+/// `source_comment` is embedded in the file header (e.g. "Setup Wizard", "server 1.2.3.4").
+/// Applies anti_dpi=true normalization automatically.
+pub fn build_client_config(endpoint_section: &str, source_comment: &str) -> String {
+    let config = format!(
+        r#"# TrustTunnel Client Configuration
+# {source_comment}
+
+loglevel = "info"
+vpn_mode = "general"
+killswitch_enabled = true
+killswitch_allow_ports = [67, 68]
+post_quantum_group_enabled = true
+
+[endpoint]
+{endpoint_section}
+
+[listener.tun]
+mtu_size = 1280
+change_system_dns = true
+included_routes = ["0.0.0.0/0"]
+excluded_routes = []
+"#
+    );
+    config.replace("anti_dpi = false", "anti_dpi = true")
 }
 
 // ─── Helpers ───────────────────────────────────────
