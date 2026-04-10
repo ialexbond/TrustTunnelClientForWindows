@@ -1,6 +1,6 @@
 [package]
 name = "trusttunnel-light"
-version = "2.3.0"
+version = "2.5.0"
 description = "TrustTunnel Light VPN Client"
 authors = ["Alex Bond"]
 edition = "2021"
@@ -34,6 +34,8 @@ sha2 = "0.10"
 trusttunnel-settings = { path = "../../trusttunnel/settings" }
 futures-util = "0.3"
 chrono = "0.4"
+ipconfig = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
 
 [profile.release]
 strip = true
