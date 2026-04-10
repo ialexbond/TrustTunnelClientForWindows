@@ -1,11 +1,19 @@
+use socket2::{Socket, Domain, Type, Protocol, SockAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Emitter;
+
+use crate::logging::log_app;
 
 /// Periodically check internet connectivity while VPN is connected.
 /// Emits "internet-status" events with { online: bool } payload.
 /// When internet drops, waits for the primary network adapter to come back
 /// before signaling the frontend to reconnect.
+///
+/// Uses multiple check methods to avoid false positives:
+/// 1. TCP connect via socket2 bound to physical adapter (bypasses VPN routing)
+/// 2. HTTP captive portal endpoints as fallback
 pub fn start_monitor(
     app: tauri::AppHandle,
     is_connected: Arc<Mutex<bool>>,
@@ -15,6 +23,8 @@ pub fn start_monitor(
         let mut was_online = true;
         // Wait a bit before starting checks (let VPN establish)
         tokio::time::sleep(Duration::from_secs(15)).await;
+
+        log_app("INFO", "[connectivity] Monitor started");
 
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
@@ -32,6 +42,7 @@ pub fn start_monitor(
             if online {
                 if !was_online {
                     eprintln!("[connectivity] Internet restored");
+                    log_app("INFO", "[connectivity] Internet restored");
                     app.emit("internet-status", serde_json::json!({ "online": true })).ok();
                 }
                 consecutive_failures = 0;
@@ -42,6 +53,7 @@ pub fn start_monitor(
                 // Declare offline after 3 consecutive failures (~45 seconds)
                 if consecutive_failures >= 3 && was_online {
                     eprintln!("[connectivity] Internet appears down — telling frontend to disconnect VPN");
+                    log_app("WARN", "[connectivity] Declaring offline after 3 failures");
                     was_online = false;
 
                     // Tell frontend: disconnect VPN, then we'll monitor adapter recovery
@@ -61,6 +73,7 @@ pub fn start_monitor(
 
                         if check_adapter_online().await {
                             eprintln!("[connectivity] Network adapter back online after {adapter_wait} checks");
+                            log_app("INFO", &format!("[connectivity] Adapter recovered after {} checks", adapter_wait));
                             // Give adapter a moment to fully stabilize
                             tokio::time::sleep(Duration::from_secs(3)).await;
                             app.emit("internet-status", serde_json::json!({
@@ -73,6 +86,7 @@ pub fn start_monitor(
                         // Give up after 5 minutes of waiting
                         if adapter_wait > 60 {
                             eprintln!("[connectivity] Gave up waiting for adapter after 5 minutes");
+                            log_app("WARN", "[connectivity] Gave up waiting for adapter after 5 minutes");
                             app.emit("internet-status", serde_json::json!({
                                 "online": false,
                                 "action": "give_up"
@@ -90,42 +104,180 @@ pub fn start_monitor(
     });
 }
 
-/// Check internet connectivity via lightweight HTTP endpoints.
+/// Find the local IP of the primary physical network adapter (not VPN, not loopback).
+/// Returns None if no suitable adapter found — caller should fall back to default routing.
+fn find_physical_adapter_ip() -> Option<IpAddr> {
+    let adapters = ipconfig::get_adapters().ok()?;
+
+    let result = adapters
+        .iter()
+        .filter(|a| a.oper_status() == ipconfig::OperStatus::IfOperStatusUp)
+        .filter(|a| !a.gateways().is_empty())
+        .filter(|a| {
+            // Only physical adapter types: Ethernet (6) and WiFi (71)
+            // Excludes WinTUN (53), PPP (23), loopback, etc.
+            let if_type = a.if_type();
+            if_type == ipconfig::IfType::EthernetCsmacd
+                || if_type == ipconfig::IfType::Ieee80211
+        })
+        .filter(|a| {
+            let desc = a.description().to_lowercase();
+            !desc.contains("wintun")
+                && !desc.contains("vpn")
+                && !desc.contains("virtual")
+                && !desc.contains("tap-")
+        })
+        .flat_map(|a| a.ip_addresses().iter().copied())
+        .find(|ip| ip.is_ipv4());
+
+    if let Some(ip) = result {
+        log_app("DEBUG", &format!("[connectivity] Physical adapter found: {}", ip));
+    } else {
+        log_app("DEBUG", "[connectivity] No physical adapter found");
+    }
+
+    result
+}
+
+/// Check internet connectivity using multiple methods, binding to the physical
+/// network adapter to bypass VPN routing. Returns true if ANY method succeeds.
 async fn check_connectivity() -> bool {
-    let endpoints = [
+    let physical_ip = find_physical_adapter_ip();
+
+    if let Some(ip) = physical_ip {
+        eprintln!("[connectivity] Using physical adapter: {ip}");
+    } else {
+        eprintln!("[connectivity] No physical adapter found, using default routing");
+    }
+
+    log_app("DEBUG", &format!("[connectivity] Cycle: physical_ip={:?}", physical_ip));
+
+    // Method 1: TCP connect via socket2 bound to physical adapter.
+    // Uses spawn_blocking because socket2 is synchronous.
+    // Light uses 2 targets (Pro uses 3).
+    let tcp_ip = physical_ip;
+    let tcp_ok = tokio::task::spawn_blocking(move || {
+        let targets = [
+            SocketAddr::new([1, 1, 1, 1].into(), 443),  // Cloudflare DNS
+            SocketAddr::new([8, 8, 8, 8].into(), 443),  // Google DNS
+        ];
+
+        for target in targets {
+            let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Bind to physical adapter IP (port 0 = OS picks ephemeral port)
+            if let Some(ip) = tcp_ip {
+                if socket.bind(&SockAddr::from(SocketAddr::new(ip, 0))).is_err() {
+                    continue;
+                }
+            }
+
+            if socket
+                .connect_timeout(&SockAddr::from(target), Duration::from_secs(4))
+                .is_ok()
+            {
+                return true;
+            }
+        }
+
+        false
+    })
+    .await
+    .unwrap_or(false);
+
+    log_app("DEBUG", &format!("[connectivity] TCP result: {}", tcp_ok));
+
+    if tcp_ok {
+        return true;
+    }
+
+    // Method 2: HTTP captive portal endpoints bound to physical adapter (fallback)
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .local_address(physical_ip)
+        .build()
+        .unwrap_or_default();
+
+    let http_endpoints = [
         "https://clients3.google.com/generate_204",
         "https://cp.cloudflare.com",
     ];
 
-    for url in endpoints {
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            reqwest::get(url),
-        ).await;
+    for url in http_endpoints {
+        let result = tokio::time::timeout(Duration::from_secs(5), client.get(url).send()).await;
 
         match result {
             Ok(Ok(resp)) => {
                 if resp.status().is_success() || resp.status().as_u16() == 204 {
+                    log_app("DEBUG", &format!("[connectivity] HTTP {} => OK", url));
                     return true;
                 }
             }
             _ => continue,
         }
     }
+
+    log_app("DEBUG", "[connectivity] All checks failed");
     false
 }
 
 /// Check if the physical network adapter has connectivity (without VPN).
-/// Uses a simple DNS resolution + TCP check to verify the adapter is up.
+/// Uses TCP connect + HTTP check bound to the physical adapter IP.
 async fn check_adapter_online() -> bool {
-    // After VPN disconnect, try to reach a simple endpoint over plain internet
+    let physical_ip = find_physical_adapter_ip();
+
+    // Quick TCP check first via socket2 bound to physical adapter
+    let tcp_ip = physical_ip;
+    let tcp_ok = tokio::task::spawn_blocking(move || {
+        let target = SocketAddr::new([1, 1, 1, 1].into(), 443);
+        let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        if let Some(ip) = tcp_ip {
+            if socket.bind(&SockAddr::from(SocketAddr::new(ip, 0))).is_err() {
+                return false;
+            }
+        }
+
+        socket
+            .connect_timeout(&SockAddr::from(target), Duration::from_secs(3))
+            .is_ok()
+    })
+    .await
+    .unwrap_or(false);
+
+    log_app("DEBUG", &format!("[connectivity] adapter_online TCP: {}", tcp_ok));
+
+    if tcp_ok {
+        return true;
+    }
+
+    // Fallback: HTTP captive portal bound to physical adapter
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .local_address(physical_ip)
+        .build()
+        .unwrap_or_default();
+
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        reqwest::get("http://clients3.google.com/generate_204"),
-    ).await;
+        client.get("http://clients3.google.com/generate_204").send(),
+    )
+    .await;
 
     match result {
-        Ok(Ok(resp)) => resp.status().as_u16() == 204 || resp.status().is_success(),
+        Ok(Ok(resp)) => {
+            let ok = resp.status().as_u16() == 204 || resp.status().is_success();
+            if ok {
+                log_app("DEBUG", "[connectivity] adapter_online HTTP => OK");
+            }
+            ok
+        }
         _ => false,
     }
 }
