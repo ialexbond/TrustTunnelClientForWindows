@@ -48,24 +48,24 @@ None currently deferred.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONN-01 | -- | Pending |
-| CONN-02 | -- | Pending |
-| CONN-03 | -- | Pending |
-| CONN-04 | -- | Pending |
-| CONN-05 | -- | Pending |
-| UPD-01 | -- | Pending |
-| UPD-02 | -- | Pending |
-| CRED-01 | -- | Pending |
-| CRED-02 | -- | Pending |
-| CRED-03 | -- | Pending |
-| REL-01 | -- | Pending |
-| REL-02 | -- | Pending |
+| CONN-01 | Phase 1 | Pending |
+| CONN-02 | Phase 1 | Pending |
+| CONN-03 | Phase 1 | Pending |
+| CONN-04 | Phase 1 | Pending |
+| CONN-05 | Phase 1 | Pending |
+| UPD-01 | Phase 2 | Pending |
+| UPD-02 | Phase 2 | Pending |
+| CRED-01 | Phase 3 | Pending |
+| CRED-02 | Phase 3 | Pending |
+| CRED-03 | Phase 3 | Pending |
+| REL-01 | Phase 4 | Pending |
+| REL-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v2.5.0 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12
+- Mapped to phases: 12
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-10*
-*Last updated: 2026-04-10 after initial definition*
+*Last updated: 2026-04-10 after roadmap creation*
