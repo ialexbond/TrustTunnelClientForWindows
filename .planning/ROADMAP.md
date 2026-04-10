@@ -39,8 +39,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Update dialog renders markdown headers, lists, and bold/italic — no raw `#` or `*` characters visible
   2. Long changelogs scroll within the dialog rather than being truncated
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+Plans:
+- [ ] 02-01-PLAN.md — Add react-markdown dependency to both apps, create ChangelogModal component
+- [ ] 02-02-PLAN.md — Add i18n keys, wire "What's new" button and ChangelogModal into AboutPanel and AboutScreen
 
 ### Phase 3: Credential Generator
 **Goal**: Users can generate random credentials directly from VPN user form inputs
@@ -69,6 +71,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Connectivity Bypass | 0/2 | Planning complete | - |
-| 2. Update UX | 0/TBD | Not started | - |
+| 2. Update UX | 0/2 | Planning complete | - |
 | 3. Credential Generator | 0/TBD | Not started | - |
 | 4. Release | 0/TBD | Not started | - |
