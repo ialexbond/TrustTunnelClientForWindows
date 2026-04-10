@@ -199,11 +199,18 @@ async fn check_connectivity() -> bool {
     }
 
     // Method 2: HTTP captive portal endpoints bound to physical adapter (fallback)
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .local_address(physical_ip)
         .build()
-        .unwrap_or_default();
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log_app("WARN", &format!("[connectivity] Failed to build bound HTTP client: {e}"));
+            // A default client routes through VPN, producing false positives — skip HTTP check
+            return false;
+        }
+    };
 
     let http_endpoints = [
         "https://clients3.google.com/generate_204",
@@ -262,11 +269,17 @@ async fn check_adapter_online() -> bool {
     }
 
     // Fallback: HTTP captive portal bound to physical adapter
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .local_address(physical_ip)
         .build()
-        .unwrap_or_default();
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log_app("WARN", &format!("[connectivity] Failed to build bound HTTP client: {e}"));
+            return false;
+        }
+    };
 
     let result = tokio::time::timeout(
         Duration::from_secs(5),
