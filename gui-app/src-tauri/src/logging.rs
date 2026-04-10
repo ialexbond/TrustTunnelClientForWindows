@@ -312,4 +312,31 @@ mod tests {
         let safe = "this is a safe log line with no secrets";
         assert_eq!(sanitize(safe), safe);
     }
+
+    #[test]
+    fn sanitize_all_sensitive_keys() {
+        for key in SENSITIVE_KEYS {
+            let input = format!(r#"{key} = "sensitive_value""#);
+            let result = sanitize(&input);
+            assert!(!result.contains("sensitive_value"), "Key '{key}' not sanitized");
+            assert!(result.contains("***"), "Key '{key}' missing *** replacement");
+        }
+    }
+
+    #[test]
+    fn sanitize_case_insensitive() {
+        let upper = r#"PASSWORD = "secret""#;
+        assert!(!sanitize(upper).contains("secret"), "uppercase PASSWORD not sanitized");
+
+        let mixed = r#"Password = "secret""#;
+        assert!(!sanitize(mixed).contains("secret"), "mixed-case Password not sanitized");
+    }
+
+    #[test]
+    fn sanitize_quoted_value_boundaries() {
+        let input = r#"password = "abc"def"#;
+        let result = sanitize(input);
+        assert!(!result.contains("abc"), "value inside quotes not sanitized");
+        assert!(result.contains("def"), "text after closing quote should remain");
+    }
 }
