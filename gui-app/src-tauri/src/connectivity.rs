@@ -109,6 +109,11 @@ pub fn start_monitor(
 
 /// Find the local IP of the primary physical network adapter (not VPN, not loopback).
 /// Returns None if no suitable adapter found — caller should fall back to default routing.
+///
+/// NOTE: On multi-homed systems (e.g., Ethernet + WiFi both up) this returns the first
+/// matching adapter's IPv4 address. If that adapter lacks the default route, TCP bind
+/// checks may fail. The `ipconfig` crate does not expose route metrics, so we cannot
+/// distinguish the primary default-route adapter programmatically.
 fn find_physical_adapter_ip() -> Option<IpAddr> {
     let adapters = ipconfig::get_adapters().ok()?;
 
