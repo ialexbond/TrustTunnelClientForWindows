@@ -77,6 +77,15 @@ static constexpr bool TCP_RECORD_ESTATS = true;
 #endif
 static constexpr uint8_t TCP_TLS_ALPN_PROTOS[] = {2, 'h', '2', 8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
+/**
+ * Certificate verification type.
+ * Indicates the origin of the certificate being verified.
+ */
+typedef enum {
+    VT_DEFAULT = 0, /** General-purpose connection (e.g. DNS upstream) */
+    VT_ENDPOINT,    /** VPN endpoint connection */
+} VpnCertVerificationType;
+
 typedef enum {
     VDSP_PLAIN,
     VDSP_DNSCRYPT,

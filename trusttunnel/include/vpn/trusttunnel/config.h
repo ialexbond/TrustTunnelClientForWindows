@@ -28,6 +28,7 @@ struct TrustTunnelConfig {
         ag::VpnUpstreamProtocol upstream_protocol = ag::VPN_UP_HTTP2;
         std::string client_random;
         std::string client_random_mask;
+        std::optional<std::vector<std::string>> dns_upstreams;
         bool skip_verification = false;
         bool anti_dpi = false;
         bool has_ipv6 = false;
@@ -72,7 +73,7 @@ struct TrustTunnelConfig {
     /// Newline-separated process names to block entirely.
     std::string process_block;
     std::optional<std::string> ssl_session_storage_path;
-    std::vector<std::string> dns_upstreams;
+    std::vector<std::string> legacy_dns_upstreams;
     Location location;
     Listener listener;
 
