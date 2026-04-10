@@ -1,4 +1,5 @@
 use super::super::*;
+use russh::client;
 use serde::{Deserialize, Serialize};
 
 // ═══════════════════════════════════════════════════════════════
@@ -149,15 +150,15 @@ async fn read_vpn_port(handle: &client::Handle<SshHandler>, app: &tauri::AppHand
 
 pub async fn get_security_status(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
+    ssh_port: u16,
 ) -> Result<SecurityStatus, String> {
-    let current_ssh_port = params.port;
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let current_ssh_port = ssh_port;
+    let sudo = detect_sudo(handle, app).await;
 
     // ── fail2ban presence & jails ──
     let (f2b_installed_raw, _) = exec_command(
-        &handle, app,
+        handle, app,
         "command -v fail2ban-client >/dev/null 2>&1 && echo F2B_OK || echo F2B_NO",
     ).await?;
     let f2b_installed = f2b_installed_raw.contains("F2B_OK");
@@ -167,14 +168,14 @@ pub async fn get_security_status(
 
     if f2b_installed {
         let (active_raw, _) = exec_command(
-            &handle, app,
+            handle, app,
             &format!("{sudo}systemctl is-active fail2ban 2>/dev/null || echo inactive"),
         ).await?;
         f2b_active = active_raw.trim() == "active";
 
         if f2b_active {
             let (status_raw, _) = exec_command(
-                &handle, app,
+                handle, app,
                 &format!("{sudo}fail2ban-client status 2>/dev/null"),
             ).await?;
             // Parse: "  `- Jail list: sshd, sshd-ddos"
@@ -186,7 +187,7 @@ pub async fn get_security_status(
                 .unwrap_or_default();
 
             for name in jail_names {
-                let info = parse_jail(&handle, app, &sudo, &name).await;
+                let info = parse_jail(handle, app, &sudo, &name).await;
                 jails.push(info);
             }
         }
@@ -194,7 +195,7 @@ pub async fn get_security_status(
 
     // ── ufw presence & rules ──
     let (ufw_installed_raw, _) = exec_command(
-        &handle, app,
+        handle, app,
         "command -v ufw >/dev/null 2>&1 && echo UFW_OK || echo UFW_NO",
     ).await?;
     let ufw_installed = ufw_installed_raw.contains("UFW_OK");
@@ -208,7 +209,7 @@ pub async fn get_security_status(
 
     if ufw_installed {
         let (verbose, _) = exec_command(
-            &handle, app,
+            handle, app,
             &format!("{sudo}ufw status verbose 2>/dev/null"),
         ).await?;
         ufw_active = verbose.lines().next().map(ufw_line_is_active).unwrap_or(false);
@@ -230,16 +231,14 @@ pub async fn get_security_status(
 
         if ufw_active {
             let (numbered, _) = exec_command(
-                &handle, app,
+                handle, app,
                 &format!("{sudo}ufw status numbered 2>/dev/null"),
             ).await?;
             rules = parse_ufw_numbered(&numbered);
         }
     }
 
-    let vpn_port = read_vpn_port(&handle, app, &sudo).await;
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let vpn_port = read_vpn_port(handle, app, &sudo).await;
 
     Ok(SecurityStatus {
         fail2ban: Fail2banStatus { installed: f2b_installed, active: f2b_active, jails },
@@ -390,20 +389,17 @@ fn parse_ufw_numbered(text: &str) -> Vec<FirewallRule> {
 
 pub async fn install_fail2ban(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Installing fail2ban...");
-    let handle = params.connect().await
-        .map_err(|e| { emit_step(app, "security", "error", &e); e })?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
 
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get update -qq && {sudo}DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban"),
     ).await?;
     if code != 0 {
         emit_step(app, "security", "error", "apt install failed");
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SECURITY_F2B_INSTALL_FAILED".into());
     }
 
@@ -411,7 +407,7 @@ pub async fn install_fail2ban(
     // All duration keys live inside [sshd] so later updates via sed can find & replace them
     // without needing to add missing keys.
     // backend = auto: fail2ban auto-detects the best available backend.
-    // On systems with python3-systemd → uses journald. Without it → falls back to
+    // On systems with python3-systemd -> uses journald. Without it -> falls back to
     // polling /var/log/auth.log. The previous hardcoded `backend = systemd` crashed
     // on servers without python3-systemd ("No module named 'systemd'").
     let jail_local = "[DEFAULT]\nbackend  = auto\n\n[sshd]\nenabled  = true\nport     = ssh\nfilter   = sshd\nmaxretry = 5\nbantime  = 1h\nfindtime = 10m\n";
@@ -420,45 +416,40 @@ pub async fn install_fail2ban(
     let cmd = format!(
         "{sudo}tee /etc/fail2ban/jail.local >/dev/null <<'F2BEOF'\n{jail_local}F2BEOF\n"
     );
-    let (_, code) = exec_command(&handle, app, &cmd).await?;
+    let (_, code) = exec_command(handle, app, &cmd).await?;
     if code != 0 {
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SECURITY_F2B_CONFIG_FAILED".into());
     }
 
-    let _ = exec_command(&handle, app, &format!("{sudo}systemctl enable fail2ban && {sudo}systemctl restart fail2ban")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}systemctl enable fail2ban && {sudo}systemctl restart fail2ban")).await?;
     emit_step(app, "security", "ok", "fail2ban installed");
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
 
 pub async fn uninstall_fail2ban(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Uninstalling fail2ban...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
 
-    // Full removal: stop service → purge (removes config) → autoremove deps → wipe
+    // Full removal: stop service -> purge (removes config) -> autoremove deps -> wipe
     // /etc/fail2ban directory just in case any local files remain. Each step is its own
     // command so a failure in one (e.g. service already stopped) doesn't mask the rest.
-    let _ = exec_command(&handle, app, &format!("{sudo}systemctl stop fail2ban 2>/dev/null; true")).await?;
-    let _ = exec_command(&handle, app, &format!("{sudo}systemctl disable fail2ban 2>/dev/null; true")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}systemctl stop fail2ban 2>/dev/null; true")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}systemctl disable fail2ban 2>/dev/null; true")).await?;
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y fail2ban"),
     ).await?;
     if code != 0 {
         emit_step(app, "security", "error", "apt purge failed");
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SECURITY_F2B_PURGE_FAILED".into());
     }
-    let _ = exec_command(&handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
-    let _ = exec_command(&handle, app, &format!("{sudo}rm -rf /etc/fail2ban")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}rm -rf /etc/fail2ban")).await?;
 
     emit_step(app, "security", "ok", "fail2ban removed");
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
 
@@ -466,13 +457,11 @@ pub async fn uninstall_fail2ban(
 /// Reversible via `start_fail2ban`.
 pub async fn stop_fail2ban(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Stopping fail2ban...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl disable --now fail2ban")).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let sudo = detect_sudo(handle, app).await;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}systemctl disable --now fail2ban")).await?;
     if code != 0 { return Err("SECURITY_F2B_STOP_FAILED".into()); }
     emit_step(app, "security", "ok", "fail2ban stopped");
     Ok(())
@@ -481,13 +470,11 @@ pub async fn stop_fail2ban(
 /// Start/enable a previously-installed fail2ban service.
 pub async fn start_fail2ban(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Starting fail2ban...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}systemctl enable --now fail2ban")).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let sudo = detect_sudo(handle, app).await;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}systemctl enable --now fail2ban")).await?;
     if code != 0 { return Err("SECURITY_F2B_START_FAILED".into()); }
     emit_step(app, "security", "ok", "fail2ban started");
     Ok(())
@@ -497,13 +484,11 @@ pub async fn start_fail2ban(
 /// re-enabled later via `start_firewall` in exactly the same state.
 pub async fn stop_firewall(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Disabling firewall...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}ufw --force disable")).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let sudo = detect_sudo(handle, app).await;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}ufw --force disable")).await?;
     if code != 0 { return Err("SECURITY_UFW_STOP_FAILED".into()); }
     emit_step(app, "security", "ok", "Firewall disabled");
     Ok(())
@@ -512,13 +497,11 @@ pub async fn stop_firewall(
 /// Enable a previously-installed UFW — re-activates saved rules.
 pub async fn start_firewall(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Enabling firewall...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}ufw --force enable")).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let sudo = detect_sudo(handle, app).await;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}ufw --force enable")).await?;
     if code != 0 { return Err("SECURITY_UFW_START_FAILED".into()); }
     emit_step(app, "security", "ok", "Firewall enabled");
     Ok(())
@@ -526,45 +509,41 @@ pub async fn start_firewall(
 
 pub async fn fail2ban_unban(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     jail: String,
     ip: String,
 ) -> Result<(), String> {
     if !is_safe_jail(&jail) { return Err("SECURITY_F2B_INVALID_JAIL".into()); }
     if !is_safe_ip(&ip)     { return Err("SECURITY_F2B_INVALID_IP".into()); }
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}fail2ban-client set {jail} unbanip {ip}"),
     ).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     if code != 0 { return Err("SECURITY_F2B_UNBAN_FAILED".into()); }
     Ok(())
 }
 
 pub async fn fail2ban_ban(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     jail: String,
     ip: String,
 ) -> Result<(), String> {
     if !is_safe_jail(&jail) { return Err("SECURITY_F2B_INVALID_JAIL".into()); }
     if !is_safe_ip(&ip)     { return Err("SECURITY_F2B_INVALID_IP".into()); }
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}fail2ban-client set {jail} banip {ip}"),
     ).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     if code != 0 { return Err("SECURITY_F2B_BAN_FAILED".into()); }
     Ok(())
 }
 
 pub async fn fail2ban_set_jail_config(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     jail: String,
     config: JailConfigUpdate,
 ) -> Result<(), String> {
@@ -574,8 +553,7 @@ pub async fn fail2ban_set_jail_config(
     if !is_safe_duration(&config.bantime)    { return Err("SECURITY_F2B_INVALID_BANTIME".into()); }
     if !is_safe_duration(&config.findtime)   { return Err("SECURITY_F2B_INVALID_FINDTIME".into()); }
 
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
 
     let enabled = if config.enabled { "true" } else { "false" };
     let maxretry = config.maxretry;
@@ -595,36 +573,32 @@ pub async fn fail2ban_set_jail_config(
             s/^findtime[[:space:]]*=.*/findtime = {findtime}/; \
         }}' /etc/fail2ban/jail.local"
     );
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}{sed_script}")).await?;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}{sed_script}")).await?;
     if code != 0 {
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SECURITY_F2B_PERSIST_FAILED".into());
     }
 
     // Runtime update — affects the running daemon without needing a restart.
     // These are best-effort: a jail may not accept a key at runtime if it's disabled.
-    let _ = exec_command(&handle, app, &format!("{sudo}fail2ban-client set {jail} maxretry {maxretry}")).await?;
-    let _ = exec_command(&handle, app, &format!("{sudo}fail2ban-client set {jail} bantime {bantime}")).await?;
-    let _ = exec_command(&handle, app, &format!("{sudo}fail2ban-client set {jail} findtime {findtime}")).await?;
-    let _ = exec_command(&handle, app, &format!("{sudo}fail2ban-client reload {jail}")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}fail2ban-client set {jail} maxretry {maxretry}")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}fail2ban-client set {jail} bantime {bantime}")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}fail2ban-client set {jail} findtime {findtime}")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}fail2ban-client reload {jail}")).await?;
 
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
 
 pub async fn fail2ban_tail_log(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     lines: u32,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
     let n = lines.clamp(10, 5000);
     let (out, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}tail -n {n} /var/log/fail2ban.log 2>/dev/null || true"),
     ).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(out)
 }
 
@@ -634,106 +608,97 @@ pub async fn fail2ban_tail_log(
 
 pub async fn install_firewall(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
+    ssh_port: u16,
     keep_http_open: bool,
 ) -> Result<(), String> {
-    let ssh_port = params.port;
     emit_step(app, "security", "progress", "Installing UFW...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
 
     // Install (no-op if already present)
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get update -qq && {sudo}DEBIAN_FRONTEND=noninteractive apt-get install -y ufw"),
     ).await?;
     if code != 0 {
         emit_step(app, "security", "error", "apt install failed");
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SECURITY_UFW_INSTALL_FAILED".into());
     }
 
     // Detect whether UFW is already enabled. If yes, we only *add* rules required for
     // TrustTunnel and the SSH port — we must not reset default policies or touch unrelated
     // rules that the sysadmin configured manually.
-    let (status_raw, _) = exec_command(&handle, app, &format!("{sudo}ufw status 2>/dev/null")).await?;
+    let (status_raw, _) = exec_command(handle, app, &format!("{sudo}ufw status 2>/dev/null")).await?;
     let already_active = status_raw.lines().next().map(ufw_line_is_active).unwrap_or(false);
 
     // CRITICAL: allow the current SSH port BEFORE any enable, so we don't lock ourselves out.
-    let _ = exec_command(&handle, app, &format!("{sudo}ufw allow {ssh_port}/tcp comment 'SSH (TrustTunnel)'")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}ufw allow {ssh_port}/tcp comment 'SSH (TrustTunnel)'")).await?;
 
     if !already_active {
         // Only set default policies on fresh install. On an already-enabled firewall the
         // admin's existing default policy is preserved.
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw default deny incoming")).await?;
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw default allow outgoing")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw default deny incoming")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw default allow outgoing")).await?;
     } else {
         emit_log(app, "info", "UFW already active — appending TrustTunnel rules without resetting policies");
     }
 
-    if let Some(vpn) = read_vpn_port(&handle, app, &sudo).await {
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow {vpn}/tcp comment 'TrustTunnel VPN'")).await?;
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow {vpn}/udp comment 'TrustTunnel QUIC'")).await?;
+    if let Some(vpn) = read_vpn_port(handle, app, &sudo).await {
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow {vpn}/tcp comment 'TrustTunnel VPN'")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow {vpn}/udp comment 'TrustTunnel QUIC'")).await?;
     } else {
         // fallback default 443
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow 443/tcp comment 'TrustTunnel VPN'")).await?;
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow 443/udp comment 'TrustTunnel QUIC'")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 443/tcp comment 'TrustTunnel VPN'")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 443/udp comment 'TrustTunnel QUIC'")).await?;
     }
 
     if keep_http_open {
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow 80/tcp comment 'HTTP cert renewal'")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 80/tcp comment 'HTTP cert renewal'")).await?;
     }
 
     if !already_active {
-        let (_, code) = exec_command(&handle, app, &format!("{sudo}ufw --force enable")).await?;
+        let (_, code) = exec_command(handle, app, &format!("{sudo}ufw --force enable")).await?;
         if code != 0 {
             emit_step(app, "security", "error", "ufw enable failed");
-            handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
             return Err("SECURITY_UFW_ENABLE_FAILED".into());
         }
     }
 
     emit_step(app, "security", "ok", "Firewall enabled");
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
 
 pub async fn uninstall_firewall(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<(), String> {
     emit_step(app, "security", "progress", "Uninstalling firewall...");
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let _ = exec_command(&handle, app, &format!("{sudo}ufw --force disable 2>/dev/null; true")).await?;
+    let sudo = detect_sudo(handle, app).await;
+    let _ = exec_command(handle, app, &format!("{sudo}ufw --force disable 2>/dev/null; true")).await?;
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y ufw"),
     ).await?;
     if code != 0 {
         emit_step(app, "security", "error", "apt purge failed");
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SECURITY_UFW_PURGE_FAILED".into());
     }
-    let _ = exec_command(&handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
     emit_step(app, "security", "ok", "Firewall removed");
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
 
 pub async fn firewall_add_rule(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     rule: NewFirewallRule,
 ) -> Result<(), String> {
     // Validate BEFORE connecting — reject anything that could inject shell metacharacters.
     let cmd = build_ufw_rule_cmd(&rule)
         .ok_or_else(|| "SECURITY_UFW_INVALID_RULE".to_string())?;
 
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}{cmd}")).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let sudo = detect_sudo(handle, app).await;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}{cmd}")).await?;
     if code != 0 { return Err("SECURITY_UFW_ADD_FAILED".into()); }
     Ok(())
 }
@@ -774,70 +739,62 @@ fn build_ufw_rule_cmd(rule: &NewFirewallRule) -> Option<String> {
 
 pub async fn firewall_delete_rule(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     number: u32,
 ) -> Result<(), String> {
     if number == 0 || number > 10_000 { return Err("SECURITY_UFW_INVALID_NUMBER".into()); }
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
     // `ufw --force delete N` skips the "Proceed?" confirmation without piping anything.
     // Previous attempt (`yes | sudo ufw delete N`) broke because `yes` fed its stdin to
     // `sudo`, not to `ufw`, so the prompt was never answered.
     let (_, code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}ufw --force delete {number}"),
     ).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     if code != 0 { return Err("SECURITY_UFW_DELETE_FAILED".into()); }
     Ok(())
 }
 
 pub async fn firewall_set_logging(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     level: String,
 ) -> Result<(), String> {
     let lvl = match level.as_str() {
         "off" | "low" | "medium" | "high" | "full" => level,
         _ => return Err("SECURITY_UFW_BAD_LEVEL".into()),
     };
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
-    let (_, code) = exec_command(&handle, app, &format!("{sudo}ufw logging {lvl}")).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let sudo = detect_sudo(handle, app).await;
+    let (_, code) = exec_command(handle, app, &format!("{sudo}ufw logging {lvl}")).await?;
     if code != 0 { return Err("SECURITY_UFW_LOGGING_FAILED".into()); }
     Ok(())
 }
 
 pub async fn firewall_tail_log(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     lines: u32,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
     let n = lines.clamp(10, 5000);
     let (out, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}grep -h 'UFW' /var/log/ufw.log /var/log/kern.log /var/log/syslog 2>/dev/null | tail -n {n} || true"),
     ).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(out)
 }
 
 pub async fn firewall_set_http_port(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     open: bool,
 ) -> Result<(), String> {
-    let handle = params.connect().await?;
-    let sudo = detect_sudo(&handle, app).await;
+    let sudo = detect_sudo(handle, app).await;
     if open {
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow 80/tcp comment 'HTTP cert renewal'")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 80/tcp comment 'HTTP cert renewal'")).await?;
     } else {
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true")).await?;
     }
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
 }
 

@@ -1,7 +1,10 @@
 use super::super::*;
+use super::super::sanitize::*;
+use russh::client;
 
 /// Check if TrustTunnel is already installed on the server.
 /// Returns JSON: { installed: bool, version: String, service_active: bool }
+/// NOTE: Uses direct connect (NOT pooled) — initial check before pool exists.
 pub async fn check_server_installation(
     app: &tauri::AppHandle,
     params: SshParams,
@@ -35,8 +38,7 @@ pub async fn check_server_installation(
 
     // Get list of VPN users from credentials.toml
     let users: Vec<String> = if installed {
-        let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-        let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+        let sudo = detect_sudo(&handle, app).await;
         let (creds_raw, _) = exec_command(
             &handle, app,
             &format!("{sudo}grep -oP 'username\\s*=\\s*\"\\K[^\"]+' {dir}/credentials.toml 2>/dev/null || echo ''", dir = ENDPOINT_DIR)
@@ -60,6 +62,7 @@ pub async fn check_server_installation(
 }
 
 /// Completely remove TrustTunnel from the server.
+/// NOTE: Uses direct connect (NOT pooled) — destructive one-shot operation.
 pub async fn uninstall_server(
     app: &tauri::AppHandle,
     params: SshParams,
@@ -70,8 +73,7 @@ pub async fn uninstall_server(
         .map_err(|e| { emit_step(app, "uninstall", "error", &e); e })?;
 
     // Determine sudo
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(&handle, app).await;
 
     emit_step(app, "uninstall", "progress", "Removing TrustTunnel...");
 
@@ -140,24 +142,20 @@ fi
 /// restart the service, export the client config, and save it locally.
 pub async fn add_server_user(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     vpn_username: String,
     vpn_password: String,
 ) -> Result<String, String> {
-    emit_step(app, "connect", "progress", "Connecting to server...");
-    let handle = params.connect().await
-        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");
 
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     // Check that credentials.toml exists
     emit_step(app, "check", "progress", "Checking configuration...");
 
     let (cfg_check, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("test -f {dir}/credentials.toml && echo CFG_OK || echo CFG_MISSING", dir = ENDPOINT_DIR)
     ).await?;
 
@@ -169,7 +167,7 @@ pub async fn add_server_user(
 
     // Check if username already exists
     let (creds_raw, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}grep -oP 'username\\s*=\\s*\"\\K[^\"]+' {dir}/credentials.toml 2>/dev/null || echo ''", dir = ENDPOINT_DIR)
     ).await?;
     let existing_users: Vec<&str> = creds_raw.lines()
@@ -185,17 +183,26 @@ pub async fn add_server_user(
 
     emit_step(app, "check", "ok", "Configuration verified");
 
-    // Append new [[client]] block to credentials.toml
+    // Validate user inputs before constructing shell commands
+    validate_vpn_username(&vpn_username)?;
+    validate_vpn_password(&vpn_password)?;
+
+    // Append new [[client]] block to credentials.toml using heredoc (safe from injection)
     emit_step(app, "configure", "progress", &format!("Adding user '{}'...", vpn_username));
 
-    let escaped_user = vpn_username.replace('\\', "\\\\").replace('"', "\\\"");
-    let escaped_pass = vpn_password.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped_user = vpn_username.replace('\\', "\\\\");
+    let escaped_pass = vpn_password.replace('\\', "\\\\");
     let append_cmd = format!(
-        r#"{sudo}bash -c 'printf "\n\n[[client]]\nusername = \"{escaped_user}\"\npassword = \"{escaped_pass}\"\n" >> {dir}/credentials.toml'"#,
+        r#"{sudo}tee -a {dir}/credentials.toml > /dev/null << 'USER_EOF'
+
+[[client]]
+username = "{escaped_user}"
+password = "{escaped_pass}"
+USER_EOF"#,
         dir = ENDPOINT_DIR
     );
 
-    let (_, append_code) = exec_command(&handle, app, &append_cmd).await?;
+    let (_, append_code) = exec_command(handle, app, &append_cmd).await?;
 
     if append_code != 0 {
         let msg = "SSH_ADD_USER_FAILED";
@@ -209,7 +216,7 @@ pub async fn add_server_user(
     emit_step(app, "service", "progress", "Restarting service...");
 
     let (_, restart_code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1")
     ).await?;
 
@@ -223,8 +230,6 @@ pub async fn add_server_user(
     emit_step(app, "service", "ok", "Service restarted");
 
     // User added — config download is done separately via UI
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
-
     emit_step(app, "done", "ok", &format!("User '{}' added!", vpn_username));
 
     Ok(vpn_username)
@@ -233,13 +238,10 @@ pub async fn add_server_user(
 /// Remove a VPN user from credentials.toml on the remote server and restart the service.
 pub async fn server_remove_user(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
     vpn_username: String,
 ) -> Result<(), String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     // Use sed to remove the [[client]] block matching the username.
     let escaped_user = vpn_username.replace('\'', "'\\''");
@@ -258,20 +260,17 @@ with open('{dir}/credentials.toml', 'w') as f:
         escaped_user
     );
 
-    let (_, remove_code) = exec_command(&handle, app, &remove_cmd).await?;
+    let (_, remove_code) = exec_command(handle, app, &remove_cmd).await?;
 
     if remove_code != 0 {
-        handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
         return Err("SSH_DELETE_USER_FAILED".into());
     }
 
     // Restart service to apply changes
     let (_, restart_code) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1"),
     ).await?;
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     if restart_code != 0 {
         return Err("User removed, but failed to restart service".into());
