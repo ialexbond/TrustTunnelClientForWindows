@@ -71,7 +71,11 @@
     "advanced_settings": "Дополнительные настройки",
     "no": "Нет",
     "speed_test": "Тест скорости",
-    "change": "Изменить"
+    "change": "Изменить",
+    "close": "Закрыть"
+  },
+  "modal": {
+    "changelog_title": "Что нового в v{{version}}"
   },
   "labels": {
     "config_file": "Файл конфигурации",

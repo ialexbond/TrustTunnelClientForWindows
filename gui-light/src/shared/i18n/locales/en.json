@@ -71,7 +71,11 @@
     "advanced_settings": "Advanced Settings",
     "no": "No",
     "speed_test": "Speed Test",
-    "change": "Change"
+    "change": "Change",
+    "close": "Close"
+  },
+  "modal": {
+    "changelog_title": "What's new in v{{version}}"
   },
   "labels": {
     "config_file": "Configuration File",
