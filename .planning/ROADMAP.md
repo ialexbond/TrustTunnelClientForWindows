@@ -29,8 +29,8 @@ Restore connectivity bypass (lost in v2.4.0 catch-all commit), add markdown rend
   5. Connectivity monitor does not trigger false VPN reconnects while VPN is active
 **Plans**: 2 plans
 Plans:
-- [ ] 01-01-PLAN.md — Version bump, add socket2/ipconfig deps, restore gui-app connectivity.rs from 798ce8e7 with verbose logging
-- [ ] 01-02-PLAN.md — Port socket2 connectivity bypass to gui-light (Light timing profile), verify both editions compile
+- [x] 01-01-PLAN.md — Version bump, add socket2/ipconfig deps, restore gui-app connectivity.rs from 798ce8e7 with verbose logging
+- [x] 01-02-PLAN.md — Port socket2 connectivity bypass to gui-light (Light timing profile), verify both editions compile
 
 ### Phase 2: Update UX
 **Goal**: Users can read formatted release notes in the update dialog
