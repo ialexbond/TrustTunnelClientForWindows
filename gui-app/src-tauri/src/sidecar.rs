@@ -2,6 +2,8 @@ use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 pub const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -32,6 +34,7 @@ pub async fn spawn_trusttunnel(
 
     let app_handle = app.clone();
     let disc_for_child = Arc::clone(&disconnecting);
+    let disc_for_task = Arc::clone(&disc_for_child);
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
@@ -50,14 +53,17 @@ pub async fn spawn_trusttunnel(
                         )
                         .ok();
 
-                    // Detect actual VPN connection success
+                    // Detect actual VPN connection success (skip if user already cancelled)
                     if trimmed.contains("Successfully connected to endpoint") {
-                        app_handle
-                            .emit(
-                                "vpn-status",
-                                serde_json::json!({ "status": "connected" }),
-                            )
-                            .ok();
+                        let cancelled = disc_for_task.lock().map(|g| *g).unwrap_or(false);
+                        if !cancelled {
+                            app_handle
+                                .emit(
+                                    "vpn-status",
+                                    serde_json::json!({ "status": "connected" }),
+                                )
+                                .ok();
+                        }
                     }
                 }
                 CommandEvent::Stderr(line) => {
@@ -78,15 +84,18 @@ pub async fn spawn_trusttunnel(
                         )
                         .ok();
 
-                    // Detect actual VPN connection success (C++ logs go to stderr)
+                    // Detect actual VPN connection success (C++ logs go to stderr, skip if cancelled)
                     if trimmed.contains("Successfully connected to endpoint") {
-                        if let Ok(mut g) = is_connected.lock() { *g = true; }
-                        app_handle
-                            .emit(
-                                "vpn-status",
-                                serde_json::json!({ "status": "connected" }),
-                            )
-                            .ok();
+                        let cancelled = disc_for_task.lock().map(|g| *g).unwrap_or(false);
+                        if !cancelled {
+                            if let Ok(mut g) = is_connected.lock() { *g = true; }
+                            app_handle
+                                .emit(
+                                    "vpn-status",
+                                    serde_json::json!({ "status": "connected" }),
+                                )
+                                .ok();
+                        }
                     }
 
                     // Detect config parse errors and surface them clearly
@@ -153,10 +162,14 @@ pub async fn spawn_trusttunnel(
 }
 
 pub async fn kill_sidecar(sidecar: SidecarChild) -> Result<(), Box<dyn std::error::Error>> {
-    sidecar
-        .child
-        .kill()
-        .map_err(|e| format!("Failed to kill sidecar: {e}"))?;
+    let pid = sidecar.child.pid();
+    // Try graceful kill first
+    sidecar.child.kill().ok();
+    // Force-kill by PID to ensure the process is dead
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     Ok(())
 }
 

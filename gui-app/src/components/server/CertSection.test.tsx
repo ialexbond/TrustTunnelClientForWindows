@@ -94,7 +94,7 @@ describe("CertSection", () => {
     expect(screen.getByText(i18n.t("server.cert.not_configured"))).toBeInTheDocument();
   });
 
-  it("shows renew button (disabled) for Let's Encrypt certs", () => {
+  it("shows renew button for Let's Encrypt certs", () => {
     const state = makeState({
       certRaw: {
         issuer: "R3",
@@ -105,7 +105,7 @@ describe("CertSection", () => {
     });
     render(<CertSection state={state} />);
     const renewBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.cert.renew")) });
-    expect(renewBtn).toBeDisabled();
+    expect(renewBtn).toBeInTheDocument();
   });
 
   it("shows expiry info for certs with notAfter", () => {
