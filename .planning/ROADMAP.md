@@ -52,8 +52,10 @@ Plans:
   1. Username input field shows a generator icon that fills the field with a random value on click
   2. Password input field shows a generator icon that fills the field with a random value on click
   3. Generator icons appear in both the deploy wizard (ServerStep) and the server panel add-user form
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+Plans:
+- [ ] 03-01-PLAN.md — Create credentialGenerator.ts utility (word-based username, 16-char password, crypto.getRandomValues) mirrored to gui-light
+- [ ] 03-02-PLAN.md — Wire Shuffle icons into AddUserForm and UsersSection with Tooltip, i18n keys, disabled state
 
 ### Phase 4: Release
 **Goal**: Both Pro and Light installers are built and ready for distribution
@@ -72,5 +74,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Connectivity Bypass | 0/2 | Planning complete | - |
 | 2. Update UX | 0/2 | Planning complete | - |
-| 3. Credential Generator | 0/TBD | Not started | - |
+| 3. Credential Generator | 0/2 | Planning complete | - |
 | 4. Release | 0/TBD | Not started | - |
