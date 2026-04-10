@@ -106,7 +106,8 @@ function VpnScreen({
   const isBusy = status === "connecting" || status === "disconnecting" || status === "recovering";
 
   const handleCircleClick = () => {
-    if (isBusy) return;
+    if (status === "disconnecting" || status === "recovering") return;
+    if (status === "connecting") { onDisconnect(); return; }
     if (isConnected) onDisconnect();
     else onConnect();
   };
@@ -213,10 +214,10 @@ function VpnScreen({
       <div className="flex flex-col items-center gap-4 flex-1 justify-center">
         <button
           onClick={handleCircleClick}
-          disabled={isBusy}
+          disabled={status === "disconnecting" || status === "recovering"}
           className={`relative w-[120px] h-[120px] rounded-full border-[3px] flex flex-col items-center justify-center gap-1
                      transition-all duration-300
-                     ${isBusy ? "cursor-not-allowed opacity-80" : "hover:scale-105 active:scale-95 cursor-pointer"}`}
+                     ${(status === "disconnecting" || status === "recovering") ? "cursor-not-allowed opacity-80" : "hover:scale-105 active:scale-95 cursor-pointer"}`}
           style={{
             borderColor: circleStyles.borderColor,
             background: circleStyles.background,
@@ -271,7 +272,7 @@ function VpnScreen({
 
         {/* Status label */}
         <span className="text-sm font-semibold" style={{ color: getStatusColor() }}>
-          {statusLabel[status]}
+          {status === "connecting" ? t("buttons.cancel", "Отмена") : statusLabel[status]}
         </span>
 
         {/* Uptime */}

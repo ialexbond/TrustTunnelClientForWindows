@@ -26,10 +26,6 @@ interface Props {
 type AuthMode = "password" | "key";
 type KeyInputMode = "file" | "paste";
 
-function obfuscate(value: string): string {
-  return "b64:" + btoa(unescape(encodeURIComponent(value)));
-}
-
 export function SshConnectForm({ onConnect }: Props) {
   const { t } = useTranslation();
   const [host, setHost] = useState("");
@@ -99,7 +95,7 @@ export function SshConnectForm({ onConnect }: Props) {
         host: creds.host,
         port: creds.port,
         user: creds.user,
-        password: creds.password ? obfuscate(creds.password) : "",
+        password: creds.password || "",
         keyPath: creds.keyPath || null,
       });
 

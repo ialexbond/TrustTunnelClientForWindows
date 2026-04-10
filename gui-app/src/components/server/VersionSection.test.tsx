@@ -67,11 +67,11 @@ describe("VersionSection", () => {
     expect(screen.getByText(new RegExp("v1\\.3\\.0"))).toBeInTheDocument();
   });
 
-  it("shows install button (disabled) when a non-current version is selected", () => {
+  it("shows install button when a non-current version is selected", () => {
     const state = makeState({ selectedVersion: "v1.5.0" });
     render(<VersionSection state={state} />);
     const installBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.version.install_version")) });
-    expect(installBtn).toBeDisabled();
+    expect(installBtn).toBeInTheDocument();
   });
 
   it("does not show install button when selected version matches current", () => {

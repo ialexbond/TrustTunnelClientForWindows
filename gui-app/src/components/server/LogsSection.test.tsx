@@ -63,10 +63,10 @@ describe("LogsSection", () => {
     expect(screen.getByText("2024-01-01 INFO started")).toBeInTheDocument();
   });
 
-  it("shows loading text when logsLoading is true", () => {
+  it("shows spinner when logsLoading is true", () => {
     const state = makeState({ showLogs: true, logsLoading: true });
-    render(<LogsSection state={state} />);
-    expect(screen.getByText(i18n.t("server.logs.loading"))).toBeInTheDocument();
+    const { container } = render(<LogsSection state={state} />);
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
   });
 
   it("shows no data text when showLogs is true but no logs", () => {
@@ -157,10 +157,10 @@ describe("LogsSection", () => {
     expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.logs.load")) })).not.toBeInTheDocument();
   });
 
-  it("does not show copy/collapse when showLogs true but serverLogs empty", () => {
+  it("does not show copy button when showLogs true but serverLogs empty, but collapse is visible", () => {
     const state = makeState({ showLogs: true, serverLogs: "" });
     render(<LogsSection state={state} />);
     expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.logs.copy")) })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.logs.collapse")) })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.logs.collapse")) })).toBeInTheDocument();
   });
 });

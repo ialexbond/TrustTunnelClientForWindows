@@ -1,12 +1,16 @@
 pub mod deploy;
+pub mod pool;
+pub mod sanitize;
 pub mod server;
 pub mod process;
 
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use russh::client;
 use russh::ChannelMsg;
 use serde::Deserialize;
 use tauri::Emitter;
+use tokio::sync::oneshot;
 
 // Re-export everything that lib.rs uses
 pub use deploy::{deploy_server, diagnose_server};
@@ -24,6 +28,7 @@ pub use server::{
     firewall_set_logging, firewall_tail_log, firewall_set_http_port,
     NewFirewallRule, JailConfigUpdate,
 };
+pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
 
 // ── Server path constants ──
@@ -48,7 +53,11 @@ pub struct SshParams {
 
 impl SshParams {
     pub async fn connect(&self) -> Result<client::Handle<SshHandler>, String> {
-        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref()).await
+        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), None).await
+    }
+
+    pub async fn connect_with_app(&self, app: tauri::AppHandle) -> Result<client::Handle<SshHandler>, String> {
+        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), Some(app)).await
     }
 }
 
@@ -59,6 +68,15 @@ pub fn portable_data_dir() -> std::path::PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+// ── TOFU Host Key Verification ───────────────────
+static PENDING_HOST_VERIFY: StdMutex<Option<oneshot::Sender<bool>>> = StdMutex::new(None);
+
+#[derive(Clone, serde::Serialize)]
+struct HostKeyVerifyPayload {
+    host: String,
+    fingerprint: String,
 }
 
 // ─── Event Payloads ────────────────────────────────
@@ -131,10 +149,19 @@ pub fn forget_known_host(host: &str, port: u16) {
     }
 }
 
+#[tauri::command]
+pub fn confirm_host_key(accepted: bool) {
+    let mut pending = PENDING_HOST_VERIFY.lock().unwrap();
+    if let Some(tx) = pending.take() {
+        let _ = tx.send(accepted);
+    }
+}
+
 // ─── SSH Handler ───────────────────────────────────
 
 pub struct SshHandler {
     host_key: String,
+    app: Option<tauri::AppHandle>,
 }
 
 #[async_trait::async_trait]
@@ -150,10 +177,40 @@ impl client::Handler for SshHandler {
 
         match hosts.get(&self.host_key) {
             None => {
-                eprintln!("[SSH] New host {}: fingerprint {fingerprint}", self.host_key);
-                hosts.insert(self.host_key.clone(), fingerprint);
-                save_known_hosts(&hosts);
-                Ok(true)
+                if let Some(ref app) = self.app {
+                    // Create oneshot channel for user response
+                    let (tx, rx) = oneshot::channel();
+                    {
+                        let mut pending = PENDING_HOST_VERIFY.lock().unwrap();
+                        *pending = Some(tx);
+                    }
+
+                    // Emit event to frontend
+                    app.emit("ssh-host-key-verify", HostKeyVerifyPayload {
+                        host: self.host_key.clone(),
+                        fingerprint: fingerprint.clone(),
+                    }).ok();
+
+                    // Wait for user response with 60-second timeout
+                    let accepted = tokio::time::timeout(
+                        std::time::Duration::from_secs(60),
+                        rx,
+                    ).await
+                        .unwrap_or(Ok(false))   // timeout -> reject
+                        .unwrap_or(false);       // channel dropped -> reject
+
+                    if accepted {
+                        hosts.insert(self.host_key.clone(), fingerprint);
+                        save_known_hosts(&hosts);
+                    }
+                    Ok(accepted)
+                } else {
+                    // No AppHandle (e.g. test context) — auto-accept
+                    eprintln!("[SSH] New host {}: fingerprint {fingerprint} (auto-accepted, no UI)", self.host_key);
+                    hosts.insert(self.host_key.clone(), fingerprint);
+                    save_known_hosts(&hosts);
+                    Ok(true)
+                }
             }
             Some(stored) if stored == &fingerprint => {
                 eprintln!("[SSH] Host {} fingerprint verified", self.host_key);
@@ -169,6 +226,46 @@ impl client::Handler for SshHandler {
             }
         }
     }
+}
+
+// ─── Shared SSH helpers ──────────────────────────────
+
+/// Detect whether the SSH session is root. Returns "" if root, "sudo " otherwise.
+pub async fn detect_sudo(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+) -> &'static str {
+    let (whoami, _) = exec_command(handle, app, "whoami")
+        .await
+        .unwrap_or_default();
+    if whoami.trim() == "root" { "" } else { "sudo " }
+}
+
+/// Build a complete client TOML config wrapping an endpoint section.
+/// `source_comment` is embedded in the file header (e.g. "Setup Wizard", "server 1.2.3.4").
+/// Applies anti_dpi=true normalization automatically.
+pub fn build_client_config(endpoint_section: &str, source_comment: &str) -> String {
+    let config = format!(
+        r#"# TrustTunnel Client Configuration
+# {source_comment}
+
+loglevel = "info"
+vpn_mode = "general"
+killswitch_enabled = true
+killswitch_allow_ports = [67, 68]
+post_quantum_group_enabled = true
+
+[endpoint]
+{endpoint_section}
+
+[listener.tun]
+mtu_size = 1280
+change_system_dns = true
+included_routes = ["0.0.0.0/0"]
+excluded_routes = []
+"#
+    );
+    config.replace("anti_dpi = false", "anti_dpi = true")
 }
 
 // ─── Helpers ───────────────────────────────────────
@@ -210,6 +307,7 @@ pub async fn ssh_connect(
     ssh_password: &str,
     key_path: Option<&str>,
     key_data: Option<&str>,
+    app: Option<tauri::AppHandle>,
 ) -> Result<client::Handle<SshHandler>, String> {
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(300)),
@@ -218,6 +316,7 @@ pub async fn ssh_connect(
 
     let connect_fut = client::connect(config, (host, port), SshHandler {
         host_key: format!("{host}:{port}"),
+        app,
     });
     let mut handle = tokio::time::timeout(
         std::time::Duration::from_secs(15),

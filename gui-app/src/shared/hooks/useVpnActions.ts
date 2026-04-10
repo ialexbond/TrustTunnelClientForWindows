@@ -65,10 +65,7 @@ export function useVpnActions({
       }, 5000);
     });
 
-    // Small delay to let the sidecar process fully terminate
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Now reconnect
+    // Reconnect immediately — sidecar is already terminated when disconnect event fires
     await handleConnect();
   }, [status, handleDisconnect, handleConnect, reconnectResolve]);
 

@@ -1,11 +1,11 @@
 use crate::ssh;
 
-// ─── Macro to eliminate SshParams boilerplate ──────────────────────
+// ─── Macro to eliminate SshParams boilerplate (direct connect) ─────
 
 /// Generates a `#[tauri::command]` that constructs `SshParams` from the
 /// standard (host, port, user, password, key_path) arguments and delegates
-/// to an `ssh::` function.  Extra parameters can be appended after the
-/// method path.
+/// to an `ssh::` function.  Used for long-running / one-shot commands
+/// (deploy, install, upgrade, uninstall) that should NOT reuse pooled connections.
 macro_rules! ssh_command {
     ($name:ident, $method:path $(, $extra_param:ident : $extra_type:ty)*) => {
         #[tauri::command]
@@ -25,47 +25,115 @@ macro_rules! ssh_command {
     };
 }
 
-// ─── SSH commands using the macro ──────────────────────────────────
+// ─── Macro for pooled SSH commands ────────────────────────────────
+
+/// Like `ssh_command!` but uses the SshPool to reuse persistent connections.
+/// Acquires a connection from the pool (creating one if needed) and passes
+/// `&Handle` to the server function. Does NOT disconnect after — pool manages lifecycle.
+macro_rules! ssh_pool_command {
+    ($name:ident, $method:path $(, $extra_param:ident : $extra_type:ty)*) => {
+        #[tauri::command]
+        pub async fn $name(
+            app: tauri::AppHandle,
+            pool: tauri::State<'_, crate::ssh::SshPool>,
+            host: String,
+            port: u16,
+            user: String,
+            password: String,
+            key_path: Option<String>,
+            key_data: Option<String>,
+            $($extra_param: $extra_type,)*
+        ) -> Result<serde_json::Value, String> {
+            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+            let handle = pool.acquire(&params, Some(app.clone())).await?;
+            let result = $method(&app, &*handle $(, $extra_param)*).await?;
+            serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+        }
+    };
+}
+
+// ─── Direct-connect commands (long-running / one-shot) ────────────
 
 ssh_command!(deploy_server, ssh::deploy_server, settings: ssh::EndpointSettings);
 ssh_command!(diagnose_server, ssh::diagnose_server);
 ssh_command!(check_server_installation, ssh::check_server_installation);
 ssh_command!(uninstall_server, ssh::uninstall_server);
 ssh_command!(fetch_server_config, ssh::fetch_server_config, client_name: String);
-ssh_command!(add_server_user, ssh::add_server_user, vpn_username: String, vpn_password: String);
-ssh_command!(server_restart_service, ssh::server_restart_service);
-ssh_command!(server_stop_service, ssh::server_stop_service);
-ssh_command!(server_start_service, ssh::server_start_service);
-ssh_command!(server_reboot, ssh::server_reboot);
-ssh_command!(server_get_logs, ssh::server_get_logs);
-ssh_command!(server_remove_user, ssh::server_remove_user, vpn_username: String);
-ssh_command!(server_get_config, ssh::get_server_config);
-ssh_command!(server_get_cert_info, ssh::get_cert_info);
-ssh_command!(server_renew_cert, ssh::renew_cert);
-ssh_command!(server_update_config_feature, ssh::update_config_feature, feature: String, enabled: bool);
-ssh_command!(server_export_config_deeplink, ssh::export_config_deeplink, client_name: String);
-ssh_command!(server_get_stats, ssh::server_get_stats);
 ssh_command!(server_upgrade, ssh::server_upgrade, version: String);
 
-// ─── Security commands ────────────────────────────────────────────
-ssh_command!(security_get_status, ssh::get_security_status);
-ssh_command!(security_install_fail2ban, ssh::install_fail2ban);
-ssh_command!(security_uninstall_fail2ban, ssh::uninstall_fail2ban);
-ssh_command!(security_start_fail2ban, ssh::start_fail2ban);
-ssh_command!(security_stop_fail2ban, ssh::stop_fail2ban);
-ssh_command!(security_start_firewall, ssh::start_firewall);
-ssh_command!(security_stop_firewall, ssh::stop_firewall);
-ssh_command!(security_fail2ban_unban, ssh::fail2ban_unban, jail: String, ip: String);
-ssh_command!(security_fail2ban_ban, ssh::fail2ban_ban, jail: String, ip: String);
-ssh_command!(security_fail2ban_set_jail, ssh::fail2ban_set_jail_config, jail: String, config: ssh::JailConfigUpdate);
-ssh_command!(security_fail2ban_tail_log, ssh::fail2ban_tail_log, lines: u32);
-ssh_command!(security_install_firewall, ssh::install_firewall, keep_http_open: bool);
-ssh_command!(security_uninstall_firewall, ssh::uninstall_firewall);
-ssh_command!(security_firewall_add_rule, ssh::firewall_add_rule, rule: ssh::NewFirewallRule);
-ssh_command!(security_firewall_delete_rule, ssh::firewall_delete_rule, number: u32);
-ssh_command!(security_firewall_set_logging, ssh::firewall_set_logging, level: String);
-ssh_command!(security_firewall_tail_log, ssh::firewall_tail_log, lines: u32);
-ssh_command!(security_firewall_set_http_port, ssh::firewall_set_http_port, open: bool);
+// ─── Pooled server management commands ────────────────────────────
+
+ssh_pool_command!(server_get_stats, ssh::server_get_stats);
+ssh_pool_command!(server_get_config, ssh::get_server_config);
+ssh_pool_command!(server_get_cert_info, ssh::get_cert_info);
+ssh_pool_command!(server_get_logs, ssh::server_get_logs);
+ssh_pool_command!(server_renew_cert, ssh::renew_cert);
+ssh_pool_command!(server_update_config_feature, ssh::update_config_feature, feature: String, enabled: bool);
+ssh_pool_command!(server_export_config_deeplink, ssh::export_config_deeplink, client_name: String);
+ssh_pool_command!(server_restart_service, ssh::server_restart_service);
+ssh_pool_command!(server_stop_service, ssh::server_stop_service);
+ssh_pool_command!(server_start_service, ssh::server_start_service);
+ssh_pool_command!(server_reboot, ssh::server_reboot);
+ssh_pool_command!(server_remove_user, ssh::server_remove_user, vpn_username: String);
+ssh_pool_command!(add_server_user, ssh::add_server_user, vpn_username: String, vpn_password: String);
+
+// ─── Pooled security commands ─────────────────────────────────────
+
+// security_get_status and security_install_firewall are manual because they
+// need `port` (the SSH port) passed as an extra parameter to the server function,
+// but `port` is already part of the standard SSH params (no extra frontend field needed).
+
+#[tauri::command]
+pub async fn security_get_status(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    let result = ssh::get_security_status(&app, &*handle, port).await?;
+    serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+}
+
+#[tauri::command]
+pub async fn security_install_firewall(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+    keep_http_open: bool,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::install_firewall(&app, &*handle, port, keep_http_open).await?;
+    Ok(serde_json::Value::Null)
+}
+
+ssh_pool_command!(security_install_fail2ban, ssh::install_fail2ban);
+ssh_pool_command!(security_uninstall_fail2ban, ssh::uninstall_fail2ban);
+ssh_pool_command!(security_start_fail2ban, ssh::start_fail2ban);
+ssh_pool_command!(security_stop_fail2ban, ssh::stop_fail2ban);
+ssh_pool_command!(security_start_firewall, ssh::start_firewall);
+ssh_pool_command!(security_stop_firewall, ssh::stop_firewall);
+ssh_pool_command!(security_fail2ban_unban, ssh::fail2ban_unban, jail: String, ip: String);
+ssh_pool_command!(security_fail2ban_ban, ssh::fail2ban_ban, jail: String, ip: String);
+ssh_pool_command!(security_fail2ban_set_jail, ssh::fail2ban_set_jail_config, jail: String, config: ssh::JailConfigUpdate);
+ssh_pool_command!(security_fail2ban_tail_log, ssh::fail2ban_tail_log, lines: u32);
+ssh_pool_command!(security_uninstall_firewall, ssh::uninstall_firewall);
+ssh_pool_command!(security_firewall_add_rule, ssh::firewall_add_rule, rule: ssh::NewFirewallRule);
+ssh_pool_command!(security_firewall_delete_rule, ssh::firewall_delete_rule, number: u32);
+ssh_pool_command!(security_firewall_set_logging, ssh::firewall_set_logging, level: String);
+ssh_pool_command!(security_firewall_tail_log, ssh::firewall_tail_log, lines: u32);
+ssh_pool_command!(security_firewall_set_http_port, ssh::firewall_set_http_port, open: bool);
 
 // ─── Non-macro SSH commands ────────────────────────────────────────
 
@@ -79,10 +147,45 @@ pub fn forget_ssh_host_key(host: String, port: u16) {
     ssh::forget_known_host(&host, port);
 }
 
-// ─── SSH Credential Storage (file-based, not localStorage) ─────────
+// ─── SSH Credential Storage (keyring + JSON metadata) ────────────
+
+use base64::Engine;
+use keyring::Entry;
+
+const KEYRING_SERVICE: &str = "TrustTunnel";
 
 fn ssh_creds_path() -> std::path::PathBuf {
     ssh::portable_data_dir().join("ssh_credentials.json")
+}
+
+fn keyring_key(host: &str, port: &str, user: &str) -> String {
+    format!("ssh-{host}:{port}-{user}")
+}
+
+fn keyring_save(host: &str, port: &str, user: &str, password: &str) -> Result<(), String> {
+    let key = keyring_key(host, port, user);
+    let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
+    entry.set_password(password).map_err(|e| format!("Cannot store password: {e}"))?;
+    Ok(())
+}
+
+fn keyring_load(host: &str, port: &str, user: &str) -> Result<Option<String>, String> {
+    let key = keyring_key(host, port, user);
+    let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
+    match entry.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Cannot load password: {e}")),
+    }
+}
+
+fn keyring_clear(host: &str, port: &str, user: &str) -> Result<(), String> {
+    let key = keyring_key(host, port, user);
+    let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("Cannot clear password: {e}")),
+    }
 }
 
 #[tauri::command]
@@ -93,11 +196,15 @@ pub fn save_ssh_credentials(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
+    // Store password in Windows Credential Manager (DPAPI-backed)
+    if !password.is_empty() {
+        keyring_save(&host, &port, &user, &password)?;
+    }
+    // Store metadata only in JSON (no password)
     let data = serde_json::json!({
         "host": host,
         "port": port,
         "user": user,
-        "password": password, // already obfuscated (b64:...) by frontend
         "keyPath": key_path.unwrap_or_default(),
     });
     std::fs::write(ssh_creds_path(), serde_json::to_string_pretty(&data).unwrap_or_default())
@@ -106,13 +213,65 @@ pub fn save_ssh_credentials(
 
 #[tauri::command]
 pub fn load_ssh_credentials() -> Option<serde_json::Value> {
-    std::fs::read_to_string(ssh_creds_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+    let path = ssh_creds_path();
+    let content = std::fs::read_to_string(&path).ok()?;
+    let mut obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&content).ok()?;
+
+    let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let port = obj.get("port").and_then(|v| v.as_str()).unwrap_or("22").to_string();
+    let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("root").to_string();
+
+    // Migration: if JSON still has a "password" field, move it to keyring
+    if let Some(pwd_val) = obj.remove("password") {
+        if let Some(pwd_str) = pwd_val.as_str() {
+            if !pwd_str.is_empty() {
+                let decoded = if pwd_str.starts_with("b64:") {
+                    // Decode base64-obfuscated password
+                    base64::engine::general_purpose::STANDARD
+                        .decode(&pwd_str[4..])
+                        .ok()
+                        .and_then(|bytes| String::from_utf8(bytes).ok())
+                        .unwrap_or_else(|| pwd_str.to_string())
+                } else {
+                    // Plaintext legacy password
+                    pwd_str.to_string()
+                };
+                // Store decoded password in keyring (best-effort migration)
+                let _ = keyring_save(&host, &port, &user, &decoded);
+                // Rewrite JSON without password field
+                let _ = std::fs::write(&path, serde_json::to_string_pretty(&obj).unwrap_or_default());
+            }
+        }
+    }
+
+    // Load password from keyring
+    let password = keyring_load(&host, &port, &user).ok().flatten().unwrap_or_default();
+
+    // Return combined object with password from keyring + metadata from JSON
+    let mut result = serde_json::Map::new();
+    result.insert("host".into(), serde_json::Value::String(host));
+    result.insert("port".into(), serde_json::Value::String(port));
+    result.insert("user".into(), serde_json::Value::String(user));
+    result.insert("password".into(), serde_json::Value::String(password));
+    result.insert(
+        "keyPath".into(),
+        obj.get("keyPath").cloned().unwrap_or(serde_json::Value::String(String::new())),
+    );
+
+    Some(serde_json::Value::Object(result))
 }
 
 #[tauri::command]
 pub fn clear_ssh_credentials() {
+    // Read JSON to get host/port/user for keyring cleanup
+    if let Ok(content) = std::fs::read_to_string(ssh_creds_path()) {
+        if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content) {
+            let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default();
+            let port = obj.get("port").and_then(|v| v.as_str()).unwrap_or("22");
+            let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("root");
+            let _ = keyring_clear(host, port, user);
+        }
+    }
     let _ = std::fs::remove_file(ssh_creds_path());
 }
 

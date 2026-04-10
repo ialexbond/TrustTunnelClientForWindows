@@ -232,7 +232,7 @@ describe("ServerStep", () => {
     const w = makeWizardState({ step: "server" });
     render(<ServerStep {...w} />);
     fireEvent.click(screen.getByText(i18n.t("control.auth_key")));
-    expect(screen.getByText(i18n.t("control.key_file"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("control.key_from_file"))).toBeInTheDocument();
   });
 
   // ── Password label ──
