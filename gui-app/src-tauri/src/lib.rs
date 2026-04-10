@@ -338,6 +338,10 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                // Disconnect pooled SSH connection
+                if let Some(pool) = app.try_state::<ssh::SshPool>() {
+                    tauri::async_runtime::block_on(pool.invalidate());
+                }
                 // Final cleanup: kill only our own sidecar (not other app's processes)
                 if let Some(state) = app.try_state::<AppState>() {
                     kill_sidecar_from_state(&state);
