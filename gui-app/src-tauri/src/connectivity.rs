@@ -82,8 +82,8 @@ pub fn start_monitor(
                             break;
                         }
 
-                        // Give up after 5 minutes of waiting
-                        if adapter_wait > 60 {
+                        // Give up after 5 minutes of waiting (60 checks × 5 s)
+                        if adapter_wait >= 60 {
                             eprintln!("[connectivity] Gave up waiting for adapter after 5 minutes");
                             log_app("WARN", "[connectivity] Gave up waiting for adapter after 5 minutes");
                             app.emit("internet-status", serde_json::json!({
