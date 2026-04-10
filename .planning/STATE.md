@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | 4. Rust Unit Tests | COMPLETE | 54 tests: security validators, config, deploy, logging |
 | 5. Connectivity Bypass | COMPLETE | socket2+ipconfig bind to physical adapter |
 | 6. SSH Connection Pool | COMPLETE | SshPool with Arc<Handle>, channel keepalive, 29 pooled commands |
-| 7. Keyring Migration | NOT STARTED | |
+| 7. Keyring Migration | COMPLETE | keyring 3.6, obfuscation.ts deleted, DPAPI credential storage |
 | 8. TOFU Confirmation | NOT STARTED | |
 | 9. Frontend CI + SecuritySection | NOT STARTED | |
 
@@ -86,6 +86,16 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 - Pool invalidated on RunEvent::Exit
 - cargo check passes, 35 tests pass
 
+### Phase 7 (2026-04-10)
+- Added keyring 3.6 (windows-native) to Cargo.toml
+- Rewrote save/load/clear_ssh_credentials to use Windows Credential Manager (DPAPI)
+- JSON file now stores only metadata (host, port, user, keyPath) -- no password
+- Auto-migration: b64-encoded and plaintext passwords in JSON moved to keyring on first load
+- Deleted obfuscation.ts from frontend
+- Removed all obfuscate/deobfuscate calls from 9 frontend files
+- Frontend sends plaintext password over internal Tauri IPC
+- Updated 4 test files (127 tests passing)
+
 ## Decisions Log
 
 | Decision | Phase | Rationale |
@@ -105,6 +115,10 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | channel_open_session as keepalive | 6 | send_keepalive is &mut self on Session only, not on Handle |
 | serde_json::Value return for pool macro | 6 | impl Trait incompatible with State<'_> lifetime in Rust 2021 |
 | SshPool as separate managed state | 6 | Avoids coupling with AppState, cleaner macro access |
+| keyring::Entry with service=TrustTunnel | 7 | Isolates credentials per host:port:user combination |
+| Auto-migration on load (not on startup) | 7 | Lazy migration avoids startup penalty, handles edge cases |
+| No fallback to JSON on keyring error | 7 | Propagate error to UI per T-07-04 threat mitigation |
+| Plaintext in localStorage wizard state | 7 | Tauri webview-only access, VPN creds already plaintext in TOML |
 
 ---
-*Last updated: 2026-04-10 after Phase 6 completion*
+*Last updated: 2026-04-10 after Phase 7 completion*

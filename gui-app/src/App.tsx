@@ -23,7 +23,9 @@ import { useSnackBar } from "./shared/ui/SnackBarContext";
 import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
 import { useFileDrop } from "./shared/hooks/useFileDrop";
+import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
 import { DropOverlay } from "./shared/ui/DropOverlay";
+import { ConfirmDialog } from "./shared/ui";
 import { WindowControls } from "./components/layout/WindowControls";
 import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
@@ -73,6 +75,9 @@ function App() {
 
   // ─── Update check ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
+
+  // ─── Host Key Verification (TOFU) ───
+  const { pending: hostKeyPending, respond: hostKeyRespond } = useHostKeyVerification();
 
   // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
   const reconnectResolve = useRef<(() => void) | null>(null);
@@ -502,6 +507,24 @@ function App() {
       </div>
       </div>{/* /App body */}
     </div>
+
+    <ConfirmDialog
+      open={hostKeyPending !== null}
+      title={i18n.t("hostKey.title")}
+      message={
+        hostKeyPending
+          ? i18n.t("hostKey.message", {
+              host: hostKeyPending.host,
+              fingerprint: hostKeyPending.fingerprint,
+            })
+          : ""
+      }
+      confirmLabel={i18n.t("hostKey.accept")}
+      cancelLabel={i18n.t("hostKey.reject")}
+      variant="warning"
+      onConfirm={() => hostKeyRespond(true)}
+      onCancel={() => hostKeyRespond(false)}
+    />
 
     </VpnProvider>
   );
