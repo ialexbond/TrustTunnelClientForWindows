@@ -22,7 +22,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | 3. Async Logging | COMPLETE | mpsc channel, batched writes, sanitize loop fix |
 | 4. Rust Unit Tests | COMPLETE | 54 tests: security validators, config, deploy, logging |
 | 5. Connectivity Bypass | COMPLETE | socket2+ipconfig bind to physical adapter |
-| 6. SSH Connection Pool | NOT STARTED | |
+| 6. SSH Connection Pool | COMPLETE | SshPool with Arc<Handle>, channel keepalive, 29 pooled commands |
 | 7. Keyring Migration | NOT STARTED | |
 | 8. TOFU Confirmation | NOT STARTED | |
 | 9. Frontend CI + SecuritySection | NOT STARTED | |
@@ -75,6 +75,17 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 - Fallback to default routing when no physical adapter found
 - cargo check passes, start_monitor() public API unchanged
 
+### Phase 6 (2026-04-10)
+- Created `gui-app/src-tauri/src/ssh/pool.rs` -- SshPool with Arc<TokioMutex<Option<CachedSsh>>>
+- acquire() reuses cached connection if same server and alive, disconnects old on server switch
+- channel_open_session keepalive probe every 60s (send_keepalive not on Handle)
+- Added ssh_pool_command! macro returning serde_json::Value (impl Trait incompatible with State<'_>)
+- Switched 29 server management commands to pooled connections
+- Kept 6 commands on direct connect: deploy, diagnose, check_installation, uninstall, fetch_config, upgrade
+- Manual commands for security_get_status and install_firewall (forward SSH port param)
+- Pool invalidated on RunEvent::Exit
+- cargo check passes, 35 tests pass
+
 ## Decisions Log
 
 | Decision | Phase | Rationale |
@@ -90,6 +101,10 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 | socket2 connect_timeout in spawn_blocking | 5 | Avoids async TcpStream complexity, clean blocking approach |
 | ipconfig crate for adapter enumeration | 5 | Windows-native, exposes if_type and oper_status |
 | Dual filter (if_type + description) for VPN exclusion | 5 | Robust: if_type catches known types, description catches edge cases |
+| Arc<Handle> for shared pool ownership | 6 | Handle is not Clone; Arc enables shared access across commands |
+| channel_open_session as keepalive | 6 | send_keepalive is &mut self on Session only, not on Handle |
+| serde_json::Value return for pool macro | 6 | impl Trait incompatible with State<'_> lifetime in Rust 2021 |
+| SshPool as separate managed state | 6 | Avoids coupling with AppState, cleaner macro access |
 
 ---
-*Last updated: 2026-04-10 after Phase 5 completion*
+*Last updated: 2026-04-10 after Phase 6 completion*

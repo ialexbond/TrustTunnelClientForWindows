@@ -78,16 +78,20 @@ Plans:
 - [ ] Fallback to default routing if no physical adapter found
 
 ## Phase 6: SSH Connection Pool
-**Status:** NOT STARTED
+**Status:** PLANNED
 **Goal:** Persistent SSH connections for server management (eliminate 200-500ms per request)
 **Requires:** PERF-02
 **Depends on:** Phase 2 (detect_sudo centralized)
 **Estimated effort:** 4-5h
+**Plans:** 1 plan
+
+Plans:
+- [x] 06-01-PLAN.md — SshPool module, ssh_pool_command! macro, server function migration, keepalive
 
 - [ ] Create SshPool with Arc<TokioMutex<Option<CachedSsh>>>
 - [ ] acquire()/invalidate() methods with is_closed() check
 - [ ] Keepalive task (send_keepalive every 60s)
-- [ ] Add SshPool to AppState
+- [ ] Add SshPool as Tauri managed state
 - [ ] Server management commands use pool; deploy uses direct connect
 
 ## Phase 7: Credential Storage — Keyring Migration
@@ -139,7 +143,7 @@ Plans:
 | 3. Async Logging | PLANNED | PERF-01 | 2-3h |
 | 4. Rust Unit Tests | 1/1 | Complete   | 2026-04-10 |
 | 5. Connectivity Bypass | PLANNED | FIX-03 | 2-3h |
-| 6. SSH Connection Pool | NOT STARTED | PERF-02 | 4-5h |
+| 6. SSH Connection Pool | PLANNED | PERF-02 | 4-5h |
 | 7. Keyring Migration | NOT STARTED | SEC-04 | 3-4h |
 | 8. TOFU Confirmation | NOT STARTED | SEC-05 | 3-4h |
 | 9. Frontend CI + SecuritySection | NOT STARTED | TEST-02,03 | 4-5h |
@@ -148,4 +152,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-04-10*
-*Last updated: 2026-04-10 after Phase 5 planning*
+*Last updated: 2026-04-10 after Phase 6 planning*
