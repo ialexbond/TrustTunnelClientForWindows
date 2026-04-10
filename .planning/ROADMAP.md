@@ -27,7 +27,10 @@ Restore connectivity bypass (lost in v2.4.0 catch-all commit), add markdown rend
   3. HTTP checks use reqwest with local_address set to the physical adapter IP
   4. When no physical adapter is found, app falls back to default routing without crashing
   5. Connectivity monitor does not trigger false VPN reconnects while VPN is active
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 01-01-PLAN.md — Version bump, add socket2/ipconfig deps, restore gui-app connectivity.rs from 798ce8e7 with verbose logging
+- [ ] 01-02-PLAN.md — Port socket2 connectivity bypass to gui-light (Light timing profile), verify both editions compile
 
 ### Phase 2: Update UX
 **Goal**: Users can read formatted release notes in the update dialog
@@ -65,7 +68,7 @@ Restore connectivity bypass (lost in v2.4.0 catch-all commit), add markdown rend
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Connectivity Bypass | 0/TBD | Not started | - |
+| 1. Connectivity Bypass | 0/2 | Planning complete | - |
 | 2. Update UX | 0/TBD | Not started | - |
 | 3. Credential Generator | 0/TBD | Not started | - |
 | 4. Release | 0/TBD | Not started | - |
