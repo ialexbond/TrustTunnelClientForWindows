@@ -362,6 +362,108 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
     Ok(())
 }
 
+// ═══════════════════════════════════════════════════════════════
+//   Tests
+// ═══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_minimal_config() {
+        let toml = r#"
+loglevel = "debug"
+vpn_mode = "proxy"
+killswitch_enabled = false
+"#;
+        let config = ClientConfig::validate(toml).unwrap();
+        assert_eq!(config.loglevel, "debug");
+        assert_eq!(config.vpn_mode, "proxy");
+        assert!(!config.killswitch_enabled);
+    }
+
+    #[test]
+    fn test_validate_invalid_toml() {
+        let result = ClientConfig::validate("this is not TOML {{{");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_defaults() {
+        // Empty string parses as empty TOML table — all fields get defaults
+        let config = ClientConfig::validate("").unwrap();
+        assert_eq!(config.loglevel, "info");
+        assert_eq!(config.vpn_mode, "general");
+        assert!(config.killswitch_enabled);
+        assert!(config.post_quantum_group_enabled);
+    }
+
+    #[test]
+    fn test_validate_preserves_unknown_keys() {
+        let toml = r#"
+loglevel = "info"
+vpn_mode = "general"
+killswitch_enabled = true
+some_future_key = "value"
+"#;
+        let config = ClientConfig::validate(toml).unwrap();
+        assert!(config.extra.contains_key("some_future_key"));
+        assert_eq!(
+            config.extra["some_future_key"],
+            toml::Value::String("value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_default_has_dhcp_ports() {
+        let config = ClientConfig::default();
+        assert!(config.killswitch_allow_ports.contains(&67));
+        assert!(config.killswitch_allow_ports.contains(&68));
+    }
+
+    #[test]
+    fn test_ensure_dhcp_ports_adds_missing() {
+        let mut config = ClientConfig::default();
+        config.killswitch_allow_ports.clear();
+        assert!(!config.killswitch_allow_ports.contains(&67));
+        config.ensure_dhcp_ports();
+        assert!(config.killswitch_allow_ports.contains(&67));
+        assert!(config.killswitch_allow_ports.contains(&68));
+    }
+
+    #[test]
+    fn test_ensure_dhcp_ports_idempotent() {
+        let mut config = ClientConfig::default();
+        config.ensure_dhcp_ports();
+        let len = config.killswitch_allow_ports.len();
+        config.ensure_dhcp_ports(); // call again
+        assert_eq!(config.killswitch_allow_ports.len(), len); // no duplicates
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let toml_input = r#"
+loglevel = "warn"
+vpn_mode = "proxy"
+killswitch_enabled = false
+killswitch_allow_ports = [80, 443, 67, 68]
+post_quantum_group_enabled = false
+custom_field = 42
+"#;
+        let config1 = ClientConfig::validate(toml_input).unwrap();
+        let serialized = toml::to_string_pretty(&config1).unwrap();
+        let config2 = ClientConfig::validate(&serialized).unwrap();
+
+        assert_eq!(config1.loglevel, config2.loglevel);
+        assert_eq!(config1.vpn_mode, config2.vpn_mode);
+        assert_eq!(config1.killswitch_enabled, config2.killswitch_enabled);
+        assert_eq!(config1.killswitch_allow_ports, config2.killswitch_allow_ports);
+        assert_eq!(config1.post_quantum_group_enabled, config2.post_quantum_group_enabled);
+        assert!(config2.extra.contains_key("custom_field"));
+    }
+}
+
 /// Result of importing a dropped file — either a VPN config or routing rules.
 #[derive(Serialize)]
 pub struct ImportDropResult {
