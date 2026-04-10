@@ -23,6 +23,10 @@ pub struct Endpoint {
     pub anti_dpi: bool,
     #[serde(default)]
     pub custom_sni: String,
+    #[serde(default)]
+    pub dns_upstreams: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Endpoint {
@@ -94,6 +98,17 @@ impl Endpoint {
         "Custom SNI value for TLS handshake.\n\
          If set, this value is used as the TLS SNI instead of the hostname."
     }
+
+    pub fn doc_dns_upstreams() -> &'static str {
+        "DNS upstreams. Default: AdGuard DNS unfiltered.\n\
+         One of the following kinds:\n\
+           * 8.8.8.8:53 -- plain DNS\n\
+           * tcp://8.8.8.8:53 -- plain DNS over TCP\n\
+           * tls://1.1.1.1 -- DNS-over-TLS\n\
+           * https://dns.adguard.com/dns-query -- DNS-over-HTTPS\n\
+           * sdns://... -- DNS stamp (see https://dnscrypt.info/stamps-specifications)\n\
+           * quic://dns.adguard.com:8853 -- DNS-over-QUIC"
+    }
 }
 
 /// Convert a decoded [`DeepLinkConfig`] into an [`Endpoint`] ready for TOML
@@ -118,6 +133,8 @@ pub fn endpoint_from_deeplink_config(config: DeepLinkConfig) -> Result<Endpoint,
         upstream_protocol: config.upstream_protocol.to_string(),
         anti_dpi: config.anti_dpi,
         custom_sni: config.custom_sni.unwrap_or_default(),
+        dns_upstreams: config.dns_upstreams,
+        name: config.name,
     })
 }
 
@@ -140,6 +157,8 @@ mod tests {
             certificate: None,
             upstream_protocol: Protocol::Http2,
             anti_dpi: false,
+            dns_upstreams: vec!["tls://dns.adguard-dns.com".to_string()],
+            name: Some("Example VPN".to_string()),
         };
 
         let ep = endpoint_from_deeplink_config(config).unwrap();
@@ -154,6 +173,8 @@ mod tests {
         assert!(ep.certificate.is_none());
         assert_eq!(ep.upstream_protocol, "http2");
         assert!(!ep.anti_dpi);
+        assert_eq!(ep.dns_upstreams, vec!["tls://dns.adguard-dns.com"]);
+        assert_eq!(ep.name, Some("Example VPN".to_string()));
     }
 
     #[test]
@@ -170,6 +191,8 @@ mod tests {
             certificate: None,
             upstream_protocol: Protocol::Http3,
             anti_dpi: true,
+            dns_upstreams: vec![],
+            name: None,
         };
 
         let ep = endpoint_from_deeplink_config(config).unwrap();
@@ -177,5 +200,87 @@ mod tests {
         assert_eq!(ep.custom_sni, "");
         assert_eq!(ep.upstream_protocol, "http3");
         assert!(ep.anti_dpi);
+        assert!(ep.dns_upstreams.is_empty());
+        assert_eq!(ep.name, None);
+    }
+
+    #[test]
+    fn test_roundtrip_with_dns_upstreams_and_name() {
+        let config = DeepLinkConfig {
+            hostname: "vpn.example.com".to_string(),
+            addresses: vec!["1.2.3.4:443".to_string()],
+            username: "alice".to_string(),
+            password: "s3cr3t".to_string(),
+            client_random_prefix: None,
+            custom_sni: None,
+            has_ipv6: true,
+            skip_verification: false,
+            certificate: None,
+            upstream_protocol: Protocol::Http2,
+            anti_dpi: false,
+            dns_upstreams: vec!["tls://dns.adguard-dns.com".to_string()],
+            name: Some("Example VPN".to_string()),
+        };
+
+        let uri = trusttunnel_deeplink::encode(&config).unwrap();
+        let decoded = trusttunnel_deeplink::decode(&uri).unwrap();
+        let ep = endpoint_from_deeplink_config(decoded).unwrap();
+
+        assert_eq!(ep.dns_upstreams, vec!["tls://dns.adguard-dns.com"]);
+        assert_eq!(ep.name, Some("Example VPN".to_string()));
+    }
+
+    #[test]
+    fn test_roundtrip_without_dns_upstreams() {
+        let config = DeepLinkConfig {
+            hostname: "vpn.example.com".to_string(),
+            addresses: vec!["1.2.3.4:443".to_string()],
+            username: "alice".to_string(),
+            password: "s3cr3t".to_string(),
+            client_random_prefix: None,
+            custom_sni: None,
+            has_ipv6: true,
+            skip_verification: false,
+            certificate: None,
+            upstream_protocol: Protocol::Http2,
+            anti_dpi: false,
+            dns_upstreams: vec![],
+            name: None,
+        };
+
+        let uri = trusttunnel_deeplink::encode(&config).unwrap();
+        let decoded = trusttunnel_deeplink::decode(&uri).unwrap();
+        let ep = endpoint_from_deeplink_config(decoded).unwrap();
+
+        assert!(ep.dns_upstreams.is_empty());
+        assert_eq!(ep.name, None);
+    }
+
+    #[test]
+    fn test_toml_deserialization_absent_fields() {
+        let toml_str = r#"
+            hostname = "vpn.example.com"
+            addresses = ["1.2.3.4:443"]
+            username = "alice"
+            password = "s3cr3t"
+        "#;
+        let ep: Endpoint = toml::from_str(toml_str).unwrap();
+        assert!(ep.dns_upstreams.is_empty());
+        assert_eq!(ep.name, None);
+    }
+
+    #[test]
+    fn test_toml_deserialization_present_fields() {
+        let toml_str = r#"
+            hostname = "vpn.example.com"
+            addresses = ["1.2.3.4:443"]
+            username = "alice"
+            password = "s3cr3t"
+            dns_upstreams = ["tls://dns.adguard-dns.com"]
+            name = "Example VPN"
+        "#;
+        let ep: Endpoint = toml::from_str(toml_str).unwrap();
+        assert_eq!(ep.dns_upstreams, vec!["tls://dns.adguard-dns.com"]);
+        assert_eq!(ep.name, Some("Example VPN".to_string()));
     }
 }
