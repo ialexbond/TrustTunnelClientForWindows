@@ -1,23 +1,19 @@
 use super::super::*;
+use russh::client;
 
 /// Fetch service logs from the remote server.
 pub async fn server_get_logs(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     let (logs, _) = exec_command(
-        &handle,
+        handle,
         app,
         &format!("{sudo}journalctl -u trusttunnel --no-pager -n 100 2>/dev/null || {sudo}tail -100 {dir}/logs/*.log 2>/dev/null || echo 'No logs found'", dir = ENDPOINT_DIR),
     )
     .await?;
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     Ok(logs)
 }
@@ -25,10 +21,8 @@ pub async fn server_get_logs(
 /// Get server resource stats: CPU, RAM, disk, active VPN connections.
 pub async fn server_get_stats(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<serde_json::Value, String> {
-    let handle = params.connect().await?;
-
     // Single compound command to minimize SSH roundtrips
     // CPU: two /proc/stat samples 1s apart for actual current usage
     let cmd = format!(concat!(
@@ -53,8 +47,7 @@ pub async fn server_get_stats(
         "cat /proc/uptime"
     ), dir = ENDPOINT_DIR);
 
-    let (output, _) = exec_command(&handle, app, &cmd).await?;
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+    let (output, _) = exec_command(handle, app, &cmd).await?;
 
     // Parse output
     let mut cpu_usage: f64 = 0.0;
@@ -153,16 +146,13 @@ pub async fn server_get_stats(
 /// Fetch TLS certificate information from the remote server.
 pub async fn get_cert_info(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<serde_json::Value, String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     // Get hostname from hosts.toml
     let (hostname_raw, _) = exec_command(
-        &handle,
+        handle,
         app,
         &format!(r#"{sudo}grep -oP 'hostname\s*=\s*"\K[^"]+' {dir}/hosts.toml 2>/dev/null | head -1"#, dir = ENDPOINT_DIR),
     )
@@ -171,7 +161,7 @@ pub async fn get_cert_info(
 
     // Get cert path from hosts.toml
     let (cert_path_raw, _) = exec_command(
-        &handle,
+        handle,
         app,
         &format!(r#"{sudo}grep -oP 'cert_chain_path\s*=\s*"\K[^"]+' {dir}/hosts.toml 2>/dev/null | head -1"#, dir = ENDPOINT_DIR),
     )
@@ -187,7 +177,7 @@ pub async fn get_cert_info(
 
     // Get cert details via openssl
     let (cert_info, cert_code) = exec_command(
-        &handle,
+        handle,
         app,
         &format!("{sudo}openssl x509 -enddate -subject -issuer -noout -in {resolved_cert_path} 2>&1"),
     )
@@ -212,14 +202,12 @@ pub async fn get_cert_info(
 
     // Check auto-renewal cron
     let (renew_check, _) = exec_command(
-        &handle,
+        handle,
         app,
         &format!("{sudo}test -f /etc/cron.d/trusttunnel-cert-renew && echo \"true\" || echo \"false\""),
     )
     .await?;
     let auto_renew = renew_check.trim() == "true";
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     Ok(serde_json::json!({
         "hostname": hostname,
@@ -234,18 +222,15 @@ pub async fn get_cert_info(
 /// Force-renew the TLS certificate via certbot and restart the service.
 pub async fn renew_cert(
     app: &tauri::AppHandle,
-    params: SshParams,
+    handle: &client::Handle<SshHandler>,
 ) -> Result<String, String> {
-    let handle = params.connect().await?;
-
-    let (whoami, _) = exec_command(&handle, app, "whoami").await?;
-    let sudo = if whoami.trim() == "root" { "" } else { "sudo " };
+    let sudo = detect_sudo(handle, app).await;
 
     // If UFW is active and port 80 is not currently open, temporarily open it for the
     // HTTP-01 challenge — and remove the rule afterwards. This lets users keep port 80
     // closed in normal operation while still allowing certbot renewals.
     let (ufw_status, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}ufw status 2>/dev/null | head -20"),
     ).await.unwrap_or_default();
     // NOTE: `"inactive".contains("active")` is true — must parse exact value.
@@ -261,13 +246,13 @@ pub async fn renew_cert(
     });
     let temporarily_opened_80 = if ufw_active && !port80_already_open {
         emit_log(app, "info", "UFW: temporarily opening 80/tcp for cert renewal");
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw allow 80/tcp comment 'cert renewal (temporary)'")).await;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 80/tcp comment 'cert renewal (temporary)'")).await;
         true
     } else { false };
 
     // Step 1: Kill stale certbot + run renewal.
     let _ = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}pkill -9 certbot 2>/dev/null; {sudo}rm -f /tmp/.certbot.lock /var/lib/letsencrypt/.certbot.lock 2>/dev/null; true"),
     ).await;
 
@@ -275,7 +260,7 @@ pub async fn renew_cert(
     // timeout 120s prevents certbot from hanging indefinitely (e.g. DNS resolution,
     // ACME server unreachable, rate-limit retry loops).
     let renew_result = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}timeout 120 certbot renew --force-renewal"),
     ).await;
     let certbot_ok = renew_result.as_ref().map(|(_, code)| *code == 0).unwrap_or(false);
@@ -287,7 +272,7 @@ pub async fn renew_cert(
     // Use sed instead of grep -P for POSIX compatibility (grep -P requires PCRE, not
     // available on all minimal server installs).
     let (hostname_raw, _) = exec_command(
-        &handle, app,
+        handle, app,
         &format!(r#"{sudo}sed -n 's/^[[:space:]]*hostname[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' {dir}/hosts.toml 2>/dev/null | head -1"#, dir = ENDPOINT_DIR),
     ).await.unwrap_or_default();
     let hostname = hostname_raw.trim();
@@ -297,7 +282,7 @@ pub async fn renew_cert(
         let tt_dir = ENDPOINT_DIR;
         emit_log(app, "info", &format!("Copying cert from {le_dir} to {tt_dir}/certs/"));
         let (_, cp_code) = exec_command(
-            &handle, app,
+            handle, app,
             &format!("{sudo}cp {le_dir}/fullchain.pem {tt_dir}/certs/cert.pem && {sudo}cp {le_dir}/privkey.pem {tt_dir}/certs/key.pem"),
         ).await.unwrap_or_default();
         if cp_code != 0 {
@@ -311,17 +296,15 @@ pub async fn renew_cert(
     // `--no-block` tells systemd to queue the restart and return immediately —
     // no hanging SSH channel, no nohup/& tricks needed.
     let _ = exec_command(
-        &handle, app,
+        handle, app,
         &format!("{sudo}systemctl --no-block restart trusttunnel"),
     ).await;
 
     // Always close 80/tcp if we opened it — even if the renewal above failed at the SSH level.
     if temporarily_opened_80 {
         emit_log(app, "info", "UFW: closing 80/tcp after cert renewal");
-        let _ = exec_command(&handle, app, &format!("{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true")).await;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true")).await;
     }
-
-    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
     // Return based on certbot's actual exit code.
     if !certbot_ok {
