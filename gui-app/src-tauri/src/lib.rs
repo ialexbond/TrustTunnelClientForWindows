@@ -79,6 +79,7 @@ pub fn run() {
             locale: Arc::new(Mutex::new("ru".to_string())),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
+        .manage(ssh::SshPool::new())
         .setup(|app| {
             // Initialize file logging (if enabled via flag file)
             logging::init_logging();
