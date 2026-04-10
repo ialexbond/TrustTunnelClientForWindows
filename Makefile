@@ -181,3 +181,4 @@ test-cpp: build_libs
 .PHONY: test-rust
 test-rust:
 	cargo test --workspace --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml
+	cargo test --manifest-path gui-app/src-tauri/Cargo.toml
