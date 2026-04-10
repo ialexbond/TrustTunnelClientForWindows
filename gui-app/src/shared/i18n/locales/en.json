@@ -70,7 +70,11 @@
     "uninstall_vpn_from_server": "Uninstall VPN from Server",
     "advanced_settings": "Advanced Settings",
     "no": "No",
-    "speed_test": "Speed Test"
+    "speed_test": "Speed Test",
+    "close": "Close"
+  },
+  "modal": {
+    "changelog_title": "What's new in v{{version}}"
   },
   "labels": {
     "config_file": "Configuration File",
@@ -941,5 +945,11 @@
     "busy_connecting": "Cannot import while connecting",
     "busy_disconnecting": "Cannot import while disconnecting",
     "unsupported_format": "Unsupported file format. Use .toml or .json"
+  },
+  "hostKey": {
+    "title": "New SSH Server",
+    "message": "First connection to {{host}}.\n\nServer key fingerprint:\n{{fingerprint}}\n\nDo you trust this server?",
+    "accept": "Trust",
+    "reject": "Reject"
   }
 }
