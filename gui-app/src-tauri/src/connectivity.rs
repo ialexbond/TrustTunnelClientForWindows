@@ -1,4 +1,5 @@
-use std::net::ToSocketAddrs;
+use socket2::{Socket, Domain, Type, Protocol, SockAddr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Emitter;
@@ -93,6 +94,33 @@ pub fn start_monitor(
             }
         }
     });
+}
+
+/// Find the local IP of the primary physical network adapter (not VPN, not loopback).
+/// Returns None if no suitable adapter found — caller should fall back to default routing.
+fn find_physical_adapter_ip() -> Option<IpAddr> {
+    let adapters = ipconfig::get_adapters().ok()?;
+
+    adapters
+        .iter()
+        .filter(|a| a.oper_status() == ipconfig::OperStatus::IfOperStatusUp)
+        .filter(|a| !a.gateways().is_empty())
+        .filter(|a| {
+            // Only physical adapter types: Ethernet (6) and WiFi (71)
+            // Excludes WinTUN (53), PPP (23), loopback, etc.
+            let if_type = a.if_type();
+            if_type == ipconfig::IfType::EthernetCsmacd
+                || if_type == ipconfig::IfType::Ieee80211
+        })
+        .filter(|a| {
+            let desc = a.description().to_lowercase();
+            !desc.contains("wintun")
+                && !desc.contains("vpn")
+                && !desc.contains("virtual")
+                && !desc.contains("tap-")
+        })
+        .flat_map(|a| a.ip_addresses().iter().copied())
+        .find(|ip| ip.is_ipv4())
 }
 
 /// Check internet connectivity using multiple methods.

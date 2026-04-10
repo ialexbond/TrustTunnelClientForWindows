@@ -38,6 +38,8 @@ sha2 = "0.10"
 trusttunnel-settings = { path = "../../trusttunnel/settings" }
 winreg = "0.55"
 chrono = "0.4"
+ipconfig = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
 
 [profile.release]
 strip = true
