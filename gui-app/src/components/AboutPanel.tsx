@@ -12,7 +12,9 @@ import {
   ArrowUpCircle,
   Heart,
   ExternalLink,
+  FileText,
 } from "lucide-react";
+import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
 import { useSnackBar } from "../shared/ui/SnackBarContext";
@@ -36,6 +38,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
   const pushSuccess = useSnackBar();
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   // Translate update progress message keys from Rust
   const translateProgress = useCallback((payload: UpdateProgressPayload): UpdateProgressPayload => {
@@ -58,13 +61,13 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   }, [translateProgress]);
 
   const handleSelfUpdate = async () => {
-    if (!updateInfo.downloadUrl) return;
+    if (!updateInfo.downloadUrl || !updateInfo.sha256) return;
     setUpdating(true);
     setUpdateProgress({ stage: "download", percent: 0, message: t("status.preparing") });
     try {
       await invoke("self_update", {
         downloadUrl: updateInfo.downloadUrl,
-        expectedSha256: updateInfo.sha256 || null,
+        expectedSha256: updateInfo.sha256,
         language: localStorage.getItem("tt_language") || "ru",
         theme: localStorage.getItem("tt_theme") || "dark",
       });
@@ -169,6 +172,20 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 >
                   <Download className="w-3.5 h-3.5" />
                 </button>
+                {updateInfo.releaseNotes && (
+                  <button
+                    onClick={() => setChangelogOpen(true)}
+                    className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs transition-colors"
+                    style={{
+                      backgroundColor: "var(--color-bg-hover)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                    title={t("buttons.whats_new")}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    {t("buttons.whats_new")}
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -246,6 +263,13 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           </span>
         </div>
       </div>
+
+      <ChangelogModal
+        open={changelogOpen}
+        onClose={() => setChangelogOpen(false)}
+        version={updateInfo.latestVersion ?? version}
+        releaseNotes={updateInfo.releaseNotes ?? ""}
+      />
     </div>
   );
 }
