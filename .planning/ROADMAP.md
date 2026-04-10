@@ -41,8 +41,8 @@ Plans:
   2. Long changelogs scroll within the dialog rather than being truncated
 **Plans**: 2 plans
 Plans:
-- [ ] 02-01-PLAN.md — Add react-markdown dependency to both apps, create ChangelogModal component
-- [ ] 02-02-PLAN.md — Add i18n keys, wire "What's new" button and ChangelogModal into AboutPanel and AboutScreen
+- [x] 02-01-PLAN.md — Add react-markdown dependency to both apps, create ChangelogModal component
+- [x] 02-02-PLAN.md — Add i18n keys, wire "What's new" button and ChangelogModal into AboutPanel and AboutScreen
 
 ### Phase 3: Credential Generator
 **Goal**: Users can generate random credentials directly from VPN user form inputs
