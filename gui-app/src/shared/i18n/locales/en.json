@@ -941,5 +941,11 @@
     "busy_connecting": "Cannot import while connecting",
     "busy_disconnecting": "Cannot import while disconnecting",
     "unsupported_format": "Unsupported file format. Use .toml or .json"
+  },
+  "hostKey": {
+    "title": "New SSH Server",
+    "message": "First connection to {{host}}.\n\nServer key fingerprint:\n{{fingerprint}}\n\nDo you trust this server?",
+    "accept": "Trust",
+    "reject": "Reject"
   }
 }

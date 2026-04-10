@@ -247,6 +247,7 @@ pub fn run() {
             commands::ssh_commands::deploy_server,
             commands::ssh_commands::diagnose_server,
             commands::ssh_commands::forget_ssh_host_key,
+            ssh::confirm_host_key,
             commands::ssh_commands::save_ssh_credentials,
             commands::ssh_commands::load_ssh_credentials,
             commands::ssh_commands::clear_ssh_credentials,
