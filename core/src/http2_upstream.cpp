@@ -825,7 +825,7 @@ int Http2Upstream::verify_callback(X509_STORE_CTX *store_ctx, void *arg) {
             !safe_to_string_view(self->vpn->upstream_config.endpoint->remote_id).empty()
                     ? self->vpn->upstream_config.endpoint->remote_id
                     : self->vpn->upstream_config.endpoint->name,
-            (sockaddr *) &self->vpn->upstream_config.endpoint->address, {cert, chain, ssl},
+            (sockaddr *) &self->vpn->upstream_config.endpoint->address, {cert, chain, ssl, VT_ENDPOINT},
             self->vpn->parameters.cert_verify_handler.arg);
     self->m_cert_verify_failed = (ret != 1);
     return ret;

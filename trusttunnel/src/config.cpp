@@ -132,7 +132,7 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
         location.upstream_protocol = UPSTREAM_PROTO_MAP.at(*upstream_protocol);
     } else {
         errlog(g_logger, "Unexpected endpoint upstream protocol value: {}",
-                streamable_to_string(config["upstream_protocol"].node()));
+                streamable_to_string(config["upstream_protocol"]));
         return std::nullopt;
     }
 
@@ -148,6 +148,17 @@ static std::optional<TrustTunnelConfig::Location> build_endpoint(const toml::tab
         } else {
             location.client_random = *client_random;
         }
+    }
+
+    if (const auto *x = config["dns_upstreams"].as_array()) {
+        std::vector<std::string> dns_upstreams;
+        dns_upstreams.reserve(x->size());
+        for (const auto &a : *x) {
+            if (std::optional addr = a.value<std::string_view>(); addr.has_value() && !addr->empty()) {
+                dns_upstreams.emplace_back(addr.value());
+            }
+        }
+        location.dns_upstreams = std::move(dns_upstreams);
     }
 
     return location;
@@ -250,7 +261,7 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
     if (auto mode = config["vpn_mode"].value<std::string_view>(); mode && VPN_MODE_MAP.contains(*mode)) {
         result.mode = VPN_MODE_MAP.at(*mode);
     } else {
-        errlog(g_logger, "Unexpected VPN mode: {}", streamable_to_string(config["vpn_mode"].node()));
+        errlog(g_logger, "Unexpected VPN mode: {}", streamable_to_string(config["vpn_mode"]));
         return std::nullopt;
     }
 
@@ -341,17 +352,17 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
     result.process_block = load_file_content(config, "process_block_file");
 
     if (const auto *x = config["dns_upstreams"].as_array(); x != nullptr) {
-        result.dns_upstreams.reserve(x->size());
+        result.legacy_dns_upstreams.reserve(x->size());
         for (const auto &a : *x) {
             if (std::optional addr = a.value<std::string_view>(); addr.has_value() && !addr->empty()) {
-                result.dns_upstreams.emplace_back(addr.value());
+                result.legacy_dns_upstreams.emplace_back(addr.value());
             }
         }
     }
 
     const toml::table *endpoint_config = config["endpoint"].as_table();
     if (endpoint_config == nullptr) {
-        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"].node()));
+        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"]));
         return std::nullopt;
     }
     if (auto endpoint = build_endpoint(*endpoint_config)) {
@@ -363,7 +374,7 @@ std::optional<TrustTunnelConfig> TrustTunnelConfig::build_config(const toml::tab
 
     const toml::table *listener_config = config["listener"].as_table();
     if (listener_config == nullptr) {
-        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"].node()));
+        errlog(g_logger, "Endpoint configuration is not a table: {}", streamable_to_string(config["endpoint"]));
         return std::nullopt;
     }
     if (auto listener = build_listener_config(*listener_config)) {

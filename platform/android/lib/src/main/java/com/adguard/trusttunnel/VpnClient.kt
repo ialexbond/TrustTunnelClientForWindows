@@ -63,6 +63,7 @@ class VpnClient (
     override fun close() = synchronized(sync) {
         if (nativePtr.toInt() != 0) {
             destroyNative(nativePtr);
+            nativePtr = 0
         }
     }
 
