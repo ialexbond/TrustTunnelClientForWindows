@@ -3,12 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { WizardStep, DeployStep, DeployLog, ServerInfo } from "./types";
-import { deobfuscate } from "../../shared/utils/obfuscation";
 import { formatError } from "../../shared/utils/formatError";
 
 // ─── localStorage helpers ──────────────────────────
 const STORAGE_KEY = "trusttunnel_wizard";
-const OBFUSCATED_FIELDS = ["sshPassword", "vpnPassword"];
 
 function loadSaved<T>(key: string, fallback: T): T {
   try {
@@ -25,11 +23,7 @@ function saveField(key: string, value: unknown) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const obj = raw ? JSON.parse(raw) : {};
-    if (OBFUSCATED_FIELDS.includes(key) && typeof value === "string" && value) {
-      obj[key] = "b64:" + btoa(unescape(encodeURIComponent(value)));
-    } else {
-      obj[key] = value;
-    }
+    obj[key] = value;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch { /* ignore */ }
 }
@@ -61,7 +55,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   const [host, setHost] = useState(() => loadSaved("host", ""));
   const [port, setPort] = useState(() => loadSaved("port", "22"));
   const [sshUser, setSshUser] = useState(() => loadSaved("sshUser", "root"));
-  const [sshPassword, setSshPassword] = useState(() => deobfuscate(loadSaved("sshPassword", "")));
+  const [sshPassword, setSshPassword] = useState(() => loadSaved("sshPassword", ""));
   const [sshKeyPath, setSshKeyPath] = useState(() => loadSaved("sshKeyPath", ""));
   const [sshKeyData, setSshKeyData] = useState("");
   const [showSshPassword, setShowSshPassword] = useState(false);
@@ -69,7 +63,7 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   // ── Endpoint settings (persisted) ──
   const [listenAddress, setListenAddress] = useState(() => loadSaved("listenAddress", "0.0.0.0:443"));
   const [vpnUsername, setVpnUsername] = useState(() => loadSaved("vpnUsername", ""));
-  const [vpnPassword, setVpnPassword] = useState(() => deobfuscate(loadSaved("vpnPassword", "")));
+  const [vpnPassword, setVpnPassword] = useState(() => loadSaved("vpnPassword", ""));
   const [showVpnPassword, setShowVpnPassword] = useState(false);
   const [certType, setCertType] = useState<"selfsigned" | "letsencrypt" | "provided">(() => loadSaved("certType", "letsencrypt"));
   const [domain, setDomain] = useState(() => loadSaved("domain", ""));

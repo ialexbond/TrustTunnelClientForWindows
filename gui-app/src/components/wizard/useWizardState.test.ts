@@ -208,10 +208,10 @@ describe("useWizardState", () => {
     });
   });
 
-  // ─── 4. Password obfuscation ─────────────────────────
+  // ─── 4. Password persistence ─────────────────────────
 
-  describe("password obfuscation", () => {
-    it("stores sshPassword as b64:... in localStorage", () => {
+  describe("password persistence", () => {
+    it("stores sshPassword as plaintext in localStorage", () => {
       const { result } = renderWizard();
 
       act(() => {
@@ -219,11 +219,10 @@ describe("useWizardState", () => {
       });
 
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-      expect(stored.sshPassword).toMatch(/^b64:/);
-      expect(stored.sshPassword).not.toContain("secret123");
+      expect(stored.sshPassword).toBe("secret123");
     });
 
-    it("stores vpnPassword as b64:... in localStorage", () => {
+    it("stores vpnPassword as plaintext in localStorage", () => {
       const { result } = renderWizard();
 
       act(() => {
@@ -231,15 +230,13 @@ describe("useWizardState", () => {
       });
 
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-      expect(stored.vpnPassword).toMatch(/^b64:/);
-      expect(stored.vpnPassword).not.toContain("vpnpass!");
+      expect(stored.vpnPassword).toBe("vpnpass!");
     });
 
-    it("decodes obfuscated password on restore", () => {
-      const encoded = "b64:" + btoa(unescape(encodeURIComponent("mySecret")));
+    it("restores plaintext password from localStorage", () => {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ sshPassword: encoded, vpnPassword: encoded }),
+        JSON.stringify({ sshPassword: "mySecret", vpnPassword: "mySecret" }),
       );
 
       const { result } = renderWizard();

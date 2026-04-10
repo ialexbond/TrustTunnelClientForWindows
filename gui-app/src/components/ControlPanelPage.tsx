@@ -5,8 +5,6 @@ import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
 import { Button } from "../shared/ui/Button";
 import { LogOut } from "lucide-react";
-import { deobfuscate } from "../shared/utils/obfuscation";
-
 async function readStoredCredentials(): Promise<SshCredentials | null> {
   try {
     // Primary: read from Rust backend (file-based)
@@ -16,7 +14,7 @@ async function readStoredCredentials(): Promise<SshCredentials | null> {
         host: obj.host,
         port: obj.port || "22",
         user: obj.user || "root",
-        password: obj.password ? deobfuscate(obj.password) : "",
+        password: obj.password || "",
         keyPath: obj.keyPath || undefined,
       };
     }
@@ -37,7 +35,7 @@ async function readStoredCredentials(): Promise<SshCredentials | null> {
           host: legacy.host,
           port: legacy.port || "22",
           user: legacy.user || "root",
-          password: legacy.password ? deobfuscate(legacy.password) : "",
+          password: legacy.password || "",
           keyPath: legacy.keyPath || undefined,
         };
       }
