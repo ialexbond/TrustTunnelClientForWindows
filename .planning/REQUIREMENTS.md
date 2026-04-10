@@ -28,7 +28,7 @@
 ### Performance
 
 - [x] **PERF-01**: Logging через async mpsc channel (не sync Mutex per-write)
-- [ ] **PERF-02**: SSH connection pool для server management commands
+- [x] **PERF-02**: SSH connection pool для server management commands
 
 ### Testing
 
@@ -68,7 +68,7 @@
 | PERF-01 | Phase 3 | Complete |
 | TEST-01 | Phase 4 | Complete |
 | FIX-03 | Phase 5 | Complete |
-| PERF-02 | Phase 6 | Pending |
+| PERF-02 | Phase 6 | Complete |
 | SEC-04 | Phase 7 | Pending |
 | SEC-05 | Phase 8 | Pending |
 | TEST-02 | Phase 9 | Pending |
