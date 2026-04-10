@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <list>
@@ -656,7 +657,7 @@ TEST_F(LocationsPingerRunnerTest, DISABLED_Live) {
     locations_pinger_runner_run(runner);
     locations_pinger_runner_free(runner);
 
-    std::sort(ctx.results.begin(), ctx.results.end(), [](const Result &a, const Result &b) {
+    std::ranges::sort(ctx.results, [](const Result &a, const Result &b) {
         return a.ms > b.ms;
     });
 

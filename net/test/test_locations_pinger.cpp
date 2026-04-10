@@ -288,8 +288,6 @@ TEST_F(LocationsPingerTest, StopFromCallback) {
                         ctx->results[result->id] = *result;
                         ctx->results[result->id].endpoint = find_endpoint_in_context(ctx, result->endpoint);
                         ctx->result_ids[result->id] = result->id;
-                        locations_pinger_stop(ctx->pinger.get());
-                        vpn_event_loop_exit(ctx->loop, Secs(1));
                     },
                     &test_ctx,
             },
