@@ -54,8 +54,8 @@ Plans:
   3. Generator icons appear in both the deploy wizard (ServerStep) and the server panel add-user form
 **Plans**: 2 plans
 Plans:
-- [ ] 03-01-PLAN.md — Create credentialGenerator.ts utility (word-based username, 16-char password, crypto.getRandomValues) mirrored to gui-light
-- [ ] 03-02-PLAN.md — Wire Shuffle icons into AddUserForm and UsersSection with Tooltip, i18n keys, disabled state
+- [x] 03-01-PLAN.md — Create credentialGenerator.ts utility (word-based username, 16-char password, crypto.getRandomValues) mirrored to gui-light
+- [x] 03-02-PLAN.md — Wire Shuffle icons into AddUserForm and UsersSection with Tooltip, i18n keys, disabled state
 
 ### Phase 4: Release
 **Goal**: Both Pro and Light installers are built and ready for distribution
