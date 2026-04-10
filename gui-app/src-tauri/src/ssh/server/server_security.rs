@@ -82,10 +82,7 @@ pub struct JailConfigUpdate {
 //   Helpers
 // ═══════════════════════════════════════════════════════════════
 
-async fn detect_sudo(handle: &client::Handle<SshHandler>, app: &tauri::AppHandle) -> String {
-    let (whoami, _) = exec_command(handle, app, "whoami").await.unwrap_or_default();
-    if whoami.trim() == "root" { String::new() } else { "sudo ".to_string() }
-}
+// detect_sudo() is now centralized in ssh/mod.rs
 
 // ─── Input validators (reject shell metacharacters BEFORE building commands) ──
 
@@ -842,4 +839,167 @@ pub async fn firewall_set_http_port(
     }
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   Tests
+// ═══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_safe_port ──
+
+    #[test]
+    fn safe_port_accepts_valid() {
+        assert!(is_safe_port("80"));
+        assert!(is_safe_port("443"));
+        assert!(is_safe_port("80:90"));
+        assert!(is_safe_port("65535"));
+    }
+
+    #[test]
+    fn safe_port_rejects_invalid() {
+        assert!(!is_safe_port(""));
+        assert!(!is_safe_port("80; rm -rf /"));
+        assert!(!is_safe_port("$(whoami)"));
+        assert!(!is_safe_port("abc"));
+        assert!(!is_safe_port(&"1".repeat(12))); // > 11 chars
+    }
+
+    // ── is_safe_proto ──
+
+    #[test]
+    fn safe_proto_accepts_valid() {
+        assert!(is_safe_proto("tcp"));
+        assert!(is_safe_proto("udp"));
+        assert!(is_safe_proto("any"));
+        assert!(is_safe_proto(""));
+    }
+
+    #[test]
+    fn safe_proto_rejects_invalid() {
+        assert!(!is_safe_proto("tcp; ls"));
+        assert!(!is_safe_proto("$(id)"));
+        assert!(!is_safe_proto("icmp"));
+    }
+
+    // ── is_safe_action ──
+
+    #[test]
+    fn safe_action_accepts_valid() {
+        assert!(is_safe_action("allow"));
+        assert!(is_safe_action("deny"));
+        assert!(is_safe_action("limit"));
+        assert!(is_safe_action("reject"));
+    }
+
+    #[test]
+    fn safe_action_rejects_invalid() {
+        assert!(!is_safe_action(""));
+        assert!(!is_safe_action("allow; rm"));
+        assert!(!is_safe_action("drop"));
+    }
+
+    // ── is_safe_source ──
+
+    #[test]
+    fn safe_source_accepts_valid() {
+        assert!(is_safe_source(""));
+        assert!(is_safe_source("any"));
+        assert!(is_safe_source("192.168.1.0/24"));
+        assert!(is_safe_source("10.0.0.1"));
+        assert!(is_safe_source("::1"));
+        assert!(is_safe_source("fe80::1"));
+    }
+
+    #[test]
+    fn safe_source_rejects_invalid() {
+        assert!(!is_safe_source("192.168.1.1; rm -rf /"));
+        assert!(!is_safe_source("$(whoami)"));
+        assert!(!is_safe_source(&"a".repeat(44))); // > 43 chars
+    }
+
+    // ── is_safe_comment ──
+
+    #[test]
+    fn safe_comment_accepts_valid() {
+        assert!(is_safe_comment("Block SSH brute force"));
+        assert!(is_safe_comment("test 123"));
+    }
+
+    #[test]
+    fn safe_comment_rejects_dangerous_chars() {
+        assert!(!is_safe_comment(r#"test" && rm -rf /"#));
+        assert!(!is_safe_comment("test`whoami`"));
+        assert!(!is_safe_comment("test$HOME"));
+        assert!(!is_safe_comment("test\\path"));
+        assert!(!is_safe_comment("line1\nline2"));
+        assert!(!is_safe_comment(&"x".repeat(81))); // > 80 chars
+    }
+
+    // ── is_safe_jail ──
+
+    #[test]
+    fn safe_jail_accepts_valid() {
+        assert!(is_safe_jail("sshd"));
+        assert!(is_safe_jail("apache-auth"));
+        assert!(is_safe_jail("custom_jail"));
+    }
+
+    #[test]
+    fn safe_jail_rejects_invalid() {
+        assert!(!is_safe_jail(""));
+        assert!(!is_safe_jail("jail; ls"));
+        assert!(!is_safe_jail(&"a".repeat(65))); // > 64 chars
+        assert!(!is_safe_jail("jail name")); // space
+    }
+
+    // ── is_safe_ip ──
+
+    #[test]
+    fn safe_ip_accepts_valid() {
+        assert!(is_safe_ip("192.168.1.1"));
+        assert!(is_safe_ip("10.0.0.1"));
+        assert!(is_safe_ip("::1"));
+        assert!(is_safe_ip("fe80::1"));
+    }
+
+    #[test]
+    fn safe_ip_rejects_invalid() {
+        assert!(!is_safe_ip(""));
+        assert!(!is_safe_ip("192.168.1.1; rm"));
+        assert!(!is_safe_ip(&"a".repeat(46))); // > 45 chars
+        assert!(!is_safe_ip("/")); // slash not allowed in IP (unlike source)
+    }
+
+    // ── is_safe_duration ──
+
+    #[test]
+    fn safe_duration_accepts_valid() {
+        assert!(is_safe_duration("600"));
+        assert!(is_safe_duration("1h"));
+        assert!(is_safe_duration("10m"));
+        assert!(is_safe_duration("30d"));
+        assert!(is_safe_duration("1w"));
+    }
+
+    #[test]
+    fn safe_duration_rejects_invalid() {
+        assert!(!is_safe_duration(""));
+        assert!(!is_safe_duration("1h; rm"));
+        assert!(!is_safe_duration("abc"));
+        assert!(!is_safe_duration(&"1".repeat(17))); // > 16 chars
+    }
+
+    // ── ufw_line_is_active ──
+
+    #[test]
+    fn ufw_active_detection() {
+        assert!(ufw_line_is_active("Status: active"));
+        assert!(!ufw_line_is_active("Status: inactive"));
+        assert!(!ufw_line_is_active(""));
+        assert!(ufw_line_is_active("Status:    active")); // extra spaces — trim handles it
+    }
 }
