@@ -61,11 +61,15 @@ Plans:
 - [ ] Update Makefile test-rust target
 
 ## Phase 5: Connectivity Monitor — Bypass VPN
-**Status:** NOT STARTED
+**Status:** PLANNED
 **Goal:** Internet checks bypass VPN to avoid false offline detection
 **Requires:** FIX-03
 **Depends on:** None
 **Estimated effort:** 2-3h
+**Plans:** 1 plan
+
+Plans:
+- [x] 05-01-PLAN.md — Add ipconfig/socket2 deps, find_physical_adapter_ip(), rewrite checks with adapter binding
 
 - [ ] Add ipconfig + socket2 dependencies
 - [ ] Implement find_physical_adapter_ip()
@@ -134,7 +138,7 @@ Plans:
 | 2. DRY + Cleanup | PLANNED | DRY-01,02,03 FIX-01,02 | 2-3h |
 | 3. Async Logging | PLANNED | PERF-01 | 2-3h |
 | 4. Rust Unit Tests | 1/1 | Complete   | 2026-04-10 |
-| 5. Connectivity Bypass | NOT STARTED | FIX-03 | 2-3h |
+| 5. Connectivity Bypass | PLANNED | FIX-03 | 2-3h |
 | 6. SSH Connection Pool | NOT STARTED | PERF-02 | 4-5h |
 | 7. Keyring Migration | NOT STARTED | SEC-04 | 3-4h |
 | 8. TOFU Confirmation | NOT STARTED | SEC-05 | 3-4h |
@@ -144,4 +148,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-04-10*
-*Last updated: 2026-04-10 after Phase 4 planning*
+*Last updated: 2026-04-10 after Phase 5 planning*

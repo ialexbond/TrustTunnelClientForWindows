@@ -23,7 +23,7 @@
 
 - [ ] **FIX-01**: sanitize() заменяет ВСЕ вхождения sensitive keys (не только первое)
 - [ ] **FIX-02**: Hosts file path использует %SystemRoot% (не hardcoded C:\Windows)
-- [ ] **FIX-03**: Connectivity monitor проверяет через физический адаптер (не через VPN)
+- [x] **FIX-03**: Connectivity monitor проверяет через физический адаптер (не через VPN)
 
 ### Performance
 
@@ -67,7 +67,7 @@
 | DRY-03 | Phase 2 | Pending |
 | PERF-01 | Phase 3 | Complete |
 | TEST-01 | Phase 4 | Complete |
-| FIX-03 | Phase 5 | Pending |
+| FIX-03 | Phase 5 | Complete |
 | PERF-02 | Phase 6 | Pending |
 | SEC-04 | Phase 7 | Pending |
 | SEC-05 | Phase 8 | Pending |
