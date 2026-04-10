@@ -1,0 +1,76 @@
+name: Frontend Quality
+
+on:
+  push:
+    branches:
+      - "*"
+    paths:
+      - "gui-app/src/**"
+      - "gui-app/package.json"
+      - "gui-app/package-lock.json"
+      - "gui-app/tsconfig.json"
+      - "gui-app/vite.config.ts"
+      - "gui-app/eslint.config.js"
+      - "gui-light/src/**"
+      - "gui-light/package.json"
+      - "gui-light/package-lock.json"
+      - "gui-light/tsconfig.json"
+      - "gui-light/vite.config.ts"
+      - "gui-light/eslint.config.js"
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+
+jobs:
+  gui-app:
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
+    defaults:
+      run:
+        working-directory: gui-app
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gui-app/package-lock.json
+
+      - run: npm ci
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Vitest
+        run: npm run test
+
+  gui-light:
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
+    defaults:
+      run:
+        working-directory: gui-light
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gui-light/package-lock.json
+
+      - run: npm ci
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
