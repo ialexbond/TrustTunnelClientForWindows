@@ -952,5 +952,9 @@
     "message": "First connection to {{host}}.\n\nServer key fingerprint:\n{{fingerprint}}\n\nDo you trust this server?",
     "accept": "Trust",
     "reject": "Reject"
+  },
+  "common": {
+    "generate_username": "Generate random username",
+    "generate_password": "Generate random password"
   }
 }
