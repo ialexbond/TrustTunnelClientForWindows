@@ -82,7 +82,16 @@ function StatusPanel({
         </div>
 
         <div>
-          {isLoading ? (
+          {status === "connecting" ? (
+            <Button
+              variant="warning"
+              size="sm"
+              icon={<Power className="w-3.5 h-3.5" />}
+              onClick={onDisconnect}
+            >
+              {t("buttons.cancel", "Отмена")}
+            </Button>
+          ) : (status === "disconnecting" || status === "recovering") ? (
             <Button variant="warning" size="sm" disabled loading>
               {statusLabel}
             </Button>

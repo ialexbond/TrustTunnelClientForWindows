@@ -20,7 +20,7 @@ pub async fn decode_deeplink(url: String) -> Result<String, String> {
             toml::to_string(&endpoint).map_err(|e| format!("Failed to serialize endpoint: {e}"))?;
 
         // Wrap [endpoint] block into a full client config
-        return Ok(build_full_config(&endpoint_toml));
+        return Ok(crate::ssh::build_client_config(&endpoint_toml, "Imported from deeplink"));
     }
 
     // ── 2. Fallback: base64-encoded TOML ─────────────────────────
@@ -75,33 +75,10 @@ pub async fn decode_deeplink(url: String) -> Result<String, String> {
             .map_err(|e| format!("Failed to convert deeplink config: {e}"))?;
         let endpoint_toml =
             toml::to_string(&endpoint).map_err(|e| format!("Failed to serialize endpoint: {e}"))?;
-        return Ok(build_full_config(&endpoint_toml));
+        return Ok(crate::ssh::build_client_config(&endpoint_toml, "Imported from deeplink"));
     }
 
     Err("Could not parse deeplink: unrecognized format".into())
-}
-
-/// Wrap a serialized `[endpoint]` section into a full client TOML config.
-fn build_full_config(endpoint_toml: &str) -> String {
-    format!(
-        r#"# TrustTunnel Client Configuration
-# Imported from deeplink
-
-loglevel = "info"
-vpn_mode = "general"
-killswitch_enabled = true
-killswitch_allow_ports = [67, 68]
-post_quantum_group_enabled = true
-
-[endpoint]
-{endpoint_toml}
-[listener.tun]
-mtu_size = 1280
-change_system_dns = true
-included_routes = ["0.0.0.0/0"]
-excluded_routes = []
-"#
-    )
 }
 
 /// Import a config string (TOML content) and save it to the app data directory.

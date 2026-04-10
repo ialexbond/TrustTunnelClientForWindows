@@ -98,7 +98,7 @@ describe("SshConnectForm", () => {
     const keyBtn = screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) });
     fireEvent.click(keyBtn);
 
-    expect(screen.getByText(i18n.t("control.key_file"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("control.key_from_file"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: new RegExp(i18n.t("control.browse")) })).toBeInTheDocument();
   });
 
@@ -112,7 +112,7 @@ describe("SshConnectForm", () => {
   it("shows key file label and select key text in key mode", () => {
     renderForm();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) }));
-    expect(screen.getByText(i18n.t("control.key_file"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("control.key_from_file"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("control.select_key"))).toBeInTheDocument();
   });
 

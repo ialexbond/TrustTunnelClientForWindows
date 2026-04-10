@@ -6,10 +6,10 @@ import { ConfigSection } from "./ConfigSection";
 import type { ServerState } from "./useServerState";
 
 const SAMPLE_CONFIG = `
-listen = "0.0.0.0:443"
-tls_handshake_timeout = "10s"
-tcp_connection_timeout = "30s"
-udp_connection_timeout = "60s"
+listen_address = "0.0.0.0:443"
+tls_handshake_timeout_secs = 10
+tcp_connections_timeout_secs = 30
+udp_connections_timeout_secs = 60
 ping_enable = true
 speedtest_enable = false
 ipv6_available = true
@@ -91,7 +91,7 @@ describe("ConfigSection", () => {
     render(<ConfigSection state={state} />);
     const btn = screen.getByRole("button", { name: new RegExp(i18n.t("server.config.show_full")) });
     fireEvent.click(btn);
-    expect(screen.getByText(/listen\s*=\s*"0.0.0.0:443"/)).toBeInTheDocument();
+    expect(screen.getByText(/listen_address\s*=\s*"0.0.0.0:443"/)).toBeInTheDocument();
   });
 
   it("hides full config when toggled back", () => {
@@ -324,8 +324,8 @@ ipv6_available = true
 
   it("renders only available timeout fields", () => {
     const config = `
-listen = "0.0.0.0:443"
-tcp_connection_timeout = "15s"
+listen_address = "0.0.0.0:443"
+tcp_connections_timeout_secs = 15
 ping_enable = false
 speedtest_enable = false
 ipv6_available = false
