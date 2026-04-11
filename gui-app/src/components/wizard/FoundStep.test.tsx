@@ -257,20 +257,21 @@ describe("FoundStep", () => {
     });
 
     it("toggles new password visibility", () => {
-      const setShowNewPassword = vi.fn();
       const w = makeWizardState({
         ...installedState(),
-        showNewPassword: false,
-        setShowNewPassword,
       });
       render(<FoundStep {...w} />);
       const passwordInput = screen.getByPlaceholderText(
         i18n.t("wizard.found.password_placeholder")
       );
-      const toggleBtn = passwordInput.parentElement!.querySelector("button");
-      expect(toggleBtn).toBeTruthy();
-      fireEvent.click(toggleBtn!);
-      expect(setShowNewPassword).toHaveBeenCalledWith(true);
+      expect(passwordInput).toHaveAttribute("type", "password");
+      // The eye toggle is the last button inside ActionPasswordInput's action bar
+      const wrapper = passwordInput.parentElement!;
+      const buttons = wrapper.querySelectorAll("button");
+      const eyeToggle = buttons[buttons.length - 1];
+      expect(eyeToggle).toBeTruthy();
+      fireEvent.click(eyeToggle!);
+      expect(passwordInput).toHaveAttribute("type", "text");
     });
 
     // ── Action buttons ──
@@ -757,7 +758,7 @@ describe("FoundStep", () => {
       expect(passwordInput).toHaveAttribute("type", "password");
     });
 
-    it("password input type is text when showNewPassword is true", () => {
+    it("password input type is text after toggling visibility", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
@@ -768,10 +769,15 @@ describe("FoundStep", () => {
           serviceActive: true,
           os: "linux",
         } as any,
-        showNewPassword: true,
       });
       render(<FoundStep {...w} />);
       const passwordInput = screen.getByPlaceholderText(i18n.t("wizard.found.password_placeholder"));
+      expect(passwordInput).toHaveAttribute("type", "password");
+      // Toggle visibility via the eye button (last button in ActionPasswordInput)
+      const wrapper = passwordInput.parentElement!;
+      const buttons = wrapper.querySelectorAll("button");
+      const eyeToggle = buttons[buttons.length - 1];
+      fireEvent.click(eyeToggle!);
       expect(passwordInput).toHaveAttribute("type", "text");
     });
 
