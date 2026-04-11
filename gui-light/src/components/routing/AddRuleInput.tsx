@@ -87,10 +87,9 @@ export function AddRuleInput({ action, geodataStatus, geodataCategories, onAdd }
   // Show autocomplete when prefix is detected, but not if user dismissed it
   useEffect(() => {
     if (autocompleteInfo !== null && !dismissedForInput) {
-      setShowAutocomplete(true);
+      setTimeout(() => setShowAutocomplete(true), 0);
     } else if (autocompleteInfo === null) {
-      setShowAutocomplete(false);
-      setDismissedForInput(false);
+      setTimeout(() => { setShowAutocomplete(false); setDismissedForInput(false); }, 0);
     }
   }, [autocompleteInfo, dismissedForInput]);
 
