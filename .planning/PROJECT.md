@@ -29,12 +29,14 @@ Reliable VPN connection with full server control from a single desktop app — d
 - SecuritySection refactored + 41 tests — v2.4.0
 - Frontend CI (GitHub Actions) — v2.4.0
 - 54 Rust unit tests — v2.4.0
+- Connectivity bypass — socket2 bind to gateway, bypasses VPN routing — v2.5.0
+- Markdown changelog modal (react-markdown) in update dialog — v2.5.0
+- Random username/password generator in VPN user forms — v2.5.0
+- ActionInput/ActionPasswordInput reusable components — v2.5.0
 
 ### Active
 
-- [ ] Connectivity bypass — bind checks to physical adapter, bypass VPN routing
-- [ ] Markdown changelog rendering in update dialog
-- [ ] Random username/password generator in VPN user forms
+(None — next milestone needed)
 
 ### Out of Scope
 
@@ -42,23 +44,21 @@ Reliable VPN connection with full server control from a single desktop app — d
 - Mobile apps — desktop-first
 - Real-time server metrics dashboard — v2.0 redesign scope
 
-## Current Milestone: v2.5.0 UX & Connectivity
+## Shipped: v2.5.0 UX & Connectivity (2026-04-11)
 
-**Goal:** Restore connectivity bypass VPN, improve update UX and user management forms
-
-**Target features:**
-- Connectivity bypass (socket2/ipconfig bind to physical adapter)
-- Markdown changelog in update dialog
-- Credential generator for VPN user forms
+**Delivered:**
+- Connectivity bypass via gateway TCP (socket2 bind to physical adapter, probe gateway not public IPs)
+- ChangelogModal with react-markdown — formatted release notes in modal dialog
+- Credential generator — Shuffle icons in username/password fields (word-based + random)
+- ActionInput/ActionPasswordInput — reusable input components with action icon slots
+- NSIS installers (Pro + Light) built and verified
 
 ## Context
 
-- Connectivity bypass code exists in git commit `798ce8e7` — was implemented in v2.4.0 Phase 5 but lost due to worktree catch-all commit overwriting connectivity.rs
-- Current connectivity.rs (171 lines) is the old version without socket2 binding
-- Correct version (253 lines) uses `find_physical_adapter_ip()` + socket2 `bind()` + reqwest `local_address()`
-- Dependencies needed: `socket2 = { version = "0.5", features = ["all"] }`, `ipconfig = "0.3"`
-- Update dialog currently shows raw markdown text with `#` headers and truncation
-- VPN user forms exist in deploy wizard (ServerStep) and server panel (add user)
+- Connectivity uses gateway TCP instead of public IPs (1.1.1.1) — gateway on local subnet never routes through VPN
+- react-markdown ^9.0.1 for changelog rendering
+- credentialGenerator.ts uses crypto.getRandomValues() — no external deps
+- 14 ChangelogModal tests + 6 credentialGenerator tests (vitest)
 
 ## Constraints
 
@@ -71,12 +71,17 @@ Reliable VPN connection with full server control from a single desktop app — d
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| socket2 for connectivity bypass | Bind TCP checks to physical adapter IP, bypass VPN routing table | -- Pending |
-| Restore from git history | Code already written and tested, no need to rewrite | -- Pending |
+| Gateway TCP instead of public IPs | Public IPs route through VPN tunnel; gateway is local subnet | ✓ VPN stable 7+ hours |
+| react-markdown for changelog | React-idiomatic, no innerHTML/sanitization | ✓ Shipped v2.5.0 |
+| ActionInput/ActionPasswordInput | Reusable components vs rightIcon hack | ✓ Clean icon slots |
+| crypto.getRandomValues() | Secure randomness, no external deps | ✓ Shipped v2.5.0 |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
+
+---
+*Last updated: 2026-04-11 after v2.5.0 milestone*
 
 **After each phase transition** (via `/gsd-transition`):
 1. Requirements invalidated? -> Move to Out of Scope with reason
