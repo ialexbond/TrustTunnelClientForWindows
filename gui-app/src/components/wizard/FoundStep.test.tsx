@@ -18,6 +18,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
       });
@@ -30,6 +31,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
         setWizardStep,
@@ -44,6 +46,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
         setWizardStep,
@@ -99,6 +102,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         checkError: "",
       });
@@ -130,6 +134,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: false,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
       render(<FoundStep {...w} />);
@@ -350,6 +355,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         checkError: "",
       });
@@ -408,6 +414,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         checkError: "",
       });
@@ -427,6 +434,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         checkError: "",
         setWizardStep,
@@ -446,6 +454,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
       });
@@ -469,6 +478,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
       });
@@ -482,6 +492,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
         setWizardStep,
@@ -498,6 +509,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
         setWizardStep,
@@ -548,6 +560,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         savingConfigFor: "alice",
       });
@@ -565,6 +578,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         savingConfigFor: "alice",
       });
@@ -591,6 +605,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
       render(<FoundStep {...w} />);
@@ -607,6 +622,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
       render(<FoundStep {...w} />);
@@ -623,6 +639,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
       render(<FoundStep {...w} />);
@@ -644,6 +661,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         setConfirmDeleteUser,
       });
@@ -677,6 +695,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         confirmUninstall: true,
         handleUninstall,
@@ -701,6 +720,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         confirmUninstall: true,
         setConfirmUninstall,
@@ -731,6 +751,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         addingUser: true,
         newUsername: "bob",
@@ -750,6 +771,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         showNewPassword: false,
       });
@@ -768,6 +790,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
       render(<FoundStep {...w} />);
@@ -792,6 +815,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         setNewUsername,
       });
@@ -814,6 +838,7 @@ describe("FoundStep", () => {
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         selectedUser: "alice",
       });
@@ -839,6 +864,7 @@ describe("FoundStep", () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
       });

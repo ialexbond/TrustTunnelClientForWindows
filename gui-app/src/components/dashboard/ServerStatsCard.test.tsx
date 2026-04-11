@@ -30,13 +30,17 @@ const mockStats = {
 };
 
 /** Helper: configure invoke mock to handle load_ssh_credentials + server_stats */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mockWithCreds(creds: typeof sshCredsObj | null, statsOrError?: any) {
   mockInvoke.mockImplementation(async (cmd: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (cmd === "load_ssh_credentials") return creds as any;
     if (cmd === "server_get_stats") {
       if (statsOrError instanceof Error) throw statsOrError;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return (statsOrError ?? mockStats) as any;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return null as any;
   });
 }

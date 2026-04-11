@@ -5,20 +5,32 @@ import { PingChart } from "./PingChart";
 import type { PingPoint } from "./useDashboardState";
 
 // Keep track of props to verify chart configuration
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let referenceLineProps: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let lineProps: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let tooltipProps: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let xAxisProps: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let yAxisProps: any = null;
 
 vi.mock("recharts", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ResponsiveContainer: ({ children }: any) => <div data-testid="responsive-container">{children}</div>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   LineChart: ({ children, data }: any) => <div data-testid="line-chart" data-points={data?.length}>{children}</div>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Line: (props: any) => { lineProps = props; return <div data-testid="line" data-datakey={props.dataKey} />; },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   XAxis: (props: any) => { xAxisProps = props; return <div data-testid="x-axis" data-label-value={props.label?.value} />; },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   YAxis: (props: any) => { yAxisProps = props; return <div data-testid="y-axis" data-width={props.width} />; },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Tooltip: (props: any) => { tooltipProps = props; return <div data-testid="tooltip" />; },
   CartesianGrid: () => null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ReferenceLine: (props: any) => { referenceLineProps = props; return <div data-testid="reference-line" data-y={props.y} />; },
 }));
 

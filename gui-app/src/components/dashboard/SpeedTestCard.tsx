@@ -24,6 +24,7 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
     if (error && !testing) {
       pushSuccess(t("dashboard.speed_test_failed", "Speed test failed. Try again later."), "error");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error, testing]);
 
   return (
