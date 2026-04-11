@@ -17,8 +17,8 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { Input } from "../../shared/ui/Input";
-import { PasswordInput } from "../../shared/ui/PasswordInput";
+import { ActionInput } from "../../shared/ui/ActionInput";
+import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { IconButton } from "../../shared/ui/IconButton";
 import { Modal } from "../../shared/ui/Modal";
@@ -287,14 +287,14 @@ export function UsersSection({ state }: Props) {
         <div className="space-y-1.5">
           <div className="flex gap-1.5">
             <div className="flex-1">
-              <Input
+              <ActionInput
                 value={newUsername}
                 onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._\-]/g, ""))}
                 placeholder={t("server.users.username_placeholder")}
                 error={usernameError ? t(usernameError) : undefined}
                 disabled={isAdding}
-                rightIcon={
-                  <Tooltip text={t("common.generate_username")}>
+                actions={[
+                  <Tooltip key="gen" text={t("common.generate_username")}>
                     <button
                       type="button"
                       onClick={() => setNewUsername(generateUsername())}
@@ -304,18 +304,19 @@ export function UsersSection({ state }: Props) {
                     >
                       <Shuffle className="w-3.5 h-3.5" />
                     </button>
-                  </Tooltip>
-                }
+                  </Tooltip>,
+                ]}
               />
             </div>
             <div className="flex-1">
-              <PasswordInput
+              <ActionPasswordInput
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
                 placeholder={t("server.users.password_placeholder")}
                 disabled={isAdding}
-                rightIcon={
-                  <Tooltip text={t("common.generate_password")}>
+                showLockIcon={false}
+                actions={[
+                  <Tooltip key="gen" text={t("common.generate_password")}>
                     <button
                       type="button"
                       onClick={() => setNewPassword(generatePassword())}
@@ -325,8 +326,8 @@ export function UsersSection({ state }: Props) {
                     >
                       <Shuffle className="w-3.5 h-3.5" />
                     </button>
-                  </Tooltip>
-                }
+                  </Tooltip>,
+                ]}
               />
             </div>
             <Button
