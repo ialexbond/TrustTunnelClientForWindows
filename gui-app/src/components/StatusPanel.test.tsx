@@ -36,13 +36,12 @@ describe("StatusPanel", () => {
     expect(screen.getByRole("button", { name: /Отключить/ })).toBeInTheDocument();
   });
 
-  it("renders connecting state with disabled button", () => {
+  it("renders connecting state with cancel button", () => {
     render(<StatusPanel {...defaultProps} status="connecting" />);
-    // Status label appears in both badge and button
-    const texts = screen.getAllByText("Подключение");
-    expect(texts.length).toBe(2);
-    const btn = screen.getByRole("button", { name: /Подключение/ });
-    expect(btn).toBeDisabled();
+    // Status label appears in badge only; button shows "Cancel"
+    expect(screen.getByText("Подключение")).toBeInTheDocument();
+    const btn = screen.getByRole("button", { name: /Отмена/ });
+    expect(btn).toBeEnabled();
   });
 
   it("renders disconnecting state with disabled button", () => {
