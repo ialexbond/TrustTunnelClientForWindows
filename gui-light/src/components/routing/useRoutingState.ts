@@ -225,6 +225,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configPath]);
 
   // ─── Load geodata status ────────────────────────────
@@ -453,6 +454,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
     } finally {
       setSaving(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configPath, rules, computeSnapshot, pushSuccess, toBackendPayload]);
 
   // ─── Export / Import ────────────────────────────────
