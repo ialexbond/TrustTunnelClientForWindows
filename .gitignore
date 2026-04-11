@@ -47,3 +47,5 @@ TrustTunnel-Portable/
 TrustTunnel-v*-portable-*/
 exclusions.json
 gui-app/coverage/
+.planning/
+AGENTS.md
