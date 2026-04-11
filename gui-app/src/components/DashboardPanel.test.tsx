@@ -6,7 +6,9 @@ import DashboardPanel from "./DashboardPanel";
 
 // Mock recharts
 vi.mock("recharts", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   LineChart: ({ children }: any) => <div>{children}</div>,
   Line: () => null,
   XAxis: () => null,
@@ -74,7 +76,9 @@ describe("DashboardPanel", () => {
     localStorage.clear();
     // Default: no SSH creds
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (cmd === "load_ssh_credentials") return null as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return null as any;
     });
   });
@@ -113,7 +117,9 @@ describe("DashboardPanel", () => {
         user: "root",
         password: "secret",
         keyPath: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return null as any;
     });
     await act(async () => {

@@ -5,7 +5,9 @@ import i18n from "../../shared/i18n";
 import { ExportImportButtons } from "./ExportImportButtons";
 
 describe("ExportImportButtons", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onExport: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onImport: any;
 
   beforeEach(() => {

@@ -6,6 +6,7 @@ import { ControlPanelPage } from "./ControlPanelPage";
 
 // Mock child components to isolate ControlPanelPage logic
 vi.mock("./ServerPanel", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ServerPanel: (props: any) => (
     <div data-testid="server-panel">
       ServerPanel host={props.host}
@@ -16,6 +17,7 @@ vi.mock("./ServerPanel", () => ({
 }));
 
 vi.mock("./server/SshConnectForm", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   SshConnectForm: ({ onConnect }: any) => (
     <div data-testid="ssh-connect-form">
       <button
@@ -48,10 +50,14 @@ function mockCredsLoaded(creds: { host: string; port?: string; user?: string; pa
         user: creds.user || "root",
         password: creds.password || "",
         keyPath: creds.keyPath || "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (cmd === "clear_ssh_credentials") return null as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (cmd === "save_ssh_credentials") return null as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return null as any;
   });
 }
@@ -164,6 +170,7 @@ describe("ControlPanelPage", () => {
   it("returns null when load_ssh_credentials throws", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "load_ssh_credentials") throw new Error("backend error");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return null as any;
     });
     await act(async () => {
@@ -174,7 +181,9 @@ describe("ControlPanelPage", () => {
 
   it("returns null for creds missing host", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (cmd === "load_ssh_credentials") return { host: "", port: "22", user: "root", password: "pass", keyPath: "" } as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return null as any;
     });
     await act(async () => {
@@ -185,7 +194,9 @@ describe("ControlPanelPage", () => {
 
   it("returns null for creds missing both password and keyPath", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (cmd === "load_ssh_credentials") return { host: "10.0.0.1", port: "22", user: "root", password: "", keyPath: "" } as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return null as any;
     });
     await act(async () => {

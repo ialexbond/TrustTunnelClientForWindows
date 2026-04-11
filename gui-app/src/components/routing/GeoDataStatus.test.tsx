@@ -17,6 +17,7 @@ function makeStatus(overrides: Partial<GeoDataStatus> = {}): GeoDataStatus {
 }
 
 describe("GeoDataStatusCard", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onDownload: any;
 
   beforeEach(() => {

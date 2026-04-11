@@ -9,7 +9,9 @@ beforeAll(() => {
 });
 
 describe("GeoAutocomplete", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onSelect: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onClose: any;
 
   const categories = ["ru", "us", "cn", "de", "fr", "jp", "gb"];
