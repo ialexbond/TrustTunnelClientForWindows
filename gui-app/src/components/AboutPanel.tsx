@@ -25,7 +25,6 @@ interface AboutPanelProps {
   updateInfo: UpdateInfo;
   onCheckUpdates: () => void;
   onOpenDownload: () => void;
-  updateCooldown?: boolean;
 }
 
 interface UpdateProgressPayload {
@@ -34,7 +33,7 @@ interface UpdateProgressPayload {
   message: string;
 }
 
-function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, updateCooldown }: AboutPanelProps) {
+function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
   const { t } = useTranslation();
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
@@ -196,7 +195,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, updateCooldown
 
           <button
             onClick={onCheckUpdates}
-            disabled={updateInfo.checking || updating || updateCooldown}
+            disabled={updateInfo.checking || updating || updateInfo.available}
             className="w-full flex items-center justify-center gap-1.5 px-4 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-bg-hover)",
