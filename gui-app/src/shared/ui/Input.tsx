@@ -4,13 +4,12 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   description?: string;
   icon?: ReactNode;
-  rightIcon?: ReactNode;
   error?: string;
   fullWidth?: boolean;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, description, icon, rightIcon, error, fullWidth = true, className = "", style, ...rest }, ref) => {
+  ({ label, description, icon, error, fullWidth = true, className = "", style, ...rest }, ref) => {
     return (
       <div className={fullWidth ? "w-full" : ""}>
         {label && (
@@ -40,7 +39,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               placeholder:opacity-40
               disabled:opacity-50 disabled:cursor-not-allowed
               ${icon ? "pl-9" : ""}
-              ${rightIcon ? "pr-8" : ""}
               ${error ? "ring-1 ring-[var(--color-danger-500)]" : ""}
               ${className}
             `}
@@ -52,11 +50,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             }}
             {...rest}
           />
-          {rightIcon && (
-            <span className="absolute right-2 top-1/2 -translate-y-1/2">
-              {rightIcon}
-            </span>
-          )}
         </div>
         {error && (
           <p className="text-[11px] mt-1" style={{ color: "var(--color-danger-400)" }}>
