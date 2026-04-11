@@ -1,7 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { UserPlus, Eye, EyeOff, Shuffle } from "lucide-react";
+import { UserPlus, Shuffle } from "lucide-react";
 import { Button } from "../../shared/ui/Button";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { ActionInput } from "../../shared/ui/ActionInput";
+import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
 import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
 import type { WizardState } from "./useWizardState";
 
@@ -24,59 +26,48 @@ export function AddUserForm({ w, onUserAdded }: AddUserFormProps) {
       </p>
       <div className="space-y-1.5">
         <div>
-          <div className="relative">
-            <input
-              type="text"
-              placeholder={t('wizard.found.username_placeholder')}
-              value={w.newUsername}
-              onChange={(e) => w.setNewUsername(e.target.value.replace(/\s/g, ""))}
-              className="w-full px-3 pr-8 h-8 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-            />
-            <Tooltip text={t("common.generate_username")}>
+          <ActionInput
+            type="text"
+            placeholder={t('wizard.found.username_placeholder')}
+            value={w.newUsername}
+            onChange={(e) => w.setNewUsername(e.target.value.replace(/\s/g, ""))}
+            disabled={w.addingUser}
+            error={w.newUsername.trim() && w.serverInfo?.users?.includes(w.newUsername.trim()) ? t('wizard.found.user_already_exists') : undefined}
+            actions={[
+              <Tooltip key="gen" text={t("common.generate_username")}>
+                <button
+                  type="button"
+                  onClick={() => w.setNewUsername(generateUsername())}
+                  disabled={w.addingUser}
+                  className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  <Shuffle className="w-3 h-3" />
+                </button>
+              </Tooltip>,
+            ]}
+          />
+        </div>
+        <ActionPasswordInput
+          placeholder={t('wizard.found.password_placeholder')}
+          value={w.newPassword}
+          onChange={(e) => w.setNewPassword(e.target.value)}
+          disabled={w.addingUser}
+          showLockIcon={false}
+          actions={[
+            <Tooltip key="gen" text={t("common.generate_password")}>
               <button
                 type="button"
-                onClick={() => w.setNewUsername(generateUsername())}
+                onClick={() => w.setNewPassword(generatePassword())}
                 disabled={w.addingUser}
-                className="absolute right-2 top-1/2 -translate-y-1/2 transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
                 style={{ color: "var(--color-text-muted)" }}
               >
                 <Shuffle className="w-3 h-3" />
               </button>
-            </Tooltip>
-          </div>
-          {w.newUsername.trim() && w.serverInfo?.users?.includes(w.newUsername.trim()) && (
-            <p className="text-[10px] mt-0.5" style={{ color: "var(--color-danger-500)" }}>
-              {t('wizard.found.user_already_exists')}
-            </p>
-          )}
-        </div>
-        <div className="relative">
-          <input
-            type={w.showNewPassword ? "text" : "password"}
-            placeholder={t('wizard.found.password_placeholder')}
-            value={w.newPassword}
-            onChange={(e) => w.setNewPassword(e.target.value)}
-            className="w-full px-3 h-8 pr-14 rounded-lg text-xs outline-none" style={{ backgroundColor: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-          />
-          <Tooltip text={t("common.generate_password")}>
-            <button
-              type="button"
-              onClick={() => w.setNewPassword(generatePassword())}
-              disabled={w.addingUser}
-              className="absolute right-8 top-1/2 -translate-y-1/2 transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              <Shuffle className="w-3 h-3" />
-            </button>
-          </Tooltip>
-          <button
-            type="button"
-            onClick={() => w.setShowNewPassword(!w.showNewPassword)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 transition-colors" style={{ color: "var(--color-text-muted)" }}
-          >
-            {w.showNewPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-          </button>
-        </div>
+            </Tooltip>,
+          ]}
+        />
         <Button
           variant="primary"
           size="sm"
