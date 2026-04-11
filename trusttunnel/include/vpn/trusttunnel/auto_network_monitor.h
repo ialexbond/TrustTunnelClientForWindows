@@ -12,11 +12,11 @@ namespace ag {
  *
  * Monitors the active network interface and network availability, calls
  * `TrustTunnelClient::notify_network_change` and `vpn_network_manager_set_outbound_interface` respectively.
- * Respects the forced network interface returned by `TrustTunnelClient::get_bound_if`.
+ * Respects the forced network interface if `bound_if` is not empty.
  */
 class AutoNetworkMonitor {
 public:
-    explicit AutoNetworkMonitor(TrustTunnelClient *client);
+    explicit AutoNetworkMonitor(TrustTunnelClient *client, std::string bound_if);
     ~AutoNetworkMonitor();
 
     bool start();
@@ -24,6 +24,7 @@ public:
 
 private:
     TrustTunnelClient *m_client = nullptr;
+    std::string m_bound_if;
     std::unique_ptr<ag::utils::NetworkMonitor> m_network_monitor;
     UniquePtr<VpnEventLoop, &vpn_event_loop_destroy> m_network_monitor_loop = nullptr;
     std::thread m_network_monitor_loop_thread;

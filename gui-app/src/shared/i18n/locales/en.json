@@ -52,6 +52,8 @@
     "reconnect": "Reconnect",
     "import": "Import",
     "auto_update": "Update Automatically",
+    "update": "Update",
+    "download": "Download",
     "check_updates": "Check for Updates",
     "download_from_browser": "Download manually",
     "save_as": "Save As...",
@@ -70,7 +72,12 @@
     "uninstall_vpn_from_server": "Uninstall VPN from Server",
     "advanced_settings": "Advanced Settings",
     "no": "No",
-    "speed_test": "Speed Test"
+    "speed_test": "Speed Test",
+    "whats_new": "What's new",
+    "close": "Close"
+  },
+  "modal": {
+    "changelog_title": "What's new in v{{version}}"
   },
   "labels": {
     "config_file": "Configuration File",
@@ -947,5 +954,9 @@
     "message": "First connection to {{host}}.\n\nServer key fingerprint:\n{{fingerprint}}\n\nDo you trust this server?",
     "accept": "Trust",
     "reject": "Reject"
+  },
+  "common": {
+    "generate_username": "Generate random username",
+    "generate_password": "Generate random password"
   }
 }
