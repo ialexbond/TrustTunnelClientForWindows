@@ -224,13 +224,6 @@ bool TrustTunnelClient::process_client_packets(VpnPackets packets) {
     return m_vpn && vpn_process_client_packets(m_vpn, packets);
 }
 
-std::string_view TrustTunnelClient::get_bound_if() const {
-    if (const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&m_config.listener)) {
-        return tun->bound_if;
-    }
-    return {};
-}
-
 Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::set_system_dns() {
 #ifdef _WIN32
     uint32_t if_index = vpn_win_detect_active_if();
@@ -294,9 +287,13 @@ Error<TrustTunnelClient::ConnectResultError> TrustTunnelClient::vpn_runner(Liste
         return make_error(ConnectResultError{}, "Failed to create listener");
     }
 
+    // Backward compatibility for legacy configs
+    const auto &effective_dns = m_config.location.dns_upstreams.has_value() ? *m_config.location.dns_upstreams
+                                                                            : m_config.legacy_dns_upstreams;
+
     std::vector<const char *> dns_upstreams;
-    dns_upstreams.reserve(m_config.dns_upstreams.size());
-    for (const std::string &upstream : m_config.dns_upstreams) {
+    dns_upstreams.reserve(effective_dns.size());
+    for (const std::string &upstream : effective_dns) {
         dns_upstreams.emplace_back(upstream.c_str());
     }
 
@@ -577,17 +574,21 @@ void TrustTunnelClient::vpn_handler(void *, VpnEvent what, void *data) {
         break;
     case VPN_EVENT_VERIFY_CERTIFICATE: {
         auto *event = (VpnVerifyCertificateEvent *) data;
-        if (m_config.location.skip_verification) {
-            dbglog(m_logger, "Skipping certificate verification");
-            event->result = VPN_SKIP_VERIFICATION_FLAG;
-        } else if (m_config.location.ca_store) {
-            const char *err = tls_verify_cert(event->cert, event->chain, m_config.location.ca_store.get());
-            if (err != nullptr) {
-                errlog(m_logger, "Failed to verify certificate: {}", err);
-                event->result = -1;
+        if (event->verification_type == VT_ENDPOINT) {
+            if (m_config.location.skip_verification) {
+                dbglog(m_logger, "Skipping certificate verification");
+                event->result = VPN_SKIP_VERIFICATION_FLAG;
+            } else if (m_config.location.ca_store) {
+                const char *err = tls_verify_cert(event->cert, event->chain, m_config.location.ca_store.get());
+                if (err != nullptr) {
+                    errlog(m_logger, "Failed to verify certificate: {}", err);
+                    event->result = -1;
+                } else {
+                    dbglog(m_logger, "Certificate verified successfully");
+                    event->result = 0;
+                }
             } else {
-                dbglog(m_logger, "Certificate verified successfully");
-                event->result = 0;
+                m_callbacks.verify_handler(event);
             }
         } else {
             m_callbacks.verify_handler(event);

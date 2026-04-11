@@ -1,6 +1,6 @@
 [package]
 name = "trusttunnel"
-version = "2.4.0"
+version = "2.5.0"
 description = "TrustTunnel VPN Client"
 authors = ["Alex Bond"]
 edition = "2021"
@@ -38,6 +38,8 @@ sha2 = "0.10"
 trusttunnel-settings = { path = "../../trusttunnel/settings" }
 winreg = "0.55"
 chrono = "0.4"
+ipconfig = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
 keyring = { version = "3.6", features = ["windows-native"] }
 
 [profile.release]
