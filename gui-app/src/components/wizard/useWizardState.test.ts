@@ -7,7 +7,9 @@ import type { ServerInfo } from "./types";
 
 const STORAGE_KEY = "trusttunnel_wizard";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockInvoke = invoke as any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockListen = listen as any;
 
 function renderWizard(overrides?: { onSetupComplete?: () => void }) {

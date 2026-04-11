@@ -139,6 +139,7 @@ describe("SetupWizard", () => {
   });
 
   it("falls back to WelcomeStep for unknown step", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     Object.assign(mockWizardState, makeWizardState({ step: "unknown_step" as any }));
     render(<SetupWizard {...defaultProps} />);
     expect(screen.getByTestId("welcome-step")).toBeInTheDocument();

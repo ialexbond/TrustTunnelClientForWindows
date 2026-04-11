@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Modal } from "./Modal";
 
 describe("Modal", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onClose: any;
 
   beforeEach(() => {

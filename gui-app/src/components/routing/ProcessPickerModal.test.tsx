@@ -6,7 +6,9 @@ import { ProcessPickerModal } from "./ProcessPickerModal";
 import type { ProcessInfo } from "./useRoutingState";
 
 describe("ProcessPickerModal", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onConfirm: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onClose: any;
 
   const processList: ProcessInfo[] = [

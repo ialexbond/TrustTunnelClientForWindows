@@ -171,6 +171,7 @@ ipv6_available = true
   });
 
   it("shows error message when configError present", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const state = makeState({ configRaw: null as any });
     const { container } = render(<ConfigSection state={state} />);
     expect(container.innerHTML).toBe("");
@@ -295,6 +296,7 @@ ipv6_available = true
   // ── Double-click prevention ──
 
   it("prevents double-click on the same toggle", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resolveToggle: any = null;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "server_update_config_feature") {

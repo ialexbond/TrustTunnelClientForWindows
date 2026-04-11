@@ -344,6 +344,7 @@ describe("ServerStatusSection", () => {
 
   it("returns default variant for null ping", async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (cmd === "ping_endpoint") return null as any;
       return null;
     });
