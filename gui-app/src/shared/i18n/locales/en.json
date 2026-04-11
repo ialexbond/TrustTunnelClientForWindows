@@ -52,6 +52,8 @@
     "reconnect": "Reconnect",
     "import": "Import",
     "auto_update": "Update Automatically",
+    "update": "Update",
+    "download": "Download",
     "check_updates": "Check for Updates",
     "download_from_browser": "Download manually",
     "save_as": "Save As...",
