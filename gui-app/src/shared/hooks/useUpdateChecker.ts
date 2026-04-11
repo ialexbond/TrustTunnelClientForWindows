@@ -22,8 +22,8 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-// Minimum 30 seconds between manual checks to avoid stale cached responses
-const COOLDOWN_MS = 30_000;
+// Minimum 10 seconds between manual checks to let GitHub API cache refresh
+const COOLDOWN_MS = 10_000;
 
 export function useUpdateChecker() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
@@ -31,13 +31,16 @@ export function useUpdateChecker() {
     downloadUrl: "", sha256: "", releaseNotes: "", checking: false,
   });
   const lastCheckRef = useRef(0);
+  const [cooldown, setCooldown] = useState(false);
 
   const checkForUpdates = useCallback(async (silent = false) => {
     // Enforce cooldown for manual checks (not silent/background)
     if (!silent) {
       const now = Date.now();
       if (now - lastCheckRef.current < COOLDOWN_MS) {
-        return; // Too soon, skip
+        setCooldown(true);
+        setTimeout(() => setCooldown(false), COOLDOWN_MS - (now - lastCheckRef.current));
+        return;
       }
       lastCheckRef.current = now;
     }
@@ -95,5 +98,5 @@ export function useUpdateChecker() {
     return () => clearInterval(interval);
   }, [checkForUpdates]);
 
-  return { updateInfo, checkForUpdates };
+  return { updateInfo, checkForUpdates, cooldown };
 }

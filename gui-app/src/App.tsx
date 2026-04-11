@@ -72,7 +72,7 @@ function App() {
   });
 
   // ─── Update check ───
-  const { updateInfo, checkForUpdates } = useUpdateChecker();
+  const { updateInfo, checkForUpdates, cooldown: updateCooldown } = useUpdateChecker();
 
   // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
   const reconnectResolve = useRef<(() => void) | null>(null);
@@ -496,6 +496,7 @@ function App() {
               updateInfo={updateInfo}
               onCheckUpdates={() => checkForUpdates(false)}
               onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
+              updateCooldown={updateCooldown}
             />
           </div>
         </div>
