@@ -115,19 +115,23 @@ pub async fn self_update(
     file.flush().await.ok();
     drop(file);
 
-    // Verify SHA256 checksum (mandatory)
-    emit("verify", 88, "update.verifying");
-    let bytes =
-        std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
-    let hash = Sha256::digest(&bytes);
-    let actual = format!("{:x}", hash);
-    if !actual.eq_ignore_ascii_case(&expected_sha256) {
-        let _ = std::fs::remove_file(&setup_path);
-        return Err(format!(
-            "Checksum mismatch! Expected: {expected_sha256}, Got: {actual}. Download may be corrupted or tampered with."
-        ));
+    // Verify SHA256 checksum (if provided)
+    if !expected_sha256.is_empty() {
+        emit("verify", 88, "update.verifying");
+        let bytes =
+            std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
+        let hash = Sha256::digest(&bytes);
+        let actual = format!("{:x}", hash);
+        if !actual.eq_ignore_ascii_case(&expected_sha256) {
+            let _ = std::fs::remove_file(&setup_path);
+            return Err(format!(
+                "Checksum mismatch! Expected: {expected_sha256}, Got: {actual}. Download may be corrupted or tampered with."
+            ));
+        }
+        eprintln!("[self_update] SHA256 verified: {actual}");
+    } else {
+        eprintln!("[self_update] WARNING: No checksum provided, skipping verification");
     }
-    eprintln!("[self_update] SHA256 verified: {actual}");
 
     emit("install", 92, "update.preparing");
 
