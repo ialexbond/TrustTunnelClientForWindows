@@ -43,21 +43,11 @@ init:
 	git config core.hooksPath ./scripts/hooks
 
 .PHONY: bootstrap_deps
-## Export all the required conan packages to the local cache.
-## Skips if all dependencies are already resolved in the local Conan cache.
+## Export all the required conan packages to the local cache
 bootstrap_deps:
-	@if conan graph info . --profile:host=default >/dev/null 2>&1; then \
-		echo "Conan dependencies already bootstrapped, skipping."; \
-	else \
-		$(MAKE) do_bootstrap_deps; \
-	fi
-
-.PHONY: do_bootstrap_deps
 ifeq ($(SKIP_VENV),1)
-do_bootstrap_deps:
 	./scripts/bootstrap_conan_deps.py
 else
-do_bootstrap_deps:
 	python3 -m venv env && \
 	. env/bin/activate && \
 	pip install -r requirements.txt && \
@@ -120,21 +110,9 @@ lint: lint-md lint-rust lint-cpp
 .PHONY: lint-cpp
 lint-cpp: clang-format clangd-tidy
 
-## Verify that clang-format is version 21 or newer.
-.PHONY: check-clang-format-version
-check-clang-format-version:
-	@if ! command -v clang-format >/dev/null 2>&1; then \
-		echo "Error: clang-format is not installed" >&2; exit 1; \
-	fi
-	@CF_VERSION=$$(clang-format --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
-	CF_MAJOR=$$(echo "$$CF_VERSION" | cut -d. -f1); \
-	if [ "$$CF_MAJOR" -lt 21 ] 2>/dev/null; then \
-		echo "Error: clang-format version 21 or newer is required, found $$CF_VERSION" >&2; exit 1; \
-	fi
-
 ## Check c++ code formatting with clang-format.
 .PHONY: clang-format
-clang-format: check-clang-format-version
+clang-format:
 	git ls-files --exclude-standard -- . ":!third-party/**" ":!**/pigeon/**" \
 		| grep -E '\.(cpp|c|h)$$' \
 		| xargs clang-format -n -Werror
@@ -147,20 +125,10 @@ clang-tidy: compile_commands
 ## Check c++ code formatting with clangd-tidy.
 .PHONY: clangd-tidy
 clangd-tidy: compile_commands
-ifeq ($(SKIP_VENV),1)
 	jq -r '.[] | select(.file | endswith(".cpp")) | .file' $(COMPILE_COMMANDS) \
 		| grep -vE '(^|/)(third-party)(/|$$)' \
 		| sort -u \
 		| xargs clangd-tidy -p $(BUILD_DIR) --tqdm -j$(NPROC)
-else
-	python3 -m venv env && \
-	. env/bin/activate && \
-	pip install -r requirements.txt && \
-	jq -r '.[] | select(.file | endswith(".cpp")) | .file' $(COMPILE_COMMANDS) \
-		| grep -vE '(^|/)(third-party)(/|$$)' \
-		| sort -u \
-		| xargs clangd-tidy -p $(BUILD_DIR) --tqdm -j$(NPROC)
-endif
 
 ## Lint markdown files.
 ## `markdownlint-cli` should be installed:
@@ -186,7 +154,7 @@ lint-fix: lint-fix-rust lint-fix-md lint-fix-cpp
 
 ## Auto-fix c++ formatting with clang-format.
 .PHONY: lint-fix-cpp
-lint-fix-cpp: check-clang-format-version
+lint-fix-cpp:
 	git ls-files --exclude-standard -- . ":!third-party/**" ":!**/pigeon/**" \
 		| grep -E '\.(cpp|c|h)$$' \
 		| xargs clang-format -i
@@ -202,18 +170,6 @@ lint-fix-rust:
 lint-fix-md:
 	markdownlint --fix .
 
-## List Conan dependency package directories.
-.PHONY: list-deps-dirs
-list-deps-dirs: compile_commands
-	@GENERATORS_DIR=$$(cmake -L $(BUILD_DIR) 2>/dev/null \
-		| grep '_DIR:PATH=' \
-		| grep -v 'NOTFOUND' \
-		| head -1 \
-		| sed 's/.*:PATH=//') && \
-	grep -h '_PACKAGE_FOLDER_' "$$GENERATORS_DIR"/* 2>/dev/null \
-		| sed -n 's/set(\(.*\)_PACKAGE_FOLDER_[A-Z_]* "\([^"]*\)").*/\1 \2/p' \
-		| sort -u
-
 .PHONY: test
 test: test-cpp test-rust
 
@@ -225,3 +181,4 @@ test-cpp: build_libs
 .PHONY: test-rust
 test-rust:
 	cargo test --workspace --manifest-path $(SETUP_WIZARD_DIR)/Cargo.toml
+	cargo test --manifest-path gui-app/src-tauri/Cargo.toml
