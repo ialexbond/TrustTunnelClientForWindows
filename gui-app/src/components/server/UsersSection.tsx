@@ -289,7 +289,7 @@ export function UsersSection({ state }: Props) {
             <div className="flex-1">
               <ActionInput
                 value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._\-]/g, ""))}
+                onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, ""))}
                 placeholder={t("server.users.username_placeholder")}
                 error={usernameError ? t(usernameError) : undefined}
                 disabled={isAdding}

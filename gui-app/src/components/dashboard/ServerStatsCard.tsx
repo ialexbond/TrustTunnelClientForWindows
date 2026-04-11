@@ -112,7 +112,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
             if (!has) {
               setStats(null);
               initialFetchDone.current = false;
-              try { sessionStorage.removeItem("tt_server_stats"); } catch {}
+              try { sessionStorage.removeItem("tt_server_stats"); } catch { /* ignored */ }
             }
             return has;
           }
@@ -137,7 +137,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
         keyPath: c.keyPath || null,
       });
       setStats(result);
-      try { sessionStorage.setItem("tt_server_stats", JSON.stringify(result)); } catch {}
+      try { sessionStorage.setItem("tt_server_stats", JSON.stringify(result)); } catch { /* ignored */ }
     } catch (e) {
       pushSuccess(formatError(e), "error");
     } finally {
