@@ -25,6 +25,7 @@ export function SnackBarProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useSnackBar(): PushFn {
   const push = useContext(Ctx);
   if (!push) throw new Error("useSnackBar must be used within SnackBarProvider");

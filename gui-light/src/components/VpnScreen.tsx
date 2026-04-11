@@ -64,7 +64,7 @@ function usePing(configPath?: string, status?: VpnStatus) {
 
   useEffect(() => {
     if (!isConnected) {
-      setPing(null);
+      setTimeout(() => setPing(null), 0);
       return;
     }
     doPing();

@@ -86,6 +86,7 @@ export function useVpnEvents({
       },
     );
     return () => { unlistenStatus.then((f) => f()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setStatus, setError, setConnectedSince]);
 
   // ─── Auto-reconnect on internet loss ───
@@ -133,6 +134,7 @@ export function useVpnEvents({
       },
     );
     return () => { unlistenInternet.then((f) => f()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i18n, setStatus, setError]);
 
   // ─── Listen for disconnect confirmation to complete reconnect ───
@@ -157,6 +159,7 @@ export function useVpnEvents({
       },
     );
     return () => { unlisten.then((f) => f()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── VPN log collector + error detection ───
