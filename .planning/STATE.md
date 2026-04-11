@@ -1,124 +1,81 @@
+---
+gsd_state_version: 1.0
+milestone: v2.5.0
+milestone_name: milestone
+status: executing
+stopped_at: Phase 1 context gathered
+last_updated: "2026-04-11T04:49:03.875Z"
+last_activity: 2026-04-11
+progress:
+  total_phases: 4
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 6
+  percent: 100
+---
+
 # Project State
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-04-10)
 
-**Core value:** Безопасное VPN-подключение без уязвимостей в обработке пользовательского ввода
-**Current focus:** Phase 6 — SSH Connection Pool
+**Core value:** Reliable VPN connection with full server control from a single desktop app
+**Current focus:** Phase 03 — credential-generator
 
-## Current Milestone
+## Current Position
 
-**Milestone:** v2.4.0 — Security, Performance, Quality Refactoring
-**Branch:** claude/crazy-lewin
-**Started:** 2026-04-10
+Phase: 04
+Plan: Not started
+Status: Executing Phase 03
+Last activity: 2026-04-11
 
-## Phase Status
+Progress: [░░░░░░░░░░] 0%
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| 1. SSH Injection + Self-Update | COMPLETE | sanitize.rs, heredoc fix, SHA256 mandatory |
-| 2. DRY + Cleanup | COMPLETE | detect_sudo DRY, build_client_config DRY, sanitize fix, hosts path, tray.rs |
-| 3. Async Logging | COMPLETE | mpsc channel, batched writes, sanitize loop fix |
-| 4. Rust Unit Tests | COMPLETE | 54 tests: security validators, config, deploy, logging |
-| 5. Connectivity Bypass | COMPLETE | socket2+ipconfig bind to physical adapter |
-| 6. SSH Connection Pool | COMPLETE | SshPool with Arc<Handle>, channel keepalive, 29 pooled commands |
-| 7. Keyring Migration | COMPLETE | keyring 3.6, obfuscation.ts deleted, DPAPI credential storage |
-| 8. TOFU Confirmation | NOT STARTED | |
-| 9. Frontend CI + SecuritySection | NOT STARTED | |
+## Performance Metrics
 
-## Completed Work
+**Velocity:**
 
-### Phase 1 (2026-04-10)
-- Created `gui-app/src-tauri/src/ssh/sanitize.rs` — 8 validators, 18 tests passing
-- Fixed `add_server_user` — bash -c printf -> heredoc with quoted delimiter
-- Added validation in deploy.rs, server_config.rs, server_version.rs
-- Made SHA256 mandatory in updater.rs (Pro + Light)
-- Added URL domain whitelist for downloads
-- Updated frontend (AboutPanel, AboutScreen) — sha256 required
-- Updated 22 frontend tests — all passing
-- Version bumped 2.3.0 -> 2.4.0 in 6 files
+- Total plans completed: 6
+- Average duration: --
+- Total execution time: --
 
-### Phase 2 (2026-04-10)
-- Centralized `detect_sudo()` in ssh/mod.rs — replaced 17 inline copies across 6 files
-- Centralized `build_client_config()` in ssh/mod.rs — replaced 3 duplicated TOML templates
-- Fixed `sanitize()` multi-occurrence bug — while loop instead of if
-- Fixed `hosts_file_path()` — uses %SystemRoot% instead of hardcoded C:\Windows
-- Extracted tray.rs from lib.rs — lib.rs reduced from 558 to 348 lines
-- cargo check passes, 18 sanitize tests pass
+**By Phase:**
 
-### Phase 3 (2026-04-10)
-- Rewrote `logging.rs` with async `tokio::sync::mpsc` channel architecture
-- `LOG_TX: Mutex<Option<mpsc::Sender<LogEntry>>>` replaces `Mutex<Option<LogState>>`
-- `log_app`/`log_sidecar` use `try_send` (non-blocking, nanosecond lock)
-- Background `log_writer_task` batches up to 64 entries per flush
-- Fixed `sanitize()` infinite loop on quoted patterns (search_from offset)
-- Added `shutdown_logging()` to `RunEvent::Exit` handler in lib.rs
-- Added 3 unit tests for sanitize function
-- cargo check passes, 21 tests passing (3 logging + 18 sanitize)
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 01 | 2 | - | - |
+| 03 | 2 | - | - |
+| 04 | 0 | - | - |
 
-### Phase 4 (2026-04-10)
-- Added 17 tests for is_safe_*() validators in server_security.rs (injection, boundary)
-- Added 8 tests for ClientConfig: validate, defaults, DHCP ports, unknown keys, round-trip
-- Added 5 tests for build_configure_commands: backslash escaping, heredoc, cert types
-- Added 3 new logging tests: all SENSITIVE_KEYS, case-insensitive, quoted boundaries
-- Changed build_configure_commands to pub(crate) for testability
-- Added tauri/test feature flag to Cargo.toml
-- Updated Makefile test-rust to include gui-app/src-tauri
-- Total: 54 Rust unit tests passing
+**Recent Trend:**
 
-### Phase 5 (2026-04-10)
-- Added ipconfig 0.3 and socket2 0.5 dependencies
-- Implemented `find_physical_adapter_ip()` — filters by oper_status UP, gateway, if_type (Ethernet/WiFi), excludes VPN keywords
-- Rewrote `check_connectivity()` — socket2 TCP bind in spawn_blocking + reqwest local_address
-- Rewrote `check_adapter_online()` — same physical adapter binding pattern
-- Fallback to default routing when no physical adapter found
-- cargo check passes, start_monitor() public API unchanged
+- Last 5 plans: --
+- Trend: --
 
-### Phase 6 (2026-04-10)
-- Created `gui-app/src-tauri/src/ssh/pool.rs` -- SshPool with Arc<TokioMutex<Option<CachedSsh>>>
-- acquire() reuses cached connection if same server and alive, disconnects old on server switch
-- channel_open_session keepalive probe every 60s (send_keepalive not on Handle)
-- Added ssh_pool_command! macro returning serde_json::Value (impl Trait incompatible with State<'_>)
-- Switched 29 server management commands to pooled connections
-- Kept 6 commands on direct connect: deploy, diagnose, check_installation, uninstall, fetch_config, upgrade
-- Manual commands for security_get_status and install_firewall (forward SSH port param)
-- Pool invalidated on RunEvent::Exit
-- cargo check passes, 35 tests pass
+*Updated after each plan completion*
 
-### Phase 7 (2026-04-10)
-- Added keyring 3.6 (windows-native) to Cargo.toml
-- Rewrote save/load/clear_ssh_credentials to use Windows Credential Manager (DPAPI)
-- JSON file now stores only metadata (host, port, user, keyPath) -- no password
-- Auto-migration: b64-encoded and plaintext passwords in JSON moved to keyring on first load
-- Deleted obfuscation.ts from frontend
-- Removed all obfuscate/deobfuscate calls from 9 frontend files
-- Frontend sends plaintext password over internal Tauri IPC
-- Updated 4 test files (127 tests passing)
+## Accumulated Context
 
-## Decisions Log
+### Decisions
 
-| Decision | Phase | Rationale |
-|----------|-------|-----------|
-| Loop-based sanitize, not regex | 1 | No regex dep needed for 4 patterns |
-| Heredoc for SSH credentials | 1 | Quoted delimiter prevents shell expansion |
-| SHA256 mandatory | 1 | Optional allowed skipping verification |
-| Mutex<Option<Sender>> over OnceLock | 3 | OnceLock is set-once, cannot support reinit_logging |
-| Drop-based shutdown over Shutdown sentinel | 3 | Simpler: drop sender closes channel, writer drains and exits |
-| search_from offset in sanitize loop | 3 | Prevents infinite re-matching of already-sanitized content |
-| pub(crate) for build_configure_commands | 4 | Minimal visibility increase for testability |
-| Inline #[cfg(test)] modules | 4 | Tests private functions without exposing them |
-| socket2 connect_timeout in spawn_blocking | 5 | Avoids async TcpStream complexity, clean blocking approach |
-| ipconfig crate for adapter enumeration | 5 | Windows-native, exposes if_type and oper_status |
-| Dual filter (if_type + description) for VPN exclusion | 5 | Robust: if_type catches known types, description catches edge cases |
-| Arc<Handle> for shared pool ownership | 6 | Handle is not Clone; Arc enables shared access across commands |
-| channel_open_session as keepalive | 6 | send_keepalive is &mut self on Session only, not on Handle |
-| serde_json::Value return for pool macro | 6 | impl Trait incompatible with State<'_> lifetime in Rust 2021 |
-| SshPool as separate managed state | 6 | Avoids coupling with AppState, cleaner macro access |
-| keyring::Entry with service=TrustTunnel | 7 | Isolates credentials per host:port:user combination |
-| Auto-migration on load (not on startup) | 7 | Lazy migration avoids startup penalty, handles edge cases |
-| No fallback to JSON on keyring error | 7 | Propagate error to UI per T-07-04 threat mitigation |
-| Plaintext in localStorage wizard state | 7 | Tauri webview-only access, VPN creds already plaintext in TOML |
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
 
----
-*Last updated: 2026-04-10 after Phase 7 completion*
+- Phase 1: Restore connectivity.rs from git commit 798ce8e7 (253-line version with socket2 + ipconfig), do not rewrite from scratch
+- Phase 1: socket2/ipconfig deps were in commit 308583b6, need to restore in Cargo.toml
+- Phase 1: Changes to connectivity.rs must be mirrored in gui-light
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+- Phase 1: connectivity.rs in current branch is the old 171-line version — correct version must be restored from git history before adding stability fixes
+
+## Session Continuity
+
+Last session: 2026-04-10T15:54:01.756Z
+Stopped at: Phase 1 context gathered
+Resume file: .planning/phases/01-connectivity-bypass/01-CONTEXT.md

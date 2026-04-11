@@ -1,84 +1,71 @@
-# Requirements: TrustTunnel Client Refactoring
+# Requirements: TrustTunnel
 
 **Defined:** 2026-04-10
-**Core Value:** Безопасное и надёжное VPN-подключение без уязвимостей в обработке пользовательского ввода
+**Core Value:** Reliable VPN connection with full server control from a single desktop app
 
-## v2.4.0 Requirements
+## v2.5.0 Requirements
 
-### Security
+Requirements for milestone v2.5.0. Each maps to roadmap phases.
 
-- [x] **SEC-01**: Все user inputs валидируются перед интерполяцией в SSH команды
-- [x] **SEC-02**: SHA256 checksum обязателен при self-update (не Optional)
-- [x] **SEC-03**: Download URL ограничен whitelist доменов (github.com)
-- [ ] **SEC-04**: SSH credentials хранятся в Windows Credential Manager (keyring)
-- [ ] **SEC-05**: TOFU host key verification с подтверждением пользователя
+### Connectivity
 
-### Code Quality
+- [ ] **CONN-01**: Приложение определяет IP физического адаптера (Ethernet/WiFi), исключая VPN/WinTUN
+- [ ] **CONN-02**: TCP-проверки связи привязываются к физическому адаптеру через socket2 bind()
+- [ ] **CONN-03**: HTTP-проверки используют reqwest с local_address(physical_ip)
+- [ ] **CONN-04**: При отсутствии физического адаптера — fallback на дефолтную маршрутизацию
+- [ ] **CONN-05**: Монитор связи не вызывает ложных переподключений VPN
 
-- [ ] **DRY-01**: detect_sudo() централизован в ssh/mod.rs (17 дубликатов -> 1)
-- [ ] **DRY-02**: build_client_config() централизован (3 копии -> 1)
-- [ ] **DRY-03**: Tray logic извлечён из lib.rs в tray.rs (~208 строк)
+### Update UX
 
-### Bug Fixes
+- [ ] **UPD-01**: Release notes отображаются с рендерингом markdown (заголовки, списки, bold/italic)
+- [ ] **UPD-02**: Длинный changelog скроллится, не обрезается
 
-- [ ] **FIX-01**: sanitize() заменяет ВСЕ вхождения sensitive keys (не только первое)
-- [ ] **FIX-02**: Hosts file path использует %SystemRoot% (не hardcoded C:\Windows)
-- [x] **FIX-03**: Connectivity monitor проверяет через физический адаптер (не через VPN)
+### Credentials
 
-### Performance
+- [ ] **CRED-01**: Иконка генерации случайного username внутри поля ввода
+- [ ] **CRED-02**: Иконка генерации случайного пароля внутри поля ввода
+- [ ] **CRED-03**: Генератор доступен во всех формах добавления VPN-пользователей (wizard + server panel)
 
-- [x] **PERF-01**: Logging через async mpsc channel (не sync Mutex per-write)
-- [x] **PERF-02**: SSH connection pool для server management commands
+### Release
 
-### Testing
+- [ ] **REL-01**: NSIS-инсталлятор Pro собран и выложен на рабочий стол
+- [ ] **REL-02**: NSIS-инсталлятор Light собран и выложен на рабочий стол
 
-- [x] **TEST-01**: Rust unit tests для sanitize, validators, config, deploy
-- [ ] **TEST-02**: Frontend CI (GitHub Actions) для typecheck + lint + test
-- [ ] **TEST-03**: SecuritySection.tsx refactored + tested (910 строк -> sub-components)
+## Future Requirements
 
-## v2.5.0 Requirements (deferred)
-
-- **DEFER-01**: SSH key passphrase support
-- **DEFER-02**: VPN credentials encryption в TOML config
-- **DEFER-03**: Authenticode signature verification при self-update
-- **DEFER-04**: gui-light test infrastructure
-- **DEFER-05**: Portable data dir APPDATA fallback
+None currently deferred.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Cross-platform GUI (Linux/macOS) | Только Windows desktop target |
-| Full regex crate для sanitize | Loop-based подход достаточен для 4 паттернов |
-| SSH connection multiplexing (concurrent commands) | Одного pool slot достаточно |
-| Server upgrade GPG verification | Требует изменений в серверном репо |
+| TrustTunnel Light feature parity with Pro | Separate milestone |
+| Mobile apps | Desktop-first |
+| Real-time server metrics dashboard | v2.0 redesign scope |
+| Auto-update without user confirmation | Security — user must approve |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEC-01 | Phase 1 | Complete |
-| SEC-02 | Phase 1 | Complete |
-| SEC-03 | Phase 1 | Complete |
-| DRY-01 | Phase 2 | Pending |
-| DRY-02 | Phase 2 | Pending |
-| FIX-01 | Phase 2 | Pending |
-| FIX-02 | Phase 2 | Pending |
-| DRY-03 | Phase 2 | Pending |
-| PERF-01 | Phase 3 | Complete |
-| TEST-01 | Phase 4 | Complete |
-| FIX-03 | Phase 5 | Complete |
-| PERF-02 | Phase 6 | Complete |
-| SEC-04 | Phase 7 | Pending |
-| SEC-05 | Phase 8 | Pending |
-| TEST-02 | Phase 9 | Pending |
-| TEST-03 | Phase 9 | Pending |
+| CONN-01 | Phase 1 | Pending |
+| CONN-02 | Phase 1 | Pending |
+| CONN-03 | Phase 1 | Pending |
+| CONN-04 | Phase 1 | Pending |
+| CONN-05 | Phase 1 | Pending |
+| UPD-01 | Phase 2 | Pending |
+| UPD-02 | Phase 2 | Pending |
+| CRED-01 | Phase 3 | Pending |
+| CRED-02 | Phase 3 | Pending |
+| CRED-03 | Phase 3 | Pending |
+| REL-01 | Phase 4 | Pending |
+| REL-02 | Phase 4 | Pending |
 
 **Coverage:**
-- v2.4.0 requirements: 16 total
-- Mapped to phases: 16
+- v2.5.0 requirements: 12 total
+- Mapped to phases: 12
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-10*
-*Last updated: 2026-04-10 after initialization*
+*Last updated: 2026-04-10 after roadmap creation*

@@ -39,7 +39,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: gui-app/package-lock.json
 
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
 
       - name: TypeScript check
         run: npm run typecheck
@@ -67,7 +67,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: gui-light/package-lock.json
 
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
 
       - name: TypeScript check
         run: npm run typecheck

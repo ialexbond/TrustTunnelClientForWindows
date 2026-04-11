@@ -52,6 +52,8 @@
     "reconnect": "Переподключить",
     "import": "Подгрузить",
     "auto_update": "Обновить автоматически",
+    "update": "Обновить",
+    "download": "Скачать",
     "check_updates": "Проверить обновления",
     "download_from_browser": "Скачать вручную из браузера",
     "save_as": "Сохранить как...",
@@ -70,7 +72,12 @@
     "uninstall_vpn_from_server": "Удалить VPN с сервера",
     "advanced_settings": "Дополнительные настройки",
     "no": "Нет",
-    "speed_test": "Тест скорости"
+    "speed_test": "Тест скорости",
+    "whats_new": "Что нового",
+    "close": "Закрыть"
+  },
+  "modal": {
+    "changelog_title": "Что нового в v{{version}}"
   },
   "labels": {
     "config_file": "Файл конфигурации",
@@ -947,5 +954,9 @@
     "message": "Первое подключение к {{host}}.\n\nОтпечаток ключа сервера:\n{{fingerprint}}\n\nВы доверяете этому серверу?",
     "accept": "Доверять",
     "reject": "Отклонить"
+  },
+  "common": {
+    "generate_username": "Сгенерировать имя пользователя",
+    "generate_password": "Сгенерировать пароль"
   }
 }

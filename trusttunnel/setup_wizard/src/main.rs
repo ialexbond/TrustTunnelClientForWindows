@@ -287,6 +287,9 @@ Note: Cannot mix these variants"#,
                     let doc = composer::compose_document(None, &settings);
                     fs::write(&path, doc.to_string())
                         .expect("Couldn't write the settings to a file");
+                } else {
+                    println!("Config file was not saved.");
+                    return;
                 }
                 path
             }

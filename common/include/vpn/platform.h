@@ -97,6 +97,8 @@ static inline pid_t gettid(void) {
 #include <winsock2.h>
 #undef ERROR
 #undef DELETE
+// Use this instead of DELETE:
+#define STANDARD_RIGHTS_DELETE (0x00010000L)
 #undef PASSTHROUGH
 #include <ws2ipdef.h>
 #include <ws2tcpip.h>

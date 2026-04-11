@@ -105,7 +105,7 @@ The configuration file uses TOML format. Below are all available settings.
 | `killswitch_allow_ports` | array[int] | `[]` | Local ports to allow inbound connections when kill switch is active |
 | `post_quantum_group_enabled` | bool | `true` | Enable post-quantum key exchange in TLS handshakes |
 | `exclusions` | array[string] | `[]` | Domains/IPs to route specially based on `vpn_mode` |
-| `dns_upstreams` | array[string] | `[]` | DNS resolvers for queries routed through VPN |
+| `dns_upstreams` | array[string] | `[]` | **Legacy.** Kept only for backward compatibility with old configs; prefer `[endpoint].dns_upstreams` instead |
 
 ### Endpoint Settings (`[endpoint]`)
 
@@ -121,6 +121,7 @@ The configuration file uses TOML format. Below are all available settings.
 | `certificate` | string | `null` | Endpoint certificate in PEM format (uses system store if empty) |
 | `upstream_protocol` | string | `"http2"` | Protocol: `http2` or `http3` |
 | `anti_dpi` | bool | `false` | Enable anti-DPI (Deep Packet Inspection) measures |
+| `dns_upstreams` | array[string] | `[]` | DNS resolvers for queries routed through VPN. If empty, AdGuard DNS unfiltered is used |
 
 ### TUN Listener Settings (`[listener.tun]`)
 
@@ -172,7 +173,6 @@ killswitch_enabled = true
 killswitch_allow_ports = []
 post_quantum_group_enabled = true
 exclusions = []
-dns_upstreams = ["tls://1.1.1.1"]
 
 [endpoint]
 hostname = "vpn.example.com"
@@ -183,6 +183,7 @@ password = "mypassword"
 client_random = ""
 skip_verification = false
 certificate = ""
+dns_upstreams = ["tls://1.1.1.1"]
 upstream_protocol = "http2"
 anti_dpi = false
 
@@ -211,3 +212,91 @@ To run the TrustTunnel CLI Client, execute the following command:
 Replace `<path/to/configuration/file.toml>` with the actual path to your
 configuration file. You may need to run the command with superuser privileges
 if a TUN device is selected.
+
+---
+
+## Windows Service (Windows Only)
+
+The TrustTunnel CLI Client can be installed as a Windows service, allowing it
+to run in the background without requiring an interactive console session.
+
+> **Note**: Both install and uninstall commands require **Administrator
+> privileges**. Run the command from an elevated Command Prompt or PowerShell.
+
+### Installing the Service
+
+```shell
+trusttunnel_client --service-install --config <path/to/trusttunnel_client.toml>
+```
+
+The command validates the configuration file before registering the service.
+If validation fails, the service is not installed. The config path is resolved
+to an absolute path and baked into the service registration — the service will
+always start with that config file.
+
+The service is registered with **automatic** start type
+(`SERVICE_AUTO_START`) and is started immediately after installation.
+
+### Starting and Stopping the Service
+
+After installation, use the standard Windows service management commands:
+
+**cmd.exe**:
+
+```shell
+sc start TrustTunnelClient
+sc stop TrustTunnelClient
+```
+
+**PowerShell**:
+
+```powershell
+Start-Service TrustTunnelClient
+Stop-Service TrustTunnelClient
+```
+
+### Querying Service Status
+
+**cmd.exe**:
+
+```shell
+sc query TrustTunnelClient
+```
+
+**PowerShell**:
+
+```powershell
+Get-Service TrustTunnelClient
+```
+
+### Disabling Auto-Start
+
+To switch the service to manual start:
+
+**cmd.exe**:
+
+```shell
+sc config TrustTunnelClient start= demand
+```
+
+**PowerShell**:
+
+```powershell
+Set-Service TrustTunnelClient -StartupType Manual
+```
+
+### Uninstalling the Service
+
+```shell
+trusttunnel_client --service-uninstall
+```
+
+If the service is currently running, it will be stopped automatically before
+removal.
+
+### Notes
+
+- If the configuration file is moved or deleted after installation, the
+  service will fail to start. Reinstall the service with the new config path.
+- The `--service-install` and `--service-uninstall` options are only available
+  on Windows builds.

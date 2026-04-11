@@ -12,7 +12,9 @@ import {
   ArrowUpCircle,
   Heart,
   ExternalLink,
+  FileText,
 } from "lucide-react";
+import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
 import { useSnackBar } from "../shared/ui/SnackBarContext";
@@ -36,6 +38,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
   const pushSuccess = useSnackBar();
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   // Translate update progress message keys from Rust
   const translateProgress = useCallback((payload: UpdateProgressPayload): UpdateProgressPayload => {
@@ -64,7 +67,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
     try {
       await invoke("self_update", {
         downloadUrl: updateInfo.downloadUrl,
-        expectedSha256: updateInfo.sha256,
+        expectedSha256: updateInfo.sha256 || "",
         language: localStorage.getItem("tt_language") || "ru",
         theme: localStorage.getItem("tt_theme") || "dark",
       });
@@ -140,16 +143,9 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 style={{ backgroundColor: colors.successBgSubtle, border: `1px solid ${colors.successBorder}` }}
               >
                 <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>
-                    {t("about.update_available", { version: updateInfo.latestVersion })}
-                  </p>
-                  {updateInfo.releaseNotes && (
-                    <p className="text-[11px] mt-0.5 truncate" style={{ color: "var(--color-text-muted)" }}>
-                      {updateInfo.releaseNotes.split("\n")[0]}
-                    </p>
-                  )}
-                </div>
+                <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>
+                  {t("about.update_available", { version: updateInfo.latestVersion })}
+                </p>
               </div>
               <div className="flex gap-2">
                 <button
@@ -159,16 +155,29 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                   style={{ backgroundColor: colors.successBg, color: "var(--color-success-500)" }}
                 >
                   <ArrowUpCircle className="w-3.5 h-3.5" />
-                  {t("buttons.auto_update")}
+                  {t("buttons.update")}
                 </button>
                 <button
                   onClick={onOpenDownload}
-                  className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
                   style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
-                  title={t("buttons.download_from_browser")}
                 >
                   <Download className="w-3.5 h-3.5" />
+                  {t("buttons.download")}
                 </button>
+                {updateInfo.releaseNotes && (
+                  <button
+                    onClick={() => setChangelogOpen(true)}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: "var(--color-bg-hover)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    {t("buttons.whats_new")}
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -186,7 +195,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
 
           <button
             onClick={onCheckUpdates}
-            disabled={updateInfo.checking || updating}
+            disabled={updateInfo.checking || updating || updateInfo.available}
             className="w-full flex items-center justify-center gap-1.5 px-4 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-bg-hover)",
@@ -246,6 +255,13 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           </span>
         </div>
       </div>
+
+      <ChangelogModal
+        open={changelogOpen}
+        onClose={() => setChangelogOpen(false)}
+        version={updateInfo.latestVersion ?? version}
+        releaseNotes={updateInfo.releaseNotes ?? ""}
+      />
     </div>
   );
 }

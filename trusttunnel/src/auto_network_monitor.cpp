@@ -21,8 +21,9 @@
 
 namespace ag {
 
-AutoNetworkMonitor::AutoNetworkMonitor(TrustTunnelClient *client)
-        : m_client(client) {
+AutoNetworkMonitor::AutoNetworkMonitor(TrustTunnelClient *client, std::string bound_if)
+        : m_client(client)
+        , m_bound_if(std::move(bound_if)) {
 }
 
 AutoNetworkMonitor::~AutoNetworkMonitor() {
@@ -50,8 +51,7 @@ bool AutoNetworkMonitor::start() {
         vpn_event_loop_run(m_network_monitor_loop.get());
     });
 
-    std::string_view bound_if = m_client->get_bound_if();
-    bool is_bound_if_override = !bound_if.empty();
+    bool is_bound_if_override = !m_bound_if.empty();
 
     m_network_monitor = ag::utils::create_network_monitor(
             [this, is_bound_if_override](const std::string &if_name, bool is_connected) {
@@ -61,7 +61,7 @@ bool AutoNetworkMonitor::start() {
                 m_client->notify_network_change(is_connected ? ag::VPN_NS_CONNECTED : ag::VPN_NS_NOT_CONNECTED);
             });
 
-    if (is_bound_if_override && !update_interface(bound_if)) {
+    if (is_bound_if_override && !update_interface(m_bound_if)) {
         return false;
     }
 
