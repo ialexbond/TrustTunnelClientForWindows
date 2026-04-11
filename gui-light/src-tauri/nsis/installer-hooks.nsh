@@ -3,11 +3,15 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
 
-  ; ── 1. Kill sidecar VPN process ────────────────────────────────
-  ;    Main app is handled by Tauri's CheckIfAppIsRunning after this hook.
-  ;    But we need to kill the sidecar (trusttunnel_client.exe) which Tauri doesn't know about.
-  nsis_tauri_utils::KillProcess "trusttunnel_client.exe"
-  Pop $R0
+  ; ── 1. Kill only THIS edition's sidecar VPN process ────────────
+  ;    Read PID from .sidecar.pid and kill only that process.
+  ;    Do NOT use KillProcess — it kills ALL trusttunnel_client.exe,
+  ;    including the other edition's (Pro/Light) active VPN connection.
+  IfFileExists "$INSTDIR\.sidecar.pid" 0 +5
+    FileOpen $R1 "$INSTDIR\.sidecar.pid" r
+    FileRead $R1 $R0
+    FileClose $R1
+    nsExec::ExecToLog 'taskkill /F /PID $R0'
   Sleep 500
 
 !macroend
