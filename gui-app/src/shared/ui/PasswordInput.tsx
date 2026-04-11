@@ -1,14 +1,15 @@
-import { useState, forwardRef, type InputHTMLAttributes } from "react";
+import { useState, forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { Eye, EyeOff, Lock } from "lucide-react";
 
 interface PasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   label?: string;
   error?: string;
   showIcon?: boolean;
+  rightIcon?: ReactNode;
 }
 
 export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
-  ({ label, error, showIcon = true, className = "", style, ...rest }, ref) => {
+  ({ label, error, showIcon = true, rightIcon, className = "", style, ...rest }, ref) => {
     const [visible, setVisible] = useState(false);
 
     return (
@@ -29,7 +30,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             ref={ref}
             type={visible ? "text" : "password"}
             className={`
-              w-full rounded-[var(--radius-lg)] h-8 text-xs pr-10
+              w-full rounded-[var(--radius-lg)] h-8 text-xs ${rightIcon ? "pr-[4.5rem]" : "pr-10"}
               transition-colors outline-none
               placeholder:opacity-40
               disabled:opacity-50 disabled:cursor-not-allowed
@@ -45,6 +46,11 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             }}
             {...rest}
           />
+          {rightIcon && (
+            <span className="absolute right-9 top-1/2 -translate-y-1/2">
+              {rightIcon}
+            </span>
+          )}
           <button
             type="button"
             tabIndex={-1}
