@@ -25,6 +25,7 @@ beforeAll(() => {
 });
 
 describe("AddRuleInput", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onAdd: any;
 
   beforeEach(() => {

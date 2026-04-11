@@ -14,7 +14,9 @@ function makeEntry(overrides: Partial<RuleEntry> = {}): RuleEntry {
 }
 
 describe("RuleEntryRow", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onRemove: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onMove: any;
 
   beforeEach(() => {

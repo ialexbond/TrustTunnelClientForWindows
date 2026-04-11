@@ -25,7 +25,9 @@ vi.mock("./index.css", () => ({}));
 
 // Mock recharts
 vi.mock("recharts", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   LineChart: ({ children }: any) => <div>{children}</div>,
   Line: () => null,
   XAxis: () => null,
@@ -40,6 +42,7 @@ let capturedRenderArg: React.ReactNode | null = null;
 const mockRender = vi.fn((node: React.ReactNode) => {
   capturedRenderArg = node;
 });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockCreateRoot = vi.fn((..._args: any[]) => ({
   render: mockRender,
 }));
@@ -47,11 +50,13 @@ const mockCreateRoot = vi.fn((..._args: any[]) => ({
 vi.mock("react-dom/client", () => ({
   __esModule: true,
   default: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createRoot: (...args: any[]) => mockCreateRoot(...args),
   },
 }));
 
 // Will hold the real ErrorBoundary class after import
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let ErrorBoundary: any;
 let rootEl: HTMLDivElement;
 
@@ -152,6 +157,7 @@ describe("main.tsx", () => {
   it("unhandledrejection handler logs to console", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const event = new Event("unhandledrejection", { cancelable: true, bubbles: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (event as any).reason = "Promise failed";
     window.dispatchEvent(event);
 
@@ -162,6 +168,7 @@ describe("main.tsx", () => {
   it("unhandledrejection handler prevents default", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const event = new Event("unhandledrejection", { cancelable: true, bubbles: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (event as any).reason = "test";
     const prevented = !window.dispatchEvent(event);
     expect(prevented).toBe(true);

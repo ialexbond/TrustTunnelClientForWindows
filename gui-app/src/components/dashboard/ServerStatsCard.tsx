@@ -143,6 +143,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch once when creds appear, then every 30s. Independent of VPN status.

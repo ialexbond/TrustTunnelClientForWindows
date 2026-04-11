@@ -6,9 +6,13 @@ import { ProcessFilterSection } from "./ProcessFilterSection";
 import type { ProcessInfo } from "./useRoutingState";
 
 describe("ProcessFilterSection", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onModeChange: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onAdd: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onRemove: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onLoadProcesses: any;
 
   const defaultProcesses = ["chrome.exe", "firefox.exe"];

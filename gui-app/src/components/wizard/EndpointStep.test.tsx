@@ -15,12 +15,14 @@ describe("EndpointStep", () => {
     !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 
   it("renders endpoint title", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = makeWizardState({ step: "endpoint", isValidEmail: validEmailFn as any });
     render(<EndpointStep {...w} />);
     expect(screen.getByText(i18n.t("wizard.endpoint.title"))).toBeInTheDocument();
   });
 
   it("renders VPN credentials section", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = makeWizardState({ step: "endpoint", isValidEmail: validEmailFn as any });
     render(<EndpointStep {...w} />);
     expect(screen.getByText(i18n.t("wizard.endpoint.vpn_credentials"))).toBeInTheDocument();
@@ -30,6 +32,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       vpnUsername: "testuser",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -42,6 +45,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       setVpnUsername,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -55,6 +59,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       vpnPassword: "secret",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -69,6 +74,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       showVpnPassword: false,
       setShowVpnPassword,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -83,12 +89,14 @@ describe("EndpointStep", () => {
   // ── TLS Certificate section ──
 
   it("renders TLS certificate section", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = makeWizardState({ step: "endpoint", isValidEmail: validEmailFn as any });
     render(<EndpointStep {...w} />);
     expect(screen.getByText(i18n.t("wizard.endpoint.tls_certificate"))).toBeInTheDocument();
   });
 
   it("renders cert type buttons", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = makeWizardState({ step: "endpoint", isValidEmail: validEmailFn as any });
     render(<EndpointStep {...w} />);
     expect(screen.getByText("Let's Encrypt")).toBeInTheDocument();
@@ -101,6 +109,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       setCertType,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -113,6 +122,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       setCertType,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -124,6 +134,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       certType: "selfsigned",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -136,6 +147,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       certType: "letsencrypt",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -149,6 +161,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "letsencrypt",
       setDomain,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -164,6 +177,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "letsencrypt",
       setEmail,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -178,6 +192,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "letsencrypt",
       email: "bademail",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -189,6 +204,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "letsencrypt",
       email: "valid@test.com",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -200,6 +216,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "letsencrypt",
       host: "1.2.3.4",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -214,6 +231,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       certType: "provided",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -227,6 +245,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "provided",
       setCertChainPath,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -242,6 +261,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "provided",
       setCertKeyPath,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -254,6 +274,7 @@ describe("EndpointStep", () => {
   // ── Server Features (toggles) ──
 
   it("renders server features section", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = makeWizardState({ step: "endpoint", isValidEmail: validEmailFn as any });
     render(<EndpointStep {...w} />);
     expect(screen.getByText(i18n.t("wizard.endpoint.server_features"))).toBeInTheDocument();
@@ -265,6 +286,7 @@ describe("EndpointStep", () => {
   // ── Advanced settings ──
 
   it("renders advanced settings toggle button", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = makeWizardState({ step: "endpoint", isValidEmail: validEmailFn as any });
     render(<EndpointStep {...w} />);
     expect(screen.getByText(i18n.t("wizard.endpoint.advanced_settings"))).toBeInTheDocument();
@@ -276,6 +298,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       showAdvanced: false,
       setShowAdvanced,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -288,6 +311,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       showAdvanced: true,
       listenAddress: "0.0.0.0:443",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -301,6 +325,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       showAdvanced: true,
       setListenAddress,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -314,6 +339,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       showAdvanced: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -328,6 +354,7 @@ describe("EndpointStep", () => {
       certType: "letsencrypt",
       domain: "vpn.example.com",
       host: "1.2.3.4",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -341,6 +368,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       certType: "letsencrypt",
       domain: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -357,6 +385,7 @@ describe("EndpointStep", () => {
       step: "endpoint",
       handleDeploy,
       canDeploy: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -368,6 +397,7 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       canDeploy: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -383,6 +413,7 @@ describe("EndpointStep", () => {
       cameFromFound: true,
       setWizardStep,
       setCameFromFound,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -397,9 +428,11 @@ describe("EndpointStep", () => {
     const w = makeWizardState({
       step: "endpoint",
       cameFromFound: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       serverInfo: { installed: true, users: [], version: "1.0", serviceActive: true, os: "linux" } as any,
       setWizardStep,
       setCameFromFound,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);
@@ -416,6 +449,7 @@ describe("EndpointStep", () => {
       serverInfo: null,
       setWizardStep,
       setCameFromFound,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       isValidEmail: validEmailFn as any,
     });
     render(<EndpointStep {...w} />);

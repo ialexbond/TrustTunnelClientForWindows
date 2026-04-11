@@ -3,7 +3,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ConfirmDialog", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onConfirm: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onCancel: any;
 
   const defaults = {

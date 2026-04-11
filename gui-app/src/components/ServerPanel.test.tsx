@@ -13,6 +13,7 @@ const mockSetConfirmReboot = vi.fn();
 const mockPushSuccess = vi.fn();
 const mockShiftSuccess = vi.fn();
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockState: any;
 
 vi.mock("./server/useServerState", () => ({

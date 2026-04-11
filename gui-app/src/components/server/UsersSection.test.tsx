@@ -7,6 +7,7 @@ import type { ServerState } from "./useServerState";
 
 // Mock qrcode.react
 vi.mock("qrcode.react", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   QRCodeSVG: (props: any) => <svg data-testid="qr-code" data-value={props.value} />,
 }));
 

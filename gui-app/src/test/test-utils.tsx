@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React from "react";
 import { render, type RenderOptions } from "@testing-library/react";
 import { SnackBarProvider } from "../shared/ui/SnackBarContext";
