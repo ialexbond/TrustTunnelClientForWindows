@@ -1,8 +1,11 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-shell";
 import { Modal } from "../shared/ui/Modal";
+
+type CP = { children?: ReactNode };
 
 interface ChangelogModalProps {
   open: boolean;
@@ -56,7 +59,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
         >
           <ReactMarkdown
             components={{
-              h1: ({ children }) => (
+              h1: ({ children }: CP) => (
                 <h1
                   className="text-sm font-semibold mt-0 mb-2"
                   style={{ color: "var(--color-text-primary)" }}
@@ -64,7 +67,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   {children}
                 </h1>
               ),
-              h2: ({ children }) => (
+              h2: ({ children }: CP) => (
                 <h2
                   className="text-sm font-semibold mt-3 mb-1.5"
                   style={{ color: "var(--color-text-primary)" }}
@@ -72,7 +75,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   {children}
                 </h2>
               ),
-              h3: ({ children }) => (
+              h3: ({ children }: CP) => (
                 <h3
                   className="text-xs font-semibold mt-2 mb-1"
                   style={{ color: "var(--color-text-secondary)" }}
@@ -80,7 +83,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   {children}
                 </h3>
               ),
-              p: ({ children }) => (
+              p: ({ children }: CP) => (
                 <p
                   className="text-xs leading-relaxed mb-2"
                   style={{ color: "var(--color-text-secondary)" }}
@@ -88,7 +91,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   {children}
                 </p>
               ),
-              strong: ({ children }) => (
+              strong: ({ children }: CP) => (
                 <strong
                   className="font-semibold"
                   style={{ color: "var(--color-text-primary)" }}
@@ -96,18 +99,18 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   {children}
                 </strong>
               ),
-              em: ({ children }) => (
+              em: ({ children }: CP) => (
                 <em className="italic" style={{ color: "var(--color-text-secondary)" }}>
                   {children}
                 </em>
               ),
-              ul: ({ children }) => (
+              ul: ({ children }: CP) => (
                 <ul className="list-disc pl-4 space-y-0.5 mb-2">{children}</ul>
               ),
-              ol: ({ children }) => (
+              ol: ({ children }: CP) => (
                 <ol className="list-decimal pl-4 space-y-0.5 mb-2">{children}</ol>
               ),
-              li: ({ children }) => (
+              li: ({ children }: CP) => (
                 <li className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                   {children}
                 </li>
@@ -118,7 +121,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   style={{ borderColor: "var(--color-border)" }}
                 />
               ),
-              code: ({ children, className }) => {
+              code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
                 const isBlock = Boolean(className);
                 if (isBlock) {
                   return (
@@ -145,7 +148,7 @@ export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }:
                   </code>
                 );
               },
-              a: ({ href, children }) => (
+              a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
                 <a
                   href={href}
                   className="underline underline-offset-2 opacity-80 hover:opacity-100 cursor-pointer"
