@@ -286,46 +286,48 @@ export function UsersSection({ state }: Props) {
         {/* Add user form */}
         <div className="space-y-1.5">
           <div className="flex gap-1.5">
-            <div className="relative flex-1">
+            <div className="flex-1">
               <Input
                 value={newUsername}
                 onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._\-]/g, ""))}
                 placeholder={t("server.users.username_placeholder")}
                 error={usernameError ? t(usernameError) : undefined}
                 disabled={isAdding}
-                className="pr-8"
+                rightIcon={
+                  <Tooltip text={t("common.generate_username")}>
+                    <button
+                      type="button"
+                      onClick={() => setNewUsername(generateUsername())}
+                      disabled={isAdding}
+                      className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                }
               />
-              <Tooltip text={t("common.generate_username")}>
-                <button
-                  type="button"
-                  onClick={() => setNewUsername(generateUsername())}
-                  disabled={isAdding}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  <Shuffle className="w-3.5 h-3.5" />
-                </button>
-              </Tooltip>
             </div>
-            <div className="relative flex-1">
+            <div className="flex-1">
               <PasswordInput
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
                 placeholder={t("server.users.password_placeholder")}
                 disabled={isAdding}
-                className="pr-16"
+                rightIcon={
+                  <Tooltip text={t("common.generate_password")}>
+                    <button
+                      type="button"
+                      onClick={() => setNewPassword(generatePassword())}
+                      disabled={isAdding}
+                      className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                }
               />
-              <Tooltip text={t("common.generate_password")}>
-                <button
-                  type="button"
-                  onClick={() => setNewPassword(generatePassword())}
-                  disabled={isAdding}
-                  className="absolute right-9 top-1/2 -translate-y-1/2 transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  <Shuffle className="w-3.5 h-3.5" />
-                </button>
-              </Tooltip>
             </div>
             <Button
               variant="success"
