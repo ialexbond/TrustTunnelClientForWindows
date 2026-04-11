@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import type { UpdateInfo } from "../types";
 
@@ -22,28 +22,13 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-// Minimum 10 seconds between manual checks to let GitHub API cache refresh
-const COOLDOWN_MS = 10_000;
-
 export function useUpdateChecker() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     available: false, latestVersion: "", currentVersion: "",
     downloadUrl: "", sha256: "", releaseNotes: "", checking: false,
   });
-  const lastCheckRef = useRef(0);
-  const [cooldown, setCooldown] = useState(false);
 
-  const checkForUpdates = useCallback(async (silent = false) => {
-    // Enforce cooldown for manual checks (not silent/background)
-    if (!silent) {
-      const now = Date.now();
-      if (now - lastCheckRef.current < COOLDOWN_MS) {
-        setCooldown(true);
-        setTimeout(() => setCooldown(false), COOLDOWN_MS - (now - lastCheckRef.current));
-        return;
-      }
-      lastCheckRef.current = now;
-    }
+  const checkForUpdates = useCallback(async (_silent = false) => {
     setUpdateInfo(prev => ({ ...prev, checking: true }));
     try {
       const currentVersion = await getVersion();
@@ -98,5 +83,5 @@ export function useUpdateChecker() {
     return () => clearInterval(interval);
   }, [checkForUpdates]);
 
-  return { updateInfo, checkForUpdates, cooldown };
+  return { updateInfo, checkForUpdates };
 }
