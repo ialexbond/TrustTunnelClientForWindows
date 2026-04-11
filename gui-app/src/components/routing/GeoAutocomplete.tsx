@@ -34,7 +34,7 @@ export function GeoAutocomplete({
 
   // Reset index when query changes
   useEffect(() => {
-    setActiveIndex(0);
+    setTimeout(() => setActiveIndex(0), 0);
   }, [query]);
 
   // Scroll active item into view

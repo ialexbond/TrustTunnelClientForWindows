@@ -4,10 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { ChangelogModal } from "./ChangelogModal";
 
 describe("ChangelogModal", () => {
-  let onClose: ReturnType<typeof vi.fn>;
+  let onClose: () => void;
 
   beforeEach(() => {
-    onClose = vi.fn();
+    onClose = vi.fn() as unknown as () => void;
   });
 
   // UPD-01: modal opens when open=true, hides when open=false

@@ -26,7 +26,7 @@ export function useTheme() {
   // Listen for system theme changes when mode is "system"
   useEffect(() => {
     localStorage.setItem("tt_theme", themeMode);
-    setTheme(getEffectiveTheme(themeMode));
+    setTimeout(() => setTheme(getEffectiveTheme(themeMode)), 0);
 
     if (themeMode !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
