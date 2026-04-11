@@ -1,15 +1,20 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 
-interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+interface ActionInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   description?: string;
-  icon?: ReactNode;
+  leftIcon?: ReactNode;
+  actions?: ReactNode[];
   error?: string;
   fullWidth?: boolean;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, description, icon, error, fullWidth = true, className = "", style, ...rest }, ref) => {
+export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
+  ({ label, description, leftIcon, actions, error, fullWidth = true, className = "", style, ...rest }, ref) => {
+    const actionCount = actions?.length ?? 0;
+    // Each action ~28px (icon 14px + gap 4px + padding), base right padding 8px
+    const rightPadding = actionCount > 0 ? `${8 + actionCount * 28}px` : undefined;
+
     return (
       <div className={fullWidth ? "w-full" : ""}>
         {label && (
@@ -23,12 +28,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           </p>
         )}
         <div className="relative">
-          {icon && (
+          {leftIcon && (
             <span
               className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {icon}
+              {leftIcon}
             </span>
           )}
           <input
@@ -38,7 +43,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               transition-colors outline-none
               placeholder:opacity-40
               disabled:opacity-50 disabled:cursor-not-allowed
-              ${icon ? "pl-9" : ""}
+              ${leftIcon ? "pl-9" : ""}
               ${error ? "ring-1 ring-[var(--color-danger-500)]" : ""}
               ${className}
             `}
@@ -46,10 +51,20 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               backgroundColor: "var(--color-input-bg)",
               border: `1px solid ${error ? "var(--color-danger-500)" : "var(--color-input-border)"}`,
               color: "var(--color-text-primary)",
+              paddingRight: rightPadding,
               ...style,
             }}
             {...rest}
           />
+          {actionCount > 0 && (
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {actions!.map((action, i) => (
+                <span key={i} className="flex items-center">
+                  {action}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         {error && (
           <p className="text-[11px] mt-1" style={{ color: "var(--color-danger-400)" }}>
@@ -61,4 +76,4 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   }
 );
 
-Input.displayName = "Input";
+ActionInput.displayName = "ActionInput";
