@@ -6,6 +6,7 @@ import type { RuleEntry, RouteAction, GeoDataStatus, GeoDataIndex } from "./useR
 
 // Mock child components to simplify testing
 vi.mock("./RuleEntryRow", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   RuleEntryRow: ({ entry, onRemove, onMove, currentAction }: any) => (
     <div data-testid={`rule-entry-${entry.id}`}>
       <span>{entry.value}</span>
@@ -16,14 +17,18 @@ vi.mock("./RuleEntryRow", () => ({
 }));
 
 vi.mock("./AddRuleInput", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   AddRuleInput: ({ action }: any) => (
     <div data-testid={`add-rule-input-${action}`}>add-rule-input</div>
   ),
 }));
 
 describe("RoutingBlockCard", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onAdd: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onRemove: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onMove: any;
 
   const defaultGeoStatus: GeoDataStatus = {

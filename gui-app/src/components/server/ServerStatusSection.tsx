@@ -162,7 +162,7 @@ export function ServerStatusSection({ state }: Props) {
               </button>
             </Tooltip>
             {ping !== null && ping > 0 && (
-              <Badge variant={pingVariant as any} size="sm">
+              <Badge variant={pingVariant as "success" | "warning" | "danger" | "default"} size="sm">
                 <Activity className="w-2.5 h-2.5" />
                 {ping}ms
               </Badge>

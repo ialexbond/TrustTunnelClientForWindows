@@ -9,7 +9,9 @@ import { renderWithProviders as render } from "./test/test-utils";
 
 // Mock recharts
 vi.mock("recharts", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   LineChart: ({ children }: any) => <div>{children}</div>,
   Line: () => null,
   XAxis: () => null,
@@ -20,62 +22,76 @@ vi.mock("recharts", () => ({
 }));
 
 // Mock heavy child components to keep tests fast — capture props for assertions
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let setupWizardProps: any = {};
 vi.mock("./components/SetupWizard", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     setupWizardProps = props;
     return <div data-testid="setup-wizard">SetupWizard</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let controlPanelProps: any = {};
 vi.mock("./components/ControlPanelPage", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ControlPanelPage: (props: any) => {
     controlPanelProps = props;
     return <div data-testid="control-panel-page">ControlPanelPage</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let settingsPanelProps: any = {};
 vi.mock("./components/SettingsPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     settingsPanelProps = props;
     return <div data-testid="settings-panel">SettingsPanel</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let routingPanelProps: any = {};
 vi.mock("./components/RoutingPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     routingPanelProps = props;
     return <div data-testid="routing-panel">RoutingPanel</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let logPanelProps: any = {};
 vi.mock("./components/LogPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     logPanelProps = props;
     return <div data-testid="log-panel">LogPanel</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let aboutPanelProps: any = {};
 vi.mock("./components/AboutPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     aboutPanelProps = props;
     return <div data-testid="about-panel">AboutPanel</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let dashboardPanelProps: any = {};
 vi.mock("./components/DashboardPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     dashboardPanelProps = props;
     return <div data-testid="dashboard-panel">DashboardPanel</div>;
@@ -84,14 +100,17 @@ vi.mock("./components/DashboardPanel", () => ({
 
 vi.mock("./components/AppSettingsPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (_props: any) => {
     return <div data-testid="app-settings-panel">AppSettingsPanel</div>;
   },
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let statusPanelProps: any = {};
 vi.mock("./components/StatusPanel", () => ({
   __esModule: true,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     statusPanelProps = props;
     return <div data-testid="status-panel">StatusPanel</div>;
@@ -108,6 +127,7 @@ const mockFetch = vi.fn().mockResolvedValue({
     html_url: "https://github.com",
   }),
 });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).fetch = mockFetch;
 
 // Mock window.matchMedia
@@ -118,6 +138,7 @@ const mockMatchMedia = vi.fn().mockImplementation((query: string) => ({
   onchange: null,
   addListener: vi.fn(),
   removeListener: vi.fn(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addEventListener: vi.fn((_: string, handler: any) => {
     matchMediaListeners.push(handler);
   }),
@@ -130,11 +151,13 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 // Helper: capture listen callbacks by event name
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ListenCallback = (event: { payload: any }) => void;
 let listenCallbacks: Record<string, ListenCallback[]> = {};
 
 function setupListenMock() {
   listenCallbacks = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(listen).mockImplementation(async (eventName: string, callback: any) => {
     if (!listenCallbacks[eventName]) listenCallbacks[eventName] = [];
     listenCallbacks[eventName].push(callback);
@@ -142,6 +165,7 @@ function setupListenMock() {
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function emitEvent(eventName: string, payload: any) {
   const cbs = listenCallbacks[eventName] || [];
   cbs.forEach(cb => cb({ payload }));
