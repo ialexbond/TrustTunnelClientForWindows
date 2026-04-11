@@ -25,6 +25,7 @@ interface AboutPanelProps {
   updateInfo: UpdateInfo;
   onCheckUpdates: () => void;
   onOpenDownload: () => void;
+  updateCooldown?: boolean;
 }
 
 interface UpdateProgressPayload {
@@ -33,7 +34,7 @@ interface UpdateProgressPayload {
   message: string;
 }
 
-function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
+function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, updateCooldown }: AboutPanelProps) {
   const { t } = useTranslation();
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
@@ -159,7 +160,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 </button>
                 <button
                   onClick={onOpenDownload}
-                  className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
                   style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -168,12 +169,11 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 {updateInfo.releaseNotes && (
                   <button
                     onClick={() => setChangelogOpen(true)}
-                    className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs transition-colors"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
                     style={{
                       backgroundColor: "var(--color-bg-hover)",
                       color: "var(--color-text-secondary)",
                     }}
-                    title={t("buttons.whats_new")}
                   >
                     <FileText className="w-3.5 h-3.5" />
                     {t("buttons.whats_new")}
@@ -196,7 +196,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
 
           <button
             onClick={onCheckUpdates}
-            disabled={updateInfo.checking || updating}
+            disabled={updateInfo.checking || updating || updateCooldown}
             className="w-full flex items-center justify-center gap-1.5 px-4 h-8 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-bg-hover)",
