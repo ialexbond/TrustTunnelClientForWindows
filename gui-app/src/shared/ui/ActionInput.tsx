@@ -59,7 +59,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
           {actionCount > 0 && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
               {actions!.map((action, i) => (
-                <span key={i} className="flex items-center">
+                <span key={i} className="flex items-center p-1">
                   {action}
                 </span>
               ))}
