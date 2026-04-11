@@ -63,7 +63,7 @@ function AboutScreen({ updateInfo, onCheckUpdates, onOpenDownload }: AboutScreen
   }, []);
 
   const handleSelfUpdate = async () => {
-    if (!updateInfo.downloadUrl || !updateInfo.sha256) return;
+    if (!updateInfo.downloadUrl) return;
     setUpdating(true);
     setUpdateProgress({ stage: "download", percent: 0, message: t("status.preparing") });
     try {
