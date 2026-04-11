@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import type { UpdateInfo } from "../types";
 
@@ -22,13 +22,25 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+// Minimum 30 seconds between manual checks to avoid stale cached responses
+const COOLDOWN_MS = 30_000;
+
 export function useUpdateChecker() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     available: false, latestVersion: "", currentVersion: "",
     downloadUrl: "", sha256: "", releaseNotes: "", checking: false,
   });
+  const lastCheckRef = useRef(0);
 
-  const checkForUpdates = useCallback(async (_silent = false) => {
+  const checkForUpdates = useCallback(async (silent = false) => {
+    // Enforce cooldown for manual checks (not silent/background)
+    if (!silent) {
+      const now = Date.now();
+      if (now - lastCheckRef.current < COOLDOWN_MS) {
+        return; // Too soon, skip
+      }
+      lastCheckRef.current = now;
+    }
     setUpdateInfo(prev => ({ ...prev, checking: true }));
     try {
       const currentVersion = await getVersion();

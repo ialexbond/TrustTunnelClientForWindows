@@ -143,16 +143,9 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 style={{ backgroundColor: colors.successBgSubtle, border: `1px solid ${colors.successBorder}` }}
               >
                 <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>
-                    {t("about.update_available", { version: updateInfo.latestVersion })}
-                  </p>
-                  {updateInfo.releaseNotes && (
-                    <p className="text-[11px] mt-0.5 truncate" style={{ color: "var(--color-text-muted)" }}>
-                      {updateInfo.releaseNotes.split("\n")[0]}
-                    </p>
-                  )}
-                </div>
+                <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>
+                  {t("about.update_available", { version: updateInfo.latestVersion })}
+                </p>
               </div>
               <div className="flex gap-2">
                 <button
@@ -162,15 +155,15 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                   style={{ backgroundColor: colors.successBg, color: "var(--color-success-500)" }}
                 >
                   <ArrowUpCircle className="w-3.5 h-3.5" />
-                  {t("buttons.auto_update")}
+                  {t("buttons.update")}
                 </button>
                 <button
                   onClick={onOpenDownload}
                   className="shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
                   style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
-                  title={t("buttons.download_from_browser")}
                 >
                   <Download className="w-3.5 h-3.5" />
+                  {t("buttons.download")}
                 </button>
                 {updateInfo.releaseNotes && (
                   <button
