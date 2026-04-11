@@ -67,7 +67,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
     try {
       await invoke("self_update", {
         downloadUrl: updateInfo.downloadUrl,
-        expectedSha256: updateInfo.sha256 || null,
+        expectedSha256: updateInfo.sha256 || "",
         language: localStorage.getItem("tt_language") || "ru",
         theme: localStorage.getItem("tt_theme") || "dark",
       });
