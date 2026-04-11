@@ -58,13 +58,13 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   }, [translateProgress]);
 
   const handleSelfUpdate = async () => {
-    if (!updateInfo.downloadUrl || !updateInfo.sha256) return;
+    if (!updateInfo.downloadUrl) return;
     setUpdating(true);
     setUpdateProgress({ stage: "download", percent: 0, message: t("status.preparing") });
     try {
       await invoke("self_update", {
         downloadUrl: updateInfo.downloadUrl,
-        expectedSha256: updateInfo.sha256,
+        expectedSha256: updateInfo.sha256 || "",
         language: localStorage.getItem("tt_language") || "ru",
         theme: localStorage.getItem("tt_theme") || "dark",
       });
