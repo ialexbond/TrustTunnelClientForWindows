@@ -1,5 +1,17 @@
 # Milestones
 
+## v2.5.0 UX & Connectivity (Shipped: 2026-04-11)
+
+**Phases completed:** 4 phases, 6 plans, 8 tasks
+
+**Key accomplishments:**
+
+- 1. [Rule 2 - Missing functionality] Added i18n keys for ChangelogModal
+- 1. [Rule 2 - Security] Added crypto.getRandomValues runtime guard
+- AddUserForm.tsx (wizard):
+
+---
+
 ## Completed
 
 ### v2.3.0 — Tray, Logging, SSH UX (2026-04-07)
