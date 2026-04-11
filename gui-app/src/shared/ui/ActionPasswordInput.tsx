@@ -12,8 +12,8 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
   ({ label, error, showLockIcon = true, actions, className = "", style, ...rest }, ref) => {
     const [visible, setVisible] = useState(false);
     const actionCount = actions?.length ?? 0;
-    // Eye button ~28px, each action ~28px, base right padding 8px
-    const rightPadding = `${8 + 28 + actionCount * 28}px`;
+    // Eye ~22px (14px icon + p-1), each action ~22px, gap-1 (4px), right-2 (8px)
+    const rightPadding = `${8 + (1 + actionCount) * 22 + actionCount * 4}px`;
 
     return (
       <div className="w-full">
@@ -52,7 +52,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
             {actions?.map((action, i) => (
-              <span key={i} className="flex items-center">
+              <span key={i} className="flex items-center p-1">
                 {action}
               </span>
             ))}
