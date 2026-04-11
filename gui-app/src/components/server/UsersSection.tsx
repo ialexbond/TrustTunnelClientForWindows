@@ -12,17 +12,20 @@ import {
   QrCode,
   Link2,
   X,
+  Shuffle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { Input } from "../../shared/ui/Input";
-import { PasswordInput } from "../../shared/ui/PasswordInput";
+import { ActionInput } from "../../shared/ui/ActionInput";
+import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { IconButton } from "../../shared/ui/IconButton";
 import { Modal } from "../../shared/ui/Modal";
 import { colors } from "../../shared/ui/colors";
 import { formatError } from "../../shared/utils/formatError";
+import { Tooltip } from "../../shared/ui/Tooltip";
+import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -283,22 +286,50 @@ export function UsersSection({ state }: Props) {
         {/* Add user form */}
         <div className="space-y-1.5">
           <div className="flex gap-1.5">
-            <Input
-              value={newUsername}
-              onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._\-]/g, ""))}
-              placeholder={t("server.users.username_placeholder")}
-              error={usernameError ? t(usernameError) : undefined}
-              disabled={isAdding}
-              className=""
-            />
-            <PasswordInput
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
-              placeholder={t("server.users.password_placeholder")}
-              showIcon={false}
-              disabled={isAdding}
-              className=""
-            />
+            <div className="flex-1">
+              <ActionInput
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._\-]/g, ""))}
+                placeholder={t("server.users.username_placeholder")}
+                error={usernameError ? t(usernameError) : undefined}
+                disabled={isAdding}
+                actions={[
+                  <Tooltip key="gen" text={t("common.generate_username")}>
+                    <button
+                      type="button"
+                      onClick={() => setNewUsername(generateUsername())}
+                      disabled={isAdding}
+                      className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>,
+                ]}
+              />
+            </div>
+            <div className="flex-1">
+              <ActionPasswordInput
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
+                placeholder={t("server.users.password_placeholder")}
+                disabled={isAdding}
+                showLockIcon={false}
+                actions={[
+                  <Tooltip key="gen" text={t("common.generate_password")}>
+                    <button
+                      type="button"
+                      onClick={() => setNewPassword(generatePassword())}
+                      disabled={isAdding}
+                      className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>,
+                ]}
+              />
+            </div>
             <Button
               variant="success"
               size="sm"

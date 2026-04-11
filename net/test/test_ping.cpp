@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -112,8 +113,9 @@ TEST_F(PingTest, Single) {
         ASSERT_EQ(test_ctx.results[i.first].status, i.second) << i.first;
 #else
         if (i.second != PING_OK) {
-            // on windows refused error returns after about 2 seconds, so depending on configuration
-            // here might be PING_TIMEDOUT or PING_SOCKET_ERROR status code
+            // on windows refused error returns after about 2 seconds, so
+            // depending on configuration here might be PING_TIMEDOUT or
+            // PING_SOCKET_ERROR status code
             ASSERT_TRUE(test_ctx.results[i.first].status != PING_OK) << i.first;
         } else {
             ASSERT_EQ(test_ctx.results[i.first].status, i.second) << i.first;
@@ -207,17 +209,16 @@ TEST_F(PingTest, Multiple) {
                         [](void *ctx, const PingResult *result) {
                             auto *contexts = (std::vector<TestCtx> *) ctx;
 
-                            auto i = std::find_if(
-                                    contexts->begin(), contexts->end(), [ping = result->ping](const TestCtx &i) {
-                                        return ping == i.ping.get();
-                                    });
+                            auto i = std::ranges::find_if(*contexts, [ping = result->ping](const TestCtx &item) {
+                                return ping == item.ping.get();
+                            });
                             assert(i != contexts->end());
 
                             TestCtx *test_ctx = &*i;
                             if (result->status == PING_FINISHED) {
                                 test_ctx->finished = true;
-                                if (std::all_of(contexts->begin(), contexts->end(), [](const TestCtx &i) {
-                                        return i.finished;
+                                if (std::ranges::all_of(*contexts, [](const TestCtx &item) {
+                                        return item.finished;
                                     })) {
                                     event_base_loopbreak(test_ctx->base);
                                 }
@@ -457,8 +458,9 @@ TEST_F(PingTest, MultipleRounds) {
             ASSERT_EQ(r.status, i.second) << i.first;
 #else
             if (i.second != PING_OK) {
-                // on windows refused error returns after about 2 seconds, so depending on configuration
-                // here might be PING_TIMEDOUT or PING_SOCKET_ERROR status code
+                // on windows refused error returns after about 2 seconds, so
+                // depending on configuration here might be PING_TIMEDOUT or
+                // PING_SOCKET_ERROR status code
                 ASSERT_TRUE(r.status != PING_OK) << i.first;
             } else {
                 ASSERT_EQ(r.status, i.second) << i.first;
@@ -473,7 +475,8 @@ TEST_F(PingTest, MultipleRounds) {
 }
 
 #ifdef __MACH__
-// Need a machine with more than one usable interface (loopback and tunnels are excluded on purpose)
+// Need a machine with more than one usable interface (loopback and tunnels are
+// excluded on purpose)
 TEST_F(PingTest, DISABLED_QueryAllInterfaces) {
     static const std::pair<const char *, PingStatus> TEST_DATA[] = {
             {"1.1.1.1:443", PING_OK},
@@ -516,10 +519,9 @@ TEST_F(PingTest, DISABLED_QueryAllInterfaces) {
         ASSERT_EQ(test_ctx.results.count(i.first), 1) << i.first;
         // More than one interface should have been used
         ASSERT_GT(test_ctx.results[i.first].size(), 1) << i.first;
-        auto it = std::find_if(
-                test_ctx.results[i.first].begin(), test_ctx.results[i.first].end(), [](const PingResult &result) {
-                    return result.status == PING_OK;
-                });
+        auto it = std::ranges::find_if(test_ctx.results[i.first], [](const PingResult &result) {
+            return result.status == PING_OK;
+        });
         // At least one should be successful
         ASSERT_NE(test_ctx.results[i.first].end(), it) << i.first;
     }

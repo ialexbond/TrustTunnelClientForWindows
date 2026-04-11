@@ -122,8 +122,13 @@ static vpn_easy_t *vpn_easy_start_internal(
 
     auto vpn = std::make_unique<vpn_easy_t>();
 
+    std::string bound_if;
+    if (const auto *tun = std::get_if<TrustTunnelConfig::TunListener>(&trusttunnel_config->listener)) {
+        bound_if = tun->bound_if;
+    }
+
     vpn->client = std::make_unique<ag::TrustTunnelClient>(std::move(*trusttunnel_config), std::move(callbacks));
-    vpn->network_monitor = std::make_unique<ag::AutoNetworkMonitor>(vpn->client.get());
+    vpn->network_monitor = std::make_unique<ag::AutoNetworkMonitor>(vpn->client.get(), std::move(bound_if));
     if (!vpn->network_monitor->start()) {
         errlog(g_logger, "Failed to start network monitor");
         return nullptr;

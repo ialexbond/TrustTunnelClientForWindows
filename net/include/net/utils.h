@@ -38,6 +38,7 @@ struct CertVerifyCtx {
     X509 *cert = nullptr;
     STACK_OF(X509) *chain = nullptr;
     SSL *ssl = nullptr;
+    VpnCertVerificationType verification_type = VT_DEFAULT;
 };
 
 struct CertVerifyHandler {
