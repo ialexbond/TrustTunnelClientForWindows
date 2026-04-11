@@ -100,10 +100,10 @@ describe("AboutPanel", () => {
       />
     );
     expect(screen.getByText("Доступна версия 2.0.0")).toBeInTheDocument();
-    expect(screen.getByText("Обновить автоматически")).toBeInTheDocument();
+    expect(screen.getByText("Обновить")).toBeInTheDocument();
   });
 
-  it("shows release notes first line when available", () => {
+  it("shows 'whats new' button when release notes available", () => {
     render(
       <AboutPanel
         {...defaultProps}
@@ -117,7 +117,7 @@ describe("AboutPanel", () => {
       />
     );
     expect(
-      screen.getByText("Bug fixes and improvements")
+      screen.getByText(i18n.t("buttons.whats_new"))
     ).toBeInTheDocument();
   });
 
@@ -133,7 +133,7 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    const btn = screen.getByText("Обновить автоматически").closest("button");
+    const btn = screen.getByText("Обновить").closest("button");
     expect(btn).toBeDisabled();
   });
 
@@ -149,7 +149,7 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    const downloadBtn = screen.getByTitle("Скачать вручную из браузера");
+    const downloadBtn = screen.getByText(i18n.t("buttons.download")).closest("button")!;
     fireEvent.click(downloadBtn);
     expect(defaultProps.onOpenDownload).toHaveBeenCalledOnce();
   });
@@ -199,7 +199,7 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText("Обновить автоматически"));
+    fireEvent.click(screen.getByText("Обновить"));
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("self_update", {
         downloadUrl: "https://example.com/update.zip",
@@ -226,7 +226,7 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText("Обновить автоматически"));
+    fireEvent.click(screen.getByText("Обновить"));
     await waitFor(() => {
       expect(screen.getByText("Подготовка...")).toBeInTheDocument();
     });
@@ -246,7 +246,7 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText("Обновить автоматически"));
+    fireEvent.click(screen.getByText("Обновить"));
     await waitFor(() => {
       const checkBtn = screen.getByText("Проверить обновления").closest("button");
       expect(checkBtn).toBeDisabled();
@@ -271,7 +271,7 @@ describe("AboutPanel", () => {
     );
 
     // Start update
-    fireEvent.click(screen.getByText("Обновить автоматически"));
+    fireEvent.click(screen.getByText("Обновить"));
     await waitFor(() => {
       expect(screen.getByText("Подготовка...")).toBeInTheDocument();
     });
@@ -316,7 +316,7 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText("Обновить автоматически"));
+    fireEvent.click(screen.getByText("Обновить"));
     await waitFor(() => {
       expect(
         screen.getByText("Network error: connection refused")
@@ -338,12 +338,12 @@ describe("AboutPanel", () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText("Обновить автоматически"));
+    fireEvent.click(screen.getByText("Обновить"));
     await waitFor(() => {
       expect(screen.getByText("Update failed")).toBeInTheDocument();
     });
     // Auto-update button should be visible again
-    expect(screen.getByText("Обновить автоматически")).toBeInTheDocument();
+    expect(screen.getByText("Обновить")).toBeInTheDocument();
   });
 
   // ─── Updates section heading ───
