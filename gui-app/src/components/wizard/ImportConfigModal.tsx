@@ -177,7 +177,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
                   value={linkValue}
                   onChange={(e) => {
                     // ASCII only — no cyrillic
-                    const ascii = e.target.value.replace(/[^\x00-\x7F]/g, "");
+                    const ascii = e.target.value.replace(/[^\x20-\x7E]/g, "");
                     setLinkValue(ascii);
                   }}
                   placeholder="tt://?BASE64... or trusttunnel://..."
