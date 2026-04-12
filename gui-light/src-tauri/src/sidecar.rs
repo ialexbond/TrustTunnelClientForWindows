@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -29,8 +30,13 @@ pub async fn spawn_trusttunnel(
 
     let app_handle = app.clone();
     let disc_for_child = Arc::clone(&disconnecting);
+    let disc_for_task = Arc::clone(&disc_for_child);
+    let spawn_time = Instant::now();
 
     tokio::spawn(async move {
+        let mut handshake_done = false;
+        let mut dns_proxy_ready = false;
+
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
@@ -48,15 +54,10 @@ pub async fn spawn_trusttunnel(
                         )
                         .ok();
 
-                    // Detect actual VPN connection success
-                    if trimmed.contains("Successfully connected to endpoint") {
-                        app_handle
-                            .emit(
-                                "vpn-status",
-                                serde_json::json!({ "status": "connected" }),
-                            )
-                            .ok();
-                    }
+                    check_sidecar_markers(
+                        trimmed, &app_handle, &disc_for_task, &is_connected,
+                        &mut handshake_done, &mut dns_proxy_ready, &spawn_time,
+                    ).await;
                 }
                 CommandEvent::Stderr(line) => {
                     let line_str = String::from_utf8_lossy(&line);
@@ -76,16 +77,10 @@ pub async fn spawn_trusttunnel(
                         )
                         .ok();
 
-                    // Detect actual VPN connection success (C++ logs go to stderr)
-                    if trimmed.contains("Successfully connected to endpoint") {
-                        if let Ok(mut g) = is_connected.lock() { *g = true; }
-                        app_handle
-                            .emit(
-                                "vpn-status",
-                                serde_json::json!({ "status": "connected" }),
-                            )
-                            .ok();
-                    }
+                    check_sidecar_markers(
+                        trimmed, &app_handle, &disc_for_task, &is_connected,
+                        &mut handshake_done, &mut dns_proxy_ready, &spawn_time,
+                    ).await;
 
                     // Detect config parse errors and surface them clearly
                     if trimmed.contains("Failed parsing configuration") {
@@ -181,6 +176,94 @@ pub async fn spawn_with_args(
     }
 
     Ok(result)
+}
+
+/// Check sidecar log lines for connection milestones and emit "connected" only
+/// after both handshake AND DNS proxy are ready (or DNS probe succeeds).
+async fn check_sidecar_markers(
+    line: &str,
+    app: &tauri::AppHandle,
+    disconnecting: &Arc<Mutex<bool>>,
+    is_connected: &Arc<Mutex<bool>>,
+    handshake_done: &mut bool,
+    dns_proxy_ready: &mut bool,
+    spawn_time: &Instant,
+) {
+    let cancelled = disconnecting.lock().map(|g| *g).unwrap_or(false);
+    if cancelled {
+        return;
+    }
+
+    // Track DNS proxy readiness from sidecar logs
+    if !*dns_proxy_ready && (line.contains("DNS proxy listening") || line.contains("System DNS proxy listening")) {
+        *dns_proxy_ready = true;
+        let elapsed = spawn_time.elapsed().as_millis();
+        let msg = format!("[vpn] T+{elapsed}ms: DNS proxy ready");
+        eprintln!("{msg}");
+        crate::logging::log_app("INFO", &msg);
+    }
+
+    // Track VPN handshake completion
+    if !*handshake_done && line.contains("Successfully connected to endpoint") {
+        *handshake_done = true;
+        let elapsed = spawn_time.elapsed().as_millis();
+        let msg = format!("[vpn] T+{elapsed}ms: handshake complete");
+        eprintln!("{msg}");
+        crate::logging::log_app("INFO", &msg);
+    }
+
+    // Emit "connected" when handshake is done
+    if *handshake_done && !is_connected.lock().map(|g| *g).unwrap_or(false) {
+        if *dns_proxy_ready {
+            // DNS proxy already reported ready — emit immediately
+            emit_connected(app, is_connected, spawn_time);
+        } else {
+            // DNS proxy not yet ready — run a quick probe instead of waiting for log line
+            let app_clone = app.clone();
+            let is_conn = Arc::clone(is_connected);
+            let t = *spawn_time;
+            tokio::spawn(async move {
+                let probe_ok = dns_probe(std::time::Duration::from_secs(10)).await;
+                let elapsed = t.elapsed().as_millis();
+                if probe_ok {
+                    crate::logging::log_app("INFO", &format!("[vpn] T+{elapsed}ms: DNS probe success"));
+                } else {
+                    crate::logging::log_app("WARN", &format!("[vpn] T+{elapsed}ms: DNS probe timeout — emitting connected anyway"));
+                }
+                emit_connected(&app_clone, &is_conn, &t);
+            });
+        }
+    }
+}
+
+fn emit_connected(app: &tauri::AppHandle, is_connected: &Arc<Mutex<bool>>, spawn_time: &Instant) {
+    // Guard against double-emit
+    if is_connected.lock().map(|g| *g).unwrap_or(false) {
+        return;
+    }
+    if let Ok(mut g) = is_connected.lock() { *g = true; }
+    let total = spawn_time.elapsed().as_millis();
+    let msg = format!("[vpn] T+{total}ms: VPN fully ready");
+    eprintln!("{msg}");
+    crate::logging::log_app("INFO", &msg);
+    app.emit("vpn-status", serde_json::json!({ "status": "connected" })).ok();
+}
+
+/// Probe DNS by resolving a lightweight domain. Returns true as soon as DNS works.
+async fn dns_probe(max_wait: std::time::Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < max_wait {
+        match tokio::net::lookup_host("clients3.google.com:443").await {
+            Ok(mut addrs) => {
+                if addrs.next().is_some() {
+                    return true;
+                }
+            }
+            Err(_) => {}
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    false
 }
 
 fn parse_log_level(line: &str) -> &str {

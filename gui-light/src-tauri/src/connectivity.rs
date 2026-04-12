@@ -22,8 +22,7 @@ pub fn start_monitor(
     tauri::async_runtime::spawn(async move {
         let mut consecutive_failures: u32 = 0;
         let mut was_online = true;
-        // Wait a bit before starting checks (let VPN establish)
-        tokio::time::sleep(Duration::from_secs(15)).await;
+        // No artificial delay — start monitoring as soon as VPN reports connected
 
         log_app("INFO", "[connectivity] Monitor started");
 
