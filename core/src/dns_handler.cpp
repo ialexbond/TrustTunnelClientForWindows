@@ -15,7 +15,7 @@
 
 static ag::Logger g_logger{"DNS_HANDLER"};
 
-static constexpr auto DNS_CLIENT_TIMEOUT = ag::Secs{30};
+static constexpr auto DNS_CLIENT_TIMEOUT = ag::Secs{5};
 static constexpr size_t CONN_MAX_BUFFERED = 128 * 1024;
 static constexpr size_t MAX_UDP_QUEUE_SIZE = 10;
 

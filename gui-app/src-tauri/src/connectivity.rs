@@ -22,8 +22,7 @@ pub fn start_monitor(
     tauri::async_runtime::spawn(async move {
         let mut consecutive_failures: u32 = 0;
         let mut was_online = true;
-        // Wait a bit before starting checks (let VPN fully establish)
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        let mut was_connected = false;
 
         log_app("INFO", "[connectivity] Monitor started");
 
@@ -35,6 +34,16 @@ pub fn start_monitor(
             if !vpn_up {
                 consecutive_failures = 0;
                 was_online = true;
+                was_connected = false;
+                continue;
+            }
+
+            // Skip the first check cycle after VPN connects — DNS proxy needs
+            // time to restart with new system DNS servers. Without this grace
+            // period the monitor sees DNS failures and kills the VPN.
+            if !was_connected {
+                was_connected = true;
+                log_app("INFO", "[connectivity] VPN just connected — skipping first check cycle");
                 continue;
             }
 
