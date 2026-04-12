@@ -2,6 +2,7 @@ export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { Toggle } from "./Toggle";
 export { Input } from "./Input";
+export { NumberInput } from "./NumberInput";
 export { ActionInput } from "./ActionInput";
 export { PasswordInput } from "./PasswordInput";
 export { ActionPasswordInput } from "./ActionPasswordInput";
