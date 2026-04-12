@@ -827,7 +827,8 @@
         "new_port": "Новый порт",
         "apply": "Применить",
         "changing": "Меняем порт...",
-        "range_hint": "1024-65535"
+        "range_hint": "1024-65535",
+        "reset": "Сбросить на 22"
       },
       "snack": {
         "fail2ban_installed": "Fail2ban установлен и активен",
@@ -844,7 +845,8 @@
         "fail2ban_stopped": "Fail2ban остановлен",
         "firewall_started": "Firewall включён",
         "firewall_stopped": "Firewall выключен (правила сохранены)",
-        "port_changed": "SSH порт изменён на {{port}}"
+        "port_changed": "SSH порт изменён на {{port}}",
+        "port_reset": "SSH порт сброшен на 22"
       },
       "errors": {
         "port_empty": "Укажите порт",
@@ -878,7 +880,9 @@
         "delete_rule_title": "Удалить правило?",
         "delete_rule_message": "Правило #{{n}} будет удалено из firewall.",
         "unban_title": "Разблокировать {{ip}}?",
-        "unban_message": "{{ip}} будет удалён из jail {{jail}}."
+        "unban_message": "{{ip}} будет удалён из jail {{jail}}.",
+        "reset_port_title": "Сброс SSH порта",
+        "reset_port_message": "Вернуть SSH-порт на стандартный 22? Будет использован тот же безопасный процесс (бэкап, firewall, валидация)."
       }
     },
     "danger": {

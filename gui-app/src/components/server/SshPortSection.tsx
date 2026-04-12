@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
 import { NumberInput } from "../../shared/ui";
 import { Button } from "../../shared/ui/Button";
 import type { SecurityState } from "./useSecurityState";
@@ -61,6 +61,25 @@ export function SshPortSection({ state }: SshPortSectionProps) {
           >
             {t("server.security.ssh_port.apply")}
           </Button>
+          {currentPort !== 22 && state.status && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => state.setConfirm({
+                title: t("server.security.confirm.reset_port_title"),
+                message: t("server.security.confirm.reset_port_message"),
+                variant: "warning",
+                onConfirm: () => {
+                  state.setConfirm(null);
+                  void state.changeSshPort(22);
+                },
+              })}
+              aria-label={t("server.security.ssh_port.reset")}
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span className="ml-1">{t("server.security.ssh_port.reset")}</span>
+            </Button>
+          )}
         </div>
       )}
     </div>

@@ -827,7 +827,8 @@
         "new_port": "New port",
         "apply": "Apply",
         "changing": "Changing port...",
-        "range_hint": "1024-65535"
+        "range_hint": "1024-65535",
+        "reset": "Reset to 22"
       },
       "snack": {
         "fail2ban_installed": "Fail2ban installed and active",
@@ -844,7 +845,8 @@
         "fail2ban_stopped": "Fail2ban stopped",
         "firewall_started": "Firewall enabled",
         "firewall_stopped": "Firewall disabled (rules preserved)",
-        "port_changed": "SSH port changed to {{port}}"
+        "port_changed": "SSH port changed to {{port}}",
+        "port_reset": "SSH port reset to 22"
       },
       "errors": {
         "port_empty": "Port is required",
@@ -878,7 +880,9 @@
         "delete_rule_title": "Delete rule?",
         "delete_rule_message": "Rule #{{n}} will be removed from the firewall.",
         "unban_title": "Unban {{ip}}?",
-        "unban_message": "{{ip}} will be removed from jail {{jail}}."
+        "unban_message": "{{ip}} will be removed from jail {{jail}}.",
+        "reset_port_title": "Reset SSH Port",
+        "reset_port_message": "Reset SSH port to the default value 22? The same safe process will be used (backup, firewall, validation)."
       }
     },
     "danger": {
