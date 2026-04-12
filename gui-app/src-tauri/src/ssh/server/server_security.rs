@@ -83,6 +83,7 @@ pub struct JailConfigUpdate {
 //   SSH Service Type (socket activation vs classic service)
 // ═══════════════════════════════════════════════════════════════
 
+#[derive(Copy, Clone)]
 enum SshServiceType {
     /// Ubuntu 24.04+ uses systemd socket activation (ssh.socket)
     Socket,
