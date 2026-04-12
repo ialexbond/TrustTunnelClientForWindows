@@ -189,7 +189,8 @@ pub async fn change_ssh_port(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
     new_port: u16,
-) -> Result<(), String> {
+    ssh_port: u16,
+) -> Result<u16, String> {
     // ── Input validation (T-02-01: port range check) ──
     // u16 max is 65535, so only lower bound needs checking
     if new_port < 1024 {
@@ -199,6 +200,25 @@ pub async fn change_ssh_port(
     emit_log(app, "info", &format!("Detecting SSH service type..."));
     let sudo = detect_sudo(handle, app).await;
     let service_type = detect_ssh_service_type(handle, app, sudo).await?;
+
+    // ── Firewall: detect UFW status ──
+    let (ufw_raw, _) = exec_command(
+        handle, app,
+        &format!("{sudo}ufw status 2>/dev/null || echo 'Status: inactive'"),
+    ).await?;
+    let ufw_active = ufw_raw.lines().next().map(ufw_line_is_active).unwrap_or(false);
+
+    // ── Firewall: open new port FIRST (safe order per D-01) ──
+    if ufw_active && new_port != ssh_port {
+        emit_log(app, "info", &format!("Opening port {new_port}/tcp in UFW..."));
+        let (_, code) = exec_command(
+            handle, app,
+            &format!("{sudo}ufw allow {new_port}/tcp comment 'SSH'"),
+        ).await?;
+        if code != 0 {
+            return Err("SSH_PORT_CHANGE_FAILED|firewall_open_failed".into());
+        }
+    }
 
     match service_type {
         // ── Socket activation path (Ubuntu 24.04+) ──
@@ -330,7 +350,68 @@ fi'"#
         }
     }
 
-    Ok(())
+    // ── Firewall: verify new port and close old port ──
+    if ufw_active && new_port != ssh_port {
+        emit_log(app, "info", &format!("Verifying sshd on port {new_port}..."));
+        let verify_cmd = match service_type {
+            SshServiceType::Socket => format!(
+                "{sudo}systemctl show ssh.socket --property=Listen 2>/dev/null | grep -q '{new_port}' && echo OK || echo FAIL"
+            ),
+            SshServiceType::Service => format!(
+                "{sudo}ss -tlnp 2>/dev/null | grep ':{new_port}' | head -1 | grep -q . && echo OK || echo FAIL"
+            ),
+        };
+        let (verify, _) = exec_command(handle, app, &verify_cmd).await?;
+        if !verify.trim().contains("OK") {
+            // Rollback: remove new firewall rule
+            emit_log(app, "warn", &format!("Verification failed on port {new_port}, removing firewall rule..."));
+            let _ = exec_command(
+                handle, app,
+                &format!("{sudo}ufw --force delete allow {new_port}/tcp"),
+            ).await;
+            return Err("SSH_PORT_CHANGE_FAILED|verification_failed".into());
+        }
+
+        // Close old port in firewall
+        emit_log(app, "info", &format!("Closing old port {ssh_port}/tcp in UFW..."));
+        let _ = exec_command(
+            handle, app,
+            &format!("{sudo}ufw --force delete allow {ssh_port}/tcp"),
+        ).await;
+        // Non-fatal if delete fails (rule might have different format)
+    }
+
+    // ── Fail2Ban: update sshd jail port if installed (D-10) ──
+    let (f2b_check, _) = exec_command(
+        handle, app,
+        "command -v fail2ban-client >/dev/null 2>&1 && echo F2B_OK || echo F2B_NO",
+    ).await?;
+    if f2b_check.trim().contains("F2B_OK") {
+        emit_log(app, "info", "Updating Fail2Ban sshd jail port...");
+        let (has_port, _) = exec_command(
+            handle, app,
+            &format!("{sudo}grep -c '^port' /etc/fail2ban/jail.local 2>/dev/null || echo 0"),
+        ).await?;
+        if has_port.trim() != "0" {
+            // Update existing port line in [sshd] section
+            let _ = exec_command(
+                handle, app,
+                &format!(r#"{sudo}sed -i '/^\[sshd\]/,/^\[/ s/^port[[:space:]]*=.*/port     = {new_port}/' /etc/fail2ban/jail.local"#),
+            ).await;
+        } else {
+            // Append port line after [sshd] header if it exists
+            let _ = exec_command(
+                handle, app,
+                &format!(r#"{sudo}sed -i '/^\[sshd\]/a port     = {new_port}' /etc/fail2ban/jail.local 2>/dev/null"#),
+            ).await;
+        }
+        let _ = exec_command(
+            handle, app,
+            &format!("{sudo}fail2ban-client reload sshd 2>/dev/null"),
+        ).await;
+    }
+
+    Ok(new_port)
 }
 
 // ═══════════════════════════════════════════════════════════════
