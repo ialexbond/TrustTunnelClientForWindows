@@ -101,6 +101,20 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     setRefreshKey(k => k + 1);
   }, []);
 
+  const handlePortChanged = useCallback(async (newPort: number) => {
+    if (!creds) return;
+    const updated = { ...creds, port: newPort.toString() };
+    setCreds(updated);
+    // Persist updated credentials
+    await invoke("save_ssh_credentials", {
+      host: updated.host,
+      port: updated.port,
+      user: updated.user,
+      password: updated.password,
+      keyPath: updated.keyPath || null,
+    });
+  }, [creds]);
+
   const handleDisconnect = useCallback(() => {
     invoke("clear_ssh_credentials").catch(() => {});
     localStorage.removeItem("trusttunnel_control_refresh");
@@ -151,6 +165,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         onSwitchToSetup={onSwitchToSetup}
         onClearConfig={() => {}}
         onDisconnect={handleDisconnect}
+        onPortChanged={handlePortChanged}
         onConfigExported={(path) => {
           onConfigExported(path);
           if (onNavigateToSettings) onNavigateToSettings();
