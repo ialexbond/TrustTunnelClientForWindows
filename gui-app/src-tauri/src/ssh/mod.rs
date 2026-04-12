@@ -26,6 +26,7 @@ pub use server::{
     fail2ban_unban, fail2ban_ban, fail2ban_set_jail_config, fail2ban_tail_log,
     install_firewall, uninstall_firewall, firewall_add_rule, firewall_delete_rule,
     firewall_set_logging, firewall_tail_log, firewall_set_http_port,
+    change_ssh_port,
     NewFirewallRule, JailConfigUpdate,
 };
 pub use pool::SshPool;
