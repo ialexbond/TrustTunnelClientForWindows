@@ -821,6 +821,14 @@
         "preset_http": "HTTP",
         "preset_custom": "Custom"
       },
+      "ssh_port": {
+        "title": "SSH Port",
+        "current": "Current: {{port}}",
+        "new_port": "New port",
+        "apply": "Apply",
+        "changing": "Changing port...",
+        "range_hint": "1024-65535"
+      },
       "snack": {
         "fail2ban_installed": "Fail2ban installed and active",
         "fail2ban_uninstalled": "Fail2ban removed",
@@ -835,7 +843,8 @@
         "fail2ban_started": "Fail2ban started",
         "fail2ban_stopped": "Fail2ban stopped",
         "firewall_started": "Firewall enabled",
-        "firewall_stopped": "Firewall disabled (rules preserved)"
+        "firewall_stopped": "Firewall disabled (rules preserved)",
+        "port_changed": "SSH port changed to {{port}}"
       },
       "errors": {
         "port_empty": "Port is required",
@@ -847,7 +856,10 @@
         "comment_bad_chars": "Comment cannot contain \" ` $ \\ or newlines",
         "ip_invalid": "Invalid IP address",
         "generic_rule_rejected": "Rule rejected — check port, source and comment",
-        "backend_generic": "Operation failed: {{msg}}"
+        "backend_generic": "Operation failed: {{msg}}",
+        "port_change_failed": "Failed to change SSH port: {{msg}}",
+        "port_validation_failed": "sshd config validation error: {{msg}}",
+        "unsupported_os": "OS not supported: neither ssh.socket nor ssh.service found"
       },
       "confirm": {
         "install_fail2ban_title": "Install fail2ban?",
