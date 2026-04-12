@@ -19,6 +19,7 @@ export interface ServerPanelProps {
   onClearConfig: () => void;
   onDisconnect: () => void;
   onConfigExported: (configPath: string) => void;
+  onPortChanged?: (newPort: number) => void;
 }
 
 export interface ServerInfo {
@@ -36,7 +37,7 @@ export type ActionResult = { type: "ok" | "error"; message: string } | null;
 
 export function useServerState(props: ServerPanelProps) {
   const { t } = useTranslation();
-  const { host, port, sshUser, sshPassword, sshKeyPath, onSwitchToSetup, onClearConfig, onConfigExported } = props;
+  const { host, port, sshUser, sshPassword, sshKeyPath, onSwitchToSetup, onClearConfig, onConfigExported, onPortChanged } = props;
 
   // ─── State: Server Info ───
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
@@ -290,6 +291,7 @@ export function useServerState(props: ServerPanelProps) {
     onSwitchToSetup,
     onClearConfig,
     onConfigExported,
+    onPortChanged,
   };
 }
 
