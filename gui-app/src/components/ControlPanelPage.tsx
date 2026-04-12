@@ -106,13 +106,17 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     const updated = { ...creds, port: newPort.toString() };
     setCreds(updated);
     // Persist updated credentials
-    await invoke("save_ssh_credentials", {
-      host: updated.host,
-      port: updated.port,
-      user: updated.user,
-      password: updated.password,
-      keyPath: updated.keyPath || null,
-    });
+    try {
+      await invoke("save_ssh_credentials", {
+        host: updated.host,
+        port: updated.port,
+        user: updated.user,
+        password: updated.password,
+        keyPath: updated.keyPath || null,
+      });
+    } catch (e) {
+      console.error("Failed to persist updated SSH port:", e);
+    }
   }, [creds]);
 
   const handleDisconnect = useCallback(() => {
