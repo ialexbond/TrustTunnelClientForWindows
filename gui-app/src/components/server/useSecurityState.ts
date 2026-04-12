@@ -168,6 +168,17 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess)
     if (raw.includes("SECURITY_UFW_INVALID_RULE")) return t("server.security.errors.generic_rule_rejected");
     if (raw.includes("SECURITY_F2B_INVALID_IP"))   return t("server.security.errors.ip_invalid");
     if (raw.includes("SECURITY_F2B_INVALID_JAIL")) return t("server.security.errors.generic_rule_rejected");
+    if (raw.includes("SSH_PORT_CHANGE_FAILED")) {
+      const msg = raw.split("|").slice(1).join("|") || "";
+      return t("server.security.errors.port_change_failed", { msg });
+    }
+    if (raw.includes("SSH_PORT_VALIDATION_FAILED")) {
+      const msg = raw.split("|").slice(1).join("|") || "";
+      return t("server.security.errors.port_validation_failed", { msg });
+    }
+    if (raw.includes("SSH_UNSUPPORTED_OS")) {
+      return t("server.security.errors.unsupported_os");
+    }
     return t("server.security.errors.backend_generic", { msg: raw });
   }, [t]);
 
@@ -359,6 +370,15 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess)
       setFwLog(log);
     });
 
+  // ── SSH Port actions ──
+  const changeSshPort = (newPort: number) =>
+    run(
+      "change-ssh-port",
+      () => invoke("security_change_ssh_port", { ...sshParams, newPort }),
+      t("server.security.snack.port_changed", { port: newPort }),
+    );
+  const portBusy = isBusy("change-ssh-port");
+
   return {
     // State
     status,
@@ -390,6 +410,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess)
     banIp, unbanIp, saveJail, loadF2bLog,
     installFirewall, uninstallFirewall, startFirewall, stopFirewall,
     deleteRule, addRule, loadFwLog,
+    changeSshPort, portBusy,
 
     // For sub-components that need to run arbitrary ops
     run,
