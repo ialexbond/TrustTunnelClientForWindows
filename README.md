@@ -6,11 +6,11 @@
 </picture>
 </p>
 
-<h2 align="center">TrustTunnel Client for Windows v2.0.0</h2>
+<h2 align="center">TrustTunnel Client for Windows v2.6.0</h2>
 
 <p align="center">
-Графический VPN-клиент для протокола TrustTunnel.<br>
-Две редакции: <b>Pro</b> (управление сервером + VPN) и <b>Light</b> (только VPN).
+Графический клиент для безопасного сетевого соединения по протоколу TrustTunnel.<br>
+Две редакции: <b>Pro</b> (управление сервером + подключение) и <b>Light</b> (только подключение).
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 ### TrustTunnel Pro
 
 Полноценный клиент для администраторов: развёртывание сервера через SSH,
-управление пользователями, дашборд, логи, расширенные настройки VPN.
+управление пользователями, дашборд, логи, расширенные сетевые настройки.
 
 ### TrustTunnel Light
 
@@ -35,18 +35,21 @@
 
 | Функция | Pro | Light |
 |---|:---:|:---:|
-| Подключение к VPN | + | + |
-| Импорт конфигурации (файл / ссылка) | + | + |
+| Безопасное подключение | + | + |
+| Импорт конфигурации (файл / ссылка / deeplink) | + | + |
 | Маршрутизация (GeoIP, GeoSite, домены, IP) | + | + |
 | Тема (тёмная / светлая), язык (RU / EN) | + | + |
-| Автозапуск, автоподключение, трей | + | + |
+| Автозапуск, автоподключение, системный трей | + | + |
 | Проверка обновлений и автообновление | + | + |
+| Контроль соединения (мониторинг, реконнект) | + | + |
+| Генератор учётных данных | + | + |
 | Управление сервером (SSH) | + | — |
 | Установка протокола на сервер | + | — |
-| Управление пользователями VPN | + | — |
+| Управление пользователями | + | — |
 | Дашборд (пинг, статистика сервера) | + | — |
+| Безопасность сервера (fail2ban, firewall) | + | — |
 | Просмотр логов | + | — |
-| Настройки VPN (протокол, MTU, Kill Switch, DNS) | + | — |
+| Настройки соединения (протокол, MTU, Kill Switch, DNS) | + | — |
 | QR-код конфигурации | + | — |
 
 ---
@@ -57,8 +60,8 @@
 поверх стандартных транспортных протоколов (HTTP/2, QUIC).
 
 - Туннелирование TCP, UDP и ICMP трафика
-- Поддержка системного туннеля (TUN) и SOCKS5-прокси
-- Split tunneling — раздельная маршрутизация трафика
+- Системный сетевой адаптер (TUN) и SOCKS5-прокси
+- Раздельная маршрутизация трафика (split tunneling)
 - Пользовательские DNS-серверы через туннель
 - Post-Quantum криптография (X25519MLKEM768)
 
@@ -74,7 +77,7 @@
 ### Pro — для администраторов
 
 1. Арендуйте Linux-сервер (Ubuntu 22+, Debian 11+), купите домен
-2. Скачайте `TrustTunnel-Pro-v2.0.0-portable-win64.zip`
+2. Скачайте `TrustTunnel-Pro-v2.6.0-portable-win64.zip`
     из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
 3. Распакуйте и запустите `TrustTunnel.exe`
 4. В мастере введите SSH-данные сервера (IP, порт, логин, пароль или SSH-ключ)
@@ -84,7 +87,7 @@
 ### Light — для пользователей
 
 1. Получите конфиг-файл (.toml) или ссылку (tt://) от администратора
-2. Скачайте `TrustTunnel-Light-v2.0.0-portable-win64.zip`
+2. Скачайте `TrustTunnel-Light-v2.6.0-portable-win64.zip`
     из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
 3. Распакуйте и запустите `TrustTunnel Light.exe`
 4. Импортируйте конфиг (файл или ссылка)
@@ -110,9 +113,9 @@
 └──────────────────────────────────────────────────┘
 ```
 
-- **Frontend**: React + TypeScript + Tailwind CSS
-- **Backend**: Rust (Tauri v2) — sidecar, SSH-деплой (Pro), системный трей
-- **VPN Core**: C++ библиотеки TrustTunnel — WinTUN-адаптер, DNS, маршрутизация
+- **Frontend**: React 19 + TypeScript + Tailwind CSS
+- **Backend**: Rust 1.88 (Tauri v2) — sidecar, SSH-деплой (Pro), системный трей
+- **Network Core**: C++ библиотеки TrustTunnel — WinTUN-адаптер, DNS, маршрутизация
 
 ---
 
@@ -121,7 +124,7 @@
 ### Требования
 
 - **Node.js** >= 18
-- **Rust** >= 1.75
+- **Rust** >= 1.88
 - **CMake** >= 3.24
 - **Visual Studio 2022** (C++ Build Tools)
 - **Python** >= 3.10 (для Conan)
@@ -155,9 +158,9 @@ cd ..\gui-light && npm install && npx tauri build
 | Компонент | Технология |
 |---|---|
 | GUI Framework | [Tauri v2](https://v2.tauri.app) |
-| Frontend | React + TypeScript + Tailwind CSS |
-| Backend | Rust |
-| VPN Core | C++ (TrustTunnel Client Libraries) |
+| Frontend | React 19 + TypeScript + Tailwind CSS |
+| Backend | Rust 1.88 |
+| Network Core | C++20 (TrustTunnel Client Libraries) |
 | Tunnel Driver | [WinTUN](https://www.wintun.net) |
 | SSH Deploy | [russh](https://github.com/warp-tech/russh) (Pro only) |
 
@@ -167,8 +170,6 @@ cd ..\gui-light && npm install && npx tauri build
 
 - [AdGuard](https://adguard.com) — за разработку протокола TrustTunnel
     и открытие исходного кода клиентских библиотек
-- Клиентское приложение создано методом **вайб-кодинга** —
-    AI-ассистент писал код на основе описания задач на естественном языке
 
 ---
 
