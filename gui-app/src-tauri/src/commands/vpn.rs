@@ -144,23 +144,25 @@ pub async fn vpn_connect(
     // Kill any stale sidecar processes that might hold the WinTUN adapter
     kill_stale_sidecar();
 
-    // Warn about conflicting VPN adapters from other software
-    let conflicts = detect_conflicting_adapters();
-    if !conflicts.is_empty() {
-        let names = conflicts.join(", ");
-        let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
-        eprintln!("[vpn_connect] {warn_msg}");
-        crate::logging::log_app("WARN", &warn_msg);
-        app.emit("vpn-log", VpnLogPayload {
-            message: warn_msg.clone(),
-            level: "warn".into(),
-        }).ok();
-        // Also emit as a warning event the frontend can display as snackbar
-        app.emit("vpn-adapter-conflict", serde_json::json!({
-            "adapters": conflicts,
-            "message": warn_msg,
-        })).ok();
-    }
+    // Warn about conflicting VPN adapters (non-blocking — runs in background)
+    let app_bg = app.clone();
+    std::thread::spawn(move || {
+        let conflicts = detect_conflicting_adapters();
+        if !conflicts.is_empty() {
+            let names = conflicts.join(", ");
+            let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
+            eprintln!("[vpn_connect] {warn_msg}");
+            crate::logging::log_app("WARN", &warn_msg);
+            app_bg.emit("vpn-log", VpnLogPayload {
+                message: warn_msg.clone(),
+                level: "warn".into(),
+            }).ok();
+            app_bg.emit("vpn-adapter-conflict", serde_json::json!({
+                "adapters": conflicts,
+                "message": warn_msg,
+            })).ok();
+        }
+    });
 
     app.emit("vpn-log", VpnLogPayload {
         message: "Spawning trusttunnel_client process...".into(),
