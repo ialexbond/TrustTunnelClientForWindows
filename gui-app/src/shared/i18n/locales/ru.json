@@ -821,6 +821,14 @@
         "preset_http": "HTTP",
         "preset_custom": "Свой"
       },
+      "ssh_port": {
+        "title": "SSH Порт",
+        "current": "Текущий: {{port}}",
+        "new_port": "Новый порт",
+        "apply": "Применить",
+        "changing": "Меняем порт...",
+        "range_hint": "1024-65535"
+      },
       "snack": {
         "fail2ban_installed": "Fail2ban установлен и активен",
         "fail2ban_uninstalled": "Fail2ban удалён",
@@ -835,7 +843,8 @@
         "fail2ban_started": "Fail2ban запущен",
         "fail2ban_stopped": "Fail2ban остановлен",
         "firewall_started": "Firewall включён",
-        "firewall_stopped": "Firewall выключен (правила сохранены)"
+        "firewall_stopped": "Firewall выключен (правила сохранены)",
+        "port_changed": "SSH порт изменён на {{port}}"
       },
       "errors": {
         "port_empty": "Укажите порт",
@@ -847,7 +856,10 @@
         "comment_bad_chars": "Комментарий не может содержать \" ` $ \\ или переносы строк",
         "ip_invalid": "Неверный IP-адрес",
         "generic_rule_rejected": "Правило отклонено — проверьте порт, источник и комментарий",
-        "backend_generic": "Операция не выполнена: {{msg}}"
+        "backend_generic": "Операция не выполнена: {{msg}}",
+        "port_change_failed": "Не удалось сменить SSH порт: {{msg}}",
+        "port_validation_failed": "Ошибка валидации sshd конфига: {{msg}}",
+        "unsupported_os": "ОС не поддерживается: не найден ssh.socket или ssh.service"
       },
       "confirm": {
         "install_fail2ban_title": "Установить fail2ban?",
