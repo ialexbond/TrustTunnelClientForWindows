@@ -380,6 +380,13 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
       // Notify parent to update creds.port (triggers sshParams recalculation)
       onPortChanged?.(actualPort);
 
+      // Optimistically update displayed SSH port so UI reflects change immediately
+      // (full reload will happen via useEffect when sshParams.port updates after re-render)
+      setStatus(prev => prev ? {
+        ...prev,
+        firewall: { ...prev.firewall, current_ssh_port: actualPort }
+      } : prev);
+
       // Show success message
       if (actualPort === 22) {
         pushSuccess(t("server.security.snack.port_reset"));
