@@ -57,7 +57,7 @@ export function SshPortSection({ state }: SshPortSectionProps) {
             variant="primary"
             size="sm"
             onClick={handleApply}
-            disabled={!isValid || state.portBusy}
+            disabled={!isValid || state.portBusy || state.loading}
           >
             {t("server.security.ssh_port.apply")}
           </Button>
