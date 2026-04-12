@@ -261,11 +261,12 @@ EOF'"#
         SshServiceType::Service => {
             emit_log(app, "info", "Detected ssh.service (classic sshd)");
 
-            // Backup sshd_config with timestamp
+            // Backup sshd_config with deterministic timestamp name
+            let backup_name = format!("/etc/ssh/sshd_config.bak.{}", chrono::Utc::now().timestamp());
             emit_log(app, "info", "Backing up /etc/ssh/sshd_config...");
             let (_, bak_code) = exec_command(
                 handle, app,
-                &format!("{sudo}cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%s)"),
+                &format!("{sudo}cp /etc/ssh/sshd_config '{backup_name}'"),
             ).await?;
             if bak_code != 0 {
                 return Err("SSH_PORT_CHANGE_FAILED|backup_failed".into());
@@ -295,19 +296,12 @@ fi'"#
             ).await?;
 
             if sshd_code != 0 {
-                // Rollback: find latest backup and restore
+                // Rollback: restore from our deterministic backup
                 emit_log(app, "warn", "sshd -t validation failed, rolling back...");
-                let (bak_list, _) = exec_command(
+                let _ = exec_command(
                     handle, app,
-                    &format!("{sudo}ls -t /etc/ssh/sshd_config.bak.* 2>/dev/null | head -1"),
-                ).await?;
-                let backup_file = bak_list.trim();
-                if !backup_file.is_empty() {
-                    let _ = exec_command(
-                        handle, app,
-                        &format!("{sudo}cp {backup_file} /etc/ssh/sshd_config"),
-                    ).await;
-                }
+                    &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+                ).await;
                 return Err(format!("SSH_PORT_VALIDATION_FAILED|{}", sshd_out.trim()));
             }
 
@@ -319,23 +313,16 @@ fi'"#
             ).await?;
 
             if restart_code != 0 {
-                // Rollback: find latest backup and restore
+                // Rollback: restore from our deterministic backup
                 emit_log(app, "warn", "Service restart failed, rolling back...");
-                let (bak_list, _) = exec_command(
+                let _ = exec_command(
                     handle, app,
-                    &format!("{sudo}ls -t /etc/ssh/sshd_config.bak.* 2>/dev/null | head -1"),
-                ).await?;
-                let backup_file = bak_list.trim();
-                if !backup_file.is_empty() {
-                    let _ = exec_command(
-                        handle, app,
-                        &format!("{sudo}cp {backup_file} /etc/ssh/sshd_config"),
-                    ).await;
-                    let _ = exec_command(
-                        handle, app,
-                        &format!("{sudo}systemctl restart ssh.service"),
-                    ).await;
-                }
+                    &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+                ).await;
+                let _ = exec_command(
+                    handle, app,
+                    &format!("{sudo}systemctl restart ssh.service"),
+                ).await;
                 return Err(format!("SSH_PORT_CHANGE_FAILED|service_restart_failed|{}", restart_out.trim()));
             }
 
