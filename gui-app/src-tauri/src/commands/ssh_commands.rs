@@ -152,6 +152,9 @@ pub async fn security_change_ssh_port(
     let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     ssh::change_ssh_port(&app, &*handle, new_port).await?;
+    // Drop stale handle and invalidate pool — the SSH daemon restarted on a new port
+    drop(handle);
+    pool.invalidate().await;
     Ok(serde_json::Value::Null)
 }
 
