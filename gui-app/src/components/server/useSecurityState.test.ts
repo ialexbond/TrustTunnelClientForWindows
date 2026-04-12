@@ -383,4 +383,94 @@ describe("useSecurityState", () => {
       expect(result.current.isBusy("start-f2b")).toBe(false);
     });
   });
+
+  // ── PORT-05: onPortChanged callback ──
+
+  it("changeSshPort invokes security_change_ssh_port and calls onPortChanged with returned port", async () => {
+    setupInvokeForLoad();
+    const onPortChanged = vi.fn();
+
+    const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess, onPortChanged));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    // Mock change command to return newPort
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "security_change_ssh_port") return { newPort: 2222 };
+      if (cmd === "security_get_status") return makeSecurityStatus();
+      return null;
+    });
+
+    await act(async () => {
+      await result.current.changeSshPort(2222);
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("security_change_ssh_port", expect.objectContaining({ newPort: 2222 }));
+    expect(onPortChanged).toHaveBeenCalledWith(2222);
+  });
+
+  it("reloads security status when sshParams.port changes (useEffect dependency)", async () => {
+    setupInvokeForLoad();
+
+    const initialParams = { ...mockSshParams, port: 22 };
+    const { result, rerender } = renderHook(
+      ({ params }) => useSecurityState(params, mockPushSuccess),
+      { initialProps: { params: initialParams } },
+    );
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    // Clear call history after initial load
+    mockInvoke.mockClear();
+    setupInvokeForLoad();
+
+    // Re-render with updated port
+    rerender({ params: { ...mockSshParams, port: 2222 } });
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("security_get_status", expect.objectContaining({ port: 2222 }));
+    });
+  });
+
+  it("changeSshPort does not call load() directly after success", async () => {
+    setupInvokeForLoad();
+
+    const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    // Track security_get_status calls after initial load
+    mockInvoke.mockClear();
+    let changeResolved = false;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "security_change_ssh_port") {
+        changeResolved = true;
+        return { newPort: 2222 };
+      }
+      if (cmd === "security_get_status") {
+        // If this is called synchronously after change (before useEffect), fail
+        if (changeResolved) {
+          // This is the useEffect reload — acceptable only if it's a new render cycle
+          return makeSecurityStatus();
+        }
+        return makeSecurityStatus();
+      }
+      return null;
+    });
+
+    await act(async () => {
+      await result.current.changeSshPort(2222);
+    });
+
+    // After changeSshPort resolves, security_get_status should NOT have been called
+    // (because sshParams.port hasn't changed in this test — no parent to update creds)
+    const getStatusCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "security_get_status");
+    expect(getStatusCalls).toHaveLength(0);
+  });
 });
