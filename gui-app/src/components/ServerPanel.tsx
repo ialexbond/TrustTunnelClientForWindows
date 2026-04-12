@@ -38,6 +38,7 @@ interface ServerPanelProps {
   onClearConfig: () => void;
   onDisconnect: () => void;
   onConfigExported: (configPath: string) => void;
+  onPortChanged?: (newPort: number) => void;
 }
 
 // ═══════════════════════════════════════════════════════
