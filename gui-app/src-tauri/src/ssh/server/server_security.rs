@@ -80,6 +80,43 @@ pub struct JailConfigUpdate {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//   SSH Service Type (socket activation vs classic service)
+// ═══════════════════════════════════════════════════════════════
+
+enum SshServiceType {
+    /// Ubuntu 24.04+ uses systemd socket activation (ssh.socket)
+    Socket,
+    /// Ubuntu 22.04, Debian 11/12 use classic ssh.service
+    Service,
+}
+
+async fn detect_ssh_service_type(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<SshServiceType, String> {
+    // Check ssh.socket first (Ubuntu 24.04+)
+    let (socket_raw, _) = exec_command(
+        handle, app,
+        &format!("{sudo}systemctl is-active ssh.socket 2>/dev/null || echo inactive"),
+    ).await?;
+    if socket_raw.trim() == "active" {
+        return Ok(SshServiceType::Socket);
+    }
+
+    // Check classic ssh.service (Ubuntu 22.04, Debian 11/12)
+    let (service_raw, _) = exec_command(
+        handle, app,
+        &format!("{sudo}systemctl is-active ssh.service 2>/dev/null || echo inactive"),
+    ).await?;
+    if service_raw.trim() == "active" {
+        return Ok(SshServiceType::Service);
+    }
+
+    Err("SSH_UNSUPPORTED_OS".into())
+}
+
+// ═══════════════════════════════════════════════════════════════
 //   Helpers
 // ═══════════════════════════════════════════════════════════════
 
@@ -142,6 +179,171 @@ async fn read_vpn_port(handle: &client::Handle<SshHandler>, app: &tauri::AppHand
         &format!(r#"{sudo}sed -n 's/^[[:space:]]*listen_address[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' {cfg} 2>/dev/null"#, cfg = ENDPOINT_CONFIG),
     ).await.ok()?;
     raw.trim().split(':').last().and_then(|p| p.parse::<u16>().ok())
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   SSH PORT CHANGE — backup / validate / apply / rollback
+// ═══════════════════════════════════════════════════════════════
+
+pub async fn change_ssh_port(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    new_port: u16,
+) -> Result<(), String> {
+    // ── Input validation (T-02-01: port range check) ──
+    // u16 max is 65535, so only lower bound needs checking
+    if new_port < 1024 {
+        return Err("SSH_PORT_CHANGE_FAILED|port_out_of_range".into());
+    }
+
+    emit_log(app, "info", &format!("Detecting SSH service type..."));
+    let sudo = detect_sudo(handle, app).await;
+    let service_type = detect_ssh_service_type(handle, app, sudo).await?;
+
+    match service_type {
+        // ── Socket activation path (Ubuntu 24.04+) ──
+        SshServiceType::Socket => {
+            emit_log(app, "info", "Detected ssh.socket (systemd socket activation)");
+
+            // Backup existing override.conf (best-effort)
+            emit_log(app, "info", "Backing up current socket override...");
+            let _ = exec_command(
+                handle, app,
+                &format!("{sudo}cp /etc/systemd/system/ssh.socket.d/override.conf /etc/systemd/system/ssh.socket.d/override.conf.bak 2>/dev/null; echo ok"),
+            ).await;
+
+            // Ensure override directory exists
+            let (_, mkdir_code) = exec_command(
+                handle, app,
+                &format!("{sudo}mkdir -p /etc/systemd/system/ssh.socket.d/"),
+            ).await?;
+            if mkdir_code != 0 {
+                return Err("SSH_PORT_CHANGE_FAILED|cannot_create_override_dir".into());
+            }
+
+            // Write override.conf (CRITICAL: empty ListenStream= clears inherited value)
+            emit_log(app, "info", &format!("Writing socket override for port {new_port}..."));
+            let write_cmd = format!(
+                r#"{sudo}bash -c 'cat > /etc/systemd/system/ssh.socket.d/override.conf << EOF
+[Socket]
+ListenStream=
+ListenStream={new_port}
+EOF'"#
+            );
+            let (_, write_code) = exec_command(handle, app, &write_cmd).await?;
+            if write_code != 0 {
+                return Err("SSH_PORT_CHANGE_FAILED|cannot_write_override".into());
+            }
+
+            // Reload systemd and restart ssh.socket
+            emit_log(app, "info", "Reloading systemd and restarting ssh.socket...");
+            let (restart_out, restart_code) = exec_command(
+                handle, app,
+                &format!("{sudo}systemctl daemon-reload && {sudo}systemctl restart ssh.socket"),
+            ).await?;
+
+            if restart_code != 0 {
+                // Rollback from backup
+                emit_log(app, "warn", "Restart failed, rolling back...");
+                let _ = exec_command(
+                    handle, app,
+                    &format!(
+                        "{sudo}cp /etc/systemd/system/ssh.socket.d/override.conf.bak /etc/systemd/system/ssh.socket.d/override.conf 2>/dev/null; {sudo}systemctl daemon-reload; {sudo}systemctl restart ssh.socket"
+                    ),
+                ).await;
+                return Err(format!("SSH_PORT_CHANGE_FAILED|socket_restart_failed|{}", restart_out.trim()));
+            }
+
+            emit_log(app, "info", &format!("SSH port changed to {new_port} via socket activation"));
+        }
+
+        // ── Classic service path (Ubuntu 22.04, Debian 11/12) ──
+        SshServiceType::Service => {
+            emit_log(app, "info", "Detected ssh.service (classic sshd)");
+
+            // Backup sshd_config with timestamp
+            emit_log(app, "info", "Backing up /etc/ssh/sshd_config...");
+            let (_, bak_code) = exec_command(
+                handle, app,
+                &format!("{sudo}cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%s)"),
+            ).await?;
+            if bak_code != 0 {
+                return Err("SSH_PORT_CHANGE_FAILED|backup_failed".into());
+            }
+
+            // Edit Port line (handle: existing Port, commented #Port, or missing)
+            emit_log(app, "info", &format!("Setting Port {new_port} in sshd_config..."));
+            let edit_cmd = format!(
+                r#"{sudo}bash -c 'if grep -q "^Port " /etc/ssh/sshd_config; then
+  sed -i "s/^Port .*/Port {new_port}/" /etc/ssh/sshd_config
+elif grep -q "^#Port " /etc/ssh/sshd_config; then
+  sed -i "s/^#Port .*/Port {new_port}/" /etc/ssh/sshd_config
+else
+  echo "Port {new_port}" >> /etc/ssh/sshd_config
+fi'"#
+            );
+            let (_, edit_code) = exec_command(handle, app, &edit_cmd).await?;
+            if edit_code != 0 {
+                return Err("SSH_PORT_CHANGE_FAILED|edit_failed".into());
+            }
+
+            // Validate with sshd -t
+            emit_log(app, "info", "Validating sshd config with sshd -t...");
+            let (sshd_out, sshd_code) = exec_command(
+                handle, app,
+                &format!("{sudo}sshd -t 2>&1"),
+            ).await?;
+
+            if sshd_code != 0 {
+                // Rollback: find latest backup and restore
+                emit_log(app, "warn", "sshd -t validation failed, rolling back...");
+                let (bak_list, _) = exec_command(
+                    handle, app,
+                    &format!("{sudo}ls -t /etc/ssh/sshd_config.bak.* 2>/dev/null | head -1"),
+                ).await?;
+                let backup_file = bak_list.trim();
+                if !backup_file.is_empty() {
+                    let _ = exec_command(
+                        handle, app,
+                        &format!("{sudo}cp {backup_file} /etc/ssh/sshd_config"),
+                    ).await;
+                }
+                return Err(format!("SSH_PORT_VALIDATION_FAILED|{}", sshd_out.trim()));
+            }
+
+            // Restart ssh.service
+            emit_log(app, "info", "Restarting ssh.service...");
+            let (restart_out, restart_code) = exec_command(
+                handle, app,
+                &format!("{sudo}systemctl restart ssh.service"),
+            ).await?;
+
+            if restart_code != 0 {
+                // Rollback: find latest backup and restore
+                emit_log(app, "warn", "Service restart failed, rolling back...");
+                let (bak_list, _) = exec_command(
+                    handle, app,
+                    &format!("{sudo}ls -t /etc/ssh/sshd_config.bak.* 2>/dev/null | head -1"),
+                ).await?;
+                let backup_file = bak_list.trim();
+                if !backup_file.is_empty() {
+                    let _ = exec_command(
+                        handle, app,
+                        &format!("{sudo}cp {backup_file} /etc/ssh/sshd_config"),
+                    ).await;
+                    let _ = exec_command(
+                        handle, app,
+                        &format!("{sudo}systemctl restart ssh.service"),
+                    ).await;
+                }
+                return Err(format!("SSH_PORT_CHANGE_FAILED|service_restart_failed|{}", restart_out.trim()));
+            }
+
+            emit_log(app, "info", &format!("SSH port changed to {new_port} via sshd_config"));
+        }
+    }
+
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════
