@@ -116,7 +116,7 @@ type PushSuccess = (msg: string, type?: "success" | "error") => void;
 // Hook
 // ═══════════════════════════════════════════════════════
 
-export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess) {
+export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess, onPortChanged?: (newPort: number) => void) {
   const { t } = useTranslation();
 
   const showError = useCallback((msg: string) => {
@@ -371,12 +371,27 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess)
     });
 
   // ── SSH Port actions ──
-  const changeSshPort = (newPort: number) =>
-    run(
-      "change-ssh-port",
-      () => invoke("security_change_ssh_port", { ...sshParams, newPort }),
-      t("server.security.snack.port_changed", { port: newPort }),
-    );
+  const changeSshPort = async (newPort: number) => {
+    setBusySet(prev => { const n = new Set(prev); n.add("change-ssh-port"); return n; });
+    try {
+      const result = await invoke<{ newPort: number }>("security_change_ssh_port", { ...sshParams, newPort });
+      const actualPort = result.newPort;
+
+      // Notify parent to update creds.port (triggers sshParams recalculation)
+      onPortChanged?.(actualPort);
+
+      // Show success message
+      if (actualPort === 22) {
+        pushSuccess(t("server.security.snack.port_reset"));
+      } else {
+        pushSuccess(t("server.security.snack.port_changed", { port: actualPort }));
+      }
+    } catch (e) {
+      showError(formatBackendError(e));
+    } finally {
+      setBusySet(prev => { const n = new Set(prev); n.delete("change-ssh-port"); return n; });
+    }
+  };
   const portBusy = isBusy("change-ssh-port");
 
   return {

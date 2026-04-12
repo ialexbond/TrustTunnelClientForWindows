@@ -14,7 +14,7 @@ interface Props { state: ServerState; }
 
 export function SecuritySection({ state }: Props) {
   const { t } = useTranslation();
-  const security = useSecurityState(state.sshParams, state.pushSuccess);
+  const security = useSecurityState(state.sshParams, state.pushSuccess, state.onPortChanged);
 
   return (
     <Card>
