@@ -298,6 +298,7 @@ pub fn run() {
             commands::ssh_commands::security_firewall_set_logging,
             commands::ssh_commands::security_firewall_tail_log,
             commands::ssh_commands::security_firewall_set_http_port,
+            commands::ssh_commands::security_change_ssh_port,
             geodata::load_exclusion_list,
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,

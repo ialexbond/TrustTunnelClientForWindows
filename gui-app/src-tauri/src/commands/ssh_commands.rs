@@ -135,6 +135,26 @@ ssh_pool_command!(security_firewall_set_logging, ssh::firewall_set_logging, leve
 ssh_pool_command!(security_firewall_tail_log, ssh::firewall_tail_log, lines: u32);
 ssh_pool_command!(security_firewall_set_http_port, ssh::firewall_set_http_port, open: bool);
 
+// ─── Manual pooled security commands (port reuse) ────────────────
+
+#[tauri::command]
+pub async fn security_change_ssh_port(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+    new_port: u16,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::change_ssh_port(&app, &*handle, new_port).await?;
+    Ok(serde_json::Value::Null)
+}
+
 // ─── Non-macro SSH commands ────────────────────────────────────────
 
 #[tauri::command]
