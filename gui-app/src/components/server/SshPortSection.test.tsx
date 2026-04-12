@@ -8,7 +8,14 @@ import type { SecurityState } from "./useSecurityState";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) => {
+      if (params) {
+        // Append param values to key for testability
+        const paramStr = Object.values(params).map(String).join(", ");
+        return `${key} [${paramStr}]`;
+      }
+      return key;
+    },
     i18n: { language: "en", changeLanguage: vi.fn() },
   }),
 }));
