@@ -17,9 +17,9 @@ export function SshPortSection({ state }: SshPortSectionProps) {
   const parsed = newPort ? parseInt(newPort, 10) : NaN;
   const isValid = !isNaN(parsed) && parsed >= 1024 && parsed <= 65535 && parsed !== currentPort;
 
-  const handleApply = () => {
+  const handleApply = async () => {
     if (!isValid) return;
-    void state.changeSshPort(parsed);
+    await state.changeSshPort(parsed);
     setNewPort("");
   };
 
