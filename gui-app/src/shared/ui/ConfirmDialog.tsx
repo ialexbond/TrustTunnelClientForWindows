@@ -70,7 +70,7 @@ export function ConfirmDialog({
             {resolvedCancelText}
           </Button>
           <Button
-            variant={variant === "danger" ? "danger" : "warning"}
+            variant={variant === "danger" ? "danger" : "primary"}
             onClick={onConfirm}
             loading={loading}
             disabled={loading}

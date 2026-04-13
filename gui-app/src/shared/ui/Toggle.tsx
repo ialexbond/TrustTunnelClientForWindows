@@ -50,7 +50,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
               {label && (
                 <span className="flex items-center gap-1">
                   <span
-                    className="text-xs font-medium"
+                    className="text-[var(--font-size-xs)] font-[var(--font-weight-semibold)]"
                     style={{ color: "var(--color-text-primary)" }}
                   >
                     {label}
@@ -60,7 +60,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
               )}
               {description && (
                 <p
-                  className="text-[10px] mt-0.5"
+                  className="text-[var(--font-size-xs)] mt-0.5"
                   style={{ color: "var(--color-text-muted)" }}
                 >
                   {description}
@@ -90,7 +90,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
         >
           <div
             className={`
-              absolute top-0.5 w-4 h-4 rounded-full bg-white shadow
+              absolute top-0.5 w-4 h-4 rounded-full bg-[var(--color-toggle-thumb,#fff)] shadow
               transition-transform duration-[var(--transition-fast)]
               ${isChecked ? "translate-x-[18px]" : "translate-x-0.5"}
             `}
