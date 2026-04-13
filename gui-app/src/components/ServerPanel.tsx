@@ -18,6 +18,7 @@ import { VersionSection } from "./server/VersionSection";
 import { ConfigSection } from "./server/ConfigSection";
 import { CertSection } from "./server/CertSection";
 import { SecuritySection } from "./server/SecuritySection";
+import { UtilitiesSection } from "./server/UtilitiesSection";
 import { UsersSection } from "./server/UsersSection";
 
 import { LogsSection } from "./server/LogsSection";
@@ -230,6 +231,7 @@ export function ServerPanel(props: ServerPanelProps) {
           <ConfigSection state={state} />
           <CertSection state={state} />
           <SecuritySection state={state} />
+          <UtilitiesSection state={state} />
           <LogsSection state={state} />
           <DangerZoneSection state={state} />
 
