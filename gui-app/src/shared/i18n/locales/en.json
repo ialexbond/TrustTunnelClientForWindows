@@ -885,6 +885,45 @@
         "reset_port_message": "Reset SSH port to the default value 22? The same safe process will be used (backup, firewall, validation)."
       }
     },
+    "utilities": {
+      "title": "Utilities",
+      "tooltip": "Server utilities: proxy and network optimization tools.",
+      "loading": "Loading utilities status...",
+      "refresh": "Refresh",
+      "mtproto": {
+        "title": "MTProto Proxy",
+        "status": {
+          "not_installed": "Not installed",
+          "installing": "Installing...",
+          "running": "Running",
+          "stopped": "Stopped",
+          "error": "Error"
+        },
+        "install": "Install",
+        "port_placeholder": "Random (1024-65535)",
+        "copy": "Copy",
+        "copied": "Copied!",
+        "uninstall": "Uninstall",
+        "retry": "Retry",
+        "port_display": "Port: {{port}}",
+        "empty_hint": "Install MTProto proxy to access Telegram through your server.",
+        "step": {
+          "download": "Downloading",
+          "configure": "Configuring",
+          "secret": "Generating secret",
+          "service": "Starting service",
+          "complete": "Complete"
+        },
+        "confirm_uninstall_title": "Remove MTProto Proxy?",
+        "confirm_uninstall_message": "The proxy will be completely removed: service stopped, binary deleted, firewall port closed. The proxy link will stop working.",
+        "snack": {
+          "installed": "MTProto proxy installed",
+          "uninstalled": "MTProto proxy removed",
+          "install_error": "Failed to install MTProto: {{error}}",
+          "uninstall_error": "Failed to remove MTProto: {{error}}"
+        }
+      }
+    },
     "danger": {
       "title": "Danger Zone",
       "tooltip": "Actions that may cause data loss or VPN disconnection.",

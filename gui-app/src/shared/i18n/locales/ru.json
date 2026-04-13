@@ -885,6 +885,45 @@
         "reset_port_message": "Вернуть SSH-порт на стандартный 22? Будет использован тот же безопасный процесс (бэкап, firewall, валидация)."
       }
     },
+    "utilities": {
+      "title": "Утилиты",
+      "tooltip": "Серверные утилиты: прокси и инструменты оптимизации сети.",
+      "loading": "Загрузка статуса утилит...",
+      "refresh": "Обновить",
+      "mtproto": {
+        "title": "MTProto Прокси",
+        "status": {
+          "not_installed": "Не установлен",
+          "installing": "Установка...",
+          "running": "Работает",
+          "stopped": "Остановлен",
+          "error": "Ошибка"
+        },
+        "install": "Установить",
+        "port_placeholder": "Случайный (1024-65535)",
+        "copy": "Скопировать",
+        "copied": "Скопировано!",
+        "uninstall": "Удалить",
+        "retry": "Повторить",
+        "port_display": "Порт: {{port}}",
+        "empty_hint": "Установите MTProto прокси для доступа к Telegram через ваш сервер.",
+        "step": {
+          "download": "Скачивание",
+          "configure": "Настройка",
+          "secret": "Генерация ключа",
+          "service": "Запуск сервиса",
+          "complete": "Готово"
+        },
+        "confirm_uninstall_title": "Удалить MTProto Прокси?",
+        "confirm_uninstall_message": "Прокси будет полностью удалён: сервис остановлен, бинарник удалён, порт файрвола закрыт. Ссылка на прокси перестанет работать.",
+        "snack": {
+          "installed": "MTProto прокси установлен",
+          "uninstalled": "MTProto прокси удалён",
+          "install_error": "Не удалось установить MTProto: {{error}}",
+          "uninstall_error": "Не удалось удалить MTProto: {{error}}"
+        }
+      }
+    },
     "danger": {
       "title": "Опасная зона",
       "tooltip": "Действия, которые могут привести к потере данных или разрыву VPN-подключения.",
