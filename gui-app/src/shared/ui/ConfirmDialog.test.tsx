@@ -9,7 +9,7 @@ describe("ConfirmDialog", () => {
   let onCancel: any;
 
   const defaults = {
-    open: true,
+    isOpen: true,
     title: "Delete item?",
     message: "This action cannot be undone.",
     onConfirm: vi.fn(),
@@ -29,27 +29,39 @@ describe("ConfirmDialog", () => {
     expect(screen.getByText("This action cannot be undone.")).toBeInTheDocument();
   });
 
-  it("renders default button labels", () => {
+  it("renders default confirm text 'Удалить'", () => {
     render(<ConfirmDialog {...defaults} />);
-    expect(screen.getByText("Подтвердить")).toBeInTheDocument();
+    expect(screen.getByText("Удалить")).toBeInTheDocument();
+  });
+
+  it("renders default cancel text 'Отмена'", () => {
+    render(<ConfirmDialog {...defaults} />);
     expect(screen.getByText("Отмена")).toBeInTheDocument();
   });
 
-  it("renders custom button labels", () => {
-    render(
-      <ConfirmDialog
-        {...defaults}
-        confirmLabel="Yes, delete"
-        cancelLabel="Keep it"
-      />,
-    );
+  it("renders custom confirmText", () => {
+    render(<ConfirmDialog {...defaults} confirmText="Yes, delete" />);
     expect(screen.getByText("Yes, delete")).toBeInTheDocument();
+  });
+
+  it("renders custom cancelText", () => {
+    render(<ConfirmDialog {...defaults} cancelText="Keep it" />);
     expect(screen.getByText("Keep it")).toBeInTheDocument();
+  });
+
+  it("renders custom confirmLabel (legacy)", () => {
+    render(<ConfirmDialog {...defaults} confirmLabel="Confirm label" />);
+    expect(screen.getByText("Confirm label")).toBeInTheDocument();
+  });
+
+  it("renders custom cancelLabel (legacy)", () => {
+    render(<ConfirmDialog {...defaults} cancelLabel="Cancel label" />);
+    expect(screen.getByText("Cancel label")).toBeInTheDocument();
   });
 
   it("calls onConfirm when confirm button clicked", () => {
     render(<ConfirmDialog {...defaults} />);
-    fireEvent.click(screen.getByText("Подтвердить"));
+    fireEvent.click(screen.getByText("Удалить"));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
@@ -59,9 +71,22 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("renders nothing when open=false", () => {
-    render(<ConfirmDialog {...defaults} open={false} />);
+  it("renders nothing when isOpen=false", () => {
+    render(<ConfirmDialog {...defaults} isOpen={false} />);
     expect(screen.queryByText("Delete item?")).not.toBeInTheDocument();
+  });
+
+  it("works with legacy open prop", () => {
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Legacy"
+        message="Legacy message"
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    );
+    expect(screen.getByText("Legacy")).toBeInTheDocument();
   });
 
   it("applies danger variant styling to title", () => {

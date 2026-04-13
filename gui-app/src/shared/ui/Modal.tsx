@@ -1,21 +1,40 @@
 import { useEffect, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+type ModalSize = "sm" | "md" | "lg";
+
 interface ModalProps {
-  open: boolean;
+  isOpen?: boolean;
+  /** @deprecated Use isOpen */
+  open?: boolean;
   onClose?: () => void;
+  title?: string;
+  size?: ModalSize;
+  children: ReactNode;
+  className?: string;
   closeOnBackdrop?: boolean;
   closeOnEscape?: boolean;
-  children: ReactNode;
 }
 
+const sizeClasses: Record<ModalSize, string> = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+};
+
 export function Modal({
+  isOpen,
   open,
   onClose,
+  title,
+  size = "md",
+  children,
+  className = "",
   closeOnBackdrop = true,
   closeOnEscape = true,
-  children,
 }: ModalProps) {
+  const isVisible = isOpen ?? open ?? false;
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (closeOnEscape && e.key === "Escape" && onClose) onClose();
@@ -24,29 +43,42 @@ export function Modal({
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!isVisible) return;
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, handleKeyDown]);
+  }, [isVisible, handleKeyDown]);
 
-  if (!open) return null;
+  if (!isVisible) return null;
 
   return createPortal(
     <div
-      className="flex items-center justify-center"
-      style={{
-        position: "fixed",
-        top: "-50px",
-        left: "-50px",
-        right: "-50px",
-        bottom: "-50px",
-        zIndex: 9000,
-        backgroundColor: "rgba(0,0,0,0.4)",
-        backdropFilter: "blur(6px)",
-      }}
+      className="fixed inset-0 flex items-center justify-center z-[var(--z-modal)] bg-black/40 backdrop-blur-sm"
       onClick={closeOnBackdrop && onClose ? onClose : undefined}
     >
-      <div onClick={(e) => e.stopPropagation()}>{children}</div>
+      <div
+        className={`
+          w-full ${sizeClasses[size]} mx-4
+          bg-[var(--color-bg-surface)]
+          border border-[var(--color-border)]
+          rounded-[var(--radius-lg)]
+          shadow-[var(--shadow-lg)]
+          p-[var(--space-6)]
+          transition-all duration-[var(--transition-normal)]
+          ${className}
+        `}
+        style={{ transitionTimingFunction: "var(--ease-in-out)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {title && (
+          <h2
+            className="text-[var(--font-size-lg)] font-[var(--font-weight-semibold)] mb-[var(--space-4)]"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            {title}
+          </h2>
+        )}
+        {children}
+      </div>
     </div>,
     document.body
   );
