@@ -31,3 +31,6 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+
+*storybook.log
+storybook-static
