@@ -190,10 +190,11 @@ pub async fn mtproto_install(
              | cut -d\"\\\"\" -f4); \
              if [ -z \"$ASSET_URL\" ]; then echo DOWNLOAD_FAILED; exit 1; fi; \
              curl -sL -o /tmp/mtg.tar.gz \"$ASSET_URL\" && \
-             tar -xzf /tmp/mtg.tar.gz -C /tmp/ && \
-             mv /tmp/mtg /usr/local/bin/mtg && \
+             rm -rf /tmp/mtg-extract && mkdir -p /tmp/mtg-extract && \
+             tar -xzf /tmp/mtg.tar.gz -C /tmp/mtg-extract --strip-components=1 && \
+             mv /tmp/mtg-extract/mtg /usr/local/bin/mtg && \
              chmod +x /usr/local/bin/mtg && \
-             rm -f /tmp/mtg.tar.gz && echo DOWNLOAD_OK'"
+             rm -rf /tmp/mtg.tar.gz /tmp/mtg-extract && echo DOWNLOAD_OK'"
         ),
     )
     .await?;
