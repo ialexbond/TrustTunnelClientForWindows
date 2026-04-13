@@ -272,6 +272,13 @@ EOF'"#
                         "{sudo}cp /etc/systemd/system/ssh.socket.d/override.conf.bak /etc/systemd/system/ssh.socket.d/override.conf 2>/dev/null; {sudo}systemctl daemon-reload; {sudo}systemctl restart ssh.socket"
                     ),
                 ).await;
+                // Rollback UFW: remove the rule we opened for new_port
+                if ufw_active && new_port != ssh_port {
+                    let _ = exec_command(
+                        handle, app,
+                        &format!("{sudo}ufw --force delete allow {new_port}/tcp"),
+                    ).await;
+                }
                 return Err(format!("SSH_PORT_CHANGE_FAILED|socket_restart_failed|{}", restart_out.trim()));
             }
 
@@ -344,6 +351,13 @@ fi'"#
                     handle, app,
                     &format!("{sudo}systemctl restart ssh.service"),
                 ).await;
+                // Rollback UFW: remove the rule we opened for new_port
+                if ufw_active && new_port != ssh_port {
+                    let _ = exec_command(
+                        handle, app,
+                        &format!("{sudo}ufw --force delete allow {new_port}/tcp"),
+                    ).await;
+                }
                 return Err(format!("SSH_PORT_CHANGE_FAILED|service_restart_failed|{}", restart_out.trim()));
             }
 
