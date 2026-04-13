@@ -28,6 +28,8 @@ pub use server::{
     firewall_set_logging, firewall_tail_log, firewall_set_http_port,
     change_ssh_port,
     NewFirewallRule, JailConfigUpdate,
+    mtproto_install, mtproto_get_status, mtproto_uninstall,
+    MtProtoStatus, MtProtoInstallStep,
 };
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};

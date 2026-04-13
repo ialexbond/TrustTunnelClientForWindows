@@ -158,6 +158,29 @@ pub async fn security_change_ssh_port(
     Ok(serde_json::json!({ "newPort": actual_port }))
 }
 
+// ─── MTProto proxy commands ──────────────────────────────────────
+
+ssh_command!(mtproto_install, ssh::mtproto_install, mtproto_port: u16);
+ssh_command!(mtproto_uninstall, ssh::mtproto_uninstall);
+
+// mtproto_get_status needs host for proxy link construction -- manual command like security_get_status
+#[tauri::command]
+pub async fn mtproto_get_status(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    let result = ssh::mtproto_get_status(&app, &*handle, &host).await?;
+    serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+}
+
 // ─── Non-macro SSH commands ────────────────────────────────────────
 
 #[tauri::command]
