@@ -1,0 +1,44 @@
+import { Meta } from '@storybook/blocks';
+
+<Meta title="Foundations/Spacing" />
+
+# Spacing
+
+4px base unit. Sequential scale (--space-1 through --space-8). All multiples of 4.
+
+## Scale
+
+<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontFamily: 'monospace', fontSize: '13px' }}>
+  {[
+    { token: '--space-1', value: '4px', usage: 'Icon gaps, tight inline padding' },
+    { token: '--space-2', value: '8px', usage: 'Compact element spacing, icon-to-label gap' },
+    { token: '--space-3', value: '12px', usage: 'Input internal padding (vertical)' },
+    { token: '--space-4', value: '16px', usage: 'Default element spacing, form field gaps' },
+    { token: '--space-5', value: '20px', usage: 'Card padding (compact)' },
+    { token: '--space-6', value: '24px', usage: 'Section padding, modal padding' },
+    { token: '--space-7', value: '32px', usage: 'Layout gaps, section breaks' },
+    { token: '--space-8', value: '40px', usage: 'Major section breaks' },
+  ].map(({ token, value, usage }) => (
+    <div key={token} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div style={{
+        width: value,
+        height: '24px',
+        backgroundColor: 'var(--color-accent-interactive)',
+        borderRadius: '2px',
+        flexShrink: 0,
+      }} />
+      <div style={{ width: '100px', flexShrink: 0, color: 'var(--color-text-primary)' }}>{token}</div>
+      <div style={{ width: '50px', flexShrink: 0, color: 'var(--color-text-secondary)' }}>{value}</div>
+      <div style={{ color: 'var(--color-text-muted)' }}>{usage}</div>
+    </div>
+  ))}
+</div>
+
+## Exceptions
+
+| Element | Value | Token | Rationale |
+|---------|-------|-------|-----------|
+| Sidebar collapsed | 56px | `--sidebar-width-collapsed` | Existing, preserved |
+| Sidebar expanded | 220px | `--sidebar-width-expanded` | Existing, preserved |
+| Window control button | 40x32px | (no token) | OS chrome, non-4-point width acceptable |
+| Touch/click target min | 32px | `--space-7` | Minimum clickable area |

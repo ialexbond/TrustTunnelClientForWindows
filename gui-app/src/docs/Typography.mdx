@@ -1,0 +1,42 @@
+import { Meta, Typeset } from '@storybook/blocks';
+
+<Meta title="Foundations/Typography" />
+
+# Typography
+
+Font stack: Inter, Segoe UI, system-ui, -apple-system, sans-serif.
+14px body is standard for compact desktop utility apps (Linear, Raycast).
+
+## Scale
+
+<Typeset
+  fontSizes={[11, 12, 14, 16]}
+  fontWeight={400}
+  sampleText="The quick brown fox jumps over the lazy dog"
+  fontFamily='"Inter", "Segoe UI", system-ui, -apple-system, sans-serif'
+/>
+
+## Weight 600 (Semibold)
+
+<Typeset
+  fontSizes={[11, 12, 14, 16]}
+  fontWeight={600}
+  sampleText="The quick brown fox jumps over the lazy dog"
+  fontFamily='"Inter", "Segoe UI", system-ui, -apple-system, sans-serif'
+/>
+
+## Token Reference
+
+| Role | CSS Var | Size | Weight | Line Height | Tracking |
+|------|---------|------|--------|-------------|----------|
+| xs (caption) | `--font-size-xs` | 11px | 400 | 1.4 | `--tracking-wide` (0.02em) |
+| sm (helper) | `--font-size-sm` | 12px | 400 | 1.5 | `--tracking-normal` (0) |
+| md (body) | `--font-size-md` | 14px | 400 | 1.5 | `--tracking-normal` (0) |
+| lg (heading) | `--font-size-lg` | 16px | 600 | 1.3 | `--tracking-tight` (-0.01em) |
+
+## Design Notes
+
+- Only 2 weights: 400 (normal) and 600 (semibold). No medium or bold.
+- Scale steps: 11 -> 12 -> 14 -> 16. Each step is perceptually distinct (min 2px gap).
+- 11px captions use wider tracking (0.02em) to prevent character collapse at small size.
+- Headings use tighter tracking (-0.01em) for density.
