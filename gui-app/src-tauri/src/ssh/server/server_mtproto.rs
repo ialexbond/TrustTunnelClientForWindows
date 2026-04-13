@@ -39,37 +39,31 @@ fn emit_mtproto_step(app: &tauri::AppHandle, step: &str, status: &str, msg: &str
     .ok();
 }
 
-/// Parse mtg TOML config to extract secret and bind port.
-fn parse_mtg_config(raw: &str) -> (String, u16) {
+/// Parse MTProxy environment file to extract secret and port.
+/// Format: KEY=VALUE lines (SECRET=..., PORT=..., TAG=...)
+fn parse_mtproxy_env(raw: &str) -> (String, u16) {
     let mut secret = String::new();
     let mut port: u16 = 0;
     for line in raw.lines() {
         let line = line.trim();
-        if line.starts_with("secret") {
-            if let Some(val) = line.split('=').nth(1) {
-                secret = val.trim().trim_matches('"').to_string();
-            }
+        if let Some(val) = line.strip_prefix("SECRET=") {
+            secret = val.trim().to_string();
         }
-        if line.starts_with("bind-to") {
-            if let Some(val) = line.split('=').nth(1) {
-                let bind = val.trim().trim_matches('"');
-                if let Some(port_str) = bind.rsplit(':').next() {
-                    port = port_str.parse().unwrap_or(0);
-                }
-            }
+        if let Some(val) = line.strip_prefix("PORT=") {
+            port = val.trim().parse().unwrap_or(0);
         }
     }
     (secret, port)
 }
 
-/// Build tg:// proxy link.
+/// Build tg:// proxy link with dd prefix for random padding (anti-DPI).
 fn build_proxy_link(host: &str, port: u16, secret: &str) -> String {
-    format!("tg://proxy?server={host}&port={port}&secret={secret}")
+    format!("tg://proxy?server={host}&port={port}&secret=dd{secret}")
 }
 
-/// Validate hex secret format (STRIDE T-04-02 mitigation).
+/// Validate hex secret format (32 hex chars = 16 bytes).
 fn is_valid_hex_secret(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 512 && s.chars().all(|c| c.is_ascii_hexdigit())
+    s.len() == 32 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -87,7 +81,7 @@ pub async fn mtproto_get_status(
     let (out, _) = exec_command(
         handle,
         app,
-        "test -f /usr/local/bin/mtg && echo INSTALLED || echo NOT_INSTALLED",
+        "test -f /opt/MTProxy/mtproto-proxy && echo INSTALLED || echo NOT_INSTALLED",
     )
     .await?;
     if out.trim().contains("NOT_INSTALLED") {
@@ -104,17 +98,21 @@ pub async fn mtproto_get_status(
     let (svc_out, _) = exec_command(
         handle,
         app,
-        &format!("{sudo}systemctl is-active mtg 2>/dev/null || echo inactive"),
+        &format!("{sudo}systemctl is-active MTProxy 2>/dev/null || echo inactive"),
     )
     .await?;
     let active = svc_out.trim() == "active";
 
-    // Read config
-    let (cfg_out, _) =
-        exec_command(handle, app, "cat /etc/mtg/config.toml 2>/dev/null || echo ''").await?;
-    let (secret, port) = parse_mtg_config(&cfg_out);
+    // Read env config
+    let (cfg_out, _) = exec_command(
+        handle,
+        app,
+        "cat /etc/mtproxy.env 2>/dev/null || echo ''",
+    )
+    .await?;
+    let (secret, port) = parse_mtproxy_env(&cfg_out);
 
-    // Validate secret and build link
+    // Build link
     let proxy_link = if is_valid_hex_secret(&secret) && port > 0 {
         build_proxy_link(host, port, &secret)
     } else {
@@ -132,6 +130,7 @@ pub async fn mtproto_get_status(
 
 // ═══════════════════════════════════════════════════════════════
 //   mtproto_install — direct connect, long-running
+//   Uses official TelegramMessenger/MTProxy (C implementation)
 // ═══════════════════════════════════════════════════════════════
 
 pub async fn mtproto_install(
@@ -144,7 +143,6 @@ pub async fn mtproto_install(
 
     // ── Validate / resolve port ──
     let port: u16 = if mtproto_port == 0 {
-        // Auto-select a random free port
         emit_mtproto_step(app, "download", "running", "Finding free port...");
         let (port_out, _) = exec_command(
             &handle,
@@ -159,17 +157,13 @@ pub async fn mtproto_install(
         }
         auto_port
     } else {
-        // Validate range
         if mtproto_port < 1024 {
             return Err(format!("MTPROTO_INVALID_PORT|{mtproto_port}"));
         }
-        // Check port is free
         let (busy_out, _) = exec_command(
             &handle,
             app,
-            &format!(
-                "ss -tlnp | grep -q ':{mtproto_port} ' && echo BUSY || echo FREE"
-            ),
+            &format!("ss -tlnp | grep -q ':{mtproto_port} ' && echo BUSY || echo FREE"),
         )
         .await?;
         if busy_out.trim().contains("BUSY") {
@@ -178,83 +172,123 @@ pub async fn mtproto_install(
         mtproto_port
     };
 
-    // ── Step: download ──
+    // ── Step: download (install deps + clone + build) ──
     emit_mtproto_step(app, "download", "running", "");
-    let (dl_out, _) = exec_command(
+
+    // Install build dependencies
+    let (deps_out, deps_code) = exec_command(
+        &handle,
+        app,
+        &format!("{sudo}apt-get update -qq && {sudo}apt-get install -y -qq git curl build-essential libssl-dev zlib1g-dev 2>&1 && echo DEPS_OK"),
+    )
+    .await?;
+    if !deps_out.contains("DEPS_OK") {
+        emit_mtproto_step(app, "download", "error", "Failed to install build dependencies");
+        return Err(format!("MTPROTO_DEPS_FAILED|{}", deps_code));
+    }
+
+    // Clone and build MTProxy
+    let (build_out, _) = exec_command(
         &handle,
         app,
         &format!(
             "{sudo}bash -c 'set -e; \
-             ASSET_URL=$(curl -sL https://api.github.com/repos/9seconds/mtg/releases/latest \
-             | grep browser_download_url | grep linux-amd64.tar.gz | grep -v amd64-v3 | head -1 \
-             | cut -d\"\\\"\" -f4); \
-             if [ -z \"$ASSET_URL\" ]; then echo DOWNLOAD_FAILED; exit 1; fi; \
-             curl -sL -o /tmp/mtg.tar.gz \"$ASSET_URL\" && \
-             rm -rf /tmp/mtg-extract && mkdir -p /tmp/mtg-extract && \
-             tar -xzf /tmp/mtg.tar.gz -C /tmp/mtg-extract --strip-components=1 && \
-             mv /tmp/mtg-extract/mtg /usr/local/bin/mtg && \
-             chmod +x /usr/local/bin/mtg && \
-             rm -rf /tmp/mtg.tar.gz /tmp/mtg-extract && echo DOWNLOAD_OK'"
+             rm -rf /opt/MTProxy && \
+             git clone https://github.com/TelegramMessenger/MTProxy.git /opt/MTProxy && \
+             cd /opt/MTProxy && \
+             make -j$(nproc) 2>&1 && \
+             test -f /opt/MTProxy/objs/bin/mtproto-proxy && \
+             ln -sf /opt/MTProxy/objs/bin/mtproto-proxy /opt/MTProxy/mtproto-proxy && \
+             echo BUILD_OK'"
         ),
     )
     .await?;
-    if !dl_out.contains("DOWNLOAD_OK") {
-        emit_mtproto_step(app, "download", "error", "Download failed");
-        return Err("MTPROTO_DOWNLOAD_FAILED".into());
+    if !build_out.contains("BUILD_OK") {
+        emit_mtproto_step(app, "download", "error", "Build failed");
+        return Err("MTPROTO_BUILD_FAILED".into());
     }
     emit_mtproto_step(app, "download", "done", "");
 
-    // ── Step: configure ──
+    // ── Step: configure (download proxy-secret + proxy-multi.conf) ──
     emit_mtproto_step(app, "configure", "running", "");
 
-    // Check existing config for secret reuse
-    let (cfg_out, _) =
-        exec_command(&handle, app, "cat /etc/mtg/config.toml 2>/dev/null || echo ''").await?;
-    let (existing_secret, _) = parse_mtg_config(&cfg_out);
+    let (cfg_ok, _) = exec_command(
+        &handle,
+        app,
+        &format!(
+            "{sudo}bash -c 'set -e; \
+             curl -s https://core.telegram.org/getProxySecret -o /opt/MTProxy/proxy-secret && \
+             curl -s https://core.telegram.org/getProxyConfig -o /opt/MTProxy/proxy-multi.conf && \
+             test -s /opt/MTProxy/proxy-secret && \
+             test -s /opt/MTProxy/proxy-multi.conf && \
+             echo CONFIG_OK'"
+        ),
+    )
+    .await?;
+    if !cfg_ok.contains("CONFIG_OK") {
+        emit_mtproto_step(app, "configure", "error", "Failed to download Telegram configs");
+        return Err("MTPROTO_CONFIG_DOWNLOAD_FAILED".into());
+    }
+    emit_mtproto_step(app, "configure", "done", "");
+
+    // ── Step: generate_secret ──
+    emit_mtproto_step(app, "generate_secret", "running", "");
+
+    // Check existing env for secret reuse (MTPROTO-07)
+    let (env_out, _) = exec_command(
+        &handle,
+        app,
+        "cat /etc/mtproxy.env 2>/dev/null || echo ''",
+    )
+    .await?;
+    let (existing_secret, _) = parse_mtproxy_env(&env_out);
 
     let secret = if is_valid_hex_secret(&existing_secret) {
         existing_secret
     } else {
-        // Generate new secret
+        // Generate new 16-byte hex secret
         let (secret_out, _) = exec_command(
             &handle,
             app,
-            &format!("{sudo}/usr/local/bin/mtg generate-secret --hex google.com"),
+            "head -c 16 /dev/urandom | xxd -ps",
         )
         .await?;
         let gen_secret = secret_out.trim().to_string();
         if !is_valid_hex_secret(&gen_secret) {
-            emit_mtproto_step(app, "configure", "error", "Invalid secret generated");
+            emit_mtproto_step(app, "generate_secret", "error", "Invalid secret generated");
             return Err("MTPROTO_SECRET_INVALID".into());
         }
         gen_secret
     };
 
-    // Create config directory and write config
-    exec_command(&handle, app, &format!("{sudo}mkdir -p /etc/mtg")).await?;
+    // Save env config for persistence
     exec_command(
         &handle,
         app,
         &format!(
-            "{sudo}bash -c 'cat > /etc/mtg/config.toml << MTGEOF\nsecret = \"{secret}\"\nbind-to = \"0.0.0.0:{port}\"\nMTGEOF'"
+            "{sudo}bash -c 'cat > /etc/mtproxy.env << ENVEOF\nSECRET={secret}\nPORT={port}\nENVEOF'"
         ),
     )
     .await?;
-    emit_mtproto_step(app, "configure", "done", "");
+    emit_mtproto_step(app, "generate_secret", "done", "");
 
-    // ── Step: generate_secret (emit for UI, creates systemd unit) ──
-    emit_mtproto_step(app, "generate_secret", "running", "");
+    // ── Step: start_service (create systemd unit + firewall + start) ──
+    emit_mtproto_step(app, "start_service", "running", "");
+
+    // Create systemd unit
     exec_command(
         &handle,
         app,
         &format!(
-            "{sudo}bash -c 'cat > /etc/systemd/system/mtg.service << MTGEOF\n\
+            "{sudo}bash -c 'cat > /etc/systemd/system/MTProxy.service << MTGEOF\n\
              [Unit]\n\
-             Description=mtg MTProto proxy\n\
+             Description=Telegram MTProxy\n\
              After=network.target\n\
              \n\
              [Service]\n\
-             ExecStart=/usr/local/bin/mtg run /etc/mtg/config.toml\n\
+             Type=simple\n\
+             WorkingDirectory=/opt/MTProxy\n\
+             ExecStart=/opt/MTProxy/mtproto-proxy -u nobody -p 8888 -H {port} -S {secret} --aes-pwd /opt/MTProxy/proxy-secret /opt/MTProxy/proxy-multi.conf -M 1\n\
              Restart=always\n\
              RestartSec=3\n\
              LimitNOFILE=65536\n\
@@ -265,10 +299,6 @@ pub async fn mtproto_install(
         ),
     )
     .await?;
-    emit_mtproto_step(app, "generate_secret", "done", "");
-
-    // ── Step: start_service ──
-    emit_mtproto_step(app, "start_service", "running", "");
 
     // Open firewall port
     exec_command(
@@ -283,14 +313,14 @@ pub async fn mtproto_install(
         &handle,
         app,
         &format!(
-            "{sudo}systemctl daemon-reload && {sudo}systemctl enable mtg && {sudo}systemctl start mtg"
+            "{sudo}systemctl daemon-reload && {sudo}systemctl enable MTProxy && {sudo}systemctl start MTProxy"
         ),
     )
     .await?;
 
     // Verify active
     let (active_out, _) =
-        exec_command(&handle, app, &format!("{sudo}systemctl is-active mtg")).await?;
+        exec_command(&handle, app, &format!("{sudo}systemctl is-active MTProxy")).await?;
     if active_out.trim() != "active" {
         emit_mtproto_step(app, "start_service", "error", "Service failed to start");
         return Err("MTPROTO_START_FAILED".into());
@@ -321,16 +351,20 @@ pub async fn mtproto_uninstall(
     let handle = params.connect_with_app(app.clone()).await?;
     let sudo = detect_sudo(&handle, app).await;
 
-    // Read config to get port for firewall cleanup
-    let (cfg_out, _) =
-        exec_command(&handle, app, "cat /etc/mtg/config.toml 2>/dev/null || echo ''").await?;
-    let (_, port) = parse_mtg_config(&cfg_out);
+    // Read env config to get port for firewall cleanup
+    let (cfg_out, _) = exec_command(
+        &handle,
+        app,
+        "cat /etc/mtproxy.env 2>/dev/null || echo ''",
+    )
+    .await?;
+    let (_, port) = parse_mtproxy_env(&cfg_out);
 
     // Stop and disable service
     exec_command(
         &handle,
         app,
-        &format!("{sudo}systemctl stop mtg 2>/dev/null; {sudo}systemctl disable mtg 2>/dev/null; echo STOP_OK"),
+        &format!("{sudo}systemctl stop MTProxy 2>/dev/null; {sudo}systemctl disable MTProxy 2>/dev/null; echo STOP_OK"),
     )
     .await?;
 
@@ -338,15 +372,15 @@ pub async fn mtproto_uninstall(
     exec_command(
         &handle,
         app,
-        &format!("{sudo}rm -f /etc/systemd/system/mtg.service && {sudo}systemctl daemon-reload"),
+        &format!("{sudo}rm -f /etc/systemd/system/MTProxy.service && {sudo}systemctl daemon-reload"),
     )
     .await?;
 
-    // Remove binary
-    exec_command(&handle, app, &format!("{sudo}rm -f /usr/local/bin/mtg")).await?;
+    // Remove MTProxy directory (source + binary)
+    exec_command(&handle, app, &format!("{sudo}rm -rf /opt/MTProxy")).await?;
 
-    // Remove config directory
-    exec_command(&handle, app, &format!("{sudo}rm -rf /etc/mtg")).await?;
+    // Remove env config
+    exec_command(&handle, app, &format!("{sudo}rm -f /etc/mtproxy.env")).await?;
 
     // Close firewall port
     if port > 0 {
