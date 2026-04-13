@@ -1,7 +1,4 @@
 /* Override Tauri desktop app styles that break Storybook */
 body {
   overflow: auto !important;
-  /* Reset text color — app uses light-on-dark tokens, Storybook docs are light background */
-  color: #161616 !important;
-  background-color: #ffffff !important;
 }
