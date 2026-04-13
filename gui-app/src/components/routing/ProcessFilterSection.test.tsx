@@ -109,16 +109,15 @@ describe("ProcessFilterSection", () => {
 
   it("toggles mode from exclude to only when toggle is clicked", () => {
     renderSection({ processMode: "exclude" });
-    // The Toggle component renders a button — find it by looking for the toggle
-    const toggleButtons = screen.getAllByRole("button");
-    // First button is the toggle (before add/browse buttons)
+    // The Toggle component renders a switch role element
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[0]);
     expect(onModeChange).toHaveBeenCalledWith("only");
   });
 
   it("toggles mode from only to exclude when toggle is clicked", () => {
     renderSection({ processMode: "only" });
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[0]);
     expect(onModeChange).toHaveBeenCalledWith("exclude");
   });
