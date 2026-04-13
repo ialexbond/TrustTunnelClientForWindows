@@ -30,6 +30,7 @@ pub use server::{
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,
     MtProtoStatus, MtProtoInstallStep,
+    detect_bbr_status, enable_bbr, disable_bbr,
 };
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
