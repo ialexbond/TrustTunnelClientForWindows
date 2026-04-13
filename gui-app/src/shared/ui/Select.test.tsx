@@ -20,6 +20,16 @@ describe("Select", () => {
     expect(screen.getByText("Beta")).toBeInTheDocument();
   });
 
+  it("renders placeholder when no value selected", () => {
+    render(<Select options={options} onChange={onChange} />);
+    expect(screen.getByText("Выберите...")).toBeInTheDocument();
+  });
+
+  it("renders custom placeholder", () => {
+    render(<Select options={options} onChange={onChange} placeholder="Select option" />);
+    expect(screen.getByText("Select option")).toBeInTheDocument();
+  });
+
   it("renders label and description when provided", () => {
     render(
       <Select
@@ -34,6 +44,16 @@ describe("Select", () => {
     expect(screen.getByText("Helper text")).toBeInTheDocument();
   });
 
+  it("has combobox role on trigger", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
+  });
+
+  it("trigger has aria-expanded=false when closed", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+    expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("opens dropdown on click and shows all options", () => {
     render(<Select options={options} value="a" onChange={onChange} />);
 
@@ -41,7 +61,7 @@ describe("Select", () => {
     expect(screen.queryByText("Beta")).not.toBeInTheDocument();
 
     // Click trigger button
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("combobox"));
 
     // All option labels visible (Alpha appears twice: trigger + dropdown)
     expect(screen.getAllByText("Alpha")).toHaveLength(2);
@@ -49,10 +69,31 @@ describe("Select", () => {
     expect(screen.getByText("Gamma")).toBeInTheDocument();
   });
 
+  it("trigger has aria-expanded=true when open", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("dropdown has listbox role", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("options have option role and aria-selected", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("combobox"));
+    const optionEls = screen.getAllByRole("option");
+    expect(optionEls).toHaveLength(3);
+    expect(optionEls[0]).toHaveAttribute("aria-selected", "true");
+    expect(optionEls[1]).toHaveAttribute("aria-selected", "false");
+  });
+
   it("calls onChange with selected option value", () => {
     render(<Select options={options} value="a" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button")); // open
+    fireEvent.click(screen.getByRole("combobox")); // open
     fireEvent.click(screen.getByText("Gamma")); // pick option
 
     expect(onChange).toHaveBeenCalledWith({ target: { value: "c" } });
@@ -61,42 +102,68 @@ describe("Select", () => {
   it("closes dropdown after selecting an option", () => {
     render(<Select options={options} value="a" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("combobox"));
     fireEvent.click(screen.getByText("Beta"));
 
-    // Dropdown should be closed — only the trigger button text remains
-    // "Beta" will still show as the selected label if parent re-renders,
-    // but the dropdown list should be gone (only 1 button total)
-    const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(1);
+    // Dropdown should be closed — listbox gone
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("closes dropdown on outside click", () => {
     render(<Select options={options} value="a" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button")); // open
-    expect(screen.getByText("Beta")).toBeInTheDocument(); // dropdown open
+    fireEvent.click(screen.getByRole("combobox")); // open
+    expect(screen.getByRole("listbox")).toBeInTheDocument(); // dropdown open
 
     fireEvent.mouseDown(document.body); // click outside
 
-    // Dropdown options should disappear (Beta not rendered outside dropdown)
-    expect(screen.queryByText("Beta")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("does not open when disabled", () => {
     render(<Select options={options} value="a" onChange={onChange} disabled />);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("combobox"));
 
-    // Dropdown should not open — no option buttons besides the trigger
-    expect(screen.queryByText("Beta")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("applies disabled styling", () => {
     render(<Select options={options} value="a" onChange={onChange} disabled />);
 
-    const button = screen.getByRole("button");
-    expect(button.className).toContain("opacity-50");
+    const button = screen.getByRole("combobox");
+    expect(button.className).toContain("opacity-[var(--opacity-disabled)]");
     expect(button.className).toContain("cursor-not-allowed");
+  });
+
+  it("keyboard ArrowDown opens dropdown", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+
+    const trigger = screen.getByRole("combobox");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("keyboard Enter selects highlighted option", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+
+    const trigger = screen.getByRole("combobox");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" }); // open
+    fireEvent.keyDown(trigger, { key: "ArrowDown" }); // move to next (Beta)
+    fireEvent.keyDown(trigger, { key: "Enter" });     // select
+
+    expect(onChange).toHaveBeenCalledWith({ target: { value: "b" } });
+  });
+
+  it("keyboard Escape closes dropdown", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+
+    const trigger = screen.getByRole("combobox");
+    fireEvent.click(trigger); // open
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 });
