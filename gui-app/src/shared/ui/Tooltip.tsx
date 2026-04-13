@@ -61,7 +61,7 @@ export function Tooltip({ text, children, maxWidth = 224, delay = 400 }: Tooltip
         createPortal(
           <div
             ref={positionTip}
-            className="fixed z-[9500] px-2.5 py-2 rounded-[var(--radius-md)] shadow-lg pointer-events-none"
+            className="fixed z-[var(--z-dropdown)] px-[var(--space-2)] py-1 rounded-[var(--radius-sm)] shadow-[var(--shadow-md)] pointer-events-none transition-opacity duration-[var(--transition-fast)]"
             style={{
               visibility: "hidden",
               maxWidth,
@@ -72,7 +72,7 @@ export function Tooltip({ text, children, maxWidth = 224, delay = 400 }: Tooltip
               color: "var(--color-text-secondary)",
             }}
           >
-            <p className="text-[10px] leading-relaxed whitespace-normal">{text}</p>
+            <p className="text-[var(--font-size-xs)] leading-relaxed whitespace-normal">{text}</p>
           </div>,
           document.body
         )}

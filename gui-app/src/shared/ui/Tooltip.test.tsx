@@ -15,7 +15,7 @@ describe("Tooltip", () => {
     render(
       <Tooltip text="Help info">
         <button>Hover me</button>
-      </Tooltip>,
+      </Tooltip>
     );
     expect(screen.getByText("Hover me")).toBeInTheDocument();
   });
@@ -24,7 +24,7 @@ describe("Tooltip", () => {
     render(
       <Tooltip text="Help info">
         <button>Hover me</button>
-      </Tooltip>,
+      </Tooltip>
     );
     expect(screen.queryByText("Help info")).not.toBeInTheDocument();
   });
@@ -33,16 +33,14 @@ describe("Tooltip", () => {
     render(
       <Tooltip text="Help info" delay={400}>
         <button>Hover me</button>
-      </Tooltip>,
+      </Tooltip>
     );
 
     const trigger = screen.getByText("Hover me").closest("div")!;
     fireEvent.mouseEnter(trigger);
 
-    // Not shown before delay
     expect(screen.queryByText("Help info")).not.toBeInTheDocument();
 
-    // Advance past delay
     act(() => {
       vi.advanceTimersByTime(450);
     });
@@ -54,7 +52,7 @@ describe("Tooltip", () => {
     render(
       <Tooltip text="Help info" delay={0}>
         <button>Hover me</button>
-      </Tooltip>,
+      </Tooltip>
     );
 
     const trigger = screen.getByText("Hover me").closest("div")!;
@@ -73,7 +71,7 @@ describe("Tooltip", () => {
     render(
       <Tooltip text="Specific tooltip content" delay={0}>
         <span>Trigger</span>
-      </Tooltip>,
+      </Tooltip>
     );
 
     const trigger = screen.getByText("Trigger").closest("div")!;
@@ -92,21 +90,40 @@ describe("Tooltip", () => {
     render(
       <Tooltip text="Delayed tip" delay={500}>
         <span>Trigger</span>
-      </Tooltip>,
+      </Tooltip>
     );
 
     const trigger = screen.getByText("Trigger").closest("div")!;
 
     fireEvent.mouseEnter(trigger);
     act(() => {
-      vi.advanceTimersByTime(200); // before 500ms delay
+      vi.advanceTimersByTime(200);
     });
     fireEvent.mouseLeave(trigger);
 
     act(() => {
-      vi.advanceTimersByTime(400); // finish remaining time
+      vi.advanceTimersByTime(400);
     });
 
     expect(screen.queryByText("Delayed tip")).not.toBeInTheDocument();
+  });
+
+  it("uses z-[var(--z-dropdown)] not hardcoded 9500", () => {
+    render(
+      <Tooltip text="Z-check" delay={0}>
+        <span>Trigger</span>
+      </Tooltip>
+    );
+
+    const trigger = screen.getByText("Trigger").closest("div")!;
+    fireEvent.mouseEnter(trigger);
+
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+
+    const tip = screen.getByText("Z-check").closest("div[class*='fixed']")!;
+    expect(tip.className).toContain("z-[var(--z-dropdown)]");
+    expect(tip.className).not.toContain("9500");
   });
 });
