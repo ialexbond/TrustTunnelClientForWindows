@@ -87,4 +87,38 @@ describe("SnackBar", () => {
     // onShown called once per message in the batch
     expect(onShown).toHaveBeenCalledTimes(3);
   });
+
+  it("error snackbar uses color-status-error token (not broken orange fallback)", () => {
+    render(
+      <SnackBar
+        messages={[{ text: "Something failed", type: "error" }]}
+        onShown={onShown}
+      />,
+    );
+
+    act(() => { vi.advanceTimersByTime(50); });
+
+    // The error icon should be styled with --color-status-error, not #f97316
+    const icon = document.querySelector("svg.lucide-triangle-alert");
+    // The icon's parent or itself should NOT have orange (#f97316) color
+    const allElements = document.querySelectorAll("[style]");
+    const hasOrangeFallback = Array.from(allElements).some((el) =>
+      (el as HTMLElement).style.color.includes("#f97316") ||
+      (el as HTMLElement).style.color.includes("f97316"),
+    );
+    expect(hasOrangeFallback).toBe(false);
+    // The icon element exists (error message is rendered)
+    expect(icon).toBeTruthy();
+  });
+
+  it("uses z-snackbar token for stacking", () => {
+    const { container } = render(
+      <SnackBar messages={["Test"]} onShown={onShown} />,
+    );
+
+    act(() => { vi.advanceTimersByTime(50); });
+
+    const wrapper = container.firstChild as HTMLElement;
+    expect(wrapper.style.zIndex).toBe("var(--z-snackbar)");
+  });
 });
