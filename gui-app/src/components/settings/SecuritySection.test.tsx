@@ -80,7 +80,7 @@ describe("SecuritySection", () => {
   it("calls updateField when kill switch toggle is clicked", () => {
     const state = makeState();
     render(<SecuritySection state={state} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[0]);
     expect(state.updateField).toHaveBeenCalledWith("killswitch_enabled", true);
   });
@@ -88,7 +88,7 @@ describe("SecuritySection", () => {
   it("calls updateField when anti-DPI toggle is clicked", () => {
     const state = makeState();
     render(<SecuritySection state={state} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[1]);
     expect(state.updateField).toHaveBeenCalledWith("endpoint.anti_dpi", true);
   });
@@ -96,7 +96,7 @@ describe("SecuritySection", () => {
   it("calls updateField when post-quantum toggle is clicked", () => {
     const state = makeState();
     render(<SecuritySection state={state} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[2]);
     expect(state.updateField).toHaveBeenCalledWith("post_quantum_group_enabled", false);
   });

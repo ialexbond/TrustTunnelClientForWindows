@@ -95,8 +95,8 @@ describe("NetworkSection", () => {
   it("calls updateField to toggle IPv6 on", () => {
     const state = makeState();
     render(<NetworkSection state={state} />);
-    // The IPv6 toggle is the first button
-    const toggleButtons = screen.getAllByRole("button");
+    // The IPv6 toggle uses role="switch"
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[0]);
     expect(state.updateField).toHaveBeenCalledWith("endpoint.has_ipv6", true);
   });
@@ -112,12 +112,11 @@ describe("NetworkSection", () => {
   it("calls updateField to remove a DNS upstream when trash button is clicked", () => {
     const state = makeState();
     render(<NetworkSection state={state} />);
-    // Find the trash/delete buttons for DNS entries
+    // Find the trash/delete buttons for DNS entries (toggle is now role="switch", not button)
     const allButtons = screen.getAllByRole("button");
-    // Filter for delete buttons (they come after the IPv6 toggle and before Add DNS)
-    // IPv6 toggle is [0], then delete buttons for each DNS, then add DNS button
-    // With 2 DNS entries, delete buttons are at index 1 and 2
-    fireEvent.click(allButtons[1]);
+    // Delete buttons for each DNS, then add DNS button
+    // With 2 DNS entries, delete buttons are at index 0 and 1
+    fireEvent.click(allButtons[0]);
     expect(state.updateField).toHaveBeenCalledWith("dns_upstreams", ["8.8.8.8"]);
   });
 
@@ -126,7 +125,7 @@ describe("NetworkSection", () => {
     render(<NetworkSection state={state} />);
     const allButtons = screen.getAllByRole("button");
     // Second delete button removes the second DNS entry
-    fireEvent.click(allButtons[2]);
+    fireEvent.click(allButtons[1]);
     expect(state.updateField).toHaveBeenCalledWith("dns_upstreams", ["1.1.1.1"]);
   });
 
@@ -155,7 +154,7 @@ describe("NetworkSection", () => {
     render(<NetworkSection state={state} />);
     // IPv6 is off in default state (has_ipv6: false)
     // Toggle should exist and be clickable
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     expect(toggleButtons[0]).toBeInTheDocument();
   });
 
@@ -171,7 +170,7 @@ describe("NetworkSection", () => {
     });
     render(<NetworkSection state={state} />);
     // Clicking should set to false
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[0]);
     expect(state.updateField).toHaveBeenCalledWith("endpoint.has_ipv6", false);
   });

@@ -36,7 +36,7 @@ describe("ExperimentalSection", () => {
 
   it("calls update when block routing toggle is clicked", () => {
     render(<ExperimentalSection />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     // Find the toggle button for blockRouting (first toggle)
     fireEvent.click(toggleButtons[0]);
     expect(mockUpdate).toHaveBeenCalledWith("blockRouting", true);
