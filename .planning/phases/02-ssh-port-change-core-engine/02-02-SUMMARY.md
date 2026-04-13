@@ -1,99 +1,123 @@
 ---
 phase: 02-ssh-port-change-core-engine
 plan: 02
-subsystem: ui
-tags: [react, numberinput, ssh-port, tauri-invoke, security]
-
-# Dependency graph
-requires:
-  - phase: 02-ssh-port-change-core-engine/01
-    provides: security_change_ssh_port Tauri command and i18n keys
-provides:
-  - NumberInput reusable UI component with min/max validation
-  - SshPortSection component for SSH port change UI
-  - changeSshPort action wired through useSecurityState hook
-affects: []
-
-# Tech tracking
-tech-stack:
+subsystem: ui/input-family
+tags: [input, form-primitives, token-redesign, storybook, clearable]
+dependency_graph:
+  requires: [02-01]
+  provides: [Input-clearable, Input-helperText, Input-error, NumberInput-redesign, PasswordInput-redesign, ActionInput-redesign, ActionPasswordInput-redesign]
+  affects: [all forms using Input family]
+tech_stack:
   added: []
-  patterns:
-    - "NumberInput controlled component with digit-only filtering and blur validation"
-    - "SshPortSection follows FirewallSection visual pattern with border-t separator"
-
-key-files:
+  patterns: [cn() for class merging, CSS custom properties only, forwardRef on all components, token-driven error states]
+key_files:
   created:
-    - gui-app/src/shared/ui/NumberInput.tsx
-    - gui-app/src/shared/ui/NumberInput.test.tsx
-    - gui-app/src/components/server/SshPortSection.tsx
+    - gui-app/src/shared/ui/Input.stories.tsx
+    - gui-app/src/shared/ui/NumberInput.stories.tsx
+    - gui-app/src/shared/ui/PasswordInput.stories.tsx
+    - gui-app/src/shared/ui/ActionInput.stories.tsx
+    - gui-app/src/shared/ui/ActionPasswordInput.stories.tsx
   modified:
-    - gui-app/src/shared/ui/index.ts
-    - gui-app/src/components/server/useSecurityState.ts
-    - gui-app/src/components/server/SecuritySection.tsx
-
-key-decisions:
-  - "Used type=text with inputMode=numeric instead of type=number to avoid browser spinner arrows and allow full filtering control"
-
-patterns-established:
-  - "NumberInput: reusable numeric input with digit filtering and range validation on blur"
-
-requirements-completed: [PORT-01]
-
-# Metrics
-duration: 6min
-completed: 2026-04-12
+    - gui-app/src/shared/ui/Input.tsx
+    - gui-app/src/shared/ui/Input.test.tsx
+    - gui-app/src/shared/ui/NumberInput.tsx
+    - gui-app/src/shared/ui/PasswordInput.tsx
+    - gui-app/src/shared/ui/ActionInput.tsx
+    - gui-app/src/shared/ui/ActionPasswordInput.tsx
+decisions:
+  - "Clearable button uses aria-label=Clear for accessibility and testability"
+  - "helperText hidden when error is present (error takes precedence)"
+  - "Switched from --radius-lg to --radius-md per plan spec (8px vs 12px)"
+  - "NumberInput gains forwardRef to match Input family contract"
+  - "Error text uses --color-status-error instead of --color-danger-400 (per plan)"
+metrics:
+  duration: ~15min
+  completed: 2026-04-14
+  tasks_completed: 2
+  files_changed: 11
 ---
 
-# Phase 02 Plan 02: SSH Port Change Frontend Summary
+# Phase 02 Plan 02: Input Family Redesign Summary
 
-**NumberInput reusable component and SshPortSection wired into SecuritySection for SSH port change UI with spinner feedback and error translation**
+**One-liner:** Token-driven redesign of 5 input components with clearable/helperText/error API, plus 5 Storybook story files covering all states.
 
-## Performance
+## What Was Built
 
-- **Duration:** 6 min
-- **Started:** 2026-04-12T17:39:10Z
-- **Completed:** 2026-04-12T17:45:13Z
-- **Tasks:** 2
-- **Files modified:** 6
+### Task 1: Input Redesign
 
-## Accomplishments
-- Created reusable NumberInput component with min/max validation, digit-only filtering, and blur validation (7 tests)
-- Built SshPortSection with current port display, NumberInput (1024-65535), Apply button, and Loader2 spinner during operation
-- Extended useSecurityState with changeSshPort action, portBusy state, and error code translation for SSH_PORT_CHANGE_FAILED, SSH_PORT_VALIDATION_FAILED, SSH_UNSUPPORTED_OS
-- Wired SshPortSection into SecuritySection below FirewallSection
+`Input.tsx` fully rewritten with:
+- `clearable?: boolean` — shows Lucide X button (14px) when value non-empty; calls `onChange("")` on click
+- `helperText?: string` — renders below input in `--color-text-muted` / `--font-size-xs`; hidden when error present
+- `error?: string` — renders in `--color-status-error`; triggers `border-[--color-danger-500]` + `bg-[--color-status-error-bg]`
+- `cn()` for all class merging, zero inline style colors, zero hardcoded hex
+- `focus-visible:border-[--color-input-focus] focus-visible:shadow-[--focus-ring]` for keyboard navigation
+- All tests updated: 11 passing
+
+`Input.stories.tsx` created with 9 stories: Default, WithLabel, WithPlaceholder, WithHelperText, WithError, Clearable, WithIcon, Disabled, AllStates.
+
+### Task 2: Derivative Components Redesign
+
+All 4 derivatives aligned with Input redesign:
+
+| Component | Changes |
+|-----------|---------|
+| NumberInput | + forwardRef, + cn(), + helperText prop, --radius-md, --color-status-error |
+| PasswordInput | + cn(), + helperText prop, --radius-md, --color-status-error |
+| ActionInput | + cn(), + helperText prop, --radius-md, --color-status-error |
+| ActionPasswordInput | + cn(), + helperText prop, --radius-md, --color-status-error |
+
+Story files created (component-specific stories per component):
+- `NumberInput.stories.tsx` — Default/WithLabel/WithHelperText/WithError/WithMinMax/Disabled
+- `PasswordInput.stories.tsx` — Default/WithLabel/WithHelperText/WithError/ShowPassword/NoLockIcon/Disabled
+- `ActionInput.stories.tsx` — Default/WithLabel/WithHelperText/WithError/WithAction/WithMultipleActions/Disabled
+- `ActionPasswordInput.stories.tsx` — Default/WithLabel/WithHelperText/WithError/WithAction/ShowPassword/NoLockIcon/Disabled
+
+## Verification Results
+
+All tests passing:
+- Input.test.tsx: 11/11
+- NumberInput.test.tsx: 7/7
+- PasswordInput.test.tsx: 4/4
+- Total: 22/22
+
+Zero hardcoded colors in all 5 component files (confirmed with grep).
+
+All 5 `.stories.tsx` files created with `tags: ["autodocs"]`.
 
 ## Task Commits
 
-Each task was committed atomically:
-
-1. **Task 1: Create NumberInput reusable component with tests** - `87aa17c9` (feat) - TDD: RED/GREEN
-2. **Task 2: Create SshPortSection and wire into SecuritySection** - `bb2411e0` (feat)
-
-## Files Created/Modified
-- `gui-app/src/shared/ui/NumberInput.tsx` - Reusable numeric input with digit filtering, min/max validation on blur
-- `gui-app/src/shared/ui/NumberInput.test.tsx` - 7 tests covering rendering, range validation, filtering, disabled state
-- `gui-app/src/shared/ui/index.ts` - Added NumberInput export
-- `gui-app/src/components/server/SshPortSection.tsx` - SSH port change UI with NumberInput, Apply button, Loader2 spinner
-- `gui-app/src/components/server/useSecurityState.ts` - Added changeSshPort action, portBusy state, error code translation
-- `gui-app/src/components/server/SecuritySection.tsx` - Added SshPortSection rendering below FirewallSection
-
-## Decisions Made
-- Used `type="text"` with `inputMode="numeric"` instead of `type="number"` to avoid browser-native spinner arrows and maintain full control over digit filtering
+1. **Task 1: Input redesign + story + tests** - `6b340d28` (feat)
+2. **Task 2: Derivatives redesign + stories** - `aab465a8` (feat)
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
 
-## Issues Encountered
-None.
+**1. [Rule 3 - Blocking] npm dependencies absent from worktree**
+- **Found during:** Task 1 verification
+- **Issue:** `node_modules` was not present in this worktree — `npx vitest run` failed with `ERR_MODULE_NOT_FOUND`
+- **Fix:** Ran `npm install --legacy-peer-deps` in `gui-app/`
+- **Commit:** no separate commit (setup only)
 
-## User Setup Required
-None - no external service configuration required.
+### Style Alignment
 
-## Next Phase Readiness
-- SSH port change frontend is complete and ready for end-to-end testing
-- All 1277 existing tests continue to pass
+- `--radius-lg` (12px) replaced with `--radius-md` (8px) per plan spec — old components used `--radius-lg` but plan explicitly specifies `--radius-md`
+- Error text switched from `--color-danger-400` to `--color-status-error` per plan spec
 
----
-*Phase: 02-ssh-port-change-core-engine*
-*Completed: 2026-04-12*
+## Known Stubs
+
+None — all components fully functional with real token-driven styling.
+
+## Self-Check: PASSED
+
+Files verified to exist:
+- gui-app/src/shared/ui/Input.tsx (clearable, helperText, error, forwardRef present)
+- gui-app/src/shared/ui/Input.stories.tsx (title "Primitives/Input", tags ["autodocs"])
+- gui-app/src/shared/ui/NumberInput.stories.tsx (title "Primitives/NumberInput")
+- gui-app/src/shared/ui/PasswordInput.stories.tsx (title "Primitives/PasswordInput")
+- gui-app/src/shared/ui/ActionInput.stories.tsx (title "Primitives/ActionInput")
+- gui-app/src/shared/ui/ActionPasswordInput.stories.tsx (title "Primitives/ActionPasswordInput")
+
+Commits verified:
+- 6b340d28 present in git log
+- aab465a8 present in git log
