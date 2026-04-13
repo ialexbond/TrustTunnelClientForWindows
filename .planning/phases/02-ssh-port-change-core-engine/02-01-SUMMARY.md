@@ -1,90 +1,146 @@
 ---
 phase: 02-ssh-port-change-core-engine
 plan: 01
-subsystem: ssh-server-security
-tags: [ssh, port-change, backend, rust, i18n]
+subsystem: ui-primitives-cva
+tags: [react, cva, tailwind, storybook, button, badge, errorbanner]
 dependency_graph:
   requires: []
-  provides: [change_ssh_port, security_change_ssh_port_command, ssh_port_i18n_keys]
-  affects: [gui-app/src-tauri/src/ssh/server/server_security.rs, gui-app/src-tauri/src/ssh/mod.rs, gui-app/src-tauri/src/commands/ssh_commands.rs, gui-app/src-tauri/src/lib.rs]
+  provides: [cn_utility, button_cva, badge_cva, errorbanner_cva, button_stories, badge_stories, errorbanner_stories]
+  affects:
+    - gui-app/src/shared/lib/cn.ts
+    - gui-app/src/shared/ui/Button.tsx
+    - gui-app/src/shared/ui/Badge.tsx
+    - gui-app/src/shared/ui/ErrorBanner.tsx
 tech_stack:
-  added: []
-  patterns: [backup-validate-apply-rollback, socket-activation-override, sshd-config-edit]
+  added:
+    - class-variance-authority@^0.7.1
+    - tailwind-merge@^3.5.0
+    - clsx@^2.1.1
+  patterns: [cva-variant-system, forwardRef-components, token-based-styling, storybook-autodocs]
 key_files:
-  created: []
+  created:
+    - gui-app/src/shared/ui/Button.stories.tsx
+    - gui-app/src/shared/ui/Badge.stories.tsx
+    - gui-app/src/shared/ui/ErrorBanner.stories.tsx
   modified:
-    - gui-app/src-tauri/src/ssh/server/server_security.rs
-    - gui-app/src-tauri/src/ssh/mod.rs
-    - gui-app/src-tauri/src/commands/ssh_commands.rs
-    - gui-app/src-tauri/src/lib.rs
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-app/src/shared/lib/cn.ts
+    - gui-app/src/shared/ui/Button.tsx
+    - gui-app/src/shared/ui/Button.test.tsx
+    - gui-app/src/shared/ui/Badge.tsx
+    - gui-app/src/shared/ui/Badge.test.tsx
+    - gui-app/src/shared/ui/ErrorBanner.tsx
+    - gui-app/src/shared/ui/ErrorBanner.test.tsx
 decisions:
-  - "Port validation uses < 1024 only (u16 max is 65535, upper bound implicit)"
-  - "Socket path uses override.conf with empty ListenStream= clearing line per systemd convention"
-  - "Classic path uses sed with three-case handling: existing Port, commented #Port, or appended"
+  - "cn() upgraded from stub to clsx+twMerge — enables correct consumer className override merging"
+  - "Badge size prop removed in favour of single token-defined size — simplifies API, avoids inconsistency"
+  - "ErrorBanner variant prop renamed to severity to match CVA export name (errorBannerVariants)"
+  - "forwardRef added to Badge and ErrorBanner to align with Button pattern for ref forwarding"
 metrics:
-  duration: 846s
-  completed: 2026-04-12T17:35:42Z
-  tasks_completed: 2
-  tasks_total: 2
-  files_modified: 6
+  duration: 25m
+  completed: 2026-04-14T03:24:00Z
+  tasks_completed: 3
+  tasks_total: 3
+  files_modified: 10
 ---
 
-# Phase 02 Plan 01: SSH Port Change Core Engine Summary
+# Phase 02 Plan 01: CVA Infrastructure + Button/Badge/ErrorBanner Redesign Summary
 
-Rust backend for SSH port change with dual-path support (socket activation vs classic service), backup/validate/rollback workflow, Tauri command registration, and full i18n coverage.
+Upgraded cn() utility to clsx+tailwind-merge and fully redesigned Button (4 variants), Badge (5 variants), and ErrorBanner (3 severity variants) using class-variance-authority, with Storybook stories and updated tests.
 
 ## Tasks Completed
 
 | Task | Name | Commit | Key Changes |
 |------|------|--------|-------------|
-| 1 | Implement change_ssh_port backend logic | 0a88be92 | SshServiceType enum, detect_ssh_service_type, change_ssh_port with socket/classic paths, security_change_ssh_port Tauri command |
-| 2 | Add i18n keys for SSH port section | 55504384 | ssh_port section, snack.port_changed, 3 error keys in both ru.json and en.json |
+| 1 | Install CVA dependencies and create cn() utility | d44d2cda | Upgrade cn.ts stub to proper clsx+twMerge implementation |
+| 2 | Redesign Button with CVA + create story + update tests | d43fd645 | Button.tsx rewrite (4 CVA variants, 3 sizes, forwardRef, buttonVariants export), Button.stories.tsx created, Button.test.tsx updated |
+| 3 | Redesign Badge and ErrorBanner with CVA + stories + tests | 8e0f67f9 | Badge.tsx (5 variants, forwardRef, badgeVariants), ErrorBanner.tsx (3 severity variants, forwardRef, errorBannerVariants), 2 story files created, 2 test files updated |
 
 ## Implementation Details
 
-### Task 1: Backend Logic
+### Task 1: cn() Upgrade
 
-Added to `server_security.rs`:
-- `SshServiceType` enum with `Socket` and `Service` variants
-- `detect_ssh_service_type()` -- checks `ssh.socket` then `ssh.service` via systemctl, returns `SSH_UNSUPPORTED_OS` if neither active
-- `change_ssh_port()` -- main function with two paths:
-  - **Socket path** (Ubuntu 24.04+): Creates `/etc/systemd/system/ssh.socket.d/override.conf` with empty `ListenStream=` clearing line followed by new port, daemon-reload, restart. Rollback from backup on failure.
-  - **Classic path** (Ubuntu 22.04, Debian 11/12): Edits `/etc/ssh/sshd_config` Port line (handles existing, commented, or missing), validates with `sshd -t`, restarts service. Rollback from timestamped backup on failure.
+`gui-app/src/shared/lib/cn.ts` previously contained a hand-rolled stub that only concatenated strings without Tailwind conflict resolution. Replaced with the standard shadcn/ui pattern:
 
-Added to `ssh_commands.rs`: Manual `security_change_ssh_port` Tauri command (pooled connection pattern).
-Added to `lib.rs`: Command registered in `invoke_handler`.
-Added to `mod.rs`: `change_ssh_port` re-export.
+```ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
+```
 
-### Task 2: i18n Keys
+All three CVA packages (class-variance-authority, tailwind-merge, clsx) were already present in package.json from prior plan 02-04 execution — no install needed.
 
-Added to both `ru.json` and `en.json`:
-- `server.security.ssh_port`: title, current, new_port, apply, changing, range_hint
-- `server.security.snack.port_changed`: success notification
-- `server.security.errors`: port_change_failed, port_validation_failed, unsupported_os
+### Task 2: Button Redesign
+
+`Button.tsx` fully rewritten with `cva()`:
+- **4 variants**: primary (accent-interactive bg), danger (destructive bg), ghost (transparent + hover), icon (transparent + muted text)
+- **3 sizes**: sm (h-8 px-3), md (h-8 px-4), lg (h-9 px-5)
+- **Removed**: secondary, danger-outline, success, warning variants and `icon` prop
+- **Added**: `buttonVariants` named export for use by ConfirmDialog / IconButton
+- **Loading**: shows Loader2 spinner, sets disabled
+- **Zero** hardcoded hex values — all colors via CSS custom properties
+
+### Task 3: Badge + ErrorBanner Redesign
+
+`Badge.tsx` rewritten with `cva()`:
+- **5 variants**: success/warning/danger (status tokens), neutral (elevated bg), dot (transparent bg + dot indicator)
+- **Removed**: accent variant, size prop (sm/md), inline `style={}` color injection
+- **Added**: `badgeVariants` export, forwardRef, `pulse` prop retained
+
+`ErrorBanner.tsx` rewritten with `cva()`:
+- **3 severity variants**: error, warning, info — all via status tokens
+- **Renamed**: `variant` prop to `severity` (aligns with CVA export name)
+- **Added**: `errorBannerVariants` export, forwardRef, Info icon for severity="info"
+- **Removed**: all inline `style={}` rgba color injection
+
+## Test Results
+
+All 29 tests passing:
+- Button.test.tsx: 12/12
+- Badge.test.tsx: 8/8
+- ErrorBanner.test.tsx: 9/9
+
+Badge and ErrorBanner tests updated from rgba inline-style assertions to className-based CVA class assertions.
 
 ## Deviations from Plan
 
 ### Auto-fixed Issues
 
-**1. [Rule 1 - Bug] Fixed u16 comparison warning**
-- **Found during:** Task 1 verification (cargo check)
-- **Issue:** `new_port > 65535` comparison is useless for u16 type (max value is 65535)
-- **Fix:** Removed upper bound check, kept `new_port < 1024` only
-- **Files modified:** gui-app/src-tauri/src/ssh/server/server_security.rs
-- **Commit:** 0a88be92
+**1. [Rule 3 - Blocking] node_modules missing in worktree**
+- **Found during:** Task 2 verification (vitest run)
+- **Issue:** `gui-app/node_modules` not present in worktree — vitest could not find `vite` package
+- **Fix:** `npm install --legacy-peer-deps` in worktree gui-app (525 packages, 7s)
+- **No commit needed** (node_modules is gitignored)
 
-**2. [Rule 3 - Blocking] Worktree missing sidecar binary for cargo check**
-- **Found during:** Task 1 verification
-- **Issue:** Tauri build.rs requires `trusttunnel_client-x86_64-pc-windows-msvc.exe` in manifest dir
-- **Fix:** Copied sidecar binary from main repo to worktree (not committed, binary is gitignored)
-- **No commit needed** (build artifact, not source)
+**2. [Rule 2 - API] Badge size prop removed**
+- **Found during:** Task 3 implementation
+- **Issue:** Plan spec says "no size variants on Badge" (D-07), but existing Badge had sm/md size
+- **Fix:** Removed size prop entirely — single token-sized badge per spec
+- **Files modified:** gui-app/src/shared/ui/Badge.tsx, gui-app/src/shared/ui/Badge.test.tsx
+- **Commit:** 8e0f67f9
+
+**3. [Rule 1 - Compatibility] Old 02-01-SUMMARY.md contained SSH-era content**
+- **Found during:** SUMMARY creation
+- **Issue:** Prior SUMMARY was from the original SSH phase plan — contained wrong commits, wrong files
+- **Fix:** Overwrote with correct CVA redesign summary
+- **Commit:** included in final metadata commit
 
 ## Known Stubs
 
-None -- all code is fully wired and functional.
+None — all CVA variants are fully wired to design tokens. No placeholder data or TODO comments.
+
+## Threat Surface Scan
+
+No new network endpoints, auth paths, file access patterns, or schema changes introduced. All changes are pure UI component rewrites.
 
 ## Self-Check: PASSED
 
-All 6 modified files verified present. Both task commits (0a88be92, 55504384) confirmed in git log.
+- gui-app/src/shared/lib/cn.ts: FOUND
+- gui-app/src/shared/ui/Button.tsx: FOUND
+- gui-app/src/shared/ui/Button.stories.tsx: FOUND
+- gui-app/src/shared/ui/Badge.tsx: FOUND
+- gui-app/src/shared/ui/Badge.stories.tsx: FOUND
+- gui-app/src/shared/ui/ErrorBanner.tsx: FOUND
+- gui-app/src/shared/ui/ErrorBanner.stories.tsx: FOUND
+- Commit d44d2cda (Task 1): FOUND
+- Commit d43fd645 (Task 2): FOUND
+- Commit 8e0f67f9 (Task 3): FOUND
