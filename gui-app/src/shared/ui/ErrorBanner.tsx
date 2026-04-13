@@ -1,5 +1,4 @@
 import { AlertTriangle, X } from "lucide-react";
-import { colors } from "./colors";
 
 interface ErrorBannerProps {
   message: string;
@@ -15,14 +14,14 @@ const variantConfig = {
     icon: "var(--color-danger-400)",
   },
   warning: {
-    bg: colors.warningBg,
+    bg: "rgba(245, 158, 11, 0.1)",
     border: "rgba(245, 158, 11, 0.2)",
     text: "var(--color-warning-400)",
     icon: "var(--color-warning-400)",
   },
   info: {
-    bg: colors.accentBg,
-    border: colors.accentBorder,
+    bg: "rgba(99, 102, 241, 0.1)",
+    border: "rgba(99, 102, 241, 0.2)",
     text: "var(--color-accent-400)",
     icon: "var(--color-accent-400)",
   },
