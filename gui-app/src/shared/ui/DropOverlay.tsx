@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { cn } from "../lib/cn";
 
 interface DropOverlayProps {
   isDragging: boolean;
@@ -11,29 +12,26 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
 
   return (
     <div
+      className={cn(
+        "fixed inset-0 flex items-center justify-center",
+      )}
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        zIndex: "var(--z-overlay)",
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
         backgroundColor: "rgba(0, 0, 0, 0.4)",
-        transition: "opacity 150ms ease",
+        transition: "opacity var(--transition-fast) ease",
         pointerEvents: "none",
       }}
     >
       <div
+        className={cn(
+          "flex flex-col items-center gap-3",
+          "text-[var(--color-text-inverse)]",
+          "text-[var(--font-size-lg)]",
+          "font-[var(--font-weight-semibold)]",
+        )}
         style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "12px",
-          color: "#fff",
-          fontSize: "18px",
-          fontWeight: 500,
           textShadow: "0 1px 4px rgba(0,0,0,0.5)",
         }}
       >
@@ -53,11 +51,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         </svg>
         <span>{t("drop.overlay_text", "Drop file here")}</span>
         <span
-          style={{
-            fontSize: "13px",
-            fontWeight: 400,
-            opacity: 0.7,
-          }}
+          className="text-xs font-normal opacity-70"
         >
           {t("drop.overlay_hint", ".toml — VPN config, .json — routing rules")}
         </span>
