@@ -151,7 +151,7 @@ pub async fn mtproto_install(
         )
         .await?;
         let auto_port: u16 = port_out.trim().parse().unwrap_or(0);
-        if auto_port == 0 {
+        if auto_port == 0 || auto_port < 1024 {
             emit_mtproto_step(app, "download", "error", "No free port found");
             return Err("MTPROTO_NO_FREE_PORT".into());
         }
@@ -260,6 +260,12 @@ pub async fn mtproto_install(
         }
         gen_secret
     };
+
+    // Final validation guard: secret may come from existing env file (user-editable),
+    // so re-validate right before embedding in shell heredoc to prevent injection.
+    if !is_valid_hex_secret(&secret) {
+        return Err("MTPROTO_SECRET_INVALID".into());
+    }
 
     // Save env config for persistence
     exec_command(
