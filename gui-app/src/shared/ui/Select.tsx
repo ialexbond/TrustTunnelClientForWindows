@@ -1,45 +1,127 @@
-import { type ReactNode } from "react";
+import { forwardRef, type ReactNode, useId, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
-import { colors } from "./colors";
+import { cn } from "../lib/cn";
 
-interface SelectOption {
+export interface SelectOption {
   value: string;
   label: string;
 }
 
-interface SelectProps {
+export interface SelectProps {
   label?: string;
   description?: string;
   icon?: ReactNode;
   options: SelectOption[];
   value?: string;
   onChange?: (e: { target: { value: string } }) => void;
+  placeholder?: string;
   fullWidth?: boolean;
   disabled?: boolean;
   className?: string;
 }
 
-export function Select({
-  label,
-  description,
-  icon,
-  options,
-  value,
-  onChange,
-  fullWidth = true,
-  disabled = false,
-  className = "",
-}: SelectProps) {
-  const { open, style: dropdownStyle, containerRef, triggerRef, portalRef, toggle, close } = useDropdownPortal();
+export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
+  {
+    label,
+    description,
+    icon,
+    options,
+    value,
+    onChange,
+    placeholder = "Выберите...",
+    fullWidth = true,
+    disabled = false,
+    className,
+  },
+  ref,
+) {
+  const { open, style: dropdownStyle, containerRef, triggerRef, portalRef, toggle, close } =
+    useDropdownPortal();
 
-  const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
+  const listboxId = useId();
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+
+  const selectedIndex = options.findIndex((o) => o.value === value);
+  const selectedLabel = selectedIndex >= 0 ? options[selectedIndex].label : "";
+
+  // Reset highlight when dropdown opens/closes
+  useEffect(() => {
+    if (open) {
+      setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    } else {
+      setHighlightedIndex(-1);
+    }
+  }, [open, selectedIndex]);
+
+  const handleSelect = useCallback(
+    (optValue: string) => {
+      onChange?.({ target: { value: optValue } });
+      close();
+    },
+    [onChange, close],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (disabled) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          if (!open) {
+            toggle();
+          } else {
+            setHighlightedIndex((prev) => Math.min(prev + 1, options.length - 1));
+          }
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          if (!open) {
+            toggle();
+          } else {
+            setHighlightedIndex((prev) => Math.max(prev - 1, 0));
+          }
+          break;
+        case "Home":
+          e.preventDefault();
+          if (open) setHighlightedIndex(0);
+          break;
+        case "End":
+          e.preventDefault();
+          if (open) setHighlightedIndex(options.length - 1);
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (!open) {
+            toggle();
+          } else if (highlightedIndex >= 0 && highlightedIndex < options.length) {
+            handleSelect(options[highlightedIndex].value);
+          }
+          break;
+        case "Escape":
+          e.preventDefault();
+          close();
+          break;
+        case "Tab":
+          if (open) close();
+          break;
+      }
+    },
+    [disabled, open, toggle, close, options, highlightedIndex, handleSelect],
+  );
+
+  const activeDescendantId =
+    open && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined;
 
   return (
-    <div className={fullWidth ? "w-full" : ""}>
+    <div className={cn(fullWidth ? "w-full" : "")}>
       {label && (
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--color-text-secondary)" }}>
+        <label
+          className="block text-xs font-medium mb-1.5"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
           {label}
         </label>
       )}
@@ -48,23 +130,33 @@ export function Select({
           {description}
         </p>
       )}
-      <div className={`relative ${className}`} ref={containerRef}>
+      <div className={cn("relative", className)} ref={containerRef}>
         <button
-          ref={triggerRef}
-          type="button"
-          onClick={() => { if (!disabled) toggle(); }}
-          className={`
-            flex items-center justify-between gap-2 rounded-[var(--radius-lg)] px-3 h-8 text-xs
-            cursor-pointer transition-colors outline-none
-            w-full
-            ${disabled ? "opacity-50 cursor-not-allowed" : ""}
-            ${icon ? "pl-9" : ""}
-          `}
-          style={{
-            backgroundColor: "var(--color-input-bg)",
-            border: "1px solid var(--color-input-border)",
-            color: "var(--color-text-primary)",
+          ref={(node) => {
+            (triggerRef as React.MutableRefObject<HTMLButtonElement | null>).current = node;
+            if (typeof ref === "function") ref(node);
+            else if (ref) (ref as React.MutableRefObject<HTMLButtonElement | null>).current = node;
           }}
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-activedescendant={activeDescendantId}
+          aria-controls={open ? listboxId : undefined}
+          onClick={() => {
+            if (!disabled) toggle();
+          }}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          className={cn(
+            "flex items-center justify-between gap-2 w-full",
+            "rounded-[var(--radius-md)] px-[var(--space-3)] h-8 text-[var(--font-size-md)]",
+            "cursor-pointer transition-colors outline-none",
+            "border border-[var(--color-input-border)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)]",
+            "focus-visible:shadow-[var(--focus-ring)]",
+            disabled && "opacity-[var(--opacity-disabled)] cursor-not-allowed",
+            icon && "pl-9",
+          )}
         >
           {icon && (
             <span
@@ -74,65 +166,74 @@ export function Select({
               {icon}
             </span>
           )}
-          <span className="truncate">{selectedLabel}</span>
+          <span className={cn("truncate", !selectedLabel && "text-[var(--color-text-muted)]")}>
+            {selectedLabel || placeholder}
+          </span>
           <ChevronDown
-            className="w-4 h-4 shrink-0 transition-transform duration-200"
-            style={{
-              color: "var(--color-text-muted)",
-              transform: open ? "rotate(180deg)" : "rotate(0deg)",
-            }}
+            className={cn(
+              "w-4 h-4 shrink-0 transition-transform duration-200",
+              open && "rotate-180",
+            )}
+            style={{ color: "var(--color-text-muted)" }}
           />
         </button>
 
-        {open && createPortal(
-          <div
-            ref={portalRef}
-            style={{
-              ...dropdownStyle,
-              zIndex: 9500,
-              backgroundColor: "var(--color-bg-elevated)",
-              border: "1px solid var(--color-border)",
-              borderRadius: "var(--radius-lg)",
-              boxShadow: colors.dropdownShadow,
-              minWidth: 120,
-              overflow: "hidden",
-            }}
-          >
-            <div className="max-h-48 overflow-y-auto space-y-0.5" style={{ padding: "4px" }}>
-              {options.map((opt) => {
-                const isSelected = opt.value === value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => {
-                      onChange?.({ target: { value: opt.value } });
-                      close();
-                    }}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
-                    style={{
-                      backgroundColor: isSelected ? colors.accentBg : "transparent",
-                      color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = "transparent";
-                    }}
-                  >
-                    <span>{opt.label}</span>
-                    {isSelected && <Check className="w-3 h-3 shrink-0" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>,
-          document.body
-        )}
+        {open &&
+          createPortal(
+            <div
+              ref={portalRef}
+              id={listboxId}
+              role="listbox"
+              aria-label={label}
+              style={{
+                ...dropdownStyle,
+                zIndex: "var(--z-dropdown)",
+                backgroundColor: "var(--color-bg-elevated)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "var(--radius-md)",
+                boxShadow: "var(--shadow-md)",
+                minWidth: 120,
+                overflow: "hidden",
+              }}
+            >
+              <div className="max-h-48 overflow-y-auto" style={{ padding: "4px" }}>
+                {options.map((opt, index) => {
+                  const isSelected = opt.value === value;
+                  const isHighlighted = index === highlightedIndex;
+                  return (
+                    <button
+                      key={opt.value}
+                      id={`${listboxId}-option-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => handleSelect(opt.value)}
+                      onMouseEnter={() => setHighlightedIndex(index)}
+                      className={cn(
+                        "w-full flex items-center justify-between gap-2",
+                        "px-[var(--space-3)] py-[var(--space-2)] text-xs",
+                        "transition-colors rounded-[var(--radius-sm)] cursor-pointer",
+                        isSelected
+                          ? "bg-[var(--color-bg-active)] text-[var(--color-accent-interactive)]"
+                          : isHighlighted
+                            ? "bg-[var(--color-bg-hover)] text-[var(--color-text-primary)]"
+                            : "bg-transparent text-[var(--color-text-primary)]",
+                      )}
+                    >
+                      <span className="truncate">{opt.label}</span>
+                      {isSelected && (
+                        <Check className="w-3 h-3 shrink-0 text-[var(--color-accent-interactive)]" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>,
+            document.body,
+          )}
       </div>
     </div>
   );
-}
+});
 
 Select.displayName = "Select";
