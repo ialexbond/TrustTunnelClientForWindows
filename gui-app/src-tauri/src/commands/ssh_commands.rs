@@ -181,6 +181,12 @@ pub async fn mtproto_get_status(
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
 }
 
+// ─── BBR optimization commands ───────────────────────────────────────
+
+ssh_pool_command!(detect_bbr_status, ssh::detect_bbr_status);
+ssh_pool_command!(enable_bbr, ssh::enable_bbr);
+ssh_pool_command!(disable_bbr, ssh::disable_bbr);
+
 // ─── Non-macro SSH commands ────────────────────────────────────────
 
 #[tauri::command]
