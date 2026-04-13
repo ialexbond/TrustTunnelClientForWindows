@@ -125,7 +125,7 @@
     "uninstall_consequences": "The service will be stopped, all TrustTunnel files will be deleted from the server. The current VPN connection will be terminated."
   },
   "tooltips": {
-    "kill_switch_detailed": "When the VPN connection drops, all internet traffic is blocked to prevent your data from leaking outside the VPN. Recommended to keep enabled for maximum security.",
+    "kill_switch_detailed": "When the VPN connection drops, all internet traffic is blocked to prevent your data from leaking outside the VPN. Recommended to keep enabled for maximum security. Enabled Kill Switch may slightly slow down VPN connection.",
     "anti_dpi_detailed": "Disguises VPN traffic as regular HTTPS to bypass Deep Packet Inspection (DPI) systems used by ISPs and government agencies to block VPNs.",
     "post_quantum_detailed": "Uses encryption algorithms resistant to quantum computer attacks. Protects your data from future decryption. Slightly increases connection time.",
     "ipv6_detailed": "Allows IPv6 traffic routing through the VPN tunnel. If your ISP or server doesn't support IPv6, keep this disabled to avoid connection issues.",
@@ -921,6 +921,17 @@
           "uninstalled": "MTProto proxy removed",
           "install_error": "Failed to install MTProto: {{error}}",
           "uninstall_error": "Failed to remove MTProto: {{error}}"
+        }
+      },
+      "bbr": {
+        "label": "BBR",
+        "description": "TCP optimization for faster connections",
+        "detecting": "Detecting status...",
+        "snack": {
+          "enabled": "BBR enabled",
+          "disabled": "BBR disabled",
+          "enable_error": "Failed to enable BBR: {{error}}",
+          "disable_error": "Failed to disable BBR: {{error}}"
         }
       }
     },
