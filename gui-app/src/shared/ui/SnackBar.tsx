@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { CheckCircle2, AlertTriangle, X, Copy } from "lucide-react";
+import { cn } from "../lib/cn";
 
 type SnackMessage = string | { text: string; type?: "success" | "error" };
 
@@ -166,17 +167,28 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
 
   return (
     <div
-      className="fixed bottom-4 left-1/2 z-[10000] flex flex-col-reverse items-center gap-2 pointer-events-none"
-      style={{ transform: "translateX(-50%)", transition: "all 0.3s ease" }}
+      className="fixed bottom-4 left-1/2 flex flex-col-reverse items-center gap-2 pointer-events-none"
+      style={{
+        zIndex: "var(--z-snackbar)",
+        transform: "translateX(-50%)",
+        transition: "all 0.3s ease",
+      }}
     >
       {items.map((item) => (
         <div
           key={item.id}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-[var(--radius-lg)] shadow-lg text-sm font-medium pointer-events-auto"
+          className={cn(
+            "flex items-center gap-2 px-4 py-2.5",
+            "rounded-[var(--radius-lg)] text-sm font-medium pointer-events-auto",
+            "shadow-[var(--shadow-lg)]",
+            item.type === "error" && "border-l-2 border-[var(--color-status-error)]",
+          )}
           style={{
-            backgroundColor: "var(--color-bg-secondary)",
+            backgroundColor: "var(--color-bg-elevated)",
             color: "var(--color-text-primary)",
             border: "1px solid var(--color-border)",
+            borderLeftColor:
+              item.type === "error" ? "var(--color-status-error)" : undefined,
             opacity: item.phase === "visible" ? 1 : 0,
             transform:
               item.phase === "visible"
@@ -185,19 +197,19 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
                   ? "translateY(15px)"
                   : "translateY(0)",
             pointerEvents: item.phase === "exit" ? "none" : undefined,
-            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            transition: "opacity var(--transition-fast), transform var(--transition-fast)",
             maxWidth: "90vw",
           }}
         >
           {item.type === "success" ? (
             <CheckCircle2
               className="w-4 h-4 shrink-0"
-              style={{ color: "var(--color-success-500)" }}
+              style={{ color: "var(--color-status-success)" }}
             />
           ) : (
             <AlertTriangle
               className="w-4 h-4 shrink-0"
-              style={{ color: "var(--color-error, #f97316)" }}
+              style={{ color: "var(--color-status-error)" }}
             />
           )}
 
@@ -214,7 +226,8 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
 
           {item.type === "error" && (
             <button
-              className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+              className="shrink-0 p-0.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors"
+              aria-label="Close notification"
               title="Close"
               onClick={() => dismiss(item.id)}
             >

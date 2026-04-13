@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
+import { cn } from "../lib/cn";
 
 interface State {
   hasError: boolean;
@@ -17,7 +18,12 @@ class PanelErrorBoundaryInner extends React.Component<
   Props & { t: (key: string, opts?: Record<string, string>) => string; onNavigateHome?: () => void },
   State
 > {
-  constructor(props: Props & { t: (key: string, opts?: Record<string, string>) => string; onNavigateHome?: () => void }) {
+  constructor(
+    props: Props & {
+      t: (key: string, opts?: Record<string, string>) => string;
+      onNavigateHome?: () => void;
+    },
+  ) {
     super(props);
     this.state = { hasError: false, error: "" };
   }
@@ -27,16 +33,25 @@ class PanelErrorBoundaryInner extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error(`[ErrorBoundary:${this.props.panelName || "unknown"}]`, error, info.componentStack);
+    console.error(
+      `[ErrorBoundary:${this.props.panelName || "unknown"}]`,
+      error,
+      process.env.NODE_ENV !== "production" ? info.componentStack : "",
+    );
   }
 
   render() {
     if (this.state.hasError) {
       const { t, panelName } = this.props;
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4"
-          style={{ color: "var(--color-text-secondary)" }}>
-          <AlertTriangle className="w-10 h-10 text-red-500" />
+        <div
+          className={cn(
+            "flex-1 flex flex-col items-center justify-center p-8 gap-4",
+            "bg-[var(--color-bg-surface)]",
+          )}
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          <AlertTriangle className="w-10 h-10 text-[var(--color-danger-400)]" />
           <p className="text-sm text-center">
             {t("errors.panelCrash", { panel: panelName || "?" })}
           </p>
@@ -46,12 +61,15 @@ class PanelErrorBoundaryInner extends React.Component<
           <div className="flex gap-2">
             <button
               onClick={() => this.setState({ hasError: false, error: "" })}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm"
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-sm",
+                "transition-colors cursor-pointer",
+                "hover:bg-[var(--color-bg-hover)]",
+              )}
               style={{
-                background: "var(--color-bg-tertiary)",
+                background: "var(--color-bg-surface)",
                 color: "var(--color-text-primary)",
                 border: "1px solid var(--color-border)",
-                cursor: "pointer",
               }}
             >
               <RefreshCw className="w-4 h-4" />
@@ -63,12 +81,15 @@ class PanelErrorBoundaryInner extends React.Component<
                   this.setState({ hasError: false, error: "" });
                   this.props.onNavigateHome?.();
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm"
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-sm",
+                  "transition-colors cursor-pointer",
+                  "hover:bg-[var(--color-bg-hover)]",
+                )}
                 style={{
-                  background: "var(--color-bg-tertiary)",
+                  background: "var(--color-bg-surface)",
                   color: "var(--color-text-muted)",
                   border: "1px solid var(--color-border)",
-                  cursor: "pointer",
                 }}
               >
                 <Home className="w-4 h-4" />

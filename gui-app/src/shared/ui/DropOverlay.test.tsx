@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DropOverlay } from "./DropOverlay";
 import i18n from "../i18n";
@@ -39,5 +39,26 @@ describe("DropOverlay", () => {
     i18n.changeLanguage("en");
     render(<DropOverlay isDragging={true} />);
     expect(screen.getByText("Drop file here")).toBeInTheDocument();
+  });
+
+  it("uses token-based text color (not hardcoded #fff)", () => {
+    const { container } = render(<DropOverlay isDragging={true} />);
+    // The inner content div should NOT have hardcoded color: #fff
+    const allElements = container.querySelectorAll("[style]");
+    const hasHardcodedWhite = Array.from(allElements).some((el) => {
+      const style = (el as HTMLElement).style;
+      return style.color === "#fff" || style.color === "rgb(255, 255, 255)";
+    });
+    expect(hasHardcodedWhite).toBe(false);
+  });
+
+  it("uses token-based font size (not hardcoded 18px)", () => {
+    const { container } = render(<DropOverlay isDragging={true} />);
+    const allElements = container.querySelectorAll("[style]");
+    const hasHardcoded18px = Array.from(allElements).some((el) => {
+      const style = (el as HTMLElement).style;
+      return style.fontSize === "18px";
+    });
+    expect(hasHardcoded18px).toBe(false);
   });
 });
