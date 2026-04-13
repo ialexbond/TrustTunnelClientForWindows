@@ -187,3 +187,15 @@ Task 2 is a `checkpoint:human-verify` requiring visual inspection of all 26 comp
 ---
 *Phase: 02-ssh-port-change-core-engine*
 *Completed: 2026-04-14*
+
+## Self-Check: PASSED
+
+- FOUND: gui-app/src/shared/ui/index.ts (25 export lines)
+- FOUND: gui-app/src/shared/ui/Badge.tsx (0 colors imports)
+- FOUND: gui-app/src/shared/ui/ErrorBanner.tsx (0 colors imports)
+- FOUND: memory/v3/design-system/components.md (in project memory/)
+- FOUND: .planning/phases/02-ssh-port-change-core-engine/02-07-SUMMARY.md
+- FOUND: e122f620 (task commit)
+- FOUND: 5cae443f (summary commit)
+- TypeScript: zero errors (tsc --noEmit)
+- Tests: 1285 passed, 0 failed
