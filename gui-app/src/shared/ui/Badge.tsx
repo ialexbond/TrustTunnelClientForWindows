@@ -1,43 +1,80 @@
-import type { ReactNode } from "react";
+import { forwardRef, type HTMLAttributes } from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "../lib/cn";
 
-type BadgeVariant = "default" | "success" | "warning" | "danger" | "accent";
-type BadgeSize = "sm" | "md";
+export const badgeVariants = cva(
+  [
+    "inline-flex items-center gap-1.5",
+    "px-2 py-0.5",
+    "rounded-[var(--radius-full)]",
+    "text-[var(--font-size-xs)]",
+    "font-[var(--font-weight-semibold)]",
+    "uppercase tracking-[var(--tracking-wide)]",
+  ].join(" "),
+  {
+    variants: {
+      variant: {
+        success: [
+          "bg-[var(--color-status-connected-bg)]",
+          "text-[var(--color-status-connected)]",
+          "border border-[var(--color-status-connected-border)]",
+        ].join(" "),
+        warning: [
+          "bg-[var(--color-status-connecting-bg)]",
+          "text-[var(--color-status-connecting)]",
+          "border border-[var(--color-status-connecting-border)]",
+        ].join(" "),
+        danger: [
+          "bg-[var(--color-status-error-bg)]",
+          "text-[var(--color-status-error)]",
+          "border border-[var(--color-status-error-border)]",
+        ].join(" "),
+        neutral: [
+          "bg-[var(--color-bg-elevated)]",
+          "text-[var(--color-text-secondary)]",
+          "border border-[var(--color-border)]",
+        ].join(" "),
+        dot: [
+          "bg-transparent",
+          "text-[var(--color-text-secondary)]",
+          "border border-transparent",
+        ].join(" "),
+      },
+    },
+    defaultVariants: {
+      variant: "neutral",
+    },
+  }
+);
 
-interface BadgeProps {
-  children: ReactNode;
-  variant?: BadgeVariant;
-  size?: BadgeSize;
-  icon?: ReactNode;
+export interface BadgeProps
+  extends HTMLAttributes<HTMLSpanElement>,
+    VariantProps<typeof badgeVariants> {
   pulse?: boolean;
 }
 
-const variantColors: Record<BadgeVariant, { bg: string; text: string }> = {
-  default: { bg: "var(--color-bg-hover)", text: "var(--color-text-secondary)" },
-  success: { bg: "rgba(16, 185, 129, 0.15)", text: "var(--color-success-400)" },
-  warning: { bg: "rgba(245, 158, 11, 0.15)", text: "var(--color-warning-400)" },
-  danger:  { bg: "rgba(239, 68, 68, 0.15)", text: "var(--color-danger-400)" },
-  accent:  { bg: "rgba(99, 102, 241, 0.15)", text: "var(--color-accent-400)" },
-};
+export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
+  ({ variant, pulse, className, children, ...props }, ref) => {
+    return (
+      <span
+        ref={ref}
+        className={cn(
+          badgeVariants({ variant }),
+          pulse && "animate-pulse",
+          className
+        )}
+        {...props}
+      >
+        {variant === "dot" && (
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-[var(--color-text-muted)] shrink-0"
+            aria-hidden="true"
+          />
+        )}
+        {children}
+      </span>
+    );
+  }
+);
 
-const sizeStyles: Record<BadgeSize, string> = {
-  sm: "px-1.5 py-0.5 text-[10px] gap-1",
-  md: "px-2 py-0.5 text-[11px] gap-1.5",
-};
-
-export function Badge({ children, variant = "default", size = "sm", icon, pulse }: BadgeProps) {
-  const variantStyle = variantColors[variant];
-
-  return (
-    <span
-      className={`
-        inline-flex items-center font-semibold rounded-[var(--radius-md)] uppercase tracking-wide
-        ${sizeStyles[size]}
-        ${pulse ? "animate-pulse" : ""}
-      `}
-      style={{ backgroundColor: variantStyle.bg, color: variantStyle.text }}
-    >
-      {icon && <span className="shrink-0">{icon}</span>}
-      {children}
-    </span>
-  );
-}
+Badge.displayName = "Badge";

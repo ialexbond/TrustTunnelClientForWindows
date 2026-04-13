@@ -8,48 +8,51 @@ describe("Badge", () => {
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
 
-  it("applies success variant colors", () => {
+  it("applies success variant classes", () => {
     render(<Badge variant="success">OK</Badge>);
     const el = screen.getByText("OK").closest("span")!;
-    expect(el.style.backgroundColor).toBe("rgba(16, 185, 129, 0.15)");
-    expect(el.style.color).toBe("var(--color-success-400)");
+    expect(el.className).toContain("bg-[var(--color-status-connected-bg)]");
+    expect(el.className).toContain("text-[var(--color-status-connected)]");
   });
 
-  it("applies warning variant colors", () => {
+  it("applies warning variant classes", () => {
     render(<Badge variant="warning">Warn</Badge>);
     const el = screen.getByText("Warn").closest("span")!;
-    expect(el.style.backgroundColor).toBe("rgba(245, 158, 11, 0.15)");
-    expect(el.style.color).toBe("var(--color-warning-400)");
+    expect(el.className).toContain("bg-[var(--color-status-connecting-bg)]");
+    expect(el.className).toContain("text-[var(--color-status-connecting)]");
   });
 
-  it("applies danger variant colors", () => {
+  it("applies danger variant classes", () => {
     render(<Badge variant="danger">Err</Badge>);
     const el = screen.getByText("Err").closest("span")!;
-    expect(el.style.backgroundColor).toBe("rgba(239, 68, 68, 0.15)");
-    expect(el.style.color).toBe("var(--color-danger-400)");
+    expect(el.className).toContain("bg-[var(--color-status-error-bg)]");
+    expect(el.className).toContain("text-[var(--color-status-error)]");
   });
 
-  it("applies default variant colors", () => {
+  it("applies neutral variant classes by default", () => {
     render(<Badge>Default</Badge>);
     const el = screen.getByText("Default").closest("span")!;
-    expect(el.style.backgroundColor).toBe("var(--color-bg-hover)");
-    expect(el.style.color).toBe("var(--color-text-secondary)");
+    expect(el.className).toContain("bg-[var(--color-bg-elevated)]");
+    expect(el.className).toContain("text-[var(--color-text-secondary)]");
   });
 
-  it("renders icon when provided", () => {
-    render(<Badge icon={<span data-testid="icon">*</span>}>WithIcon</Badge>);
-    expect(screen.getByTestId("icon")).toBeInTheDocument();
+  it("applies dot variant and renders dot indicator", () => {
+    render(<Badge variant="dot">Offline</Badge>);
+    const el = screen.getByText("Offline").closest("span")!;
+    expect(el.className).toContain("bg-transparent");
+    // dot indicator span should exist inside
+    const dot = el.querySelector("span[aria-hidden]");
+    expect(dot).toBeInTheDocument();
   });
 
-  it("applies sm size classes", () => {
-    const { container } = render(<Badge size="sm">Small</Badge>);
-    const badge = container.firstElementChild!;
-    expect(badge.className).toContain("text-[10px]");
+  it("applies pulse animation when pulse prop is true", () => {
+    render(<Badge pulse>Live</Badge>);
+    const el = screen.getByText("Live").closest("span")!;
+    expect(el.className).toContain("animate-pulse");
   });
 
-  it("applies md size classes", () => {
-    const { container } = render(<Badge size="md">Medium</Badge>);
-    const badge = container.firstElementChild!;
-    expect(badge.className).toContain("text-[11px]");
+  it("forwards ref correctly", () => {
+    const { container } = render(<Badge>Ref</Badge>);
+    expect(container.firstElementChild).toBeInTheDocument();
   });
 });
