@@ -8,12 +8,12 @@ use russh::client;
 /// Check whether BBR congestion control is currently active on the server.
 /// Returns `true` if `net.ipv4.tcp_congestion_control` is set to `bbr`.
 pub async fn detect_bbr_status(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
 ) -> Result<bool, String> {
     let (out, _) = exec_command(
         handle,
-        _app,
+        app,
         "sysctl net.ipv4.tcp_congestion_control 2>/dev/null || echo ''",
     )
     .await?;
@@ -23,15 +23,15 @@ pub async fn detect_bbr_status(
 /// Enable BBR: load kernel module, set sysctl values, persist to /etc/sysctl.conf.
 /// Returns `true` on success after verifying BBR is actually active.
 pub async fn enable_bbr(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
 ) -> Result<bool, String> {
-    let sudo = detect_sudo(handle, _app).await;
+    let sudo = detect_sudo(handle, app).await;
 
     // Apply BBR + persist to sysctl.conf (grep-then-sed avoids duplicates per T-05-03)
     let (out, code) = exec_command(
         handle,
-        _app,
+        app,
         &format!(
             "{sudo}bash -c 'set -e; \
              modprobe tcp_bbr 2>/dev/null || true; \
@@ -55,7 +55,7 @@ pub async fn enable_bbr(
     // Verify BBR is active
     let (verify_out, _) = exec_command(
         handle,
-        _app,
+        app,
         "sysctl net.ipv4.tcp_congestion_control 2>/dev/null",
     )
     .await?;
@@ -71,14 +71,14 @@ pub async fn enable_bbr(
 /// Note: default_qdisc is not reverted via sysctl -w (fq is harmless without BBR),
 /// but both lines are removed from sysctl.conf for cleanliness.
 pub async fn disable_bbr(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
 ) -> Result<bool, String> {
-    let sudo = detect_sudo(handle, _app).await;
+    let sudo = detect_sudo(handle, app).await;
 
     let (out, code) = exec_command(
         handle,
-        _app,
+        app,
         &format!(
             "{sudo}bash -c 'set -e; \
              sysctl -w net.ipv4.tcp_congestion_control=cubic; \
