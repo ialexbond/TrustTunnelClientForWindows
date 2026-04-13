@@ -10,7 +10,6 @@ describe("ErrorBanner", () => {
 
   it("renders an alert icon", () => {
     const { container } = render(<ErrorBanner message="Error" />);
-    // AlertTriangle renders as an svg
     expect(container.querySelector("svg")).toBeInTheDocument();
   });
 
@@ -33,25 +32,25 @@ describe("ErrorBanner", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it("applies error variant styles by default", () => {
+  it("applies error severity classes by default", () => {
     const { container } = render(<ErrorBanner message="Error" />);
     const banner = container.firstChild as HTMLElement;
-    expect(banner.style.backgroundColor).toBe("rgba(239, 68, 68, 0.1)");
-    expect(banner.style.borderColor).toBe("rgba(239, 68, 68, 0.2)");
+    expect(banner.className).toContain("bg-[var(--color-status-error-bg)]");
+    expect(banner.className).toContain("text-[var(--color-status-error)]");
   });
 
-  it("applies warning variant styles", () => {
-    const { container } = render(<ErrorBanner message="Warning" variant="warning" />);
+  it("applies warning severity classes", () => {
+    const { container } = render(<ErrorBanner message="Warning" severity="warning" />);
     const banner = container.firstChild as HTMLElement;
-    expect(banner.style.backgroundColor).toBe("rgba(245, 158, 11, 0.1)");
-    expect(banner.style.borderColor).toBe("rgba(245, 158, 11, 0.2)");
+    expect(banner.className).toContain("bg-[var(--color-status-connecting-bg)]");
+    expect(banner.className).toContain("text-[var(--color-status-connecting)]");
   });
 
-  it("applies info variant styles", () => {
-    const { container } = render(<ErrorBanner message="Info" variant="info" />);
+  it("applies info severity classes", () => {
+    const { container } = render(<ErrorBanner message="Info" severity="info" />);
     const banner = container.firstChild as HTMLElement;
-    expect(banner.style.backgroundColor).toBe("rgba(99, 102, 241, 0.1)");
-    expect(banner.style.borderColor).toBe("rgba(99, 102, 241, 0.2)");
+    expect(banner.className).toContain("bg-[var(--color-status-info-bg)]");
+    expect(banner.className).toContain("text-[var(--color-status-info)]");
   });
 
   it("displays message text within a span", () => {
