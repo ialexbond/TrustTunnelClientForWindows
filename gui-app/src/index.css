@@ -6,7 +6,7 @@
   body {
     background-color: var(--color-bg-primary);
     color: var(--color-text-primary);
-    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: "Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
