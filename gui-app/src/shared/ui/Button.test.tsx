@@ -40,11 +40,6 @@ describe("Button", () => {
     expect(container.querySelector("button")).toBeInTheDocument();
   });
 
-  it("renders secondary variant without error", () => {
-    const { container } = render(<Button variant="secondary">S</Button>);
-    expect(container.querySelector("button")).toBeInTheDocument();
-  });
-
   it("renders danger variant without error", () => {
     const { container } = render(<Button variant="danger">D</Button>);
     expect(container.querySelector("button")).toBeInTheDocument();
@@ -52,6 +47,11 @@ describe("Button", () => {
 
   it("renders ghost variant without error", () => {
     const { container } = render(<Button variant="ghost">G</Button>);
+    expect(container.querySelector("button")).toBeInTheDocument();
+  });
+
+  it("renders icon variant without error", () => {
+    const { container } = render(<Button variant="icon" aria-label="icon-btn">*</Button>);
     expect(container.querySelector("button")).toBeInTheDocument();
   });
 
@@ -70,11 +70,6 @@ describe("Button", () => {
     render(<Button size="lg">L</Button>);
     expect(screen.getByRole("button").className).toContain("h-9");
     expect(screen.getByRole("button").className).toContain("px-5");
-  });
-
-  it("renders icon", () => {
-    render(<Button icon={<span data-testid="btn-icon">+</span>}>Add</Button>);
-    expect(screen.getByTestId("btn-icon")).toBeInTheDocument();
   });
 
   it("forwardRef works", () => {
