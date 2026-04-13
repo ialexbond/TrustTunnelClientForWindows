@@ -16,10 +16,10 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         "fixed inset-0 flex items-center justify-center",
       )}
       style={{
-        zIndex: "var(--z-overlay)",
+        zIndex: "var(--z-modal)",
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
-        backgroundColor: "rgba(0, 0, 0, 0.4)",
+        backgroundColor: "var(--color-glass-bg)",
         transition: "opacity var(--transition-fast) ease",
         pointerEvents: "none",
       }}
@@ -32,7 +32,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
           "font-[var(--font-weight-semibold)]",
         )}
         style={{
-          textShadow: "0 1px 4px rgba(0,0,0,0.5)",
+          textShadow: "0 1px 4px var(--color-glass-bg)",
         }}
       >
         <svg
@@ -51,7 +51,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         </svg>
         <span>{t("drop.overlay_text", "Drop file here")}</span>
         <span
-          className="text-xs font-normal opacity-70"
+          className="text-[var(--font-size-xs)] font-[var(--font-weight-normal)] opacity-70"
         >
           {t("drop.overlay_hint", ".toml — VPN config, .json — routing rules")}
         </span>
