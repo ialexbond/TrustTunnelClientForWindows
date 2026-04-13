@@ -17,9 +17,6 @@ const config: StorybookConfig = {
   async viteFinal(config) {
     const { mergeConfig } = await import('vite');
     return mergeConfig(config, {
-      server: {
-        hmr: { host: 'localhost', port: 6007, protocol: 'ws' },
-      },
       resolve: {
         alias: {
           '@tauri-apps/api/core': path.resolve(__dirname, './tauri-mocks/api-core.ts'),
