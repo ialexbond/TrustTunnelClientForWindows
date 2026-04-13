@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { colors } from "./colors";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "accent";
 type BadgeSize = "sm" | "md";
@@ -14,10 +13,10 @@ interface BadgeProps {
 
 const variantColors: Record<BadgeVariant, { bg: string; text: string }> = {
   default: { bg: "var(--color-bg-hover)", text: "var(--color-text-secondary)" },
-  success: { bg: colors.successBorder, text: "var(--color-success-400)" },
-  warning: { bg: colors.warningBorder, text: "var(--color-warning-400)" },
-  danger:  { bg: colors.dangerBorder, text: "var(--color-danger-400)" },
-  accent:  { bg: colors.accentLogoGlow, text: "var(--color-accent-400)" },
+  success: { bg: "rgba(16, 185, 129, 0.15)", text: "var(--color-success-400)" },
+  warning: { bg: "rgba(245, 158, 11, 0.15)", text: "var(--color-warning-400)" },
+  danger:  { bg: "rgba(239, 68, 68, 0.15)", text: "var(--color-danger-400)" },
+  accent:  { bg: "rgba(99, 102, 241, 0.15)", text: "var(--color-accent-400)" },
 };
 
 const sizeStyles: Record<BadgeSize, string> = {
