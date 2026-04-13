@@ -55,7 +55,7 @@ describe("GeneralSection", () => {
 
   it("auto-connect toggle is enabled when hasConfig is true", () => {
     render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     // The auto-connect toggle (third one) should not be disabled
     const autoConnectToggle = toggleButtons[2];
     expect(autoConnectToggle).not.toBeDisabled();
@@ -63,28 +63,28 @@ describe("GeneralSection", () => {
 
   it("auto-connect toggle is disabled when hasConfig is false", () => {
     render(<GeneralSection {...defaultProps} hasConfig={false} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     const autoConnectToggle = toggleButtons[2];
     expect(autoConnectToggle).toBeDisabled();
   });
 
   it("calls onAutoConnectChange when auto-connect toggle is clicked", () => {
     render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[2]);
     expect(defaultProps.onAutoConnectChange).toHaveBeenCalledWith(true);
   });
 
   it("calls onSaved when auto-connect is toggled", () => {
     render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[2]);
     expect(defaultProps.onSaved).toHaveBeenCalled();
   });
 
   it("stores auto-connect value in localStorage when toggled on", () => {
     render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[2]);
     expect(localStorage.getItem("tt_auto_connect")).toBe("true");
   });
@@ -94,7 +94,7 @@ describe("GeneralSection", () => {
     render(<GeneralSection {...defaultProps} />);
     // The toggle should reflect the stored value (true)
     // Clicking it again should set to false
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[2]);
     expect(defaultProps.onAutoConnectChange).toHaveBeenCalledWith(false);
   });
@@ -106,7 +106,7 @@ describe("GeneralSection", () => {
 
   it("calls invoke for start minimized toggle", async () => {
     render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     // Second toggle is start minimized
     fireEvent.click(toggleButtons[1]);
     await waitFor(() => {
@@ -116,7 +116,7 @@ describe("GeneralSection", () => {
 
   it("calls onSaved when start minimized toggle is changed", async () => {
     render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("button");
+    const toggleButtons = screen.getAllByRole("switch");
     fireEvent.click(toggleButtons[1]);
     await waitFor(() => {
       expect(defaultProps.onSaved).toHaveBeenCalled();
