@@ -1,57 +1,73 @@
-import { AlertTriangle, X } from "lucide-react";
+import { forwardRef, type HTMLAttributes } from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { AlertTriangle, Info, X } from "lucide-react";
+import { cn } from "../lib/cn";
 
-interface ErrorBannerProps {
+export const errorBannerVariants = cva(
+  [
+    "flex items-center gap-2",
+    "px-[var(--space-3)] py-[var(--space-2)]",
+    "rounded-[var(--radius-md)]",
+    "text-[var(--font-size-sm)]",
+    "border",
+  ].join(" "),
+  {
+    variants: {
+      severity: {
+        error: [
+          "bg-[var(--color-status-error-bg)]",
+          "text-[var(--color-status-error)]",
+          "border-[var(--color-status-error-border)]",
+        ].join(" "),
+        warning: [
+          "bg-[var(--color-status-connecting-bg)]",
+          "text-[var(--color-status-connecting)]",
+          "border-[var(--color-status-connecting-border)]",
+        ].join(" "),
+        info: [
+          "bg-[var(--color-status-info-bg)]",
+          "text-[var(--color-status-info)]",
+          "border-[var(--color-status-info-border)]",
+        ].join(" "),
+      },
+    },
+    defaultVariants: {
+      severity: "error",
+    },
+  }
+);
+
+export interface ErrorBannerProps
+  extends Omit<HTMLAttributes<HTMLDivElement>, "children">,
+    VariantProps<typeof errorBannerVariants> {
   message: string;
   onDismiss?: () => void;
-  variant?: "error" | "warning" | "info";
 }
 
-const variantConfig = {
-  error: {
-    bg: "rgba(239, 68, 68, 0.1)",
-    border: "rgba(239, 68, 68, 0.2)",
-    text: "var(--color-danger-400)",
-    icon: "var(--color-danger-400)",
-  },
-  warning: {
-    bg: "rgba(245, 158, 11, 0.1)",
-    border: "rgba(245, 158, 11, 0.2)",
-    text: "var(--color-warning-400)",
-    icon: "var(--color-warning-400)",
-  },
-  info: {
-    bg: "rgba(99, 102, 241, 0.1)",
-    border: "rgba(99, 102, 241, 0.2)",
-    text: "var(--color-accent-400)",
-    icon: "var(--color-accent-400)",
-  },
-};
+export const ErrorBanner = forwardRef<HTMLDivElement, ErrorBannerProps>(
+  ({ severity, message, onDismiss, className, ...props }, ref) => {
+    const Icon = severity === "info" ? Info : AlertTriangle;
 
-export function ErrorBanner({ message, onDismiss, variant = "error" }: ErrorBannerProps) {
-  const config = variantConfig[variant];
+    return (
+      <div
+        ref={ref}
+        className={cn(errorBannerVariants({ severity }), className)}
+        {...props}
+      >
+        <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+        <span className="flex-1 break-words">{message}</span>
+        {onDismiss && (
+          <button
+            onClick={onDismiss}
+            className="shrink-0 p-0.5 rounded transition-opacity hover:opacity-70"
+            aria-label="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    );
+  }
+);
 
-  return (
-    <div
-      className="flex items-start gap-2.5 px-3 py-2.5 rounded-[var(--radius-lg)] text-[13px] leading-relaxed"
-      style={{
-        backgroundColor: config.bg,
-        borderWidth: "1px",
-        borderStyle: "solid",
-        borderColor: config.border,
-        color: config.text,
-      }}
-    >
-      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: config.icon }} />
-      <span className="flex-1 break-words">{message}</span>
-      {onDismiss && (
-        <button
-          onClick={onDismiss}
-          className="shrink-0 p-0.5 rounded transition-opacity hover:opacity-70"
-          style={{ color: config.text }}
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
+ErrorBanner.displayName = "ErrorBanner";
