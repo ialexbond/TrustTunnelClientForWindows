@@ -1,6 +1,7 @@
 import type { StorybookConfig } from '@storybook/react-vite';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import remarkGfm from 'remark-gfm';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,7 +12,10 @@ const config: StorybookConfig = {
     '../src/**/*.stories.@(js|jsx|ts|tsx)',
   ],
   addons: [
-    '@storybook/addon-docs',
+    {
+      name: '@storybook/addon-docs',
+      options: { mdxPluginOptions: { mdxCompileOptions: { remarkPlugins: [remarkGfm] } } },
+    },
     '@storybook/addon-themes',
   ],
   async viteFinal(config) {
