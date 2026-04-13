@@ -69,7 +69,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-[var(--font-size-sm)] font-medium mb-1.5 text-[var(--color-text-secondary)]">
+          <label className="block text-[var(--font-size-sm)] font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
             {label}
           </label>
         )}

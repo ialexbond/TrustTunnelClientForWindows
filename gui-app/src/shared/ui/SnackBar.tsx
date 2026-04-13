@@ -42,7 +42,7 @@ function ErrorSnackText({ text, onCopy }: { text: string; onCopy: () => void }) 
       </span>
       {truncated && (
         <button
-          className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+          className="shrink-0 p-0.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors"
           title="Copy"
           onClick={onCopy}
         >
@@ -179,7 +179,7 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
           key={item.id}
           className={cn(
             "flex items-center gap-2 px-4 py-2.5",
-            "rounded-[var(--radius-lg)] text-sm font-medium pointer-events-auto",
+            "rounded-[var(--radius-lg)] text-sm font-[var(--font-weight-normal)] pointer-events-auto",
             "shadow-[var(--shadow-lg)]",
             item.type === "error" && "border-l-2 border-[var(--color-status-error)]",
           )}
@@ -204,7 +204,7 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
           {item.type === "success" ? (
             <CheckCircle2
               className="w-4 h-4 shrink-0"
-              style={{ color: "var(--color-status-success)" }}
+              style={{ color: "var(--color-status-connected)" }}
             />
           ) : (
             <AlertTriangle

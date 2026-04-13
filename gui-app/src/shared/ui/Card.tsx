@@ -45,7 +45,7 @@ export function CardHeader({ title, description, icon, action }: CardHeaderProps
     <div className="flex items-center justify-between mb-[var(--space-3)]">
       <div className="flex items-center gap-[var(--space-2)]">
         {icon && (
-          <span style={{ color: "var(--color-accent-400)" }}>{icon}</span>
+          <span style={{ color: "var(--color-accent-interactive)" }}>{icon}</span>
         )}
         <div>
           <h3
