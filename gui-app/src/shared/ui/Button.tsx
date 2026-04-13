@@ -81,11 +81,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(buttonVariants({ variant, size, fullWidth }), className)}
         {...props}
       >
-        {loading ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          children
-        )}
+        {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+        {children}
       </button>
     );
   }
