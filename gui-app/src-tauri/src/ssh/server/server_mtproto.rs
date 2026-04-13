@@ -246,11 +246,11 @@ pub async fn mtproto_install(
     let secret = if is_valid_hex_secret(&existing_secret) {
         existing_secret
     } else {
-        // Generate new 16-byte hex secret
+        // Generate new 16-byte hex secret (openssl is always available, xxd may not be)
         let (secret_out, _) = exec_command(
             &handle,
             app,
-            "head -c 16 /dev/urandom | xxd -ps",
+            "openssl rand -hex 16",
         )
         .await?;
         let gen_secret = secret_out.trim().to_string();
