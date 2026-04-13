@@ -8,7 +8,7 @@ import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
 import { Fail2banSection } from "./Fail2banSection";
 import { FirewallSection } from "./FirewallSection";
-import { SshPortSection } from "./SshPortSection";
+// import { SshPortSection } from "./SshPortSection";
 
 interface Props { state: ServerState; }
 
@@ -43,7 +43,7 @@ export function SecuritySection({ state }: Props) {
         <div className="space-y-4">
           <Fail2banSection status={security.status.fail2ban} state={security} />
           <FirewallSection status={security.status.firewall} state={security} />
-          <SshPortSection state={security} />
+          {/* <SshPortSection state={security} /> */}
         </div>
       )}
 
