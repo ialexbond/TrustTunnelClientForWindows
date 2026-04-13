@@ -1,0 +1,4 @@
+/* Override Tauri desktop app styles that break Storybook scrolling */
+body {
+  overflow: auto !important;
+}

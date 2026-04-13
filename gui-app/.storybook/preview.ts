@@ -2,6 +2,7 @@ import type { Preview, Renderer } from '@storybook/react-vite';
 import { withThemeByDataAttribute } from '@storybook/addon-themes';
 import '../src/shared/styles/tokens.css';
 import '../src/index.css';
+import './storybook-overrides.css';
 
 const preview: Preview = {
   decorators: [
@@ -16,7 +17,7 @@ const preview: Preview = {
   ],
   parameters: {
     backgrounds: { disable: true },
-    layout: 'centered',
+    layout: 'fullscreen',
   },
 };
 
