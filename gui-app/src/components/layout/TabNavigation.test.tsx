@@ -15,7 +15,6 @@ describe("TabNavigation", () => {
   const defaultProps = {
     activeTab: "control" as AppTab,
     onTabChange,
-    hasConfig: true,
   };
 
   beforeEach(() => {
@@ -78,25 +77,11 @@ describe("TabNavigation", () => {
     expect(btn?.getAttribute("aria-selected")).toBe("false");
   });
 
-  it("tabs requiring config are disabled when hasConfig is false", () => {
-    render(<TabNavigation {...defaultProps} hasConfig={false} />);
-    const routingBtn = screen.getByText(i18n.t("tabs.routing")).closest("button");
-    expect(routingBtn).toBeDisabled();
-  });
-
-  it("does not call onTabChange when disabled tab is clicked", () => {
-    render(<TabNavigation {...defaultProps} hasConfig={false} />);
+  it("all tabs are always clickable", () => {
+    render(<TabNavigation {...defaultProps} />);
     const routingBtn = screen.getByText(i18n.t("tabs.routing")).closest("button")!;
     fireEvent.click(routingBtn);
-    expect(onTabChange).not.toHaveBeenCalled();
-  });
-
-  it("control and about tabs are always enabled even without config", () => {
-    render(<TabNavigation {...defaultProps} hasConfig={false} />);
-    const controlBtn = screen.getByText(i18n.t("tabs.controlPanel")).closest("button");
-    const aboutBtn = screen.getByText(i18n.t("tabs.about")).closest("button");
-    expect(controlBtn).not.toBeDisabled();
-    expect(aboutBtn).not.toBeDisabled();
+    expect(onTabChange).toHaveBeenCalledWith("routing");
   });
 
   it("uses CSS token var for active tab accent, not hardcoded color", () => {

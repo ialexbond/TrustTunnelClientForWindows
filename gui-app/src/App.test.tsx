@@ -1302,8 +1302,8 @@ describe("App", () => {
       controlPanelProps.onSwitchToSetup();
     });
 
-    // Control tab stays active (no navigation to "server" — old page removed)
-    expect(localStorage.getItem("tt_active_tab")).toBe("control");
+    // With config present, app starts on connection tab — onSwitchToSetup doesn't navigate
+    expect(localStorage.getItem("tt_active_tab")).toBe("connection");
   });
 
   it("ControlPanelPage onNavigateToSettings navigates to settings", async () => {

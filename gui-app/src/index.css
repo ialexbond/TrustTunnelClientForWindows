@@ -22,14 +22,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 32px;
+  width: 30px;
+  height: 26px;
   border: none;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: background 100ms ease, color 100ms ease;
   -webkit-app-region: no-drag;
+  margin: 0 2px;
 }
 .window-control-btn:hover {
   color: var(--color-text-primary);
