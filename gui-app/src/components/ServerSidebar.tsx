@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Server, Plus, Power, Loader2 } from "lucide-react";
-import { cn } from "../shared/ui/cn";
+import { cn } from "../shared/lib/cn";
 
 export interface ServerEntry {
   id: string;
