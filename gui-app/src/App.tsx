@@ -2,15 +2,15 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import { Sidebar, type SidebarPage } from "./components/layout/Sidebar";
+import { TitleBar } from "./components/layout/TitleBar";
+import { TabNavigation } from "./components/layout/TabNavigation";
+import { WindowControls } from "./components/layout/WindowControls";
 import StatusPanel from "./components/StatusPanel";
 import SetupWizard from "./components/SetupWizard";
 import { ControlPanelPage } from "./components/ControlPanelPage";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
-import LogPanel from "./components/LogPanel";
 import AboutPanel from "./components/AboutPanel";
-import DashboardPanel from "./components/DashboardPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
 import { PanelErrorBoundary } from "./shared/ui/PanelErrorBoundary";
 import { formatError } from "./shared/utils/formatError";
@@ -26,8 +26,7 @@ import { useFileDrop } from "./shared/hooks/useFileDrop";
 import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { ConfirmDialog } from "./shared/ui";
-import { WindowControls } from "./components/layout/WindowControls";
-import type { VpnStatus, VpnConfig, LogEntry } from "./shared/types";
+import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 // Re-export types for backward compatibility
 export type { VpnStatus, UpdateInfo, VpnConfig, LogEntry, AppTab } from "./shared/types";
@@ -40,22 +39,29 @@ function App() {
   const { i18n, handleLanguageChange, toggleLanguage } = useLanguage();
 
   // ─── Navigation ───
-  const [activePage, setActivePage] = useState<SidebarPage>(() => {
+  const [activeTab, setActiveTab] = useState<AppTab>(() => {
     const saved = localStorage.getItem("tt_active_page") || localStorage.getItem("tt_active_tab");
     const savedConfig = localStorage.getItem("tt_config_path");
 
-    // Map old tab names to new page names
-    const pageMap: Record<string, SidebarPage> = {
-      setup: "server",
-      settings: "settings",
+    // Map ALL old IDs (including pre-Phase-4 SidebarPage values) to new AppTab
+    const tabMap: Record<string, AppTab> = {
+      // Old SidebarPage IDs -> new AppTab
+      server: "control",
+      control: "control",
+      settings: "connection",      // old "VPN settings" -> "connection" tab
+      appSettings: "settings",     // old "App settings" -> "settings" tab
+      dashboard: "control",
       routing: "routing",
+      logs: "connection",
       about: "about",
+      // New AppTab IDs (passthrough for forward compat)
+      connection: "connection",
     };
-    const mapped = saved ? (pageMap[saved] || saved) : null;
 
-    if (savedConfig && mapped && mapped !== "server") return mapped as SidebarPage;
-    if (savedConfig) return "settings";
-    return "server";
+    const mapped = saved ? (tabMap[saved] ?? "control") : null;
+    if (savedConfig && mapped) return mapped;
+    if (savedConfig) return "connection";
+    return "control";
   });
 
   const [status, setStatus] = useState<VpnStatus>("disconnected");
@@ -109,8 +115,8 @@ function App() {
         localStorage.removeItem("tt_connected_since");
         localStorage.removeItem("trusttunnel_wizard");
         setConfig({ configPath: "", logLevel: "info" });
-        setActivePage("server");
         setWizardKey(k => k + 1);
+        // Control tab auto-shows wizard when hasConfig is false
       });
     } else {
       localStorage.removeItem("trusttunnel_wizard");
@@ -124,7 +130,7 @@ function App() {
         invoke<string | null>("auto_detect_config").then((detected) => {
           if (detected) {
             setConfig(prev => ({ ...prev, configPath: detected }));
-            if (activePage === "server") setActivePage("settings");
+            if (activeTab === "control") setActiveTab("connection");
           }
         }).catch(() => {});
       }
@@ -147,15 +153,15 @@ function App() {
         // Config file was deleted externally
         localStorage.removeItem("tt_config_path");
         setConfig({ configPath: "", logLevel: "info" });
-        setActivePage("server");
         setWizardKey(k => k + 1);
+        // Control tab auto-shows wizard when hasConfig is false
         pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
       } else if (exists && !config.configPath) {
         // Config file appeared — reload it (dismisses error snackbar via success message)
         setConfig({ configPath: path, logLevel: "info" });
         localStorage.setItem("tt_config_path", path);
         setSettingsKey(k => k + 1);
-        setActivePage("settings");
+        setActiveTab("connection");
         pushSuccess(i18n.t("messages.config_file_restored", "Config loaded"));
       }
     });
@@ -164,7 +170,11 @@ function App() {
   }, [config.configPath]);
 
   // ─── Persist state ───
-  useEffect(() => { localStorage.setItem("tt_active_page", activePage); }, [activePage]);
+  useEffect(() => {
+    localStorage.setItem("tt_active_tab", activeTab);
+    // Also persist with old key for backward compat
+    localStorage.setItem("tt_active_page", activeTab);
+  }, [activeTab]);
   useEffect(() => {
     localStorage.setItem("tt_config_path", config.configPath);
     localStorage.setItem("tt_log_level", config.logLevel);
@@ -239,15 +249,11 @@ function App() {
 
     if (navigateTo === "settings") {
       setSettingsKey(k => k + 1);
-      setActivePage("settings");
+      setActiveTab("settings");
     } else {
       setControlKey(k => k + 1);
-      setActivePage("control");
+      setActiveTab("control");
     }
-  }, []);
-
-  const handleSwitchToSetup = useCallback(() => {
-    setActivePage("server");
   }, []);
 
   const [wizardKey, setWizardKey] = useState(0);
@@ -278,22 +284,23 @@ function App() {
       localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
     } catch { /* ignore */ }
     setWizardKey(k => k + 1);
+    // Control tab auto-shows wizard when hasConfig is false
   }, [status]);
 
-  // Reset scroll on page change
+  // Reset scroll on tab change
   useEffect(() => {
     document.querySelectorAll('[class*="overflow"]').forEach((el) => {
       el.scrollTop = 0;
     });
-  }, [activePage]);
+  }, [activeTab]);
 
-  // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..8 = navigate, etc.)
+  // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..5 = navigate, etc.)
   useKeyboardShortcuts({
     onToggleConnect: useCallback(() => {
       if (status === "connected") handleDisconnect();
       else if (status === "disconnected" && config.configPath) handleConnect();
     }, [status, config.configPath, handleConnect, handleDisconnect]),
-    onNavigate: setActivePage as (page: string) => void,
+    onNavigate: setActiveTab as (page: string) => void,
     onToggleTheme: toggleTheme,
     onToggleLanguage: toggleLanguage,
   });
@@ -304,12 +311,12 @@ function App() {
     localStorage.setItem("tt_config_path", configPath);
     localStorage.removeItem("tt_config_cleared");
     setSettingsKey(k => k + 1);
-    setActivePage("settings");
+    setActiveTab("connection");
   }, []);
 
   const handleDropRouting = useCallback(() => {
     setRoutingKey(k => k + 1);
-    setActivePage("routing");
+    setActiveTab("routing");
   }, []);
 
   const { isDragging } = useFileDrop({
@@ -317,11 +324,11 @@ function App() {
     onConfigImported: handleDropConfig,
     onRoutingImported: handleDropRouting,
     pushSuccess,
-    isBusy: false, // drag-drop is safe on any page — import uses a separate SSH session
+    isBusy: false, // drag-drop is safe on any tab — import uses a separate SSH session
   });
 
   const hasConfig = !!config.configPath;
-  const showStatusPanel = hasConfig && activePage !== "server" && activePage !== "control";
+  const showStatusPanel = hasConfig && activeTab !== "control";
 
   const vpnContextValue = useMemo(() => ({
     status,
@@ -350,111 +357,73 @@ function App() {
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
     >
       <DropOverlay isDragging={isDragging} />
-      {/* Custom titlebar */}
-      <div
-        className="flex items-center shrink-0"
-        data-tauri-drag-region
-        style={{
-          height: 32,
-          backgroundColor: "var(--color-bg-secondary)",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
-        <div className="flex items-center gap-1.5 pl-3" data-tauri-drag-region>
-          <span className="text-xs font-bold tracking-wide" style={{ color: "var(--color-text-secondary)" }} data-tauri-drag-region>
-            TrustTunnel
-          </span>
-          <span
-            className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: "rgba(99, 102, 241, 0.1)", color: "var(--color-accent-500)" }}
-          >
-            PRO
-          </span>
-        </div>
-        <div className="flex-1" data-tauri-drag-region />
-        <WindowControls />
-      </div>
 
-      {/* App body */}
-      <div className="flex-1 min-h-0 flex">
-      {/* Sidebar */}
-      <Sidebar
-        activePage={activePage}
-        onPageChange={(page) => {
-          if (page === "server" && wizardResetRef.current) {
+      {/* Title bar — seamless, no border-bottom */}
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+
+      {/* Tab navigation — 5 tabs */}
+      <TabNavigation
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          if (tab === "control" && wizardResetRef.current) {
             wizardResetRef.current();
           }
-          setActivePage(page);
+          setActiveTab(tab);
         }}
         hasConfig={hasConfig}
-        hasUpdate={updateInfo.available}
       />
 
-      {/* Main content */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Page content */}
-        <div className="flex-1 min-h-0">
-          {/* Installation (SetupWizard) — always shows wizard */}
-          <div className="h-full flex flex-col overflow-hidden px-4" style={{ display: activePage === "server" ? "flex" : "none" }}>
-            <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
-          </div>
+      {/* Content area — full width */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* Control Panel — includes ServerSidebar internally */}
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "control" ? "flex" : "none" }}>
+          <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Control Panel">
+            {hasConfig ? (
+              <ControlPanelPage
+                key={controlKey}
+                onConfigExported={(path) => {
+                  setConfig(prev => ({ ...prev, configPath: path }));
+                  localStorage.setItem("tt_config_path", path);
+                  setSettingsKey(k => k + 1);
+                }}
+                onSwitchToSetup={() => {
+                  setWizardKey(k => k + 1);
+                  // When no config, control tab shows SshConnectForm or SetupWizard
+                }}
+                onNavigateToSettings={() => {
+                  setActiveTab("settings");
+                }}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col overflow-hidden px-4">
+                <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
+              </div>
+            )}
+          </PanelErrorBoundary>
+        </div>
 
-          {/* Control Panel — SSH form or ServerPanel */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "control" ? "flex" : "none" }}>
-            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Control Panel">
-            <ControlPanelPage
-              key={controlKey}
-              onConfigExported={(path) => {
-                setConfig(prev => ({ ...prev, configPath: path }));
-                localStorage.setItem("tt_config_path", path);
-                setSettingsKey(k => k + 1);
-              }}
-              onSwitchToSetup={() => {
-                setWizardKey(k => k + 1);
-                setActivePage("server");
-              }}
-              onNavigateToSettings={() => {
-                setActivePage("settings");
-              }}
-            />
-            </PanelErrorBoundary>
-          </div>
-
-          {/* Settings */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "settings" ? "flex" : "none" }}>
-            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Settings">
+        {/* Connection — VPN Settings */}
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "connection" ? "flex" : "none" }}>
+          <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Connection">
             <SettingsPanel
               key={settingsKey}
               configPath={config.configPath}
               onConfigChange={setConfig}
               status={status}
               onReconnect={handleReconnect}
-              onSwitchToSetup={handleSwitchToSetup}
+              onSwitchToSetup={() => setActiveTab("control")}
               onClearConfig={handleClearConfig}
               onVpnModeChange={setVpnMode}
               statusPanel={statusPanelNode}
             />
-            </PanelErrorBoundary>
-          </div>
+          </PanelErrorBoundary>
+        </div>
 
-          {/* Dashboard */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "dashboard" ? "flex" : "none" }}>
-            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Dashboard">
-            <DashboardPanel
-              status={status}
-              connectedSince={connectedSince}
-              configPath={config.configPath}
-              vpnMode={vpnMode}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-              onNavigateToControl={() => setActivePage("control")}
-            />
-            </PanelErrorBoundary>
-          </div>
-
-          {/* Routing */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "routing" ? "flex" : "none" }}>
-            <PanelErrorBoundary onNavigateHome={() => setActivePage("server")} panelName="Routing">
+        {/* Routing */}
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "routing" ? "flex" : "none" }}>
+          <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Routing">
             <RoutingPanel
               key={routingKey}
               configPath={config.configPath}
@@ -467,45 +436,31 @@ function App() {
               onReconnect={handleReconnect}
               onVpnModeChange={setVpnMode}
             />
-            </PanelErrorBoundary>
-          </div>
+          </PanelErrorBoundary>
+        </div>
 
-          {/* Logs */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "logs" ? "flex" : "none" }}>
-            {statusPanelNode}
-            <div className="flex-1 overflow-hidden py-3 px-4">
-              <LogPanel
-                logs={vpnLogs}
-                onClear={() => setVpnLogs([])}
-                isConnected={status === "connected"}
-              />
-            </div>
-          </div>
+        {/* Settings — App settings (theme, language, autostart) */}
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "settings" ? "flex" : "none" }}>
+          <AppSettingsPanel
+            theme={themeMode}
+            onThemeChange={handleThemeChange}
+            language={i18n.language}
+            onLanguageChange={handleLanguageChange}
+            hasConfig={!!config.configPath}
+            statusPanel={statusPanelNode}
+          />
+        </div>
 
-          {/* App Settings */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "appSettings" ? "flex" : "none" }}>
-            <AppSettingsPanel
-              theme={themeMode}
-              onThemeChange={handleThemeChange}
-              language={i18n.language}
-              onLanguageChange={handleLanguageChange}
-              hasConfig={!!config.configPath}
-              statusPanel={statusPanelNode}
-            />
-          </div>
-
-          {/* About */}
-          <div className="h-full flex flex-col overflow-hidden" style={{ display: activePage === "about" ? "flex" : "none" }}>
-            {statusPanelNode}
-            <AboutPanel
-              updateInfo={updateInfo}
-              onCheckUpdates={() => checkForUpdates(false)}
-              onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
-            />
-          </div>
+        {/* About */}
+        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "about" ? "flex" : "none" }}>
+          {statusPanelNode}
+          <AboutPanel
+            updateInfo={updateInfo}
+            onCheckUpdates={() => checkForUpdates(false)}
+            onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
+          />
         </div>
       </div>
-      </div>{/* /App body */}
     </div>
 
     <ConfirmDialog
