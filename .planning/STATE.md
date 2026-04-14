@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-04-14T19:47:49.637Z"
-last_activity: 2026-04-15
+status: executing
+stopped_at: Completed 05-layout-shell 05-01-PLAN.md
+last_updated: "2026-04-14T20:47:50.648Z"
+last_activity: 2026-04-14
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 19
-  completed_plans: 23
+  total_plans: 22
+  completed_plans: 24
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** Пользователь устанавливает приложение, вставляет ссылку/конфиг и подключается к VPN — без CLI и технической настройки
-**Current focus:** Phase 05 — layout-shell
+**Current focus:** Phase 05 — Shell Polish + TODO Closure
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
-Status: Ready to plan Phase 05
-Last activity: 2026-04-15
+Phase: 05 (Shell Polish + TODO Closure) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-14
 
 Progress: [████████░░] 80%
 
@@ -55,6 +55,7 @@ Progress: [████████░░] 80%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 05-layout-shell P01 | 20 | 3 tasks | 4 files |
 
 ## Governance Rules (v3.0 milestone)
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - Phase 4: hasConfig removed — все табы всегда доступны, SetupWizard убран
 - Phase 4: sonner (toast library) установлен для будущих анимаций
 - Governance: release/tt-win-3.0.0 branch, master readonly, NSIS на рабочий стол, Storybook для review
+- [Phase 05-layout-shell]: D-01 completed: all border-[var(--color-border)] removed from TabNavigation, ServerSidebar, ServerTabs, ControlPanelPage
+- [Phase 05-layout-shell]: D-10 safety fix: onAddServer no longer calls handleDisconnect — Add Server is safe during active VPN
 
 ### Pending Todos
 
@@ -88,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T19:47:49.633Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-layout-shell/05-CONTEXT.md
+Last session: 2026-04-14T20:47:50.645Z
+Stopped at: Completed 05-layout-shell 05-01-PLAN.md
+Resume file: None

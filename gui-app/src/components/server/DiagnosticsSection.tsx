@@ -54,7 +54,7 @@ export function DiagnosticsSection({ state }: Props) {
 
       <div className="flex gap-2">
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
           icon={<Stethoscope className="w-3.5 h-3.5" />}
           loading={diagLoading}
@@ -66,7 +66,7 @@ export function DiagnosticsSection({ state }: Props) {
         </Button>
         {showDiag && diagResult && (
           <Button
-            variant="secondary"
+            variant="ghost"
             size="sm"
             icon={<ChevronUp className="w-3.5 h-3.5" />}
             onClick={handleCollapse}

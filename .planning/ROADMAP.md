@@ -95,7 +95,7 @@ Plans:
   3. The full application looks visually cohesive end-to-end — Sidebar + all panels + WindowControls form one unified design system
 **Plans**: 3 plans
 Plans:
-- [ ] 05-01-PLAN.md — Shell visual polish: remove borders, sidebar bg-secondary, tab max-width, roving focus, sidebar animation, ServerTabs caching
+- [x] 05-01-PLAN.md — Shell visual polish: remove borders, sidebar bg-secondary, tab max-width, roving focus, sidebar animation, ServerTabs caching
 - [ ] 05-02-PLAN.md — Fix invalid Button/Badge CVA variants in all server sections + auth button color
 - [ ] 05-03-PLAN.md — i18n hardcoded strings cleanup (StatusBadge, Select, EmptyState) + sanitize verification
 **UI hint**: yes
