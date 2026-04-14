@@ -19,21 +19,16 @@ interface ServerSidebarProps {
   onDisconnect: (id: string) => void;
 }
 
-// Status dot: inline styles using design token vars (no hardcoded Tailwind colors)
-const statusDotStyle: Record<ServerEntry["status"], React.CSSProperties> = {
-  connected: { backgroundColor: "var(--color-status-connected)" },
-  connecting: { backgroundColor: "var(--color-status-connecting)" },
-  disconnected: { backgroundColor: "var(--color-status-disconnected)" },
-  error: { backgroundColor: "var(--color-status-error)" },
-};
-
 export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDisconnect }: ServerSidebarProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="w-[200px] shrink-0 flex flex-col border-r border-[var(--color-border)]">
+    <div
+      className="shrink-0 flex flex-col"
+      style={{ width: 220, backgroundColor: "var(--color-bg-secondary)" }}
+    >
       {/* Header */}
-      <div className="h-[40px] flex items-center px-3 border-b border-[var(--color-border)]">
+      <div className="h-[40px] flex items-center px-3">
         <span
           className="uppercase text-[var(--color-text-muted)]"
           style={{ fontSize: "11px", fontWeight: 400, letterSpacing: "0.02em" }}
@@ -52,15 +47,9 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
               "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors group",
               selectedId === srv.id
                 ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]"
-                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)]/50"
+                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
             )}
           >
-            {/* Status dot — token vars, animate-pulse for connecting */}
-            <div
-              className={cn("w-2 h-2 rounded-full shrink-0", srv.status === "connecting" && "animate-pulse")}
-              style={statusDotStyle[srv.status]}
-            />
-
             {/* Server info */}
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium truncate">
@@ -73,11 +62,11 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
               )}
             </div>
 
-            {/* Quick disconnect (only when connected + hovered) */}
+            {/* Quick disconnect (only when connected + hovered or keyboard focused) */}
             {srv.status === "connected" && (
               <button
                 onClick={(e) => { e.stopPropagation(); onDisconnect(srv.id); }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--color-status-error-bg)] transition-opacity"
+                className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 p-0.5 rounded hover:bg-[var(--color-status-error-bg)] transition-opacity"
                 aria-label={t("buttons.disconnect", "Отключить") + " " + (srv.label || srv.host)}
               >
                 <Power className="w-3 h-3" style={{ color: "var(--color-status-error)" }} />
@@ -102,7 +91,7 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
       </div>
 
       {/* Add server button */}
-      <div className="p-2 border-t border-[var(--color-border)]">
+      <div className="p-2">
         <button
           onClick={onAddServer}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-[var(--radius-md)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-colors"
