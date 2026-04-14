@@ -21,6 +21,7 @@
         "decorations": false,
         "shadow": true,
         "transparent": false,
+        "backgroundColor": "#0d0d0d",
         "dragDropEnabled": false,
         "visible": false,
         "skipTaskbar": false
