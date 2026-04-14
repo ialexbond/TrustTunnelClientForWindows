@@ -996,6 +996,11 @@
     "mkdirFailed": "Failed to create directory: {{detail}}",
     "killProcessFailed": "Failed to terminate process: {{detail}}"
   },
+  "vpnErrors": {
+    "tunnelDown": "VPN connection lost. Check server connectivity and press Connect.",
+    "authFailed": "VPN authentication failed. Check server configuration.",
+    "generic": "Failed to connect to VPN. Try again."
+  },
   "logs_panel": {
     "filter_all": "All",
     "search_placeholder": "Search logs...",
