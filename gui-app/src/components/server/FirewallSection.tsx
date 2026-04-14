@@ -48,7 +48,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
         ) : (
           <div className="flex gap-1.5">
             {status.active ? (
-              <Button variant="secondary" size="sm" onClick={state.stopFirewall} loading={state.isBusy("stop-fw")} disabled={state.fwBusy}>
+              <Button variant="ghost" size="sm" onClick={state.stopFirewall} loading={state.isBusy("stop-fw")} disabled={state.fwBusy}>
                 {t("server.security.firewall.stop")}
               </Button>
             ) : (
@@ -56,7 +56,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                 {t("server.security.firewall.start")}
               </Button>
             )}
-            <Button variant="danger-outline" size="sm" onClick={state.uninstallFirewall} loading={state.isBusy("uninstall-fw")} disabled={state.fwBusy}>
+            <Button variant="danger" size="sm" onClick={state.uninstallFirewall} loading={state.isBusy("uninstall-fw")} disabled={state.fwBusy}>
               {t("server.security.firewall.uninstall")}
             </Button>
           </div>

@@ -255,7 +255,7 @@ export function CertSection({ state }: Props) {
 
         {certInfo.certType === "lets_encrypt" && (
           <Button
-            variant="secondary"
+            variant="ghost"
             size="sm"
             icon={<RefreshCw className="w-3.5 h-3.5" />}
             loading={renewLoading}
