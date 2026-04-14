@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 2: Primitive Redesign** - All 19 existing + new primitive components redesigned in Storybook
 - [ ] **Phase 3: Control Panel** - First screen migration, proves the design system works end-to-end
 - [ ] **Phase 4: Remaining Panels** - Wizard, Settings, Server, Routing, Dashboard, Logs, About screens
-- [ ] **Phase 5: Layout Shell** - Sidebar and WindowControls (last, frames everything)
+- [ ] **Phase 5: Layout Shell** - Shell Polish + TODO Closure
 - [ ] **Phase 6: Cleanup** - Remove legacy artifacts, enforce quality gates, finalize cross-references
 
 ## Phase Details
@@ -86,14 +86,18 @@ Plans:
 **UI hint**: yes
 
 ### Phase 5: Layout Shell
-**Goal**: Sidebar navigation and WindowControls (custom title bar) are redesigned — the last pieces that frame the entire application
+**Goal**: Shell polish and TODO closure — visual softness, sidebar UX, bug fixes, design-system cleanup
 **Depends on**: Phase 4
 **Requirements**: SCR-10, SCR-11
 **Success Criteria** (what must be TRUE):
   1. Sidebar renders with the new design, correct token-based active/hover states, and functions correctly in both light and dark themes
   2. WindowControls (minimize, maximize, close) render with redesigned styling using token vars and function correctly as a custom title bar
   3. The full application looks visually cohesive end-to-end — Sidebar + all panels + WindowControls form one unified design system
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 05-01-PLAN.md — Shell visual polish: remove borders, sidebar bg-secondary, tab max-width, roving focus, sidebar animation, ServerTabs caching
+- [ ] 05-02-PLAN.md — Fix invalid Button/Badge CVA variants in all server sections + auth button color
+- [ ] 05-03-PLAN.md — i18n hardcoded strings cleanup (StatusBadge, Select, EmptyState) + sanitize verification
 **UI hint**: yes
 
 ### Phase 6: Cleanup
@@ -119,5 +123,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Primitive Redesign | 0/7 | Planned | - |
 | 3. Control Panel | 0/TBD | Not started | - |
 | 4. Remaining Panels | 0/TBD | Not started | - |
-| 5. Layout Shell | 0/TBD | Not started | - |
+| 5. Layout Shell | 0/3 | Planned | - |
 | 6. Cleanup | 0/TBD | Not started | - |
