@@ -2,11 +2,10 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Server, Lock, Key, FileKey, ClipboardPaste } from "lucide-react";
+import { Lock, Key, FileKey, ClipboardPaste } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
-import { Card } from "../../shared/ui/Card";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { formatError } from "../../shared/utils/formatError";
@@ -90,7 +89,6 @@ export function SshConnectForm({ onConnect }: Props) {
         password: authMode === "password" ? password : "",
         keyPath: authMode === "key" ? keyPath : undefined,
       };
-      // Store credentials in Rust backend (file-based, not localStorage)
       await invoke("save_ssh_credentials", {
         host: creds.host,
         port: creds.port,
@@ -114,25 +112,24 @@ export function SshConnectForm({ onConnect }: Props) {
   };
 
   return (
-    <div className="flex-1 flex items-center justify-center py-[var(--space-7)] bg-[var(--color-bg-primary)]">
-      <Card padding="lg" className="w-full max-w-[400px] rounded-[var(--radius-xl)]">
-        {/* Header */}
-        <div className="flex flex-col items-center mb-[var(--space-4)]">
-          <div className="w-9 h-9 rounded-[var(--radius-lg)] flex items-center justify-center bg-[var(--color-bg-elevated)] mb-[var(--space-2)]">
-            <Server className="w-4 h-4 text-[var(--color-accent-interactive)]" />
-          </div>
-          <h2 className="text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-primary)] tracking-[var(--tracking-tight)]">
-            {t("control.ssh_title")}
-          </h2>
-          <p className="text-xs text-[var(--color-text-muted)] mt-[var(--space-1)]">
+    <div className="flex-1 flex flex-col bg-[var(--color-bg-primary)]">
+      {/* Заголовок панели */}
+      <div className="h-[40px] flex items-center px-4 border-b border-[var(--color-border)] shrink-0">
+        <h2 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+          {t("control.ssh_title")}
+        </h2>
+      </div>
+
+      {/* Форма */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[360px] mx-auto px-4 py-5 space-y-3.5">
+          {/* Подпись */}
+          <p className="text-xs text-[var(--color-text-muted)]">
             {t("control.ssh_description")}
           </p>
-        </div>
 
-        {/* Form fields */}
-        <div className="space-y-[var(--space-4)]">
-          {/* Host + Port */}
-          <div className="flex gap-[var(--space-3)] items-end">
+          {/* IP + Порт */}
+          <div className="flex gap-2.5 items-end">
             <div className="flex-1">
               <Input
                 label={t("labels.server_ip")}
@@ -141,7 +138,7 @@ export function SshConnectForm({ onConnect }: Props) {
                 placeholder="123.45.67.89"
               />
             </div>
-            <div className="w-20">
+            <div className="w-[72px]">
               <Input
                 label={t("labels.port")}
                 value={port}
@@ -151,7 +148,7 @@ export function SshConnectForm({ onConnect }: Props) {
             </div>
           </div>
 
-          {/* Username */}
+          {/* Имя пользователя */}
           <Input
             label={t("labels.username")}
             value={user}
@@ -159,12 +156,12 @@ export function SshConnectForm({ onConnect }: Props) {
             placeholder="root"
           />
 
-          {/* Auth mode toggle */}
+          {/* Способ авторизации */}
           <div>
-            <label className="block text-xs font-medium mb-[var(--space-2)] text-[var(--color-text-secondary)]">
+            <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">
               {t("control.auth_method")}
             </label>
-            <div className="grid grid-cols-2 gap-[var(--space-2)]">
+            <div className="grid grid-cols-2 gap-1.5">
               <Button
                 variant={authMode === "password" ? "primary" : "ghost"}
                 size="sm"
@@ -184,7 +181,7 @@ export function SshConnectForm({ onConnect }: Props) {
             </div>
           </div>
 
-          {/* Password or Key input */}
+          {/* Пароль или ключ */}
           {authMode === "password" ? (
             <PasswordInput
               label={t("labels.ssh_password")}
@@ -193,38 +190,37 @@ export function SshConnectForm({ onConnect }: Props) {
               placeholder="********"
             />
           ) : (
-            <div className="space-y-[var(--space-2)]">
-              {/* File / Paste toggle */}
-              <div className="flex gap-[var(--space-1)]">
+            <div className="space-y-1.5">
+              <div className="flex gap-1">
                 <Button
                   variant={keyInputMode === "file" ? "primary" : "ghost"}
                   size="sm"
                   onClick={() => setKeyInputMode("file")}
-                  className="text-[var(--font-size-xs)]"
+                  className="text-xs"
                 >
                   <FileKey className="w-3 h-3" />
-                  {t("control.key_from_file", "File")}
+                  {t("control.key_from_file", "Файл")}
                 </Button>
                 <Button
                   variant={keyInputMode === "paste" ? "primary" : "ghost"}
                   size="sm"
                   onClick={() => setKeyInputMode("paste")}
-                  className="text-[var(--font-size-xs)]"
+                  className="text-xs"
                 >
                   <ClipboardPaste className="w-3 h-3" />
-                  {t("control.key_paste", "Paste")}
+                  {t("control.key_paste", "Вставить")}
                 </Button>
               </div>
 
               {keyInputMode === "file" ? (
                 <div>
-                  <div className="flex gap-[var(--space-2)]">
+                  <div className="flex gap-1.5">
                     <div
-                      className="flex-1 flex items-center px-[var(--space-3)] h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)]"
+                      className="flex-1 flex items-center px-2.5 h-8 rounded-[var(--radius-md)] text-xs truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)]"
                       onClick={handleSelectKey}
                     >
-                      <FileKey className="w-4 h-4 shrink-0 mr-[var(--space-2)] text-[var(--color-text-muted)]" />
-                      <span className="truncate text-[var(--font-size-xs)]" style={{ color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
+                      <FileKey className="w-3.5 h-3.5 shrink-0 mr-2 text-[var(--color-text-muted)]" />
+                      <span className="truncate text-xs" style={{ color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
                         {keyPath ? keyPath.split(/[/\\]/).pop() : t("control.select_key")}
                       </span>
                     </div>
@@ -233,14 +229,14 @@ export function SshConnectForm({ onConnect }: Props) {
                     </Button>
                   </div>
                   {keyPath && (
-                    <p className="text-[var(--font-size-xs)] mt-[var(--space-1)] truncate text-[var(--color-text-muted)]">
+                    <p className="text-[10px] mt-1 truncate text-[var(--color-text-muted)]">
                       {keyPath}
                     </p>
                   )}
                 </div>
               ) : (
                 <textarea
-                  className="w-full rounded-[var(--radius-lg)] px-[var(--space-3)] py-[var(--space-2)] text-[var(--font-size-xs)] font-mono resize-none h-[100px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)]"
+                  className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-xs font-mono resize-none h-[100px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)]"
                   value={keyData}
                   onChange={(e) => setKeyData(e.target.value)}
                   placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
@@ -250,7 +246,7 @@ export function SshConnectForm({ onConnect }: Props) {
             </div>
           )}
 
-          {/* Connect button */}
+          {/* Кнопка подключения */}
           <Button
             variant="primary"
             fullWidth
@@ -261,15 +257,15 @@ export function SshConnectForm({ onConnect }: Props) {
             {connecting ? t("control.connecting") : t("control.connect")}
           </Button>
 
-          {/* Security note */}
-          <div className="flex items-center justify-center gap-[var(--space-1)]">
+          {/* Примечание */}
+          <div className="flex items-center justify-center gap-1 pt-1">
             <Lock className="w-3 h-3 text-[var(--color-text-muted)]" />
-            <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+            <span className="text-[10px] text-[var(--color-text-muted)]">
               {t("control.remember")}
             </span>
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }
