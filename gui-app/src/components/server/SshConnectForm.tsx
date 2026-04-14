@@ -156,7 +156,7 @@ export function SshConnectForm({ onConnect }: Props) {
             label={t("labels.username")}
             value={user}
             onChange={(e) => setUser(e.target.value)}
-            placeholder="root"
+            placeholder={t("control.username_placeholder", "Введите имя пользователя")}
           />
 
           {/* Способ авторизации — 2 сегмента */}
