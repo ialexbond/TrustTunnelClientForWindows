@@ -48,8 +48,8 @@ export function ServerTabs({ state }: ServerTabsProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar */}
-      <div className="flex items-center gap-0.5 px-3 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+      {/* Tab bar — no border (D-01) */}
+      <div className="flex items-center gap-0.5 px-3 bg-[var(--color-bg-primary)]">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -67,29 +67,47 @@ export function ServerTabs({ state }: ServerTabsProps) {
         ))}
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-        {activeTab === "status" && <ServerStatusSection state={state} />}
-        {activeTab === "users" && <UsersSection state={state} />}
-        {activeTab === "config" && (
-          <>
-            <VersionSection state={state} />
-            <ConfigSection state={state} />
-          </>
-        )}
-        {activeTab === "security" && (
-          <>
-            <SecuritySection state={state} />
-            <CertSection state={state} />
-          </>
-        )}
-        {activeTab === "tools" && (
-          <>
-            <UtilitiesSection state={state} />
-            <LogsSection state={state} />
-          </>
-        )}
-        {activeTab === "danger" && <DangerZoneSection state={state} />}
+      {/* Tab content — display:none caching (D-13, D-14): mount once, toggle visibility */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <div
+          className="h-full flex flex-col overflow-hidden scroll-overlay py-3 px-4 space-y-4"
+          style={{ display: activeTab === "status" ? "flex" : "none" }}
+        >
+          <ServerStatusSection state={state} />
+        </div>
+        <div
+          className="h-full flex flex-col overflow-hidden scroll-overlay py-3 px-4 space-y-4"
+          style={{ display: activeTab === "users" ? "flex" : "none" }}
+        >
+          <UsersSection state={state} />
+        </div>
+        <div
+          className="h-full flex flex-col overflow-hidden scroll-overlay py-3 px-4 space-y-4"
+          style={{ display: activeTab === "config" ? "flex" : "none" }}
+        >
+          <VersionSection state={state} />
+          <ConfigSection state={state} />
+        </div>
+        <div
+          className="h-full flex flex-col overflow-hidden scroll-overlay py-3 px-4 space-y-4"
+          style={{ display: activeTab === "security" ? "flex" : "none" }}
+        >
+          <SecuritySection state={state} />
+          <CertSection state={state} />
+        </div>
+        <div
+          className="h-full flex flex-col overflow-hidden scroll-overlay py-3 px-4 space-y-4"
+          style={{ display: activeTab === "tools" ? "flex" : "none" }}
+        >
+          <UtilitiesSection state={state} />
+          <LogsSection state={state} />
+        </div>
+        <div
+          className="h-full flex flex-col overflow-hidden scroll-overlay py-3 px-4 space-y-4"
+          style={{ display: activeTab === "danger" ? "flex" : "none" }}
+        >
+          <DangerZoneSection state={state} />
+        </div>
       </div>
     </div>
   );

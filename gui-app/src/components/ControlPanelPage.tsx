@@ -57,7 +57,6 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   const [creds, setCreds] = useState<SshCredentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showAddForm, setShowAddForm] = useState(false);
   const lastTsRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -76,7 +75,6 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         readStoredCredentials().then((fresh) => {
           if (fresh) {
             setCreds(fresh);
-            setShowAddForm(false);
             setRefreshKey(k => k + 1);
           } else {
             setCreds(null);
@@ -87,7 +85,6 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         readStoredCredentials().then((fresh) => {
           if (fresh) {
             setCreds(fresh);
-            setShowAddForm(false);
             setRefreshKey(k => k + 1);
           }
         });
@@ -98,7 +95,6 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
 
   const handleConnect = useCallback((newCreds: SshCredentials) => {
     setCreds(newCreds);
-    setShowAddForm(false);
     setRefreshKey(k => k + 1);
   }, []);
 
@@ -123,7 +119,6 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     invoke("clear_ssh_credentials").catch(() => {});
     localStorage.removeItem("trusttunnel_control_refresh");
     setCreds(null);
-    setShowAddForm(false);
   }, []);
 
   if (loading) {
@@ -137,22 +132,34 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
 
   const selectedId = creds ? "main" : null;
 
+  // Sidebar is visible when 2+ servers exist (D-08)
+  // Currently only 1 server is supported, but the animation wrapper is ready for multi-server
+  const sidebarVisible = servers.length >= 2;
+
   return (
     <div className="h-full flex overflow-hidden">
-      {/* Sidebar */}
-      <ServerSidebar
-        servers={servers}
-        selectedId={selectedId}
-        onSelect={() => { /* single server for now */ }}
-        onAddServer={() => {
-          if (creds) {
-            // Already connected — disconnect first, then show form
-            handleDisconnect();
-          }
-          setShowAddForm(true);
+      {/* Sidebar animation wrapper — hidden at <2 servers, animated show/hide (D-08, D-11) */}
+      <div
+        style={{
+          width: sidebarVisible ? 220 : 0,
+          opacity: sidebarVisible ? 1 : 0,
+          overflow: "hidden",
+          flexShrink: 0,
+          transition: sidebarVisible
+            ? "width var(--transition-normal) var(--ease-out), opacity var(--transition-normal) var(--ease-out)"
+            : "width var(--transition-fast) var(--ease-out), opacity var(--transition-fast) var(--ease-out)",
         }}
-        onDisconnect={() => handleDisconnect()}
-      />
+      >
+        <ServerSidebar
+          servers={servers}
+          selectedId={selectedId}
+          onSelect={() => { /* single server for now */ }}
+          onAddServer={() => {
+            setRefreshKey(k => k + 1);
+          }}
+          onDisconnect={() => handleDisconnect()}
+        />
+      </div>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
