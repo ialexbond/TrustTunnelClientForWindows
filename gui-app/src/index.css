@@ -127,6 +127,21 @@
   50% { opacity: 0.5; }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ── Number input spinners ── */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
@@ -151,10 +166,10 @@ input[type="number"] {
   overflow-y: auto;
 }
 
-/* Thin visible scrollbar for log panels */
+/* Thin visible scrollbar — adapts to theme */
 .scroll-visible {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: var(--color-border-hover) transparent;
 }
 .scroll-visible::-webkit-scrollbar {
   display: block;
@@ -164,11 +179,11 @@ input[type="number"] {
   background: transparent;
 }
 .scroll-visible::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--color-border-hover);
   border-radius: 3px;
 }
 .scroll-visible::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--color-border-active);
 }
 .scroll-visible::-webkit-scrollbar-button {
   display: none;

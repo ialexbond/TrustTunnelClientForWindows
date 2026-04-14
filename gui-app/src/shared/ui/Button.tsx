@@ -7,7 +7,7 @@ export const buttonVariants = cva(
   [
     "inline-flex items-center justify-center",
     "font-[var(--font-weight-semibold)]",
-    "rounded-[var(--radius-lg)]",
+    "rounded-[var(--radius-md)]",
     "transition-all duration-[var(--transition-fast)] ease-[var(--ease-out)]",
     "active:scale-[0.97]",
     "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:pointer-events-none",
@@ -20,7 +20,7 @@ export const buttonVariants = cva(
           "bg-[var(--color-accent-interactive)]",
           "hover:bg-[var(--color-accent-hover)]",
           "active:bg-[var(--color-accent-active)]",
-          "text-[var(--color-text-inverse)]",
+          "text-white",
           "border border-transparent",
         ].join(" "),
         danger: [
@@ -45,9 +45,9 @@ export const buttonVariants = cva(
         ].join(" "),
       },
       size: {
-        sm: "h-8 px-3 text-[var(--font-size-sm)] gap-1.5",
-        md: "h-8 px-4 text-[var(--font-size-sm)] gap-2",
-        lg: "h-9 px-5 text-[var(--font-size-md)] gap-2",
+        sm: "h-8 px-3 text-sm gap-1.5",
+        md: "h-8 px-4 text-sm gap-2",
+        lg: "h-9 px-5 text-base gap-2",
       },
       fullWidth: {
         true: "w-full",

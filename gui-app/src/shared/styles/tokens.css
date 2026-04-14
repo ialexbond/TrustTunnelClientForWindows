@@ -137,8 +137,8 @@
   --color-border-active: rgba(255, 255, 255, 0.22);
 
   /* Input */
-  --color-input-bg: rgba(255, 255, 255, 0.05);
-  --color-input-border: rgba(255, 255, 255, 0.12);
+  --color-input-bg: rgba(255, 255, 255, 0.06);
+  --color-input-border: rgba(255, 255, 255, 0.22);
   --color-input-focus: var(--color-accent-400);
 
   /* Toggle */

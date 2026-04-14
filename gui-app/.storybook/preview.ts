@@ -17,7 +17,7 @@ const preview: Preview = {
   ],
   parameters: {
     backgrounds: { disable: true },
-    layout: 'fullscreen',
+    layout: 'padded',
   },
 };
 

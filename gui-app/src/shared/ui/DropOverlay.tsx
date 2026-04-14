@@ -28,7 +28,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         className={cn(
           "flex flex-col items-center gap-3",
           "text-[var(--color-text-inverse)]",
-          "text-[var(--font-size-lg)]",
+          "text-lg",
           "font-[var(--font-weight-semibold)]",
         )}
         style={{
@@ -51,7 +51,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         </svg>
         <span>{t("drop.overlay_text", "Drop file here")}</span>
         <span
-          className="text-[var(--font-size-xs)] font-[var(--font-weight-normal)] opacity-70"
+          className="text-xs font-[var(--font-weight-normal)] opacity-70"
         >
           {t("drop.overlay_hint", ".toml — VPN config, .json — routing rules")}
         </span>

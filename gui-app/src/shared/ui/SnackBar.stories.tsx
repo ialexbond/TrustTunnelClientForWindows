@@ -36,7 +36,7 @@ export const Default: Story = {
           style={{
             padding: "8px 16px",
             background: "var(--color-accent-interactive)",
-            color: "var(--color-text-on-accent)",
+            color: "white",
             border: "none",
             borderRadius: "var(--radius-md)",
             cursor: "pointer",

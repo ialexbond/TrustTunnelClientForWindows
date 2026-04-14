@@ -25,17 +25,17 @@ export const Default: Story = {
 export const Positions: Story = {
   render: () => (
     <div className="grid grid-cols-2 gap-8 p-16">
-      <Tooltip text="Tooltip above" delay={0}>
-        <Button variant="secondary" size="sm">Top</Button>
+      <Tooltip text="Tooltip above" position="top" delay={0}>
+        <Button variant="ghost" size="sm">Top</Button>
       </Tooltip>
-      <Tooltip text="Tooltip below" delay={0}>
-        <Button variant="secondary" size="sm">Bottom</Button>
+      <Tooltip text="Tooltip below" position="bottom" delay={0}>
+        <Button variant="ghost" size="sm">Bottom</Button>
       </Tooltip>
-      <Tooltip text="Tooltip to the left" delay={0}>
-        <Button variant="secondary" size="sm">Left</Button>
+      <Tooltip text="Tooltip to the left" position="left" delay={0}>
+        <Button variant="ghost" size="sm">Left</Button>
       </Tooltip>
-      <Tooltip text="Tooltip to the right" delay={0}>
-        <Button variant="secondary" size="sm">Right</Button>
+      <Tooltip text="Tooltip to the right" position="right" delay={0}>
+        <Button variant="ghost" size="sm">Right</Button>
       </Tooltip>
     </div>
   ),

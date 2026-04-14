@@ -91,19 +91,29 @@ export const Disabled: Story = {
   },
 };
 
+function ClearableInAllStates() {
+  const [val, setVal] = useState("Clearable");
+  return (
+    <div>
+      <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Clearable</p>
+      <Input value={val} onChange={(e) => setVal(e.target.value)} clearable placeholder="Clearable" />
+    </div>
+  );
+}
+
 export const AllStates: Story = {
   render: () => (
     <div className="flex flex-col gap-4 max-w-xs">
       <div>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Default</p>
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Default</p>
         <Input placeholder="Default state" />
       </div>
       <div>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">With value</p>
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">With value</p>
         <Input value="Some input value" onChange={() => {}} placeholder="With value" />
       </div>
       <div>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Error</p>
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Error</p>
         <Input
           value="Bad value"
           onChange={() => {}}
@@ -112,17 +122,14 @@ export const AllStates: Story = {
         />
       </div>
       <div>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Disabled</p>
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Disabled</p>
         <Input disabled placeholder="Disabled state" />
       </div>
       <div>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">With helper text</p>
+        <p className="text-xs text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">With helper text</p>
         <Input placeholder="With helper" helperText="Helpful hint below the input" />
       </div>
-      <div>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">Clearable</p>
-        <Input value="Clearable" onChange={() => {}} clearable placeholder="Clearable" />
-      </div>
+      <ClearableInAllStates />
     </div>
   ),
 };

@@ -119,7 +119,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     <div className={cn(fullWidth ? "w-full" : "")}>
       {label && (
         <label
-          className="block text-[var(--font-size-xs)] font-[var(--font-weight-semibold)] mb-1.5"
+          className="block text-xs font-[var(--font-weight-semibold)] mb-1.5"
           style={{ color: "var(--color-text-secondary)" }}
         >
           {label}
@@ -150,7 +150,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
           disabled={disabled}
           className={cn(
             "flex items-center justify-between gap-2 w-full",
-            "rounded-[var(--radius-md)] px-[var(--space-3)] h-8 text-[var(--font-size-md)]",
+            "rounded-[var(--radius-md)] px-[var(--space-3)] h-8 text-base",
             "cursor-pointer transition-colors outline-none",
             "border border-[var(--color-input-border)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)]",
             "focus-visible:shadow-[var(--focus-ring)]",
@@ -185,6 +185,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
               id={listboxId}
               role="listbox"
               aria-label={label}
+              className="animate-[fadeInScale_150ms_ease-out]"
               style={{
                 ...dropdownStyle,
                 zIndex: "var(--z-dropdown)",
@@ -196,7 +197,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
                 overflow: "hidden",
               }}
             >
-              <div className="max-h-48 overflow-y-auto" style={{ padding: "4px" }}>
+              <div className="max-h-48 overflow-y-auto scroll-visible flex flex-col gap-0.5" style={{ padding: "4px" }}>
                 {options.map((opt, index) => {
                   const isSelected = opt.value === value;
                   const isHighlighted = index === highlightedIndex;

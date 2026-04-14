@@ -1,4 +1,4 @@
-import { useEffect, useCallback, type ReactNode } from "react";
+import { useEffect, useCallback, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
 
@@ -35,6 +35,19 @@ export function Modal({
   closeOnEscape = true,
 }: ModalProps) {
   const isVisible = isOpen ?? open ?? false;
+  const [mounted, setMounted] = useState(false);
+  const [animating, setAnimating] = useState(false);
+
+  useEffect(() => {
+    if (isVisible) {
+      setMounted(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setAnimating(true)));
+    } else {
+      setAnimating(false);
+      const t = setTimeout(() => setMounted(false), 200);
+      return () => clearTimeout(t);
+    }
+  }, [isVisible]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -49,11 +62,15 @@ export function Modal({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isVisible, handleKeyDown]);
 
-  if (!isVisible) return null;
+  if (!mounted) return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center z-[var(--z-modal)] bg-[var(--color-glass-bg)] backdrop-blur-sm"
+      className={cn(
+        "fixed inset-0 flex items-center justify-center z-[var(--z-modal)] backdrop-blur-sm",
+        "transition-opacity duration-200 ease-out",
+        animating ? "opacity-100 bg-[var(--color-glass-bg)]" : "opacity-0 bg-transparent",
+      )}
       onClick={closeOnBackdrop && onClose ? onClose : undefined}
     >
       <div
@@ -64,15 +81,15 @@ export function Modal({
           "rounded-[var(--radius-lg)]",
           "shadow-[var(--shadow-lg)]",
           "p-[var(--space-6)]",
-          "transition-all duration-[var(--transition-normal)]",
+          "transition-all duration-200 ease-out",
+          animating ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-2",
           className,
         )}
-        style={{ transitionTimingFunction: "var(--ease-in-out)" }}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
           <h2
-            className="text-[var(--font-size-lg)] font-[var(--font-weight-semibold)] mb-[var(--space-4)]"
+            className="text-lg font-[var(--font-weight-semibold)] mb-[var(--space-4)]"
             style={{ color: "var(--color-text-primary)" }}
           >
             {title}

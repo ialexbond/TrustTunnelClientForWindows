@@ -50,7 +50,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
               {label && (
                 <span className="flex items-center gap-1">
                   <span
-                    className="text-[var(--font-size-xs)] font-[var(--font-weight-semibold)]"
+                    className="text-xs font-[var(--font-weight-semibold)]"
                     style={{ color: "var(--color-text-primary)" }}
                   >
                     {label}
@@ -60,7 +60,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
               )}
               {description && (
                 <p
-                  className="text-[var(--font-size-xs)] mt-0.5"
+                  className="text-xs mt-0.5"
                   style={{ color: "var(--color-text-muted)" }}
                 >
                   {description}
