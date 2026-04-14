@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { SshConnectForm } from "./SshConnectForm";
-import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 
 const meta: Meta<typeof SshConnectForm> = {
   title: "Screens/SshConnectForm",
@@ -11,11 +10,9 @@ const meta: Meta<typeof SshConnectForm> = {
   },
   decorators: [
     (Story) => (
-      <SnackBarProvider>
-        <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-          <Story />
-        </div>
-      </SnackBarProvider>
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+        <Story />
+      </div>
     ),
   ],
   args: {
