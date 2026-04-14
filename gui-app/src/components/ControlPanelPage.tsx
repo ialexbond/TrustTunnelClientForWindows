@@ -158,16 +158,16 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
       <div className="flex-1 flex flex-col overflow-hidden">
         {!creds ? (
           /* No credentials — show SshConnectForm */
-          <div className="flex-1 flex flex-col overflow-hidden bg-[var(--color-bg-primary)]">
+          <div className="flex-1 flex flex-col overflow-hidden">
             <SshConnectForm onConnect={handleConnect} />
           </div>
         ) : (
           /* Connected — show header + ServerPanel (tabs coming in next iteration) */
           <>
             {/* Header */}
-            <div className="h-[40px] flex items-center justify-between px-3 shrink-0 bg-[var(--color-bg-primary)] border-b border-[var(--color-border)]">
+            <div className="h-[40px] flex items-center justify-between px-3 shrink-0 border-b border-[var(--color-border)]">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-status-connected)" }} />
                 <span className="text-xs font-medium text-[var(--color-text-primary)]">
                   {creds.host}:{creds.port}
                 </span>

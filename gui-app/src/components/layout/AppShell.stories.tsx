@@ -1,0 +1,124 @@
+import type { Meta, StoryObj } from "@storybook/react";
+import { TitleBar } from "./TitleBar";
+import { WindowControls } from "./WindowControls";
+import { TabNavigation } from "./TabNavigation";
+
+/**
+ * AppShell -- composition story showing the complete app layout:
+ * TitleBar (32px) at top, content area in the middle, TabNavigation (48px) at bottom.
+ *
+ * This demonstrates how all layout components work together as the application shell.
+ * The content area uses a placeholder with centered text.
+ */
+
+/** Placeholder content area to simulate page content. */
+function ContentPlaceholder({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--color-text-muted)",
+        fontSize: 13,
+        borderTop: "1px solid var(--color-border)",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+const meta: Meta = {
+  title: "Layout/AppShell",
+  parameters: { layout: "fullscreen" },
+  decorators: [
+    (Story) => (
+      <div
+        style={{
+          height: 400,
+          backgroundColor: "var(--color-bg-primary)",
+          display: "flex",
+          flexDirection: "column",
+          borderRadius: "var(--radius-lg)",
+          overflow: "hidden",
+          border: "1px solid var(--color-border)",
+        }}
+      >
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+export default meta;
+type Story = StoryObj;
+
+/** Full shell: TitleBar + content placeholder + TabNavigation with all tabs enabled. */
+export const Default: Story = {
+  render: () => (
+    <>
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+      <ContentPlaceholder label="Content Area" />
+      <TabNavigation
+        activeTab="control"
+        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
+        hasConfig={true}
+      />
+    </>
+  ),
+};
+
+/** Connection tab active -- shows elevated background on the active tab button. */
+export const ConnectionActive: Story = {
+  render: () => (
+    <>
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+      <ContentPlaceholder label="Connection Settings" />
+      <TabNavigation
+        activeTab="connection"
+        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
+        hasConfig={true}
+      />
+    </>
+  ),
+};
+
+/** No config loaded -- config-dependent tabs (connection, routing, settings) are disabled. */
+export const WithoutConfig: Story = {
+  render: () => (
+    <>
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+      <ContentPlaceholder label="No configuration loaded" />
+      <TabNavigation
+        activeTab="control"
+        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
+        hasConfig={false}
+      />
+    </>
+  ),
+};
+
+/** About tab active -- always available regardless of config state. */
+export const AboutActive: Story = {
+  render: () => (
+    <>
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+      <ContentPlaceholder label="About TrustTunnel" />
+      <TabNavigation
+        activeTab="about"
+        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
+        hasConfig={true}
+      />
+    </>
+  ),
+};

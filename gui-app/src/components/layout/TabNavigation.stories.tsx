@@ -2,20 +2,28 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { TabNavigation } from "./TabNavigation";
 
 /**
- * TabNavigation — horizontal 5-tab navigation bar for the Application Shell.
+ * TabNavigation -- bottom tab bar (48px height, border-top, transparent background).
  *
- * Tabs requiring config (connection, routing, settings) are disabled when
- * hasConfig=false. The "Панель управления" and "О программе" tabs are always enabled.
+ * 5 tabs as compact 64x40px rounded buttons with icon + label stacked vertically.
+ * Active tab uses accent color + bg-elevated. Tabs requiring config (connection,
+ * routing, settings) are disabled when hasConfig=false.
  *
- * i18n is initialized globally via preview.ts (../src/shared/i18n), so tab labels
- * render in Russian without additional story configuration.
+ * i18n is initialized globally via preview.ts, so tab labels render in Russian
+ * without additional story configuration.
  */
 const meta: Meta<typeof TabNavigation> = {
   title: "Layout/TabNavigation",
   component: TabNavigation,
   parameters: { layout: "fullscreen" },
+  decorators: [
+    (Story) => (
+      <div style={{ backgroundColor: "var(--color-bg-primary)" }}>
+        <Story />
+      </div>
+    ),
+  ],
   args: {
-    onTabChange: () => {},
+    onTabChange: (tab: string) => console.log("[Story] onTabChange:", tab),
     hasConfig: true,
     activeTab: "control",
   },
@@ -24,35 +32,38 @@ const meta: Meta<typeof TabNavigation> = {
 export default meta;
 type Story = StoryObj<typeof TabNavigation>;
 
-/** All 5 tabs enabled, "Панель управления" active. */
-export const AllEnabled: Story = {
+/** Default: all tabs enabled, "control" active. */
+export const Default: Story = {};
+
+/** WithConfig: all 5 tabs enabled, "control" active. */
+export const WithConfig: Story = {
   args: { hasConfig: true, activeTab: "control" },
 };
 
 /**
- * No config: connection, routing, and settings tabs are disabled (dimmed, cursor not-allowed).
- * Control panel and about tabs remain active.
+ * WithoutConfig: connection, routing, and settings tabs are disabled
+ * (dimmed, opacity 0.4, cursor not-allowed). Control and About remain active.
  */
-export const NoConfig: Story = {
+export const WithoutConfig: Story = {
   args: { hasConfig: false, activeTab: "control" },
 };
 
-/** "Подключение" tab active. */
+/** Connection tab active (requires hasConfig). */
 export const ConnectionActive: Story = {
   args: { hasConfig: true, activeTab: "connection" },
 };
 
-/** "Маршрутизация" tab active. */
+/** Routing tab active (requires hasConfig). */
 export const RoutingActive: Story = {
   args: { hasConfig: true, activeTab: "routing" },
 };
 
-/** "Настройки" tab active. */
+/** Settings tab active (requires hasConfig). */
 export const SettingsActive: Story = {
   args: { hasConfig: true, activeTab: "settings" },
 };
 
-/** "О программе" tab active. */
+/** About tab active (always available). */
 export const AboutActive: Story = {
   args: { hasConfig: true, activeTab: "about" },
 };

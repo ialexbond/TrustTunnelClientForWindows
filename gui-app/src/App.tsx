@@ -25,7 +25,9 @@ import { useVpnActions } from "./shared/hooks/useVpnActions";
 import { useFileDrop } from "./shared/hooks/useFileDrop";
 import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
 import { DropOverlay } from "./shared/ui/DropOverlay";
+import { EmptyState } from "./shared/ui/EmptyState";
 import { ConfirmDialog } from "./shared/ui";
+import { Settings } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 // Re-export types for backward compatibility
@@ -40,28 +42,10 @@ function App() {
 
   // ─── Navigation ───
   const [activeTab, setActiveTab] = useState<AppTab>(() => {
-    const saved = localStorage.getItem("tt_active_page") || localStorage.getItem("tt_active_tab");
+    // Fresh start: config exists → connection, no config → control panel
+    // Tab is NOT restored from localStorage — always fresh on app start
     const savedConfig = localStorage.getItem("tt_config_path");
-
-    // Map ALL old IDs (including pre-Phase-4 SidebarPage values) to new AppTab
-    const tabMap: Record<string, AppTab> = {
-      // Old SidebarPage IDs -> new AppTab
-      server: "control",
-      control: "control",
-      settings: "connection",      // old "VPN settings" -> "connection" tab
-      appSettings: "settings",     // old "App settings" -> "settings" tab
-      dashboard: "control",
-      routing: "routing",
-      logs: "connection",
-      about: "about",
-      // New AppTab IDs (passthrough for forward compat)
-      connection: "connection",
-    };
-
-    const mapped = saved ? (tabMap[saved] ?? "control") : null;
-    if (savedConfig && mapped) return mapped;
-    if (savedConfig) return "connection";
-    return "control";
+    return savedConfig ? "connection" : "control";
   });
 
   const [status, setStatus] = useState<VpnStatus>("disconnected");
@@ -358,25 +342,15 @@ function App() {
     >
       <DropOverlay isDragging={isDragging} />
 
-      {/* Title bar — seamless, no border-bottom */}
+      {/* Title bar — brand + window controls */}
       <TitleBar>
         <WindowControls />
       </TitleBar>
 
-      {/* Tab navigation — 5 tabs */}
-      <TabNavigation
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          if (tab === "control" && wizardResetRef.current) {
-            wizardResetRef.current();
-          }
-          setActiveTab(tab);
-        }}
-        hasConfig={hasConfig}
-      />
-
-      {/* Content area — full width */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      {/* Content area */}
+      <div
+        className="flex-1 min-h-0 flex flex-col overflow-hidden"
+      >
         {/* Control Panel — includes ServerSidebar internally */}
         <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "control" ? "flex" : "none" }}>
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Control Panel">
@@ -404,20 +378,28 @@ function App() {
           </PanelErrorBoundary>
         </div>
 
-        {/* Connection — VPN Settings */}
+        {/* Connection — VPN Settings or placeholder */}
         <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "connection" ? "flex" : "none" }}>
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Connection">
-            <SettingsPanel
-              key={settingsKey}
-              configPath={config.configPath}
-              onConfigChange={setConfig}
-              status={status}
-              onReconnect={handleReconnect}
-              onSwitchToSetup={() => setActiveTab("control")}
-              onClearConfig={handleClearConfig}
-              onVpnModeChange={setVpnMode}
-              statusPanel={statusPanelNode}
-            />
+            {hasConfig ? (
+              <SettingsPanel
+                key={settingsKey}
+                configPath={config.configPath}
+                onConfigChange={setConfig}
+                status={status}
+                onReconnect={handleReconnect}
+                onSwitchToSetup={() => setActiveTab("control")}
+                onClearConfig={handleClearConfig}
+                onVpnModeChange={setVpnMode}
+                statusPanel={statusPanelNode}
+              />
+            ) : (
+              <EmptyState
+                icon={<Settings className="w-6 h-6" />}
+                heading={i18n.t("connection.noConfig", "Нет подключения")}
+                body={i18n.t("connection.noConfigHint", "Настройте сервер в «Панель управления», чтобы управлять VPN-подключением")}
+              />
+            )}
           </PanelErrorBoundary>
         </div>
 
@@ -461,6 +443,17 @@ function App() {
           />
         </div>
       </div>
+
+      {/* Bottom tab navigation */}
+      <TabNavigation
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          if (tab === "control" && wizardResetRef.current) {
+            wizardResetRef.current();
+          }
+          setActiveTab(tab);
+        }}
+      />
     </div>
 
     <ConfirmDialog

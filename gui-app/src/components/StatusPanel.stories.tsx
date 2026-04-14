@@ -58,7 +58,13 @@ export const Error: Story = {
 };
 
 export const AllStates: Story = {
+  args: {
+    error: "",
+    status: "disconnected"
+  },
+
   name: "All States (composite)",
+
   render: () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       <StatusPanel
@@ -104,5 +110,5 @@ export const AllStates: Story = {
         onDisconnect={() => {}}
       />
     </div>
-  ),
+  )
 };
