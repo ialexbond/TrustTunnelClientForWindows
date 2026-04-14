@@ -178,8 +178,8 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
         <div
           key={item.id}
           className={cn(
-            "flex items-center gap-2 px-4 py-2.5",
-            "rounded-[var(--radius-lg)] text-sm font-[var(--font-weight-normal)] pointer-events-auto",
+            "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)]",
+            "rounded-[var(--radius-lg)] text-[var(--font-size-sm)] font-[var(--font-weight-normal)] pointer-events-auto",
             "shadow-[var(--shadow-lg)]",
             item.type === "error" && "border-l-2 border-[var(--color-status-error)]",
           )}

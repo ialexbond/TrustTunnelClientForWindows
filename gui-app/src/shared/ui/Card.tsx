@@ -1,4 +1,5 @@
 import type { HTMLAttributes, ReactNode } from "react";
+import { cn } from "../lib/cn";
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
@@ -16,16 +17,16 @@ const paddingMap = {
 export function Card({ children, padding = "md", hover, className = "", ...props }: CardProps) {
   return (
     <div
-      className={`
-        rounded-[var(--radius-lg)]
-        border border-[var(--color-border)]
-        bg-[var(--color-bg-surface)]
-        shadow-[var(--shadow-sm)]
-        transition-colors
-        ${hover ? "hover:border-[var(--color-border-hover)]" : ""}
-        ${paddingMap[padding]}
-        ${className}
-      `}
+      className={cn(
+        "rounded-[var(--radius-lg)]",
+        "border border-[var(--color-border)]",
+        "bg-[var(--color-bg-surface)]",
+        "shadow-[var(--shadow-sm)]",
+        "transition-colors",
+        hover && "hover:border-[var(--color-border-hover)]",
+        paddingMap[padding],
+        className,
+      )}
       {...props}
     >
       {children}
