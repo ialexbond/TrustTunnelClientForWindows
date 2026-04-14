@@ -194,7 +194,7 @@ export function CertSection({ state }: Props) {
       case "self_signed":
         return <Badge variant="warning" size="sm">{t("server.cert.self_signed")}</Badge>;
       default:
-        return <Badge variant="default" size="sm">{t("server.cert.unknown")}</Badge>;
+        return <Badge variant="neutral" size="sm">{t("server.cert.unknown")}</Badge>;
     }
   };
 
@@ -222,7 +222,7 @@ export function CertSection({ state }: Props) {
           <div className="flex items-center justify-between">
             <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.domain")}</span>
             <Badge
-              variant={certInfo.certType === "lets_encrypt" ? "success" : certInfo.certType === "self_signed" ? "warning" : "default"}
+              variant={certInfo.certType === "lets_encrypt" ? "success" : certInfo.certType === "self_signed" ? "warning" : "neutral"}
               size="sm"
             >
               {certInfo.domain}
@@ -248,7 +248,7 @@ export function CertSection({ state }: Props) {
 
         <div className="flex items-center justify-between">
           <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.auto_renew")}</span>
-          <Badge variant={certInfo.autoRenew ? "success" : "default"} size="sm">
+          <Badge variant={certInfo.autoRenew ? "success" : "neutral"} size="sm">
             {certInfo.autoRenew ? t("server.cert.configured") : t("server.cert.not_configured")}
           </Badge>
         </div>

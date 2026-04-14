@@ -107,8 +107,8 @@ export function ServerStatusSection({ state }: Props) {
   };
 
   const pingVariant = (() => {
-    if (ping === null) return "default";
-    if (ping <= 0) return "default";
+    if (ping === null) return "neutral";
+    if (ping <= 0) return "neutral";
     if (ping < 100) return "success";
     if (ping < 300) return "warning";
     return "danger";
@@ -162,13 +162,13 @@ export function ServerStatusSection({ state }: Props) {
               </button>
             </Tooltip>
             {ping !== null && ping > 0 && (
-              <Badge variant={pingVariant as "success" | "warning" | "danger" | "default"} size="sm">
+              <Badge variant={pingVariant as "success" | "warning" | "danger" | "neutral"} size="sm">
                 <Activity className="w-2.5 h-2.5" />
                 {ping}ms
               </Badge>
             )}
             {ping !== null && ping <= 0 && (
-              <Badge variant="default" size="sm">
+              <Badge variant="neutral" size="sm">
                 <WifiOff className="w-2.5 h-2.5" />
                 {t("server.status.no_connection")}
               </Badge>
