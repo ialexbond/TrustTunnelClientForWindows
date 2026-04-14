@@ -31,7 +31,7 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
   const { t } = useTranslation();
 
   return (
-    <div className="w-[200px] shrink-0 flex flex-col border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+    <div className="w-[200px] shrink-0 flex flex-col border-r border-[var(--color-border)]">
       {/* Header */}
       <div className="h-[40px] flex items-center px-3 border-b border-[var(--color-border)]">
         <span
