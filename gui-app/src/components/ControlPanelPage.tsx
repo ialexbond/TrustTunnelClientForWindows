@@ -131,7 +131,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
 
   if (!creds) {
     return (
-      <div className="h-full flex flex-col overflow-hidden">
+      <div className="h-full flex flex-col overflow-hidden bg-[var(--color-bg-primary)]">
         <SshConnectForm onConnect={handleConnect} />
       </div>
     );
@@ -140,20 +140,13 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div
-        className="flex items-center justify-end px-4 shrink-0"
-        style={{
-          height: 52,
-          backgroundColor: "var(--color-bg-primary)",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
+      <div className="h-[52px] flex items-center justify-end px-[var(--space-4)] shrink-0 bg-[var(--color-bg-primary)] border-b border-[var(--color-border)]">
         <Button
           variant="ghost"
           size="sm"
-          icon={<LogOut className="w-3.5 h-3.5" />}
           onClick={handleDisconnect}
         >
+          <LogOut className="w-3.5 h-3.5" />
           {t("control.disconnect")}
         </Button>
       </div>
