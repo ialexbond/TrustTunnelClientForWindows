@@ -351,30 +351,23 @@ function App() {
       <div
         className="flex-1 min-h-0 flex flex-col overflow-hidden"
       >
-        {/* Control Panel — includes ServerSidebar internally */}
+        {/* Control Panel — always shows ControlPanelPage (handles no-creds internally) */}
         <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "control" ? "flex" : "none" }}>
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Control Panel">
-            {hasConfig ? (
-              <ControlPanelPage
-                key={controlKey}
-                onConfigExported={(path) => {
-                  setConfig(prev => ({ ...prev, configPath: path }));
-                  localStorage.setItem("tt_config_path", path);
-                  setSettingsKey(k => k + 1);
-                }}
-                onSwitchToSetup={() => {
-                  setWizardKey(k => k + 1);
-                  // When no config, control tab shows SshConnectForm or SetupWizard
-                }}
-                onNavigateToSettings={() => {
-                  setActiveTab("settings");
-                }}
-              />
-            ) : (
-              <div className="flex-1 flex flex-col overflow-hidden px-4">
-                <SetupWizard key={wizardKey} onSetupComplete={handleSetupComplete} resetToWelcomeRef={wizardResetRef} />
-              </div>
-            )}
+            <ControlPanelPage
+              key={controlKey}
+              onConfigExported={(path) => {
+                setConfig(prev => ({ ...prev, configPath: path }));
+                localStorage.setItem("tt_config_path", path);
+                setSettingsKey(k => k + 1);
+              }}
+              onSwitchToSetup={() => {
+                setWizardKey(k => k + 1);
+              }}
+              onNavigateToSettings={() => {
+                setActiveTab("settings");
+              }}
+            />
           </PanelErrorBoundary>
         </div>
 
