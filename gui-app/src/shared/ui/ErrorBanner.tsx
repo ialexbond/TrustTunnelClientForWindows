@@ -8,7 +8,7 @@ export const errorBannerVariants = cva(
     "flex items-center gap-2",
     "px-[var(--space-3)] py-[var(--space-2)]",
     "rounded-[var(--radius-md)]",
-    "text-[var(--font-size-sm)]",
+    "text-sm",
     "border",
   ].join(" "),
   {

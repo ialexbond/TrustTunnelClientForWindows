@@ -7,7 +7,7 @@ export const badgeVariants = cva(
     "inline-flex items-center gap-1.5",
     "px-2 py-0.5",
     "rounded-[var(--radius-full)]",
-    "text-[var(--font-size-xs)]",
+    "text-xs",
     "font-[var(--font-weight-semibold)]",
     "uppercase tracking-[var(--tracking-wide)]",
   ].join(" "),

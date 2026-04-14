@@ -34,12 +34,12 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
     return (
       <div className={fullWidth ? "w-full" : ""}>
         {label && (
-          <label className="block text-[var(--font-size-sm)] font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+          <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
             {label}
           </label>
         )}
         {description && (
-          <p className="text-[var(--font-size-xs)] mb-1.5 text-[var(--color-text-muted)]">
+          <p className="text-xs mb-1.5 text-[var(--color-text-muted)]">
             {description}
           </p>
         )}
@@ -56,7 +56,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
               "px-[var(--space-3)]",
-              "text-[var(--font-size-md)] text-[var(--color-text-primary)]",
+              "text-base text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
@@ -83,12 +83,12 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
           )}
         </div>
         {error && (
-          <p className="text-[var(--font-size-xs)] mt-1 text-[var(--color-status-error)]">
+          <p className="text-xs mt-1 text-[var(--color-status-error)]">
             {error}
           </p>
         )}
         {!error && helperText && (
-          <p className="text-[var(--font-size-xs)] mt-1 text-[var(--color-text-muted)]">
+          <p className="text-xs mt-1 text-[var(--color-text-muted)]">
             {helperText}
           </p>
         )}
