@@ -24,25 +24,8 @@ export default meta;
 type Story = StoryObj<typeof SshConnectForm>;
 
 /**
- * Default state: empty form, password auth mode.
- * Connect button is disabled until host and password are filled.
- * Switch theme via toolbar (dark/light) to verify both themes.
+ * Форма подключения к серверу. Начальное состояние — режим пароля.
+ * Переключите на SSH-ключ прямо в форме, чтобы увидеть файловый/вставочный режим.
+ * Тему (dark/light) можно переключить через тулбар сверху.
  */
 export const Default: Story = {};
-
-/**
- * Password mode — explicitly named for clarity.
- * Identical to Default, documents the initial auth mode.
- */
-export const PasswordMode: Story = {
-  name: "Password Mode (default)",
-};
-
-/**
- * Interactive key modes: click the "SSH ключ" button in the auth toggle
- * to switch to key-file mode, then "Вставить" to switch to key-paste mode.
- * Both modes are accessible via user interaction within this same story.
- */
-export const KeyMode: Story = {
-  name: "Key Mode (click 'SSH ключ' to activate)",
-};
