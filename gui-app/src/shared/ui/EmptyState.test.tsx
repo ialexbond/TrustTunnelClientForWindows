@@ -3,14 +3,14 @@ import { render, screen } from "@testing-library/react";
 import { EmptyState } from "./EmptyState";
 
 describe("EmptyState", () => {
-  it("renders default heading 'Ничего нет'", () => {
+  it("renders default heading from i18n", () => {
     render(<EmptyState />);
-    expect(screen.getByText("Ничего нет")).toBeInTheDocument();
+    expect(screen.getByText("Nothing here")).toBeInTheDocument();
   });
 
-  it("renders default body 'Здесь появятся элементы после добавления.'", () => {
+  it("renders default body from i18n", () => {
     render(<EmptyState />);
-    expect(screen.getByText("Здесь появятся элементы после добавления.")).toBeInTheDocument();
+    expect(screen.getByText("Items will appear after adding.")).toBeInTheDocument();
   });
 
   it("renders custom heading when heading prop provided", () => {

@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 
 interface EmptyStateProps {
@@ -11,11 +12,14 @@ interface EmptyStateProps {
 
 export function EmptyState({
   icon,
-  heading = "Ничего нет",
-  body = "Здесь появятся элементы после добавления.",
+  heading,
+  body,
   action,
   className,
 }: EmptyStateProps) {
+  const { t } = useTranslation();
+  const resolvedHeading = heading ?? t("empty.heading", "Ничего нет");
+  const resolvedBody = body ?? t("empty.body", "Здесь появятся элементы после добавления.");
   return (
     <div
       className={cn(
@@ -38,7 +42,7 @@ export function EmptyState({
           color: "var(--color-text-secondary)",
         }}
       >
-        {heading}
+        {resolvedHeading}
       </p>
       <p
         style={{
@@ -46,7 +50,7 @@ export function EmptyState({
           color: "var(--color-text-muted)",
         }}
       >
-        {body}
+        {resolvedBody}
       </p>
       {action && <div>{action}</div>}
     </div>

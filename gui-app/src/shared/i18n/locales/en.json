@@ -1031,5 +1031,12 @@
     "add_server": "Add server",
     "no_servers": "No servers",
     "no_servers_hint": "Configure connection in Control Panel"
+  },
+  "select": {
+    "placeholder": "Select..."
+  },
+  "empty": {
+    "heading": "Nothing here",
+    "body": "Items will appear after adding."
   }
 }
