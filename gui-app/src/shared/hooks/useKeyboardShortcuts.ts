@@ -10,13 +10,13 @@ interface ShortcutHandlers {
 /**
  * Global keyboard shortcuts:
  *  Ctrl+Shift+C  — Toggle VPN connect/disconnect
- *  Ctrl+1..8     — Navigate to panel by index
+ *  Ctrl+1..5     — Navigate to tab by index
  *  Ctrl+Shift+D  — Toggle dark/light theme
  *  Ctrl+Shift+L  — Toggle language
  */
 export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
   useEffect(() => {
-    const pages = ["dashboard", "server", "control", "settings", "routing", "logs", "appSettings", "about"];
+    const pages = ["control", "connection", "routing", "settings", "about"];
 
     function onKeyDown(e: KeyboardEvent) {
       // Ignore if typing in input/textarea
