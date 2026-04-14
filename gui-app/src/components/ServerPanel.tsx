@@ -13,17 +13,7 @@ import { Button } from "../shared/ui/Button";
 import { colors } from "../shared/ui/colors";
 import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 import { useServerState } from "./server/useServerState";
-import { ServerStatusSection } from "./server/ServerStatusSection";
-import { VersionSection } from "./server/VersionSection";
-import { ConfigSection } from "./server/ConfigSection";
-import { CertSection } from "./server/CertSection";
-import { SecuritySection } from "./server/SecuritySection";
-import { UtilitiesSection } from "./server/UtilitiesSection";
-import { UsersSection } from "./server/UsersSection";
-
-import { LogsSection } from "./server/LogsSection";
-
-import { DangerZoneSection } from "./server/DangerZoneSection";
+import { ServerTabs } from "./ServerTabs";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -221,37 +211,26 @@ export function ServerPanel(props: ServerPanelProps) {
     );
   }
 
-  // ─── Main panel ───
+  // ─── Main panel — tabbed layout ───
   return (
     <>
-      <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">
-          <ServerStatusSection state={state} />
-          <UsersSection state={state} />
-          <VersionSection state={state} />
-          <ConfigSection state={state} />
-          <CertSection state={state} />
-          <SecuritySection state={state} />
-          <UtilitiesSection state={state} />
-          <LogsSection state={state} />
-          <DangerZoneSection state={state} />
+      <ServerTabs state={state} />
 
-          {/* Reboot server confirmation */}
-          <ConfirmDialog
-            open={state.confirmReboot}
-            title={t("server.danger.confirm_reboot_title")}
-            message={t("server.danger.confirm_reboot_message")}
-            confirmLabel={t("server.danger.confirm_reboot_btn")}
-            cancelLabel={t("buttons.cancel")}
-            variant="warning"
-            onCancel={() => state.setConfirmReboot(false)}
-            onConfirm={() => {
-              state.setConfirmReboot(false);
-              state.setRebooting(true);
-              invoke("server_reboot", state.sshParams).catch(() => {});
-            }}
-          />
-      </div>
-
+      {/* Reboot server confirmation */}
+      <ConfirmDialog
+        open={state.confirmReboot}
+        title={t("server.danger.confirm_reboot_title")}
+        message={t("server.danger.confirm_reboot_message")}
+        confirmLabel={t("server.danger.confirm_reboot_btn")}
+        cancelLabel={t("buttons.cancel")}
+        variant="warning"
+        onCancel={() => state.setConfirmReboot(false)}
+        onConfirm={() => {
+          state.setConfirmReboot(false);
+          state.setRebooting(true);
+          invoke("server_reboot", state.sshParams).catch(() => {});
+        }}
+      />
     </>
   );
 }
