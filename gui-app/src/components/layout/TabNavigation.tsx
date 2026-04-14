@@ -42,18 +42,15 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
         const active = activeTab === tab.id;
 
         return (
-          <button
-            key={tab.id}
-            role="tab"
-            aria-selected={active}
-            onClick={() => onTabChange(tab.id)}
-            className="flex-1 flex flex-col items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)] focus-visible:ring-offset-1 group cursor-pointer"
-          >
-            {/* Fixed-size hover area — icon + text */}
-            <div
+          <div key={tab.id} className="flex-1 flex items-center justify-center">
+            <button
+              role="tab"
+              aria-selected={active}
+              onClick={() => onTabChange(tab.id)}
               className={[
-                "flex flex-col items-center justify-center rounded-[var(--radius-lg)] transition-colors duration-[var(--transition-fast)]",
-                !active ? "group-hover:bg-[var(--color-bg-hover)]" : "",
+                "flex flex-col items-center justify-center rounded-[var(--radius-lg)] transition-colors duration-[var(--transition-fast)] outline-none cursor-pointer",
+                "focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)] focus-visible:ring-offset-1",
+                !active ? "hover:bg-[var(--color-bg-hover)]" : "",
               ].join(" ")}
               style={{
                 width: 120,
@@ -76,8 +73,8 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
               >
                 {t(tab.labelKey)}
               </span>
-            </div>
-          </button>
+            </button>
+          </div>
         );
       })}
     </nav>
