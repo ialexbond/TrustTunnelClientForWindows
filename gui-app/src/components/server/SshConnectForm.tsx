@@ -161,7 +161,7 @@ export function SshConnectForm({ onConnect }: Props) {
 
           {/* Auth mode toggle */}
           <div>
-            <label className="block text-[var(--font-size-xs)] font-[var(--font-weight-medium)] mb-[var(--space-2)] text-[var(--color-text-secondary)]">
+            <label className="block text-xs font-medium mb-[var(--space-2)] text-[var(--color-text-secondary)]">
               {t("control.auth_method")}
             </label>
             <div className="grid grid-cols-2 gap-[var(--space-2)]">
