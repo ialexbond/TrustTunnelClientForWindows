@@ -88,7 +88,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               onClick={handleClear}
               aria-label="Clear"
               className={cn(
-                "absolute right-2 top-1/2 -translate-y-1/2",
+                "absolute right-[var(--space-2)] top-1/2 -translate-y-1/2",
                 "p-0.5 rounded",
                 "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
                 "transition-colors duration-[var(--transition-fast)]"
