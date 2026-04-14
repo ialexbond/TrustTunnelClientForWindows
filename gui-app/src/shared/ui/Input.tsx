@@ -70,11 +70,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             value={value}
             onChange={onChange}
             className={cn(
-              "min-h-8 w-full rounded-[var(--radius-md)]",
+              "h-8 w-full rounded-[var(--radius-md)]",
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
-              "px-[var(--space-3)] py-[6px]",
-              "text-sm leading-5 text-[var(--color-text-primary)]",
+              "px-[var(--space-3)]",
+              "text-sm text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
