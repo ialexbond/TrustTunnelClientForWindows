@@ -1,5 +1,6 @@
 import { useEffect, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "../lib/cn";
 
 type ModalSize = "sm" | "md" | "lg";
 
@@ -56,16 +57,16 @@ export function Modal({
       onClick={closeOnBackdrop && onClose ? onClose : undefined}
     >
       <div
-        className={`
-          w-full ${sizeClasses[size]} mx-4
-          bg-[var(--color-bg-surface)]
-          border border-[var(--color-border)]
-          rounded-[var(--radius-lg)]
-          shadow-[var(--shadow-lg)]
-          p-[var(--space-6)]
-          transition-all duration-[var(--transition-normal)]
-          ${className}
-        `}
+        className={cn(
+          "w-full", sizeClasses[size], "mx-4",
+          "bg-[var(--color-bg-surface)]",
+          "border border-[var(--color-border)]",
+          "rounded-[var(--radius-lg)]",
+          "shadow-[var(--shadow-lg)]",
+          "p-[var(--space-6)]",
+          "transition-all duration-[var(--transition-normal)]",
+          className,
+        )}
         style={{ transitionTimingFunction: "var(--ease-in-out)" }}
         onClick={(e) => e.stopPropagation()}
       >
