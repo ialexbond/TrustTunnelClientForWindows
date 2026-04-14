@@ -118,13 +118,13 @@ export function SshConnectForm({ onConnect }: Props) {
       <Card padding="lg" className="w-full max-w-[400px] rounded-[var(--radius-xl)]">
         {/* Header */}
         <div className="flex flex-col items-center mb-[var(--space-4)]">
-          <div className="w-12 h-12 rounded-[var(--radius-lg)] flex items-center justify-center bg-[var(--color-bg-elevated)] mb-[var(--space-3)]">
-            <Server className="w-6 h-6 text-[var(--color-accent-interactive)]" />
+          <div className="w-9 h-9 rounded-[var(--radius-lg)] flex items-center justify-center bg-[var(--color-bg-elevated)] mb-[var(--space-2)]">
+            <Server className="w-4 h-4 text-[var(--color-accent-interactive)]" />
           </div>
-          <h2 className="text-lg font-[var(--font-weight-semibold)] text-[var(--color-text-primary)] tracking-[var(--tracking-tight)]">
+          <h2 className="text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-primary)] tracking-[var(--tracking-tight)]">
             {t("control.ssh_title")}
           </h2>
-          <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-[var(--space-1)]">
+          <p className="text-xs text-[var(--color-text-muted)] mt-[var(--space-1)]">
             {t("control.ssh_description")}
           </p>
         </div>
