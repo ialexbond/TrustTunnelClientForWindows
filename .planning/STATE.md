@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: executing
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-04-14T19:24:13.014Z"
-last_activity: 2026-04-14
+status: planning
+stopped_at: Phase 5 context gathered
+last_updated: "2026-04-14T19:47:49.637Z"
+last_activity: 2026-04-15
 progress:
   total_phases: 6
   completed_phases: 4
@@ -88,6 +88,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15
-Stopped at: Phase 4 complete, ready to plan Phase 5
-Resume file: None
+Last session: 2026-04-14T19:47:49.633Z
+Stopped at: Phase 5 context gathered
+Resume file: .planning/phases/05-layout-shell/05-CONTEXT.md
