@@ -16,7 +16,9 @@ export function WindowControls() {
       <button
         className="window-control-btn"
         style={{
-          background: hovered === "min" ? "rgba(255,255,255,0.08)" : "transparent",
+          background: hovered === "min" ? "var(--color-bg-hover)" : "transparent",
+          color: "var(--color-text-secondary)",
+          transition: "background-color var(--transition-fast) ease",
         }}
         onMouseEnter={() => setHovered("min")}
         onMouseLeave={() => setHovered(null)}
@@ -32,7 +34,9 @@ export function WindowControls() {
       <button
         className="window-control-btn"
         style={{
-          background: hovered === "max" ? "rgba(255,255,255,0.08)" : "transparent",
+          background: hovered === "max" ? "var(--color-bg-hover)" : "transparent",
+          color: "var(--color-text-secondary)",
+          transition: "background-color var(--transition-fast) ease",
         }}
         onMouseEnter={() => setHovered("max")}
         onMouseLeave={() => setHovered(null)}
@@ -48,8 +52,9 @@ export function WindowControls() {
       <button
         className="window-control-btn window-control-close"
         style={{
-          background: hovered === "close" ? "#e81123" : "transparent",
-          color: hovered === "close" ? "#fff" : undefined,
+          background: hovered === "close" ? "var(--color-destructive)" : "transparent",
+          color: hovered === "close" ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
+          transition: "background-color var(--transition-fast) ease, color var(--transition-fast) ease",
         }}
         onMouseEnter={() => setHovered("close")}
         onMouseLeave={() => setHovered(null)}
