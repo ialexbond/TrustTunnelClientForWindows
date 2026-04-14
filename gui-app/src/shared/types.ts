@@ -27,7 +27,6 @@ export interface LogEntry {
   message: string;
 }
 
-/** @deprecated Use SidebarPage instead — kept for backward compat with Header.tsx */
-export type AppTab = "setup" | "settings" | "routing" | "about";
+export type AppTab = "control" | "connection" | "routing" | "settings" | "about";
 
 export type ThemeMode = "system" | "dark" | "light";
