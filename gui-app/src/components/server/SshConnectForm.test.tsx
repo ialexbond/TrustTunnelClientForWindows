@@ -79,7 +79,6 @@ describe("SshConnectForm", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
-      // Error should be displayed in a snackbar (AlertTriangle icon present)
       const snackbar = document.querySelector("[class*='fixed bottom']");
       expect(snackbar).toBeInTheDocument();
     });
@@ -87,18 +86,18 @@ describe("SshConnectForm", () => {
     expect(onConnect).not.toHaveBeenCalled();
   });
 
-  it("shows auth mode toggle buttons", () => {
+  it("shows auth method segmented control with 3 options", () => {
     renderForm();
     expect(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_password")) })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ключ \(файл\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ключ \(вставка\)/ })).toBeInTheDocument();
   });
 
-  it("switches to key auth mode and shows key file selector", () => {
+  it("switches to key-file mode and shows file selector", () => {
     renderForm();
-    const keyBtn = screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) });
-    fireEvent.click(keyBtn);
+    fireEvent.click(screen.getByRole("button", { name: /Ключ \(файл\)/ }));
 
-    expect(screen.getByText(i18n.t("control.key_from_file"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("control.select_key"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: new RegExp(i18n.t("control.browse")) })).toBeInTheDocument();
   });
 
@@ -107,22 +106,16 @@ describe("SshConnectForm", () => {
     expect(screen.getByText(i18n.t("control.remember"))).toBeInTheDocument();
   });
 
-  // ── Key auth mode ──
-
-  it("shows key file label and select key text in key mode", () => {
+  it("shows select key text in key-file mode", () => {
     renderForm();
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) }));
-    expect(screen.getByText(i18n.t("control.key_from_file"))).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Ключ \(файл\)/ }));
     expect(screen.getByText(i18n.t("control.select_key"))).toBeInTheDocument();
   });
 
-  it("connect button is disabled in key mode with no key selected", () => {
+  it("connect button is disabled in key-file mode with no key selected", () => {
     renderForm();
-    // Fill host
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    // Switch to key mode
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) }));
-    // No key file selected - button should be disabled
+    fireEvent.click(screen.getByRole("button", { name: /Ключ \(файл\)/ }));
     const connectBtn = screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) });
     expect(connectBtn).toBeDisabled();
   });
@@ -130,20 +123,15 @@ describe("SshConnectForm", () => {
   it("password not required in key mode", () => {
     renderForm();
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    // In password mode with no password -> disabled
     const connectBtn = screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) });
     expect(connectBtn).toBeDisabled();
   });
 
-  // ── Browse key file ──
-
-  it("renders browse button in key auth mode", () => {
+  it("renders browse button in key-file mode", () => {
     renderForm();
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) }));
+    fireEvent.click(screen.getByRole("button", { name: /Ключ \(файл\)/ }));
     expect(screen.getByRole("button", { name: new RegExp(i18n.t("control.browse")) })).toBeInTheDocument();
   });
-
-  // ── Connection error display ──
 
   it("displays translated error message on connection failure", async () => {
     vi.mocked(invoke).mockRejectedValue("SSH_AUTH_FAILED|root@10.0.0.1");
@@ -154,7 +142,6 @@ describe("SshConnectForm", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
-      // Error should appear in a snackbar
       const snackbar = document.querySelector("[class*='fixed bottom']");
       expect(snackbar).toBeInTheDocument();
     });
@@ -167,14 +154,12 @@ describe("SshConnectForm", () => {
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
     fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "pass" } });
 
-    // First attempt - error (shown as snackbar)
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
     await waitFor(() => {
       const snackbar = document.querySelector("[class*='fixed bottom']");
       expect(snackbar).toBeInTheDocument();
     });
 
-    // Second attempt - success
     vi.mocked(invoke).mockResolvedValue({ installed: true });
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
@@ -183,45 +168,31 @@ describe("SshConnectForm", () => {
     });
   });
 
-  // ── Port input strips non-digits ──
-
   it("port input accepts only digits", () => {
     renderForm();
     const portInput = screen.getByPlaceholderText("22");
     fireEvent.change(portInput, { target: { value: "22abc" } });
-    // The onChange strips non-digits, but since we're testing component behavior
-    // the value replacement happens via React state
     expect(portInput).toBeInTheDocument();
   });
 
-  // ── Switching back to password mode ──
-
-  it("switches back to password mode from key mode", () => {
+  it("switches back to password mode from key-file mode", () => {
     renderForm();
-    // Switch to key
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_key")) }));
+    fireEvent.click(screen.getByRole("button", { name: /Ключ \(файл\)/ }));
     expect(screen.queryByPlaceholderText("********")).not.toBeInTheDocument();
-    // Switch back to password
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_password")) }));
     expect(screen.getByPlaceholderText("********")).toBeInTheDocument();
   });
-
-  // ── SSH title and description ──
 
   it("renders ssh description text", () => {
     renderForm();
     expect(screen.getByText(i18n.t("control.ssh_description"))).toBeInTheDocument();
   });
 
-  // ── Default values ──
-
   it("has default port 22 and user root", () => {
     renderForm();
     expect(screen.getByPlaceholderText("22")).toHaveValue("22");
     expect(screen.getByPlaceholderText("root")).toHaveValue("root");
   });
-
-  // ── Username and port labels ──
 
   it("renders server IP and port labels", () => {
     renderForm();
@@ -232,5 +203,11 @@ describe("SshConnectForm", () => {
   it("renders username label", () => {
     renderForm();
     expect(screen.getByText(i18n.t("labels.username"))).toBeInTheDocument();
+  });
+
+  it("switches to key-paste mode and shows textarea", () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: /Ключ \(вставка\)/ }));
+    expect(screen.getByPlaceholderText(/BEGIN OPENSSH/)).toBeInTheDocument();
   });
 });
