@@ -7,8 +7,8 @@ import { TabNavigation } from "./TabNavigation";
  * AppShell -- composition story showing the complete app layout:
  * TitleBar (32px) at top, content area in the middle, TabNavigation (56px) at bottom.
  *
- * This demonstrates how all layout components work together as the application shell.
- * Seamless design: all components are transparent, inheriting bg-primary from body.
+ * All 5 tab states demonstrated. Seamless design: all components transparent,
+ * inheriting bg-primary from body.
  */
 
 /** Placeholder content area to simulate page content. */
@@ -55,14 +55,14 @@ const meta: Meta = {
 export default meta;
 type Story = StoryObj;
 
-/** Full shell: TitleBar + content placeholder + TabNavigation. All tabs always enabled. */
+/** Control tab active (default startup without config). */
 export const Default: Story = {
   render: () => (
     <>
       <TitleBar>
         <WindowControls />
       </TitleBar>
-      <ContentPlaceholder label="Content Area" />
+      <ContentPlaceholder label="Панель управления" />
       <TabNavigation
         activeTab="control"
         onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
@@ -71,16 +71,48 @@ export const Default: Story = {
   ),
 };
 
-/** Connection tab active -- shows elevated background on the active tab button. */
+/** Connection tab active (default startup with config). */
 export const ConnectionActive: Story = {
   render: () => (
     <>
       <TitleBar>
         <WindowControls />
       </TitleBar>
-      <ContentPlaceholder label="Connection Settings" />
+      <ContentPlaceholder label="Подключение" />
       <TabNavigation
         activeTab="connection"
+        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
+      />
+    </>
+  ),
+};
+
+/** Routing tab active. */
+export const RoutingActive: Story = {
+  render: () => (
+    <>
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+      <ContentPlaceholder label="Маршрутизация" />
+      <TabNavigation
+        activeTab="routing"
+        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
+      />
+    </>
+  ),
+};
+
+/** Settings tab active. */
+export const SettingsActive: Story = {
+  render: () => (
+    <>
+      <TitleBar>
+        <WindowControls />
+      </TitleBar>
+      <ContentPlaceholder label="Настройки" />
+      <TabNavigation
+        activeTab="settings"
         onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
       />
     </>
@@ -94,7 +126,7 @@ export const AboutActive: Story = {
       <TitleBar>
         <WindowControls />
       </TitleBar>
-      <ContentPlaceholder label="About TrustTunnel" />
+      <ContentPlaceholder label="О программе" />
       <TabNavigation
         activeTab="about"
         onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}

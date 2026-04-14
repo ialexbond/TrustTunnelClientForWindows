@@ -17,7 +17,7 @@ type Story = StoryObj<typeof Tooltip>;
 export const Default: Story = {
   render: () => (
     <Tooltip text="This is a helpful tooltip" delay={0}>
-      <Button variant="secondary" size="sm">Hover me</Button>
+      <Button variant="ghost" size="sm">Hover me</Button>
     </Tooltip>
   ),
 };
@@ -47,7 +47,7 @@ export const LongText: Story = {
       text="This is a much longer tooltip text that wraps across multiple lines to demonstrate how the tooltip handles longer content without breaking the layout."
       delay={0}
     >
-      <Button variant="secondary" size="sm">Long tooltip</Button>
+      <Button variant="ghost" size="sm">Long tooltip</Button>
     </Tooltip>
   ),
 };
