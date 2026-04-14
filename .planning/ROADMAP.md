@@ -96,7 +96,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 05-01-PLAN.md — Shell visual polish: remove borders, sidebar bg-secondary, tab max-width, roving focus, sidebar animation, ServerTabs caching
-- [ ] 05-02-PLAN.md — Fix invalid Button/Badge CVA variants in all server sections + auth button color
+- [x] 05-02-PLAN.md — Fix invalid Button/Badge CVA variants in all server sections + auth button color
 - [ ] 05-03-PLAN.md — i18n hardcoded strings cleanup (StatusBadge, Select, EmptyState) + sanitize verification
 **UI hint**: yes
 
@@ -123,5 +123,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Primitive Redesign | 0/7 | Planned | - |
 | 3. Control Panel | 0/TBD | Not started | - |
 | 4. Remaining Panels | 0/TBD | Not started | - |
-| 5. Layout Shell | 0/3 | Planned | - |
+| 5. Layout Shell | 2/3 | In Progress|  |
 | 6. Cleanup | 0/TBD | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-layout-shell 05-01-PLAN.md
-last_updated: "2026-04-14T20:47:50.648Z"
+stopped_at: Completed 05-layout-shell 05-02-PLAN.md
+last_updated: "2026-04-14T20:52:34.994Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 22
-  completed_plans: 24
+  completed_plans: 25
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 ## Current Position
 
 Phase: 05 (Shell Polish + TODO Closure) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-14
 
@@ -56,6 +56,7 @@ Progress: [████████░░] 80%
 
 *Updated after each plan completion*
 | Phase 05-layout-shell P01 | 20 | 3 tasks | 4 files |
+| Phase 05-layout-shell P02 | 2 | 2 tasks | 8 files |
 
 ## Governance Rules (v3.0 milestone)
 
@@ -80,6 +81,7 @@ Recent decisions affecting current work:
 - Governance: release/tt-win-3.0.0 branch, master readonly, NSIS на рабочий стол, Storybook для review
 - [Phase 05-layout-shell]: D-01 completed: all border-[var(--color-border)] removed from TabNavigation, ServerSidebar, ServerTabs, ControlPanelPage
 - [Phase 05-layout-shell]: D-10 safety fix: onAddServer no longer calls handleDisconnect — Add Server is safe during active VPN
+- [Phase 05-layout-shell]: danger-outline -> danger: план не упоминал danger-outline, но он тоже невалидный CVA вариант Button — исправлен по Rule 1 во всех server-секциях
 
 ### Pending Todos
 
@@ -91,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T20:47:50.645Z
-Stopped at: Completed 05-layout-shell 05-01-PLAN.md
+Last session: 2026-04-14T20:52:34.990Z
+Stopped at: Completed 05-layout-shell 05-02-PLAN.md
 Resume file: None
