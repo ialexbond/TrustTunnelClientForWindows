@@ -1,4 +1,5 @@
 import { forwardRef, type ReactNode, useId, useEffect, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
@@ -30,13 +31,15 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     options,
     value,
     onChange,
-    placeholder = "Выберите...",
+    placeholder,
     fullWidth = true,
     disabled = false,
     className,
   },
   ref,
 ) {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t("select.placeholder", "Выберите...");
   const { open, style: dropdownStyle, containerRef, triggerRef, portalRef, toggle, close } =
     useDropdownPortal();
 
@@ -167,7 +170,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
             </span>
           )}
           <span className={cn("truncate", !selectedLabel && "text-[var(--color-text-muted)]")}>
-            {selectedLabel || placeholder}
+            {selectedLabel || resolvedPlaceholder}
           </span>
           <ChevronDown
             className={cn(
