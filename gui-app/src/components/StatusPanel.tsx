@@ -1,16 +1,10 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Wifi,
-  WifiOff,
-  Loader2,
-  AlertTriangle,
-  Clock,
-  Power,
-} from "lucide-react";
+import { Clock, Power } from "lucide-react";
 import type { VpnStatus } from "../shared/types";
 import { Button } from "../shared/ui/Button";
-import { Badge } from "../shared/ui/Badge";
+import { StatusBadge } from "../shared/ui/StatusBadge";
+import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { formatUptime } from "../shared/utils/uptime";
 
 interface StatusPanelProps {
@@ -30,6 +24,13 @@ function UptimeCounter({ since }: { since: Date }) {
   return <span>{formatUptime(since)}</span>;
 }
 
+const statusBadgeVariant = (s: VpnStatus): "connected" | "connecting" | "error" | "disconnected" => {
+  if (s === "connected") return "connected";
+  if (s === "connecting" || s === "disconnecting" || s === "recovering") return "connecting";
+  if (s === "error") return "error";
+  return "disconnected";
+};
+
 function StatusPanel({
   status,
   error,
@@ -38,12 +39,13 @@ function StatusPanel({
   onDisconnect,
 }: StatusPanelProps) {
   const { t } = useTranslation();
+  const [errorDismissed, setErrorDismissed] = useState(false);
 
-  const isLoading = status === "connecting" || status === "disconnecting" || status === "recovering";
+  useEffect(() => {
+    setErrorDismissed(false);
+  }, [status]);
+
   const isConnected = status === "connected";
-
-  const statusVariant: "success" | "warning" | "danger" | "default" =
-    isConnected ? "success" : isLoading ? "warning" : status === "error" ? "danger" : "default";
 
   const statusLabel = isConnected
     ? t("status.connected")
@@ -57,74 +59,53 @@ function StatusPanel({
             ? t("status.error")
             : t("status.disconnected");
 
-  const statusIcon = isLoading
-    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-    : status === "error"
-      ? <AlertTriangle className="w-3.5 h-3.5" />
-      : isConnected
-        ? <Wifi className="w-3.5 h-3.5" />
-        : <WifiOff className="w-3.5 h-3.5" />;
-
   return (
-    <div className="border-b" style={{ borderColor: "var(--color-border)" }}>
-      <div className="px-4 flex items-center justify-between" style={{ height: 51 }}>
-        <div className="flex items-center gap-3">
-          <Badge variant={statusVariant} size="md" icon={statusIcon}>
-            {statusLabel}
-          </Badge>
+    <div className="border-b border-[var(--color-border)]">
+      <div className="px-[var(--space-4)] flex items-center justify-between h-[52px]">
+        <div className="flex items-center gap-[var(--space-3)]">
+          <StatusBadge variant={statusBadgeVariant(status)} label={statusLabel} />
 
           {isConnected && connectedSince && (
-            <div className="flex items-center gap-1 text-xs tabular-nums" style={{ color: "var(--color-text-muted)", minWidth: "5.5em" }}>
-              <Clock className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-[var(--space-1)] text-[var(--font-size-xs)] font-mono tabular-nums text-[var(--color-text-muted)]">
+              <Clock className="w-3.5 h-3.5" aria-hidden="true" />
               <UptimeCounter since={connectedSince} />
             </div>
           )}
         </div>
 
         <div>
-          {status === "connecting" ? (
-            <Button
-              variant="warning"
-              size="sm"
-              icon={<Power className="w-3.5 h-3.5" />}
-              onClick={onDisconnect}
-            >
-              {t("buttons.cancel", "Отмена")}
-            </Button>
-          ) : (status === "disconnecting" || status === "recovering") ? (
-            <Button variant="warning" size="sm" disabled loading>
-              {statusLabel}
-            </Button>
-          ) : isConnected ? (
-            <Button
-              variant="danger"
-              size="sm"
-              icon={<Power className="w-3.5 h-3.5" />}
-              onClick={onDisconnect}
-            >
+          {status === "connected" && (
+            <Button variant="danger" size="sm" onClick={onDisconnect}>
+              <Power className="w-3.5 h-3.5" />
               {t("buttons.disconnect")}
             </Button>
-          ) : (
-            <Button
-              variant="success"
-              size="sm"
-              icon={<Power className="w-3.5 h-3.5" />}
-              onClick={onConnect}
-            >
+          )}
+          {status === "connecting" && (
+            <Button variant="ghost" size="sm" onClick={onDisconnect}>
+              <Power className="w-3.5 h-3.5" />
+              {t("buttons.cancel")}
+            </Button>
+          )}
+          {(status === "disconnecting" || status === "recovering") && (
+            <Button variant="ghost" size="sm" disabled loading>
+              {statusLabel}
+            </Button>
+          )}
+          {(status === "error" || status === "disconnected") && (
+            <Button variant="ghost" size="sm" onClick={onConnect}>
               {t("buttons.connect")}
             </Button>
           )}
         </div>
       </div>
 
-      {error && (
-        <p
-          className="px-4 text-[11px] pb-1.5 max-w-sm break-words line-clamp-3"
-          style={{ color: "var(--color-danger-400)" }}
-          title={error}
-        >
-          {error}
-        </p>
+      {error && !errorDismissed && (
+        <ErrorBanner
+          severity="error"
+          message={error}
+          onDismiss={() => setErrorDismissed(true)}
+          className="mx-[var(--space-4)] mb-[var(--space-2)]"
+        />
       )}
     </div>
   );
