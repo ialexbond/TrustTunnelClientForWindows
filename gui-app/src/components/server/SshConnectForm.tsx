@@ -6,6 +6,7 @@ import { Lock, Key, FileKey, ClipboardPaste } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
+import { cn } from "../../shared/lib/cn";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { formatError } from "../../shared/utils/formatError";
@@ -22,8 +23,13 @@ interface Props {
   onConnect: (creds: SshCredentials) => void;
 }
 
-type AuthMode = "password" | "key";
-type KeyInputMode = "file" | "paste";
+type AuthMethod = "password" | "key-file" | "key-paste";
+
+const authMethods: { id: AuthMethod; icon: React.ReactNode; labelKey: string; fallback: string }[] = [
+  { id: "password",  icon: <Key className="w-3 h-3" />,            labelKey: "control.auth_password", fallback: "Пароль" },
+  { id: "key-file",  icon: <FileKey className="w-3 h-3" />,        labelKey: "control.auth_key_file", fallback: "Ключ (файл)" },
+  { id: "key-paste", icon: <ClipboardPaste className="w-3 h-3" />, labelKey: "control.auth_key_paste", fallback: "Ключ (вставка)" },
+];
 
 export function SshConnectForm({ onConnect }: Props) {
   const { t } = useTranslation();
@@ -33,8 +39,7 @@ export function SshConnectForm({ onConnect }: Props) {
   const [password, setPassword] = useState("");
   const [keyPath, setKeyPath] = useState("");
   const [keyData, setKeyData] = useState("");
-  const [authMode, setAuthMode] = useState<AuthMode>("password");
-  const [keyInputMode, setKeyInputMode] = useState<KeyInputMode>("file");
+  const [authMethod, setAuthMethod] = useState<AuthMethod>("password");
   const [connecting, setConnecting] = useState(false);
   const pushSuccess = useSnackBar();
 
@@ -42,9 +47,7 @@ export function SshConnectForm({ onConnect }: Props) {
     try {
       const selected = await open({
         title: t("control.select_key_title"),
-        filters: [
-          { name: "All Files", extensions: ["*"] },
-        ],
+        filters: [{ name: "All Files", extensions: ["*"] }],
         multiple: false,
       });
       if (selected) {
@@ -57,9 +60,9 @@ export function SshConnectForm({ onConnect }: Props) {
 
   const isValid =
     host.trim() &&
-    (authMode === "password"
+    (authMethod === "password"
       ? password.trim()
-      : keyInputMode === "file" ? keyPath.trim() : keyData.trim());
+      : authMethod === "key-file" ? keyPath.trim() : keyData.trim());
 
   const handleConnect = async () => {
     if (!isValid) return;
@@ -70,14 +73,12 @@ export function SshConnectForm({ onConnect }: Props) {
         host: host.trim(),
         port: parseInt(port) || 22,
         user: user.trim() || "root",
-        password: authMode === "password" ? password : "",
+        password: authMethod === "password" ? password : "",
       };
-      if (authMode === "key") {
-        if (keyInputMode === "file" && keyPath) {
-          params.keyPath = keyPath;
-        } else if (keyInputMode === "paste" && keyData.trim()) {
-          params.keyData = keyData.trim();
-        }
+      if (authMethod === "key-file" && keyPath) {
+        params.keyPath = keyPath;
+      } else if (authMethod === "key-paste" && keyData.trim()) {
+        params.keyData = keyData.trim();
       }
 
       await invoke("check_server_installation", params);
@@ -86,8 +87,8 @@ export function SshConnectForm({ onConnect }: Props) {
         host: host.trim(),
         port: port || "22",
         user: user.trim() || "root",
-        password: authMode === "password" ? password : "",
-        keyPath: authMode === "key" ? keyPath : undefined,
+        password: authMethod === "password" ? password : "",
+        keyPath: authMethod === "key-file" ? keyPath : undefined,
       };
       await invoke("save_ssh_credentials", {
         host: creds.host,
@@ -123,7 +124,6 @@ export function SshConnectForm({ onConnect }: Props) {
       {/* Форма */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[360px] mx-auto px-4 py-5 space-y-3.5">
-          {/* Подпись */}
           <p className="text-xs text-[var(--color-text-muted)]">
             {t("control.ssh_description")}
           </p>
@@ -156,93 +156,81 @@ export function SshConnectForm({ onConnect }: Props) {
             placeholder="root"
           />
 
-          {/* Способ авторизации */}
+          {/* Авторизация — один переключатель на 3 варианта */}
           <div>
             <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">
               {t("control.auth_method")}
             </label>
-            <div className="grid grid-cols-2 gap-1.5">
-              <Button
-                variant={authMode === "password" ? "primary" : "ghost"}
-                size="sm"
-                onClick={() => setAuthMode("password")}
-              >
-                <Key className="w-3.5 h-3.5" />
-                {t("control.auth_password")}
-              </Button>
-              <Button
-                variant={authMode === "key" ? "primary" : "ghost"}
-                size="sm"
-                onClick={() => setAuthMode("key")}
-              >
-                <FileKey className="w-3.5 h-3.5" />
-                {t("control.auth_key")}
-              </Button>
+            <div className="flex rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden">
+              {authMethods.map((method) => (
+                <button
+                  key={method.id}
+                  type="button"
+                  onClick={() => setAuthMethod(method.id)}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium transition-colors",
+                    "border-r border-[var(--color-border)] last:border-r-0",
+                    authMethod === method.id
+                      ? "bg-[var(--color-accent-interactive)] text-white"
+                      : "bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)]"
+                  )}
+                >
+                  {method.icon}
+                  {t(method.labelKey, method.fallback)}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Пароль или ключ */}
-          {authMode === "password" ? (
+          {/* Поле ввода — зависит от выбранного метода */}
+          {authMethod === "password" && (
             <PasswordInput
               label={t("labels.ssh_password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="********"
             />
-          ) : (
-            <div className="space-y-1.5">
-              <div className="flex gap-1">
-                <Button
-                  variant={keyInputMode === "file" ? "primary" : "ghost"}
-                  size="sm"
-                  onClick={() => setKeyInputMode("file")}
-                  className="text-xs"
+          )}
+
+          {authMethod === "key-file" && (
+            <div>
+              <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">
+                {t("control.key_file_label", "Файл ключа")}
+              </label>
+              <div className="flex gap-1.5">
+                <div
+                  className="flex-1 flex items-center px-2.5 h-8 rounded-[var(--radius-md)] text-xs truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)] hover:border-[var(--color-accent-interactive)] transition-colors"
+                  onClick={handleSelectKey}
                 >
-                  <FileKey className="w-3 h-3" />
-                  {t("control.key_from_file", "Файл")}
-                </Button>
-                <Button
-                  variant={keyInputMode === "paste" ? "primary" : "ghost"}
-                  size="sm"
-                  onClick={() => setKeyInputMode("paste")}
-                  className="text-xs"
-                >
-                  <ClipboardPaste className="w-3 h-3" />
-                  {t("control.key_paste", "Вставить")}
+                  <FileKey className="w-3.5 h-3.5 shrink-0 mr-2 text-[var(--color-text-muted)]" />
+                  <span className="truncate text-xs" style={{ color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
+                    {keyPath ? keyPath.split(/[/\\]/).pop() : t("control.select_key")}
+                  </span>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleSelectKey}>
+                  {t("control.browse")}
                 </Button>
               </div>
-
-              {keyInputMode === "file" ? (
-                <div>
-                  <div className="flex gap-1.5">
-                    <div
-                      className="flex-1 flex items-center px-2.5 h-8 rounded-[var(--radius-md)] text-xs truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)]"
-                      onClick={handleSelectKey}
-                    >
-                      <FileKey className="w-3.5 h-3.5 shrink-0 mr-2 text-[var(--color-text-muted)]" />
-                      <span className="truncate text-xs" style={{ color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
-                        {keyPath ? keyPath.split(/[/\\]/).pop() : t("control.select_key")}
-                      </span>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={handleSelectKey}>
-                      {t("control.browse")}
-                    </Button>
-                  </div>
-                  {keyPath && (
-                    <p className="text-[10px] mt-1 truncate text-[var(--color-text-muted)]">
-                      {keyPath}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <textarea
-                  className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-xs font-mono resize-none h-[100px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)]"
-                  value={keyData}
-                  onChange={(e) => setKeyData(e.target.value)}
-                  placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
-                  spellCheck={false}
-                />
+              {keyPath && (
+                <p className="text-[10px] mt-1 truncate text-[var(--color-text-muted)]">
+                  {keyPath}
+                </p>
               )}
+            </div>
+          )}
+
+          {authMethod === "key-paste" && (
+            <div>
+              <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">
+                {t("control.key_paste_label", "Содержимое ключа")}
+              </label>
+              <textarea
+                className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-xs font-mono resize-none h-[100px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)] focus:border-[var(--color-accent-interactive)] outline-none transition-colors"
+                value={keyData}
+                onChange={(e) => setKeyData(e.target.value)}
+                placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
+                spellCheck={false}
+              />
             </div>
           )}
 
