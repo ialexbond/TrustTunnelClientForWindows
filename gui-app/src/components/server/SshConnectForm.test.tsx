@@ -26,8 +26,8 @@ describe("SshConnectForm", () => {
     renderForm();
     expect(screen.getByPlaceholderText("123.45.67.89")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("22")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("root")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("********")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("root")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Введите пароль/)).toBeInTheDocument();
   });
 
   it("shows connect button disabled when host is empty", () => {
@@ -39,7 +39,7 @@ describe("SshConnectForm", () => {
   it("enables connect button when host and password are filled", () => {
     renderForm();
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByPlaceholderText(/Введите пароль/), { target: { value: "secret" } });
     const connectBtn = screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) });
     expect(connectBtn).not.toBeDisabled();
   });
@@ -49,7 +49,7 @@ describe("SshConnectForm", () => {
 
     renderForm();
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByPlaceholderText(/Введите пароль/), { target: { value: "secret" } });
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
@@ -67,7 +67,7 @@ describe("SshConnectForm", () => {
 
     renderForm();
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByPlaceholderText(/Введите пароль/), { target: { value: "secret" } });
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
@@ -116,25 +116,14 @@ describe("SshConnectForm", () => {
     expect(screen.getByRole("button", { name: new RegExp(i18n.t("control.browse")) })).toBeInTheDocument();
   });
 
-  it("shows paste link in key mode and switches to textarea", () => {
+  it("shows both file picker and paste textarea in key mode with separator", () => {
     renderForm();
     fireEvent.click(screen.getByRole("button", { name: /SSH-ключ/ }));
-    // Click "Или вставьте ключ вручную" link
-    const pasteLink = screen.getByRole("button", { name: /вставьте ключ/ });
-    expect(pasteLink).toBeInTheDocument();
-    fireEvent.click(pasteLink);
-    expect(screen.getByPlaceholderText(/BEGIN OPENSSH/)).toBeInTheDocument();
-  });
-
-  it("switches back from paste to file mode via link", () => {
-    renderForm();
-    fireEvent.click(screen.getByRole("button", { name: /SSH-ключ/ }));
-    fireEvent.click(screen.getByRole("button", { name: /вставьте ключ/ }));
-    expect(screen.getByPlaceholderText(/BEGIN OPENSSH/)).toBeInTheDocument();
-    // Switch back
-    const fileLink = screen.getByRole("button", { name: /выберите файл/ });
-    fireEvent.click(fileLink);
+    // Both visible at once
     expect(screen.getByText(i18n.t("control.select_key"))).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/BEGIN OPENSSH/)).toBeInTheDocument();
+    // Separator "или" between them
+    expect(screen.getByText(/или/)).toBeInTheDocument();
   });
 
   it("displays translated error message on connection failure", async () => {
@@ -142,7 +131,7 @@ describe("SshConnectForm", () => {
 
     renderForm();
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "wrong" } });
+    fireEvent.change(screen.getByPlaceholderText(/Введите пароль/), { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
 
     await waitFor(() => {
@@ -156,7 +145,7 @@ describe("SshConnectForm", () => {
 
     renderForm();
     fireEvent.change(screen.getByPlaceholderText("123.45.67.89"), { target: { value: "10.0.0.1" } });
-    fireEvent.change(screen.getByPlaceholderText("********"), { target: { value: "pass" } });
+    fireEvent.change(screen.getByPlaceholderText(/Введите пароль/), { target: { value: "pass" } });
 
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.connect")) }));
     await waitFor(() => {
@@ -181,9 +170,9 @@ describe("SshConnectForm", () => {
   it("switches back to password mode from key mode", () => {
     renderForm();
     fireEvent.click(screen.getByRole("button", { name: /SSH-ключ/ }));
-    expect(screen.queryByPlaceholderText("********")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Введите пароль/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("control.auth_password")) }));
-    expect(screen.getByPlaceholderText("********")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Введите пароль/)).toBeInTheDocument();
   });
 
   it("renders ssh description text", () => {
@@ -194,7 +183,7 @@ describe("SshConnectForm", () => {
   it("has default port 22 and user root", () => {
     renderForm();
     expect(screen.getByPlaceholderText("22")).toHaveValue("22");
-    expect(screen.getByPlaceholderText("root")).toHaveValue("root");
+    expect(screen.getByDisplayValue("root")).toHaveValue("root");
   });
 
   it("renders server IP and port labels", () => {
