@@ -32,7 +32,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
               "pr-10",
-              "text-base text-[var(--color-text-primary)]",
+              "text-sm leading-8 text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
