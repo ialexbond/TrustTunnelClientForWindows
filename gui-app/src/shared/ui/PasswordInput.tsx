@@ -28,11 +28,11 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             ref={ref}
             type={visible ? "text" : "password"}
             className={cn(
-              "h-8 w-full rounded-[var(--radius-md)]",
+              "min-h-8 w-full rounded-[var(--radius-md)]",
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
-              "pr-10 py-[7px]",
-              "text-sm text-[var(--color-text-primary)]",
+              "pr-10 py-[6px]",
+              "text-sm leading-5 text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
