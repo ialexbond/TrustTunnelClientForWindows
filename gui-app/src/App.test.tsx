@@ -205,14 +205,12 @@ describe("App", () => {
     expect(document.querySelector(".h-screen.flex")).toBeInTheDocument();
   });
 
-  it("shows sidebar with navigation buttons", async () => {
+  it("shows tab navigation", async () => {
     await act(async () => {
       render(<App />);
     });
-    const aside = document.querySelector("aside");
-    expect(aside).toBeInTheDocument();
-    const installBtn = document.querySelector('button[title="Установка"]');
-    expect(installBtn).toBeInTheDocument();
+    const tablist = document.querySelector('[role="tablist"]');
+    expect(tablist).toBeInTheDocument();
   });
 
   it("renders setup wizard by default when no config", async () => {
@@ -984,51 +982,7 @@ describe("App", () => {
 
   // ─── VPN log collector ───
 
-  it("vpn-log events are collected into logs", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-    localStorage.setItem("tt_active_page", "logs");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "Connected to server", source: "stdout" });
-    });
-
-    expect(logPanelProps.logs.length).toBe(1);
-    expect(logPanelProps.logs[0].message).toBe("Connected to server");
-    expect(logPanelProps.logs[0].level).toBe("info");
-  });
-
-  it("vpn-log stderr source gets error level", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-    localStorage.setItem("tt_active_page", "logs");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "Error occurred", source: "stderr" });
-    });
-
-    expect(logPanelProps.logs[0].level).toBe("error");
-  });
+  // vpn-log tests removed — LogPanel no longer rendered in App.tsx (D-05: logs folded into connection tab)
 
   it("vpn-log detects Authorization Required error", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
@@ -1136,27 +1090,7 @@ describe("App", () => {
     expect(statusPanelProps.status).toBe("error");
   });
 
-  it("vpn-log empty messages are ignored", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-    localStorage.setItem("tt_active_page", "logs");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "   ", source: "stdout" });
-    });
-
-    expect(logPanelProps.logs.length).toBe(0);
-  });
+  // vpn-log empty messages test removed — LogPanel no longer rendered in App.tsx
 
   // ─── Setup completion ───
 
@@ -1298,27 +1232,7 @@ describe("App", () => {
 
   // ─── Dashboard panel props ───
 
-  it("passes correct props to DashboardPanel", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-    localStorage.setItem("tt_active_page", "dashboard");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "proxy" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    expect(dashboardPanelProps.configPath).toBe("/config.json");
-    expect(dashboardPanelProps.status).toBe("disconnected");
-    expect(typeof dashboardPanelProps.onConnect).toBe("function");
-    expect(typeof dashboardPanelProps.onDisconnect).toBe("function");
-    expect(typeof dashboardPanelProps.onNavigateToControl).toBe("function");
-  });
+  // DashboardPanel test removed — Dashboard disbanded per D-04, no longer rendered in App.tsx
 
   // ─── Routing panel props ───
 
@@ -1368,9 +1282,9 @@ describe("App", () => {
     expect(localStorage.getItem("tt_config_path")).toBe("/new/exported/config.json");
   });
 
-  it("ControlPanelPage onSwitchToSetup navigates to server", async () => {
+  it("ControlPanelPage onSwitchToSetup resets wizard key", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
-    localStorage.setItem("tt_active_page", "control");
+    localStorage.setItem("tt_active_tab", "control");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "check_vpn_status") return "disconnected";
@@ -1383,11 +1297,13 @@ describe("App", () => {
       render(<App />);
     });
 
+    // onSwitchToSetup increments wizard key (stays on control tab)
     await act(async () => {
       controlPanelProps.onSwitchToSetup();
     });
 
-    expect(localStorage.getItem("tt_active_page")).toBe("server");
+    // Control tab stays active (no navigation to "server" — old page removed)
+    expect(localStorage.getItem("tt_active_tab")).toBe("control");
   });
 
   it("ControlPanelPage onNavigateToSettings navigates to settings", async () => {
