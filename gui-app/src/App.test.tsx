@@ -213,11 +213,11 @@ describe("App", () => {
     expect(tablist).toBeInTheDocument();
   });
 
-  it("renders setup wizard by default when no config", async () => {
+  it("renders control panel by default when no config", async () => {
     await act(async () => {
       render(<App />);
     });
-    expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
+    expect(screen.getByTestId("control-panel-page")).toBeInTheDocument();
   });
 
   it("renders settings page when config exists", async () => {
@@ -814,15 +814,15 @@ describe("App", () => {
     expect(screen.getByTestId("routing-panel")).toBeInTheDocument();
   });
 
-  it("maps old tab name 'setup' to 'server' page", async () => {
+  it("maps old tab name 'setup' to control page", async () => {
     localStorage.setItem("tt_active_tab", "setup");
-    // No config — should stay on server
+    // No config — shows control panel
 
     await act(async () => {
       render(<App />);
     });
 
-    expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
+    expect(screen.getByTestId("control-panel-page")).toBeInTheDocument();
   });
 
   it("maps old tab name 'about' to 'about' page", async () => {
@@ -1091,65 +1091,6 @@ describe("App", () => {
   });
 
   // vpn-log empty messages test removed — LogPanel no longer rendered in App.tsx
-
-  // ─── Setup completion ───
-
-  it("handleSetupComplete sets config and navigates to control", async () => {
-    await act(async () => {
-      render(<App />);
-    });
-
-    // Call onSetupComplete via captured props
-    await act(async () => {
-      setupWizardProps.onSetupComplete("/new/config.json");
-    });
-
-    expect(localStorage.getItem("tt_config_path")).toBe("/new/config.json");
-  });
-
-  it("handleSetupComplete copies SSH credentials from wizard storage via invoke", async () => {
-    await act(async () => {
-      render(<App />);
-    });
-
-    // Set wizard data AFTER render but before calling onSetupComplete
-    // (startup clears trusttunnel_wizard when no config path)
-    localStorage.setItem("trusttunnel_wizard", JSON.stringify({
-      host: "1.2.3.4",
-      port: "22",
-      sshUser: "admin",
-      sshPassword: "obfuscated_pass",
-      sshKeyPath: "",
-    }));
-
-    await act(async () => {
-      setupWizardProps.onSetupComplete("/new/config.json");
-    });
-
-    // Now saves via invoke("save_ssh_credentials") instead of localStorage
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("save_ssh_credentials", {
-      host: "1.2.3.4",
-      port: "22",
-      user: "admin",
-      password: "obfuscated_pass",
-      keyPath: null,
-    });
-  });
-
-  it("handleSetupComplete navigates to settings when tt_navigate_after_setup is 'settings'", async () => {
-    localStorage.setItem("tt_navigate_after_setup", "settings");
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      setupWizardProps.onSetupComplete("/new/config.json");
-    });
-
-    expect(localStorage.getItem("tt_navigate_after_setup")).toBeNull();
-    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
-  });
 
   // ─── Clear config ───
 

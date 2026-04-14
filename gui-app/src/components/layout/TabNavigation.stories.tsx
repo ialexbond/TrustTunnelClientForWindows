@@ -2,11 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { TabNavigation } from "./TabNavigation";
 
 /**
- * TabNavigation -- bottom tab bar (48px height, border-top, transparent background).
+ * TabNavigation -- bottom tab bar (56px height, border-top, transparent background).
  *
- * 5 tabs as compact 64x40px rounded buttons with icon + label stacked vertically.
- * Active tab uses accent color + bg-elevated. Tabs requiring config (connection,
- * routing, settings) are disabled when hasConfig=false.
+ * 5 tabs as fixed 120x44px rounded buttons with icon + label stacked vertically.
+ * Active tab uses accent color + bg-elevated. All tabs always enabled.
  *
  * i18n is initialized globally via preview.ts, so tab labels render in Russian
  * without additional story configuration.
@@ -24,7 +23,6 @@ const meta: Meta<typeof TabNavigation> = {
   ],
   args: {
     onTabChange: (tab: string) => console.log("[Story] onTabChange:", tab),
-    hasConfig: true,
     activeTab: "control",
   },
 };
@@ -35,35 +33,22 @@ type Story = StoryObj<typeof TabNavigation>;
 /** Default: all tabs enabled, "control" active. */
 export const Default: Story = {};
 
-/** WithConfig: all 5 tabs enabled, "control" active. */
-export const WithConfig: Story = {
-  args: { hasConfig: true, activeTab: "control" },
-};
-
-/**
- * WithoutConfig: connection, routing, and settings tabs are disabled
- * (dimmed, opacity 0.4, cursor not-allowed). Control and About remain active.
- */
-export const WithoutConfig: Story = {
-  args: { hasConfig: false, activeTab: "control" },
-};
-
-/** Connection tab active (requires hasConfig). */
+/** Connection tab active. */
 export const ConnectionActive: Story = {
-  args: { hasConfig: true, activeTab: "connection" },
+  args: { activeTab: "connection" },
 };
 
-/** Routing tab active (requires hasConfig). */
+/** Routing tab active. */
 export const RoutingActive: Story = {
-  args: { hasConfig: true, activeTab: "routing" },
+  args: { activeTab: "routing" },
 };
 
-/** Settings tab active (requires hasConfig). */
+/** Settings tab active. */
 export const SettingsActive: Story = {
-  args: { hasConfig: true, activeTab: "settings" },
+  args: { activeTab: "settings" },
 };
 
-/** About tab active (always available). */
+/** About tab active. */
 export const AboutActive: Story = {
-  args: { hasConfig: true, activeTab: "about" },
+  args: { activeTab: "about" },
 };

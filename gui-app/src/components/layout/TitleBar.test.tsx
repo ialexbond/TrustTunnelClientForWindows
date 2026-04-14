@@ -38,12 +38,12 @@ describe("TitleBar", () => {
     expect(draggable.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("uses CSS token variables for background, not hardcoded colors", () => {
+  it("has transparent background (seamless design — inherits from body)", () => {
     const { container } = render(<TitleBar />);
     const root = container.firstChild as HTMLElement;
-    const style = root.style.backgroundColor;
-    // Should use CSS var, not a literal color
-    expect(style).toMatch(/var\(--/);
+    const bg = root.style.backgroundColor;
+    // Seamless design: no explicit background — inherits bg-primary from body
+    expect(bg).toBe("");
   });
 
   it("has height matching titlebar spec (32px)", () => {

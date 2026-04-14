@@ -5,10 +5,10 @@ import { TabNavigation } from "./TabNavigation";
 
 /**
  * AppShell -- composition story showing the complete app layout:
- * TitleBar (32px) at top, content area in the middle, TabNavigation (48px) at bottom.
+ * TitleBar (32px) at top, content area in the middle, TabNavigation (56px) at bottom.
  *
  * This demonstrates how all layout components work together as the application shell.
- * The content area uses a placeholder with centered text.
+ * Seamless design: all components are transparent, inheriting bg-primary from body.
  */
 
 /** Placeholder content area to simulate page content. */
@@ -55,7 +55,7 @@ const meta: Meta = {
 export default meta;
 type Story = StoryObj;
 
-/** Full shell: TitleBar + content placeholder + TabNavigation with all tabs enabled. */
+/** Full shell: TitleBar + content placeholder + TabNavigation. All tabs always enabled. */
 export const Default: Story = {
   render: () => (
     <>
@@ -66,7 +66,6 @@ export const Default: Story = {
       <TabNavigation
         activeTab="control"
         onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
-        hasConfig={true}
       />
     </>
   ),
@@ -83,30 +82,12 @@ export const ConnectionActive: Story = {
       <TabNavigation
         activeTab="connection"
         onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
-        hasConfig={true}
       />
     </>
   ),
 };
 
-/** No config loaded -- config-dependent tabs (connection, routing, settings) are disabled. */
-export const WithoutConfig: Story = {
-  render: () => (
-    <>
-      <TitleBar>
-        <WindowControls />
-      </TitleBar>
-      <ContentPlaceholder label="No configuration loaded" />
-      <TabNavigation
-        activeTab="control"
-        onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
-        hasConfig={false}
-      />
-    </>
-  ),
-};
-
-/** About tab active -- always available regardless of config state. */
+/** About tab active. */
 export const AboutActive: Story = {
   render: () => (
     <>
@@ -117,7 +98,6 @@ export const AboutActive: Story = {
       <TabNavigation
         activeTab="about"
         onTabChange={(tab) => console.log("[Story] onTabChange:", tab)}
-        hasConfig={true}
       />
     </>
   ),
