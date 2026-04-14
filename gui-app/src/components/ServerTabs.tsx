@@ -8,7 +8,7 @@ import {
   Wrench,
   AlertTriangle,
 } from "lucide-react";
-import { cn } from "../shared/ui/cn";
+import { cn } from "../shared/lib/cn";
 import type { ServerState } from "./server/useServerState";
 import { ServerStatusSection } from "./server/ServerStatusSection";
 import { UsersSection } from "./server/UsersSection";
