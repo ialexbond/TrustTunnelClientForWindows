@@ -10,7 +10,9 @@
     "routing": "Маршрутизация",
     "logs": "Логи",
     "about": "О программе",
-    "setup": "Установка VPN"
+    "setup": "Установка VPN",
+    "connection": "Подключение",
+    "requires_config": "Сначала настройте подключение"
   },
   "status": {
     "connected": "Подключен",
@@ -149,7 +151,9 @@
       "custom_sni_description": "Маскирует TLS-обращение под другой домен для обхода DPI. Оставьте пустым для стандартного SNI.",
       "custom_sni_warning": "С Let's Encrypt сертификатом подмена SNI может вызвать ошибку подключения — сертификат не совпадёт с подменённым доменом."
     },
-    "network": { "title": "Сеть" },
+    "network": {
+      "title": "Сеть"
+    },
     "experimental": {
       "title": "Экспериментальные функции",
       "description": "Функции в разработке. Могут быть нестабильны.",
@@ -301,7 +305,7 @@
       "save_config_tooltip": "Сохранить конфиг",
       "delete_user_tooltip": "Удалить пользователя",
       "confirm_delete_title": "Удалить пользователя?",
-      "confirm_delete_message": "Пользователь \u00AB{{user}}\u00BB будет удалён с сервера. Его конфигурация перестанет работать.",
+      "confirm_delete_message": "Пользователь «{{user}}» будет удалён с сервера. Его конфигурация перестанет работать.",
       "confirm_uninstall_title": "Вы уверены?",
       "continue_btn": "Продолжить",
       "skip_have_config": "Пропустить — у меня есть конфиг",
@@ -330,11 +334,11 @@
       "tls_certificate": "TLS-сертификат",
       "self_signed": "Self-signed",
       "self_signed_warning": "Самоподписанный сертификат небезопасен и может быть заблокирован. Настоятельно рекомендуем использовать домен с Let's Encrypt.",
-      "dns_record_help": "A-запись домена \u2192 {{host}}, порт 80 открыт",
-      "dns_record_help_no_host": "A-запись домена \u2192 IP сервера, порт 80 открыт",
+      "dns_record_help": "A-запись домена → {{host}}, порт 80 открыт",
+      "dns_record_help_no_host": "A-запись домена → IP сервера, порт 80 открыт",
       "email_label": "Email для уведомлений",
       "email_invalid": "Введите корректный email",
-      "certificate_email_help": "Необязательно \u00B7 для уведомлений об обновлении сертификата",
+      "certificate_email_help": "Необязательно · для уведомлений об обновлении сертификата",
       "advanced_settings": "Дополнительные настройки",
       "listen_address_label": "Адрес прослушивания",
       "listen_address_help": "Оставьте по умолчанию, если не уверены",
@@ -432,31 +436,26 @@
     "add_domains_above": "Добавьте домены выше",
     "mode_selective_description": "Режим: Напрямую. Домены ниже пойдут через VPN, остальной трафик — напрямую.",
     "mode_general_description": "Режим: Всё через VPN. Домены ниже пойдут напрямую, остальной трафик — через VPN.",
-
     "directTitle": "Напрямую",
     "directDescription": "Трафик к этим адресам пойдёт напрямую, минуя VPN-туннель.",
     "proxyTitle": "Через VPN",
     "proxyDescription": "Трафик к этим адресам будет маршрутизирован через VPN-туннель.",
     "blockTitle": "Заблокировать",
     "blockDescription": "Трафик к этим адресам будет заблокирован.",
-
     "redundantHint": "Это уже поведение по умолчанию в текущем режиме. Записи сохраняются и применятся при смене режима.",
     "noEntries": "Нет записей",
     "addRulePlaceholder": "domain.com, IP, geoip:RU, geosite:category...",
     "duplicateEntry": "Такая запись уже существует",
     "removeEntry": "Удалить запись",
-
     "validation": {
       "needsDot": "Введите полный домен (например, example.com)",
       "invalidCyrillic": "Кириллический домен должен содержать точку (например, сайт.рф)",
       "invalidDomain": "Некорректный домен",
       "invalidFormat": "Допустимы: домен, IP, CIDR, geoip:, geosite:"
     },
-
     "moveTo_direct": "Переместить в Напрямую",
     "moveTo_proxy": "Переместить в VPN",
     "moveTo_block": "Переместить в Блокировку",
-
     "geodataTitle": "Геоданные",
     "geodataDescription": "GeoIP и GeoSite базы для маршрутизации по странам и категориям.",
     "geodataReady": "Загружено",
@@ -478,7 +477,6 @@
     "updateAvailable": "Доступно обновление!",
     "downloadGeoDataFirst": "Сначала скачайте геоданные",
     "noMatchingCategories": "Нет совпадений",
-
     "processFilterTitle": "Фильтрация по процессам",
     "processFilterDescription": "Управление VPN-маршрутизацией для отдельных приложений.",
     "processExcludeMode": "Исключить из VPN",
@@ -494,10 +492,8 @@
     "alreadyAdded": "добавлен",
     "selectedCount": "Выбрано: {{count}}",
     "addSelected": "Добавить",
-
     "export": "Экспортировать",
     "import": "Импортировать",
-
     "unsavedChanges": "Есть несохранённые изменения",
     "unsavedChangesReconnect": "Есть несохранённые изменения — требуется применение",
     "applyChanges": "Применить изменения",
@@ -1029,5 +1025,11 @@
   "common": {
     "generate_username": "Сгенерировать имя пользователя",
     "generate_password": "Сгенерировать пароль"
+  },
+  "sidebar": {
+    "servers": "Серверы",
+    "add_server": "Добавить сервер",
+    "no_servers": "Нет серверов",
+    "no_servers_hint": "Настройте подключение в «Панель управления»"
   }
 }

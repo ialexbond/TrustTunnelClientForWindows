@@ -10,7 +10,9 @@
     "routing": "Routing",
     "logs": "Logs",
     "about": "About",
-    "setup": "VPN Setup"
+    "setup": "VPN Setup",
+    "connection": "Connection",
+    "requires_config": "Set up connection first"
   },
   "status": {
     "connected": "Connected",
@@ -149,7 +151,9 @@
       "custom_sni_description": "Masks TLS connection as another domain to bypass DPI. Leave empty for standard SNI.",
       "custom_sni_warning": "With Let's Encrypt certificate, custom SNI may cause connection failure — certificate won't match the spoofed domain."
     },
-    "network": { "title": "Network" },
+    "network": {
+      "title": "Network"
+    },
     "experimental": {
       "title": "Experimental Features",
       "description": "Features under development. May be unstable.",
@@ -330,11 +334,11 @@
       "tls_certificate": "TLS Certificate",
       "self_signed": "Self-signed",
       "self_signed_warning": "Self-signed certificates are insecure and may be blocked. We strongly recommend using a domain with Let's Encrypt.",
-      "dns_record_help": "A record for domain \u2192 {{host}}, port 80 open",
-      "dns_record_help_no_host": "A record for domain \u2192 Server IP, port 80 open",
+      "dns_record_help": "A record for domain → {{host}}, port 80 open",
+      "dns_record_help_no_host": "A record for domain → Server IP, port 80 open",
       "email_label": "Notification email",
       "email_invalid": "Enter a valid email",
-      "certificate_email_help": "Optional \u00B7 for certificate renewal notifications",
+      "certificate_email_help": "Optional · for certificate renewal notifications",
       "advanced_settings": "Advanced settings",
       "listen_address_label": "Listen address",
       "listen_address_help": "Leave default if unsure",
@@ -432,31 +436,26 @@
     "add_domains_above": "Add domains above",
     "mode_selective_description": "Mode: Direct. Domains below will go through VPN, all other traffic — direct.",
     "mode_general_description": "Mode: Everything via VPN. Domains below will go direct, all other traffic — through VPN.",
-
     "directTitle": "Direct",
     "directDescription": "Traffic to these addresses will bypass the VPN tunnel.",
     "proxyTitle": "Via VPN",
     "proxyDescription": "Traffic to these addresses will be routed through the VPN tunnel.",
     "blockTitle": "Block",
     "blockDescription": "Traffic to these addresses will be blocked.",
-
     "redundantHint": "This is already the default behavior in the current mode. Entries are saved and will apply when the mode is switched.",
     "noEntries": "No entries",
     "addRulePlaceholder": "domain.com, IP, geoip:RU, geosite:category...",
     "duplicateEntry": "This entry already exists",
     "removeEntry": "Remove entry",
-
     "validation": {
       "needsDot": "Enter a full domain (e.g. example.com)",
       "invalidCyrillic": "Cyrillic domain must include a dot (e.g. сайт.рф)",
       "invalidDomain": "Invalid domain",
       "invalidFormat": "Allowed: domain, IP, CIDR, geoip:, geosite:"
     },
-
     "moveTo_direct": "Move to Direct",
     "moveTo_proxy": "Move to VPN",
     "moveTo_block": "Move to Block",
-
     "geodataTitle": "Geodata",
     "geodataDescription": "GeoIP and GeoSite databases for country and category-based routing.",
     "geodataReady": "Ready",
@@ -478,7 +477,6 @@
     "updateAvailable": "Update available!",
     "downloadGeoDataFirst": "Download geodata first",
     "noMatchingCategories": "No matches",
-
     "processFilterTitle": "Process Filtering",
     "processFilterDescription": "Manage VPN routing for specific applications.",
     "processExcludeMode": "Exclude from VPN",
@@ -494,10 +492,8 @@
     "alreadyAdded": "added",
     "selectedCount": "Selected: {{count}}",
     "addSelected": "Add",
-
     "export": "Export",
     "import": "Import",
-
     "unsavedChanges": "Unsaved changes",
     "unsavedChangesReconnect": "Unsaved changes — apply required",
     "applyChanges": "Apply Changes",
@@ -1029,5 +1025,11 @@
   "common": {
     "generate_username": "Generate random username",
     "generate_password": "Generate random password"
+  },
+  "sidebar": {
+    "servers": "Servers",
+    "add_server": "Add server",
+    "no_servers": "No servers",
+    "no_servers_hint": "Configure connection in Control Panel"
   }
 }
