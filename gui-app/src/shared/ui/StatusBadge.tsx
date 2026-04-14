@@ -1,4 +1,5 @@
 import { cva, type VariantProps } from "class-variance-authority";
+import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 
 export const statusBadgeVariants = cva(
@@ -22,13 +23,6 @@ export const statusBadgeVariants = cva(
   }
 );
 
-const defaultLabels: Record<NonNullable<VariantProps<typeof statusBadgeVariants>["variant"]>, string> = {
-  connected: "Подключено",
-  connecting: "Подключение...",
-  error: "Ошибка",
-  disconnected: "Отключено",
-};
-
 const dotStyles: Record<NonNullable<VariantProps<typeof statusBadgeVariants>["variant"]>, string> = {
   connected: "bg-[var(--color-status-connected)]",
   connecting: "bg-[var(--color-status-connecting)] animate-pulse",
@@ -42,8 +36,9 @@ interface StatusBadgeProps extends VariantProps<typeof statusBadgeVariants> {
 }
 
 export function StatusBadge({ variant = "disconnected", label, className }: StatusBadgeProps) {
+  const { t } = useTranslation();
   const resolvedVariant = (variant ?? "disconnected") as NonNullable<typeof variant>;
-  const displayLabel = label ?? defaultLabels[resolvedVariant];
+  const displayLabel = label ?? t(`status.${resolvedVariant}`);
 
   return (
     <span

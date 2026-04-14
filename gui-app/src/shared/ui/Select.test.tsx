@@ -22,7 +22,7 @@ describe("Select", () => {
 
   it("renders placeholder when no value selected", () => {
     render(<Select options={options} onChange={onChange} />);
-    expect(screen.getByText("Выберите...")).toBeInTheDocument();
+    expect(screen.getByText("Select...")).toBeInTheDocument();
   });
 
   it("renders custom placeholder", () => {
