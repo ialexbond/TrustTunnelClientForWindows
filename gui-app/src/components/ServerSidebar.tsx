@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Server, Plus, Power, Loader2 } from "lucide-react";
 import { cn } from "../shared/lib/cn";
+import { EmptyState } from "../shared/ui/EmptyState";
 
 export interface ServerEntry {
   id: string;
@@ -18,11 +19,12 @@ interface ServerSidebarProps {
   onDisconnect: (id: string) => void;
 }
 
-const statusDot: Record<ServerEntry["status"], string> = {
-  connected: "bg-emerald-400",
-  connecting: "bg-amber-400 animate-pulse",
-  disconnected: "bg-neutral-500",
-  error: "bg-red-400",
+// Status dot: inline styles using design token vars (no hardcoded Tailwind colors)
+const statusDotStyle: Record<ServerEntry["status"], React.CSSProperties> = {
+  connected: { backgroundColor: "var(--color-status-connected)" },
+  connecting: { backgroundColor: "var(--color-status-connecting)" },
+  disconnected: { backgroundColor: "var(--color-status-disconnected)" },
+  error: { backgroundColor: "var(--color-status-error)" },
 };
 
 export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDisconnect }: ServerSidebarProps) {
@@ -32,7 +34,10 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
     <div className="w-[200px] shrink-0 flex flex-col border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       {/* Header */}
       <div className="h-[40px] flex items-center px-3 border-b border-[var(--color-border)]">
-        <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+        <span
+          className="uppercase text-[var(--color-text-muted)]"
+          style={{ fontSize: "11px", fontWeight: 400, letterSpacing: "0.02em" }}
+        >
           {t("sidebar.servers", "Серверы")}
         </span>
       </div>
@@ -50,8 +55,11 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
                 : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)]/50"
             )}
           >
-            {/* Status dot */}
-            <div className={cn("w-2 h-2 rounded-full shrink-0", statusDot[srv.status])} />
+            {/* Status dot — token vars, animate-pulse for connecting */}
+            <div
+              className={cn("w-2 h-2 rounded-full shrink-0", srv.status === "connecting" && "animate-pulse")}
+              style={statusDotStyle[srv.status]}
+            />
 
             {/* Server info */}
             <div className="flex-1 min-w-0">
@@ -69,27 +77,27 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
             {srv.status === "connected" && (
               <button
                 onClick={(e) => { e.stopPropagation(); onDisconnect(srv.id); }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 transition-opacity"
-                title={t("buttons.disconnect", "Отключить")}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--color-status-error-bg)] transition-opacity"
+                aria-label={t("buttons.disconnect", "Отключить") + " " + (srv.label || srv.host)}
               >
-                <Power className="w-3 h-3 text-red-400" />
+                <Power className="w-3 h-3" style={{ color: "var(--color-status-error)" }} />
               </button>
             )}
 
-            {/* Connecting spinner */}
+            {/* Connecting spinner — token var for color */}
             {srv.status === "connecting" && (
-              <Loader2 className="w-3 h-3 animate-spin text-amber-400 shrink-0" />
+              <Loader2 className="w-3 h-3 animate-spin shrink-0" style={{ color: "var(--color-status-connecting)" }} />
             )}
           </button>
         ))}
 
+        {/* Empty state — uses shared EmptyState component */}
         {servers.length === 0 && (
-          <div className="px-3 py-6 text-center">
-            <Server className="w-5 h-5 mx-auto mb-2 text-[var(--color-text-muted)]" />
-            <p className="text-xs text-[var(--color-text-muted)]">
-              {t("sidebar.no_servers", "Нет серверов")}
-            </p>
-          </div>
+          <EmptyState
+            icon={<Server className="w-5 h-5" />}
+            heading={t("sidebar.no_servers", "Нет серверов")}
+            body={t("sidebar.no_servers_hint", "Настройте подключение в «Панель управления»")}
+          />
         )}
       </div>
 
