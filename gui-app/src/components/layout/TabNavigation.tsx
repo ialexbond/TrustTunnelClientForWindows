@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Monitor, Settings, GitBranch, SlidersHorizontal, Info } from "lucide-react";
+import { Monitor, Cable, GitBranch, Settings, Info } from "lucide-react";
 import type { AppTab } from "../../shared/types";
 
 interface TabNavigationProps {
@@ -16,9 +16,9 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: "control",    labelKey: "tabs.controlPanel", icon: <Monitor size={18} /> },
-  { id: "connection", labelKey: "tabs.connection",   icon: <Settings size={18} /> },
+  { id: "connection", labelKey: "tabs.connection",   icon: <Cable size={18} /> },
   { id: "routing",    labelKey: "tabs.routing",      icon: <GitBranch size={18} /> },
-  { id: "settings",   labelKey: "tabs.appSettings",  icon: <SlidersHorizontal size={18} /> },
+  { id: "settings",   labelKey: "tabs.appSettings",  icon: <Settings size={18} /> },
   { id: "about",      labelKey: "tabs.about",        icon: <Info size={18} /> },
 ];
 
