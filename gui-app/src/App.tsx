@@ -391,6 +391,7 @@ function App() {
                 icon={<Settings className="w-6 h-6" />}
                 heading={i18n.t("connection.noConfig", "Нет подключения")}
                 body={i18n.t("connection.noConfigHint", "Настройте сервер в «Панель управления», чтобы управлять VPN-подключением")}
+                className="flex-1"
               />
             )}
           </PanelErrorBoundary>
