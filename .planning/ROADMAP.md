@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Foundation** - Token consolidation + Storybook infrastructure, zero component changes
 - [ ] **Phase 2: Primitive Redesign** - All 19 existing + new primitive components redesigned in Storybook
 - [ ] **Phase 3: Control Panel** - First screen migration, proves the design system works end-to-end
-- [ ] **Phase 4: Application Shell** - TitleBar, TabNavigation (5 tabs replacing sidebar), ServerSidebar redesign, App.tsx routing refactor
+- [ ] **Phase 4: Remaining Panels** - Wizard, Settings, Server, Routing, Dashboard, Logs, About screens
 - [ ] **Phase 5: Layout Shell** - Sidebar and WindowControls (last, frames everything)
 - [ ] **Phase 6: Cleanup** - Remove legacy artifacts, enforce quality gates, finalize cross-references
 
@@ -73,22 +73,16 @@ Plans:
 **Plans**: TBD
 **UI hint**: yes
 
-### Phase 4: Application Shell
-**Goal**: Application shell is complete: TitleBar (custom title bar with logo + WindowControls), TabNavigation (5 horizontal tabs replacing sidebar), ServerSidebar redesigned with tokens, and App.tsx routing refactored from 8 SidebarPage to 5 AppTab
+### Phase 4: Remaining Panels
+**Goal**: All remaining application screens (Setup Wizard, Settings, Server, Routing, Dashboard, Logs, About) are fully migrated to the design system
 **Depends on**: Phase 3
-**Requirements**: SCR-07 (partial — Dashboard disbanded), DOC-04 (partial — shell use cases), DOC-05 (partial — shell test cases). SCR-03, SCR-04, SCR-05, SCR-06, SCR-08, SCR-09 deferred to future screen phases.
+**Requirements**: SCR-03, SCR-04, SCR-05, SCR-06, SCR-07, SCR-08, SCR-09, DOC-04, DOC-05
 **Success Criteria** (what must be TRUE):
-  1. TitleBar renders seamlessly (no border-bottom) with logo + drag region + WindowControls in both themes
-  2. TabNavigation shows 5 tabs with correct disabled states when hasConfig=false, ARIA tablist semantics
-  3. ServerSidebar uses only design token vars for status dots and hover states — zero hardcoded Tailwind colors
-  4. App.tsx routing uses AppTab 5-tab union, old localStorage page IDs migrate correctly
-  5. Sidebar.tsx is deleted, all navigation goes through TabNavigation
-**Plans**: 4 plans
-Plans:
-- [ ] 04-03-PLAN.md — Foundation: AppTab type + i18n keys + keyboard shortcuts + ROADMAP update
-- [ ] 04-04-PLAN.md — New components: TitleBar + TabNavigation + WindowControls redesign
-- [ ] 04-05-PLAN.md — Integration: App.tsx refactor + ServerSidebar redesign + Sidebar deletion
-- [ ] 04-06-PLAN.md — Polish: Storybook stories + documentation + visual checkpoint
+  1. Setup Wizard renders all steps using FormField and ProgressBar components with correct token-based styling in both themes
+  2. Settings, Server, Routing, Dashboard, Log, and About panels all render using Section components and semantic tokens — no legacy styles
+  3. memory/v3/use-cases/ contains user scenarios for every migrated screen
+  4. memory/v3/test-cases/ contains positive and negative test cases linked to each screen's use cases
+**Plans**: TBD
 **UI hint**: yes
 
 ### Phase 5: Layout Shell
@@ -124,6 +118,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Foundation | 5/5 | Complete | - |
 | 2. Primitive Redesign | 0/7 | Planned | - |
 | 3. Control Panel | 0/TBD | Not started | - |
-| 4. Application Shell | 0/4 | Not started | - |
+| 4. Remaining Panels | 0/TBD | Not started | - |
 | 5. Layout Shell | 0/TBD | Not started | - |
 | 6. Cleanup | 0/TBD | Not started | - |
