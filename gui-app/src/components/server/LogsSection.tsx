@@ -82,7 +82,7 @@ export function LogsSection({ state }: Props) {
 
       <div className="flex gap-2">
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
           icon={showLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ScrollText className="w-3.5 h-3.5" />}
           onClick={showLogs ? handleCollapse : handleLoadLogs}

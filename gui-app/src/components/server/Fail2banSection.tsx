@@ -39,7 +39,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
         ) : (
           <div className="flex gap-1.5">
             {status.active ? (
-              <Button variant="secondary" size="sm" onClick={state.stopFail2ban} loading={state.isBusy("stop-f2b")} disabled={state.f2bBusy}>
+              <Button variant="ghost" size="sm" onClick={state.stopFail2ban} loading={state.isBusy("stop-f2b")} disabled={state.f2bBusy}>
                 {t("server.security.fail2ban.stop")}
               </Button>
             ) : (
@@ -47,7 +47,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
                 {t("server.security.fail2ban.start")}
               </Button>
             )}
-            <Button variant="danger-outline" size="sm" onClick={state.uninstallFail2ban} loading={state.isBusy("uninstall-f2b")} disabled={state.f2bBusy}>
+            <Button variant="danger" size="sm" onClick={state.uninstallFail2ban} loading={state.isBusy("uninstall-f2b")} disabled={state.f2bBusy}>
               {t("server.security.fail2ban.uninstall")}
             </Button>
           </div>
@@ -107,7 +107,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
                           className="text-[11px]"
                         />
                         <Button
-                          variant="secondary" size="sm"
+                          variant="ghost" size="sm"
                           onClick={() => state.banIp(jail.name)}
                           disabled={!state.manualBanIp.trim() || state.isBusy(`ban-${state.manualBanIp.trim()}`)}
                           loading={state.isBusy(`ban-${state.manualBanIp.trim()}`)}

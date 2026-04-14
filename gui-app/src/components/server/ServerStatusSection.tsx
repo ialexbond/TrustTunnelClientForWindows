@@ -180,7 +180,7 @@ export function ServerStatusSection({ state }: Props) {
             {serverInfo.serviceActive ? (
               <>
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   icon={<RefreshCw className="w-3.5 h-3.5" />}
                   loading={actionLoading === "restart"}
@@ -191,7 +191,7 @@ export function ServerStatusSection({ state }: Props) {
                   {t("server.actions.restart")}
                 </Button>
                 <Button
-                  variant="danger-outline"
+                  variant="danger"
                   size="sm"
                   icon={<PowerOff className="w-3.5 h-3.5" />}
                   loading={actionLoading === "stop"}
@@ -204,7 +204,7 @@ export function ServerStatusSection({ state }: Props) {
               </>
             ) : (
               <Button
-                variant="success"
+                variant="primary"
                 size="sm"
                 icon={<Power className="w-3.5 h-3.5" />}
                 loading={actionLoading === "start"}
@@ -216,7 +216,7 @@ export function ServerStatusSection({ state }: Props) {
               </Button>
             )}
             <Button
-              variant="danger-outline"
+              variant="danger"
               size="sm"
               icon={<RotateCcw className="w-3.5 h-3.5" />}
               loading={rebooting}

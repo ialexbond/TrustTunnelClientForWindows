@@ -271,7 +271,7 @@ export function UsersSection({ state }: Props) {
         {serverInfo.users.length > 0 && (
           <div className="mb-3">
             <Button
-              variant={selectedUser ? "primary" : "secondary"}
+              variant={selectedUser ? "primary" : "ghost"}
               fullWidth
               icon={continueLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
               loading={continueLoading}
@@ -331,7 +331,7 @@ export function UsersSection({ state }: Props) {
               />
             </div>
             <Button
-              variant="success"
+              variant="primary"
               size="sm"
               icon={<UserPlus className="w-3.5 h-3.5" />}
               loading={isAdding}
