@@ -47,7 +47,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
             role="tab"
             aria-selected={active}
             onClick={() => onTabChange(tab.id)}
-            className="flex-1 flex flex-col items-center justify-center outline-none group cursor-pointer"
+            className="flex-1 flex flex-col items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)] focus-visible:ring-offset-1 group cursor-pointer"
           >
             {/* Fixed-size hover area — icon + text */}
             <div
