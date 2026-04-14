@@ -81,7 +81,7 @@ export function VersionSection({ state }: Props) {
         <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
           {t("server.version.current")}:
         </span>
-        <Badge variant="accent" size="md">v{currentClean || "?"}</Badge>
+        <Badge variant="neutral" size="md">v{currentClean || "?"}</Badge>
         {hasUpdate && (
           <Badge variant="success" size="md">{t("server.version.update_badge")}</Badge>
         )}
