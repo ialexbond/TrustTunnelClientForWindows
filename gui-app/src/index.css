@@ -48,46 +48,6 @@
     border-radius: var(--radius-xl);
   }
 
-  /* ── Buttons ── */
-  .btn-primary {
-    @apply px-6 py-3 rounded-xl font-semibold text-white
-           bg-gradient-to-r from-indigo-500 to-purple-600
-           hover:from-indigo-400 hover:to-purple-500
-           active:scale-95 transition-all duration-200
-           shadow-lg shadow-indigo-500/25;
-  }
-
-  .btn-danger {
-    @apply px-6 py-3 rounded-xl font-semibold text-white
-           bg-gradient-to-r from-red-500 to-rose-600
-           hover:from-red-400 hover:to-rose-500
-           active:scale-95 transition-all duration-200
-           shadow-lg shadow-red-500/25;
-  }
-
-  /* ── Status dots ── */
-  .status-dot {
-    @apply w-3 h-3 rounded-full;
-  }
-
-  .status-dot-connected {
-    @apply bg-emerald-400 shadow-lg shadow-emerald-400/50;
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-
-  .status-dot-connecting {
-    @apply bg-amber-400 shadow-lg shadow-amber-400/50;
-    animation: pulse-glow 1s ease-in-out infinite;
-  }
-
-  .status-dot-disconnected {
-    @apply bg-gray-500;
-  }
-
-  .status-dot-error {
-    @apply bg-red-400 shadow-lg shadow-red-400/50;
-  }
-
   /* ── Wizard input: theme-aware ── */
   .wizard-input {
     width: 100%;
@@ -124,11 +84,6 @@
 }
 
 /* ── Animations ── */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }

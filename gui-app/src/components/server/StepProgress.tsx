@@ -24,7 +24,7 @@ export function StepProgress({ steps, currentStep, status }: StepProgressProps) 
             className="flex-1 h-0.5 mx-1"
             style={{
               backgroundColor: i <= currentStep
-                ? "var(--color-success-500)"
+                ? "var(--color-status-connected)"
                 : "var(--color-border)",
             }}
           />
@@ -32,15 +32,15 @@ export function StepProgress({ steps, currentStep, status }: StepProgressProps) 
 
         // Icon
         let icon;
-        if (stepStatus === "active") icon = <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--color-accent-500)" }} />;
-        else if (stepStatus === "done") icon = <Check className="w-4 h-4" style={{ color: "var(--color-success-500)" }} />;
-        else if (stepStatus === "error") icon = <X className="w-4 h-4" style={{ color: "var(--color-danger-500)" }} />;
+        if (stepStatus === "active") icon = <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--color-accent-interactive)" }} />;
+        else if (stepStatus === "done") icon = <Check className="w-4 h-4" style={{ color: "var(--color-status-connected)" }} />;
+        else if (stepStatus === "error") icon = <X className="w-4 h-4" style={{ color: "var(--color-status-error)" }} />;
         else icon = <Circle className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />;
 
         // Label color
         let labelColor: string;
-        if (stepStatus === "active") labelColor = "var(--color-accent-500)";
-        else if (stepStatus === "error") labelColor = "var(--color-danger-500)";
+        if (stepStatus === "active") labelColor = "var(--color-accent-interactive)";
+        else if (stepStatus === "error") labelColor = "var(--color-status-error)";
         else labelColor = "var(--color-text-muted)";
 
         return (
