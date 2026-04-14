@@ -191,7 +191,7 @@ export function SshConnectForm({ onConnect }: Props) {
               label={t("labels.ssh_password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder=""
+              placeholder={t("control.password_placeholder", "Введите пароль")}
             />
           )}
 
