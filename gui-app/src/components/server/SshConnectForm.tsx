@@ -2,13 +2,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Server, Loader2, Lock, Key, FileKey, ClipboardPaste } from "lucide-react";
+import { Server, Lock, Key, FileKey, ClipboardPaste } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
+import { Card } from "../../shared/ui/Card";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
-import { colors } from "../../shared/ui/colors";
 import { formatError } from "../../shared/utils/formatError";
 
 export interface SshCredentials {
@@ -114,31 +114,25 @@ export function SshConnectForm({ onConnect }: Props) {
   };
 
   return (
-    <div className="flex-1 flex items-center justify-center py-8">
-      <div className="w-full max-w-md">
+    <div className="flex-1 flex items-center justify-center py-[var(--space-7)] bg-[var(--color-bg-primary)]">
+      <Card padding="lg" className="w-full max-w-[400px] rounded-[var(--radius-xl)]">
         {/* Header */}
-        <div className="text-center mb-6">
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3"
-            style={{ backgroundColor: colors.accentLogoGlow }}
-          >
-            <Server className="w-6 h-6" style={{ color: "var(--color-accent-400)" }} />
+        <div className="flex flex-col items-center mb-[var(--space-4)]">
+          <div className="w-12 h-12 rounded-[var(--radius-lg)] flex items-center justify-center bg-[var(--color-bg-elevated)] mb-[var(--space-3)]">
+            <Server className="w-6 h-6 text-[var(--color-accent-interactive)]" />
           </div>
-          <h2 className="text-lg font-bold mb-1" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-lg font-[var(--font-weight-semibold)] text-[var(--color-text-primary)] tracking-[var(--tracking-tight)]">
             {t("control.ssh_title")}
           </h2>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+          <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-[var(--space-1)]">
             {t("control.ssh_description")}
           </p>
         </div>
 
-        {/* Form */}
-        <div
-          className="rounded-[var(--radius-xl)] p-5 space-y-4"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-        >
+        {/* Form fields */}
+        <div className="space-y-[var(--space-4)]">
           {/* Host + Port */}
-          <div className="flex gap-3 items-end">
+          <div className="flex gap-[var(--space-3)] items-end">
             <div className="flex-1">
               <Input
                 label={t("labels.server_ip")}
@@ -167,24 +161,24 @@ export function SshConnectForm({ onConnect }: Props) {
 
           {/* Auth mode toggle */}
           <div>
-            <label className="block text-xs font-medium mb-2" style={{ color: "var(--color-text-secondary)" }}>
+            <label className="block text-[var(--font-size-xs)] font-[var(--font-weight-medium)] mb-[var(--space-2)] text-[var(--color-text-secondary)]">
               {t("control.auth_method")}
             </label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-2 gap-[var(--space-2)]">
               <Button
-                variant={authMode === "password" ? "primary" : "secondary"}
+                variant={authMode === "password" ? "primary" : "ghost"}
                 size="sm"
-                icon={<Key className="w-3.5 h-3.5" />}
                 onClick={() => setAuthMode("password")}
               >
+                <Key className="w-3.5 h-3.5" />
                 {t("control.auth_password")}
               </Button>
               <Button
-                variant={authMode === "key" ? "primary" : "secondary"}
+                variant={authMode === "key" ? "primary" : "ghost"}
                 size="sm"
-                icon={<FileKey className="w-3.5 h-3.5" />}
                 onClick={() => setAuthMode("key")}
               >
+                <FileKey className="w-3.5 h-3.5" />
                 {t("control.auth_key")}
               </Button>
             </div>
@@ -199,69 +193,54 @@ export function SshConnectForm({ onConnect }: Props) {
               placeholder="********"
             />
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-[var(--space-2)]">
               {/* File / Paste toggle */}
-              <div className="flex gap-1">
-                <button
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
-                  style={{
-                    backgroundColor: keyInputMode === "file" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
-                    color: keyInputMode === "file" ? "#fff" : "var(--color-text-secondary)",
-                  }}
+              <div className="flex gap-[var(--space-1)]">
+                <Button
+                  variant={keyInputMode === "file" ? "primary" : "ghost"}
+                  size="sm"
                   onClick={() => setKeyInputMode("file")}
+                  className="text-[var(--font-size-xs)]"
                 >
                   <FileKey className="w-3 h-3" />
                   {t("control.key_from_file", "File")}
-                </button>
-                <button
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
-                  style={{
-                    backgroundColor: keyInputMode === "paste" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
-                    color: keyInputMode === "paste" ? "#fff" : "var(--color-text-secondary)",
-                  }}
+                </Button>
+                <Button
+                  variant={keyInputMode === "paste" ? "primary" : "ghost"}
+                  size="sm"
                   onClick={() => setKeyInputMode("paste")}
+                  className="text-[var(--font-size-xs)]"
                 >
                   <ClipboardPaste className="w-3 h-3" />
                   {t("control.key_paste", "Paste")}
-                </button>
+                </Button>
               </div>
 
               {keyInputMode === "file" ? (
                 <div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-[var(--space-2)]">
                     <div
-                      className="flex-1 flex items-center px-3 h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer"
-                      style={{
-                        backgroundColor: "var(--color-input-bg)",
-                        border: "1px solid var(--color-input-border)",
-                        color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)",
-                      }}
+                      className="flex-1 flex items-center px-[var(--space-3)] h-8 rounded-[var(--radius-lg)] text-sm truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)]"
                       onClick={handleSelectKey}
                     >
-                      <FileKey className="w-4 h-4 shrink-0 mr-2" style={{ color: "var(--color-text-muted)" }} />
-                      <span className="truncate text-xs">
+                      <FileKey className="w-4 h-4 shrink-0 mr-[var(--space-2)] text-[var(--color-text-muted)]" />
+                      <span className="truncate text-[var(--font-size-xs)]" style={{ color: keyPath ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
                         {keyPath ? keyPath.split(/[/\\]/).pop() : t("control.select_key")}
                       </span>
                     </div>
-                    <Button variant="secondary" size="sm" onClick={handleSelectKey}>
+                    <Button variant="ghost" size="sm" onClick={handleSelectKey}>
                       {t("control.browse")}
                     </Button>
                   </div>
                   {keyPath && (
-                    <p className="text-[10px] mt-1 truncate" style={{ color: "var(--color-text-muted)" }}>
+                    <p className="text-[var(--font-size-xs)] mt-[var(--space-1)] truncate text-[var(--color-text-muted)]">
                       {keyPath}
                     </p>
                   )}
                 </div>
               ) : (
                 <textarea
-                  className="w-full rounded-[var(--radius-lg)] px-3 py-2 text-xs font-mono resize-none"
-                  style={{
-                    backgroundColor: "var(--color-input-bg)",
-                    border: "1px solid var(--color-input-border)",
-                    color: "var(--color-text-primary)",
-                    height: 100,
-                  }}
+                  className="w-full rounded-[var(--radius-lg)] px-[var(--space-3)] py-[var(--space-2)] text-[var(--font-size-xs)] font-mono resize-none h-[100px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)]"
                   value={keyData}
                   onChange={(e) => setKeyData(e.target.value)}
                   placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
@@ -275,7 +254,7 @@ export function SshConnectForm({ onConnect }: Props) {
           <Button
             variant="primary"
             fullWidth
-            icon={connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Server className="w-4 h-4" />}
+            loading={connecting}
             disabled={!isValid || connecting}
             onClick={handleConnect}
           >
@@ -283,14 +262,14 @@ export function SshConnectForm({ onConnect }: Props) {
           </Button>
 
           {/* Security note */}
-          <div className="flex items-center justify-center gap-1.5">
-            <Lock className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />
-            <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+          <div className="flex items-center justify-center gap-[var(--space-1)]">
+            <Lock className="w-3 h-3 text-[var(--color-text-muted)]" />
+            <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
               {t("control.remember")}
             </span>
           </div>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
