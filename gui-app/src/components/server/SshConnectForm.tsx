@@ -245,8 +245,8 @@ export function SshConnectForm({ onConnect }: Props) {
                 className="text-[11px] text-[var(--color-accent-interactive)] hover:underline"
               >
                 {keyInputMode === "file"
-                  ? t("control.key_switch_paste", "Или вставьте ключ вручную")
-                  : t("control.key_switch_file", "Или выберите файл ключа")}
+                  ? t("control.key_switch_paste", "Вставить ключ вручную")
+                  : t("control.key_switch_file", "Выбрать файл ключа")}
               </button>
             </div>
           )}
