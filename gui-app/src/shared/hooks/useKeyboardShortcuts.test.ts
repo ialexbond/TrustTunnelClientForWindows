@@ -9,31 +9,31 @@ beforeEach(() => {
 });
 
 describe("useKeyboardShortcuts", () => {
-  it("Ctrl+1 calls onNavigate with 'dashboard'", () => {
+  it("Ctrl+1 calls onNavigate with 'control'", () => {
     const onNavigate = vi.fn();
     renderHook(() => useKeyboardShortcuts({ onNavigate }));
 
     fireEvent.keyDown(document, { key: "1", ctrlKey: true });
 
-    expect(onNavigate).toHaveBeenCalledWith("dashboard");
+    expect(onNavigate).toHaveBeenCalledWith("control");
   });
 
-  it("Ctrl+2 calls onNavigate with 'server'", () => {
+  it("Ctrl+2 calls onNavigate with 'connection'", () => {
     const onNavigate = vi.fn();
     renderHook(() => useKeyboardShortcuts({ onNavigate }));
 
     fireEvent.keyDown(document, { key: "2", ctrlKey: true });
 
-    expect(onNavigate).toHaveBeenCalledWith("server");
+    expect(onNavigate).toHaveBeenCalledWith("connection");
   });
 
-  it("Ctrl+3 calls onNavigate with 'control'", () => {
+  it("Ctrl+3 calls onNavigate with 'routing'", () => {
     const onNavigate = vi.fn();
     renderHook(() => useKeyboardShortcuts({ onNavigate }));
 
     fireEvent.keyDown(document, { key: "3", ctrlKey: true });
 
-    expect(onNavigate).toHaveBeenCalledWith("control");
+    expect(onNavigate).toHaveBeenCalledWith("routing");
   });
 
   it("Ctrl+Shift+C calls onToggleConnect", () => {
