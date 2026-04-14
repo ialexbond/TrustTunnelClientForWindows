@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
+import React, { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -29,6 +29,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     },
     ref
   ) => {
+    const inputRef = React.useRef<HTMLInputElement | null>(null);
     const hasAdornment = !!icon || !!clearable;
     const showClear = clearable && value !== undefined && value !== "";
 
@@ -37,19 +38,20 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         const event = { target: { value: "" } } as React.ChangeEvent<HTMLInputElement>;
         onChange(event);
       }
+      inputRef.current?.focus();
     };
 
     return (
       <div className={fullWidth ? "w-full" : ""}>
         {label && (
           <label
-            className="block text-[var(--font-size-sm)] font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]"
+            className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]"
           >
             {label}
           </label>
         )}
         {description && (
-          <p className="text-[var(--font-size-xs)] mb-1.5 text-[var(--color-text-muted)]">
+          <p className="text-xs mb-1.5 text-[var(--color-text-muted)]">
             {description}
           </p>
         )}
@@ -60,7 +62,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             </span>
           )}
           <input
-            ref={ref}
+            ref={(node) => {
+              inputRef.current = node;
+              if (typeof ref === "function") ref(node);
+              else if (ref) ref.current = node;
+            }}
             value={value}
             onChange={onChange}
             className={cn(
@@ -68,7 +74,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
               "px-[var(--space-3)]",
-              "text-[var(--font-size-md)] text-[var(--color-text-primary)]",
+              "text-base text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
@@ -99,12 +105,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
         </div>
         {error && (
-          <p className="text-[var(--font-size-xs)] mt-1 text-[var(--color-status-error)]">
+          <p className="text-xs mt-1 text-[var(--color-status-error)]">
             {error}
           </p>
         )}
         {!error && helperText && (
-          <p className="text-[var(--font-size-xs)] mt-1 text-[var(--color-text-muted)]">
+          <p className="text-xs mt-1 text-[var(--color-text-muted)]">
             {helperText}
           </p>
         )}

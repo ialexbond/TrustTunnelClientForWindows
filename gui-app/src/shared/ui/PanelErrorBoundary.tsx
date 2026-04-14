@@ -52,17 +52,17 @@ class PanelErrorBoundaryInner extends React.Component<
           style={{ color: "var(--color-text-secondary)" }}
         >
           <AlertTriangle className="w-10 h-10 text-[var(--color-danger-400)]" />
-          <p className="text-[var(--font-size-sm)] text-center">
+          <p className="text-sm text-center">
             {t("errors.panelCrash", { panel: panelName || "?" })}
           </p>
-          <pre className="text-[var(--font-size-xs)] opacity-60 max-w-md overflow-auto whitespace-pre-wrap">
+          <pre className="text-xs opacity-60 max-w-md overflow-auto whitespace-pre-wrap">
             {this.state.error}
           </pre>
           <div className="flex gap-[var(--space-2)]">
             <button
               onClick={() => this.setState({ hasError: false, error: "" })}
               className={cn(
-                "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)] rounded-[var(--radius-md)] text-[var(--font-size-sm)]",
+                "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)] rounded-[var(--radius-md)] text-sm",
                 "transition-colors cursor-pointer",
                 "hover:bg-[var(--color-bg-hover)]",
               )}
@@ -82,7 +82,7 @@ class PanelErrorBoundaryInner extends React.Component<
                   this.props.onNavigateHome?.();
                 }}
                 className={cn(
-                  "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)] rounded-[var(--radius-md)] text-[var(--font-size-sm)]",
+                  "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)] rounded-[var(--radius-md)] text-sm",
                   "transition-colors cursor-pointer",
                   "hover:bg-[var(--color-bg-hover)]",
                 )}

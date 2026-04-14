@@ -29,7 +29,7 @@ export function Separator({
       >
         <div className="flex-1 h-px bg-[var(--color-border)]" />
         <span
-          className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] whitespace-nowrap"
+          className="text-xs text-[var(--color-text-muted)] whitespace-nowrap"
           style={{ fontSize: "var(--font-size-xs)" }}
         >
           {label}

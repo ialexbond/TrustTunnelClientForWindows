@@ -44,7 +44,7 @@ export function ConfirmDialog({
     >
       <div className="space-y-[var(--space-4)]">
         <h3
-          className="text-[var(--font-size-md)] font-[var(--font-weight-semibold)] text-center"
+          className="text-base font-[var(--font-weight-semibold)] text-center"
           style={{
             color:
               variant === "danger"
@@ -55,7 +55,7 @@ export function ConfirmDialog({
           {title}
         </h3>
         <p
-          className="text-[var(--font-size-xs)] text-center leading-relaxed"
+          className="text-xs text-center leading-relaxed"
           style={{ color: "var(--color-text-secondary)" }}
         >
           {message}

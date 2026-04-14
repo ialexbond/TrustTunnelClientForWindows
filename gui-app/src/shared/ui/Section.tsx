@@ -115,10 +115,17 @@ export function Section({
           onToggle={collapsible ? () => setOpen((prev) => !prev) : undefined}
         />
       )}
-      {showContent && (
-        <div className="overflow-hidden">
-          {children}
+      {collapsible ? (
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-out"
+          style={{ gridTemplateRows: showContent ? "1fr" : "0fr" }}
+        >
+          <div className="overflow-hidden">
+            {children}
+          </div>
         </div>
+      ) : (
+        <div>{children}</div>
       )}
     </div>
   );
