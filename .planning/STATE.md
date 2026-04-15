@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.1
 milestone_name: Stabilization & UX Redesign
 status: executing
-stopped_at: "Completed 08-04-PLAN.md — i18n audit: EmptyState, Select, DropOverlay"
-last_updated: "2026-04-15T10:20:37.103Z"
+stopped_at: Completed 08-05-PLAN.md — UI fixes D-14..D-19 + STAB-09 keyboard a11y
+last_updated: "2026-04-15T10:21:44.167Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Phase: 8 (Stabilization) — EXECUTING
-Plan: 4 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-04-15
 
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08-stabilization P02 | 4m | 2 tasks | 4 files |
 | Phase 08-stabilization P06 | 15 | 2 tasks | 6 files |
 | Phase 08-stabilization P04 | 5m | 2 tasks | 3 files |
+| Phase 08-stabilization P05 | 7m | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - [Phase 08-stabilization]: t() вызывается в теле компонента как fallback, не в default props (D-04, D-06)
 - [Phase 08-stabilization]: Screen specs format: component tree + ASCII architecture + states table + user flows + edge cases + shared/ui used
 - [Phase 08-stabilization]: Inline fallbacks в t() убраны — ru.json/en.json единственный источник переведённого текста (D-06, D-08)
+- [Phase 08-stabilization]: D-18: pill-индикатор ServerTabs — rounded-md bg-elevated shadow-xs вместо border-b underline
+- [Phase 08-stabilization]: STAB-09: focus-visible ring + aria-label на обоих disconnect buttons (ServerTabs + StatusPanel)
 
 ### Pending Todos
 
@@ -77,6 +80,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-15T10:20:37.100Z
-Stopped at: Completed 08-04-PLAN.md — i18n audit: EmptyState, Select, DropOverlay
+Last session: 2026-04-15T10:21:33.000Z
+Stopped at: Completed 08-05-PLAN.md — UI fixes D-14..D-19 + STAB-09 keyboard a11y
 Resume file: None
