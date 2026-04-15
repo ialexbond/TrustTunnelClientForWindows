@@ -26,7 +26,7 @@
 **Milestone Goal:** Стабилизировать кодовую базу v3.0 (тесты, баги, a11y, design-system), добавить 4 новых компонента и провести поэкранный UX-редизайн Pro-версии.
 
 - [x] **Phase 8: Stabilization** — Зелёный CI, баги закрыты, документация экранов написана (completed 2026-04-15)
-- [ ] **Phase 9: New Components** — 4 новых shared/ui компонента с Storybook stories
+- [x] **Phase 9: New Components** — 4 новых shared/ui компонента с Storybook stories (completed 2026-04-15)
 - [ ] **Phase 10: Tab Bar & Control Panel** — Pill-индикатор, Skeleton loading, ServerTabs 5 вкладок
 - [ ] **Phase 11: Screen UX Redesign** — Поэкранный редизайн Dashboard, Security, Settings, Routing, About
 
@@ -60,7 +60,11 @@ Plans:
   2. Каждый компонент использует CVA для вариантов и CSS-токены для цветов — ни одного захардкоженного hex
   3. Accordion раскрывается и закрывается плавно (≤300ms), `aria-hidden` переключается правильно
   4. Тесты компонентов проверяют поведение и семантику, не Tailwind-классы
-**Plans**: TBD
+**Plans:** 3/3 plans complete
+Plans:
+- [x] 09-01-PLAN.md — Skeleton + StatusIndicator (CVA, keyframe, stories, tests)
+- [x] 09-02-PLAN.md — useCollapse hook + Accordion (multi/single, aria, stories, tests)
+- [x] 09-03-PLAN.md — StatCard (Card wrapper, trend, loading) + barrel exports
 **UI hint**: yes
 
 ### Phase 10: Tab Bar & Control Panel
@@ -100,6 +104,6 @@ Plans:
 | 5. Layout Shell | v3.0 | 3/3 | Complete | 2026-04-15 |
 | 6. Cleanup | v3.0 | 3/3 | Complete | 2026-04-15 |
 | 8. Stabilization | v3.1 | 6/6 | Complete   | 2026-04-15 |
-| 9. New Components | v3.1 | 0/? | Not started | - |
+| 9. New Components | v3.1 | 3/3 | Complete   | 2026-04-15 |
 | 10. Tab Bar & Control Panel | v3.1 | 0/? | Not started | - |
 | 11. Screen UX Redesign | v3.1 | 0/? | Not started | - |
