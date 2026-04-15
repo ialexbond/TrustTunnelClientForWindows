@@ -29,6 +29,7 @@ export function SectionHeader({
           <button
             type="button"
             onClick={onToggle}
+            aria-expanded={!collapsed}
             className="flex items-center gap-1.5 flex-1 text-left"
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
           >
@@ -99,7 +100,7 @@ export function Section({
   children,
   className,
 }: SectionProps) {
-  const { open, setOpen } = useCollapse(defaultOpen);
+  const { open, toggle } = useCollapse(defaultOpen);
 
   const showContent = !collapsible || open;
 
@@ -113,7 +114,7 @@ export function Section({
           description={description}
           action={action}
           collapsed={collapsible ? !open : undefined}
-          onToggle={collapsible ? () => setOpen((prev) => !prev) : undefined}
+          onToggle={collapsible ? toggle : undefined}
         />
       )}
       {collapsible ? (
