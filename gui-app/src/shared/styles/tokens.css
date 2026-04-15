@@ -250,16 +250,16 @@
   /* Input */
   --color-input-bg: #f4f4f1;
   --color-input-border: #c8c8c4;
-  --color-input-focus: var(--color-accent-600);
+  --color-input-focus: var(--color-accent-500);
 
   /* Toggle */
   --color-toggle-off: rgba(0, 0, 0, 0.14);
-  --color-toggle-on: var(--color-accent-600);
+  --color-toggle-on: var(--color-accent-500);
 
   /* Accent semantic aliases */
-  --color-accent-interactive: var(--color-accent-600);
-  --color-accent-hover: var(--color-accent-700);
-  --color-accent-active: var(--color-accent-800);
+  --color-accent-interactive: var(--color-accent-500);
+  --color-accent-hover: var(--color-accent-600);
+  --color-accent-active: var(--color-accent-700);
 
   /* Destructive */
   --color-destructive: #b03020;
