@@ -47,6 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 | v3.0 (1-6) | 27 | — | — |
 
 *Updated after each plan completion*
+| Phase 08-stabilization P01 | 5m | 2 tasks | 4 files |
 | Phase 08-stabilization P02 | 4m | 2 tasks | 4 files |
 
 ## Accumulated Context
