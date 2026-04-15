@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 05-layout-shell 05-03-PLAN.md
-last_updated: "2026-04-14T21:14:34.739Z"
-last_activity: 2026-04-14
+status: executing
+stopped_at: Completed 06-cleanup 06-01-PLAN.md
+last_updated: "2026-04-15T05:05:14.608Z"
+last_activity: 2026-04-15
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 5
-  total_plans: 22
-  completed_plans: 26
+  total_plans: 25
+  completed_plans: 27
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** Пользователь устанавливает приложение, вставляет ссылку/конфиг и подключается к VPN — без CLI и технической настройки
-**Current focus:** Phase 05 — Shell Polish + TODO Closure
+**Current focus:** Phase 06 — cleanup
 
 ## Current Position
 
-Phase: 6
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-14
+Phase: 06 (cleanup) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-15
 
 Progress: [████████░░] 80%
 
@@ -58,6 +58,7 @@ Progress: [████████░░] 80%
 | Phase 05-layout-shell P01 | 20 | 3 tasks | 4 files |
 | Phase 05-layout-shell P02 | 2 | 2 tasks | 8 files |
 | Phase 05-layout-shell P03 | 10 | 2 tasks | 8 files |
+| Phase 06-cleanup P01 | 425 | 2 tasks | 21 files |
 
 ## Governance Rules (v3.0 milestone)
 
@@ -85,6 +86,7 @@ Recent decisions affecting current work:
 - [Phase 05-layout-shell]: danger-outline -> danger: план не упоминал danger-outline, но он тоже невалидный CVA вариант Button — исправлен по Rule 1 во всех server-секциях
 - [Phase 05-layout-shell]: D-17 closed: StatusBadge/Select/EmptyState use useTranslation — no hardcoded Russian strings
 - [Phase 05-layout-shell]: D-18 closed: sanitize() loop+search_from pattern verified by all 6 logging tests
+- [Phase 06-cleanup]: Added --color-accent-tint-40 token (not in original plan) to cover rgba(99,102,241,0.4) in EndpointStep.tsx
 
 ### Pending Todos
 
@@ -96,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T21:03:35.820Z
-Stopped at: Completed 05-layout-shell 05-03-PLAN.md
+Last session: 2026-04-15T05:05:14.605Z
+Stopped at: Completed 06-cleanup 06-01-PLAN.md
 Resume file: None

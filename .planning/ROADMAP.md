@@ -110,7 +110,11 @@ Plans:
   3. All 38 !important overrides are removed from index.css — specificity is resolved through token architecture
   4. vitest-axe a11y tests run in CI and pass; all 83+ behavioral tests continue to pass
   5. Every screen has a Storybook story, and memory/v3/ documentation has complete cross-references (screen → components → use cases → test cases)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [x] 06-01-PLAN.md — Tokenize all 42 inline rgba() values into CSS custom property tint tokens
+- [ ] 06-02-PLAN.md — Remove legacy artifacts (surface palette, !important) + documentation update
+- [ ] 06-03-PLAN.md — Todo closure + final quality gate + state update
 
 ## Progress
 
@@ -124,4 +128,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Control Panel | 0/TBD | Not started | - |
 | 4. Remaining Panels | 0/TBD | Not started | - |
 | 5. Layout Shell | 3/3 | Complete   | 2026-04-14 |
-| 6. Cleanup | 0/TBD | Not started | - |
+| 6. Cleanup | 0/3 | Planned | - |
