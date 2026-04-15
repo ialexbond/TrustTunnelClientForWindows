@@ -65,8 +65,8 @@ export function DangerZoneSection({ state }: Props) {
       <div
         className="rounded-[var(--radius-xl)] p-4 border transition-colors"
         style={{
-          backgroundColor: "rgba(239, 68, 68, 0.03)",
-          borderColor: "rgba(239, 68, 68, 0.25)",
+          backgroundColor: "var(--color-danger-tint-03)",
+          borderColor: "var(--color-danger-tint-25)",
         }}
       >
         <CardHeader

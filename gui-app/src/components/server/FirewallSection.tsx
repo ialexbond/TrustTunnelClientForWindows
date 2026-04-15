@@ -160,9 +160,9 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                     <span
                       className="font-mono px-1.5 py-0.5 rounded text-center"
                       style={{
-                        backgroundColor: r.action.startsWith("ALLOW") ? "rgba(16,185,129,0.15)"
-                          : r.action.startsWith("DENY") || r.action.startsWith("REJECT") ? "rgba(239,68,68,0.15)"
-                          : "rgba(245,158,11,0.15)",
+                        backgroundColor: r.action.startsWith("ALLOW") ? "var(--color-success-tint-15)"
+                          : r.action.startsWith("DENY") || r.action.startsWith("REJECT") ? "var(--color-danger-tint-15)"
+                          : "var(--color-warning-tint-15)",
                         color: r.action.startsWith("ALLOW") ? "var(--color-success-500)"
                           : r.action.startsWith("DENY") || r.action.startsWith("REJECT") ? "var(--color-danger-500)"
                           : "var(--color-warning-500)",

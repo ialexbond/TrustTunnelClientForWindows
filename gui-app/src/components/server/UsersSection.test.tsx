@@ -274,7 +274,7 @@ describe("UsersSection", () => {
     // The selected user row has a specific background color
     const aliceRow = screen.getByText("alice").closest("div[class*='cursor-pointer']") as HTMLElement;
     expect(aliceRow).toBeTruthy();
-    expect(aliceRow.style.backgroundColor).toBe("rgba(99, 102, 241, 0.08)");
+    expect(aliceRow.style.backgroundColor).toBe("var(--color-accent-tint-08)");
   });
 
   it("shows separator between users but not after last", () => {
@@ -346,7 +346,7 @@ describe("UsersSection", () => {
     const aliceRow = screen.getByText("alice").closest("div[class*='cursor-pointer']") as HTMLElement;
     fireEvent.mouseEnter(aliceRow);
     // Should stay with selected background
-    expect(aliceRow.style.backgroundColor).toBe("rgba(99, 102, 241, 0.08)");
+    expect(aliceRow.style.backgroundColor).toBe("var(--color-accent-tint-08)");
   });
 
   it("add user handles error from invoke", async () => {

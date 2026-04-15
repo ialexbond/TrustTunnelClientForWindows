@@ -136,7 +136,7 @@ export function VersionSection({ state }: Props) {
                         onClick={() => { setSelectedVersion(v); dropdown.close(); }}
                         className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                         style={{
-                          backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
+                          backgroundColor: isSelected ? "var(--color-accent-tint-10)" : "transparent",
                           color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
                         }}
                         onMouseEnter={(e) => {

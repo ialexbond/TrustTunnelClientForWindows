@@ -18,7 +18,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
             className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center relative"
             style={{
               backgroundColor: "var(--color-accent-500)",
-              boxShadow: "0 8px 32px rgba(99, 102, 241, 0.3), 0 0 64px rgba(99, 102, 241, 0.15)",
+              boxShadow: "0 8px 32px var(--color-accent-tint-30), 0 0 64px var(--color-accent-tint-15)",
             }}
           >
             <Shield className="w-8 h-8 text-white" />
@@ -44,8 +44,8 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
             className="cursor-pointer group active:scale-[0.98] transition-all duration-200"
             onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
             style={{
-              backgroundColor: "rgba(99, 102, 241, 0.06)",
-              borderColor: "rgba(99, 102, 241, 0.2)",
+              backgroundColor: "var(--color-accent-tint-06)",
+              borderColor: "var(--color-accent-tint-20)",
             }}
           >
             <div className="flex items-start gap-3">
@@ -76,7 +76,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
             <div className="flex items-start gap-3">
               <div
                 className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5"
-                style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}
+                style={{ backgroundColor: "var(--color-accent-tint-10)" }}
               >
                 <Download className="w-4.5 h-4.5" style={{ color: "var(--color-accent-500)" }} />
               </div>
