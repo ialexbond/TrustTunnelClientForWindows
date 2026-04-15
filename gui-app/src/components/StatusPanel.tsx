@@ -75,7 +75,7 @@ function StatusPanel({
 
         <div>
           {status === "connected" && (
-            <Button variant="danger" size="sm" onClick={onDisconnect}>
+            <Button variant="danger" size="sm" onClick={onDisconnect} aria-label={t("buttons.disconnect")}>
               <Power className="w-3.5 h-3.5" />
               {t("buttons.disconnect")}
             </Button>
