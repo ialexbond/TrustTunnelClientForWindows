@@ -1050,5 +1050,11 @@
   "empty": {
     "heading": "Nothing here",
     "body": "Items will appear after adding."
+  },
+  "configPanel": {
+    "title": "Settings",
+    "configFile": "Config file",
+    "selectFile": "Select file",
+    "logLevel": "Log level"
   }
 }
