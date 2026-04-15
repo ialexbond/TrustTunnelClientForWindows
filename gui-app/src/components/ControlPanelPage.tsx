@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
+import { Skeleton } from "../shared/ui/Skeleton";
 
 async function readStoredCredentials(): Promise<SshCredentials | null> {
   try {
@@ -42,6 +43,45 @@ async function readStoredCredentials(): Promise<SshCredentials | null> {
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// ServerPanelSkeleton — shown during first SSH connect
+// ═══════════════════════════════════════════════════════
+
+function ServerPanelSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Header skeleton — address bar + disconnect button */}
+      <div
+        className="flex items-center justify-between px-4 py-2 shrink-0"
+        style={{ borderBottom: "1px solid var(--color-border)" }}
+      >
+        <Skeleton variant="line" width="55%" height={14} />
+        <Skeleton variant="line" width="18%" height={14} />
+      </div>
+      {/* Tab bar skeleton — 5 tab pills */}
+      <div
+        className="flex items-center shrink-0 gap-1 px-2 py-1"
+        style={{ borderBottom: "1px solid var(--color-border)" }}
+      >
+        {[...Array(5)].map((_, i) => (
+          <Skeleton key={i} variant="card" className="flex-1" height={32} />
+        ))}
+      </div>
+      {/* Content area skeleton */}
+      <div className="flex-1 px-6 py-4 space-y-4">
+        <Skeleton variant="card" height={80} />
+        <Skeleton variant="line" width="40%" height={14} />
+        <Skeleton variant="line" width="70%" height={14} />
+        <Skeleton variant="line" width="55%" height={14} />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// Props
+// ═══════════════════════════════════════════════════════
+
 interface Props {
   onConfigExported: (configPath: string) => void;
   onSwitchToSetup: () => void;
@@ -53,6 +93,20 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const lastTsRef = useRef<string | null>(null);
+
+  // First-connect skeleton state (D-07/D-08/D-09)
+  const [isFirstConnect, setIsFirstConnect] = useState(false);
+
+  // Persisted last SSH host/user/port (D-10/D-11) — restored on next visit
+  const [lastHost, setLastHost] = useState<string>(
+    () => localStorage.getItem("tt_ssh_last_host") ?? ""
+  );
+  const [lastUser, setLastUser] = useState<string>(
+    () => localStorage.getItem("tt_ssh_last_user") ?? "root"
+  );
+  const [lastPort, setLastPort] = useState<string>(
+    () => localStorage.getItem("tt_ssh_last_port") ?? "22"
+  );
 
   useEffect(() => {
     readStoredCredentials().then((c) => {
@@ -89,6 +143,13 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   }, [creds]);
 
   const handleConnect = useCallback((newCreds: SshCredentials) => {
+    setIsFirstConnect(true);
+    setLastHost(newCreds.host);
+    setLastUser(newCreds.user);
+    setLastPort(newCreds.port);
+    localStorage.setItem("tt_ssh_last_host", newCreds.host);
+    localStorage.setItem("tt_ssh_last_user", newCreds.user);
+    localStorage.setItem("tt_ssh_last_port", newCreds.port);
     setCreds(newCreds);
     setRefreshKey(k => k + 1);
   }, []);
@@ -113,6 +174,8 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   const handleDisconnect = useCallback(() => {
     invoke("clear_ssh_credentials").catch(() => {});
     localStorage.removeItem("trusttunnel_control_refresh");
+    setIsFirstConnect(false);
+    // Per D-10: lastHost/lastUser/lastPort are NOT cleared on disconnect
     setCreds(null);
   }, []);
 
@@ -123,24 +186,35 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {!creds ? (
-        <SshConnectForm onConnect={handleConnect} />
-      ) : (
-        <ServerPanel
-          key={refreshKey}
-          host={creds.host}
-          port={creds.port}
-          sshUser={creds.user}
-          sshPassword={creds.password}
-          sshKeyPath={creds.keyPath}
-          onSwitchToSetup={onSwitchToSetup}
-          onClearConfig={() => {}}
-          onDisconnect={handleDisconnect}
-          onPortChanged={handlePortChanged}
-          onConfigExported={(path) => {
-            onConfigExported(path);
-            if (onNavigateToSettings) onNavigateToSettings();
-          }}
+        <SshConnectForm
+          onConnect={handleConnect}
+          initialHost={lastHost}
+          initialUser={lastUser}
+          initialPort={lastPort}
         />
+      ) : (
+        <>
+          {isFirstConnect && <ServerPanelSkeleton />}
+          <div style={{ display: isFirstConnect ? "none" : "flex", flexDirection: "column", height: "100%" }}>
+            <ServerPanel
+              key={refreshKey}
+              host={creds.host}
+              port={creds.port}
+              sshUser={creds.user}
+              sshPassword={creds.password}
+              sshKeyPath={creds.keyPath}
+              onSwitchToSetup={onSwitchToSetup}
+              onClearConfig={() => {}}
+              onDisconnect={handleDisconnect}
+              onPortChanged={handlePortChanged}
+              onPanelReady={() => setIsFirstConnect(false)}
+              onConfigExported={(path) => {
+                onConfigExported(path);
+                if (onNavigateToSettings) onNavigateToSettings();
+              }}
+            />
+          </div>
+        </>
       )}
     </div>
   );
