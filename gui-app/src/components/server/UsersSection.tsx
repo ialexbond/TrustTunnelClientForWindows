@@ -5,12 +5,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   Users,
   UserPlus,
-  Trash2,
-  Download,
   ChevronRight,
   Loader2,
-  QrCode,
-  Link2,
   X,
   Shuffle,
 } from "lucide-react";
@@ -20,8 +16,8 @@ import { Button } from "../../shared/ui/Button";
 import { ActionInput } from "../../shared/ui/ActionInput";
 import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
-import { IconButton } from "../../shared/ui/IconButton";
 import { Modal } from "../../shared/ui/Modal";
+import { OverflowMenu } from "../../shared/ui/OverflowMenu";
 import { formatError } from "../../shared/utils/formatError";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
@@ -235,24 +231,16 @@ export function UsersSection({ state }: Props) {
                     </div>
                     <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                   </div>
-                  <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                    <IconButton tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
-                      <QrCode className="w-3.5 h-3.5" />
-                    </IconButton>
-                    <IconButton tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
-                      <Link2 className="w-3.5 h-3.5" />
-                    </IconButton>
-                    <IconButton tooltip={t("server.users.export_tooltip")} onClick={() => handleDownloadConfig(u)} loading={exportingUser === u}>
-                      <Download className="w-3.5 h-3.5" />
-                    </IconButton>
-                    <IconButton
-                      tooltip={serverInfo.users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
-                      onClick={() => setConfirmDeleteUser(u)}
-                      disabled={serverInfo.users.length <= 1}
-                      color="var(--color-danger-400)"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </IconButton>
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <OverflowMenu
+                      triggerAriaLabel={t("users.actions_menu")}
+                      items={[
+                        { label: t("server.users.qr_tooltip"), onSelect: () => handleShowQR(u), loading: qrLoading && qrUser === u },
+                        { label: t("server.users.link_tooltip"), onSelect: () => handleCopyLink(u), loading: linkLoadingUser === u },
+                        { label: t("server.users.export_tooltip"), onSelect: () => handleDownloadConfig(u), loading: exportingUser === u },
+                        { label: t("server.users.delete_tooltip"), onSelect: () => setConfirmDeleteUser(u), destructive: true, disabled: serverInfo.users.length <= 1 },
+                      ]}
+                    />
                   </div>
                 </div>
                 {!isLast && <div className="mx-3 my-1" style={{ borderBottom: "1px solid var(--color-border)" }} />}
