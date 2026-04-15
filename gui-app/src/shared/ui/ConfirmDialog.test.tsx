@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
+import i18n from "../../shared/i18n";
 
 describe("ConfirmDialog", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -17,6 +18,7 @@ describe("ConfirmDialog", () => {
   };
 
   beforeEach(() => {
+    i18n.changeLanguage("ru");
     onConfirm = vi.fn();
     onCancel = vi.fn();
     defaults.onConfirm = onConfirm;
