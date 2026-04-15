@@ -265,14 +265,12 @@ static void start_location_ping(LocationsPinger *pinger) {
             pinger->anti_dpi, pinger->handoff, {i->info->relays.data, i->info->relays.size}, *pinger->relay_parallel,
             pinger->quic_max_idle_timeout_ms, pinger->quic_version};
     Ping *ping = ping_start(&ping_info, {ping_handler, pinger});
-    if (!ping) {
-        FinalizeLocationInfo info{std::move(*i), pinger->pending_locations.size() == 1 && pinger->locations.empty()};
-        finalize_location(pinger, std::move(info));
-    } else {
-        pinger->locations.emplace(ping, std::move(*i));
-    }
-    pinger->pending_locations.pop_front();
 
+    // Must be extracted before pop_front() invalidates the iterator, and before finalize_location()
+    // is called, since the callback inside it may destroy the pinger.
+    FinalizeLocationInfo info{std::move(*i), pinger->pending_locations.size() == 1 && pinger->locations.empty()};
+
+    pinger->pending_locations.pop_front();
     if (!pinger->pending_locations.empty()) {
         pinger->task_id = event_loop::schedule(pinger->loop,
                 {
@@ -283,6 +281,12 @@ static void start_location_ping(LocationsPinger *pinger) {
                                 },
                 },
                 Millis{1} /*ms (force libevent to poll/select*/);
+    }
+
+    if (!ping) {
+        finalize_location(pinger, std::move(info));
+    } else {
+        pinger->locations.emplace(ping, std::move(info.location_ctx));
     }
 }
 
