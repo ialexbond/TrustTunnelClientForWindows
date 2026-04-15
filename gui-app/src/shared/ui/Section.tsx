@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useCollapse } from "../hooks/useCollapse";
 
 interface SectionHeaderProps {
   title: string;
@@ -98,7 +99,7 @@ export function Section({
   children,
   className,
 }: SectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  const { open, setOpen } = useCollapse(defaultOpen);
 
   const showContent = !collapsible || open;
 
