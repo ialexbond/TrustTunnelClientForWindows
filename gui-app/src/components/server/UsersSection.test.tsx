@@ -41,6 +41,14 @@ function makeState(overrides: Partial<ServerState> = {}): ServerState {
   } as unknown as ServerState;
 }
 
+/** Open overflow menu for the Nth user (0-based index). */
+function openOverflowMenu(index: number) {
+  const menuTriggers = screen.getAllByRole("button", {
+    name: i18n.t("users.actions_menu"),
+  });
+  fireEvent.click(menuTriggers[index]);
+}
+
 describe("UsersSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -113,25 +121,58 @@ describe("UsersSection", () => {
     expect(screen.getByPlaceholderText(i18n.t("server.users.password_placeholder"))).toBeInTheDocument();
   });
 
-  it("clicking delete icon calls setConfirmDeleteUser", () => {
+  it("shows overflow menu trigger for each user", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    // Delete buttons for users — find the delete icon buttons (Trash2)
-    // There should be delete buttons for each user. We get all buttons with danger color.
-    const deleteButtons = document.querySelectorAll("button[style*='color: var(--color-danger-400)']");
-    expect(deleteButtons.length).toBe(2); // one per user
-    fireEvent.click(deleteButtons[0]);
+    const triggers = screen.getAllByRole("button", { name: i18n.t("users.actions_menu") });
+    expect(triggers.length).toBe(2); // one per user
+  });
+
+  it("overflow menu trigger has aria-haspopup=menu", () => {
+    const state = makeState();
+    render(<UsersSection state={state} />);
+    const triggers = screen.getAllByRole("button", { name: i18n.t("users.actions_menu") });
+    triggers.forEach((trigger) => {
+      expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    });
+  });
+
+  it("clicking overflow trigger opens menu with user actions", () => {
+    const state = makeState();
+    render(<UsersSection state={state} />);
+    openOverflowMenu(0); // alice
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.link_tooltip") })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.export_tooltip") })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") })).toBeInTheDocument();
+  });
+
+  it("clicking delete menu item calls setConfirmDeleteUser", () => {
+    const state = makeState();
+    render(<UsersSection state={state} />);
+    openOverflowMenu(0); // alice
+    const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
+    fireEvent.click(deleteItem);
     expect(state.setConfirmDeleteUser).toHaveBeenCalledWith("alice");
   });
 
-  it("delete button is disabled when only one user exists", () => {
+  it("delete menu item is disabled when only one user exists", () => {
     const state = makeState({
       serverInfo: { installed: true, version: "1.4.0", serviceActive: true, users: ["alice"] },
     });
     render(<UsersSection state={state} />);
-    const deleteButtons = document.querySelectorAll("button[style*='color: var(--color-danger-400)']");
-    expect(deleteButtons.length).toBe(1);
-    expect(deleteButtons[0]).toBeDisabled();
+    openOverflowMenu(0); // alice
+    const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
+    expect(deleteItem).toBeDisabled();
+  });
+
+  it("delete menu item has destructive color", () => {
+    const state = makeState();
+    render(<UsersSection state={state} />);
+    openOverflowMenu(0);
+    const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
+    expect(deleteItem).toHaveStyle({ color: "var(--color-destructive)" });
   });
 
   it("does not show continue button when users list is empty", () => {
@@ -142,24 +183,13 @@ describe("UsersSection", () => {
     expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.users.select_user")) })).not.toBeInTheDocument();
   });
 
-  it("shows QR icon buttons for each user", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    // Each user has 4 icon buttons: QR, Link, Download, Delete (danger-colored)
-    // QR, Link, Download are muted-colored: 3 per user * 2 users = 6
-    // But there may also be a close button in the QR modal
-    const allIconButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    // At least 6 muted buttons (3 per user), possibly more from modal close
-    expect(allIconButtons.length).toBeGreaterThanOrEqual(6);
-  });
-
-  it("clicking QR icon invokes server_export_config_deeplink", async () => {
+  it("clicking QR menu item invokes server_export_config_deeplink", async () => {
     vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
     const state = makeState();
     render(<UsersSection state={state} />);
-    // First non-danger icon button per user is QR
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[0]); // First QR button (alice)
+    openOverflowMenu(0); // alice
+    const qrItem = screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") });
+    fireEvent.click(qrItem);
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("server_export_config_deeplink", {
         host: "10.0.0.1", port: 22, user: "root", password: "pass",
@@ -172,8 +202,8 @@ describe("UsersSection", () => {
     vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[0]); // QR button for alice
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
     await waitFor(() => {
       expect(screen.getByTestId("qr-code")).toBeInTheDocument();
     });
@@ -186,8 +216,8 @@ describe("UsersSection", () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("SSH failed"));
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[0]); // QR button for alice
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
     await waitFor(() => {
       expect(state.setActionResult).toHaveBeenCalledWith({
         type: "error",
@@ -196,27 +226,27 @@ describe("UsersSection", () => {
     });
   });
 
-  it("clicking link icon copies deeplink to clipboard", async () => {
+  it("clicking link menu item copies deeplink to clipboard", async () => {
     vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
     });
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[1]); // Link button for alice (2nd muted button)
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.link_tooltip") }));
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("trusttunnel://config/abc123");
     });
     expect(state.pushSuccess).toHaveBeenCalled();
   });
 
-  it("clicking download icon triggers config export", async () => {
+  it("clicking download menu item triggers config export", async () => {
     vi.mocked(invoke).mockResolvedValueOnce("/tmp/config.toml");
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[2]); // Download button for alice (3rd muted button)
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.export_tooltip") }));
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("fetch_server_config", {
         host: "10.0.0.1", port: 22, user: "root", password: "pass",
@@ -304,8 +334,8 @@ describe("UsersSection", () => {
     vi.mocked(invoke).mockImplementationOnce(() => new Promise(r => { resolveInvoke = r; }));
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[0]); // QR button for alice
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
     // The modal should be open with loading spinner
     await waitFor(() => {
       const spinners = document.querySelectorAll("svg.animate-spin");
@@ -319,8 +349,8 @@ describe("UsersSection", () => {
     vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[0]); // QR button for alice
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
     await waitFor(() => {
       expect(screen.getByTestId("qr-code")).toBeInTheDocument();
     });
@@ -367,8 +397,8 @@ describe("UsersSection", () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("ssh error"));
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[1]); // Link button for alice
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.link_tooltip") }));
     await waitFor(() => {
       expect(state.setActionResult).toHaveBeenCalledWith({
         type: "error",
@@ -381,8 +411,8 @@ describe("UsersSection", () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("download failed"));
     const state = makeState();
     render(<UsersSection state={state} />);
-    const mutedButtons = document.querySelectorAll("button[style*='color: var(--color-text-muted)']");
-    fireEvent.click(mutedButtons[2]); // Download button for alice
+    openOverflowMenu(0); // alice
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.export_tooltip") }));
     await waitFor(() => {
       expect(state.setActionResult).toHaveBeenCalledWith({
         type: "error",
