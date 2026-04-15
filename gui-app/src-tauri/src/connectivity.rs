@@ -65,7 +65,6 @@ pub fn start_monitor(
                 if consecutive_failures >= 4 && was_online {
                     eprintln!("[connectivity] Internet appears down — telling frontend to disconnect VPN");
                     log_app("WARN", "[connectivity] Declaring offline after 4 failures");
-                    was_online = false;
 
                     // Tell frontend: disconnect VPN, then we'll monitor adapter recovery
                     app.emit("internet-status", serde_json::json!({
