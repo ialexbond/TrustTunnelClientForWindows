@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { open } from "@tauri-apps/plugin-dialog";
+import i18n from "../shared/i18n";
 import ConfigPanel from "./ConfigPanel";
 import type { VpnConfig } from "../shared/types";
 
@@ -13,6 +14,7 @@ describe("ConfigPanel", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    i18n.changeLanguage("ru");
   });
 
   it("renders section title", () => {
