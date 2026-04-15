@@ -131,7 +131,6 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
               <span
                 className={[
                   "flex flex-col items-center justify-center rounded-[var(--radius-lg)] transition-colors duration-[var(--transition-fast)]",
-                  "focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)]",
                   !active ? "hover:bg-[var(--color-bg-hover)]" : "",
                 ].join(" ")}
                 style={{
