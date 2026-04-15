@@ -236,7 +236,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
                   {t("control.key_paste_label", "Вставить ключ")}
                 </label>
                 <textarea
-                  className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-xs font-mono resize-none h-[80px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)] focus:border-[var(--color-accent-interactive)] outline-none transition-colors"
+                  className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-xs font-mono resize-none h-[80px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)] focus:border-[var(--color-accent-interactive)] outline-none focus-visible:shadow-[var(--focus-ring)] transition-colors"
                   value={keyData}
                   onChange={(e) => setKeyData(e.target.value)}
                   placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}

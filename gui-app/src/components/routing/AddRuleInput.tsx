@@ -207,7 +207,7 @@ export function AddRuleInput({ action, geodataStatus, geodataCategories, onAdd }
               }
             }}
             placeholder={t("routing.addRulePlaceholder")}
-            className="w-full px-3 h-8 pr-8 rounded-[var(--radius-lg)] text-xs font-mono transition-colors outline-none placeholder:opacity-40"
+            className="w-full px-3 h-8 pr-8 rounded-[var(--radius-lg)] text-xs font-mono transition-colors outline-none focus-visible:shadow-[var(--focus-ring)] placeholder:opacity-40"
             style={{
               backgroundColor: "var(--color-input-bg)",
               border: `1px solid ${errorMsg ? "var(--color-danger-500)" : "var(--color-input-border)"}`,
