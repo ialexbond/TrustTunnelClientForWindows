@@ -29,7 +29,7 @@ pub use server::{
     change_ssh_port,
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,
-    MtProtoStatus, MtProtoInstallStep,
+    // MtProtoStatus, MtProtoInstallStep are re-exported via commands
     detect_bbr_status, enable_bbr, disable_bbr,
 };
 pub use pool::SshPool;
@@ -56,6 +56,7 @@ pub struct SshParams {
 }
 
 impl SshParams {
+    #[allow(dead_code)]
     pub async fn connect(&self) -> Result<client::Handle<SshHandler>, String> {
         ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), None).await
     }

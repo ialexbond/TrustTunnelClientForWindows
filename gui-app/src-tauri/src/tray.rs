@@ -3,10 +3,9 @@ use std::sync::Arc;
 use tauri::Manager;
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::image::Image;
 
-use crate::commands::{AppState, kill_sidecar_from_state, kill_stale_sidecar};
+use crate::commands::{AppState, kill_stale_sidecar};
 use crate::{routing_rules, geodata_v2ray, sidecar};
 
 /// Load a tray icon PNG from the icons directory embedded at compile time.

@@ -11,6 +11,7 @@ use winreg::RegKey;
 
 /// Get the path where incoming deep-link URLs are written.
 #[cfg(windows)]
+#[allow(dead_code)]
 fn deeplink_pending_path() -> std::path::PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.parent().unwrap_or(std::path::Path::new(".")).join(".pending_deeplink")
