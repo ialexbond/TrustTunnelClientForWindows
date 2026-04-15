@@ -1,4 +1,4 @@
-import { forwardRef, type ButtonHTMLAttributes } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Loader2 } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -23,11 +23,24 @@ export const buttonVariants = cva(
           "text-white",
           "border border-transparent",
         ].join(" "),
+        secondary: [
+          "bg-[var(--color-bg-elevated)]",
+          "hover:bg-[var(--color-bg-hover)]",
+          "active:bg-[var(--color-bg-active)]",
+          "text-[var(--color-text-primary)]",
+          "border border-[var(--color-border)]",
+        ].join(" "),
         danger: [
           "bg-[var(--color-destructive)]",
           "hover:opacity-90",
           "text-white",
           "border border-transparent",
+        ].join(" "),
+        "danger-outline": [
+          "bg-transparent",
+          "hover:bg-[var(--color-destructive)] hover:text-white",
+          "text-[var(--color-destructive)]",
+          "border border-[var(--color-destructive)]",
         ].join(" "),
         ghost: [
           "bg-transparent",
@@ -67,11 +80,12 @@ export interface ButtonProps
     VariantProps<typeof buttonVariants> {
   loading?: boolean;
   fullWidth?: boolean;
+  icon?: ReactNode;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
-    { variant, size, fullWidth, loading, className, children, disabled, ...props },
+    { variant, size, fullWidth, loading, icon, className, children, disabled, ...props },
     ref
   ) => {
     return (
@@ -82,6 +96,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+        {!loading && icon}
         {children}
       </button>
     );
