@@ -175,7 +175,7 @@ export function SshConnectForm({ onConnect }: Props) {
                     "border-r border-[var(--color-border)] last:border-r-0",
                     authMode === seg.id
                       ? "bg-[var(--color-accent-interactive)] text-white"
-                      : "bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)]"
+                      : "bg-[var(--color-input-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
                   )}
                 >
                   {seg.icon}
