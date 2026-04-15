@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -28,6 +29,7 @@ interface ServerPanelProps {
   onDisconnect: () => void;
   onConfigExported: (configPath: string) => void;
   onPortChanged?: (newPort: number) => void;
+  onPanelReady?: () => void;  // called when panelDataLoaded becomes true
 }
 
 // ═══════════════════════════════════════════════════════
@@ -37,6 +39,13 @@ interface ServerPanelProps {
 export function ServerPanel(props: ServerPanelProps) {
   const { t } = useTranslation();
   const state = useServerState(props);
+
+  // Signal to parent when panel data is loaded (for skeleton dismissal)
+  useEffect(() => {
+    if (state.panelDataLoaded && props.onPanelReady) {
+      props.onPanelReady();
+    }
+  }, [state.panelDataLoaded, props.onPanelReady]);
 
   // Reboot polling is handled by ServerStatusSection (with countdown + credential cleanup)
 
