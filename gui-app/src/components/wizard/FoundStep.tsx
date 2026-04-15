@@ -224,7 +224,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                     <div
                       onClick={() => w.setSelectedUser(u)}
                       className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
-                      style={{ backgroundColor: isSelected ? "rgba(99, 102, 241, 0.08)" : "transparent" }}
+                      style={{ backgroundColor: isSelected ? "var(--color-accent-tint-08)" : "transparent" }}
                       onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
                       onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                     >
@@ -318,7 +318,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (w.checkError === "HOST_KEY_RESET") {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
           <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -362,7 +362,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   // Server ready, TT not installed
   return (
     <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
         <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
       </div>
       <div className="space-y-1.5">

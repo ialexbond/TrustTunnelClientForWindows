@@ -94,7 +94,7 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
       {/* Delete */}
       <button
         onClick={() => onRemove(entry.id)}
-        className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-[rgba(239,68,68,0.1)] transition-all"
+        className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--color-danger-tint-10)] transition-all"
         title={t("routing.removeEntry")}
       >
         <Trash2 className="w-3.5 h-3.5" style={{ color: "var(--color-danger-400)" }} />

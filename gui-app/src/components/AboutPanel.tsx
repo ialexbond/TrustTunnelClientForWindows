@@ -97,7 +97,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             </h1>
             <span
               className="text-[10px] font-bold px-2 py-0.5 rounded"
-              style={{ backgroundColor: "rgba(99, 102, 241, 0.1)", color: "var(--color-accent-500)" }}
+              style={{ backgroundColor: "var(--color-accent-tint-10)", color: "var(--color-accent-500)" }}
             >
               PRO
             </span>
@@ -120,7 +120,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             <div className="space-y-2">
               <div
                 className="flex items-center gap-3 rounded-lg p-3"
-                style={{ backgroundColor: "rgba(99, 102, 241, 0.08)", border: "1px solid rgba(99, 102, 241, 0.2)" }}
+                style={{ backgroundColor: "var(--color-accent-tint-08)", border: "1px solid var(--color-accent-tint-20)" }}
               >
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" style={{ color: "var(--color-accent-500)" }} />
                 <p className="text-xs font-medium" style={{ color: "var(--color-accent-500)" }}>
@@ -139,7 +139,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             <div className="space-y-2.5">
               <div
                 className="flex items-center gap-2.5 rounded-lg p-2.5"
-                style={{ backgroundColor: "rgba(16, 185, 129, 0.06)", border: "1px solid var(--color-status-connected-border)" }}
+                style={{ backgroundColor: "var(--color-success-tint-06)", border: "1px solid var(--color-status-connected-border)" }}
               >
                 <Download className="w-4 h-4 shrink-0" style={{ color: "var(--color-success-500)" }} />
                 <p className="text-xs font-medium" style={{ color: "var(--color-success-500)" }}>

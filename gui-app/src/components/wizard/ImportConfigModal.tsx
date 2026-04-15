@@ -122,7 +122,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
         style={{
           backgroundColor: "var(--color-bg-surface)",
           border: "1px solid var(--color-border)",
-          boxShadow: "0 16px 48px rgba(0,0,0,0.4)",
+          boxShadow: "0 16px 48px var(--color-overlay-40)",
         }}
       >
         {/* Header */}
@@ -143,7 +143,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
             className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors hover:bg-[var(--color-bg-hover)]"
             style={{ border: "1px solid var(--color-border)" }}
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
               <FileText className="w-4 h-4" style={{ color: "var(--color-accent-500)" }} />
             </div>
             <div>
@@ -161,7 +161,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
               onClick={() => setShowLinkInput(!showLinkInput)}
               className="w-full flex items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
             >
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
                 <Link2 className="w-4 h-4" style={{ color: "var(--color-accent-500)" }} />
               </div>
               <div>

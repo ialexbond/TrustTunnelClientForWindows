@@ -13,8 +13,8 @@ import { Input } from "../../shared/ui/Input";
 
 export function StatusBadge({ state, label }: { state: "on" | "off" | "warn"; label: string }) {
   const map = {
-    on: { color: "var(--color-success-500)", bg: "rgba(16,185,129,0.12)", icon: <CheckCircle2 className="w-3 h-3" /> },
-    warn: { color: "var(--color-warning-500)", bg: "rgba(245,158,11,0.12)", icon: <AlertTriangle className="w-3 h-3" /> },
+    on: { color: "var(--color-success-500)", bg: "var(--color-success-tint-12)", icon: <CheckCircle2 className="w-3 h-3" /> },
+    warn: { color: "var(--color-warning-500)", bg: "var(--color-warning-tint-12)", icon: <AlertTriangle className="w-3 h-3" /> },
     off: { color: "var(--color-text-muted)", bg: "var(--color-bg-hover)", icon: <XCircle className="w-3 h-3" /> },
   }[state];
   return (
