@@ -69,7 +69,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-2 mx-1 text-xs font-medium transition-colors rounded-[var(--radius-md)]",
+              "flex-1 flex items-center justify-center gap-1.5 py-2 mx-1 text-xs font-[var(--font-weight-semibold)] transition-colors rounded-[var(--radius-md)]",
               "focus-visible:shadow-[var(--focus-ring)] outline-none",
               activeTab === tab.id
                 ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-[var(--shadow-xs)]"
