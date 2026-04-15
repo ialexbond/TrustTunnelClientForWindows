@@ -175,25 +175,21 @@ export function OverviewSection({ state }: Props) {
           label={t("server.overview.version")}
           value={serverInfo.version || "?"}
           icon={<Tag className="w-4 h-4" />}
-          loading={!serverInfo}
         />
         <StatCard
           label={t("server.overview.protocol")}
           value={protocolValue}
           icon={<Shield className="w-4 h-4" />}
-          loading={!serverInfo}
         />
         <StatCard
           label={t("server.overview.port")}
           value={listenPort ? String(listenPort) : "?"}
           icon={<Network className="w-4 h-4" />}
-          loading={!serverInfo}
         />
         <StatCard
           label={t("server.overview.users")}
           value={String(serverInfo.users?.length ?? 0)}
           icon={<Users className="w-4 h-4" />}
-          loading={!serverInfo}
         />
       </div>
 
