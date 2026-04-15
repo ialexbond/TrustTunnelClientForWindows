@@ -209,16 +209,12 @@ export function UsersSection({ state }: Props) {
               <div key={u}>
                 <div
                   onClick={() => setSelectedUser(u)}
-                  className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
-                  style={{
-                    backgroundColor: isSelected ? "var(--color-accent-tint-08)" : "transparent",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) (e.currentTarget as HTMLDivElement).style.backgroundColor = "var(--color-bg-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) (e.currentTarget as HTMLDivElement).style.backgroundColor = "transparent";
-                  }}
+                  className={cn(
+                    "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer",
+                    isSelected
+                      ? "bg-[var(--color-accent-tint-08)]"
+                      : "hover:bg-[var(--color-bg-hover)]"
+                  )}
                 >
                   <div className="flex items-center gap-2.5">
                     <div
