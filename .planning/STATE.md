@@ -96,8 +96,9 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-17 pending (16 from Phase 04 critique + 1 from UX audit):
+18 pending (16 from Phase 04 critique + 2 from UX audit):
 - **[ux]** Полный UX-редизайн панели управления и нижнего меню (2026-04-15)
+- **[ux]** v3.1 детальная спецификация редизайна — 7-фазный план реализации (2026-04-15)
 - **[ui]** 6 UI issues (tabs style, visual softness, shell layout shift, etc.)
 - **[bug]** 3 bugs (server section buttons, tab preserve state, status rerender)
 - **[ux]** 3 UX issues (credentials persist, disabled onboarding, IP dedup)
