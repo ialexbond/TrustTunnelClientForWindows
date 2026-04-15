@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 06-cleanup 06-01-PLAN.md
-last_updated: "2026-04-15T05:05:14.608Z"
+status: complete
+stopped_at: Completed 06-cleanup 06-03-PLAN.md — Phase 6 complete
+last_updated: "2026-04-15T05:09:40.927Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 25
-  completed_plans: 27
+  completed_plans: 28
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** Пользователь устанавливает приложение, вставляет ссылку/конфиг и подключается к VPN — без CLI и технической настройки
-**Current focus:** Phase 06 — cleanup
+**Current focus:** Phase 06 — Cleanup complete
 
 ## Current Position
 
-Phase: 06 (cleanup) — EXECUTING
-Plan: 2 of 3
-Status: Ready to execute
+Phase: 06 (cleanup) — COMPLETE
+Plan: 3 of 3
+Status: Complete
 Last activity: 2026-04-15
 
 Progress: [████████░░] 80%
@@ -59,6 +59,7 @@ Progress: [████████░░] 80%
 | Phase 05-layout-shell P02 | 2 | 2 tasks | 8 files |
 | Phase 05-layout-shell P03 | 10 | 2 tasks | 8 files |
 | Phase 06-cleanup P01 | 425 | 2 tasks | 21 files |
+| Phase 06-cleanup P02 | 132 | 2 tasks | 5 files |
 
 ## Governance Rules (v3.0 milestone)
 
@@ -87,6 +88,10 @@ Recent decisions affecting current work:
 - [Phase 05-layout-shell]: D-17 closed: StatusBadge/Select/EmptyState use useTranslation — no hardcoded Russian strings
 - [Phase 05-layout-shell]: D-18 closed: sanitize() loop+search_from pattern verified by all 6 logging tests
 - [Phase 06-cleanup]: Added --color-accent-tint-40 token (not in original plan) to cover rgba(99,102,241,0.4) in EndpointStep.tsx
+- [Phase 06-cleanup]: memory/ docs are gitignored -- documentation updates local-only, not committed
+- [Phase 06-cleanup]: All legacy artifacts removed -- colors.ts, surface palette, !important overrides, inline rgba(). Todo files audited: 4 resolved+deleted, 4 kept (multi-server scope).
+- [Phase 06-cleanup]: QA-02 deferred -- vitest-axe a11y tests planned for post-v3.0
+- [Phase 06-cleanup]: SCR-12 verified -- 32 Storybook story files exist
 
 ### Pending Todos
 
@@ -94,10 +99,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 2] 38 !important коллизий в light mode — устраняется в Phase 6 (cleanup)
+- ~~[Phase 2] 38 !important коллизий в light mode~~ — RESOLVED in Phase 6 (all !important removed, zero remain)
 
 ## Session Continuity
 
-Last session: 2026-04-15T05:05:14.605Z
-Stopped at: Completed 06-cleanup 06-01-PLAN.md
+Last session: 2026-04-15T05:12:32Z
+Stopped at: Completed 06-cleanup 06-03-PLAN.md — Phase 6 complete
 Resume file: None

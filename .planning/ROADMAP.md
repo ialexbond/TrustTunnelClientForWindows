@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 3: Control Panel** - First screen migration, proves the design system works end-to-end
 - [ ] **Phase 4: Remaining Panels** - Wizard, Settings, Server, Routing, Dashboard, Logs, About screens
 - [x] **Phase 5: Layout Shell** - Shell Polish + TODO Closure (completed 2026-04-14)
-- [ ] **Phase 6: Cleanup** - Remove legacy artifacts, enforce quality gates, finalize cross-references
+- [x] **Phase 6: Cleanup** - Remove legacy artifacts, enforce quality gates, finalize cross-references (completed 2026-04-15)
 
 ## Phase Details
 
@@ -113,8 +113,8 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 06-01-PLAN.md — Tokenize all 42 inline rgba() values into CSS custom property tint tokens
-- [ ] 06-02-PLAN.md — Remove legacy artifacts (surface palette, !important) + documentation update
-- [ ] 06-03-PLAN.md — Todo closure + final quality gate + state update
+- [x] 06-02-PLAN.md — Remove legacy artifacts (surface palette, !important) + documentation update
+- [x] 06-03-PLAN.md — Todo closure + final quality gate + state update
 
 ## Progress
 
@@ -128,4 +128,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Control Panel | 0/TBD | Not started | - |
 | 4. Remaining Panels | 0/TBD | Not started | - |
 | 5. Layout Shell | 3/3 | Complete   | 2026-04-14 |
-| 6. Cleanup | 0/3 | Planned | - |
+| 6. Cleanup | 3/3 | Complete | 2026-04-15 |
