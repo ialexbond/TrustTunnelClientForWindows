@@ -88,6 +88,7 @@
     "password": "Пароль",
     "ssh_password": "Пароль SSH",
     "server_ip": "IP сервера",
+    "server_address": "Адрес сервера",
     "port": "Порт",
     "vpn_mode": "Режим VPN",
     "mtu": "MTU",
@@ -190,7 +191,7 @@
   "messages": {
     "configure_vpn_first": "Сначала настройте VPN",
     "config_required": "Сначала укажите файл конфигурации или настройте сервер",
-    "saved_check": "Сохранено ✔",
+    "saved_check": "Сохранено",
     "settings_saved": "Настройки сохранены",
     "reconnecting": "Переподключение...",
     "config_cleared": "Конфигурация очищена",
@@ -221,7 +222,7 @@
     "retry": "Попробовать снова"
   },
   "confirmations": {
-    "irreversible_action": "Вы уверены? Это действие необратимо."
+    "irreversible_action": "Это действие нельзя отменить. Продолжить?"
   },
   "updates": {
     "version_available": "Доступна версия {{version}}",
@@ -546,7 +547,7 @@
   },
   "server": {
     "status": {
-      "title": "Статус протокола",
+      "title": "Статус сервера",
       "running": "Работает",
       "stopped": "Остановлен",
       "checking": "Проверка сервера...",
@@ -561,14 +562,14 @@
       "tooltip": "Состояние TrustTunnel на удалённом сервере. Отсюда можно перезагрузить сервис или весь сервер."
     },
     "actions": {
-      "restart": "Перезапустить протокол",
-      "stop": "Остановить протокол",
-      "start": "Запустить протокол",
+      "restart": "Перезапустить сервис",
+      "stop": "Остановить сервис",
+      "start": "Запустить сервис",
       "reboot_server": "Перезагрузить сервер",
       "refresh_status": "Обновить статус",
-      "success_restart": "Протокол перезапущен",
-      "success_stop": "Протокол остановлен",
-      "success_start": "Протокол запущен",
+      "success_restart": "Сервис перезапущен",
+      "success_stop": "Сервис остановлен",
+      "success_start": "Сервис запущен",
       "success_reboot": "Сервер перезагружается",
       "success_reboot_done": "Сервер перезагружен и доступен",
       "success_generic": "Выполнено успешно",
@@ -946,7 +947,7 @@
   },
   "control": {
     "ssh_title": "Подключение к серверу",
-    "ssh_description": "Введите SSH-данные для управления сервером",
+    "ssh_description": "Введите данные SSH для управления сервером",
     "connect": "Подключиться",
     "disconnect": "Сменить сервер",
     "connecting": "Подключение...",

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useAutoSave } from "../../shared/hooks/useAutoSave";
 import { formatError } from "../../shared/utils/formatError";
@@ -256,15 +257,13 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
   // Listen for geodata file changes (fs watcher from Rust)
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen<GeoDataStatus>("geodata-files-changed", (event) => {
-        setGeodataStatus(event.payload);
-        // Reload categories if files appeared
-        if (event.payload.downloaded) {
-          loadGeoStatus();
-        }
-      }).then((fn) => { unlisten = fn; });
-    });
+    listen<GeoDataStatus>("geodata-files-changed", (event) => {
+      setGeodataStatus(event.payload);
+      // Reload categories if files appeared
+      if (event.payload.downloaded) {
+        loadGeoStatus();
+      }
+    }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, [loadGeoStatus]);
 

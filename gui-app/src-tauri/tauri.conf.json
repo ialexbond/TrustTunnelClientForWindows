@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "TrustTunnel Client for Windows Pro v3.0.0",
-        "width": 1280,
+        "width": 900,
         "height": 1000,
-        "minWidth": 1280,
+        "minWidth": 800,
         "minHeight": 1000,
         "resizable": true,
         "decorations": false,

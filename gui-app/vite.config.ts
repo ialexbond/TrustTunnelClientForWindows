@@ -6,6 +6,10 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
   plugins: [react()],
+  build: {
+    // Desktop app — bundle size is not a concern, suppress warning
+    chunkSizeWarningLimit: 1000,
+  },
   clearScreen: false,
   server: {
     port: 1420,

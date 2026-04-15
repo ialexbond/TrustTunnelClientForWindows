@@ -46,8 +46,8 @@ export const buttonVariants = cva(
       },
       size: {
         sm: "h-8 px-3 text-sm gap-1.5",
-        md: "h-8 px-4 text-sm gap-2",
-        lg: "h-9 px-5 text-base gap-2",
+        md: "h-9 px-4 text-sm gap-2",
+        lg: "h-10 px-5 text-base gap-2",
       },
       fullWidth: {
         true: "w-full",

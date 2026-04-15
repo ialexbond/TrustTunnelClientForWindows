@@ -350,7 +350,7 @@ function App() {
       {/* Content area */}
       <div
         className="flex-1 min-h-0 flex flex-col overflow-hidden"
-        style={{ maxWidth: 1000, width: "100%", margin: "0 auto" }}
+        style={{ maxWidth: 1200, width: "100%", margin: "0 auto" }}
       >
         {/* Control Panel — always shows ControlPanelPage (handles no-creds internally) */}
         <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "control" ? "flex" : "none" }}>
