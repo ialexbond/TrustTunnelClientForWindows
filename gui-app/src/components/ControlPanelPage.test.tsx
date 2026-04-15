@@ -114,7 +114,7 @@ describe("ControlPanelPage", () => {
     await act(async () => {
       render(<ControlPanelPage {...defaultProps} />);
     });
-    const btn = screen.getByRole("button", { name: /Сменить сервер/i });
+    const btn = screen.getByTestId("mock-disconnect-btn");
     expect(btn).toBeInTheDocument();
   });
 
@@ -129,7 +129,7 @@ describe("ControlPanelPage", () => {
       render(<ControlPanelPage {...defaultProps} />);
     });
 
-    const btn = screen.getByRole("button", { name: /Сменить сервер/i });
+    const btn = screen.getByTestId("mock-disconnect-btn");
     await act(async () => {
       fireEvent.click(btn);
     });
@@ -240,7 +240,7 @@ describe("ControlPanelPage", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Сменить сервер/i }));
+      fireEvent.click(screen.getByTestId("mock-disconnect-btn"));
     });
 
     expect(mockInvoke).toHaveBeenCalledWith("clear_ssh_credentials");
