@@ -22,6 +22,9 @@ export interface SshCredentials {
 
 interface Props {
   onConnect: (creds: SshCredentials) => void;
+  initialHost?: string;
+  initialUser?: string;
+  initialPort?: string;
 }
 
 type AuthMode = "password" | "key";
@@ -31,11 +34,11 @@ const authSegments: { id: AuthMode; icon: React.ReactNode; labelKey: string; fal
   { id: "key",      icon: <FileKey className="w-3 h-3" />, labelKey: "control.auth_key",      fallback: "SSH-ключ" },
 ];
 
-export function SshConnectForm({ onConnect }: Props) {
+export function SshConnectForm({ onConnect, initialHost, initialUser, initialPort }: Props) {
   const { t } = useTranslation();
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("22");
-  const [user, setUser] = useState("root");
+  const [host, setHost] = useState(initialHost ?? "");
+  const [port, setPort] = useState(initialPort ?? "22");
+  const [user, setUser] = useState(initialUser ?? "root");
   const [password, setPassword] = useState("");
   const [keyPath, setKeyPath] = useState("");
   const [keyData, setKeyData] = useState("");
