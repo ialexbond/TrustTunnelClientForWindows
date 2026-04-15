@@ -28,7 +28,7 @@
 - [x] **Phase 8: Stabilization** — Зелёный CI, баги закрыты, документация экранов написана (completed 2026-04-15)
 - [x] **Phase 9: New Components** — 4 новых shared/ui компонента с Storybook stories (completed 2026-04-15)
 - [ ] **Phase 10: Tab Bar & Control Panel** — Pill-индикатор, Skeleton loading, ServerTabs 5 вкладок
-- [ ] **Phase 11: Screen UX Redesign** — Поэкранный редизайн Dashboard, Security, Settings, Routing, About
+- [ ] **Phase 11: Screen UX Redesign** — Редизайн серверной панели: 5→4 таба, OverflowMenu, accent fix, focus rings
 
 ## Phase Details
 
@@ -85,16 +85,22 @@ Plans:
 **UI hint**: yes
 
 ### Phase 11: Screen UX Redesign
-**Goal**: Dashboard, Security, Settings, Routing и About переработаны визуально — используют новые компоненты, имеют чёткую иерархию и единый визуальный стиль
+**Goal**: Серверная панель управления реструктурирована с 5 на 4 таба (Обзор/Пользователи/Настройки/Сервис), визуально переработана с использованием design-system v3.1, a11y-фиксы применены
 **Depends on**: Phase 10
 **Requirements**: SCREEN-01, SCREEN-02, SCREEN-03, SCREEN-04, SCREEN-05
 **Success Criteria** (what must be TRUE):
-  1. Dashboard отображает метрики Download, Upload, Ping, Uptime через StatCard-компоненты
-  2. Security-вкладка показывает health summary badge, счётчик дней до истечения сертификата и StatusIndicator для каждой проверки
-  3. Settings открывается как единая scrollable-страница с секционными заголовками — без вложенных модалей
-  4. Routing отображает правила с визуальной группировкой (по типу: GeoIP, domain, process)
-  5. About освежена визуально и соответствует актуальной дизайн-системе v3.1
-**Plans**: TBD
+  1. ServerTabs показывает 4 таба: Обзор (StatusIndicator + StatCard 2x2 + TLS cert), Пользователи, Настройки, Сервис
+  2. Danger-кнопки отсутствуют на первом экране (Обзор) — только в табе Сервис через Accordion
+  3. Пользователи используют OverflowMenu вместо 4 inline-иконок, delete визуально выделен
+  4. Accent color на light theme проходит WCAG AA (accent-500), focus rings на TabNavigation + 8 inputs
+  5. Тесты обновлены для всех изменённых компонентов, memory документация отражает новую структуру
+**Plans:** 5 plans
+Plans:
+- [ ] 11-01-PLAN.md — Accent color fix (accent-500 light) + focus-visible rings (TabNavigation + 8 inputs)
+- [ ] 11-02-PLAN.md — ServerTabs 5->4 rewrite + OverviewSection + i18n keys
+- [ ] 11-03-PLAN.md — ServerSettingsSection + ServiceSection + wire into ServerTabs
+- [ ] 11-04-PLAN.md — OverflowMenu shared/ui component + UsersSection integration
+- [ ] 11-05-PLAN.md — Tests for new components + memory docs update + visual checkpoint
 **UI hint**: yes
 
 ## Progress
@@ -110,4 +116,4 @@ Plans:
 | 8. Stabilization | v3.1 | 6/6 | Complete   | 2026-04-15 |
 | 9. New Components | v3.1 | 3/3 | Complete   | 2026-04-15 |
 | 10. Tab Bar & Control Panel | v3.1 | 0/3 | Planning complete | - |
-| 11. Screen UX Redesign | v3.1 | 0/? | Not started | - |
+| 11. Screen UX Redesign | v3.1 | 0/5 | Planning complete | - |
