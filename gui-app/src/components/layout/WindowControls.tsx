@@ -25,6 +25,7 @@ export function WindowControls() {
         onMouseEnter={() => setHovered("min")}
         onMouseLeave={() => setHovered(null)}
         onClick={handleMinimize}
+        title={t("window.minimize", "Minimize")}
         aria-label={t("window.minimize", "Minimize")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12">
@@ -43,6 +44,7 @@ export function WindowControls() {
         onMouseEnter={() => setHovered("max")}
         onMouseLeave={() => setHovered(null)}
         onClick={handleMaximize}
+        title={t("window.maximize", "Maximize")}
         aria-label={t("window.maximize", "Maximize")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -61,6 +63,7 @@ export function WindowControls() {
         onMouseEnter={() => setHovered("close")}
         onMouseLeave={() => setHovered(null)}
         onClick={handleClose}
+        title={t("window.close", "Close")}
         aria-label={t("window.close", "Close")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12">
