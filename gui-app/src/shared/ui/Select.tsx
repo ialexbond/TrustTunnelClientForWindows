@@ -39,7 +39,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   ref,
 ) {
   const { t } = useTranslation();
-  const resolvedPlaceholder = placeholder ?? t("select.placeholder", "Выберите...");
+  const resolvedPlaceholder = placeholder ?? t("select.placeholder");
   const { open, style: dropdownStyle, containerRef, triggerRef, portalRef, toggle, close } =
     useDropdownPortal();
 

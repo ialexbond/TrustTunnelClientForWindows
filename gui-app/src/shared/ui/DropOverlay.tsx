@@ -49,11 +49,11 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        <span>{t("drop.overlay_text", "Drop file here")}</span>
+        <span>{t("drop.overlay_text")}</span>
         <span
           className="text-xs font-[var(--font-weight-normal)] opacity-70"
         >
-          {t("drop.overlay_hint", ".toml — VPN config, .json — routing rules")}
+          {t("drop.overlay_hint")}
         </span>
       </div>
     </div>
