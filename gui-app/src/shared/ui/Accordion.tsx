@@ -101,8 +101,6 @@ function AccordionItemComponent({ item, open, onToggle, isLast }: AccordionItemC
           visibility: open ? undefined : "hidden",
         }}
         aria-hidden={!open}
-        role="region"
-        aria-labelledby={headerId}
       >
         <div className="overflow-hidden">
           <div className="pb-[var(--space-3)]" style={{ color: "var(--color-text-secondary)" }}>
