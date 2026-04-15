@@ -150,71 +150,14 @@ export function ServerSettingsSection({ state }: Props) {
         {featureItems.length > 0 ? (
           <div className="space-y-1">
             {featureItems.map((feat) => (
-              <div
+              <Toggle
                 key={feat.key}
-                className="flex items-start justify-between px-3 py-3 rounded-[var(--radius-md)]"
-                style={{ borderBottom: "1px solid var(--color-border)" }}
-              >
-                <div className="leading-tight">
-                  <span
-                    className="text-sm font-[var(--font-weight-semibold)]"
-                    style={{ color: "var(--color-text-primary)" }}
-                  >
-                    {feat.label}
-                  </span>
-                  <span
-                    className="text-xs block mt-0.5"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    {feat.desc}
-                  </span>
-                </div>
-                <button
-                  onClick={() => void handleToggleFeature(feat.key, feat.value)}
-                  disabled={togglingFeatures.has(feat.key)}
-                  className="shrink-0 rounded-full focus:outline-none focus-visible:shadow-[var(--focus-ring)] relative overflow-hidden"
-                  style={{
-                    width: "40px",
-                    height: "22px",
-                    backgroundColor: feat.value
-                      ? "var(--color-accent-500)"
-                      : "var(--color-border)",
-                    transition: "background-color 0.3s ease",
-                  }}
-                >
-                  <span
-                    className="absolute flex items-center justify-center rounded-full"
-                    style={{
-                      width: "18px",
-                      height: "18px",
-                      top: "2px",
-                      left: feat.value ? "20px" : "2px",
-                      backgroundColor: "white",
-                      transition: "left 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                    }}
-                  >
-                    {togglingFeatures.has(feat.key) && (
-                      <svg
-                        className="animate-spin"
-                        width="10"
-                        height="10"
-                        viewBox="0 0 10 10"
-                        fill="none"
-                      >
-                        <circle
-                          cx="5"
-                          cy="5"
-                          r="4"
-                          stroke="var(--color-accent-500)"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeDasharray="12 8"
-                        />
-                      </svg>
-                    )}
-                  </span>
-                </button>
-              </div>
+                value={feat.value}
+                onChange={() => void handleToggleFeature(feat.key, feat.value)}
+                label={feat.label}
+                description={feat.desc}
+                disabled={togglingFeatures.has(feat.key)}
+              />
             ))}
           </div>
         ) : (
