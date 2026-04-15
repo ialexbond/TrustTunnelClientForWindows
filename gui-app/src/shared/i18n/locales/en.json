@@ -1,4 +1,9 @@
 {
+  "window": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "close": "Close"
+  },
   "tabs": {
     "server": "Server",
     "serverSetup": "Server Setup",

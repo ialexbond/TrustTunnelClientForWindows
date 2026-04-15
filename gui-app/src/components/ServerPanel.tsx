@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Server,
@@ -40,37 +39,7 @@ export function ServerPanel(props: ServerPanelProps) {
   const { t } = useTranslation();
   const state = useServerState(props);
 
-  // ─── Reboot polling (MUST be before any conditional returns — React hooks rule) ───
-  const rebootPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (!state.rebooting) {
-      if (rebootPollRef.current) clearInterval(rebootPollRef.current);
-      return;
-    }
-    let elapsed = 0;
-    let resolved = false;
-    rebootPollRef.current = setInterval(async () => {
-      if (resolved) return;
-      elapsed += 10;
-      try {
-        const info = await invoke<{ installed: boolean; version: string; serviceActive: boolean; users: string[] }>(
-          "check_server_installation", state.sshParams
-        );
-        if (info && !resolved) {
-          resolved = true;
-          state.setRebooting(false);
-          state.setServerInfo(info);
-          state.pushSuccess(t("server.actions.success_reboot_done"));
-        }
-      } catch {
-        if (elapsed >= 120) {
-          state.setRebooting(false);
-        }
-      }
-    }, 10000);
-    return () => { if (rebootPollRef.current) clearInterval(rebootPollRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.rebooting]);
+  // Reboot polling is handled by ServerStatusSection (with countdown + credential cleanup)
 
   // ─── Loading state ───
   if (state.loading) {
