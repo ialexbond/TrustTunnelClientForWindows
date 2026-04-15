@@ -1,3 +1,4 @@
+// NOTE: This component is currently unused (kept for future multi-server feature)
 import { useTranslation } from "react-i18next";
 import { Plus, Power, Loader2 } from "lucide-react";
 import { cn } from "../shared/lib/cn";
