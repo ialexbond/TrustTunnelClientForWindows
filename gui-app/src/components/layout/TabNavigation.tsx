@@ -61,18 +61,25 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
     const tabEls = navRef.current?.querySelectorAll<HTMLElement>('[role="tab"]');
     if (!tabEls) return;
     const currentIdx = TABS.findIndex(t => t.id === activeTab);
+
+    let nextIdx: number | null = null;
     if (e.key === "ArrowRight") {
       e.preventDefault();
-      tabEls[(currentIdx + 1) % TABS.length].focus();
+      nextIdx = (currentIdx + 1) % TABS.length;
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
-      tabEls[(currentIdx - 1 + TABS.length) % TABS.length].focus();
+      nextIdx = (currentIdx - 1 + TABS.length) % TABS.length;
     } else if (e.key === "Home") {
       e.preventDefault();
-      tabEls[0].focus();
+      nextIdx = 0;
     } else if (e.key === "End") {
       e.preventDefault();
-      tabEls[tabEls.length - 1].focus();
+      nextIdx = TABS.length - 1;
+    }
+
+    if (nextIdx !== null) {
+      tabEls[nextIdx].focus();
+      onTabChange(TABS[nextIdx].id);
     }
   };
 
