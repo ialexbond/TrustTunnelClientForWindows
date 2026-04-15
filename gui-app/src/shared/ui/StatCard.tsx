@@ -27,11 +27,11 @@ function formatTrend(trend: number): string {
 export function StatCard({ label, value, trend, icon, loading, className }: StatCardProps) {
   if (loading) {
     return (
-      <Card padding="md" className={cn(className)}>
+      <Card padding="md" className={cn("min-w-[140px]", className)}>
         <div className="flex flex-col gap-2">
-          <Skeleton variant="circle" width={16} height={16} />
-          <Skeleton variant="line" width="60%" height={24} />
-          <Skeleton variant="line" width="40%" height={14} />
+          <Skeleton variant="circle" width={20} height={20} />
+          <Skeleton variant="line" height={28} />
+          <Skeleton variant="line" width="60%" height={14} />
         </div>
       </Card>
     );
