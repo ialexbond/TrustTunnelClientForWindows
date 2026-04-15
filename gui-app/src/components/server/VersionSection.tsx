@@ -94,7 +94,7 @@ export function VersionSection({ state }: Props) {
             <button
               ref={dropdown.triggerRef}
               onClick={dropdown.toggle}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none"
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none focus-visible:shadow-[var(--focus-ring)]"
               style={{
                 backgroundColor: "var(--color-bg-elevated)",
                 border: "1px solid var(--color-border)",

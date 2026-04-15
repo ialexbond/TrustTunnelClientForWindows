@@ -205,7 +205,7 @@ export function ConfigSection({ state }: Props) {
                 <button
                   onClick={() => handleToggleFeature(feat.key, feat.value)}
                   disabled={togglingFeatures.has(feat.key)}
-                  className="shrink-0 rounded-full focus:outline-none relative overflow-hidden"
+                  className="shrink-0 rounded-full focus:outline-none focus-visible:shadow-[var(--focus-ring)] relative overflow-hidden"
                   style={{
                     width: "40px",
                     height: "22px",
