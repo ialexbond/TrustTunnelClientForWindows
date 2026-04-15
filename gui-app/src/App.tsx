@@ -6,7 +6,6 @@ import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
 import StatusPanel from "./components/StatusPanel";
-import SetupWizard from "./components/SetupWizard";
 import { ControlPanelPage } from "./components/ControlPanelPage";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
@@ -29,9 +28,6 @@ import { EmptyState } from "./shared/ui/EmptyState";
 import { ConfirmDialog } from "./shared/ui";
 import { Settings } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
-
-// Re-export types for backward compatibility
-export type { VpnStatus, UpdateInfo, VpnConfig, LogEntry, AppTab } from "./shared/types";
 
 function App() {
   // ─── Theme ───
@@ -244,7 +240,6 @@ function App() {
   const [controlKey, setControlKey] = useState(0);
   const [settingsKey, setSettingsKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
-  const wizardResetRef = useRef<(() => void) | null>(null);
 
   const handleClearConfig = useCallback(async () => {
     // Disconnect VPN first if running
@@ -442,12 +437,7 @@ function App() {
       {/* Bottom tab navigation */}
       <TabNavigation
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          if (tab === "control" && wizardResetRef.current) {
-            wizardResetRef.current();
-          }
-          setActiveTab(tab);
-        }}
+        onTabChange={(tab) => setActiveTab(tab)}
       />
     </div>
 
