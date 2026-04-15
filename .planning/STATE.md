@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-04-15T05:18:19.108Z"
+stopped_at: Milestone v3.0 summary generated
+last_updated: "2026-04-15T07:23:14.646Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 7
@@ -96,7 +96,13 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+17 pending (16 from Phase 04 critique + 1 from UX audit):
+- **[ux]** Полный UX-редизайн панели управления и нижнего меню (2026-04-15)
+- **[ui]** 6 UI issues (tabs style, visual softness, shell layout shift, etc.)
+- **[bug]** 3 bugs (server section buttons, tab preserve state, status rerender)
+- **[ux]** 3 UX issues (credentials persist, disabled onboarding, IP dedup)
+- **[a11y]** 1 accessibility (disconnect keyboard)
+- **[design-system]** 2 design system (i18n hardcoded, sidebar colors)
 
 ### Blockers/Concerns
 
@@ -104,6 +110,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T05:18:19.103Z
-Stopped at: Completed 06-03-PLAN.md
-Resume file: None
+Last session: 2026-04-15T07:23:14.642Z
+Stopped at: Milestone v3.0 summary generated
+Resume file: .planning/reports/MILESTONE_SUMMARY-v3.0.md
