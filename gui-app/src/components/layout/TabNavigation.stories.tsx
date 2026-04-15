@@ -1,18 +1,21 @@
+import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { TabNavigation } from "./TabNavigation";
+import type { AppTab } from "../../shared/types";
 
 /**
- * TabNavigation -- bottom tab bar (56px height, border-top, transparent background).
+ * TabNavigation — bottom tab bar (64px height, transparent background).
  *
- * 5 tabs as fixed 120x44px rounded buttons with icon + label stacked vertically.
- * Active tab uses accent color + bg-elevated. All tabs always enabled.
+ * 5 tabs distributed evenly (flex-1) with icon + label stacked vertically.
+ * Active tab: accent color + animated pill indicator (translateX via getBoundingClientRect).
+ * Pill animates smoothly between tabs (300ms ease-out).
  *
- * i18n is initialized globally via preview.ts, so tab labels render in Russian
- * without additional story configuration.
+ * Use the **Interactive** story to click tabs and see the pill move.
  */
 const meta: Meta<typeof TabNavigation> = {
   title: "Layout/TabNavigation",
   component: TabNavigation,
+  tags: ["autodocs"],
   parameters: { layout: "fullscreen" },
   decorators: [
     (Story) => (
@@ -30,7 +33,15 @@ const meta: Meta<typeof TabNavigation> = {
 export default meta;
 type Story = StoryObj<typeof TabNavigation>;
 
-/** Default: all tabs enabled, "control" active. */
+/** Interactive: click tabs to see pill indicator animate between positions. */
+export const Interactive: Story = {
+  render: () => {
+    const [activeTab, setActiveTab] = useState<AppTab>("control");
+    return <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />;
+  },
+};
+
+/** Default: "control" tab active (static). */
 export const Default: Story = {};
 
 /** Connection tab active. */
