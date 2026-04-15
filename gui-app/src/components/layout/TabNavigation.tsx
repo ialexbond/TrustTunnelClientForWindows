@@ -80,7 +80,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
                 ].join(" ")}
                 style={{
                   width: "calc(100% - 8px)",
-                  height: 40,
+                  height: 44,
                   backgroundColor: active ? "var(--color-bg-elevated)" : undefined,
                 }}
               >
