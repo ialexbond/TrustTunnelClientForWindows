@@ -5,6 +5,7 @@ import {
   Server, Cpu, MemoryStick, HardDrive, Clock, RefreshCw, Loader2, LogIn,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
+import { StatCard } from "../../shared/ui/StatCard";
 import { Button } from "../../shared/ui/Button";
 import { formatBytes } from "../../shared/utils/uptime";
 import { useSnackBar} from "../../shared/ui/SnackBarContext";
@@ -190,15 +191,11 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
 
   if (loading && !stats) {
     return (
-      <Card padding="md">
-        <CardHeader
-          title={t("dashboard.server_stats", "Server")}
-          icon={<Server className="w-4 h-4" />}
-        />
-        <div className="flex items-center justify-center py-6">
-          <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-text-muted)" }} />
-        </div>
-      </Card>
+      <div className="space-y-3">
+        <StatCard label="CPU" value="--" icon={<Cpu className="w-4 h-4" />} loading />
+        <StatCard label="RAM" value="--" icon={<MemoryStick className="w-4 h-4" />} loading />
+        <StatCard label="Disk" value="--" icon={<HardDrive className="w-4 h-4" />} loading />
+      </div>
     );
   }
 
