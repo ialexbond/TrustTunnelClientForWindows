@@ -40,7 +40,7 @@ export function StatCard({ label, value, trend, icon, loading, className }: Stat
   return (
     <Card padding="md" className={cn(className)}>
       <div className="flex flex-col gap-1">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start">
           {icon && (
             <span aria-hidden="true" style={{ color: "var(--color-accent-interactive)" }}>
               {icon}
@@ -48,7 +48,7 @@ export function StatCard({ label, value, trend, icon, loading, className }: Stat
           )}
           {trend !== undefined && trend !== 0 && (
             <span
-              className="text-xs font-[var(--font-weight-semibold)]"
+              className="text-xs font-[var(--font-weight-semibold)] ml-auto"
               style={{ color: getTrendColor(trend) }}
             >
               {formatTrend(trend)}
