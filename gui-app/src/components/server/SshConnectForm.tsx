@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Lock, Key, FileKey } from "lucide-react";
+import { Shield, Key, FileKey } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
@@ -120,17 +120,28 @@ export function SshConnectForm({ onConnect }: Props) {
       <div className="w-full overflow-y-auto">
         <div className="max-w-[360px] mx-auto px-4 py-5 space-y-3.5">
 
+          {/* Заголовок */}
+          <div className="text-center pb-1">
+            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
+              {t("control.ssh_title")}
+            </h2>
+            <p className="text-sm mt-1" style={{ color: "var(--color-text-secondary)" }}>
+              {t("control.ssh_description")}
+            </p>
+          </div>
+
           {/* IP + Порт */}
           <div className="flex gap-2.5 items-end">
             <div className="flex-1">
               <Input
-                label={t("labels.server_ip")}
+                label={t("labels.server_address")}
                 value={host}
                 onChange={(e) => setHost(e.target.value)}
                 placeholder="123.45.67.89"
+                autoFocus
               />
             </div>
-            <div className="w-[72px]">
+            <div className="w-[80px]">
               <Input
                 label={t("labels.port")}
                 value={port}
@@ -145,7 +156,7 @@ export function SshConnectForm({ onConnect }: Props) {
             label={t("labels.username")}
             value={user}
             onChange={(e) => setUser(e.target.value)}
-            placeholder={t("control.username_placeholder", "Введите имя пользователя")}
+            placeholder="root"
           />
 
           {/* Способ авторизации — 2 сегмента */}
@@ -160,7 +171,7 @@ export function SshConnectForm({ onConnect }: Props) {
                   type="button"
                   onClick={() => setAuthMode(seg.id)}
                   className={cn(
-                    "flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium transition-colors",
+                    "flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium transition-colors",
                     "border-r border-[var(--color-border)] last:border-r-0",
                     authMode === seg.id
                       ? "bg-[var(--color-accent-interactive)] text-white"
@@ -177,7 +188,7 @@ export function SshConnectForm({ onConnect }: Props) {
           {/* Пароль */}
           {authMode === "password" && (
             <PasswordInput
-              label={t("labels.ssh_password")}
+              label={t("labels.password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("control.password_placeholder", "Введите пароль")}
@@ -244,9 +255,9 @@ export function SshConnectForm({ onConnect }: Props) {
           </Button>
 
           {/* Примечание */}
-          <div className="flex items-center justify-center gap-1 pt-1">
-            <Lock className="w-3 h-3 text-[var(--color-text-muted)]" />
-            <span className="text-[10px] text-[var(--color-text-muted)]">
+          <div className="flex items-center justify-center gap-1.5 pt-1">
+            <Shield className="w-3 h-3 text-[var(--color-text-muted)]" />
+            <span className="text-xs text-[var(--color-text-muted)]">
               {t("control.remember")}
             </span>
           </div>
