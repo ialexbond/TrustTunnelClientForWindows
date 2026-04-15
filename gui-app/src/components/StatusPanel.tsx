@@ -60,7 +60,10 @@ function StatusPanel({
             : t("status.disconnected");
 
   return (
-    <div className="border-b border-[var(--color-border)]">
+    <div
+      className="border-b border-[var(--color-border)]"
+      style={{ boxShadow: "var(--shadow-sm)" }}
+    >
       <div className="px-[var(--space-4)] flex items-center justify-between h-[52px]">
         <div className="flex items-center gap-[var(--space-3)]">
           <StatusBadge variant={statusBadgeVariant(status)} label={statusLabel} />
