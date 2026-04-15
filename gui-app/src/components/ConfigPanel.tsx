@@ -69,7 +69,7 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
                        focus:ring-1 focus:ring-indigo-500/25 transition-colors appearance-none"
           >
             {LOG_LEVELS.map((level) => (
-              <option key={level} value={level} className="bg-surface-900">
+              <option key={level} value={level} className="bg-[var(--color-bg-primary)]">
                 {level.toUpperCase()}
               </option>
             ))}
