@@ -103,6 +103,11 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* ── Number input spinners ── */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
