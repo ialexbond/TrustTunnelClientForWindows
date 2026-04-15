@@ -115,7 +115,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
               aria-selected={active}
               tabIndex={active ? 0 : -1}
               onClick={() => onTabChange(tab.id)}
-              className="flex-1 flex items-center justify-center outline-none cursor-pointer bg-transparent border-none p-0"
+              className="flex-1 flex items-center justify-center outline-none cursor-pointer bg-transparent border-none p-0 focus-visible:shadow-[var(--focus-ring)]"
               style={{
                 color: active ? "var(--color-accent-interactive)" : "var(--color-text-secondary)",
                 position: "relative",

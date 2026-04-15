@@ -161,7 +161,7 @@ export function TunnelSection({ state }: Props) {
                 if (mtu < 576) updateField("listener.tun.mtu_size", 576);
                 else if (mtu > 9000) updateField("listener.tun.mtu_size", 9000);
               }}
-              className="flex-1 min-w-0 bg-transparent text-center text-xs outline-none py-1.5"
+              className="flex-1 min-w-0 bg-transparent text-center text-xs outline-none focus-visible:shadow-[var(--focus-ring)] py-1.5"
               style={{ color: "var(--color-text-primary)" }}
             />
             <button

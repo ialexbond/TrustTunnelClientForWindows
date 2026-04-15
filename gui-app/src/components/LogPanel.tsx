@@ -130,7 +130,7 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
             <Search className="w-3.5 h-3.5" />
           </span>
           <input
-            className="w-full rounded-[var(--radius-lg)] pl-9 pr-20 h-8 text-xs transition-colors outline-none placeholder:opacity-40"
+            className="w-full rounded-[var(--radius-lg)] pl-9 pr-20 h-8 text-xs transition-colors outline-none focus-visible:shadow-[var(--focus-ring)] placeholder:opacity-40"
             style={{
               backgroundColor: "var(--color-input-bg)",
               border: "1px solid var(--color-input-border)",
