@@ -67,6 +67,10 @@
     border-color: var(--color-accent-500);
     box-shadow: 0 0 0 2px var(--color-accent-tint-15);
   }
+  .wizard-input-sm {
+    padding: 0.5rem 1rem;
+    font-size: var(--font-size-xs);
+  }
 
   /* Hide native password reveal button (Edge/Chrome) to avoid double eye icon */
   input::-ms-reveal,
