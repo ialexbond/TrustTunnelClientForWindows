@@ -225,7 +225,7 @@ export function UsersSection({ state }: Props) {
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />
                       )}
                     </div>
-                    <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
+                    <span className="text-xs" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                   </div>
                   <div onClick={(e) => e.stopPropagation()}>
                     <OverflowMenu
@@ -350,7 +350,7 @@ export function UsersSection({ state }: Props) {
                   style={{ color: "var(--color-text-primary)", opacity: 0.85 }}
                 />
               </div>
-              <p className="text-xs font-medium mb-1" style={{ color: "var(--color-text-primary)" }}>{qrUser}</p>
+              <p className="text-xs mb-1" style={{ color: "var(--color-text-primary)" }}>{qrUser}</p>
               <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
                 {t("server.export.scan_qr")}
               </p>
