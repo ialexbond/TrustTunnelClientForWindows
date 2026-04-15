@@ -72,10 +72,12 @@
   --space-8: 40px;
 
   /* ── Typography ────────────────────────────────── */
-  --font-size-xs: 11px;
+  --font-size-xs: 10px;
   --font-size-sm: 12px;
   --font-size-md: 14px;
   --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
   --font-weight-normal: 400;
   --font-weight-semibold: 600;
   --tracking-tight: -0.01em;
