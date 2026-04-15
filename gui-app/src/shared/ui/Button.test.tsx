@@ -68,7 +68,7 @@ describe("Button", () => {
 
   it("applies lg size classes", () => {
     render(<Button size="lg">L</Button>);
-    expect(screen.getByRole("button").className).toContain("h-9");
+    expect(screen.getByRole("button").className).toContain("h-10");
     expect(screen.getByRole("button").className).toContain("px-5");
   });
 
