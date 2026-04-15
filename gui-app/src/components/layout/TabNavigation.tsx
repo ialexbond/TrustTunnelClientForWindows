@@ -58,7 +58,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
       ref={navRef}
       onKeyDown={handleKeyDown}
     >
-      <div className="flex items-center w-full" style={{ maxWidth: 640 }}>
+      <div className="flex items-center w-full" style={{ maxWidth: 720 }}>
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
 

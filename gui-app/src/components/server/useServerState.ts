@@ -288,6 +288,8 @@ export function useServerState(props: ServerPanelProps) {
 
     // Props pass-through
     host,
+    port,
+    onDisconnect: props.onDisconnect,
     onSwitchToSetup,
     onClearConfig,
     onConfigExported,

@@ -88,6 +88,7 @@
     "password": "Password",
     "ssh_password": "SSH Password",
     "server_ip": "Server IP",
+    "server_address": "Server Address",
     "port": "Port",
     "vpn_mode": "VPN Mode",
     "mtu": "MTU",
@@ -190,7 +191,7 @@
   "messages": {
     "configure_vpn_first": "Configure VPN first",
     "config_required": "Please select a configuration file or set up a server first",
-    "saved_check": "Saved ✔",
+    "saved_check": "Saved",
     "settings_saved": "Settings saved",
     "reconnecting": "Reconnecting...",
     "config_cleared": "Configuration cleared",
@@ -221,7 +222,7 @@
     "retry": "Try again"
   },
   "confirmations": {
-    "irreversible_action": "Are you sure? This action is irreversible."
+    "irreversible_action": "This action cannot be undone. Continue?"
   },
   "updates": {
     "version_available": "Version {{version}} available",
@@ -546,7 +547,7 @@
   },
   "server": {
     "status": {
-      "title": "Protocol Status",
+      "title": "Server Status",
       "running": "Running",
       "stopped": "Stopped",
       "checking": "Checking server...",
@@ -561,14 +562,14 @@
       "tooltip": "TrustTunnel status on the remote server. You can restart the service or reboot the server from here."
     },
     "actions": {
-      "restart": "Restart Protocol",
-      "stop": "Stop Protocol",
-      "start": "Start Protocol",
+      "restart": "Restart Service",
+      "stop": "Stop Service",
+      "start": "Start Service",
       "reboot_server": "Reboot Server",
       "refresh_status": "Refresh Status",
-      "success_restart": "Protocol restarted",
-      "success_stop": "Protocol stopped",
-      "success_start": "Protocol started",
+      "success_restart": "Service restarted",
+      "success_stop": "Service stopped",
+      "success_start": "Service started",
       "success_reboot": "Server rebooting",
       "success_reboot_done": "Server rebooted and available",
       "success_generic": "Completed successfully",

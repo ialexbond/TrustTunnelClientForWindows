@@ -103,7 +103,7 @@ export function ServerPanel(props: ServerPanelProps) {
           </p>
           <div className="flex gap-2 justify-center">
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
               icon={<RefreshCw className="w-3.5 h-3.5" />}
               onClick={() => state.loadServerInfo()}
@@ -111,7 +111,7 @@ export function ServerPanel(props: ServerPanelProps) {
               {t("server.actions.retry")}
             </Button>
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
               icon={<Server className="w-3.5 h-3.5" />}
               onClick={state.onSwitchToSetup}
@@ -142,7 +142,7 @@ export function ServerPanel(props: ServerPanelProps) {
             {t("server.status.not_installed_desc", { host: state.host })}
           </p>
           <Button
-            variant="success"
+            variant="primary"
             icon={<Download className="w-4 h-4" />}
             onClick={() => {
               // Pre-fill wizard with current SSH and skip to endpoint
