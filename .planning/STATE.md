@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.1
 milestone_name: Stabilization & UX Redesign
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-04-15T10:10:52.886Z"
+stopped_at: "Completed 08-04-PLAN.md — i18n audit: EmptyState, Select, DropOverlay"
+last_updated: "2026-04-15T10:20:37.103Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 6
-  completed_plans: 1
-  percent: 17
+  completed_plans: 4
+  percent: 67
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Phase: 8 (Stabilization) — EXECUTING
-Plan: 2 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-04-15
 
@@ -49,6 +49,8 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 08-stabilization P01 | 5m | 2 tasks | 4 files |
 | Phase 08-stabilization P02 | 4m | 2 tasks | 4 files |
+| Phase 08-stabilization P06 | 15 | 2 tasks | 6 files |
+| Phase 08-stabilization P04 | 5m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -62,6 +64,8 @@ Recent decisions affecting current work:
 - Storybook-first для всех новых компонентов (Phase 9)
 - display:flex|none tab caching сохраняется — pill-индикатор на отдельном слое (Phase 10)
 - [Phase 08-stabilization]: t() вызывается в теле компонента как fallback, не в default props (D-04, D-06)
+- [Phase 08-stabilization]: Screen specs format: component tree + ASCII architecture + states table + user flows + edge cases + shared/ui used
+- [Phase 08-stabilization]: Inline fallbacks в t() убраны — ru.json/en.json единственный источник переведённого текста (D-06, D-08)
 
 ### Pending Todos
 
@@ -73,6 +77,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-15T10:10:52.882Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-04-15T10:20:37.100Z
+Stopped at: Completed 08-04-PLAN.md — i18n audit: EmptyState, Select, DropOverlay
 Resume file: None
