@@ -86,7 +86,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
           }
         });
       }
-    }, 500);
+    }, 2000);
     return () => clearInterval(interval);
   }, [creds]);
 

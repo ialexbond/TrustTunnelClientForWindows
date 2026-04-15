@@ -66,7 +66,7 @@ function StatusPanel({
           <StatusBadge variant={statusBadgeVariant(status)} label={statusLabel} />
 
           {isConnected && connectedSince && (
-            <div className="flex items-center gap-[var(--space-1)] text-[var(--font-size-xs)] font-mono tabular-nums text-[var(--color-text-muted)]">
+            <div className="flex items-center gap-[var(--space-1)] text-xs font-mono tabular-nums text-[var(--color-text-muted)]">
               <Clock className="w-3.5 h-3.5" aria-hidden="true" />
               <UptimeCounter since={connectedSince} />
             </div>

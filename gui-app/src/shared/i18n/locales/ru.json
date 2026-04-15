@@ -1,4 +1,9 @@
 {
+  "window": {
+    "minimize": "Свернуть",
+    "maximize": "Развернуть",
+    "close": "Закрыть"
+  },
   "tabs": {
     "server": "Сервер",
     "serverSetup": "Настройка сервера",
