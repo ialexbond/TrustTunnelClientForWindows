@@ -114,6 +114,9 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
     setOpen(false);
   };
 
+  // Trim stale refs when items count decreases
+  itemRefs.current = itemRefs.current.slice(0, items.length);
+
   const menu = (
     <div
       ref={menuRef}
