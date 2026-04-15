@@ -37,7 +37,7 @@
   color: var(--color-text-primary);
 }
 .window-control-close:hover {
-  color: #fff !important;
+  color: #fff;
 }
 
 @layer components {
@@ -73,8 +73,8 @@
   input::-ms-clear {
     display: none;
   }
-  input::-webkit-credentials-auto-fill-button {
-    display: none !important;
+  [data-theme] input::-webkit-credentials-auto-fill-button {
+    display: none;
   }
 }
 
