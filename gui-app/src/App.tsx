@@ -344,11 +344,26 @@ function App() {
 
       {/* Content area */}
       <div
-        className="flex-1 min-h-0 flex flex-col overflow-hidden"
-        style={{ maxWidth: 1200, width: "100%", margin: "0 auto" }}
+        className="flex-1 min-h-0 overflow-hidden relative"
+        style={{
+          maxWidth: 1200,
+          width: "100%",
+          margin: "0 auto",
+          transition: "padding var(--transition-fast) var(--ease-out)",
+        }}
       >
         {/* Control Panel — always shows ControlPanelPage (handles no-creds internally) */}
-        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "control" ? "flex" : "none" }}>
+        <div
+          className="h-full flex flex-col overflow-hidden"
+          style={{
+            position: activeTab === "control" ? "relative" : "absolute",
+            inset: activeTab === "control" ? undefined : 0,
+            opacity: activeTab === "control" ? 1 : 0,
+            visibility: activeTab === "control" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "control"}
+        >
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Control Panel">
             <ControlPanelPage
               key={controlKey}
@@ -368,7 +383,17 @@ function App() {
         </div>
 
         {/* Connection — VPN Settings or placeholder */}
-        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "connection" ? "flex" : "none" }}>
+        <div
+          className="h-full flex flex-col overflow-hidden"
+          style={{
+            position: activeTab === "connection" ? "relative" : "absolute",
+            inset: activeTab === "connection" ? undefined : 0,
+            opacity: activeTab === "connection" ? 1 : 0,
+            visibility: activeTab === "connection" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "connection"}
+        >
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Connection">
             {hasConfig ? (
               <SettingsPanel
@@ -394,7 +419,17 @@ function App() {
         </div>
 
         {/* Routing */}
-        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "routing" ? "flex" : "none" }}>
+        <div
+          className="h-full flex flex-col overflow-hidden"
+          style={{
+            position: activeTab === "routing" ? "relative" : "absolute",
+            inset: activeTab === "routing" ? undefined : 0,
+            opacity: activeTab === "routing" ? 1 : 0,
+            visibility: activeTab === "routing" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "routing"}
+        >
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Routing">
             <RoutingPanel
               key={routingKey}
@@ -412,7 +447,17 @@ function App() {
         </div>
 
         {/* Settings — App settings (theme, language, autostart) */}
-        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "settings" ? "flex" : "none" }}>
+        <div
+          className="h-full flex flex-col overflow-hidden"
+          style={{
+            position: activeTab === "settings" ? "relative" : "absolute",
+            inset: activeTab === "settings" ? undefined : 0,
+            opacity: activeTab === "settings" ? 1 : 0,
+            visibility: activeTab === "settings" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "settings"}
+        >
           <AppSettingsPanel
             theme={themeMode}
             onThemeChange={handleThemeChange}
@@ -424,7 +469,17 @@ function App() {
         </div>
 
         {/* About */}
-        <div className="h-full flex flex-col overflow-hidden" style={{ display: activeTab === "about" ? "flex" : "none" }}>
+        <div
+          className="h-full flex flex-col overflow-hidden"
+          style={{
+            position: activeTab === "about" ? "relative" : "absolute",
+            inset: activeTab === "about" ? undefined : 0,
+            opacity: activeTab === "about" ? 1 : 0,
+            visibility: activeTab === "about" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "about"}
+        >
           {statusPanelNode}
           <AboutPanel
             updateInfo={updateInfo}
