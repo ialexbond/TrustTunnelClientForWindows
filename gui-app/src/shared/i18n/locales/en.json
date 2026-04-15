@@ -1058,7 +1058,7 @@
     "logLevel": "Log level"
   },
   "confirmDialog": {
-    "confirm": "Confirm",
+    "confirm": "Delete",
     "cancel": "Cancel"
   }
 }
