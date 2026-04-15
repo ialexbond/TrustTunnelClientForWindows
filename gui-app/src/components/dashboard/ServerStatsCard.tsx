@@ -239,7 +239,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
               <Cpu className="w-3.5 h-3.5" />
               <span>CPU</span>
             </div>
-            <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
               {stats.cpu_percent.toFixed(1)}%
             </span>
           </div>
@@ -253,7 +253,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
               <MemoryStick className="w-3.5 h-3.5" />
               <span>RAM</span>
             </div>
-            <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
               {formatBytes(stats.mem_used)} / {formatBytes(stats.mem_total)}
             </span>
           </div>
@@ -267,7 +267,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
               <HardDrive className="w-3.5 h-3.5" />
               <span>Disk</span>
             </div>
-            <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
               {formatBytes(stats.disk_used)} / {formatBytes(stats.disk_total)}
             </span>
           </div>

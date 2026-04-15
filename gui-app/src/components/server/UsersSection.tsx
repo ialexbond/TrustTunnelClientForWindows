@@ -22,7 +22,6 @@ import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { IconButton } from "../../shared/ui/IconButton";
 import { Modal } from "../../shared/ui/Modal";
-import { colors } from "../../shared/ui/colors";
 import { formatError } from "../../shared/utils/formatError";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
@@ -216,7 +215,7 @@ export function UsersSection({ state }: Props) {
                   onClick={() => setSelectedUser(u)}
                   className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
                   style={{
-                    backgroundColor: isSelected ? colors.accentBgSubtle : "transparent",
+                    backgroundColor: isSelected ? "rgba(99, 102, 241, 0.08)" : "transparent",
                   }}
                   onMouseEnter={(e) => {
                     if (!isSelected) (e.currentTarget as HTMLDivElement).style.backgroundColor = "var(--color-bg-hover)";

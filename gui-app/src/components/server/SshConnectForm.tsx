@@ -122,7 +122,7 @@ export function SshConnectForm({ onConnect }: Props) {
 
           {/* Заголовок */}
           <div className="text-center pb-1">
-            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
               {t("control.ssh_title")}
             </h2>
             <p className="text-sm mt-1" style={{ color: "var(--color-text-secondary)" }}>

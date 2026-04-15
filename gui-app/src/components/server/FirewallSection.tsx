@@ -26,7 +26,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
     <div className="pt-3 border-t space-y-2" style={{ borderColor: "var(--color-border)" }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("server.security.firewall.title")}
           </span>
           <StatusBadge
@@ -214,7 +214,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
       {/* Add rule modal */}
       <Modal open={state.showAddRule} onClose={() => state.setShowAddRule(false)}>
         <div className="max-w-sm w-full mx-4 p-5 rounded-2xl space-y-3 shadow-2xl" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-          <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("server.security.firewall.add_rule_title")}
           </h3>
           <div className="space-y-2">

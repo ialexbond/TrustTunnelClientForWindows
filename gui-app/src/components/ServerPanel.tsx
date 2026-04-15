@@ -9,7 +9,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "../shared/ui/Button";
-import { colors } from "../shared/ui/colors";
 import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 import { useServerState } from "./server/useServerState";
 import { ServerTabs } from "./ServerTabs";
@@ -64,7 +63,7 @@ export function ServerPanel(props: ServerPanelProps) {
           >
             <XCircle className="w-6 h-6" style={{ color: "var(--color-danger-500)" }} />
           </div>
-          <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("server.status.connection_failed")}
           </h2>
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -100,11 +99,11 @@ export function ServerPanel(props: ServerPanelProps) {
         <div className="max-w-sm w-full text-center space-y-4">
           <div
             className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: colors.warningBg }}
+            style={{ backgroundColor: "var(--color-status-connecting-bg)" }}
           >
             <AlertTriangle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
           </div>
-          <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("server.status.not_installed")}
           </h2>
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -157,7 +156,7 @@ export function ServerPanel(props: ServerPanelProps) {
           <div className="text-center space-y-4">
             <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: "var(--color-warning-500)" }} />
             <div>
-              <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
+              <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
                 {t("server.status.rebooting")}
               </h2>
               <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>

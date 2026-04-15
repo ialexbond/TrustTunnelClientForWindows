@@ -7,7 +7,6 @@ import {
 import { StepBar } from "./StepBar";
 import { Toggle } from "../../shared/ui/Toggle";
 import { Button } from "../../shared/ui/Button";
-import { colors } from "../../shared/ui/colors";
 import type { WizardState } from "./useWizardState";
 
 export function EndpointStep(w: WizardState) {
@@ -19,7 +18,7 @@ export function EndpointStep(w: WizardState) {
       <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
         <div className="max-w-sm w-full space-y-3">
           <div className="text-center space-y-1">
-            <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: colors.accentBg }}>
+            <div className="mx-auto w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
               <Settings className="w-5 h-5" style={{ color: "var(--color-accent-500)" }} />
             </div>
             <h2 className="text-lg font-bold">{t('wizard.endpoint.title')}</h2>
@@ -27,7 +26,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── VPN Credentials ── */}
           <div className="glass-card p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <User className="w-3 h-3" />
               {t('wizard.endpoint.vpn_credentials')}
             </div>
@@ -67,7 +66,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── TLS Certificate ── */}
           <div className="glass-card p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <Lock className="w-3 h-3" />
               {t('wizard.endpoint.tls_certificate')}
             </div>
@@ -109,7 +108,7 @@ export function EndpointStep(w: WizardState) {
                 className="p-2 rounded-xl text-xs text-left transition-all"
                 style={
                   w.certType === "provided"
-                    ? { border: "1px solid rgba(99, 102, 241, 0.4)", backgroundColor: colors.accentBgSubtle, color: "var(--color-text-primary)" }
+                    ? { border: "1px solid rgba(99, 102, 241, 0.4)", backgroundColor: "rgba(99, 102, 241, 0.08)", color: "var(--color-text-primary)" }
                     : { border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }
                 }
               >
@@ -123,7 +122,7 @@ export function EndpointStep(w: WizardState) {
 
             {/* Self-signed warning */}
             {w.certType === "selfsigned" && (
-              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ backgroundColor: colors.warningBg, border: `1px solid ${colors.warningBorder}` }}>
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ backgroundColor: "var(--color-status-connecting-bg)", border: "1px solid var(--color-status-connecting-border)" }}>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
                 <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-warning-500)" }}>
                   {t('wizard.endpoint.self_signed_warning')}
@@ -212,7 +211,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── Server Features ── */}
           <div className="glass-card p-3 space-y-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <Activity className="w-3 h-3" />
               {t('wizard.endpoint.server_features')}
             </div>
@@ -279,7 +278,7 @@ export function EndpointStep(w: WizardState) {
             <div className="flex items-start gap-2.5 p-3 rounded-xl" style={{ backgroundColor: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
               <div className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
-                <span className="font-semibold" style={{ color: "var(--color-warning-500)" }}>{t('wizard.endpoint.dns_warning_important')}</span>{' '}
+                <span className="font-[var(--font-weight-semibold)]" style={{ color: "var(--color-warning-500)" }}>{t('wizard.endpoint.dns_warning_important')}</span>{' '}
                 {w.host
                   ? t('wizard.endpoint.dns_warning_text', { domain: w.domain, host: w.host })
                   : t('wizard.endpoint.dns_warning_text_no_host', { domain: w.domain })}

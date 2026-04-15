@@ -14,7 +14,7 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
     <div className="glass-card p-4 flex flex-col gap-3 lg:col-span-1">
       <div className="flex items-center gap-2">
         <Settings className="w-3.5 h-3.5 text-indigo-400" />
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+        <h2 className="text-xs font-[var(--font-weight-semibold)] uppercase tracking-wider text-gray-400">
           Настройки
         </h2>
       </div>

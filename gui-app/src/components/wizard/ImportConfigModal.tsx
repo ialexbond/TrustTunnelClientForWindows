@@ -7,7 +7,6 @@ import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Input } from "../../shared/ui/Input";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
-import { colors } from "../../shared/ui/colors";
 
 interface ImportConfigModalProps {
   open: boolean;
@@ -128,7 +127,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
       >
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-base font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("wizard.import.title")}
           </h2>
           <button onClick={handleClose} className="p-1 rounded hover:bg-[var(--color-bg-hover)]">
@@ -144,7 +143,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
             className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors hover:bg-[var(--color-bg-hover)]"
             style={{ border: "1px solid var(--color-border)" }}
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: colors.accentBg }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
               <FileText className="w-4 h-4" style={{ color: "var(--color-accent-500)" }} />
             </div>
             <div>
@@ -162,7 +161,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
               onClick={() => setShowLinkInput(!showLinkInput)}
               className="w-full flex items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
             >
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: colors.accentBg }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
                 <Link2 className="w-4 h-4" style={{ color: "var(--color-accent-500)" }} />
               </div>
               <div>

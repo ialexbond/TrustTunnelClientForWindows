@@ -55,7 +55,7 @@ export function SessionStats({ connectedSince, recoveryCount, errorCount, isConn
               <span>{item.label}</span>
             </div>
             <span
-              className="text-sm font-semibold tabular-nums"
+              className="text-sm font-[var(--font-weight-semibold)] tabular-nums"
               style={{ color: item.color || "var(--color-text-primary)" }}
             >
               {item.value}

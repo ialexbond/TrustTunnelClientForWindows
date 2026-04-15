@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Shield, Server, Download, FileText, Info } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
-import { colors } from "../../shared/ui/colors";
 import { ImportConfigModal } from "./ImportConfigModal";
 import type { WizardState } from "./useWizardState";
 
@@ -46,7 +45,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
             onClick={() => { saveField("wizardMode", ""); setWizardStep("server"); }}
             style={{
               backgroundColor: "rgba(99, 102, 241, 0.06)",
-              borderColor: colors.accentBorder,
+              borderColor: "rgba(99, 102, 241, 0.2)",
             }}
           >
             <div className="flex items-start gap-3">
@@ -57,7 +56,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
                 <Server className="w-4.5 h-4.5 text-white" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
                   {t('wizard.welcome.setup_new')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
@@ -77,12 +76,12 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
             <div className="flex items-start gap-3">
               <div
                 className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5"
-                style={{ backgroundColor: colors.accentBg }}
+                style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}
               >
                 <Download className="w-4.5 h-4.5" style={{ color: "var(--color-accent-500)" }} />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
                   {t('wizard.welcome.fetch_config')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
@@ -107,7 +106,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
                 <FileText className="w-4.5 h-4.5" style={{ color: "var(--color-text-secondary)" }} />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
                   {t('wizard.welcome.import_config')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>

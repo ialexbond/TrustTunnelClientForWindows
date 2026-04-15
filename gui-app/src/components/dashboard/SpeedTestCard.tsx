@@ -60,7 +60,7 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
               <ArrowDown className="w-3.5 h-3.5" style={{ color: "var(--color-success-500)" }} />
               <span>Download</span>
             </div>
-            <span className="text-sm font-semibold" style={{ color: "var(--color-success-500)" }}>
+            <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-success-500)" }}>
               {speed.download_mbps.toFixed(1)} {unit}
             </span>
           </div>
@@ -69,7 +69,7 @@ export function SpeedTestCard({ speed, testing, error, onRunTest, isConnected }:
               <ArrowUp className="w-3.5 h-3.5" style={{ color: "var(--color-accent-400)" }} />
               <span>Upload</span>
             </div>
-            <span className="text-sm font-semibold" style={{ color: "var(--color-accent-400)" }}>
+            <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-accent-400)" }}>
               {speed.upload_mbps.toFixed(1)} {unit}
             </span>
           </div>
