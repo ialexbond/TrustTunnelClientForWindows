@@ -188,7 +188,7 @@ describe("SshConnectForm", () => {
 
   it("renders server IP and port labels", () => {
     renderForm();
-    expect(screen.getByText(i18n.t("labels.server_ip"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("labels.server_address"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("labels.port"))).toBeInTheDocument();
   });
 
