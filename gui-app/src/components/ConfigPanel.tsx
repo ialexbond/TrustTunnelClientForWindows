@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Settings, FolderOpen } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { VpnConfig } from "../shared/types";
@@ -10,19 +11,21 @@ interface ConfigPanelProps {
 const LOG_LEVELS = ["error", "warn", "info", "debug", "trace"];
 
 function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="glass-card p-4 flex flex-col gap-3 lg:col-span-1">
       <div className="flex items-center gap-2">
-        <Settings className="w-3.5 h-3.5 text-indigo-400" />
-        <h2 className="text-xs font-[var(--font-weight-semibold)] uppercase tracking-wider text-gray-400">
-          Настройки
+        <Settings className="w-3.5 h-3.5" style={{ color: "var(--color-accent-interactive)" }} />
+        <h2 className="text-xs font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+          {t('configPanel.title')}
         </h2>
       </div>
 
       <div className="space-y-3">
         <div>
-          <label className="block text-[11px] text-gray-500 mb-1">
-            Файл конфигурации
+          <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>
+            {t('configPanel.configFile')}
           </label>
           <div className="flex gap-1.5">
             <input
@@ -31,9 +34,14 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
               onChange={(e) =>
                 onConfigChange({ ...config, configPath: e.target.value })
               }
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs
-                         text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/50
-                         focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+              className="flex-1 rounded-lg px-3 py-1.5 text-xs outline-none transition-colors"
+              style={{
+                backgroundColor: "var(--color-input-bg)",
+                borderWidth: "1px",
+                borderStyle: "solid",
+                borderColor: "var(--color-input-border)",
+                color: "var(--color-text-primary)",
+              }}
               placeholder="trusttunnel_client.toml"
             />
             <button
@@ -46,9 +54,15 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
                   onConfigChange({ ...config, configPath: selected as string });
                 }
               }}
-              className="p-1.5 bg-white/5 border border-white/10 rounded-lg
-                         hover:bg-white/10 transition-colors text-gray-400 hover:text-gray-200"
-              title="Выбрать файл"
+              className="p-1.5 rounded-lg transition-colors"
+              style={{
+                backgroundColor: "var(--color-input-bg)",
+                borderWidth: "1px",
+                borderStyle: "solid",
+                borderColor: "var(--color-input-border)",
+                color: "var(--color-text-secondary)",
+              }}
+              title={t('configPanel.selectFile')}
             >
               <FolderOpen className="w-3.5 h-3.5" />
             </button>
@@ -56,17 +70,22 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
         </div>
 
         <div>
-          <label className="block text-[11px] text-gray-500 mb-1">
-            Уровень логирования
+          <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>
+            {t('configPanel.logLevel')}
           </label>
           <select
             value={config.logLevel}
             onChange={(e) =>
               onConfigChange({ ...config, logLevel: e.target.value })
             }
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs
-                       text-gray-200 focus:outline-none focus:border-indigo-500/50
-                       focus:ring-1 focus:ring-indigo-500/25 transition-colors appearance-none"
+            className="w-full rounded-lg px-3 py-1.5 text-xs outline-none transition-colors appearance-none"
+            style={{
+              backgroundColor: "var(--color-input-bg)",
+              borderWidth: "1px",
+              borderStyle: "solid",
+              borderColor: "var(--color-input-border)",
+              color: "var(--color-text-primary)",
+            }}
           >
             {LOG_LEVELS.map((level) => (
               <option key={level} value={level} className="bg-[var(--color-bg-primary)]">
@@ -77,9 +96,9 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
         </div>
       </div>
 
-      <div className="mt-auto pt-3 border-t border-white/5">
-        <div className="text-[10px] text-gray-600">
-          <p>Sidecar: trusttunnel_client • TOML</p>
+      <div className="mt-auto pt-3" style={{ borderTop: "1px solid var(--color-border)" }}>
+        <div className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+          <p>Sidecar: trusttunnel_client &bull; TOML</p>
         </div>
       </div>
     </div>
