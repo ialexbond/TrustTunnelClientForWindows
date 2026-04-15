@@ -27,6 +27,8 @@ export interface ServerInfo {
   version: string;
   serviceActive: boolean;
   users: string[];
+  protocol?: string;
+  listenPort?: number;
 }
 
 export type ActionResult = { type: "ok" | "error"; message: string } | null;
