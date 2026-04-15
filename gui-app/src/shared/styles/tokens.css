@@ -170,6 +170,46 @@
   --color-status-info-bg: rgba(59, 130, 246, 0.08);
   --color-status-info-border: rgba(59, 130, 246, 0.15);
 
+  /* ── Tint tokens ─────────────────────────────────── */
+  /* Accent tints (using current accent palette, not legacy indigo) */
+  --color-accent-tint-06: rgba(45, 122, 118, 0.06);
+  --color-accent-tint-08: rgba(45, 122, 118, 0.08);
+  --color-accent-tint-10: rgba(45, 122, 118, 0.10);
+  --color-accent-tint-15: rgba(45, 122, 118, 0.15);
+  --color-accent-tint-20: rgba(45, 122, 118, 0.20);
+  --color-accent-tint-30: rgba(45, 122, 118, 0.30);
+  --color-accent-tint-40: rgba(45, 122, 118, 0.40);
+  --color-accent-tint-50: rgba(45, 122, 118, 0.50);
+
+  /* Success tints */
+  --color-success-tint-06: rgba(16, 185, 129, 0.06);
+  --color-success-tint-08: rgba(16, 185, 129, 0.08);
+  --color-success-tint-12: rgba(16, 185, 129, 0.12);
+  --color-success-tint-15: rgba(16, 185, 129, 0.15);
+  --color-success-tint-25: rgba(16, 185, 129, 0.25);
+  --color-success-tint-30: rgba(16, 185, 129, 0.30);
+  --color-success-tint-40: rgba(16, 185, 129, 0.40);
+
+  /* Warning tints */
+  --color-warning-tint-05: rgba(245, 158, 11, 0.05);
+  --color-warning-tint-08: rgba(245, 158, 11, 0.08);
+  --color-warning-tint-12: rgba(245, 158, 11, 0.12);
+  --color-warning-tint-15: rgba(245, 158, 11, 0.15);
+  --color-warning-tint-20: rgba(245, 158, 11, 0.20);
+  --color-warning-tint-30: rgba(245, 158, 11, 0.30);
+  --color-warning-tint-40: rgba(245, 158, 11, 0.40);
+
+  /* Danger tints */
+  --color-danger-tint-03: rgba(239, 68, 68, 0.03);
+  --color-danger-tint-08: rgba(239, 68, 68, 0.08);
+  --color-danger-tint-10: rgba(239, 68, 68, 0.10);
+  --color-danger-tint-15: rgba(239, 68, 68, 0.15);
+  --color-danger-tint-25: rgba(239, 68, 68, 0.25);
+
+  /* Overlay (black) */
+  --color-overlay-40: rgba(0, 0, 0, 0.40);
+  --color-overlay-50: rgba(0, 0, 0, 0.50);
+
   /* Glass */
   --color-glass-bg: rgba(17, 17, 24, 0.45);
 
@@ -237,6 +277,46 @@
   --color-status-connecting-border: rgba(217, 119, 6, 0.15);
   --color-status-info-bg: rgba(37, 99, 235, 0.08);
   --color-status-info-border: rgba(37, 99, 235, 0.15);
+
+  /* ── Tint tokens ─────────────────────────────────── */
+  /* Accent tints */
+  --color-accent-tint-06: rgba(35, 98, 96, 0.06);
+  --color-accent-tint-08: rgba(35, 98, 96, 0.08);
+  --color-accent-tint-10: rgba(35, 98, 96, 0.10);
+  --color-accent-tint-15: rgba(35, 98, 96, 0.15);
+  --color-accent-tint-20: rgba(35, 98, 96, 0.20);
+  --color-accent-tint-30: rgba(35, 98, 96, 0.30);
+  --color-accent-tint-40: rgba(35, 98, 96, 0.40);
+  --color-accent-tint-50: rgba(35, 98, 96, 0.50);
+
+  /* Success tints */
+  --color-success-tint-06: rgba(5, 150, 105, 0.06);
+  --color-success-tint-08: rgba(5, 150, 105, 0.08);
+  --color-success-tint-12: rgba(5, 150, 105, 0.12);
+  --color-success-tint-15: rgba(5, 150, 105, 0.15);
+  --color-success-tint-25: rgba(5, 150, 105, 0.25);
+  --color-success-tint-30: rgba(5, 150, 105, 0.30);
+  --color-success-tint-40: rgba(5, 150, 105, 0.40);
+
+  /* Warning tints */
+  --color-warning-tint-05: rgba(217, 119, 6, 0.05);
+  --color-warning-tint-08: rgba(217, 119, 6, 0.08);
+  --color-warning-tint-12: rgba(217, 119, 6, 0.12);
+  --color-warning-tint-15: rgba(217, 119, 6, 0.15);
+  --color-warning-tint-20: rgba(217, 119, 6, 0.20);
+  --color-warning-tint-30: rgba(217, 119, 6, 0.30);
+  --color-warning-tint-40: rgba(217, 119, 6, 0.40);
+
+  /* Danger tints */
+  --color-danger-tint-03: rgba(220, 38, 38, 0.03);
+  --color-danger-tint-08: rgba(220, 38, 38, 0.08);
+  --color-danger-tint-10: rgba(220, 38, 38, 0.10);
+  --color-danger-tint-15: rgba(220, 38, 38, 0.15);
+  --color-danger-tint-25: rgba(220, 38, 38, 0.25);
+
+  /* Overlay (black) */
+  --color-overlay-40: rgba(0, 0, 0, 0.40);
+  --color-overlay-50: rgba(0, 0, 0, 0.50);
 
   /* Glass */
   --color-glass-bg: rgba(255, 255, 255, 0.45);
