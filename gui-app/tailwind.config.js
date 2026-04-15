@@ -8,6 +8,8 @@ export default {
       sm: "var(--font-size-sm)",
       base: "var(--font-size-md)",
       lg: "var(--font-size-lg)",
+      xl: "var(--font-size-xl)",
+      "2xl": "var(--font-size-2xl)",
     },
   },
   plugins: [],
