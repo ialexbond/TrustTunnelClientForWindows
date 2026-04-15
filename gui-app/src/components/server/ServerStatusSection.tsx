@@ -15,7 +15,6 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Tooltip } from "../../shared/ui/Tooltip";
-import { colors } from "../../shared/ui/colors";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -140,12 +139,10 @@ export function ServerStatusSection({ state }: Props) {
               className="w-3 h-3 rounded-full shrink-0"
               style={{
                 backgroundColor: serverInfo.serviceActive ? "var(--color-success-500)" : "var(--color-danger-500)",
-                boxShadow: serverInfo.serviceActive
-                  ? colors.successGlow
-                  : colors.dangerGlow,
+                boxShadow: "none",
               }}
             />
-            <span className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <span className="text-base font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
               {serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
             </span>
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{state.host}</span>

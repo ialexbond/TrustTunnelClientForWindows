@@ -42,7 +42,7 @@ export function MtProtoSection({ state }: MtProtoSectionProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Send className="w-3 h-3" style={{ color: "var(--color-accent-400)" }} />
-          <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("server.utilities.mtproto.title")}
           </span>
         </div>

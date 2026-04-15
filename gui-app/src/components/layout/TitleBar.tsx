@@ -36,7 +36,7 @@ export function TitleBar({ children }: TitleBarProps) {
           TrustTunnel
         </span>
         <span
-          className="text-[9px] font-semibold px-1.5 py-[1px] rounded-[var(--radius-sm)]"
+          className="text-[9px] font-[var(--font-weight-semibold)] px-1.5 py-[1px] rounded-[var(--radius-sm)]"
           style={{
             backgroundColor: "var(--color-bg-elevated)",
             color: "var(--color-accent-interactive)",

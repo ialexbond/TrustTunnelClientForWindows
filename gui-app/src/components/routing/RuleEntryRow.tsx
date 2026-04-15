@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { Globe, FileText, Server, Monitor, Folder, Trash2, ArrowRight } from "lucide-react";
-import { colors } from "../../shared/ui/colors";
 import type { RuleEntry, RouteAction } from "./useRoutingState";
 
 interface RuleEntryRowProps {
@@ -21,10 +20,10 @@ const typeIcons: Record<string, typeof Globe> = {
 
 const typeBadgeBg: Record<string, string> = {
   domain: "var(--color-bg-hover)",
-  ip: colors.accentLogoGlow,
-  cidr: colors.accentLogoGlow,
-  geoip: colors.successBorder,
-  geosite: colors.warningBorder,
+  ip: "none",
+  cidr: "none",
+  geoip: "var(--color-status-connected-border)",
+  geosite: "var(--color-status-connecting-border)",
   iplist_group: "var(--color-bg-hover)",
 };
 
@@ -61,7 +60,7 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
         style={{ color: "var(--color-text-muted)" }}
       />
       <span
-        className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[9px] font-semibold uppercase tracking-wide px-1 py-0.5"
+        className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[9px] font-[var(--font-weight-semibold)] uppercase tracking-wide px-1 py-0.5"
         style={{
           width: "58px",
           textAlign: "center",

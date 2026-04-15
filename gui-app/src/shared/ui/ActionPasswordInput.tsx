@@ -35,7 +35,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
               "h-8 w-full rounded-[var(--radius-md)]",
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
-              "text-base text-[var(--color-text-primary)]",
+              "text-sm text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
