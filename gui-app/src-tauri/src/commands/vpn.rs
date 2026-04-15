@@ -46,6 +46,7 @@ fn save_sidecar_pid(pid: u32) {
 }
 
 /// Remove the PID file (called on normal sidecar exit).
+#[allow(dead_code)]
 fn clear_sidecar_pid() {
     let _ = std::fs::remove_file(sidecar_pid_path());
 }

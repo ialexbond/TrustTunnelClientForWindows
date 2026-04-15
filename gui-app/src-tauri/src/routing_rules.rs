@@ -554,6 +554,7 @@ fn hosts_file_path() -> PathBuf {
 }
 
 /// Add blocked domains to Windows hosts file (0.0.0.0 → blocks at OS level)
+#[allow(dead_code)]
 fn apply_hosts_block(domains: &[String]) -> Result<(), String> {
     // First clean any existing entries
     cleanup_hosts_block_inner()?;
