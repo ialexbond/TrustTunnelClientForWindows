@@ -75,8 +75,9 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
                   !active ? "hover:bg-[var(--color-bg-hover)]" : "",
                 ].join(" ")}
                 style={{
-                  maxWidth: 120,
-                  height: 44,
+                  width: "100%",
+                  height: 48,
+                  padding: "0 8px",
                   backgroundColor: active ? "var(--color-bg-elevated)" : undefined,
                   color: active
                     ? "var(--color-accent-interactive)"
