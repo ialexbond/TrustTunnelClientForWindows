@@ -34,7 +34,7 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
       position: "fixed",
       top: rect.bottom + 4,
       left: rect.left,
-      zIndex: 50,
+      zIndex: "var(--z-dropdown)",
     });
   }, []);
 
