@@ -54,7 +54,7 @@ export function StepBar({ step, isFetchMode }: StepBarProps) {
               i < currentIdx
                 ? { backgroundColor: "var(--color-status-connected-bg)", color: "var(--color-success-500)" }
                 : i === currentIdx
-                ? { backgroundColor: "none", color: "var(--color-accent-500)", boxShadow: "0 0 0 2px var(--color-accent-tint-50)" }
+                ? { backgroundColor: "transparent", color: "var(--color-accent-500)", boxShadow: "0 0 0 2px var(--color-accent-tint-50)" }
                 : { backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }
             }
           >
