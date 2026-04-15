@@ -25,7 +25,7 @@
 
 **Milestone Goal:** Стабилизировать кодовую базу v3.0 (тесты, баги, a11y, design-system), добавить 4 новых компонента и провести поэкранный UX-редизайн Pro-версии.
 
-- [x] **Phase 8: Stabilization** — Зелёный CI, баги закрыты, документация экранов написана (completed 2026-04-15)
+- [x] **Phase 8: Stabilization** — Зелёный CI, баги закрыты, документация экранов написана (completed 2026-04-15)
 - [x] **Phase 9: New Components** — 4 новых shared/ui компонента с Storybook stories (completed 2026-04-15)
 - [ ] **Phase 10: Tab Bar & Control Panel** — Pill-индикатор, Skeleton loading, ServerTabs 5 вкладок
 - [ ] **Phase 11: Screen UX Redesign** — Поэкранный редизайн Dashboard, Security, Settings, Routing, About
@@ -77,7 +77,11 @@ Plans:
   3. При SSH-операциях вместо пустого экрана отображается Skeleton loading
   4. После отключения от сервера поля host и username в SshConnectForm остаются заполненными
   5. ServerTabs содержит 5 вкладок — DangerZone перенесена в Tools через Accordion
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 10-01-PLAN.md — Pill indicator + cross-fade tab panels (TabNavigation, App.tsx)
+- [ ] 10-02-PLAN.md — ServerTabs 6->5 + DangerZone Accordion + StatusPanel shadow + ServerStatsCard StatCard
+- [ ] 10-03-PLAN.md — Skeleton loading + credentials persist (ControlPanelPage, SshConnectForm, ServerPanel)
 **UI hint**: yes
 
 ### Phase 11: Screen UX Redesign
@@ -105,5 +109,5 @@ Plans:
 | 6. Cleanup | v3.0 | 3/3 | Complete | 2026-04-15 |
 | 8. Stabilization | v3.1 | 6/6 | Complete   | 2026-04-15 |
 | 9. New Components | v3.1 | 3/3 | Complete   | 2026-04-15 |
-| 10. Tab Bar & Control Panel | v3.1 | 0/? | Not started | - |
+| 10. Tab Bar & Control Panel | v3.1 | 0/3 | Planning complete | - |
 | 11. Screen UX Redesign | v3.1 | 0/? | Not started | - |
