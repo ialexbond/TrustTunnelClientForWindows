@@ -164,7 +164,8 @@ describe("SshConnectForm", () => {
     renderForm();
     const portInput = screen.getByPlaceholderText("22");
     fireEvent.change(portInput, { target: { value: "22abc" } });
-    expect(portInput).toBeInTheDocument();
+    // Verify non-digits were stripped by the onChange handler
+    expect(portInput).toHaveValue("22");
   });
 
   it("switches back to password mode from key mode", () => {
