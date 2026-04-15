@@ -49,7 +49,6 @@ export function ServerSettingsSection({ state }: Props) {
 
   // ─── Save settings state ───
   const [saveLoading, setSaveLoading] = useState(false);
-  const [confirmSave, setConfirmSave] = useState(false);
 
   const parsed = configRaw ? parseTomlConfig(configRaw) : null;
 
@@ -110,7 +109,6 @@ export function ServerSettingsSection({ state }: Props) {
     try {
       await invoke("server_apply_config", sshParams);
       state.pushSuccess(t("server.actions.success_generic"));
-      setConfirmSave(false);
     } catch (e) {
       setActionResult({ type: "error", message: formatError(e) });
     } finally {
@@ -331,24 +329,12 @@ export function ServerSettingsSection({ state }: Props) {
       <div className="flex justify-end pt-2">
         <Button
           variant="primary"
-          onClick={() => setConfirmSave(true)}
+          onClick={() => void handleSaveSettings()}
           loading={saveLoading}
         >
           {t("server.config.save_settings")}
         </Button>
       </div>
-
-      <ConfirmDialog
-        open={confirmSave}
-        title={t("server.danger.confirm_reboot_title")}
-        message={t("server.config.save_settings")}
-        confirmLabel={t("buttons.confirm")}
-        cancelLabel={t("buttons.cancel")}
-        variant="warning"
-        loading={saveLoading}
-        onCancel={() => setConfirmSave(false)}
-        onConfirm={() => void handleSaveSettings()}
-      />
 
       {/* Warning if no config loaded */}
       {!configRaw && (
