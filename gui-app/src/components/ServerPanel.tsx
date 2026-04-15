@@ -59,7 +59,7 @@ export function ServerPanel(props: ServerPanelProps) {
         <div className="max-w-sm w-full text-center space-y-4">
           <div
             className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: "rgba(239, 68, 68, 0.1)" }}
+            style={{ backgroundColor: "var(--color-status-error-bg)" }}
           >
             <XCircle className="w-6 h-6" style={{ color: "var(--color-danger-500)" }} />
           </div>
