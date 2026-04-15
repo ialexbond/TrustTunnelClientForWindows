@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v3.1
 milestone_name: Stabilization & UX Redesign
 status: executing
-stopped_at: Completed 08-05-PLAN.md — UI fixes D-14..D-19 + STAB-09 keyboard a11y
-last_updated: "2026-04-15T10:21:44.167Z"
+stopped_at: Completed 08-03-PLAN.md — all 1361 tests passing
+last_updated: "2026-04-15T10:22:00.892Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 4
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08-stabilization P06 | 15 | 2 tasks | 6 files |
 | Phase 08-stabilization P04 | 5m | 2 tasks | 3 files |
 | Phase 08-stabilization P05 | 7m | 2 tasks | 5 files |
+| Phase 08-stabilization P03 | 8m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Recent decisions affecting current work:
 - [Phase 08-stabilization]: Inline fallbacks в t() убраны — ru.json/en.json единственный источник переведённого текста (D-06, D-08)
 - [Phase 08-stabilization]: D-18: pill-индикатор ServerTabs — rounded-md bg-elevated shadow-xs вместо border-b underline
 - [Phase 08-stabilization]: STAB-09: focus-visible ring + aria-label на обоих disconnect buttons (ServerTabs + StatusPanel)
+- [Phase 08-stabilization]: getByTestId вместо getByRole(text) для мок-компонентов — мок всегда рендерит хардкодный текст
+- [Phase 08-stabilization]: i18n.changeLanguage('ru') в beforeEach обязателен для тестов компонентов, использующих t()
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-15T10:21:33.000Z
-Stopped at: Completed 08-05-PLAN.md — UI fixes D-14..D-19 + STAB-09 keyboard a11y
+Last session: 2026-04-15T10:22:00.889Z
+Stopped at: Completed 08-03-PLAN.md — all 1361 tests passing
 Resume file: None

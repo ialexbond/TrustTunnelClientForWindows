@@ -25,7 +25,7 @@
 
 **Milestone Goal:** Стабилизировать кодовую базу v3.0 (тесты, баги, a11y, design-system), добавить 4 новых компонента и провести поэкранный UX-редизайн Pro-версии.
 
-- [ ] **Phase 8: Stabilization** — Зелёный CI, баги закрыты, документация экранов написана
+- [x] **Phase 8: Stabilization** — Зелёный CI, баги закрыты, документация экранов написана (completed 2026-04-15)
 - [ ] **Phase 9: New Components** — 4 новых shared/ui компонента с Storybook stories
 - [ ] **Phase 10: Tab Bar & Control Panel** — Pill-индикатор, Skeleton loading, ServerTabs 5 вкладок
 - [ ] **Phase 11: Screen UX Redesign** — Поэкранный редизайн Dashboard, Security, Settings, Routing, About
@@ -42,11 +42,11 @@
   3. Disconnect-кнопка доступна с клавиатуры (Tab + Enter/Space)
   4. В компонентах design-system нет хардкоженых строк — всё через i18n-ключи; цвета sidebar идут через CSS-токены
   5. Для каждого экрана Pro-версии написана screen spec в memory/v3/screens/
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 Plans:
 - [x] 08-01-PLAN.md — Test infrastructure: RAF mock, Section aria-hidden, Button CVA fix
 - [x] 08-02-PLAN.md — ConfirmDialog i18n: replace hardcoded defaults with t()
-- [ ] 08-03-PLAN.md — Fix remaining 14 failing tests (ConfigPanel, ControlPanelPage, SshConnectForm, FoundStep, ProcessFilterSection)
+- [x] 08-03-PLAN.md — Fix remaining 14 failing tests (ConfigPanel, ControlPanelPage, SshConnectForm, FoundStep, ProcessFilterSection)
 - [x] 08-04-PLAN.md — i18n audit: remove hardcoded fallbacks from EmptyState, Select, DropOverlay
 - [x] 08-05-PLAN.md — UI fixes: ServerTabs pill indicator, disconnect a11y, auth contrast, visual softness
 - [x] 08-06-PLAN.md — Screen specs documentation for all Pro screens
@@ -99,7 +99,7 @@ Plans:
 | 4. Remaining Panels | v3.0 | 6/6 | Complete | 2026-04-15 |
 | 5. Layout Shell | v3.0 | 3/3 | Complete | 2026-04-15 |
 | 6. Cleanup | v3.0 | 3/3 | Complete | 2026-04-15 |
-| 8. Stabilization | v3.1 | 5/6 | In Progress|  |
+| 8. Stabilization | v3.1 | 6/6 | Complete   | 2026-04-15 |
 | 9. New Components | v3.1 | 0/? | Not started | - |
 | 10. Tab Bar & Control Panel | v3.1 | 0/? | Not started | - |
 | 11. Screen UX Redesign | v3.1 | 0/? | Not started | - |
