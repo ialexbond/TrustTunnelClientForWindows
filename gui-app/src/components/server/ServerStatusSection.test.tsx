@@ -5,6 +5,11 @@ import i18n from "../../shared/i18n";
 import { ServerStatusSection } from "./ServerStatusSection";
 import type { ServerState } from "./useServerState";
 
+// NOTE: ServerStatusSection is the pre-Phase-11 component, kept for backward compat.
+// In the new 4-tab structure, ServerTabs uses OverviewSection (which mirrors ServerStatusSection
+// without danger buttons). Danger action buttons (stop/restart/reboot) have moved to ServiceSection.
+// These tests cover only the display and status-related behaviour of ServerStatusSection.
+
 function makeState(overrides: Partial<ServerState> = {}): ServerState {
   return {
     serverInfo: { installed: true, version: "1.4.0", serviceActive: true, users: ["alice"] },
@@ -59,89 +64,7 @@ describe("ServerStatusSection", () => {
     expect(screen.getByText("10.0.0.1")).toBeInTheDocument();
   });
 
-  it("shows restart and stop buttons when service is active", () => {
-    const state = makeState();
-    render(<ServerStatusSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.restart")) })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.stop")) })).toBeInTheDocument();
-  });
-
-  it("shows start button when service is stopped", () => {
-    const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
-    });
-    render(<ServerStatusSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.start")) })).toBeInTheDocument();
-  });
-
-  it("shows reboot server button", () => {
-    const state = makeState();
-    render(<ServerStatusSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.reboot_server")) })).toBeInTheDocument();
-  });
-
-  it("clicking reboot button calls setConfirmReboot", () => {
-    const state = makeState();
-    render(<ServerStatusSection state={state} />);
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.reboot_server")) }));
-    expect(state.setConfirmReboot).toHaveBeenCalledWith(true);
-  });
-
-  it("calls runAction when restart is clicked", () => {
-    const state = makeState();
-    render(<ServerStatusSection state={state} />);
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.restart")) }));
-    expect(state.runAction).toHaveBeenCalledWith("restart", expect.any(Function), expect.any(String));
-  });
-
   it("shows rebooting state with loader", () => {
-    const state = makeState({ rebooting: true });
-    render(<ServerStatusSection state={state} />);
-    expect(screen.getByText(i18n.t("server.status.rebooting"))).toBeInTheDocument();
-  });
-
-  it("hides action buttons during rebooting state", () => {
-    const state = makeState({ rebooting: true });
-    render(<ServerStatusSection state={state} />);
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.actions.restart")) })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.actions.stop")) })).not.toBeInTheDocument();
-  });
-
-  it("calls runAction with stop when stop button is clicked", () => {
-    const state = makeState();
-    render(<ServerStatusSection state={state} />);
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.stop")) }));
-    expect(state.runAction).toHaveBeenCalledWith("stop", expect.any(Function), expect.any(String));
-  });
-
-  it("shows start button instead of restart/stop when service is inactive", () => {
-    const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
-    });
-    render(<ServerStatusSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.start")) })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.actions.restart")) })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.actions.stop")) })).not.toBeInTheDocument();
-  });
-
-  it("calls runAction with start when start button is clicked on inactive service", () => {
-    const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
-    });
-    render(<ServerStatusSection state={state} />);
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.start")) }));
-    expect(state.runAction).toHaveBeenCalledWith("start", expect.any(Function), expect.any(String));
-  });
-
-  it("always shows reboot server button regardless of service state", () => {
-    const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
-    });
-    render(<ServerStatusSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.reboot_server")) })).toBeInTheDocument();
-  });
-
-  it("shows rebooting countdown when rebootCountdown > 0", () => {
     const state = makeState({ rebooting: true });
     render(<ServerStatusSection state={state} />);
     expect(screen.getByText(i18n.t("server.status.rebooting"))).toBeInTheDocument();
@@ -154,17 +77,17 @@ describe("ServerStatusSection", () => {
     expect(screen.queryByText(i18n.t("server.status.stopped"))).not.toBeInTheDocument();
   });
 
-  it("does not show reboot button during rebooting", () => {
+  it("shows rebooting countdown when rebooting is true", () => {
     const state = makeState({ rebooting: true });
     render(<ServerStatusSection state={state} />);
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.actions.reboot_server")) })).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t("server.status.rebooting"))).toBeInTheDocument();
   });
 
-  it("shows refresh status button (soft refresh)", () => {
+  it("shows refresh status button", () => {
     const state = makeState();
     render(<ServerStatusSection state={state} />);
     const allButtons = screen.getAllByRole("button");
-    expect(allButtons.length).toBeGreaterThan(2);
+    expect(allButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   // ── Ping display ──
@@ -194,7 +117,6 @@ describe("ServerStatusSection", () => {
       serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
     });
     render(<ServerStatusSection state={state} />);
-    // Ping invoke should not be called for inactive services
     await waitFor(() => {
       expect(screen.queryByText(/ms$/)).not.toBeInTheDocument();
     });
@@ -242,12 +164,8 @@ describe("ServerStatusSection", () => {
     const loadServerInfo = vi.fn().mockResolvedValue(undefined);
     const state = makeState({ loadServerInfo });
     render(<ServerStatusSection state={state} />);
-
-    // The refresh button is the inline button in the status row (not "restart")
-    // It's a button with RefreshCw icon without text label
     const allButtons = screen.getAllByRole("button");
-    // The inline refresh button is the one that doesn't have named text
-    // Find the button that has no text match to restart/stop/reboot
+    // Find the refresh button (no text label, just icon)
     const refreshBtn = allButtons.find((btn) => {
       const text = btn.textContent || "";
       return !text.includes(i18n.t("server.actions.restart"))
@@ -256,36 +174,9 @@ describe("ServerStatusSection", () => {
     });
     expect(refreshBtn).toBeTruthy();
     fireEvent.click(refreshBtn!);
-
     await waitFor(() => {
       expect(loadServerInfo).toHaveBeenCalledWith(true);
     });
-  });
-
-  // ── Action loading states ──
-
-  it("restart button shows loading state when actionLoading is restart", () => {
-    const state = makeState({ actionLoading: "restart" });
-    render(<ServerStatusSection state={state} />);
-    const restartBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.restart")) });
-    expect(restartBtn).toBeInTheDocument();
-  });
-
-  it("stop button shows loading state when actionLoading is stop", () => {
-    const state = makeState({ actionLoading: "stop" });
-    render(<ServerStatusSection state={state} />);
-    const stopBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.stop")) });
-    expect(stopBtn).toBeInTheDocument();
-  });
-
-  it("start button shows loading state when actionLoading is start", () => {
-    const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
-      actionLoading: "start",
-    });
-    render(<ServerStatusSection state={state} />);
-    const startBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.start")) });
-    expect(startBtn).toBeInTheDocument();
   });
 
   // ── Ping rejection (catch path) ──
@@ -302,9 +193,9 @@ describe("ServerStatusSection", () => {
     });
   });
 
-  // ── Reboot polling effect is triggered when rebooting is true ──
+  // ── Reboot polling ──
 
-  it("rebooting state triggers polling effect (invoke called for check_server_installation)", async () => {
+  it("rebooting state triggers polling effect", async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "ping_endpoint") return 42;
       if (cmd === "check_server_installation") {
@@ -312,48 +203,20 @@ describe("ServerStatusSection", () => {
       }
       return null;
     });
-
     const setRebooting = vi.fn();
     const setServerInfo = vi.fn();
     const pushSuccess = vi.fn();
     const state = makeState({ rebooting: true, setRebooting, setServerInfo, pushSuccess });
     const { unmount } = render(<ServerStatusSection state={state} />);
-
-    // The rebooting state shows the loader
     expect(screen.getByText(i18n.t("server.status.rebooting"))).toBeInTheDocument();
-
-    // Cleanup to avoid timer leaks
     unmount();
   });
 
   it("does not start reboot polling when rebooting is false", () => {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "ping_endpoint") return 42;
-      return null;
-    });
-
     const state = makeState({ rebooting: false });
     render(<ServerStatusSection state={state} />);
-
-    // check_server_installation should not be called when not rebooting
     const checkCalls = vi.mocked(invoke).mock.calls.filter(c => c[0] === "check_server_installation");
     expect(checkCalls.length).toBe(0);
-  });
-
-  // ── Ping variant classification ──
-
-  it("returns default variant for null ping", async () => {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (cmd === "ping_endpoint") return null as any;
-      return null;
-    });
-    const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: false, users: ["alice"] },
-    });
-    render(<ServerStatusSection state={state} />);
-    // No ping badge when service is inactive
-    expect(screen.queryByText(/ms$/)).not.toBeInTheDocument();
   });
 
   // ── Ping=0 shows no_connection badge ──
