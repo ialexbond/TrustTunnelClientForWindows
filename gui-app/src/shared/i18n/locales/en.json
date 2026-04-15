@@ -17,7 +17,13 @@
     "about": "About",
     "setup": "VPN Setup",
     "connection": "Connection",
-    "requires_config": "Set up connection first"
+    "requires_config": "Set up connection first",
+    "status": "Status",
+    "users": "Users",
+    "config": "Configuration",
+    "security": "Security",
+    "tools": "Tools",
+    "danger": "Danger Zone"
   },
   "status": {
     "connected": "Connected",
