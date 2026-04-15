@@ -58,46 +58,46 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
       ref={navRef}
       onKeyDown={handleKeyDown}
     >
-      <div className="flex items-center w-full" style={{ maxWidth: 720 }}>
+      <div className="flex items-stretch w-full" style={{ maxWidth: 720 }}>
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
 
           return (
-            <div key={tab.id} className="flex-1 flex items-center justify-center">
-              <button
-                role="tab"
-                aria-selected={active}
-                tabIndex={active ? 0 : -1}
-                onClick={() => onTabChange(tab.id)}
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onTabChange(tab.id)}
+              className="flex-1 flex items-center justify-center outline-none cursor-pointer bg-transparent border-none p-0"
+              style={{ color: active ? "var(--color-accent-interactive)" : "var(--color-text-secondary)" }}
+            >
+              <span
                 className={[
-                  "flex flex-col items-center justify-center rounded-[var(--radius-lg)] transition-colors duration-[var(--transition-fast)] outline-none cursor-pointer",
-                  "focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)] focus-visible:ring-offset-1",
+                  "flex flex-col items-center justify-center rounded-[var(--radius-lg)] transition-colors duration-[var(--transition-fast)]",
+                  "focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)]",
                   !active ? "hover:bg-[var(--color-bg-hover)]" : "",
                 ].join(" ")}
                 style={{
-                  width: "100%",
-                  height: 48,
-                  padding: "0 8px",
+                  width: "calc(100% - 8px)",
+                  height: 40,
                   backgroundColor: active ? "var(--color-bg-elevated)" : undefined,
-                  color: active
-                    ? "var(--color-accent-interactive)"
-                    : "var(--color-text-secondary)",
                 }}
               >
                 {tab.icon}
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: active ? 600 : 400,
                     lineHeight: 1,
-                    marginTop: 3,
+                    marginTop: 4,
                     whiteSpace: "nowrap",
                   }}
                 >
                   {t(tab.labelKey)}
                 </span>
-              </button>
-            </div>
+              </span>
+            </button>
           );
         })}
       </div>
