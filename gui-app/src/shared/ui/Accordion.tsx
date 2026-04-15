@@ -4,7 +4,7 @@ import { cn } from "../lib/cn";
 
 export interface AccordionItem {
   id: string;
-  title: string;
+  title: ReactNode;
   content: ReactNode;
 }
 
@@ -95,6 +95,8 @@ function AccordionItemComponent({ item, open, onToggle, isLast }: AccordionItemC
 
       <div
         id={contentId}
+        role="region"
+        aria-labelledby={headerId}
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{
           gridTemplateRows: open ? "1fr" : "0fr",

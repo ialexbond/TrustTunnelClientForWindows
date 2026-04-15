@@ -20,8 +20,9 @@ import { SecuritySection } from "./server/SecuritySection";
 import { UtilitiesSection } from "./server/UtilitiesSection";
 import { LogsSection } from "./server/LogsSection";
 import { DangerZoneSection } from "./server/DangerZoneSection";
+import { Accordion } from "../shared/ui/Accordion";
 
-type TabId = "status" | "users" | "config" | "security" | "tools" | "danger";
+type TabId = "status" | "users" | "config" | "security" | "tools";
 
 interface Tab {
   id: TabId;
@@ -36,7 +37,6 @@ const tabs: Tab[] = [
   { id: "config",   labelKey: "tabs.config",   fallback: "Конфигурация", icon: <Settings className="w-4 h-4" /> },
   { id: "security", labelKey: "tabs.security", fallback: "Безопасность", icon: <Shield className="w-4 h-4" /> },
   { id: "tools",    labelKey: "tabs.tools",    fallback: "Инструменты",  icon: <Wrench className="w-4 h-4" /> },
-  { id: "danger",   labelKey: "tabs.danger",   fallback: "Опасная зона", icon: <AlertTriangle className="w-4 h-4" /> },
 ];
 
 interface ServerTabsProps {
@@ -90,46 +90,93 @@ export function ServerTabs({ state }: ServerTabsProps) {
         ))}
       </div>
 
-      {/* Tab content — display:none caching (D-13, D-14): mount once, toggle visibility */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      {/* Tab content — cross-fade with visibility+opacity (D-06): mount once, fade between tabs */}
+      <div className="flex-1 min-h-0 overflow-hidden relative">
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{ display: activeTab === "status" ? "flex" : "none" }}
+          style={{
+            position: activeTab === "status" ? "relative" : "absolute",
+            inset: activeTab === "status" ? undefined : 0,
+            opacity: activeTab === "status" ? 1 : 0,
+            visibility: activeTab === "status" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "status"}
         >
           <ServerStatusSection state={state} />
         </div>
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{ display: activeTab === "users" ? "flex" : "none" }}
+          style={{
+            position: activeTab === "users" ? "relative" : "absolute",
+            inset: activeTab === "users" ? undefined : 0,
+            opacity: activeTab === "users" ? 1 : 0,
+            visibility: activeTab === "users" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "users"}
         >
           <UsersSection state={state} />
         </div>
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{ display: activeTab === "config" ? "flex" : "none" }}
+          style={{
+            position: activeTab === "config" ? "relative" : "absolute",
+            inset: activeTab === "config" ? undefined : 0,
+            opacity: activeTab === "config" ? 1 : 0,
+            visibility: activeTab === "config" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "config"}
         >
           <VersionSection state={state} />
           <ConfigSection state={state} />
         </div>
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{ display: activeTab === "security" ? "flex" : "none" }}
+          style={{
+            position: activeTab === "security" ? "relative" : "absolute",
+            inset: activeTab === "security" ? undefined : 0,
+            opacity: activeTab === "security" ? 1 : 0,
+            visibility: activeTab === "security" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "security"}
         >
           <SecuritySection state={state} />
           <CertSection state={state} />
         </div>
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{ display: activeTab === "tools" ? "flex" : "none" }}
+          style={{
+            position: activeTab === "tools" ? "relative" : "absolute",
+            inset: activeTab === "tools" ? undefined : 0,
+            opacity: activeTab === "tools" ? 1 : 0,
+            visibility: activeTab === "tools" ? ("visible" as const) : ("hidden" as const),
+            transition: "opacity var(--transition-fast)",
+          }}
+          aria-hidden={activeTab !== "tools"}
         >
           <UtilitiesSection state={state} />
           <LogsSection state={state} />
-        </div>
-        <div
-          className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{ display: activeTab === "danger" ? "flex" : "none" }}
-        >
-          <DangerZoneSection state={state} />
+          <Accordion
+            items={[{
+              id: "danger",
+              title: (
+                <span className="flex items-center gap-1.5">
+                  <AlertTriangle
+                    className="w-3.5 h-3.5"
+                    style={{ color: "var(--color-danger-400)" }}
+                  />
+                  <span style={{ color: "var(--color-status-error)" }}>
+                    {t("server.danger.title", "Опасная зона")}
+                  </span>
+                </span>
+              ),
+              content: <DangerZoneSection state={state} />,
+            }]}
+            defaultOpen={[]}
+          />
         </div>
       </div>
     </div>
