@@ -39,10 +39,20 @@ export const badgeVariants = cva(
           "text-[var(--color-text-secondary)]",
           "border border-transparent",
         ].join(" "),
+        default: [
+          "bg-[var(--color-bg-elevated)]",
+          "text-[var(--color-text-secondary)]",
+          "border border-[var(--color-border)]",
+        ].join(" "),
+      },
+      size: {
+        sm: "text-[10px] px-1.5 py-0",
+        md: "text-xs px-2 py-0.5",
       },
     },
     defaultVariants: {
       variant: "neutral",
+      size: "md",
     },
   }
 );
@@ -54,12 +64,12 @@ export interface BadgeProps
 }
 
 export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
-  ({ variant, pulse, className, children, ...props }, ref) => {
+  ({ variant, size, pulse, className, children, ...props }, ref) => {
     return (
       <span
         ref={ref}
         className={cn(
-          badgeVariants({ variant }),
+          badgeVariants({ variant, size }),
           pulse && "animate-pulse",
           className
         )}
