@@ -38,7 +38,7 @@ export function EndpointStep(w: WizardState) {
                   value={w.vpnUsername}
                   onChange={(e) => w.setVpnUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, ""))}
                   placeholder="vpnuser"
-                  className="wizard-input !py-2 !text-xs"
+                  className="wizard-input wizard-input-sm"
                   autoFocus
                 />
               </div>
@@ -50,7 +50,7 @@ export function EndpointStep(w: WizardState) {
                     value={w.vpnPassword}
                     onChange={(e) => w.setVpnPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
                     placeholder="••••••••"
-                    className="wizard-input !py-2 !text-xs pr-9"
+                    className="wizard-input wizard-input-sm pr-9"
                   />
                   <button
                     type="button"
@@ -142,7 +142,7 @@ export function EndpointStep(w: WizardState) {
                       value={w.domain}
                       onChange={(e) => w.setDomain(e.target.value)}
                       placeholder="vpn.example.com"
-                      className="wizard-input !py-2 !text-xs pl-9"
+                      className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
                   <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
@@ -160,7 +160,7 @@ export function EndpointStep(w: WizardState) {
                       value={w.email}
                       onChange={(e) => w.setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="wizard-input !py-2 !text-xs pl-9"
+                      className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
                   <p className="text-[10px] mt-0.5" style={{ color: w.email.trim() && !w.isValidEmail(w.email) ? "var(--color-danger-500)" : "var(--color-text-muted)" }}>
@@ -182,7 +182,7 @@ export function EndpointStep(w: WizardState) {
                       value={w.certChainPath}
                       onChange={(e) => w.setCertChainPath(e.target.value)}
                       placeholder="/etc/ssl/certs/cert.pem"
-                      className="wizard-input !py-2 !text-xs pl-9"
+                      className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
                   <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
@@ -198,7 +198,7 @@ export function EndpointStep(w: WizardState) {
                       value={w.certKeyPath}
                       onChange={(e) => w.setCertKeyPath(e.target.value)}
                       placeholder="/etc/ssl/private/key.pem"
-                      className="wizard-input !py-2 !text-xs pl-9"
+                      className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
                   <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
@@ -265,7 +265,7 @@ export function EndpointStep(w: WizardState) {
                 value={w.listenAddress}
                 onChange={(e) => w.setListenAddress(e.target.value)}
                 placeholder="0.0.0.0:443"
-                className="wizard-input !py-2 !text-xs"
+                className="wizard-input wizard-input-sm"
               />
               <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                 {t('wizard.endpoint.listen_address_help')}
