@@ -115,7 +115,7 @@ export default function DashboardPanel({
             <BarChart3 className="w-5 h-5" style={{ color: "var(--color-text-muted)" }} />
           </div>
           <div className="text-center">
-            <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-text-primary)" }}>
+            <p className="text-sm font-[var(--font-weight-semibold)] mb-1" style={{ color: "var(--color-text-primary)" }}>
               {t("dashboard.disconnected_title", "Дашборд")}
             </p>
             <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -150,7 +150,7 @@ export default function DashboardPanel({
               <Server className="w-5 h-5" style={{ color: "var(--color-text-muted)" }} />
             </div>
             <div className="text-center">
-              <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-text-primary)" }}>
+              <p className="text-sm font-[var(--font-weight-semibold)] mb-1" style={{ color: "var(--color-text-primary)" }}>
                 {t("dashboard.server_title", "Сервер")}
               </p>
               <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>

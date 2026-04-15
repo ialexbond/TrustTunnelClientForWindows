@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, X } from "lucide-react";
 import { GeoAutocomplete } from "./GeoAutocomplete";
-import { colors } from "../../shared/ui/colors";
 import type { RouteAction, GeoDataIndex, GeoDataStatus } from "./useRoutingState";
 
 interface AddRuleInputProps {
@@ -231,7 +230,7 @@ export function AddRuleInput({ action, geodataStatus, geodataCategories, onAdd }
           disabled={!input.trim()}
           className="px-3 py-2 rounded-[var(--radius-lg)] transition-colors disabled:opacity-40 disabled:cursor-default"
           style={{
-            backgroundColor: colors.accentLogoGlow,
+            backgroundColor: "none",
             color: "var(--color-accent-400)",
           }}
         >

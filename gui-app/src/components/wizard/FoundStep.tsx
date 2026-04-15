@@ -10,7 +10,6 @@ import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Button } from "../../shared/ui/Button";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { IconButton } from "../../shared/ui/IconButton";
-import { colors } from "../../shared/ui/colors";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { UserQRModal } from "./UserQRModal";
 import { AddUserForm } from "./AddUserForm";
@@ -26,7 +25,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (isInstalled && users.length > 0) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.successBg }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-connected-bg)" }}>
           <User className="w-7 h-7" style={{ color: "var(--color-success-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -72,7 +71,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (isInstalled && users.length === 0) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.warningBg }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-connecting-bg)" }}>
           <User className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -102,7 +101,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
   // Not installed or error in fetch mode
   return (
     <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.dangerBg }}>
+      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-error-bg)" }}>
         <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
       </div>
       <div className="space-y-1.5">
@@ -188,7 +187,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     const users = w.serverInfo?.users ?? [];
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.warningBg }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-connecting-bg)" }}>
           <PackageCheck className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -212,7 +211,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
         {/* ── Users (same layout as UsersSection in dashboard) ── */}
         {users.length > 0 && (
           <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-            <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
+            <p className="text-[11px] font-[var(--font-weight-semibold)] flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
               <User className="w-3.5 h-3.5" />
               {t('wizard.found.added_users')}
             </p>
@@ -225,7 +224,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                     <div
                       onClick={() => w.setSelectedUser(u)}
                       className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
-                      style={{ backgroundColor: isSelected ? colors.accentBgSubtle : "transparent" }}
+                      style={{ backgroundColor: isSelected ? "rgba(99, 102, 241, 0.08)" : "transparent" }}
                       onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
                       onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                     >
@@ -319,7 +318,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (w.checkError === "HOST_KEY_RESET") {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.accentBg }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
           <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -339,7 +338,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (w.checkError) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.dangerBg }}>
+        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-error-bg)" }}>
           <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
         </div>
         <div className="space-y-1.5">
@@ -363,7 +362,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   // Server ready, TT not installed
   return (
     <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: colors.accentBg }}>
+      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(99, 102, 241, 0.1)" }}>
         <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
       </div>
       <div className="space-y-1.5">

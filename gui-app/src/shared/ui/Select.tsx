@@ -153,7 +153,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
           disabled={disabled}
           className={cn(
             "flex items-center justify-between gap-2 w-full",
-            "rounded-[var(--radius-md)] px-[var(--space-3)] h-8 text-base",
+            "rounded-[var(--radius-md)] px-[var(--space-3)] h-8 text-sm",
             "cursor-pointer transition-colors outline-none",
             "border border-[var(--color-input-border)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)]",
             "focus-visible:shadow-[var(--focus-ring)]",

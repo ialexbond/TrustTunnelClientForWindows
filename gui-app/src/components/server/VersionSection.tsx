@@ -13,7 +13,6 @@ import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
-import { colors } from "../../shared/ui/colors";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
@@ -122,7 +121,7 @@ export function VersionSection({ state }: Props) {
                   backgroundColor: "var(--color-bg-elevated)",
                   border: "1px solid var(--color-border)",
                   borderRadius: "var(--radius-lg)",
-                  boxShadow: colors.dropdownShadow,
+                  boxShadow: "var(--shadow-lg)",
                   overflow: "hidden",
                 }}
               >
@@ -137,7 +136,7 @@ export function VersionSection({ state }: Props) {
                         onClick={() => { setSelectedVersion(v); dropdown.close(); }}
                         className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                         style={{
-                          backgroundColor: isSelected ? colors.accentBg : "transparent",
+                          backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
                           color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
                         }}
                         onMouseEnter={(e) => {

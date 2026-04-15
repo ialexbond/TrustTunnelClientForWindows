@@ -15,7 +15,6 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
-import { colors } from "../../shared/ui/colors";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
@@ -115,7 +114,7 @@ export function ExportSection({ state }: Props) {
                   backgroundColor: "var(--color-bg-elevated)",
                   border: "1px solid var(--color-border)",
                   borderRadius: "var(--radius-lg)",
-                  boxShadow: colors.dropdownShadow,
+                  boxShadow: "var(--shadow-lg)",
                   overflow: "hidden",
                 }}
               >
@@ -128,7 +127,7 @@ export function ExportSection({ state }: Props) {
                         onClick={() => { setSelectedUser(u); userDropdown.close(); setDeeplink(""); }}
                         className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
                         style={{
-                          backgroundColor: isSelected ? colors.accentBg : "transparent",
+                          backgroundColor: isSelected ? "rgba(99, 102, 241, 0.1)" : "transparent",
                           color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
                         }}
                         onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--color-bg-hover)"; }}

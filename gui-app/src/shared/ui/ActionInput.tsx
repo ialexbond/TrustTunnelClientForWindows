@@ -56,7 +56,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
               "border border-[var(--color-input-border)]",
               "bg-[var(--color-input-bg)]",
               "px-[var(--space-3)]",
-              "text-base text-[var(--color-text-primary)]",
+              "text-sm text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
               "transition-all duration-[var(--transition-fast)]",
