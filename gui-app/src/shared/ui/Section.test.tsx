@@ -40,7 +40,7 @@ describe("Section", () => {
 
     const header = screen.getByRole("button");
     fireEvent.click(header);
-    expect(screen.queryByText("Collapsible content")).not.toBeInTheDocument();
+    expect(screen.getByText("Collapsible content")).not.toBeVisible();
   });
 
   it("defaultOpen=false starts collapsed", () => {
@@ -49,7 +49,7 @@ describe("Section", () => {
         <p>Hidden content</p>
       </Section>
     );
-    expect(screen.queryByText("Hidden content")).not.toBeInTheDocument();
+    expect(screen.getByText("Hidden content")).not.toBeVisible();
   });
 
   it("renders action slot in SectionHeader", () => {

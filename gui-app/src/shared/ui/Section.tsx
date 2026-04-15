@@ -118,7 +118,11 @@ export function Section({
       {collapsible ? (
         <div
           className="grid transition-[grid-template-rows] duration-200 ease-out"
-          style={{ gridTemplateRows: showContent ? "1fr" : "0fr" }}
+          style={{
+            gridTemplateRows: showContent ? "1fr" : "0fr",
+            visibility: showContent ? undefined : "hidden",
+          }}
+          aria-hidden={!showContent}
         >
           <div className="overflow-hidden">
             {children}
