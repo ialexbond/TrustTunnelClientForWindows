@@ -54,7 +54,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
     <nav
       role="tablist"
       className="flex items-center justify-center shrink-0"
-      style={{ height: 56 }}
+      style={{ height: 64 }}
       ref={navRef}
       onKeyDown={handleKeyDown}
     >
@@ -80,7 +80,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
                 ].join(" ")}
                 style={{
                   width: "calc(100% - 8px)",
-                  height: 44,
+                  height: 50,
                   backgroundColor: active ? "var(--color-bg-elevated)" : undefined,
                 }}
               >
