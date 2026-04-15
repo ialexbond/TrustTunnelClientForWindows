@@ -27,7 +27,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
       <div
         className={cn(
           "flex flex-col items-center gap-3",
-          "text-[var(--color-text-inverse)]",
+          "text-white",
           "text-lg",
           "font-[var(--font-weight-semibold)]",
         )}
