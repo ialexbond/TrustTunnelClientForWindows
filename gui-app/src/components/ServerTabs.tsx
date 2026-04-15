@@ -30,12 +30,12 @@ interface Tab {
 }
 
 const tabs: Tab[] = [
-  { id: "status",   labelKey: "tabs.status",   fallback: "Статус",      icon: <Activity className="w-3.5 h-3.5" /> },
-  { id: "users",    labelKey: "tabs.users",    fallback: "Пользователи", icon: <Users className="w-3.5 h-3.5" /> },
-  { id: "config",   labelKey: "tabs.config",   fallback: "Конфигурация", icon: <Settings className="w-3.5 h-3.5" /> },
-  { id: "security", labelKey: "tabs.security", fallback: "Безопасность", icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "tools",    labelKey: "tabs.tools",    fallback: "Инструменты",  icon: <Wrench className="w-3.5 h-3.5" /> },
-  { id: "danger",   labelKey: "tabs.danger",   fallback: "Опасная зона", icon: <AlertTriangle className="w-3.5 h-3.5" /> },
+  { id: "status",   labelKey: "tabs.status",   fallback: "Статус",      icon: <Activity className="w-4 h-4" /> },
+  { id: "users",    labelKey: "tabs.users",    fallback: "Пользователи", icon: <Users className="w-4 h-4" /> },
+  { id: "config",   labelKey: "tabs.config",   fallback: "Конфигурация", icon: <Settings className="w-4 h-4" /> },
+  { id: "security", labelKey: "tabs.security", fallback: "Безопасность", icon: <Shield className="w-4 h-4" /> },
+  { id: "tools",    labelKey: "tabs.tools",    fallback: "Инструменты",  icon: <Wrench className="w-4 h-4" /> },
+  { id: "danger",   labelKey: "tabs.danger",   fallback: "Опасная зона", icon: <AlertTriangle className="w-4 h-4" /> },
 ];
 
 interface ServerTabsProps {
@@ -48,14 +48,17 @@ export function ServerTabs({ state }: ServerTabsProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar — no border (D-01) */}
-      <div className="flex items-center gap-0.5 px-3 bg-[var(--color-bg-primary)]">
+      {/* Tab bar */}
+      <div
+        className="flex items-center px-3 shrink-0"
+        style={{ borderBottom: "1px solid var(--color-border)" }}
+      >
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+              "flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px",
               activeTab === tab.id
                 ? "border-[var(--color-accent-interactive)] text-[var(--color-text-primary)]"
                 : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 05-layout-shell 05-02-PLAN.md
-last_updated: "2026-04-14T20:52:34.994Z"
+status: verifying
+stopped_at: Completed 05-layout-shell 05-03-PLAN.md
+last_updated: "2026-04-14T21:14:34.739Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 22
-  completed_plans: 25
+  completed_plans: 26
   percent: 100
 ---
 
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 
 ## Current Position
 
-Phase: 05 (Shell Polish + TODO Closure) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
+Phase: 6
+Plan: Not started
+Status: Phase complete — ready for verification
 Last activity: 2026-04-14
 
 Progress: [████████░░] 80%
@@ -36,7 +36,7 @@ Progress: [████████░░] 80%
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 24
 - Average duration: —
 - Total execution time: —
 
@@ -57,6 +57,7 @@ Progress: [████████░░] 80%
 *Updated after each plan completion*
 | Phase 05-layout-shell P01 | 20 | 3 tasks | 4 files |
 | Phase 05-layout-shell P02 | 2 | 2 tasks | 8 files |
+| Phase 05-layout-shell P03 | 10 | 2 tasks | 8 files |
 
 ## Governance Rules (v3.0 milestone)
 
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase 05-layout-shell]: D-01 completed: all border-[var(--color-border)] removed from TabNavigation, ServerSidebar, ServerTabs, ControlPanelPage
 - [Phase 05-layout-shell]: D-10 safety fix: onAddServer no longer calls handleDisconnect — Add Server is safe during active VPN
 - [Phase 05-layout-shell]: danger-outline -> danger: план не упоминал danger-outline, но он тоже невалидный CVA вариант Button — исправлен по Rule 1 во всех server-секциях
+- [Phase 05-layout-shell]: D-17 closed: StatusBadge/Select/EmptyState use useTranslation — no hardcoded Russian strings
+- [Phase 05-layout-shell]: D-18 closed: sanitize() loop+search_from pattern verified by all 6 logging tests
 
 ### Pending Todos
 
@@ -93,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T20:52:34.990Z
-Stopped at: Completed 05-layout-shell 05-02-PLAN.md
+Last session: 2026-04-14T21:03:35.820Z
+Stopped at: Completed 05-layout-shell 05-03-PLAN.md
 Resume file: None

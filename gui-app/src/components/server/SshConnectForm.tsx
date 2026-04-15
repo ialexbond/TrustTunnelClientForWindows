@@ -115,20 +115,10 @@ export function SshConnectForm({ onConnect }: Props) {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--color-bg-primary)]">
-      {/* Заголовок панели */}
-      <div className="h-[40px] flex items-center px-4 border-b border-[var(--color-border)] shrink-0">
-        <h2 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
-          {t("control.ssh_title")}
-        </h2>
-      </div>
-
-      {/* Форма */}
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg-primary)]">
+      {/* Форма — вертикально по центру */}
+      <div className="w-full overflow-y-auto">
         <div className="max-w-[360px] mx-auto px-4 py-5 space-y-3.5">
-          <p className="text-xs text-[var(--color-text-muted)]">
-            {t("control.ssh_description")}
-          </p>
 
           {/* IP + Порт */}
           <div className="flex gap-2.5 items-end">

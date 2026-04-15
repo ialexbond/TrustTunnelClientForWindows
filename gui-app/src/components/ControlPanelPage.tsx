@@ -3,9 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
-import { ServerSidebar, type ServerEntry } from "./ServerSidebar";
-import { Button } from "../shared/ui/Button";
-import { LogOut } from "lucide-react";
 
 async function readStoredCredentials(): Promise<SshCredentials | null> {
   try {
@@ -125,90 +122,28 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     return null;
   }
 
-  // Build server list for sidebar
-  const servers: ServerEntry[] = creds
-    ? [{ id: "main", host: creds.host, port: creds.port, status: "connected" as const }]
-    : [];
-
-  const selectedId = creds ? "main" : null;
-
-  // Sidebar is visible when 2+ servers exist (D-08)
-  // Currently only 1 server is supported, but the animation wrapper is ready for multi-server
-  const sidebarVisible = servers.length >= 2;
-
   return (
-    <div className="h-full flex overflow-hidden">
-      {/* Sidebar animation wrapper — hidden at <2 servers, animated show/hide (D-08, D-11) */}
-      <div
-        style={{
-          width: sidebarVisible ? 220 : 0,
-          opacity: sidebarVisible ? 1 : 0,
-          overflow: "hidden",
-          flexShrink: 0,
-          transition: sidebarVisible
-            ? "width var(--transition-normal) var(--ease-out), opacity var(--transition-normal) var(--ease-out)"
-            : "width var(--transition-fast) var(--ease-out), opacity var(--transition-fast) var(--ease-out)",
-        }}
-      >
-        <ServerSidebar
-          servers={servers}
-          selectedId={selectedId}
-          onSelect={() => { /* single server for now */ }}
-          onAddServer={() => {
-            setRefreshKey(k => k + 1);
+    <div className="h-full flex flex-col overflow-hidden">
+      {!creds ? (
+        <SshConnectForm onConnect={handleConnect} />
+      ) : (
+        <ServerPanel
+          key={refreshKey}
+          host={creds.host}
+          port={creds.port}
+          sshUser={creds.user}
+          sshPassword={creds.password}
+          sshKeyPath={creds.keyPath}
+          onSwitchToSetup={onSwitchToSetup}
+          onClearConfig={() => {}}
+          onDisconnect={handleDisconnect}
+          onPortChanged={handlePortChanged}
+          onConfigExported={(path) => {
+            onConfigExported(path);
+            if (onNavigateToSettings) onNavigateToSettings();
           }}
-          onDisconnect={() => handleDisconnect()}
         />
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {!creds ? (
-          /* No credentials — show SshConnectForm */
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <SshConnectForm onConnect={handleConnect} />
-          </div>
-        ) : (
-          /* Connected — show header + ServerPanel (tabs coming in next iteration) */
-          <>
-            {/* Header */}
-            <div className="h-[40px] flex items-center justify-between px-3 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-status-connected)" }} />
-                <span className="text-xs font-medium text-[var(--color-text-primary)]">
-                  {creds.host}:{creds.port}
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleDisconnect}
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                {t("control.disconnect")}
-              </Button>
-            </div>
-
-            {/* ServerPanel */}
-            <ServerPanel
-              key={refreshKey}
-              host={creds.host}
-              port={creds.port}
-              sshUser={creds.user}
-              sshPassword={creds.password}
-              sshKeyPath={creds.keyPath}
-              onSwitchToSetup={onSwitchToSetup}
-              onClearConfig={() => {}}
-              onDisconnect={handleDisconnect}
-              onPortChanged={handlePortChanged}
-              onConfigExported={(path) => {
-                onConfigExported(path);
-                if (onNavigateToSettings) onNavigateToSettings();
-              }}
-            />
-          </>
-        )}
-      </div>
+      )}
     </div>
   );
 }
