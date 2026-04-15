@@ -60,7 +60,8 @@ export function ServerTabs({ state }: ServerTabsProps) {
         <button
           type="button"
           onClick={state.onDisconnect}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer"
+          aria-label={t("control.disconnect")}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer focus-visible:shadow-[var(--focus-ring)] outline-none"
         >
           <LogOut className="w-3.5 h-3.5" />
           {t("control.disconnect")}
@@ -69,18 +70,18 @@ export function ServerTabs({ state }: ServerTabsProps) {
 
       {/* Tab bar */}
       <div
-        className="flex items-center px-3 shrink-0"
-        style={{ borderBottom: "1px solid var(--color-border)" }}
+        className="flex items-center shrink-0"
+        style={{ borderBottom: "1px solid var(--color-border)", padding: "4px 8px" }}
       >
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-medium transition-colors border-b -mb-px",
+              "flex-1 flex items-center justify-center gap-1.5 py-2 mx-0.5 text-xs font-medium transition-colors rounded-[var(--radius-md)]",
               activeTab === tab.id
-                ? "border-[var(--color-accent-interactive)] text-[var(--color-text-primary)]"
-                : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-[var(--shadow-xs)]"
+                : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
             )}
           >
             {tab.icon}
