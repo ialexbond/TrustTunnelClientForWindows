@@ -1056,5 +1056,9 @@
     "configFile": "Config file",
     "selectFile": "Select file",
     "logLevel": "Log level"
+  },
+  "confirmDialog": {
+    "confirm": "Confirm",
+    "cancel": "Cancel"
   }
 }

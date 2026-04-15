@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 
@@ -22,18 +23,19 @@ export function ConfirmDialog({
   open,
   title,
   message,
-  confirmText = "Confirm",
+  confirmText,
   confirmLabel,
-  cancelText = "Cancel",
+  cancelText,
   cancelLabel,
   variant = "danger",
   onConfirm,
   onCancel,
   loading,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   const isVisible = isOpen ?? open ?? false;
-  const resolvedConfirmText = confirmLabel ?? confirmText;
-  const resolvedCancelText = cancelLabel ?? cancelText;
+  const resolvedConfirmText = confirmLabel ?? confirmText ?? t("confirmDialog.confirm");
+  const resolvedCancelText = cancelLabel ?? cancelText ?? t("confirmDialog.cancel");
 
   return (
     <Modal

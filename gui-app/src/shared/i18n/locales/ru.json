@@ -1056,5 +1056,9 @@
     "configFile": "Файл конфигурации",
     "selectFile": "Выбрать файл",
     "logLevel": "Уровень логирования"
+  },
+  "confirmDialog": {
+    "confirm": "Удалить",
+    "cancel": "Отмена"
   }
 }
