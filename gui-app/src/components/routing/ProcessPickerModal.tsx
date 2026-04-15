@@ -144,7 +144,7 @@ export function ProcessPickerModal({
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors disabled:opacity-40"
                     style={{
                       backgroundColor: isSelected
-                        ? "rgba(99, 102, 241, 0.08)"
+                        ? "var(--color-accent-tint-08)"
                         : "transparent",
                     }}
                   >

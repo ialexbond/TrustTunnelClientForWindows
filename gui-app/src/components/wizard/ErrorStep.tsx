@@ -32,7 +32,7 @@ export function ErrorStep(w: WizardState) {
   return (
     <div className="flex-1 flex flex-col items-center overflow-y-auto p-6">
       <div className="max-w-sm w-full text-center space-y-4 my-auto">
-        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-danger-500)", boxShadow: "0 8px 24px rgba(239, 68, 68, 0.25)" }}>
+        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-danger-500)", boxShadow: "0 8px 24px var(--color-danger-tint-25)" }}>
           <XCircle className="w-8 h-8 text-white" />
         </div>
 
@@ -46,7 +46,7 @@ export function ErrorStep(w: WizardState) {
         </div>
 
         {hints.length > 0 && (
-          <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "rgba(245, 158, 11, 0.05)", border: "1px solid var(--color-status-connecting-border)" }}>
+          <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "var(--color-warning-tint-05)", border: "1px solid var(--color-status-connecting-border)" }}>
             <p className="text-[11px] font-[var(--font-weight-semibold)] flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               {t('wizard.error.possible_cause')}
@@ -89,7 +89,7 @@ export function ErrorStep(w: WizardState) {
         )}
 
         {showReinstallPrompt ? (
-          <div className="p-3 rounded-xl space-y-2.5" style={{ backgroundColor: "var(--color-status-connecting-bg)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
+          <div className="p-3 rounded-xl space-y-2.5" style={{ backgroundColor: "var(--color-status-connecting-bg)", border: "1px solid var(--color-warning-tint-20)" }}>
             <p className="text-xs font-medium" style={{ color: "var(--color-warning-500)" }}>
               {t('wizard.error.reinstall_prompt')}
             </p>
@@ -103,7 +103,7 @@ export function ErrorStep(w: WizardState) {
               <button
                 onClick={() => { w.setFetchRetryCount(0); w.saveField("wizardMode", ""); w.setWizardStep("endpoint"); }}
                 className="flex-1 px-3 py-2 rounded-xl text-xs font-medium transition-all"
-                style={{ backgroundColor: "var(--color-status-connecting-bg)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "var(--color-warning-500)" }}
+                style={{ backgroundColor: "var(--color-status-connecting-bg)", border: "1px solid var(--color-warning-tint-30)", color: "var(--color-warning-500)" }}
               >
                 {t('buttons.confirm_reinstall')}
               </button>

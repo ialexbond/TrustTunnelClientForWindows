@@ -51,8 +51,8 @@ export function ConnectionSection({ state }: Props) {
             title={t("buttons.delete")}
             className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-lg)] px-2.5 h-8 transition-colors"
             style={{
-              backgroundColor: "rgba(239,68,68,0.08)",
-              border: "1px solid rgba(239,68,68,0.25)",
+              backgroundColor: "var(--color-danger-tint-08)",
+              border: "1px solid var(--color-danger-tint-25)",
               color: "var(--color-danger-500)",
             }}
           >
