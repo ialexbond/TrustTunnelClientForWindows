@@ -1,9 +1,11 @@
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const appWindow = getCurrentWindow();
 
 export function WindowControls() {
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState<string | null>(null);
 
   const handleMinimize = useCallback(() => appWindow.minimize(), []);
@@ -23,7 +25,7 @@ export function WindowControls() {
         onMouseEnter={() => setHovered("min")}
         onMouseLeave={() => setHovered(null)}
         onClick={handleMinimize}
-        aria-label="Minimize"
+        aria-label={t("window.minimize", "Minimize")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12">
           <rect x="2" y="5.5" width="8" height="1" rx="0.5" fill="currentColor" />
@@ -41,7 +43,7 @@ export function WindowControls() {
         onMouseEnter={() => setHovered("max")}
         onMouseLeave={() => setHovered(null)}
         onClick={handleMaximize}
-        aria-label="Maximize"
+        aria-label={t("window.maximize", "Maximize")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
           <rect x="2.5" y="2.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1" />
@@ -59,7 +61,7 @@ export function WindowControls() {
         onMouseEnter={() => setHovered("close")}
         onMouseLeave={() => setHovered(null)}
         onClick={handleClose}
-        aria-label="Close"
+        aria-label={t("window.close", "Close")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12">
           <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />

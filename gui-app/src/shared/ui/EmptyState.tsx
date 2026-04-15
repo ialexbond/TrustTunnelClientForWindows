@@ -18,8 +18,8 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   const { t } = useTranslation();
-  const resolvedHeading = heading ?? t("empty.heading", "Ничего нет");
-  const resolvedBody = body ?? t("empty.body", "Здесь появятся элементы после добавления.");
+  const resolvedHeading = heading ?? t("empty.heading", "Nothing here");
+  const resolvedBody = body ?? t("empty.body", "Items will appear here once added.");
   return (
     <div
       className={cn(

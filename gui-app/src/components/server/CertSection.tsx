@@ -137,7 +137,7 @@ export function CertSection({ state }: Props) {
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
 
   const [renewLoading, setRenewLoading] = useState(false);
-  const [_renewStatus, setRenewStatus] = useState<string>("");
+  const [, setRenewStatus] = useState<string>("");
   const [confirmRenew, setConfirmRenew] = useState(false);
 
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;

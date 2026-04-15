@@ -31,7 +31,6 @@ export function ServerStatusSection({ state }: Props) {
   const [rebootCountdown, setRebootCountdown] = useState(0);
   const rebooting = state.rebooting;
   const setRebooting = state.setRebooting;
-  const rebootPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Initial ping ──
@@ -86,7 +85,6 @@ export function ServerStatusSection({ state }: Props) {
         }
       }
     }, 10000);
-    rebootPollRef.current = interval;
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rebooting]);
