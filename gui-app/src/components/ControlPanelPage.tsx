@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useTranslation } from "react-i18next";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
 
@@ -50,7 +49,6 @@ interface Props {
 }
 
 export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigateToSettings }: Props) {
-  const { t } = useTranslation();
   const [creds, setCreds] = useState<SshCredentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
