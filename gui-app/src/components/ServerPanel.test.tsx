@@ -27,6 +27,12 @@ vi.mock("./server/OverviewSection", () => ({
 vi.mock("./server/UsersSection", () => ({
   UsersSection: () => <div data-testid="users-section">UsersSection</div>,
 }));
+vi.mock("./server/ServerSettingsSection", () => ({
+  ServerSettingsSection: () => <div data-testid="settings-section">ServerSettingsSection</div>,
+}));
+vi.mock("./server/ServiceSection", () => ({
+  ServiceSection: () => <div data-testid="service-section">ServiceSection</div>,
+}));
 
 describe("ServerPanel", () => {
   const defaultProps = {

@@ -11,6 +11,8 @@ import { cn } from "../shared/lib/cn";
 import type { ServerState } from "./server/useServerState";
 import { OverviewSection } from "./server/OverviewSection";
 import { UsersSection } from "./server/UsersSection";
+import { ServerSettingsSection } from "./server/ServerSettingsSection";
+import { ServiceSection } from "./server/ServiceSection";
 
 type TabId = "overview" | "users" | "settings" | "service";
 
@@ -119,7 +121,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
           }}
           aria-hidden={activeTab !== "settings"}
         >
-          <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>Settings loading...</div>
+          <ServerSettingsSection state={state} />
         </div>
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
@@ -132,7 +134,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
           }}
           aria-hidden={activeTab !== "service"}
         >
-          <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>Service loading...</div>
+          <ServiceSection state={state} />
         </div>
       </div>
     </div>
