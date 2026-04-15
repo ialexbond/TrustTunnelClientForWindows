@@ -23,7 +23,10 @@
     "config": "Configuration",
     "security": "Security",
     "tools": "Tools",
-    "danger": "Danger Zone"
+    "danger": "Danger Zone",
+    "overview": "Overview",
+    "settings_server": "Settings",
+    "service": "Service"
   },
   "status": {
     "connected": "Connected",
@@ -570,7 +573,8 @@
       "check_ssh": "Check SSH credentials and server availability",
       "not_installed": "TrustTunnel not installed",
       "not_installed_desc": "Server {{host}} is reachable, but TrustTunnel was not found.",
-      "tooltip": "TrustTunnel status on the remote server. You can restart the service or reboot the server from here."
+      "tooltip": "TrustTunnel status on the remote server. You can restart the service or reboot the server from here.",
+      "refresh_aria": "Refresh status"
     },
     "actions": {
       "restart": "Restart Service",
@@ -629,7 +633,9 @@
       "user_added": "User \"{{user}}\" added",
       "config_saved": "Config for \"{{user}}\" saved",
       "config_export_error": "Config export: {{error}}",
-      "tooltip": "VPN client accounts. Each device should connect with its own user."
+      "tooltip": "VPN client accounts. Each device should connect with its own user.",
+      "empty_heading": "No users",
+      "empty_body": "Add your first VPN user"
     },
     "logs": {
       "title": "Server Logs",
@@ -678,7 +684,11 @@
       "ipv6_desc": "IPv6 connection support",
       "feature_toggled": "{{feature}}: {{state}}",
       "toggled_on": "enabled",
-      "toggled_off": "disabled"
+      "toggled_off": "disabled",
+      "toggles_title": "Server parameters",
+      "network_title": "Network",
+      "advanced": "Advanced",
+      "save_settings": "Apply Settings"
     },
     "cert": {
       "title": "TLS Certificate",
@@ -720,7 +730,10 @@
       "days": "{{count}}d",
       "days_one": "{{count}} day",
       "days_few": "{{count}} days",
-      "days_many": "{{count}} days"
+      "days_many": "{{count}} days",
+      "valid_days": "Valid for {{count}} more days",
+      "expiring_days": "Expires in {{count}} days",
+      "auto_renewal": "Auto-renewal"
     },
     "export": {
       "title": "Export Configuration",
@@ -739,6 +752,7 @@
       "title": "Security",
       "tooltip": "Protect your server with fail2ban (brute-force protection) and UFW firewall.",
       "loading": "Loading security status...",
+      "load_error": "Failed to load security data. Please try again.",
       "refresh": "Refresh",
       "fail2ban": {
         "title": "Fail2ban",
@@ -953,8 +967,26 @@
       "confirm_reboot_btn": "Reboot",
       "confirm_uninstall_title": "Uninstall TrustTunnel?",
       "confirm_uninstall_message": "The service will be stopped, all TrustTunnel files will be deleted from the server. The current VPN connection will be interrupted.",
-      "confirm_delete_btn": "Yes, delete"
+      "confirm_delete_btn": "Yes, delete",
+      "stop_title": "Stop service?",
+      "stop_message": "The service will stop, VPN connections will be interrupted.",
+      "reboot_title": "Reboot server?",
+      "reboot_message": "Server will reboot. This will take 1-2 minutes.",
+      "delete_title": "Delete TrustTunnel?",
+      "delete_message": "VPN will be completely removed from the server. This action is irreversible."
+    },
+    "service": {
+      "controls_title": "Service Control"
+    },
+    "overview": {
+      "version": "Version",
+      "protocol": "Protocol",
+      "port": "Port",
+      "users": "Connections"
     }
+  },
+  "users": {
+    "actions_menu": "User actions"
   },
   "control": {
     "ssh_title": "Server Connection",

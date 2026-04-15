@@ -23,7 +23,10 @@
     "config": "Конфигурация",
     "security": "Безопасность",
     "tools": "Инструменты",
-    "danger": "Опасная зона"
+    "danger": "Опасная зона",
+    "overview": "Обзор",
+    "settings_server": "Настройки",
+    "service": "Сервис"
   },
   "status": {
     "connected": "Подключен",
@@ -570,7 +573,8 @@
       "check_ssh": "Проверьте SSH-данные и доступность сервера",
       "not_installed": "TrustTunnel не установлен",
       "not_installed_desc": "Сервер {{host}} доступен, но TrustTunnel не найден.",
-      "tooltip": "Состояние TrustTunnel на удалённом сервере. Отсюда можно перезагрузить сервис или весь сервер."
+      "tooltip": "Состояние TrustTunnel на удалённом сервере. Отсюда можно перезагрузить сервис или весь сервер.",
+      "refresh_aria": "Обновить статус"
     },
     "actions": {
       "restart": "Перезапустить сервис",
@@ -629,7 +633,9 @@
       "user_added": "Пользователь «{{user}}» добавлен",
       "config_saved": "Конфигурация «{{user}}» сохранена",
       "config_export_error": "Экспорт конфига: {{error}}",
-      "tooltip": "Учётные записи VPN-клиентов. Каждое устройство должно подключаться под своим пользователем."
+      "tooltip": "Учётные записи VPN-клиентов. Каждое устройство должно подключаться под своим пользователем.",
+      "empty_heading": "Нет пользователей",
+      "empty_body": "Добавьте первого пользователя VPN"
     },
     "logs": {
       "title": "Логи сервера",
@@ -678,7 +684,11 @@
       "ipv6_desc": "Поддержка IPv6-соединений",
       "feature_toggled": "{{feature}}: {{state}}",
       "toggled_on": "включён",
-      "toggled_off": "выключен"
+      "toggled_off": "выключен",
+      "toggles_title": "Параметры сервера",
+      "network_title": "Сеть",
+      "advanced": "Дополнительно",
+      "save_settings": "Применить настройки"
     },
     "cert": {
       "title": "TLS Сертификат",
@@ -720,7 +730,10 @@
       "days_one": "{{count}} день",
       "days_few": "{{count}} дня",
       "days_many": "{{count}} дней",
-      "days": "{{count}} дн."
+      "days": "{{count}} дн.",
+      "valid_days": "Действителен ещё {{count}} дн.",
+      "expiring_days": "Истекает через {{count}} дн.",
+      "auto_renewal": "Авто-продление"
     },
     "export": {
       "title": "Экспорт конфигурации",
@@ -739,6 +752,7 @@
       "title": "Безопасность",
       "tooltip": "Защита сервера: fail2ban (от брутфорса) и UFW firewall.",
       "loading": "Загрузка статуса безопасности...",
+      "load_error": "Не удалось загрузить данные безопасности. Попробуйте ещё раз.",
       "refresh": "Обновить",
       "fail2ban": {
         "title": "Fail2ban",
@@ -953,8 +967,26 @@
       "confirm_reboot_btn": "Перезагрузить",
       "confirm_uninstall_title": "Удалить TrustTunnel?",
       "confirm_uninstall_message": "Сервис будет остановлен, все файлы TrustTunnel будут удалены с сервера. Текущее VPN-подключение будет разорвано.",
-      "confirm_delete_btn": "Да, удалить"
+      "confirm_delete_btn": "Да, удалить",
+      "stop_title": "Остановить сервис?",
+      "stop_message": "Сервис будет остановлен, VPN-подключения прервутся.",
+      "reboot_title": "Перезагрузить сервер?",
+      "reboot_message": "Сервер будет перезагружен. Операция займёт 1-2 минуты.",
+      "delete_title": "Удалить TrustTunnel?",
+      "delete_message": "VPN будет полностью удалён с сервера. Это действие необратимо."
+    },
+    "service": {
+      "controls_title": "Управление сервисом"
+    },
+    "overview": {
+      "version": "Версия",
+      "protocol": "Протокол",
+      "port": "Порт",
+      "users": "Подключений"
     }
+  },
+  "users": {
+    "actions_menu": "Действия с пользователем"
   },
   "control": {
     "ssh_title": "Подключение к серверу",
