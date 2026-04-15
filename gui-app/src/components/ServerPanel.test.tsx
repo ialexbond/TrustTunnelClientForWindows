@@ -20,27 +20,12 @@ vi.mock("./server/useServerState", () => ({
   useServerState: () => mockState,
 }));
 
-// Mock child sections
-vi.mock("./server/ServerStatusSection", () => ({
-  ServerStatusSection: () => <div data-testid="server-status-section">ServerStatusSection</div>,
-}));
-vi.mock("./server/VersionSection", () => ({
-  VersionSection: () => <div data-testid="version-section">VersionSection</div>,
-}));
-vi.mock("./server/ConfigSection", () => ({
-  ConfigSection: () => <div data-testid="config-section">ConfigSection</div>,
-}));
-vi.mock("./server/CertSection", () => ({
-  CertSection: () => <div data-testid="cert-section">CertSection</div>,
+// Mock child sections (4-tab structure: Overview, Users, Settings, Service)
+vi.mock("./server/OverviewSection", () => ({
+  OverviewSection: () => <div data-testid="overview-section">OverviewSection</div>,
 }));
 vi.mock("./server/UsersSection", () => ({
   UsersSection: () => <div data-testid="users-section">UsersSection</div>,
-}));
-vi.mock("./server/LogsSection", () => ({
-  LogsSection: () => <div data-testid="logs-section">LogsSection</div>,
-}));
-vi.mock("./server/DangerZoneSection", () => ({
-  DangerZoneSection: () => <div data-testid="danger-zone-section">DangerZoneSection</div>,
 }));
 
 describe("ServerPanel", () => {
@@ -120,7 +105,7 @@ describe("ServerPanel", () => {
     expect(screen.getByText(/не установлен|not.installed/i)).toBeInTheDocument();
   });
 
-  it("renders all server sections when connected and installed", () => {
+  it("renders 4-tab structure when connected and installed", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -129,13 +114,15 @@ describe("ServerPanel", () => {
       panelDataLoaded: true,
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByTestId("server-status-section")).toBeInTheDocument();
+    // Overview tab is active by default — OverviewSection rendered
+    expect(screen.getByTestId("overview-section")).toBeInTheDocument();
+    // Users tab panel rendered (visibility:hidden, not removed from DOM)
     expect(screen.getByTestId("users-section")).toBeInTheDocument();
-    expect(screen.getByTestId("version-section")).toBeInTheDocument();
-    expect(screen.getByTestId("config-section")).toBeInTheDocument();
-    expect(screen.getByTestId("cert-section")).toBeInTheDocument();
-    expect(screen.getByTestId("logs-section")).toBeInTheDocument();
-    expect(screen.getByTestId("danger-zone-section")).toBeInTheDocument();
+    // 4 tab buttons present
+    expect(screen.getByRole("button", { name: /Обзор/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Пользователи/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Настройки/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Сервис/i })).toBeInTheDocument();
   });
 
   it("shows rebooting state", () => {
