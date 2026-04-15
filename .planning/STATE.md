@@ -4,7 +4,7 @@ milestone: v3.0
 milestone_name: milestone
 status: verifying
 stopped_at: Milestone v3.0 summary generated
-last_updated: "2026-04-15T07:23:14.646Z"
+last_updated: "2026-04-15T08:37:23.918Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 7
@@ -97,6 +97,7 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 20 pending (16 from Phase 04 + 2 UX audit + 2 milestone audit gaps):
+
 - **[ux]** Полный UX-редизайн панели управления и нижнего меню (2026-04-15)
 - **[ux]** v3.1 детальная спецификация редизайна — 7-фазный план реализации (2026-04-15)
 - **[docs]** Документационные гэпы v3.0: screen specs, use cases, test cases, decisions (2026-04-15)
