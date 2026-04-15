@@ -20,8 +20,8 @@ const typeIcons: Record<string, typeof Globe> = {
 
 const typeBadgeBg: Record<string, string> = {
   domain: "var(--color-bg-hover)",
-  ip: "none",
-  cidr: "none",
+  ip: "transparent",
+  cidr: "transparent",
   geoip: "var(--color-status-connected-border)",
   geosite: "var(--color-status-connecting-border)",
   iplist_group: "var(--color-bg-hover)",
