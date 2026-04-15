@@ -108,8 +108,8 @@ export function OverviewSection({ state }: Props) {
   })();
 
   // Parse protocol from serverInfo — fall back to "WireGuard"
-  const protocolValue = (serverInfo as unknown as Record<string, unknown>).protocol as string | undefined || "WireGuard";
-  const listenPort = (serverInfo as unknown as Record<string, unknown>).listenPort as number | undefined;
+  const protocolValue = serverInfo.protocol ?? "WireGuard";
+  const listenPort = serverInfo.listenPort;
 
   return (
     <>
