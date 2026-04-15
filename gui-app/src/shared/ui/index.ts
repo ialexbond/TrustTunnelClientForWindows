@@ -13,6 +13,7 @@ export { IconButton } from "./IconButton";
 export { Input } from "./Input";
 export { Modal } from "./Modal";
 export { NumberInput } from "./NumberInput";
+export { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
 export { PanelErrorBoundary } from "./PanelErrorBoundary";
 export { PasswordInput } from "./PasswordInput";
 export { ProgressBar } from "./ProgressBar";
