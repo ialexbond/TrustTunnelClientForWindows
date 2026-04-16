@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { i18n as I18nType } from "i18next";
@@ -36,7 +36,13 @@ export function useConfigLifecycle({
   i18n,
 }: UseConfigLifecycleParams) {
   // ─── Config validation on startup ───
+  // WR-05 fix: explicit startup-once guard via useRef. Without this the
+  // effect would re-run in React.StrictMode (DEV), double-clearing the
+  // wizard localStorage entries and issuing two auto_detect_config calls.
+  const didValidateStartupRef = useRef(false);
   useEffect(() => {
+    if (didValidateStartupRef.current) return;
+    didValidateStartupRef.current = true;
     const savedPath = localStorage.getItem("tt_config_path");
     if (savedPath) {
       invoke<{ vpn_mode?: string }>("read_client_config", { configPath: savedPath })
