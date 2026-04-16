@@ -117,3 +117,82 @@ Plans:
 | 9. New Components | v3.1 | 3/3 | Complete   | 2026-04-15 |
 | 10. Tab Bar & Control Panel | v3.1 | 0/3 | Planning complete | - |
 | 11. Screen UX Redesign | v3.1 | 0/5 | Planning complete | - |
+
+### Phase 12: Инфраструктура панели — 5 табов, убрать хедер, иконка Отключиться, Activity Log foundation
+
+**Goal:** Серверная панель реструктурирована с 4 на 5 табов (Обзор/Пользователи/Конфигурация/Безопасность/Утилиты), хедер с IP удален, disconnect перенесен в иконку LogOut с ConfirmDialog, Activity Log инфраструктура создана (Rust + React hook + logging Phase 12 событий)
+**Requirements**: D-01, D-02, D-03, D-04, D-05, D-06, D-07, D-08, D-09, D-10, D-11, D-12, D-13, D-14
+**Depends on:** Phase 11
+**Success Criteria** (what must be TRUE):
+  1. ServerTabs показывает 5 табов: Обзор, Пользователи, Конфигурация, Безопасность, Утилиты — с полным содержимым (не skeleton-заглушки)
+  2. Хедер с IP-адресом полностью удален, IP показывается только в Обзоре
+  3. Иконка LogOut справа от табов с border-l разделителем, ConfirmDialog variant=danger при нажатии
+  4. Activity Log: Rust модуль пишет в файл с ротацией, React hook fire-and-forget, кнопка "Скачать логи" в PanelErrorBoundary
+  5. Phase 12 логирует: app.start, tab.switch, server.disconnect.*
+  6. TypeScript и Rust компилируются без ошибок
+**Plans:** 4 plans
+Plans:
+- [ ] 12-01-PLAN.md — Rust Activity Log module + React hook useActivityLog
+- [ ] 12-02-PLAN.md — ServerTabs 4->5 tabs + header removal + disconnect icon + i18n keys
+- [ ] 12-03-PLAN.md — SecurityTabSection + UtilitiesTabSection + ServerSettingsSection cleanup + wire-up
+- [ ] 12-04-PLAN.md — PanelErrorBoundary "Скачать логи" + Activity Log integration (app.start, tab.switch, disconnect)
+
+### Phase 13: Таб Обзор — статус, IP/страна, версия, TLS, метрики, Ping, скорость, сводка безопасности, drill-down
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 12
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 13 to break down)
+
+### Phase 14: Таб Пользователи — быстрые иконки, overflow menu, генерация конфига с DNS upstream, auto-QR
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 13
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 14 to break down)
+
+### Phase 15: Таб Конфигурация — Quick Settings, TOML-парсер Advanced Accordion, двухуровневое сохранение
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 15 to break down)
+
+### Phase 16: Таб Безопасность — Firewall Modal, Fail2Ban, SSH-ключ с auto-detect, TLS cert
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 15
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 16 to break down)
+
+### Phase 17: Таб Утилиты — BBR, MTProto, Server Benchmark IP.Check.Place, Логи, DangerZone
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 16
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 17 to break down)
+
+### Phase 18: Онбординг Welcome + каскадная индикация обновлений + бесшовное обновление протокола с rollback
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 17
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 18 to break down)
