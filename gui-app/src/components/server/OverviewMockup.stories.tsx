@@ -19,11 +19,11 @@ const cardBg = { backgroundColor: "var(--color-bg-surface)", border: "1px solid 
 const muted = { color: "var(--color-text-muted)" };
 const primary = { color: "var(--color-text-primary)" };
 
-function CardTitle({ icon, title, clickable, onRefresh }: { icon: React.ReactNode; title: string; clickable?: boolean; onRefresh?: boolean }) {
+function CardTitle({ icon, title, clickable, onRefresh }: { icon?: React.ReactNode; title: string; clickable?: boolean; onRefresh?: boolean }) {
   return (
     <div className="flex items-center justify-between mb-3">
       <div className="flex items-center gap-2">
-        <span style={muted}>{icon}</span>
+        {icon && <span style={muted}>{icon}</span>}
         <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{title}</span>
       </div>
       <div className="flex items-center gap-1">
@@ -43,7 +43,7 @@ function OverviewMockup() {
 
         {/* Статус — без иконок у строк, ping просто число */}
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" onRefresh />
+          <CardTitle title="Статус" onRefresh />
           <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
@@ -70,9 +70,9 @@ function OverviewMockup() {
 
         {/* Версия протокола — огромная цифра, без "TrustTunnel" */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Radio className="w-5 h-5" />} title="Версия протокола" clickable />
+          <CardTitle title="Версия протокола" clickable />
           <div className="flex-1 flex items-center justify-center">
-            <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.49</span>
+            <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.49</span>
           </div>
         </div>
 
@@ -98,7 +98,7 @@ function OverviewMockup() {
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователей" clickable />
           <div className="flex-1 flex items-center justify-center">
-            <span style={{ fontSize: "clamp(2.5rem, 6vw, 4rem)", fontWeight: 600, lineHeight: 1, ...primary }}>2</span>
+            <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>2</span>
           </div>
         </div>
       </div>
@@ -127,7 +127,7 @@ function OverviewMockup() {
 
         {/* Нагрузка — кнопка обновить */}
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" onRefresh />
+          <CardTitle title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -160,7 +160,7 @@ function OverviewMockupMixed() {
     <div className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3" style={{ backgroundColor: "var(--color-bg-primary)" }}>
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" onRefresh />
+          <CardTitle title="Статус" onRefresh />
           <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
@@ -187,9 +187,9 @@ function OverviewMockupMixed() {
 
         {/* Версия — обновление доступно */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Radio className="w-5 h-5" />} title="Версия протокола" clickable />
+          <CardTitle title="Версия протокола" clickable />
           <div className="flex-1 flex items-center justify-center gap-2">
-            <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.47</span>
+            <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.47</span>
             <ArrowUpCircle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
           </div>
         </div>
@@ -204,7 +204,7 @@ function OverviewMockupMixed() {
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователей" clickable />
           <div className="flex-1 flex items-center justify-center">
-            <span style={{ fontSize: "clamp(2.5rem, 6vw, 4rem)", fontWeight: 600, lineHeight: 1, ...primary }}>5</span>
+            <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>5</span>
           </div>
         </div>
       </div>
@@ -229,7 +229,7 @@ function OverviewMockupMixed() {
         </div>
 
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" onRefresh />
+          <CardTitle title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
