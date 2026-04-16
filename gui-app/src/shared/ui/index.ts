@@ -5,6 +5,7 @@ export { Badge } from "./Badge";
 export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { ConfirmDialog } from "./ConfirmDialog";
+export { Divider } from "./Divider";
 export { DropOverlay } from "./DropOverlay";
 export { EmptyState } from "./EmptyState";
 export { ErrorBanner } from "./ErrorBanner";
