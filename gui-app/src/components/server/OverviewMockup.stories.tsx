@@ -41,10 +41,10 @@ function OverviewMockup() {
       {/* ── Row 1: Status(1.5fr) + Version(1.5fr) + Speed(2fr) + Users(1fr) ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
 
-        {/* Статус — без иконок у строк, ping просто число */}
-        <div className={card} style={cardBg}>
+        {/* Статус */}
+        <section aria-label="Статус сервера" className={card} style={cardBg}>
           <CardTitle title="Статус" onRefresh />
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-3" aria-live="polite">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
           </div>
@@ -66,18 +66,16 @@ function OverviewMockup() {
               <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>14д 7ч</span>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Версия протокола — огромная цифра, без "TrustTunnel" */}
-        <div className={`${card} flex flex-col`} style={cardBg}>
+        <section aria-label="Версия протокола" className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle title="Версия протокола" clickable />
           <div className="flex-1 flex items-center justify-center">
             <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.49</span>
           </div>
-        </div>
+        </section>
 
-        {/* Скорость — сепаратор короче, кнопка обновить */}
-        <div className={`${card} flex flex-col`} style={cardBg}>
+        <section aria-label="Скорость соединения" className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" onRefresh />
           <div className="flex-1 flex items-center justify-center">
             <div className="flex items-center gap-2">
@@ -92,22 +90,20 @@ function OverviewMockup() {
               <span className="text-xs" style={muted}>Мбит/с</span>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Пользователей */}
-        <div className={`${card} flex flex-col`} style={cardBg}>
+        <section aria-label="Пользователи" className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователей" clickable />
           <div className="flex-1 flex items-center justify-center">
             <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>2</span>
           </div>
-        </div>
+        </section>
       </div>
 
       {/* ── Row 2: Security(0.7fr) + Load(1fr) — безопасность уже ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "0.7fr 1fr" }}>
 
-        {/* Безопасность — 30% уже */}
-        <div className={card} style={cardBg}>
+        <section aria-label="Безопасность" className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
           <div className="grid grid-cols-2 gap-2">
             {[
@@ -123,10 +119,9 @@ function OverviewMockup() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* Нагрузка — кнопка обновить */}
-        <div className={card} style={cardBg}>
+        <section aria-label="Нагрузка сервера" className={card} style={cardBg}>
           <CardTitle title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
@@ -148,7 +143,7 @@ function OverviewMockup() {
               </div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );
