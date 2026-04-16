@@ -39,12 +39,13 @@ const bigNum: React.CSSProperties = { fontSize: "2rem", fontWeight: 600, lineHei
 const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
 
 /* ── Title ── */
-function Title({ icon, text, onRefresh, refreshing, clickable }: {
+function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel }: {
   icon: React.ReactNode;
   text: string;
   onRefresh?: () => void;
   refreshing?: boolean;
   clickable?: boolean;
+  refreshAriaLabel: string;
 }) {
   return (
     <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
@@ -56,7 +57,7 @@ function Title({ icon, text, onRefresh, refreshing, clickable }: {
         {onRefresh && (
           <button
             className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            aria-label="Обновить"
+            aria-label={refreshAriaLabel}
             style={muted}
             onClick={onRefresh}
             disabled={refreshing}
@@ -143,28 +144,29 @@ export function OverviewSection({ state }: Props) {
   }, [state.host]);
 
   // ── Skeleton: пока нет данных ──
+  const refreshAriaLabel = t("server.overview.refreshAria");
   if (!serverInfo) {
     return (
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
         {[
-          { icon: <HeartPulse className="w-5 h-5" />, text: "Статус", flex: "1 1 220px", maxWidth: "260px", h: 56 },
-          { icon: <Activity className="w-5 h-5" />, text: "Ping", flex: "1 1 140px", maxWidth: "180px", h: 48 },
-          { icon: <Zap className="w-5 h-5" />, text: "Скорость", flex: "2 1 340px", h: 48 },
-          { icon: <Users className="w-5 h-5" />, text: "Пользователей", flex: "1 1 180px", h: 48 },
-          { icon: <Network className="w-5 h-5" />, text: "IP-адрес", flex: "1 1 240px", h: 48 },
-          { icon: <Globe className="w-5 h-5" />, text: "Страна", flex: "1 1 180px", h: 36 },
-          { icon: <Clock className="w-5 h-5" />, text: "Uptime", flex: "1 1 160px", h: 48 },
-          { icon: <Package className="w-5 h-5" />, text: "Версия", flex: "1 1 220px", h: 48 },
+          { icon: <HeartPulse className="w-5 h-5" />, text: t("server.overview.cards.status"), flex: "1 1 220px", maxWidth: "260px", h: 56 },
+          { icon: <Activity className="w-5 h-5" />, text: t("server.overview.cards.ping"), flex: "1 1 140px", maxWidth: "180px", h: 48 },
+          { icon: <Zap className="w-5 h-5" />, text: t("server.overview.cards.speed"), flex: "2 1 340px", h: 48 },
+          { icon: <Users className="w-5 h-5" />, text: t("server.overview.cards.userCount"), flex: "1 1 180px", h: 48 },
+          { icon: <Network className="w-5 h-5" />, text: t("server.overview.cards.ip"), flex: "1 1 240px", h: 48 },
+          { icon: <Globe className="w-5 h-5" />, text: t("server.overview.cards.country"), flex: "1 1 180px", h: 36 },
+          { icon: <Clock className="w-5 h-5" />, text: t("server.overview.cards.uptime"), flex: "1 1 160px", h: 48 },
+          { icon: <Package className="w-5 h-5" />, text: t("server.overview.cards.protocolVersion"), flex: "1 1 220px", h: 48 },
         ].map((c) => (
           <Card key={c.text} padding="md" style={{ flex: c.flex, maxWidth: c.maxWidth }}>
-            <Title icon={c.icon} text={c.text} />
+            <Title icon={c.icon} text={c.text} refreshAriaLabel={refreshAriaLabel} />
             <div className="flex items-center justify-center py-2" style={{ minHeight: c.h }}>
               <Skeleton variant="line" width={100} height={32} />
             </div>
           </Card>
         ))}
         <Card padding="md" style={{ flex: "1 1 340px" }}>
-          <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" />
+          <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} refreshAriaLabel={refreshAriaLabel} />
           <div className="grid grid-cols-2 gap-2 mt-1">
             {[1, 2, 3, 4].map(i => (
               <div key={i} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
@@ -175,7 +177,7 @@ export function OverviewSection({ state }: Props) {
           </div>
         </Card>
         <Card padding="md" style={{ flex: "2 1 400px" }}>
-          <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" />
+          <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
           <div className="space-y-2.5 mt-1">
             {[1, 2].map(i => (
               <div key={i}>
@@ -209,16 +211,16 @@ export function OverviewSection({ state }: Props) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
 
-      {/* ── Row 1: Статус | Ping | Скорость | Пользователей ── */}
+      {/* ── Row 1: Status | Ping | Speed | Users ── */}
 
-      {/* Статус — ECG */}
+      {/* Status — ECG */}
       <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
-        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+        <Title icon={<HeartPulse className="w-5 h-5" />} text={t("server.overview.cards.status")} refreshAriaLabel={refreshAriaLabel} />
         {rebooting ? (
           <div className="flex flex-col items-center justify-center gap-1.5 py-1">
             <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-warning-500)" }} />
             <span className="text-sm" style={{ color: "var(--color-warning-500)" }}>
-              Перезагрузка{rebootCountdown > 0 ? ` ${rebootCountdown}s` : "..."}
+              {t("server.overview.rebootingCountdown")}{rebootCountdown > 0 ? ` ${rebootCountdown}s` : "..."}
             </span>
           </div>
         ) : (
@@ -229,7 +231,7 @@ export function OverviewSection({ state }: Props) {
               anim={isRunning ? "ecg-live" : "ecg-dead"}
             />
             <span className="text-sm" style={isRunning ? muted : danger}>
-              {isRunning ? "Работает" : "Остановлен"}
+              {isRunning ? t("server.status.running") : t("server.status.stopped")}
             </span>
           </div>
         )}
@@ -237,7 +239,7 @@ export function OverviewSection({ state }: Props) {
 
       {/* Ping */}
       <Card padding="md" style={{ flex: "1 1 140px", maxWidth: 180 }}>
-        <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh={refreshPing} />
+        <Title icon={<Activity className="w-5 h-5" />} text={t("server.overview.cards.ping")} onRefresh={refreshPing} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-baseline justify-center gap-1 py-2">
           {ping !== null && ping > 0 ? (
             <>
@@ -250,67 +252,67 @@ export function OverviewSection({ state }: Props) {
         </div>
       </Card>
 
-      {/* Скорость — заглушка */}
+      {/* Speed — placeholder */}
       <Card padding="md" style={{ flex: "2 1 340px" }}>
-        <Title icon={<Zap className="w-5 h-5" />} text="Скорость" onRefresh={() => {}} />
+        <Title icon={<Zap className="w-5 h-5" />} text={t("server.overview.cards.speed")} onRefresh={() => {}} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
-          <span className="text-sm" style={muted}>Не измерялась</span>
+          <span className="text-sm" style={muted}>{t("server.overview.speedNotMeasured")}</span>
         </div>
       </Card>
 
-      {/* Пользователей */}
+      {/* Users */}
       <Card padding="md" style={{ flex: "1 1 180px" }}>
-        <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
+        <Title icon={<Users className="w-5 h-5" />} text={t("server.overview.cards.userCount")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
         </div>
       </Card>
 
-      {/* ── Row 2: IP | Страна | Uptime | Версия ── */}
+      {/* ── Row 2: IP | Country | Uptime | Version ── */}
 
       {/* IP */}
       <Card padding="md" style={{ flex: "1 1 240px" }}>
-        <Title icon={<Network className="w-5 h-5" />} text="IP-адрес" />
+        <Title icon={<Network className="w-5 h-5" />} text={t("server.overview.cards.ip")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span style={bigNum}>{state.host || "—"}</span>
         </div>
       </Card>
 
-      {/* Страна — заглушка */}
+      {/* Country — placeholder */}
       <Card padding="md" style={{ flex: "1 1 180px" }}>
-        <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
+        <Title icon={<Globe className="w-5 h-5" />} text={t("server.overview.cards.country")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
         </div>
       </Card>
 
-      {/* Uptime — заглушка */}
+      {/* Uptime — placeholder */}
       <Card padding="md" style={{ flex: "1 1 160px" }}>
-        <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
+        <Title icon={<Clock className="w-5 h-5" />} text={t("server.overview.cards.uptime")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span style={{ ...bigNum, ...muted }}>—</span>
         </div>
       </Card>
 
-      {/* Версия */}
+      {/* Protocol version */}
       <Card padding="md" style={{ flex: "1 1 220px" }}>
-        <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
+        <Title icon={<Package className="w-5 h-5" />} text={t("server.overview.cards.protocolVersion")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span style={bigNum}>{version}</span>
         </div>
       </Card>
 
-      {/* ── Row 3: Безопасность | Нагрузка ── */}
+      {/* ── Row 3: Security | Load ── */}
 
-      {/* Безопасность — частично реальные данные */}
+      {/* Security — partially live data */}
       <Card padding="md" style={{ flex: "1 1 340px" }}>
-        <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
+        <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="grid grid-cols-2 gap-2 mt-1">
           {[
-            { name: "Firewall", ok: null, label: "—" },
-            { name: "Fail2Ban", ok: null, label: "—" },
-            { name: "SSH-ключ", ok: null, label: "—" },
-            { name: "TLS", ok: hasTls, label: hasTls ? "Активен" : "—" },
+            { name: t("server.overview.security.firewall"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
+            { name: t("server.overview.security.fail2ban"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
+            { name: t("server.overview.security.sshKey"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
+            { name: t("server.overview.security.tls"), ok: hasTls, label: hasTls ? t("server.overview.security.tlsActive") : t("server.overview.security.placeholder") },
           ].map((item) => {
             const bg = item.ok === null
               ? "var(--color-bg-elevated)"
@@ -330,9 +332,9 @@ export function OverviewSection({ state }: Props) {
         </div>
       </Card>
 
-      {/* Нагрузка — заглушка */}
+      {/* Load — placeholder */}
       <Card padding="md" style={{ flex: "2 1 400px" }}>
-        <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" />
+        <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
         <div className="space-y-2.5 mt-1">
           <div>
             <div className="flex items-center justify-between mb-1">

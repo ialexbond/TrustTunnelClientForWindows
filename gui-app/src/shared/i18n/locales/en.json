@@ -982,7 +982,30 @@
       "version": "Version",
       "protocol": "Protocol",
       "port": "Port",
-      "users": "Connections"
+      "users": "Connections",
+      "cards": {
+        "status": "Status",
+        "ping": "Ping",
+        "speed": "Speed",
+        "userCount": "Users",
+        "ip": "IP address",
+        "country": "Country",
+        "uptime": "Uptime",
+        "protocolVersion": "Protocol version",
+        "security": "Security",
+        "load": "Load"
+      },
+      "rebootingCountdown": "Rebooting",
+      "speedNotMeasured": "Not measured",
+      "refreshAria": "Refresh",
+      "security": {
+        "firewall": "Firewall",
+        "fail2ban": "Fail2Ban",
+        "sshKey": "SSH key",
+        "tls": "TLS",
+        "tlsActive": "Active",
+        "placeholder": "—"
+      }
     }
   },
   "users": {
