@@ -1,12 +1,11 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, PowerOff, Power, AlertTriangle, Zap } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Toggle } from "../../shared/ui/Toggle";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Accordion } from "../../shared/ui/Accordion";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import type { ServerState } from "./useServerState";
 import { useBbrState } from "./useBbrState";
 import { useMtProtoState } from "./useMtProtoState";
@@ -21,10 +20,26 @@ interface Props {
 export function UtilitiesTabSection({ state }: Props) {
   const { t } = useTranslation();
   const { serverInfo, actionLoading, sshParams, runAction, pushSuccess } = state;
+  const confirm = useConfirm();
 
   const bbr = useBbrState(sshParams, pushSuccess);
   const mtproto = useMtProtoState(sshParams, pushSuccess);
-  const [confirmStop, setConfirmStop] = useState(false);
+
+  const handleStopService = async () => {
+    const ok = await confirm({
+      title: t("server.danger.stop_title"),
+      message: t("server.danger.stop_message"),
+      variant: "danger",
+      confirmText: t("buttons.confirm"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
+    runAction(
+      "stop",
+      () => invoke("server_stop_service", sshParams),
+      t("server.actions.success_stop"),
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -59,7 +74,7 @@ export function UtilitiesTabSection({ state }: Props) {
               size="sm"
               icon={<PowerOff className="w-3.5 h-3.5" />}
               loading={actionLoading === "stop"}
-              onClick={() => setConfirmStop(true)}
+              onClick={handleStopService}
             >
               {t("server.actions.stop")}
             </Button>
@@ -85,25 +100,6 @@ export function UtilitiesTabSection({ state }: Props) {
           )}
         </div>
 
-        {/* ConfirmDialog for stop service (T-12-06: elevation guard) */}
-        <ConfirmDialog
-          isOpen={confirmStop}
-          title={t("server.danger.stop_title")}
-          message={t("server.danger.stop_message")}
-          confirmLabel={t("buttons.confirm")}
-          cancelLabel={t("buttons.cancel")}
-          variant="danger"
-          loading={actionLoading === "stop"}
-          onCancel={() => setConfirmStop(false)}
-          onConfirm={() => {
-            setConfirmStop(false);
-            runAction(
-              "stop",
-              () => invoke("server_stop_service", sshParams),
-              t("server.actions.success_stop")
-            );
-          }}
-        />
       </Card>
 
       {/* Block 2: BBR Toggle — перенесено из ServerSettingsSection */}
@@ -128,16 +124,6 @@ export function UtilitiesTabSection({ state }: Props) {
 
       {/* Block 3: MTProto — перенесено из ServerSettingsSection Advanced Accordion */}
       {mtproto.status && <MtProtoSection state={mtproto} />}
-      <ConfirmDialog
-        isOpen={!!mtproto.confirm}
-        title={mtproto.confirm?.title ?? ""}
-        message={mtproto.confirm?.message ?? ""}
-        confirmLabel={t("server.utilities.mtproto.uninstall")}
-        cancelLabel={t("buttons.cancel")}
-        variant="warning"
-        onCancel={() => mtproto.setConfirm(null)}
-        onConfirm={() => mtproto.confirm?.onConfirm()}
-      />
 
       {/* Block 4: Logs — перенесено из ServiceSection */}
       <LogsSection state={state} />

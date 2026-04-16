@@ -10,7 +10,7 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Tooltip } from "../../shared/ui/Tooltip";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
@@ -135,10 +135,10 @@ function formatDaysHuman(totalDays: number, lang: string): string {
 export function CertSection({ state }: Props) {
   const { t, i18n } = useTranslation();
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
+  const confirm = useConfirm();
 
   const [renewLoading, setRenewLoading] = useState(false);
   const [, setRenewStatus] = useState<string>("");
-  const [confirmRenew, setConfirmRenew] = useState(false);
 
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;
 
@@ -152,7 +152,14 @@ export function CertSection({ state }: Props) {
   };
 
   const handleRenew = async () => {
-    setConfirmRenew(false);
+    const ok = await confirm({
+      title: t("server.cert.renew"),
+      message: t("server.cert.renew_confirm_message"),
+      variant: "warning",
+      confirmText: t("server.cert.renew"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
     setRenewLoading(true);
     setRenewStatus(t("server.cert.renew_progress_connecting"));
     let succeeded = false;
@@ -260,24 +267,13 @@ export function CertSection({ state }: Props) {
             icon={<RefreshCw className="w-3.5 h-3.5" />}
             loading={renewLoading}
             disabled={renewLoading}
-            onClick={() => setConfirmRenew(true)}
+            onClick={handleRenew}
           >
             {t("server.cert.renew")}
           </Button>
         )}
       </div>
 
-      <ConfirmDialog
-        isOpen={confirmRenew}
-        title={t("server.cert.renew")}
-        message={t("server.cert.renew_confirm_message")}
-        confirmLabel={t("server.cert.renew")}
-        cancelLabel={t("buttons.cancel")}
-        variant="warning"
-        onCancel={() => setConfirmRenew(false)}
-        onConfirm={handleRenew}
-        loading={renewLoading}
-      />
     </Card>
   );
 }

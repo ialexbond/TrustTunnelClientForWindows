@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { ServerStatusSection } from "./ServerStatusSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
 
 // NOTE: ServerStatusSection is the pre-Phase-11 component, kept for backward compat.

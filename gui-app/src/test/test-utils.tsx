@@ -2,12 +2,17 @@
 import React from "react";
 import { render, type RenderOptions } from "@testing-library/react";
 import { SnackBarProvider } from "../shared/ui/SnackBarContext";
+import { ConfirmDialogProvider } from "../shared/ui/ConfirmDialogProvider";
 
 function AllProviders({ children }: { children: React.ReactNode }) {
-  return <SnackBarProvider>{children}</SnackBarProvider>;
+  return (
+    <SnackBarProvider>
+      <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
+    </SnackBarProvider>
+  );
 }
 
-/** render() pre-wrapped with SnackBarProvider */
+/** render() pre-wrapped with SnackBarProvider + ConfirmDialogProvider */
 export function renderWithProviders(
   ui: React.ReactElement,
   options?: Omit<RenderOptions, "wrapper">,
@@ -17,5 +22,7 @@ export function renderWithProviders(
 
 /** wrapper for renderHook() */
 export const hookWrapper = ({ children }: { children: React.ReactNode }) => (
-  <SnackBarProvider>{children}</SnackBarProvider>
+  <SnackBarProvider>
+    <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
+  </SnackBarProvider>
 );

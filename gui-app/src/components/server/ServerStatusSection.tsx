@@ -15,6 +15,7 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -23,7 +24,21 @@ interface Props {
 
 export function ServerStatusSection({ state }: Props) {
   const { t } = useTranslation();
-  const { serverInfo, actionLoading, sshParams, runAction, loadServerInfo, setConfirmReboot } = state;
+  const confirm = useConfirm();
+  const { serverInfo, actionLoading, sshParams, runAction, loadServerInfo } = state;
+
+  const handleReboot = async () => {
+    const ok = await confirm({
+      title: t("server.danger.confirm_reboot_title"),
+      message: t("server.danger.confirm_reboot_message"),
+      variant: "warning",
+      confirmText: t("server.danger.confirm_reboot_btn"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
+    state.setRebooting(true);
+    invoke("server_reboot", state.sshParams).catch(() => {});
+  };
 
   const [ping, setPing] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -215,7 +230,7 @@ export function ServerStatusSection({ state }: Props) {
               size="sm"
               icon={<RotateCcw className="w-3.5 h-3.5" />}
               loading={rebooting}
-              onClick={() => setConfirmReboot(true)}
+              onClick={handleReboot}
             >
               {t("server.actions.reboot_server")}
             </Button>

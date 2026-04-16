@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
@@ -17,9 +17,8 @@ interface Props {
 
 export function DangerZoneSection({ state }: Props) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const {
-    confirmUninstall,
-    setConfirmUninstall,
     uninstallLoading,
     setUninstallLoading,
     sshParams,
@@ -29,15 +28,21 @@ export function DangerZoneSection({ state }: Props) {
   } = state;
 
   const handleUninstall = async () => {
+    const ok = await confirm({
+      title: t("server.danger.confirm_uninstall_title"),
+      message: t("server.danger.confirm_uninstall_message"),
+      variant: "danger",
+      confirmText: t("server.danger.confirm_delete_btn"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
     setUninstallLoading(true);
     try {
       await invoke("uninstall_server", sshParams);
-      setConfirmUninstall(false);
       state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
       state.pushSuccess(t("server.danger.uninstalled", "VPN удалён с сервера"));
     } catch (e) {
       setActionResult({ type: "error", message: formatError(e) });
-      setConfirmUninstall(false);
     } finally {
       setUninstallLoading(false);
     }
@@ -93,24 +98,12 @@ export function DangerZoneSection({ state }: Props) {
             size="sm"
             icon={<Trash2 className="w-3.5 h-3.5" />}
             loading={uninstallLoading}
-            onClick={() => setConfirmUninstall(true)}
+            onClick={handleUninstall}
           >
             {t("server.danger.uninstall")}
           </Button>
         </div>
       </div>
-
-      <ConfirmDialog
-        isOpen={confirmUninstall}
-        title={t("server.danger.confirm_uninstall_title")}
-        message={t("server.danger.confirm_uninstall_message")}
-        confirmLabel={t("server.danger.confirm_delete_btn")}
-        cancelLabel={t("buttons.cancel")}
-        variant="danger"
-        loading={uninstallLoading}
-        onCancel={() => setConfirmUninstall(false)}
-        onConfirm={handleUninstall}
-      />
     </>
   );
 }

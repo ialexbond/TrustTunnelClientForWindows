@@ -11,7 +11,7 @@ import {
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
@@ -49,8 +49,8 @@ export function VersionSection({ state }: Props) {
   } = state;
 
   const dropdown = useDropdownPortal();
+  const confirm = useConfirm();
   const [upgradeLoading, setUpgradeLoading] = useState(false);
-  const [confirmUpgrade, setConfirmUpgrade] = useState(false);
 
   if (!serverInfo) return null;
 
@@ -67,6 +67,46 @@ export function VersionSection({ state }: Props) {
   const getDisplayLabel = () => {
     if (!selectedVersion) return t("server.version.latest");
     return `v${stripV(selectedVersion)}`;
+  };
+
+  const handleUpgrade = async () => {
+    const ok = await confirm({
+      title: t("server.version.confirm_title"),
+      message: t(
+        isDowngrade
+          ? "server.version.confirm_message_downgrade"
+          : "server.version.confirm_message",
+        { version: `v${selectedClean}` },
+      ),
+      variant: isDowngrade ? "danger" : "warning",
+      confirmText: t("buttons.confirm"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
+    setUpgradeLoading(true);
+    try {
+      await invoke("server_upgrade", {
+        ...state.sshParams,
+        version: selectedVersion,
+      });
+      state.pushSuccess(
+        t("server.version.upgrade_success", { version: `v${selectedClean}` }),
+      );
+      await state.loadServerInfo(true);
+    } catch (e) {
+      const raw = formatError(e);
+      let msg: string;
+      if (raw.includes("UPGRADE_FAILED|")) {
+        const parts = raw.split("|");
+        const hint = parts.slice(2).join("|") || "";
+        msg = t("server.version.upgrade_error", { hint });
+      } else {
+        msg = raw;
+      }
+      state.pushSuccess(msg, "error");
+    } finally {
+      setUpgradeLoading(false);
+    }
   };
 
   return (
@@ -164,7 +204,7 @@ export function VersionSection({ state }: Props) {
               icon={<Download className="w-3.5 h-3.5" />}
               loading={upgradeLoading}
               disabled={upgradeLoading}
-              onClick={() => setConfirmUpgrade(true)}
+              onClick={handleUpgrade}
               className="shrink-0"
               style={{ height: "34px", whiteSpace: "nowrap" }}
             >
@@ -174,40 +214,6 @@ export function VersionSection({ state }: Props) {
         </div>
       )}
 
-      <ConfirmDialog
-        isOpen={confirmUpgrade}
-        title={t("server.version.confirm_title")}
-        message={t(isDowngrade ? "server.version.confirm_message_downgrade" : "server.version.confirm_message", { version: `v${selectedClean}` })}
-        confirmLabel={t("buttons.confirm")}
-        cancelLabel={t("buttons.cancel")}
-        variant={isDowngrade ? "danger" : "warning"}
-        loading={upgradeLoading}
-        onCancel={() => { if (!upgradeLoading) setConfirmUpgrade(false); }}
-        onConfirm={async () => {
-          setUpgradeLoading(true);
-          try {
-            await invoke("server_upgrade", { ...state.sshParams, version: selectedVersion });
-            setConfirmUpgrade(false);
-            state.pushSuccess(t("server.version.upgrade_success", { version: `v${selectedClean}` }));
-            // Reload server info to reflect new version
-            await state.loadServerInfo(true);
-          } catch (e) {
-            setConfirmUpgrade(false);
-            const raw = formatError(e);
-            let msg: string;
-            if (raw.includes("UPGRADE_FAILED|")) {
-              const parts = raw.split("|");
-              const hint = parts.slice(2).join("|") || "";
-              msg = t("server.version.upgrade_error", { hint });
-            } else {
-              msg = raw;
-            }
-            state.pushSuccess(msg, "error");
-          } finally {
-            setUpgradeLoading(false);
-          }
-        }}
-      />
     </Card>
   );
 }

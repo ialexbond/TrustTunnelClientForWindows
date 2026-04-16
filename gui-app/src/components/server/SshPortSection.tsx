@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Loader2, RotateCcw } from "lucide-react";
 import { NumberInput } from "../../shared/ui";
 import { Button } from "../../shared/ui/Button";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import type { SecurityState } from "./useSecurityState";
 
 interface SshPortSectionProps {
@@ -11,6 +12,7 @@ interface SshPortSectionProps {
 
 export function SshPortSection({ state }: SshPortSectionProps) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const [newPort, setNewPort] = useState("");
 
   const currentPort = state.status?.firewall.current_ssh_port ?? 22;
@@ -21,6 +23,16 @@ export function SshPortSection({ state }: SshPortSectionProps) {
     if (!isValid) return;
     await state.changeSshPort(parsed);
     setNewPort("");
+  };
+
+  const handleResetToDefault = async () => {
+    const ok = await confirm({
+      title: t("server.security.confirm.reset_port_title"),
+      message: t("server.security.confirm.reset_port_message"),
+      variant: "warning",
+    });
+    if (!ok) return;
+    void state.changeSshPort(22);
   };
 
   return (
@@ -65,15 +77,7 @@ export function SshPortSection({ state }: SshPortSectionProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => state.setConfirm({
-                title: t("server.security.confirm.reset_port_title"),
-                message: t("server.security.confirm.reset_port_message"),
-                variant: "warning",
-                onConfirm: () => {
-                  state.setConfirm(null);
-                  void state.changeSshPort(22);
-                },
-              })}
+              onClick={handleResetToDefault}
               aria-label={t("server.security.ssh_port.reset")}
             >
               <RotateCcw className="w-3 h-3" />

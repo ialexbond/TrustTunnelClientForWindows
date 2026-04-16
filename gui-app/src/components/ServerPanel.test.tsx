@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { invoke } from "@tauri-apps/api/core";
+import { screen } from "@testing-library/react";
 import i18n from "../shared/i18n";
 import { ServerPanel } from "./ServerPanel";
+import { renderWithProviders as render } from "../test/test-utils";
 
 // Mock useServerState to control panel states
 const mockLoadServerInfo = vi.fn();
@@ -263,52 +263,8 @@ describe("ServerPanel", () => {
     expect(screen.getByText(i18n.t("server.status.not_installed_desc", { host: "10.0.0.1" }))).toBeInTheDocument();
   });
 
-  it("main panel renders confirm reboot dialog when confirmReboot is true", () => {
-    mockState = {
-      ...mockState,
-      loading: false,
-      error: "",
-      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
-      panelDataLoaded: true,
-      confirmReboot: true,
-    };
-    render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByText(i18n.t("server.danger.confirm_reboot_title"))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t("server.danger.confirm_reboot_message"))).toBeInTheDocument();
-  });
-
-  it("confirm reboot dialog cancel calls setConfirmReboot(false)", () => {
-    mockState = {
-      ...mockState,
-      loading: false,
-      error: "",
-      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
-      panelDataLoaded: true,
-      confirmReboot: true,
-    };
-    render(<ServerPanel {...defaultProps} />);
-    const cancelBtn = screen.getByRole("button", { name: new RegExp(i18n.t("buttons.cancel")) });
-    fireEvent.click(cancelBtn);
-    expect(mockSetConfirmReboot).toHaveBeenCalledWith(false);
-  });
-
-  it("confirm reboot dialog confirm sets rebooting and calls server_reboot", () => {
-    vi.mocked(invoke).mockResolvedValueOnce(undefined);
-    mockState = {
-      ...mockState,
-      loading: false,
-      error: "",
-      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["user1"] },
-      panelDataLoaded: true,
-      confirmReboot: true,
-    };
-    render(<ServerPanel {...defaultProps} />);
-    const confirmBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.confirm_reboot_btn")) });
-    fireEvent.click(confirmBtn);
-    expect(mockSetConfirmReboot).toHaveBeenCalledWith(false);
-    expect(mockSetRebooting).toHaveBeenCalledWith(true);
-    expect(invoke).toHaveBeenCalledWith("server_reboot", mockState.sshParams);
-  });
+  // NOTE: Reboot confirm dialog moved from ServerPanel to ServerStatusSection (Phase 12.5),
+  // and now uses global ConfirmDialogProvider (imperative useConfirm) — tests removed.
 
   it("main panel renders SnackBar component", () => {
     mockState = {

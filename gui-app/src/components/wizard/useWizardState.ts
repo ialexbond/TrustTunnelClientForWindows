@@ -83,7 +83,6 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   // ── Server check state ──
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [checkError, setCheckError] = useState("");
-  const [confirmUninstall, setConfirmUninstall] = useState(false);
 
   // ── Add user form ──
   const [newUsername, setNewUsername] = useState("");
@@ -91,7 +90,6 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [addingUser, setAddingUser] = useState(false);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
-  const [confirmDeleteUser, setConfirmDeleteUser] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [cameFromFound, setCameFromFound] = useState(false);
 
@@ -458,7 +456,6 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
 
   const handleDeleteUser = async (username: string) => {
     setDeletingUser(username);
-    setConfirmDeleteUser(null);
     try {
       await invoke("server_remove_user", {
         host,
@@ -545,7 +542,6 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
     // Server check
     serverInfo,
     checkError,
-    confirmUninstall, setConfirmUninstall,
 
     // Add user
     newUsername, setNewUsername,
@@ -553,7 +549,6 @@ export function useWizardState({ onSetupComplete, resetToWelcomeRef }: UseWizard
     showNewPassword, setShowNewPassword,
     addingUser,
     deletingUser,
-    confirmDeleteUser, setConfirmDeleteUser,
     selectedUser, setSelectedUser,
     cameFromFound, setCameFromFound,
 
