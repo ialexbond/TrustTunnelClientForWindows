@@ -22,15 +22,9 @@ vi.mock("recharts", () => ({
 }));
 
 // Mock heavy child components to keep tests fast — capture props for assertions
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let setupWizardProps: any = {};
 vi.mock("./components/SetupWizard", () => ({
   __esModule: true,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: (props: any) => {
-    setupWizardProps = props;
-    return <div data-testid="setup-wizard">SetupWizard</div>;
-  },
+  default: () => <div data-testid="setup-wizard">SetupWizard</div>,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,15 +59,9 @@ vi.mock("./components/RoutingPanel", () => ({
   },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let logPanelProps: any = {};
 vi.mock("./components/LogPanel", () => ({
   __esModule: true,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: (props: any) => {
-    logPanelProps = props;
-    return <div data-testid="log-panel">LogPanel</div>;
-  },
+  default: () => <div data-testid="log-panel">LogPanel</div>,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,15 +75,9 @@ vi.mock("./components/AboutPanel", () => ({
   },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let dashboardPanelProps: any = {};
 vi.mock("./components/DashboardPanel", () => ({
   __esModule: true,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: (props: any) => {
-    dashboardPanelProps = props;
-    return <div data-testid="dashboard-panel">DashboardPanel</div>;
-  },
+  default: () => <div data-testid="dashboard-panel">DashboardPanel</div>,
 }));
 
 vi.mock("./components/AppSettingsPanel", () => ({
