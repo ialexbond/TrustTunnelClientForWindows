@@ -71,7 +71,7 @@ export function ProcessPickerModal({
   };
 
   return (
-    <Modal open={open} onClose={handleClose}>
+    <Modal isOpen={open} onClose={handleClose}>
       <div
         className="w-[420px] max-h-[520px] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
         style={{

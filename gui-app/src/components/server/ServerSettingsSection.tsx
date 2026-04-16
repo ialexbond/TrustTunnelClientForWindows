@@ -57,9 +57,9 @@ export function ServerSettingsSection({ state }: Props) {
   };
 
   const featureNames: Record<string, string> = {
-    ping_enable: "Health-check Ping",
-    speedtest_enable: "Speedtest",
-    ipv6_available: "IPv6",
+    ping_enable: t("server.config.ping_enable_name"),
+    speedtest_enable: t("server.config.speedtest_enable_name"),
+    ipv6_available: t("server.config.ipv6_available_name"),
   };
 
   const handleToggleFeature = async (feature: string, currentValue: boolean) => {
@@ -115,19 +115,19 @@ export function ServerSettingsSection({ state }: Props) {
     ? [
         {
           key: "ping_enable",
-          label: "Health-check Ping",
+          label: t("server.config.ping_enable_name"),
           desc: t("server.config.ping_desc"),
           value: localOverrides.ping_enable ?? parsed.pingEnable,
         },
         {
           key: "speedtest_enable",
-          label: "Speedtest",
+          label: t("server.config.speedtest_enable_name"),
           desc: t("server.config.speedtest_desc"),
           value: localOverrides.speedtest_enable ?? parsed.speedtestEnable,
         },
         {
           key: "ipv6_available",
-          label: "IPv6",
+          label: t("server.config.ipv6_available_name"),
           desc: t("server.config.ipv6_desc"),
           value: localOverrides.ipv6_available ?? parsed.ipv6Available,
         },
@@ -224,7 +224,7 @@ export function ServerSettingsSection({ state }: Props) {
 
       {/* ConfirmDialog for security actions */}
       <ConfirmDialog
-        open={!!security.confirm}
+        isOpen={!!security.confirm}
         title={security.confirm?.title ?? ""}
         message={security.confirm?.message ?? ""}
         variant={security.confirm?.variant ?? "danger"}

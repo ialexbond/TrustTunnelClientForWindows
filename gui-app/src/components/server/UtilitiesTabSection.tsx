@@ -87,7 +87,7 @@ export function UtilitiesTabSection({ state }: Props) {
 
         {/* ConfirmDialog for stop service (T-12-06: elevation guard) */}
         <ConfirmDialog
-          open={confirmStop}
+          isOpen={confirmStop}
           title={t("server.danger.stop_title")}
           message={t("server.danger.stop_message")}
           confirmLabel={t("buttons.confirm")}
@@ -113,7 +113,7 @@ export function UtilitiesTabSection({ state }: Props) {
           icon={<Zap className="w-3.5 h-3.5" />}
         />
         <Toggle
-          value={bbr.enabled}
+          checked={bbr.enabled}
           onChange={() => void bbr.toggle()}
           label={t("server.utilities.bbr.label")}
           description={
@@ -129,7 +129,7 @@ export function UtilitiesTabSection({ state }: Props) {
       {/* Block 3: MTProto — перенесено из ServerSettingsSection Advanced Accordion */}
       {mtproto.status && <MtProtoSection state={mtproto} />}
       <ConfirmDialog
-        open={!!mtproto.confirm}
+        isOpen={!!mtproto.confirm}
         title={mtproto.confirm?.title ?? ""}
         message={mtproto.confirm?.message ?? ""}
         confirmLabel={t("server.utilities.mtproto.uninstall")}

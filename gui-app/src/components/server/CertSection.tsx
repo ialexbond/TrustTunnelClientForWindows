@@ -268,7 +268,7 @@ export function CertSection({ state }: Props) {
       </div>
 
       <ConfirmDialog
-        open={confirmRenew}
+        isOpen={confirmRenew}
         title={t("server.cert.renew")}
         message={t("server.cert.renew_confirm_message")}
         confirmLabel={t("server.cert.renew")}

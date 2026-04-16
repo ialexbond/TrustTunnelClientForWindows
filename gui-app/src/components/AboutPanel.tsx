@@ -256,7 +256,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
       </div>
 
       <ChangelogModal
-        open={changelogOpen}
+        isOpen={changelogOpen}
         onClose={() => setChangelogOpen(false)}
         version={updateInfo.latestVersion ?? version}
         releaseNotes={updateInfo.releaseNotes ?? ""}

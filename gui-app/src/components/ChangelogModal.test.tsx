@@ -14,7 +14,7 @@ describe("ChangelogModal", () => {
   it("renders modal content when open=true", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="Hello world"
@@ -26,7 +26,7 @@ describe("ChangelogModal", () => {
   it("renders nothing when open=false", () => {
     render(
       <ChangelogModal
-        open={false}
+        isOpen={false}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="Hello world"
@@ -39,7 +39,7 @@ describe("ChangelogModal", () => {
   it("displays changelog title with version from i18n", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes=""
@@ -52,7 +52,7 @@ describe("ChangelogModal", () => {
   it("renders close button with i18n text", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes=""
@@ -67,7 +67,7 @@ describe("ChangelogModal", () => {
     const user = userEvent.setup();
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes=""
@@ -82,7 +82,7 @@ describe("ChangelogModal", () => {
     const user = userEvent.setup();
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes=""
@@ -97,7 +97,7 @@ describe("ChangelogModal", () => {
   it("renders markdown h1 as an h1 element", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="# Release Title"
@@ -110,7 +110,7 @@ describe("ChangelogModal", () => {
   it("renders markdown h2 as an h2 element", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="## Section Title"
@@ -123,7 +123,7 @@ describe("ChangelogModal", () => {
   it("renders markdown h3 as an h3 element", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="### Sub-section"
@@ -136,7 +136,7 @@ describe("ChangelogModal", () => {
   it("renders markdown bold text as strong element", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="This is **bold text**"
@@ -151,7 +151,7 @@ describe("ChangelogModal", () => {
   it("renders markdown italic text as em element", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="This is *italic text*"
@@ -166,7 +166,7 @@ describe("ChangelogModal", () => {
   it("renders markdown unordered list as ul with li items", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes={"- Item one\n- Item two\n- Item three"}
@@ -185,7 +185,7 @@ describe("ChangelogModal", () => {
   it("renders markdown ordered list as ol with li items", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes={"1. First\n2. Second"}
@@ -203,7 +203,7 @@ describe("ChangelogModal", () => {
   it("scroll container has overflow-y-auto class and maxHeight style", () => {
     render(
       <ChangelogModal
-        open={true}
+        isOpen={true}
         onClose={onClose}
         version="2.3.0"
         releaseNotes="Some content"

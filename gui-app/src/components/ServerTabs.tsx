@@ -144,7 +144,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
       </div>
 
       <ConfirmDialog
-        open={showDisconnectConfirm}
+        isOpen={showDisconnectConfirm}
         variant="danger"
         title={t("server.disconnect.confirm_title")}
         message={t("server.disconnect.confirm_message")}

@@ -8,17 +8,17 @@ import { Modal } from "../shared/ui/Modal";
 type CP = { children?: ReactNode };
 
 interface ChangelogModalProps {
-  open: boolean;
+  isOpen: boolean;
   onClose: () => void;
   version: string;
   releaseNotes: string;
 }
 
-export function ChangelogModal({ open: isOpen, onClose, version, releaseNotes }: ChangelogModalProps) {
+export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: ChangelogModalProps) {
   const { t } = useTranslation();
 
   return (
-    <Modal open={isOpen} onClose={onClose} closeOnBackdrop closeOnEscape>
+    <Modal isOpen={isOpen} onClose={onClose} closeOnBackdrop closeOnEscape>
       <div
         className="w-full max-w-md rounded-xl overflow-hidden"
         style={{
