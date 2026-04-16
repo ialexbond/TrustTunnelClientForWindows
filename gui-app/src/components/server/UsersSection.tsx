@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { cn } from "../../shared/lib/cn";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   Users,

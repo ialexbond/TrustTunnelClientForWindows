@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 import { cn } from "../lib/cn";
+import { Button } from "./Button";
 
 interface State {
   hasError: boolean;
@@ -59,42 +60,26 @@ class PanelErrorBoundaryInner extends React.Component<
             {this.state.error}
           </pre>
           <div className="flex gap-[var(--space-2)]">
-            <button
+            <Button
+              variant="secondary"
+              size="md"
+              icon={<RefreshCw className="w-4 h-4" />}
               onClick={() => this.setState({ hasError: false, error: "" })}
-              className={cn(
-                "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)] rounded-[var(--radius-md)] text-sm",
-                "transition-colors cursor-pointer",
-                "hover:bg-[var(--color-bg-hover)]",
-              )}
-              style={{
-                background: "var(--color-bg-surface)",
-                color: "var(--color-text-primary)",
-                border: "1px solid var(--color-border)",
-              }}
             >
-              <RefreshCw className="w-4 h-4" />
               {t("errors.retry")}
-            </button>
+            </Button>
             {this.props.onNavigateHome && (
-              <button
+              <Button
+                variant="ghost"
+                size="md"
+                icon={<Home className="w-4 h-4" />}
                 onClick={() => {
                   this.setState({ hasError: false, error: "" });
                   this.props.onNavigateHome?.();
                 }}
-                className={cn(
-                  "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)] rounded-[var(--radius-md)] text-sm",
-                  "transition-colors cursor-pointer",
-                  "hover:bg-[var(--color-bg-hover)]",
-                )}
-                style={{
-                  background: "var(--color-bg-surface)",
-                  color: "var(--color-text-muted)",
-                  border: "1px solid var(--color-border)",
-                }}
               >
-                <Home className="w-4 h-4" />
                 {t("errors.go_home", { defaultValue: "На главную" })}
-              </button>
+              </Button>
             )}
           </div>
         </div>
