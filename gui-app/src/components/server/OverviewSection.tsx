@@ -3,21 +3,77 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Loader2,
-  WifiOff,
+  HeartPulse,
   Activity,
-  RefreshCw,
+  Zap,
   Users,
+  Network,
   Globe,
+  Clock,
+  Package,
   Shield,
+  Gauge,
+  RefreshCw,
+  ChevronRight,
 } from "lucide-react";
-import { Badge } from "../../shared/ui/Badge";
-import { StatusIndicator } from "../../shared/ui/StatusIndicator";
-import { IconButton } from "../../shared/ui/IconButton";
-// CertSection lives in Security tab — Overview shows only summary indicators
+import { Card } from "../../shared/ui/Card";
+import { ProgressBar } from "../../shared/ui/ProgressBar";
+import { Skeleton } from "../../shared/ui/Skeleton";
+import { EcgSvg, ecgHeartbeat, ecgFlatline } from "../../shared/ui/EcgSvg";
 import type { ServerState } from "./useServerState";
+
+/* ═══════════════════════════════════════════════════════
+   OverviewSection — 10 карточек обзора сервера
+   flex-wrap layout, 3 ряда при ≥1000px
+   ═══════════════════════════════════════════════════════ */
 
 interface Props {
   state: ServerState;
+}
+
+/* ── Shared styles ── */
+const muted: React.CSSProperties = { color: "var(--color-text-muted)" };
+const primary: React.CSSProperties = { color: "var(--color-text-primary)" };
+const accent: React.CSSProperties = { color: "var(--color-accent-interactive)" };
+const bigNum: React.CSSProperties = { fontSize: "2rem", fontWeight: 600, lineHeight: 1, color: "var(--color-text-primary)" };
+const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
+
+/* ── Title ── */
+function Title({ icon, text, onRefresh, refreshing, clickable }: {
+  icon: React.ReactNode;
+  text: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  clickable?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
+      <div className="flex items-center gap-2 h-full whitespace-nowrap">
+        <span className="flex items-center justify-center w-5 h-5 shrink-0" style={accent}>{icon}</span>
+        <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{text}</span>
+      </div>
+      <div className="flex items-center h-full shrink-0 ml-2">
+        {onRefresh && (
+          <button
+            className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            aria-label="Обновить"
+            style={muted}
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            {refreshing
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <RefreshCw className="w-4 h-4" />}
+          </button>
+        )}
+        {clickable && (
+          <span className="flex items-center justify-center w-8 h-8">
+            <ChevronRight className="w-5 h-5" style={muted} />
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function OverviewSection({ state }: Props) {
@@ -94,142 +150,214 @@ export function OverviewSection({ state }: Props) {
     setRefreshing(false);
   };
 
-  if (!serverInfo) return null;
+  // ── Skeleton: пока нет данных ──
+  if (!serverInfo) {
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
+        {[
+          { icon: <HeartPulse className="w-5 h-5" />, text: "Статус", flex: "1 1 220px", maxWidth: "260px", h: 56 },
+          { icon: <Activity className="w-5 h-5" />, text: "Ping", flex: "1 1 140px", maxWidth: "180px", h: 48 },
+          { icon: <Zap className="w-5 h-5" />, text: "Скорость", flex: "2 1 340px", h: 48 },
+          { icon: <Users className="w-5 h-5" />, text: "Пользователей", flex: "1 1 180px", h: 48 },
+          { icon: <Network className="w-5 h-5" />, text: "IP-адрес", flex: "1 1 240px", h: 48 },
+          { icon: <Globe className="w-5 h-5" />, text: "Страна", flex: "1 1 180px", h: 36 },
+          { icon: <Clock className="w-5 h-5" />, text: "Uptime", flex: "1 1 160px", h: 48 },
+          { icon: <Package className="w-5 h-5" />, text: "Версия", flex: "1 1 220px", h: 48 },
+        ].map((c) => (
+          <Card key={c.text} padding="md" style={{ flex: c.flex, maxWidth: c.maxWidth }}>
+            <Title icon={c.icon} text={c.text} />
+            <div className="flex items-center justify-center py-2" style={{ minHeight: c.h }}>
+              <Skeleton variant="line" width={100} height={32} />
+            </div>
+          </Card>
+        ))}
+        <Card padding="md" style={{ flex: "1 1 340px" }}>
+          <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" />
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                <Skeleton variant="line" width={60} height={14} className="mb-1" />
+                <Skeleton variant="line" width={50} height={14} />
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card padding="md" style={{ flex: "2 1 400px" }}>
+          <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" />
+          <div className="space-y-2.5 mt-1">
+            {[1, 2].map(i => (
+              <div key={i}>
+                <div className="flex items-center justify-between mb-1">
+                  <Skeleton variant="line" width={30} height={20} />
+                  <Skeleton variant="line" width={60} height={20} />
+                </div>
+                <Skeleton variant="line" width="100%" height={6} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
-  const pingVariant = (() => {
-    if (ping === null) return "neutral";
-    if (ping <= 0) return "neutral";
-    if (ping < 100) return "success";
-    if (ping < 300) return "warning";
-    return "danger";
+  // ── Computed values ──
+  const isRunning = serverInfo.serviceActive;
+  const userCount = serverInfo.users?.length ?? 0;
+  const version = serverInfo.version || "—";
+
+  const pingColor = (() => {
+    if (ping === null || ping <= 0) return "var(--color-text-muted)";
+    if (ping < 100) return "var(--color-success-500)";
+    if (ping < 300) return "var(--color-warning-500)";
+    return "var(--color-danger-500)";
   })();
 
-  // Parse protocol from serverInfo — fall back to "WireGuard"
-  const protocolValue = serverInfo.protocol ?? "WireGuard";
-  const listenPort = serverInfo.listenPort;
-
-  const userCount = serverInfo.users?.length ?? 0;
+  const hasTls = !!state.certRaw;
 
   return (
-    <>
-      {/* ── Row 1: Status Hero (full width) ── */}
-      <div
-        className="rounded-[var(--radius-lg)] p-[var(--space-4)]"
-        style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-      >
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
+
+      {/* ── Row 1: Статус | Ping | Скорость | Пользователей ── */}
+
+      {/* Статус — ECG */}
+      <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh={handleSoftRefresh} refreshing={refreshing} />
         {rebooting ? (
-          <div className="flex items-center gap-3">
-            <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-warning-500)" }} />
-            <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-warning-500)" }}>
-              {t("server.status.rebooting")}
+          <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+            <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-warning-500)" }} />
+            <span className="text-sm" style={{ color: "var(--color-warning-500)" }}>
+              Перезагрузка{rebootCountdown > 0 ? ` ${rebootCountdown}s` : "..."}
             </span>
-            {rebootCountdown > 0 && (
-              <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{rebootCountdown}s</span>
-            )}
           </div>
         ) : (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <StatusIndicator
-                status={serverInfo.serviceActive ? "success" : "danger"}
-                size="md"
-                pulse={serverInfo.serviceActive}
-                label={serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
-              />
-              <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
-                {serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
-              </span>
-              {ping !== null && ping > 0 && (
-                <Badge variant={pingVariant as "success" | "warning" | "danger" | "neutral"} size="sm">
-                  <Activity className="w-2.5 h-2.5" />
-                  {ping}ms
-                </Badge>
-              )}
-              {ping !== null && ping <= 0 && (
-                <Badge variant="neutral" size="sm">
-                  <WifiOff className="w-2.5 h-2.5" />
-                  {t("server.status.no_connection")}
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="neutral" size="sm">v{serverInfo.version || "?"}</Badge>
-              <IconButton
-                aria-label={t("server.status.refresh_aria")}
-                icon={refreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                onClick={handleSoftRefresh}
-                disabled={refreshing}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── Row 2: Asymmetric grid — Protocol (2/3) + Users (1/3) ── */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "2fr 1fr" }}>
-        {/* Protocol card — wide */}
-        <div
-          className="rounded-[var(--radius-lg)] p-[var(--space-4)] flex items-center gap-3"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-        >
-          <div
-            className="shrink-0 flex items-center justify-center w-9 h-9 rounded-[var(--radius-md)]"
-            style={{ backgroundColor: "var(--color-bg-elevated)" }}
-          >
-            <Globe className="w-4 h-4" style={{ color: "var(--color-text-muted)" }} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-[var(--font-weight-semibold)] truncate" style={{ color: "var(--color-text-primary)" }}>
-              {protocolValue}
-            </p>
-            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-              :{listenPort || "443"}
-            </p>
-          </div>
-        </div>
-
-        {/* Users card — compact, accent highlight */}
-        <div
-          className="rounded-[var(--radius-lg)] p-[var(--space-4)] flex flex-col items-center justify-center"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-        >
-          <div className="flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
-            <span className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
-              {userCount}
+          <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+            <EcgSvg
+              color={isRunning ? "var(--color-success-500)" : "var(--color-danger-500)"}
+              path={isRunning ? ecgHeartbeat : ecgFlatline}
+              anim={isRunning ? "ecg-live" : "ecg-dead"}
+            />
+            <span className="text-sm" style={isRunning ? muted : danger}>
+              {isRunning ? "Работает" : "Остановлен"}
             </span>
           </div>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {t("server.overview.users")}
-          </p>
-        </div>
-      </div>
+        )}
+      </Card>
 
-      {/* ── Row 3: Security summary (full width, compact horizontal) ── */}
-      <div
-        className="rounded-[var(--radius-lg)] px-[var(--space-4)] py-3 flex items-center gap-4"
-        style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-      >
-        <Shield className="w-4 h-4 shrink-0" style={{ color: "var(--color-text-muted)" }} />
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <StatusIndicator status="neutral" size="sm" />
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>Firewall</span>
+      {/* Ping */}
+      <Card padding="md" style={{ flex: "1 1 140px", maxWidth: 180 }}>
+        <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh={refreshPing} />
+        <div className="flex items-baseline justify-center gap-1 py-2">
+          {ping !== null && ping > 0 ? (
+            <>
+              <span style={{ ...bigNum, color: pingColor }}>{ping}</span>
+              <span className="text-sm" style={muted}>ms</span>
+            </>
+          ) : (
+            <span style={{ ...bigNum, ...muted }}>—</span>
+          )}
+        </div>
+      </Card>
+
+      {/* Скорость — заглушка */}
+      <Card padding="md" style={{ flex: "2 1 340px" }}>
+        <Title icon={<Zap className="w-5 h-5" />} text="Скорость" />
+        <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
+          <span className="text-sm" style={muted}>Не измерялась</span>
+        </div>
+      </Card>
+
+      {/* Пользователей */}
+      <Card padding="md" style={{ flex: "1 1 180px" }}>
+        <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
+        <div className="flex items-center justify-center py-2">
+          <span style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
+        </div>
+      </Card>
+
+      {/* ── Row 2: IP | Страна | Uptime | Версия ── */}
+
+      {/* IP */}
+      <Card padding="md" style={{ flex: "1 1 240px" }}>
+        <Title icon={<Network className="w-5 h-5" />} text="IP-адрес" />
+        <div className="flex items-center justify-center py-2">
+          <span style={bigNum}>{state.host || "—"}</span>
+        </div>
+      </Card>
+
+      {/* Страна — заглушка */}
+      <Card padding="md" style={{ flex: "1 1 180px" }}>
+        <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
+        <div className="flex items-center justify-center py-2">
+          <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
+        </div>
+      </Card>
+
+      {/* Uptime — заглушка */}
+      <Card padding="md" style={{ flex: "1 1 160px" }}>
+        <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
+        <div className="flex items-center justify-center py-2">
+          <span style={{ ...bigNum, ...muted }}>—</span>
+        </div>
+      </Card>
+
+      {/* Версия */}
+      <Card padding="md" style={{ flex: "1 1 220px" }}>
+        <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
+        <div className="flex items-center justify-center py-2">
+          <span style={bigNum}>{version}</span>
+        </div>
+      </Card>
+
+      {/* ── Row 3: Безопасность | Нагрузка ── */}
+
+      {/* Безопасность — частично реальные данные */}
+      <Card padding="md" style={{ flex: "1 1 340px" }}>
+        <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          {[
+            { name: "Firewall", ok: null, label: "—" },
+            { name: "Fail2Ban", ok: null, label: "—" },
+            { name: "SSH-ключ", ok: null, label: "—" },
+            { name: "TLS", ok: hasTls, label: hasTls ? "Активен" : "—" },
+          ].map((item) => {
+            const bg = item.ok === null
+              ? "var(--color-bg-elevated)"
+              : item.ok
+                ? "rgba(var(--color-status-connected-rgb, 16 185 129) / 0.08)"
+                : "rgba(var(--color-status-error-rgb, 224 85 69) / 0.08)";
+            const color = item.ok === null
+              ? "var(--color-text-muted)"
+              : item.ok ? "var(--color-success-500)" : "var(--color-danger-500)";
+            return (
+              <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: bg }}>
+                <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
+                <div className="text-sm" style={{ color }}>{item.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Нагрузка — заглушка */}
+      <Card padding="md" style={{ flex: "2 1 400px" }}>
+        <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" />
+        <div className="space-y-2.5 mt-1">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm" style={muted}>CPU</span>
+              <span className="text-sm" style={muted}>—</span>
+            </div>
+            <ProgressBar value={0} size="sm" color="success" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <StatusIndicator status="neutral" size="sm" />
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>Fail2Ban</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <StatusIndicator status="neutral" size="sm" />
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>SSH</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <StatusIndicator status={state.certRaw ? "success" : "neutral"} size="sm" />
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>TLS</span>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm" style={muted}>RAM</span>
+              <span className="text-sm" style={muted}>—</span>
+            </div>
+            <ProgressBar value={0} size="sm" color="accent" />
           </div>
         </div>
-      </div>
-    </>
+      </Card>
+    </div>
   );
 }
