@@ -8,6 +8,14 @@ interface TabNavigationProps {
   onTabChange: (tab: AppTab) => void;
 }
 
+/**
+ * Stable id for cross-referencing tabs ↔ panels (aria-controls / aria-labelledby).
+ * App.tsx renders panels with id=`tabpanel-${tab.id}`. Using a constant avoids
+ * remount churn and keeps DOM ids deterministic across renders.
+ */
+export const getTabPanelId = (tabId: AppTab) => `tabpanel-${tabId}`;
+const getTabButtonId = (tabId: AppTab) => `tab-${tabId}`;
+
 interface TabDef {
   id: AppTab;
   labelKey: string;
@@ -57,10 +65,19 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
     return () => window.removeEventListener("resize", updatePillPosition);
   }, [updatePillPosition]);
 
+  // WAI-ARIA Tabs manual activation (Phase 12.5, D-19):
+  // Arrow / Home / End move FOCUS only — activation requires Enter/Space/click.
+  // This prevents accidental activation of heavy tabs (Control/Connection) while
+  // users just navigate the tablist.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-    const tabEls = navRef.current?.querySelectorAll<HTMLElement>('[role="tab"]');
-    if (!tabEls) return;
-    const currentIdx = TABS.findIndex(t => t.id === activeTab);
+    // Find which tab currently has keyboard focus — roving focus means activeTab
+    // may lag behind focus as the user arrows around.
+    const tabEls = Array.from(
+      navRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
+    );
+    if (tabEls.length === 0) return;
+    const focusedIdx = tabEls.findIndex((el) => el === document.activeElement);
+    const currentIdx = focusedIdx >= 0 ? focusedIdx : TABS.findIndex((t) => t.id === activeTab);
 
     let nextIdx: number | null = null;
     if (e.key === "ArrowRight") {
@@ -78,8 +95,9 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
     }
 
     if (nextIdx !== null) {
+      // Manual activation: move focus, DO NOT call onTabChange.
+      // User must press Enter/Space/click to activate the focused tab.
       tabEls[nextIdx].focus();
-      onTabChange(TABS[nextIdx].id);
     }
   };
 
@@ -119,7 +137,9 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
               key={tab.id}
               ref={(el) => { tabRefs.current[index] = el; }}
               role="tab"
+              id={getTabButtonId(tab.id)}
               aria-selected={active}
+              aria-controls={getTabPanelId(tab.id)}
               tabIndex={active ? 0 : -1}
               onClick={() => onTabChange(tab.id)}
               className="flex-1 flex items-center justify-center outline-none cursor-pointer bg-transparent border-none p-0 focus-visible:shadow-[var(--focus-ring)]"
