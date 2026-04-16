@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 import { CertSection } from "./CertSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
 
 function makeState(overrides: Partial<ServerState> = {}): ServerState {

@@ -27,7 +27,7 @@ import { useFileDrop } from "./shared/hooks/useFileDrop";
 import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { EmptyState } from "./shared/ui/EmptyState";
-import { ConfirmDialog } from "./shared/ui";
+import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
 import { Settings } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
@@ -312,6 +312,7 @@ function App() {
 
   return (
     <VpnProvider value={vpnContextValue}>
+    <ConfirmDialogProvider>
     <div
       className="h-screen flex flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
@@ -495,6 +496,7 @@ function App() {
       onCancel={() => hostKeyRespond(false)}
     />
 
+    </ConfirmDialogProvider>
     </VpnProvider>
   );
 }

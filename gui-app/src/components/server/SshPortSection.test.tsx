@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SshPortSection } from "./SshPortSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 import type { SecurityState } from "./useSecurityState";
 
 // ─── Mocks ──────────────────────────────────────────
@@ -153,10 +154,9 @@ describe("SshPortSection", () => {
   });
 
   // PORT-07: Reset button action
-  it("calls state.changeSshPort(22) via confirm dialog when Reset clicked", async () => {
+  it("calls state.changeSshPort(22) when Reset confirmed via dialog", async () => {
     const user = userEvent.setup();
     const changeSshPort = vi.fn();
-    const setConfirm = vi.fn();
 
     const state = makeMockState({
       status: {
@@ -168,20 +168,17 @@ describe("SshPortSection", () => {
         },
       },
       changeSshPort,
-      setConfirm,
     });
 
     render(<SshPortSection state={state} />);
     const resetBtn = screen.getByText("server.security.ssh_port.reset");
     await user.click(resetBtn);
 
-    // setConfirm should have been called with an object containing onConfirm
-    expect(setConfirm).toHaveBeenCalledTimes(1);
-    const confirmArg = setConfirm.mock.calls[0][0];
-    expect(confirmArg).toHaveProperty("onConfirm");
+    // Dialog rendered by ConfirmDialogProvider from renderWithProviders wrapper.
+    // i18n mock returns keys verbatim; ConfirmDialog default label is t("confirmDialog.confirm").
+    const confirmBtn = await screen.findByText("confirmDialog.confirm");
+    await user.click(confirmBtn);
 
-    // Simulate user confirming the dialog
-    confirmArg.onConfirm();
     expect(changeSshPort).toHaveBeenCalledWith(22);
   });
 });

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { ServerSettingsSection } from "./ServerSettingsSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
 
 // Mock sub-hooks that call Tauri commands

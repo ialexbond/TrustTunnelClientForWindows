@@ -5,6 +5,13 @@ export { Badge } from "./Badge";
 export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { ConfirmDialog } from "./ConfirmDialog";
+export {
+  ConfirmDialogProvider,
+  ConfirmDialogContext,
+  type ConfirmOptions,
+  type ConfirmFn,
+} from "./ConfirmDialogProvider";
+export { useConfirm } from "./useConfirm";
 export { Divider } from "./Divider";
 export { DropOverlay } from "./DropOverlay";
 export { EmptyState } from "./EmptyState";

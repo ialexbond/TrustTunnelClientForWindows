@@ -14,13 +14,13 @@ import { cn } from "../shared/lib/cn";
 import { Divider } from "../shared/ui/Divider";
 import { Tooltip } from "../shared/ui/Tooltip";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { useConfirm } from "../shared/ui/useConfirm";
 import type { ServerState } from "./server/useServerState";
 import { OverviewSection } from "./server/OverviewSection";
 import { UsersSection } from "./server/UsersSection";
 import { ServerSettingsSection } from "./server/ServerSettingsSection";
 import { SecurityTabSection } from "./server/SecurityTabSection";
 import { UtilitiesTabSection } from "./server/UtilitiesTabSection";
-import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 
 type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
 
@@ -46,8 +46,25 @@ interface ServerTabsProps {
 export function ServerTabs({ state }: ServerTabsProps) {
   const { t } = useTranslation();
   const { log: activityLog } = useActivityLog();
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
-  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+
+  const handleDisconnect = async () => {
+    activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
+    const ok = await confirm({
+      title: t("server.disconnect.confirm_title"),
+      message: t("server.disconnect.confirm_message"),
+      variant: "danger",
+      confirmText: t("buttons.confirm"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (ok) {
+      activityLog("USER", "server.disconnect.confirmed", "ConfirmDialog");
+      state.onDisconnect();
+    } else {
+      activityLog("USER", "server.disconnect.cancelled", "ConfirmDialog");
+    }
+  };
 
   const handleTabKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
     const lastIndex = tabs.length - 1;
@@ -102,10 +119,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
         <Tooltip text={t("control.disconnect")} position="bottom">
           <button
             type="button"
-            onClick={() => {
-              setShowDisconnectConfirm(true);
-              activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
-            }}
+            onClick={handleDisconnect}
             aria-label={t("control.disconnect")}
             className={cn(
               "shrink-0 flex items-center justify-center",
@@ -179,23 +193,6 @@ export function ServerTabs({ state }: ServerTabsProps) {
         ))}
       </div>
 
-      <ConfirmDialog
-        isOpen={showDisconnectConfirm}
-        variant="danger"
-        title={t("server.disconnect.confirm_title")}
-        message={t("server.disconnect.confirm_message")}
-        confirmLabel={t("buttons.confirm")}
-        cancelLabel={t("buttons.cancel")}
-        onConfirm={() => {
-          activityLog("USER", "server.disconnect.confirmed", "ConfirmDialog");
-          setShowDisconnectConfirm(false);
-          state.onDisconnect();
-        }}
-        onCancel={() => {
-          activityLog("USER", "server.disconnect.cancelled", "ConfirmDialog");
-          setShowDisconnectConfirm(false);
-        }}
-      />
     </div>
   );
 }

@@ -16,7 +16,7 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { ActionInput } from "../../shared/ui/ActionInput";
 import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import { Modal } from "../../shared/ui/Modal";
 import { OverflowMenu } from "../../shared/ui/OverflowMenu";
 import { formatError } from "../../shared/utils/formatError";
@@ -30,6 +30,7 @@ interface Props {
 
 export function UsersSection({ state }: Props) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const {
     serverInfo,
     selectedUser,
@@ -40,9 +41,6 @@ export function UsersSection({ state }: Props) {
     setNewPassword,
     exportingUser,
     setExportingUser,
-    confirmDeleteUser,
-    setConfirmDeleteUser,
-    deleteLoading,
     setDeleteLoading,
     continueLoading,
     setContinueLoading,
@@ -150,21 +148,25 @@ export function UsersSection({ state }: Props) {
   const { addUserToState, removeUserFromState, setActionLoading } = state;
 
   // ── Delete user ──
-  const handleDeleteUser = async () => {
-    if (!confirmDeleteUser) return;
-    const deletingUser = confirmDeleteUser;
+  const handleDeleteUser = async (user: string) => {
+    const ok = await confirm({
+      title: t("server.users.confirm_delete_title"),
+      message: t("server.users.confirm_delete_message", { user }),
+      variant: "danger",
+      confirmText: t("buttons.confirm_delete"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
     setDeleteLoading(true);
     try {
       await invoke("server_remove_user", {
         ...sshParams,
-        vpnUsername: deletingUser,
+        vpnUsername: user,
       });
-      removeUserFromState(deletingUser);
-      setConfirmDeleteUser(null);
-      state.pushSuccess(t("server.users.user_deleted", { user: deletingUser }));
+      removeUserFromState(user);
+      state.pushSuccess(t("server.users.user_deleted", { user }));
     } catch (e) {
       setActionResult({ type: "error", message: formatError(e) });
-      setConfirmDeleteUser(null);
     } finally {
       setDeleteLoading(false);
     }
@@ -235,7 +237,7 @@ export function UsersSection({ state }: Props) {
                         { label: t("server.users.qr_tooltip"), onSelect: () => handleShowQR(u), loading: qrLoading && qrUser === u },
                         { label: t("server.users.link_tooltip"), onSelect: () => handleCopyLink(u), loading: linkLoadingUser === u },
                         { label: t("server.users.export_tooltip"), onSelect: () => handleDownloadConfig(u), loading: exportingUser === u },
-                        { label: t("server.users.delete_tooltip"), onSelect: () => setConfirmDeleteUser(u), destructive: true, disabled: serverInfo.users.length <= 1 },
+                        { label: t("server.users.delete_tooltip"), onSelect: () => { void handleDeleteUser(u); }, destructive: true, disabled: serverInfo.users.length <= 1 },
                       ]}
                     />
                   </div>
@@ -367,18 +369,6 @@ export function UsersSection({ state }: Props) {
         </div>
       </Modal>
 
-      {/* Delete user confirmation */}
-      <ConfirmDialog
-        isOpen={!!confirmDeleteUser}
-        title={t("server.users.confirm_delete_title")}
-        message={t("server.users.confirm_delete_message", { user: confirmDeleteUser ?? "" })}
-        confirmLabel={t("buttons.confirm_delete")}
-        cancelLabel={t("buttons.cancel")}
-        variant="danger"
-        loading={deleteLoading}
-        onCancel={() => setConfirmDeleteUser(null)}
-        onConfirm={handleDeleteUser}
-      />
     </>
   );
 }

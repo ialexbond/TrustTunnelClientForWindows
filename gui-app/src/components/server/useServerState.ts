@@ -55,7 +55,6 @@ export function useServerState(props: ServerPanelProps) {
   const [newPassword, setNewPassword] = useState("");
   const [showNewPw, setShowNewPw] = useState(false);
   const [exportingUser, setExportingUser] = useState<string | null>(null);
-  const [confirmDeleteUser, setConfirmDeleteUser] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [continueLoading, setContinueLoading] = useState(false);
 
@@ -82,9 +81,7 @@ export function useServerState(props: ServerPanelProps) {
   // ─── State: Reboot ───
   const [rebooting, setRebooting] = useState(false);
 
-  // ─── State: Danger Zone Confirms ───
-  const [confirmReboot, setConfirmReboot] = useState(false);
-  const [confirmUninstall, setConfirmUninstall] = useState(false);
+  // ─── State: Danger Zone ───
   const [uninstallLoading, setUninstallLoading] = useState(false);
 
   // ─── SSH params shorthand ───
@@ -227,8 +224,6 @@ export function useServerState(props: ServerPanelProps) {
     setShowNewPw,
     exportingUser,
     setExportingUser,
-    confirmDeleteUser,
-    setConfirmDeleteUser,
     deleteLoading,
     setDeleteLoading,
     continueLoading,
@@ -269,10 +264,6 @@ export function useServerState(props: ServerPanelProps) {
     setRebooting,
 
     // Danger zone
-    confirmReboot,
-    setConfirmReboot,
-    confirmUninstall,
-    setConfirmUninstall,
     uninstallLoading,
     setUninstallLoading,
 

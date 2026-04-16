@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../../shared/utils/formatError";
+import { useConfirm } from "../../shared/ui/useConfirm";
 
 // ═══════════════════════════════════════════════════════
 // Types mirroring Rust structs
@@ -126,10 +127,7 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   // ── Uninstall state ──
   const [uninstalling, setUninstalling] = useState(false);
 
-  // ── Confirm dialog ──
-  const [confirm, setConfirm] = useState<null | {
-    title: string; message: string; onConfirm: () => void; variant?: "danger" | "warning";
-  }>(null);
+  const confirm = useConfirm();
 
   const { host, port, user, password, keyPath } = sshParams;
 
@@ -199,16 +197,14 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   };
 
   // ── Uninstall (per D-10, D-11, MTPROTO-08) ──
-  const requestUninstall = () => {
-    setConfirm({
+  const requestUninstall = async () => {
+    const ok = await confirm({
       title: t("server.utilities.mtproto.confirm_uninstall_title"),
       message: t("server.utilities.mtproto.confirm_uninstall_message"),
       variant: "warning",
-      onConfirm: () => {
-        setConfirm(null);
-        void doUninstall();
-      },
     });
+    if (!ok) return;
+    void doUninstall();
   };
 
   const doUninstall = async () => {
@@ -248,8 +244,6 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     currentStep,
     stepStatus,
     steps,
-    confirm,
-    setConfirm,
     load,
     install,
     requestUninstall,
