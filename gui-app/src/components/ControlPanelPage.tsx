@@ -61,12 +61,45 @@ function ServerPanelSkeleton() {
         <div className="shrink-0 mx-2 self-stretch my-1.5" style={{ width: "1px", backgroundColor: "var(--color-border)" }} />
         <Skeleton variant="card" width={32} height={32} className="shrink-0" />
       </div>
-      {/* Content area skeleton */}
+      {/* Content area skeleton — mirrors OverviewSection Default layout */}
       <div className="flex-1 px-6 py-4 space-y-4">
-        <Skeleton variant="card" height={80} />
-        <Skeleton variant="line" width="40%" height={14} />
-        <Skeleton variant="line" width="70%" height={14} />
-        <Skeleton variant="line" width="55%" height={14} />
+        {/* Block 1: Status card — status row + info rows */}
+        <div className="rounded-[var(--radius-lg)] p-[var(--space-4)]" style={{ backgroundColor: "var(--color-bg-surface)" }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2.5">
+              <Skeleton variant="card" width={10} height={10} className="rounded-full" />
+              <Skeleton variant="line" width={80} height={14} />
+            </div>
+            <Skeleton variant="card" width={28} height={28} />
+          </div>
+          <div style={{ borderTop: "1px solid var(--color-border)" }} className="pt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <Skeleton variant="line" width={60} height={12} />
+              <Skeleton variant="line" width={40} height={12} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Skeleton variant="line" width={70} height={12} />
+              <Skeleton variant="line" width={120} height={12} />
+            </div>
+          </div>
+        </div>
+        {/* Block 2: TLS Certificate card */}
+        <div className="rounded-[var(--radius-lg)] p-[var(--space-4)]" style={{ backgroundColor: "var(--color-bg-surface)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Skeleton variant="card" width={16} height={16} />
+            <Skeleton variant="line" width={130} height={14} />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Skeleton variant="line" width={40} height={12} />
+              <Skeleton variant="line" width={90} height={12} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Skeleton variant="line" width={100} height={12} />
+              <Skeleton variant="line" width={110} height={12} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
