@@ -220,7 +220,7 @@ export const PingCritical: Story = {
 
 /** Пинг недоступен */
 export const PingUnavailable: Story = {
-  name: "2c. Ping — недоступен",
+  name: "2d. Ping — недоступен",
   decorators: wrap(140, 200),
   render: () => (
     <Card padding="md">
@@ -308,7 +308,7 @@ export const SpeedError: Story = {
 
 /** Загрузка скорости */
 export const SpeedSkeleton: Story = {
-  name: "3c. Скорость — skeleton",
+  name: "3d. Скорость — skeleton",
   decorators: wrap(340, 440),
   render: () => (
     <Card padding="md">
@@ -500,7 +500,7 @@ export const UptimeLong: Story = {
 
 /** Uptime неизвестен */
 export const UptimeUnknown: Story = {
-  name: "7b. Uptime — неизвестен",
+  name: "7c. Uptime — неизвестен",
   decorators: wrap(160, 220),
   render: () => (
     <Card padding="md">
@@ -514,7 +514,7 @@ export const UptimeUnknown: Story = {
 
 /** Загрузка uptime */
 export const UptimeSkeleton: Story = {
-  name: "7c. Uptime — skeleton",
+  name: "7d. Uptime — skeleton",
   decorators: wrap(160, 220),
   render: () => (
     <Card padding="md">
@@ -702,7 +702,7 @@ export const SecurityTlsDanger: Story = {
 
 /** Загрузка безопасности */
 export const SecuritySkeleton: Story = {
-  name: "9d. Безопасность — skeleton",
+  name: "9f. Безопасность — skeleton",
   decorators: wrap(300, 400),
   render: () => (
     <Card padding="md">
