@@ -581,7 +581,7 @@ const securityItems = (items: { name: string; ok: boolean; label: string }[]) =>
   <div className="grid grid-cols-2 gap-2 mt-1">
     {items.map((item) => (
       <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2"
-        style={{ backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)" }}>
+        style={{ backgroundColor: item.ok ? "var(--color-status-connected-bg)" : "var(--color-status-error-bg)" }}>
         <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
         <div className="text-sm" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</div>
       </div>
@@ -649,16 +649,16 @@ export const SecurityTlsWarning: Story = {
       <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
       <div className="grid grid-cols-2 gap-2 mt-1">
         {[
-          { name: "Firewall", label: "Активен", color: "var(--color-success-500)", bg: "rgba(16, 185, 129, 0.08)" },
-          { name: "Fail2Ban", label: "Активен", color: "var(--color-success-500)", bg: "rgba(16, 185, 129, 0.08)" },
-          { name: "SSH-ключ", label: "Ed25519", color: "var(--color-success-500)", bg: "rgba(16, 185, 129, 0.08)" },
+          { name: "Firewall", label: "Активен", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
+          { name: "Fail2Ban", label: "Активен", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
+          { name: "SSH-ключ", label: "Ed25519", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
         ].map((item) => (
           <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: item.bg }}>
             <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
             <div className="text-sm" style={{ color: item.color }}>{item.label}</div>
           </div>
         ))}
-        <div className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "rgba(245, 158, 11, 0.08)" }}>
+        <div className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-status-connecting-bg)" }}>
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>TLS</span>
             <AlertTriangle className="w-3.5 h-3.5" style={{ color: "var(--color-warning-500)" }} />
@@ -679,16 +679,16 @@ export const SecurityTlsDanger: Story = {
       <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
       <div className="grid grid-cols-2 gap-2 mt-1">
         {[
-          { name: "Firewall", label: "Активен", color: "var(--color-success-500)", bg: "rgba(16, 185, 129, 0.08)" },
-          { name: "Fail2Ban", label: "Активен", color: "var(--color-success-500)", bg: "rgba(16, 185, 129, 0.08)" },
-          { name: "SSH-ключ", label: "Ed25519", color: "var(--color-success-500)", bg: "rgba(16, 185, 129, 0.08)" },
+          { name: "Firewall", label: "Активен", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
+          { name: "Fail2Ban", label: "Активен", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
+          { name: "SSH-ключ", label: "Ed25519", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
         ].map((item) => (
           <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: item.bg }}>
             <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
             <div className="text-sm" style={{ color: item.color }}>{item.label}</div>
           </div>
         ))}
-        <div className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "rgba(224, 85, 69, 0.08)" }}>
+        <div className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-status-error-bg)" }}>
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>TLS</span>
             <AlertTriangle className="w-3.5 h-3.5" style={{ color: "var(--color-danger-500)" }} />
