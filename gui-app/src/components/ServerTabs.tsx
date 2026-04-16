@@ -9,7 +9,7 @@ import {
   Wrench,
   LogOut,
 } from "lucide-react";
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "../shared/lib/cn";
 import { Divider } from "../shared/ui/Divider";
 import { Tooltip } from "../shared/ui/Tooltip";
