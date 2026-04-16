@@ -97,50 +97,52 @@ function OverviewMockup() {
       {/* ── Row 2: Security (1fr) + Speed (1fr) ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
 
-        {/* Безопасность — 2x2 mini-card grid */}
+        {/* Безопасность — 2x2 color-tinted mini-cards, no dot indicators */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
           <div className="grid grid-cols-2 gap-2">
             {[
-              { name: "Firewall", status: "success" as const, label: "Активен" },
-              { name: "Fail2Ban", status: "danger" as const, label: "Выключен" },
-              { name: "SSH-ключ", status: "danger" as const, label: "Нет" },
-              { name: "TLS", status: "success" as const, label: "89 дн." },
+              { name: "Firewall", ok: true, label: "Активен" },
+              { name: "Fail2Ban", ok: false, label: "Выключен" },
+              { name: "SSH-ключ", ok: false, label: "Нет" },
+              { name: "TLS", ok: true, label: "89 дн." },
             ].map((item) => (
               <div
                 key={item.name}
-                className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1.5"
-                style={{ backgroundColor: "var(--color-bg-elevated)" }}
+                className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1"
+                style={{
+                  backgroundColor: item.ok
+                    ? "rgba(16, 185, 129, 0.08)"
+                    : "rgba(224, 85, 69, 0.08)",
+                  borderLeft: `3px solid ${item.ok ? "var(--color-success-500)" : "var(--color-danger-500)"}`,
+                }}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
-                  <StatusIndicator status={item.status} size="md" />
-                </div>
+                <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
                 <span className="text-sm" style={{
-                  color: item.status === "success" ? "var(--color-success-500)" : "var(--color-danger-500)"
+                  color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)"
                 }}>{item.label}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Скорость */}
+        {/* Скорость — massive adaptive numbers */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
-          <div className="flex-1 flex items-center justify-center gap-8">
+          <div className="flex-1 flex items-center justify-center gap-6">
             <div className="text-center">
-              <div className="flex items-center gap-1.5 justify-center">
-                <ArrowDown className="w-5 h-5" style={{ color: "var(--color-success-400)" }} />
-                <span style={{ fontSize: "clamp(1.5rem, 3.5vw, 2.5rem)", fontWeight: 600, ...primary }}>124</span>
+              <div className="flex items-center gap-2 justify-center">
+                <ArrowDown className="w-6 h-6" style={{ color: "var(--color-success-400)" }} />
+                <span style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)", fontWeight: 600, ...primary }}>124</span>
               </div>
-              <span className="text-xs" style={muted}>Мбит/с</span>
+              <span className="text-sm" style={muted}>Мбит/с</span>
             </div>
             <div className="text-center">
-              <div className="flex items-center gap-1.5 justify-center">
-                <ArrowUp className="w-5 h-5" style={{ color: "var(--color-accent-interactive)" }} />
-                <span style={{ fontSize: "clamp(1.5rem, 3.5vw, 2.5rem)", fontWeight: 600, ...primary }}>98</span>
+              <div className="flex items-center gap-2 justify-center">
+                <ArrowUp className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
+                <span style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)", fontWeight: 600, ...primary }}>98</span>
               </div>
-              <span className="text-xs" style={muted}>Мбит/с</span>
+              <span className="text-sm" style={muted}>Мбит/с</span>
             </div>
           </div>
           <p className="text-xs" style={muted}>2 мин назад</p>
@@ -233,22 +235,22 @@ function OverviewMockupMixed() {
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
           <div className="grid grid-cols-2 gap-2">
             {[
-              { name: "Firewall", status: "success" as const, label: "Активен" },
-              { name: "Fail2Ban", status: "success" as const, label: "Активен" },
-              { name: "SSH-ключ", status: "success" as const, label: "Настроен" },
-              { name: "TLS", status: "warning" as const, label: "12 дн." },
+              { name: "Firewall", ok: true, label: "Активен" },
+              { name: "Fail2Ban", ok: true, label: "Активен" },
+              { name: "SSH-ключ", ok: true, label: "Настроен" },
+              { name: "TLS", ok: false, label: "12 дн." },
             ].map((item) => (
               <div
                 key={item.name}
-                className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1.5"
-                style={{ backgroundColor: "var(--color-bg-elevated)" }}
+                className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1"
+                style={{
+                  backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)",
+                  borderLeft: `3px solid ${item.ok ? "var(--color-success-500)" : "var(--color-danger-500)"}`,
+                }}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
-                  <StatusIndicator status={item.status} size="md" />
-                </div>
+                <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
                 <span className="text-sm" style={{
-                  color: item.status === "success" ? "var(--color-success-500)" : "var(--color-warning-500)"
+                  color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)"
                 }}>{item.label}</span>
               </div>
             ))}
