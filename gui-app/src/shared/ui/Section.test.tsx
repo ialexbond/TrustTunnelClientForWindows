@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { Section, SectionHeader } from "./Section";
+import { Section } from "./Section";
 
 describe("Section", () => {
   it("renders children content", () => {
