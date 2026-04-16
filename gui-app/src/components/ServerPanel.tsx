@@ -45,7 +45,10 @@ export function ServerPanel(props: ServerPanelProps) {
     }
   }, [state.panelDataLoaded, props.onPanelReady]);
 
-  // Reboot polling is handled by ServerStatusSection (with countdown + credential cleanup)
+  // Reboot polling is handled by OverviewSection (inside the Overview tab) —
+  // see `useEffect` keyed on `rebooting` there for the 10s poll + 2min timeout.
+  // ServerStatusSection is legacy (kept for backward-compat tests only);
+  // ServerTabs renders OverviewSection instead.
 
   // ─── Loading state ───
   if (state.loading) {
