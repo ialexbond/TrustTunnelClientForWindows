@@ -78,10 +78,9 @@ function Title({ icon, text, onRefresh, refreshing, clickable }: {
 
 export function OverviewSection({ state }: Props) {
   const { t } = useTranslation();
-  const { serverInfo, sshParams, loadServerInfo, rebooting, setRebooting, setServerInfo } = state;
+  const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
 
   const [ping, setPing] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [rebootCountdown, setRebootCountdown] = useState(0);
   const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -142,13 +141,6 @@ export function OverviewSection({ state }: Props) {
       .then((ms) => setPing(ms))
       .catch(() => setPing(-1));
   }, [state.host]);
-
-  const handleSoftRefresh = async () => {
-    setRefreshing(true);
-    await loadServerInfo(true);
-    refreshPing();
-    setRefreshing(false);
-  };
 
   // ── Skeleton: пока нет данных ──
   if (!serverInfo) {
