@@ -47,7 +47,7 @@ async function readStoredCredentials(): Promise<SshCredentials | null> {
 // ServerPanelSkeleton — shown during first SSH connect
 // ═══════════════════════════════════════════════════════
 
-function ServerPanelSkeleton() {
+export function ServerPanelSkeleton() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Tab bar skeleton - 5 tab pills + separator + disconnect icon */}
