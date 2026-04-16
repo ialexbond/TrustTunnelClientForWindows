@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
@@ -83,13 +83,20 @@ export function useServerState(props: ServerPanelProps) {
   const dangerZone = useDangerZoneState();
 
   // ─── SSH params shorthand ───
-  const sshParams = {
-    host,
-    port: parseInt(port),
-    user: sshUser,
-    password: sshPassword,
-    keyPath: sshKeyPath || undefined,
-  };
+  // WR-03 fix: memoize so referential equality holds across renders.
+  // Downstream hooks (useSecurityState, useMtProtoState) destructure primitives
+  // and are stable on their own, but consumers that pass sshParams object into
+  // invoke() or other hooks benefit from referential stability.
+  const sshParams = useMemo(
+    () => ({
+      host,
+      port: parseInt(port, 10),
+      user: sshUser,
+      password: sshPassword,
+      keyPath: sshKeyPath || undefined,
+    }),
+    [host, port, sshUser, sshPassword, sshKeyPath],
+  );
 
   // ─── Load server info + panel data ───
   const loadServerInfo = useCallback(async (silent = false) => {
