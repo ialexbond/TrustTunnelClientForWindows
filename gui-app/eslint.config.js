@@ -20,4 +20,9 @@ export default tseslint.config({ ignores: ["dist", "src-tauri"] }, {
     "@typescript-eslint/no-explicit-any": "warn",
     "no-console": ["warn", { allow: ["warn", "error"] }],
   },
-}, storybook.configs["flat/recommended"]);
+}, storybook.configs["flat/recommended"], {
+  files: ["**/*.stories.{ts,tsx}"],
+  rules: {
+    "storybook/no-renderer-packages": "off",
+  },
+});
