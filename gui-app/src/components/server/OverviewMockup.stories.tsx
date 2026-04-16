@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import {
-  Activity,
   Shield,
   Users,
   Gauge,
@@ -8,40 +7,29 @@ import {
   ChevronRight,
   ArrowDown,
   ArrowUp,
-  Clock,
   Radio,
   Server,
-  Globe,
+  RefreshCw,
   ArrowUpCircle,
 } from "lucide-react";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
-import { Badge } from "../../shared/ui/Badge";
 
 const card = "rounded-[var(--radius-lg)] p-[var(--space-4)]";
 const cardBg = { backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" };
 const muted = { color: "var(--color-text-muted)" };
 const primary = { color: "var(--color-text-primary)" };
 
-function CardTitle({ icon, title, clickable }: { icon: React.ReactNode; title: string; clickable?: boolean }) {
+function CardTitle({ icon, title, clickable, onRefresh }: { icon: React.ReactNode; title: string; clickable?: boolean; onRefresh?: boolean }) {
   return (
     <div className="flex items-center justify-between mb-3">
       <div className="flex items-center gap-2">
         <span style={muted}>{icon}</span>
         <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{title}</span>
       </div>
-      {clickable && <ChevronRight className="w-5 h-5" style={muted} />}
-    </div>
-  );
-}
-
-function InfoRow({ icon, label, value }: { icon?: React.ReactNode; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        {icon && <span style={muted}>{icon}</span>}
-        <span className="text-sm" style={muted}>{label}</span>
+      <div className="flex items-center gap-1">
+        {onRefresh && <button className="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--color-bg-hover)] transition-colors" style={muted}><RefreshCw className="w-4 h-4" /></button>}
+        {clickable && <ChevronRight className="w-5 h-5" style={muted} />}
       </div>
-      <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{value}</span>
     </div>
   );
 }
@@ -50,45 +38,55 @@ function OverviewMockup() {
   return (
     <div className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3" style={{ backgroundColor: "var(--color-bg-primary)" }}>
 
-      {/* ── Row 1: Status + Protocol + Speed + Users ── */}
+      {/* ── Row 1: Status(1.5fr) + Version(1.5fr) + Speed(2fr) + Users(1fr) ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
 
-        {/* Статус */}
+        {/* Статус — без иконок у строк, ping просто число */}
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" />
+          <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" onRefresh />
           <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
           </div>
           <div className="space-y-2">
-            <InfoRow icon={<Activity className="w-3.5 h-3.5" />} label="Ping" value={<Badge variant="success" size="sm">42ms</Badge>} />
-            <InfoRow icon={<Globe className="w-3.5 h-3.5" />} label="IP" value="185.22.153.xx" />
-            <InfoRow label="Страна" value={<span>&#127465;&#127466; Германия</span>} />
-            <InfoRow icon={<Clock className="w-3.5 h-3.5" />} label="Uptime" value="14д 7ч" />
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>Ping</span>
+              <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-success-500)" }}>42ms</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>IP</span>
+              <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>185.22.153.xx</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>Страна</span>
+              <span className="text-sm" style={primary}>&#127465;&#127466; Германия</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>Uptime</span>
+              <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>14д 7ч</span>
+            </div>
           </div>
         </div>
 
-        {/* Протокол — название крупно, версия крупно текстом */}
+        {/* Версия протокола — огромная цифра, без "TrustTunnel" */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Radio className="w-5 h-5" />} title="Протокол" clickable />
-          <p className="text-xl font-[var(--font-weight-semibold)]" style={primary}>TrustTunnel</p>
-          <div className="flex items-center gap-2 mt-auto pt-2">
-            <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>v1.0.49</span>
-            <span className="text-xs" style={{ color: "var(--color-success-500)" }}>актуальная</span>
+          <CardTitle icon={<Radio className="w-5 h-5" />} title="Версия протокола" clickable />
+          <div className="flex-1 flex items-center justify-center">
+            <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.49</span>
           </div>
+          <span className="text-xs" style={{ color: "var(--color-success-500)" }}>актуальная</span>
         </div>
 
-        {/* Скорость — крупные цифры, сепаратор */}
+        {/* Скорость — сепаратор короче, кнопка обновить */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
+          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" onRefresh />
           <div className="flex-1 flex items-center justify-center">
             <div className="flex items-center gap-2">
               <ArrowDown className="w-8 h-8" style={{ color: "var(--color-success-400)" }} />
               <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, ...primary }}>124</span>
               <span className="text-xs" style={muted}>Мбит/с</span>
             </div>
-            {/* Separator */}
-            <div className="self-stretch mx-4" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="mx-4 h-8" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
             <div className="flex items-center gap-2">
               <ArrowUp className="w-8 h-8" style={{ color: "var(--color-warning-500)" }} />
               <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, ...primary }}>98</span>
@@ -107,10 +105,10 @@ function OverviewMockup() {
         </div>
       </div>
 
-      {/* ── Row 2: Security + Load ── */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      {/* ── Row 2: Security(0.7fr) + Load(1fr) — безопасность уже ── */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "0.7fr 1fr" }}>
 
-        {/* Безопасность */}
+        {/* Безопасность — 30% уже */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
           <div className="grid grid-cols-2 gap-2">
@@ -120,18 +118,18 @@ function OverviewMockup() {
               { name: "SSH-ключ", ok: false, label: "Нет" },
               { name: "TLS", ok: true, label: "89 дн." },
             ].map((item) => (
-              <div key={item.name} className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1"
+              <div key={item.name} className="rounded-[var(--radius-md)] p-2.5 flex flex-col gap-0.5"
                 style={{ backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)" }}>
-                <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
-                <span className="text-sm" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</span>
+                <span className="text-xs font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
+                <span className="text-xs" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Нагрузка */}
+        {/* Нагрузка — кнопка обновить */}
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
+          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -158,45 +156,51 @@ function OverviewMockup() {
   );
 }
 
-/* ── Variant 2: update available, speed not measured ── */
+/* ── Variant 2: update available ── */
 function OverviewMockupMixed() {
   return (
     <div className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3" style={{ backgroundColor: "var(--color-bg-primary)" }}>
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" />
+          <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" onRefresh />
           <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
           </div>
           <div className="space-y-2">
-            <InfoRow icon={<Activity className="w-3.5 h-3.5" />} label="Ping" value={<Badge variant="warning" size="sm">187ms</Badge>} />
-            <InfoRow icon={<Globe className="w-3.5 h-3.5" />} label="IP" value="45.87.214.xx" />
-            <InfoRow label="Страна" value={<span>&#127475;&#127473; Нидерланды</span>} />
-            <InfoRow icon={<Clock className="w-3.5 h-3.5" />} label="Uptime" value="47д 3ч" />
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>Ping</span>
+              <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-warning-500)" }}>187ms</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>IP</span>
+              <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>45.87.214.xx</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>Страна</span>
+              <span className="text-sm" style={primary}>&#127475;&#127473; Нидерланды</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={muted}>Uptime</span>
+              <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>47д 3ч</span>
+            </div>
           </div>
         </div>
 
-        {/* Протокол — обновление доступно */}
+        {/* Версия — обновление доступно */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Radio className="w-5 h-5" />} title="Протокол" clickable />
-          <p className="text-xl font-[var(--font-weight-semibold)]" style={primary}>TrustTunnel</p>
-          <div className="flex items-center gap-2 mt-auto pt-2">
-            <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>v1.0.47</span>
-            <ArrowUpCircle className="w-5 h-5" style={{ color: "var(--color-warning-500)" }} />
-            <span className="text-xs" style={{ color: "var(--color-warning-500)" }}>1.0.49</span>
+          <CardTitle icon={<Radio className="w-5 h-5" />} title="Версия протокола" clickable />
+          <div className="flex-1 flex items-center justify-center gap-2">
+            <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.47</span>
+            <ArrowUpCircle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
           </div>
+          <span className="text-xs" style={{ color: "var(--color-warning-500)" }}>доступна 1.0.49</span>
         </div>
 
-        {/* Скорость — не замерена */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
+          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" onRefresh />
           <div className="flex-1 flex items-center justify-center">
             <p className="text-sm" style={muted}>Не замерена</p>
-            <button className="ml-3 text-xs px-3 py-1.5 rounded-[var(--radius-md)] font-[var(--font-weight-semibold)]"
-              style={{ backgroundColor: "var(--color-bg-elevated)", color: "var(--color-text-secondary)" }}>
-              Замерить
-            </button>
           </div>
         </div>
 
@@ -208,7 +212,7 @@ function OverviewMockupMixed() {
         </div>
       </div>
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "0.7fr 1fr" }}>
         <div className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
           <div className="grid grid-cols-2 gap-2">
@@ -218,17 +222,17 @@ function OverviewMockupMixed() {
               { name: "SSH-ключ", ok: true, label: "Настроен" },
               { name: "TLS", ok: false, label: "12 дн." },
             ].map((item) => (
-              <div key={item.name} className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1"
+              <div key={item.name} className="rounded-[var(--radius-md)] p-2.5 flex flex-col gap-0.5"
                 style={{ backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)" }}>
-                <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
-                <span className="text-sm" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</span>
+                <span className="text-xs font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
+                <span className="text-xs" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</span>
               </div>
             ))}
           </div>
         </div>
 
         <div className={card} style={cardBg}>
-          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
+          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
