@@ -30,7 +30,7 @@ const danger = { color: "var(--color-danger-500)" };
 const ecgPath = "M0,18 L36,18 L40,18 L44,4 L48,32 L52,10 L56,22 L60,18 L100,18 L104,18 L108,4 L112,32 L116,10 L120,22 L124,18 L160,18";
 const ecgFlat = "M0,18 L160,18";
 
-/* ── ECG animated SVG — 6-layer gradient tail ── */
+/* ── ECG animated SVG — 12-layer gradient tail ── */
 const ecgLayers = [
   { dash: "36 184", opacity: 0.02, delay: "0s" },
   { dash: "33 187", opacity: 0.04, delay: "-0.05s" },
