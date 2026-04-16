@@ -2,6 +2,8 @@ import "@testing-library/jest-dom";
 import "./tauri-mock";
 import "../shared/i18n";
 
+declare var global: typeof globalThis;
+
 // Synchronous RAF mock — makes Modal/animation double-RAF execute immediately in tests
 global.requestAnimationFrame = (cb: FrameRequestCallback): number => {
   cb(0);
