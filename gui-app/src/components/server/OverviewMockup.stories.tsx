@@ -97,22 +97,26 @@ function OverviewMockup() {
       {/* ── Row 2: Security (1fr) + Speed (1fr) ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
 
-        {/* Безопасность */}
+        {/* Безопасность — 2x2 mini-card grid */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
-          <div className="space-y-2.5">
+          <div className="grid grid-cols-2 gap-2">
             {[
               { name: "Firewall", status: "success" as const, label: "Активен" },
               { name: "Fail2Ban", status: "danger" as const, label: "Выключен" },
               { name: "SSH-ключ", status: "danger" as const, label: "Нет" },
               { name: "TLS", status: "success" as const, label: "89 дн." },
             ].map((item) => (
-              <div key={item.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StatusIndicator status={item.status} size="sm" />
-                  <span className="text-sm" style={secondary}>{item.name}</span>
+              <div
+                key={item.name}
+                className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1.5"
+                style={{ backgroundColor: "var(--color-bg-elevated)" }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
+                  <StatusIndicator status={item.status} size="md" />
                 </div>
-                <span className="text-sm font-[var(--font-weight-semibold)]" style={{
+                <span className="text-sm" style={{
                   color: item.status === "success" ? "var(--color-success-500)" : "var(--color-danger-500)"
                 }}>{item.label}</span>
               </div>
@@ -227,19 +231,23 @@ function OverviewMockupMixed() {
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <div className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
-          <div className="space-y-2.5">
+          <div className="grid grid-cols-2 gap-2">
             {[
               { name: "Firewall", status: "success" as const, label: "Активен" },
               { name: "Fail2Ban", status: "success" as const, label: "Активен" },
               { name: "SSH-ключ", status: "success" as const, label: "Настроен" },
               { name: "TLS", status: "warning" as const, label: "12 дн." },
             ].map((item) => (
-              <div key={item.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StatusIndicator status={item.status} size="sm" />
-                  <span className="text-sm" style={secondary}>{item.name}</span>
+              <div
+                key={item.name}
+                className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1.5"
+                style={{ backgroundColor: "var(--color-bg-elevated)" }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
+                  <StatusIndicator status={item.status} size="md" />
                 </div>
-                <span className="text-sm font-[var(--font-weight-semibold)]" style={{
+                <span className="text-sm" style={{
                   color: item.status === "success" ? "var(--color-success-500)" : "var(--color-warning-500)"
                 }}>{item.label}</span>
               </div>
