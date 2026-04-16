@@ -221,7 +221,7 @@ export function OverviewSection({ state }: Props) {
 
       {/* Статус — ECG */}
       <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
-        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh={handleSoftRefresh} refreshing={refreshing} />
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
         {rebooting ? (
           <div className="flex flex-col items-center justify-center gap-1.5 py-1">
             <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-warning-500)" }} />
@@ -260,7 +260,7 @@ export function OverviewSection({ state }: Props) {
 
       {/* Скорость — заглушка */}
       <Card padding="md" style={{ flex: "2 1 340px" }}>
-        <Title icon={<Zap className="w-5 h-5" />} text="Скорость" />
+        <Title icon={<Zap className="w-5 h-5" />} text="Скорость" onRefresh={() => {}} />
         <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
           <span className="text-sm" style={muted}>Не измерялась</span>
         </div>
