@@ -175,7 +175,7 @@ export function VersionSection({ state }: Props) {
       )}
 
       <ConfirmDialog
-        open={confirmUpgrade}
+        isOpen={confirmUpgrade}
         title={t("server.version.confirm_title")}
         message={t(isDowngrade ? "server.version.confirm_message_downgrade" : "server.version.confirm_message", { version: `v${selectedClean}` })}
         confirmLabel={t("buttons.confirm")}

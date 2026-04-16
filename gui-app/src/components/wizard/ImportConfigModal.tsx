@@ -116,7 +116,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
 
   return (
     <>
-    <Modal open={isOpen} onClose={handleClose} closeOnBackdrop={false}>
+    <Modal isOpen={isOpen} onClose={handleClose} closeOnBackdrop={false}>
       <div
         className="w-[380px] p-5 space-y-4 rounded-xl"
         style={{

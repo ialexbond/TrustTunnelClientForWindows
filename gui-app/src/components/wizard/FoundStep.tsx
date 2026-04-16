@@ -237,16 +237,17 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                         <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                       </div>
                       <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                        <IconButton tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
+                        <IconButton aria-label={t("server.users.qr_tooltip")} tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
                           <QrCode className="w-3.5 h-3.5" />
                         </IconButton>
-                        <IconButton tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
+                        <IconButton aria-label={t("server.users.link_tooltip")} tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
                           <Link2 className="w-3.5 h-3.5" />
                         </IconButton>
-                        <IconButton tooltip={t("server.users.export_tooltip")} onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }} loading={w.savingConfigFor === u}>
+                        <IconButton aria-label={t("server.users.export_tooltip")} tooltip={t("server.users.export_tooltip")} onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }} loading={w.savingConfigFor === u}>
                           <Download className="w-3.5 h-3.5" />
                         </IconButton>
                         <IconButton
+                          aria-label={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
                           tooltip={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
                           onClick={() => w.setConfirmDeleteUser(u)}
                           disabled={users.length <= 1 || !!w.deletingUser}
@@ -263,7 +264,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
               })}
             </div>
             <ConfirmDialog
-              open={!!w.confirmDeleteUser}
+              isOpen={!!w.confirmDeleteUser}
               title={t('wizard.found.confirm_delete_title')}
               message={t('wizard.found.confirm_delete_message', { user: w.confirmDeleteUser })}
               confirmLabel={t('buttons.confirm_delete')}
@@ -303,7 +304,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
           </Button>
         </div>
         <ConfirmDialog
-          open={w.confirmUninstall}
+          isOpen={w.confirmUninstall}
           title={t('wizard.found.confirm_uninstall_title')}
           message={t('wizard.found.uninstall_consequences')}
           confirmLabel={t('buttons.confirm_delete')}
