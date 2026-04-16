@@ -62,30 +62,44 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
     setCurrent(next);
   }, []);
 
+  // WR-01 fix: use currentRef for the "is a dialog open?" check instead of
+  // mutating queueRef inside a setState updater. Under React.StrictMode the
+  // updater runs twice in DEV, which would have pushed the same request
+  // into the queue twice. Now the queue is mutated exactly once per call.
   const confirm = useCallback<ConfirmFn>(
     (opts) =>
       new Promise<boolean>((resolve) => {
         const req: PendingRequest = { ...opts, resolve };
-        setCurrent((prev) => {
-          if (prev) {
-            queueRef.current.push(req);
-            return prev;
-          }
-          return req;
-        });
+        if (currentRef.current) {
+          queueRef.current.push(req);
+        } else {
+          currentRef.current = req;
+          setCurrent(req);
+        }
       }),
     [],
   );
 
+  // WR-02 fix: read and clear currentRef atomically before resolving.
+  // Guards against double-click races where two rapid clicks on the same
+  // rendered dialog would both see `current` via closure and call resolve
+  // twice (Promise.resolve is idempotent, but the pattern was fragile and
+  // blocked any future side-effect addition inside resolve).
   const handleConfirm = useCallback(() => {
-    current?.resolve(true);
+    const req = currentRef.current;
+    if (!req) return;
+    currentRef.current = null;
+    req.resolve(true);
     pump();
-  }, [current, pump]);
+  }, [pump]);
 
   const handleCancel = useCallback(() => {
-    current?.resolve(false);
+    const req = currentRef.current;
+    if (!req) return;
+    currentRef.current = null;
+    req.resolve(false);
     pump();
-  }, [current, pump]);
+  }, [pump]);
 
   // Unmount cleanup: resolve everything pending so no await hangs.
   // We read through refs so we see the latest state/queue at unmount time.
