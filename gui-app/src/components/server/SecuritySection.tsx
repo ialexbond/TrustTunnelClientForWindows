@@ -2,7 +2,6 @@ import { Shield, RefreshCw, Loader2, Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
@@ -45,17 +44,6 @@ export function SecuritySection({ state }: Props) {
         </div>
       )}
 
-      {/* Confirm dialog — shared overlay for all sub-components */}
-      <ConfirmDialog
-        isOpen={!!security.confirm}
-        title={security.confirm?.title ?? ""}
-        message={security.confirm?.message ?? ""}
-        variant={security.confirm?.variant ?? "danger"}
-        confirmLabel={t("buttons.confirm")}
-        cancelLabel={t("buttons.cancel")}
-        onCancel={() => security.setConfirm(null)}
-        onConfirm={() => security.confirm?.onConfirm()}
-      />
     </Card>
   );
 }

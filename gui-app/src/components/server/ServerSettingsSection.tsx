@@ -6,7 +6,6 @@ import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Toggle } from "../../shared/ui/Toggle";
 import { Accordion } from "../../shared/ui/Accordion";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
@@ -220,18 +219,6 @@ export function ServerSettingsSection({ state }: Props) {
             ),
           },
         ]}
-      />
-
-      {/* ConfirmDialog for security actions */}
-      <ConfirmDialog
-        isOpen={!!security.confirm}
-        title={security.confirm?.title ?? ""}
-        message={security.confirm?.message ?? ""}
-        variant={security.confirm?.variant ?? "danger"}
-        confirmLabel={t("buttons.confirm")}
-        cancelLabel={t("buttons.cancel")}
-        onCancel={() => security.setConfirm(null)}
-        onConfirm={() => security.confirm?.onConfirm()}
       />
 
       {/* Save CTA */}

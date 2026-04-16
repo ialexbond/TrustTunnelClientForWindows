@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../../shared/utils/formatError";
+import { useConfirm } from "../../shared/ui/useConfirm";
 
 // ═══════════════════════════════════════════════════════
 // Types mirroring Rust structs
@@ -118,6 +119,7 @@ type PushSuccess = (msg: string, type?: "success" | "error") => void;
 
 export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess, onPortChanged?: (newPort: number) => void) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
 
   const showError = useCallback((msg: string) => {
     pushSuccess(msg, "error");
@@ -141,10 +143,6 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
   const [fwLog, setFwLog] = useState("");
   const [newRule, setNewRule] = useState({ port: "", proto: "tcp", action: "allow", from: "", comment: "" });
 
-  // Confirms
-  const [confirm, setConfirm] = useState<null | {
-    title: string; message: string; onConfirm: () => void; variant?: "danger" | "warning";
-  }>(null);
 
   // Depend on primitives, not the sshParams object.
   const { host, port, user, password, keyPath } = sshParams;
@@ -204,63 +202,64 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     || Array.from(busySet).some(k => k.startsWith("del-") || k === "add-rule");
 
   // ── Fail2ban actions ──
-  const installFail2ban = () => setConfirm({
-    title: t("server.security.confirm.install_fail2ban_title"),
-    message: t("server.security.confirm.install_fail2ban_message"),
-    variant: "warning",
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        "install-f2b",
-        () => invoke("security_install_fail2ban", sshParams),
-        t("server.security.snack.fail2ban_installed"),
-      );
-    },
-  });
-  const uninstallFail2ban = () => setConfirm({
-    title: t("server.security.confirm.uninstall_fail2ban_title"),
-    message: t("server.security.confirm.uninstall_fail2ban_message"),
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        "uninstall-f2b",
-        () => invoke("security_uninstall_fail2ban", sshParams),
-        t("server.security.snack.fail2ban_uninstalled"),
-      );
-    },
-  });
-  const stopFail2ban = () => setConfirm({
-    title: t("server.security.confirm.stop_fail2ban_title"),
-    message: t("server.security.confirm.stop_fail2ban_message"),
-    variant: "warning",
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        "stop-f2b",
-        () => invoke("security_stop_fail2ban", sshParams),
-        t("server.security.snack.fail2ban_stopped"),
-      );
-    },
-  });
+  const installFail2ban = async () => {
+    const ok = await confirm({
+      title: t("server.security.confirm.install_fail2ban_title"),
+      message: t("server.security.confirm.install_fail2ban_message"),
+      variant: "warning",
+    });
+    if (!ok) return;
+    void run(
+      "install-f2b",
+      () => invoke("security_install_fail2ban", sshParams),
+      t("server.security.snack.fail2ban_installed"),
+    );
+  };
+  const uninstallFail2ban = async () => {
+    const ok = await confirm({
+      title: t("server.security.confirm.uninstall_fail2ban_title"),
+      message: t("server.security.confirm.uninstall_fail2ban_message"),
+      variant: "danger",
+    });
+    if (!ok) return;
+    void run(
+      "uninstall-f2b",
+      () => invoke("security_uninstall_fail2ban", sshParams),
+      t("server.security.snack.fail2ban_uninstalled"),
+    );
+  };
+  const stopFail2ban = async () => {
+    const ok = await confirm({
+      title: t("server.security.confirm.stop_fail2ban_title"),
+      message: t("server.security.confirm.stop_fail2ban_message"),
+      variant: "warning",
+    });
+    if (!ok) return;
+    void run(
+      "stop-f2b",
+      () => invoke("security_stop_fail2ban", sshParams),
+      t("server.security.snack.fail2ban_stopped"),
+    );
+  };
   const startFail2ban = () =>
     run(
       "start-f2b",
       () => invoke("security_start_fail2ban", sshParams),
       t("server.security.snack.fail2ban_started"),
     );
-  const unbanIp = (jail: string, ip: string) => setConfirm({
-    title: t("server.security.confirm.unban_title", { ip }),
-    message: t("server.security.confirm.unban_message", { ip, jail }),
-    variant: "warning",
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        `unban-${ip}`,
-        () => invoke("security_fail2ban_unban", { ...sshParams, jail, ip }),
-        t("server.security.snack.ip_unbanned", { ip }),
-      );
-    },
-  });
+  const unbanIp = async (jail: string, ip: string) => {
+    const ok = await confirm({
+      title: t("server.security.confirm.unban_title", { ip }),
+      message: t("server.security.confirm.unban_message", { ip, jail }),
+      variant: "warning",
+    });
+    if (!ok) return;
+    void run(
+      `unban-${ip}`,
+      () => invoke("security_fail2ban_unban", { ...sshParams, jail, ip }),
+      t("server.security.snack.ip_unbanned", { ip }),
+    );
+  };
   const banIp = (jail: string) => {
     const ip = manualBanIp.trim();
     if (!ip) return;
@@ -288,68 +287,68 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     });
 
   // ── Firewall actions ──
-  const installFirewall = () => {
+  const installFirewall = async () => {
     const ssh = status?.firewall.current_ssh_port ?? sshParams.port;
     const vpn = status?.firewall.vpn_port ?? 443;
-    setConfirm({
+    const ok = await confirm({
       title: t("server.security.confirm.install_firewall_title"),
       message: t("server.security.confirm.install_firewall_message", {
         ssh, vpn, http: "",
       }),
       variant: "warning",
-      onConfirm: () => {
-        setConfirm(null);
-        void run(
-          "install-fw",
-          () => invoke("security_install_firewall", { ...sshParams, keepHttpOpen: false }),
-          t("server.security.snack.firewall_enabled"),
-        );
-      },
     });
+    if (!ok) return;
+    void run(
+      "install-fw",
+      () => invoke("security_install_firewall", { ...sshParams, keepHttpOpen: false }),
+      t("server.security.snack.firewall_enabled"),
+    );
   };
-  const uninstallFirewall = () => setConfirm({
-    title: t("server.security.confirm.uninstall_firewall_title"),
-    message: t("server.security.confirm.uninstall_firewall_message"),
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        "uninstall-fw",
-        () => invoke("security_uninstall_firewall", sshParams),
-        t("server.security.snack.firewall_disabled"),
-      );
-    },
-  });
-  const stopFirewall = () => setConfirm({
-    title: t("server.security.confirm.stop_firewall_title"),
-    message: t("server.security.confirm.stop_firewall_message"),
-    variant: "warning",
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        "stop-fw",
-        () => invoke("security_stop_firewall", sshParams),
-        t("server.security.snack.firewall_stopped"),
-      );
-    },
-  });
+  const uninstallFirewall = async () => {
+    const ok = await confirm({
+      title: t("server.security.confirm.uninstall_firewall_title"),
+      message: t("server.security.confirm.uninstall_firewall_message"),
+      variant: "danger",
+    });
+    if (!ok) return;
+    void run(
+      "uninstall-fw",
+      () => invoke("security_uninstall_firewall", sshParams),
+      t("server.security.snack.firewall_disabled"),
+    );
+  };
+  const stopFirewall = async () => {
+    const ok = await confirm({
+      title: t("server.security.confirm.stop_firewall_title"),
+      message: t("server.security.confirm.stop_firewall_message"),
+      variant: "warning",
+    });
+    if (!ok) return;
+    void run(
+      "stop-fw",
+      () => invoke("security_stop_firewall", sshParams),
+      t("server.security.snack.firewall_stopped"),
+    );
+  };
   const startFirewall = () =>
     run(
       "start-fw",
       () => invoke("security_start_firewall", sshParams),
       t("server.security.snack.firewall_started"),
     );
-  const deleteRule = (n: number) => setConfirm({
-    title: t("server.security.confirm.delete_rule_title"),
-    message: t("server.security.confirm.delete_rule_message", { n }),
-    onConfirm: () => {
-      setConfirm(null);
-      void run(
-        `del-${n}`,
-        () => invoke("security_firewall_delete_rule", { ...sshParams, number: n }),
-        t("server.security.snack.rule_deleted", { n }),
-      );
-    },
-  });
+  const deleteRule = async (n: number) => {
+    const ok = await confirm({
+      title: t("server.security.confirm.delete_rule_title"),
+      message: t("server.security.confirm.delete_rule_message", { n }),
+      variant: "danger",
+    });
+    if (!ok) return;
+    void run(
+      `del-${n}`,
+      () => invoke("security_firewall_delete_rule", { ...sshParams, number: n }),
+      t("server.security.snack.rule_deleted", { n }),
+    );
+  };
   const addRule = async () => {
     const portErr    = validatePort(newRule.port);
     if (portErr)    { showError(t(portErr)); return; }
@@ -422,9 +421,6 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     showFwLog, setShowFwLog,
     fwLog,
     newRule, setNewRule,
-
-    // Confirms
-    confirm, setConfirm,
 
     // Actions
     load,

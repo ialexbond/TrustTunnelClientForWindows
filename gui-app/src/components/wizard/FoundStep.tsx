@@ -6,8 +6,8 @@ import {
   PackageCheck, FolderOpen, RefreshCw, Trash2,
   QrCode, Link2,
 } from "lucide-react";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { Button } from "../../shared/ui/Button";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { IconButton } from "../../shared/ui/IconButton";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
@@ -142,6 +142,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
 // ─── Setup mode: TT installed or not ──────────────
 function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void }) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const isInstalled = w.serverInfo?.installed;
 
   // QR popup state
@@ -149,6 +150,31 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   const [qrLink, setQrLink] = useState("");
   const [qrLoading, setQrLoading] = useState(false);
   const [linkLoadingUser, setLinkLoadingUser] = useState<string | null>(null);
+
+  const handleDeleteUserPrompt = async (u: string) => {
+    const ok = await confirm({
+      title: t("wizard.found.confirm_delete_title"),
+      message: t("wizard.found.confirm_delete_message", { user: u }),
+      variant: "danger",
+      confirmText: t("buttons.confirm_delete"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
+    await w.handleDeleteUser(u);
+    w.pushSuccess(t("wizard.user_deleted", "Пользователь удалён"));
+  };
+
+  const handleUninstallPrompt = async () => {
+    const ok = await confirm({
+      title: t("wizard.found.confirm_uninstall_title"),
+      message: t("wizard.found.uninstall_consequences"),
+      variant: "danger",
+      confirmText: t("buttons.confirm_delete"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
+    w.handleUninstall();
+  };
 
   const sshParams = {
     host: w.host,
@@ -249,7 +275,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                         <IconButton
                           aria-label={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
                           tooltip={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
-                          onClick={() => w.setConfirmDeleteUser(u)}
+                          onClick={() => { void handleDeleteUserPrompt(u); }}
                           disabled={users.length <= 1 || !!w.deletingUser}
                           loading={w.deletingUser === u}
                           color="var(--color-danger-400)"
@@ -263,14 +289,6 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                 );
               })}
             </div>
-            <ConfirmDialog
-              isOpen={!!w.confirmDeleteUser}
-              title={t('wizard.found.confirm_delete_title')}
-              message={t('wizard.found.confirm_delete_message', { user: w.confirmDeleteUser })}
-              confirmLabel={t('buttons.confirm_delete')}
-              onConfirm={async () => { if (w.confirmDeleteUser) { await w.handleDeleteUser(w.confirmDeleteUser); w.pushSuccess(t("wizard.user_deleted", "Пользователь удалён")); } }}
-              onCancel={() => w.setConfirmDeleteUser(null)}
-            />
           </div>
         )}
 
@@ -299,18 +317,10 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
           <Button variant="secondary" size="sm" fullWidth icon={<RefreshCw className="w-3.5 h-3.5" />} onClick={() => { w.setCameFromFound(true); w.setWizardStep("endpoint"); }}>
             {t('wizard.found.reinstall_tt')}
           </Button>
-          <Button variant="danger-outline" size="sm" fullWidth icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => w.setConfirmUninstall(true)}>
+          <Button variant="danger-outline" size="sm" fullWidth icon={<Trash2 className="w-3.5 h-3.5" />} onClick={handleUninstallPrompt}>
             {t('wizard.found.delete_tt')}
           </Button>
         </div>
-        <ConfirmDialog
-          isOpen={w.confirmUninstall}
-          title={t('wizard.found.confirm_uninstall_title')}
-          message={t('wizard.found.uninstall_consequences')}
-          confirmLabel={t('buttons.confirm_delete')}
-          onConfirm={() => { w.setConfirmUninstall(false); w.handleUninstall(); }}
-          onCancel={() => w.setConfirmUninstall(false)}
-        />
       </>
     );
   }

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { UsersSection } from "./UsersSection";
+import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
 
 // Mock qrcode.react
@@ -22,8 +23,6 @@ function makeState(overrides: Partial<ServerState> = {}): ServerState {
     setNewPassword: vi.fn(),
     exportingUser: null,
     setExportingUser: vi.fn(),
-    confirmDeleteUser: null,
-    setConfirmDeleteUser: vi.fn(),
     deleteLoading: false,
     setDeleteLoading: vi.fn(),
     continueLoading: false,
@@ -148,13 +147,16 @@ describe("UsersSection", () => {
     expect(screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") })).toBeInTheDocument();
   });
 
-  it("clicking delete menu item calls setConfirmDeleteUser", () => {
+  it("clicking delete menu item opens confirm dialog (via ConfirmDialogProvider)", async () => {
     const state = makeState();
     render(<UsersSection state={state} />);
     openOverflowMenu(0); // alice
     const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
     fireEvent.click(deleteItem);
-    expect(state.setConfirmDeleteUser).toHaveBeenCalledWith("alice");
+    // Dialog rendered by ConfirmDialogProvider (from renderWithProviders wrapper)
+    expect(
+      await screen.findByText(i18n.t("server.users.confirm_delete_title")),
+    ).toBeInTheDocument();
   });
 
   it("delete menu item is disabled when only one user exists", () => {
@@ -313,12 +315,6 @@ describe("UsersSection", () => {
     // There should be 1 separator for 2 users (between alice and bob)
     const separators = container.querySelectorAll("div[style*='border-bottom']");
     expect(separators.length).toBe(1);
-  });
-
-  it("shows confirm delete dialog when confirmDeleteUser is set", () => {
-    const state = makeState({ confirmDeleteUser: "alice" });
-    render(<UsersSection state={state} />);
-    expect(screen.getByText(i18n.t("server.users.confirm_delete_title"))).toBeInTheDocument();
   });
 
   it("add user button disabled when usernameError is set", () => {

@@ -11,6 +11,13 @@ import {
   type SshParams,
 } from "./useSecurityState";
 
+// Mock useConfirm: always resolve `true` so confirm-gated actions proceed.
+// Individual tests can override via mockConfirm.mockResolvedValueOnce(false).
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock("../../shared/ui/useConfirm", () => ({
+  useConfirm: () => mockConfirm,
+}));
+
 // ─── Helpers ─────────────────────────────────────────
 
 const mockInvoke = vi.mocked(invoke) as unknown as Mock;
@@ -227,27 +234,23 @@ describe("useSecurityState", () => {
     expect(result.current.status!.fail2ban.installed).toBe(false);
   });
 
-  it("install fail2ban sets confirm dialog, onConfirm invokes 'security_install_fail2ban'", async () => {
+  it("install fail2ban calls confirm dialog with warning variant, then invokes 'security_install_fail2ban'", async () => {
     setupInvokeForLoad();
+    mockConfirm.mockClear();
+    mockConfirm.mockResolvedValue(true);
     const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
-    // Trigger install
-    act(() => {
-      result.current.installFail2ban();
-    });
-
-    expect(result.current.confirm).not.toBeNull();
-    expect(result.current.confirm!.variant).toBe("warning");
-
-    // Confirm
     await act(async () => {
-      result.current.confirm!.onConfirm();
+      await result.current.installFail2ban();
     });
 
+    expect(mockConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "warning" }),
+    );
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("security_install_fail2ban", expect.objectContaining({
         host: "1.2.3.4",
@@ -255,24 +258,21 @@ describe("useSecurityState", () => {
     });
   });
 
-  it("install firewall passes sshParams + keepHttpOpen=false", async () => {
+  it("install firewall passes sshParams + keepHttpOpen=false after confirm", async () => {
     setupInvokeForLoad();
+    mockConfirm.mockClear();
+    mockConfirm.mockResolvedValue(true);
     const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
 
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
-    act(() => {
-      result.current.installFirewall();
-    });
-
-    expect(result.current.confirm).not.toBeNull();
-
     await act(async () => {
-      result.current.confirm!.onConfirm();
+      await result.current.installFirewall();
     });
 
+    expect(mockConfirm).toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("security_install_firewall", expect.objectContaining({
         host: "1.2.3.4",

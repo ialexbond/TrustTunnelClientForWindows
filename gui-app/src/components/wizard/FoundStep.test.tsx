@@ -303,12 +303,14 @@ describe("FoundStep", () => {
       expect(setWizardStep).toHaveBeenCalledWith("endpoint");
     });
 
-    it("renders delete button that opens uninstall confirm", () => {
-      const setConfirmUninstall = vi.fn();
-      const w = makeWizardState({ ...installedState(), setConfirmUninstall });
+    it("renders delete button that opens uninstall confirm dialog", async () => {
+      const w = makeWizardState({ ...installedState() });
       render(<FoundStep {...w} />);
       fireEvent.click(screen.getByText(i18n.t("wizard.found.delete_tt")));
-      expect(setConfirmUninstall).toHaveBeenCalledWith(true);
+      // Dialog rendered by ConfirmDialogProvider (from renderWithProviders wrapper)
+      expect(
+        await screen.findByText(i18n.t("wizard.found.confirm_uninstall_title")),
+      ).toBeInTheDocument();
     });
 
     it("continue button is disabled when no user selected", () => {
@@ -650,8 +652,7 @@ describe("FoundStep", () => {
       expect(disabledButtons.length).toBeGreaterThanOrEqual(1);
     });
 
-    it("delete user button calls setConfirmDeleteUser for multi-user list", () => {
-      const setConfirmDeleteUser = vi.fn();
+    it("delete user button opens confirm dialog for multi-user list", async () => {
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
@@ -663,29 +664,21 @@ describe("FoundStep", () => {
           os: "linux",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
-        setConfirmDeleteUser,
       });
       render(<FoundStep {...w} />);
-      // Find delete/trash icon buttons (they are the last action buttons per user row)
-      // We know there are icon buttons for qr, link, export, delete per user
-      // Click the trash button for "alice" — we can't easily target by icon,
-      // so we look for buttons that call setConfirmDeleteUser
-      const allButtons = screen.getAllByRole("button");
-      // The delete buttons are in the user list section
-      // Click all non-disabled buttons until we find one that triggers setConfirmDeleteUser
-      for (const btn of allButtons) {
-        if (!btn.hasAttribute("disabled") && btn.closest("[style]")) {
-          fireEvent.click(btn);
-          if (setConfirmDeleteUser.mock.calls.length > 0) break;
-        }
-      }
-      // At least verify the function exists in the state
-      expect(setConfirmDeleteUser).toBeDefined();
+      // Click a delete (trash) icon button — they have aria-label from server.users.delete_tooltip
+      const deleteBtn = screen.getAllByRole("button", {
+        name: new RegExp(i18n.t("server.users.delete_tooltip")),
+      })[0];
+      fireEvent.click(deleteBtn);
+      // Dialog rendered by ConfirmDialogProvider
+      expect(
+        await screen.findByText(i18n.t("wizard.found.confirm_delete_title")),
+      ).toBeInTheDocument();
     });
 
-    it("confirm uninstall dialog calls handleUninstall when confirmed", () => {
+    it("confirm uninstall dialog calls handleUninstall when confirmed", async () => {
       const handleUninstall = vi.fn();
-      const setConfirmUninstall = vi.fn();
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
@@ -697,20 +690,19 @@ describe("FoundStep", () => {
           os: "linux",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
-        confirmUninstall: true,
         handleUninstall,
-        setConfirmUninstall,
       });
       render(<FoundStep {...w} />);
-      // ConfirmDialog should be open since confirmUninstall is true
-      const confirmBtn = screen.getByText(i18n.t("buttons.confirm_delete"));
+      fireEvent.click(screen.getByText(i18n.t("wizard.found.delete_tt")));
+      // Wait for dialog, then click confirm
+      const confirmBtn = await screen.findByRole("button", { name: new RegExp(i18n.t("buttons.confirm_delete")) });
       fireEvent.click(confirmBtn);
-      expect(setConfirmUninstall).toHaveBeenCalledWith(false);
+      await new Promise((r) => setTimeout(r, 0));
       expect(handleUninstall).toHaveBeenCalled();
     });
 
-    it("confirm uninstall dialog closes when cancelled", () => {
-      const setConfirmUninstall = vi.fn();
+    it("confirm uninstall dialog closes without action when cancelled", async () => {
+      const handleUninstall = vi.fn();
       const w = makeWizardState({
         step: "found",
         isFetchMode: false,
@@ -722,23 +714,14 @@ describe("FoundStep", () => {
           os: "linux",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
-        confirmUninstall: true,
-        setConfirmUninstall,
+        handleUninstall,
       });
       render(<FoundStep {...w} />);
-      // Find cancel button in confirm dialog
-      // ConfirmDialog typically has a cancel/close mechanism
-      // The cancel button is typically a secondary button
-      const allButtons = screen.getAllByRole("button");
-      // Look for cancel-like buttons in the dialog
-      for (const btn of allButtons) {
-        const text = btn.textContent || "";
-        if (text.includes(i18n.t("buttons.cancel")) || text === "Отмена") {
-          fireEvent.click(btn);
-          break;
-        }
-      }
-      expect(setConfirmUninstall).toHaveBeenCalledWith(false);
+      fireEvent.click(screen.getByText(i18n.t("wizard.found.delete_tt")));
+      const cancelBtn = await screen.findByRole("button", { name: new RegExp(i18n.t("buttons.cancel")) });
+      fireEvent.click(cancelBtn);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(handleUninstall).not.toHaveBeenCalled();
     });
 
     it("adding user shows loading state", () => {

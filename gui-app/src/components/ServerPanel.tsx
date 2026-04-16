@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import {
   Server,
   RefreshCw,
@@ -10,7 +9,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "../shared/ui/Button";
-import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 import { useServerState } from "./server/useServerState";
 import { ServerTabs } from "./ServerTabs";
 
@@ -189,25 +187,5 @@ export function ServerPanel(props: ServerPanelProps) {
   }
 
   // ─── Main panel — tabbed layout ───
-  return (
-    <>
-      <ServerTabs state={state} />
-
-      {/* Reboot server confirmation */}
-      <ConfirmDialog
-        isOpen={state.confirmReboot}
-        title={t("server.danger.confirm_reboot_title")}
-        message={t("server.danger.confirm_reboot_message")}
-        confirmLabel={t("server.danger.confirm_reboot_btn")}
-        cancelLabel={t("buttons.cancel")}
-        variant="warning"
-        onCancel={() => state.setConfirmReboot(false)}
-        onConfirm={() => {
-          state.setConfirmReboot(false);
-          state.setRebooting(true);
-          invoke("server_reboot", state.sshParams).catch(() => {});
-        }}
-      />
-    </>
-  );
+  return <ServerTabs state={state} />;
 }
