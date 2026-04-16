@@ -219,6 +219,9 @@ pub async fn export_config_deeplink(
         }
     };
 
+    // Validate client name before interpolating into shell command
+    validate_client_name(&client_name)?;
+
     let export_cmd = format!(
         "cd {dir} && {sudo}./{svc} vpn.toml hosts.toml -c {client_name} -a {export_address} --format deeplink 2>&1",
         dir = ENDPOINT_DIR, svc = ENDPOINT_SERVICE
