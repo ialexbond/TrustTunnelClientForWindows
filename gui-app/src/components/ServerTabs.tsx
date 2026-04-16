@@ -66,15 +66,19 @@ export function ServerTabs({ state }: ServerTabsProps) {
     }
   };
 
+  // WAI-ARIA Tabs manual activation (Phase 12.5, D-19):
+  // Arrow / Home / End move FOCUS only — activation requires Enter/Space/click.
+  // This prevents accidental activation of heavy SSH tabs while navigating.
   const handleTabKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
     const lastIndex = tabs.length - 1;
     let nextIndex: number | null = null;
     if (e.key === "ArrowRight") nextIndex = currentIndex < lastIndex ? currentIndex + 1 : 0;
-    if (e.key === "ArrowLeft") nextIndex = currentIndex > 0 ? currentIndex - 1 : lastIndex;
+    else if (e.key === "ArrowLeft") nextIndex = currentIndex > 0 ? currentIndex - 1 : lastIndex;
+    else if (e.key === "Home") nextIndex = 0;
+    else if (e.key === "End") nextIndex = lastIndex;
     if (nextIndex !== null) {
       e.preventDefault();
-      setActiveTab(tabs[nextIndex].id);
-      activityLog("USER", `tab.switch target="${tabs[nextIndex].id}"`, "ServerTabs");
+      // Manual activation: move focus only, do NOT call setActiveTab.
       document.getElementById(`tab-${tabs[nextIndex].id}`)?.focus();
     }
   };

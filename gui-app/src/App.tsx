@@ -188,6 +188,10 @@ function App() {
       >
         {/* Control Panel */}
         <div
+          role="tabpanel"
+          id="tabpanel-control"
+          aria-labelledby="tab-control"
+          tabIndex={0}
           className="h-full flex flex-col overflow-hidden"
           style={{
             position: activeTab === "control" ? "relative" : "absolute",
@@ -218,6 +222,10 @@ function App() {
 
         {/* Connection */}
         <div
+          role="tabpanel"
+          id="tabpanel-connection"
+          aria-labelledby="tab-connection"
+          tabIndex={0}
           className="h-full flex flex-col overflow-hidden"
           style={{
             position: activeTab === "connection" ? "relative" : "absolute",
@@ -254,6 +262,10 @@ function App() {
 
         {/* Routing */}
         <div
+          role="tabpanel"
+          id="tabpanel-routing"
+          aria-labelledby="tab-routing"
+          tabIndex={0}
           className="h-full flex flex-col overflow-hidden"
           style={{
             position: activeTab === "routing" ? "relative" : "absolute",
@@ -282,6 +294,10 @@ function App() {
 
         {/* Settings */}
         <div
+          role="tabpanel"
+          id="tabpanel-settings"
+          aria-labelledby="tab-settings"
+          tabIndex={0}
           className="h-full flex flex-col overflow-hidden"
           style={{
             position: activeTab === "settings" ? "relative" : "absolute",
@@ -304,6 +320,10 @@ function App() {
 
         {/* About */}
         <div
+          role="tabpanel"
+          id="tabpanel-about"
+          aria-labelledby="tab-about"
+          tabIndex={0}
           className="h-full flex flex-col overflow-hidden"
           style={{
             position: activeTab === "about" ? "relative" : "absolute",
