@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
+import { getVersion } from "@tauri-apps/api/app";
+import { useActivityLog } from "./shared/hooks/useActivityLog";
 import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
@@ -30,6 +32,9 @@ import { Settings } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 function App() {
+  // ─── Activity Log ───
+  const { log: activityLog } = useActivityLog();
+
   // ─── Theme ───
   const { themeMode, handleThemeChange, toggleTheme } = useTheme();
 
@@ -265,6 +270,17 @@ function App() {
     setWizardKey(k => k + 1);
     // Control tab auto-shows wizard when hasConfig is false
   }, [status]);
+
+  // ─── Activity Log: app.start ───
+  useEffect(() => {
+    getVersion()
+      .then((version) => {
+        activityLog("STATE", `app.start version=${version}`, "App");
+      })
+      .catch(() => {
+        activityLog("STATE", "app.start version=unknown", "App");
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset scroll on tab change
   useEffect(() => {
