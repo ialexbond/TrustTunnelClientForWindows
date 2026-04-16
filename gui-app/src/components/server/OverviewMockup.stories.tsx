@@ -17,16 +17,9 @@ import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { Badge } from "../../shared/ui/Badge";
 
 /* ═══════════════════════════════════════════════════════
-   Phase 13 Overview Mockup v6 — critique applied
-
-   Changes from v5:
-   - Status card: redesigned, uptime moved here, larger info, prominent status
-   - Users: declension (2 пользователя / 5 пользователей)
-   - Speed: separated with divider, bigger arrows
-   - Load: CPU/RAM visually separated with divider
-   - Security: border-left removed, only bg tint
-   - Protocol: "TrustTunnel" larger (text-2xl)
-   - Titles: text-lg (not text-xl) for better hierarchy gap
+   Phase 13 Overview Mockup v7
+   Row 1: Status (2fr) + Protocol (1.5fr) + Speed (1.5fr) + Users (0.8fr)
+   Row 2: Security (1fr) + Load (1fr)
    ═══════════════════════════════════════════════════════ */
 
 const card = "rounded-[var(--radius-lg)] p-[var(--space-4)]";
@@ -48,9 +41,9 @@ function CardTitle({ icon, title, clickable }: { icon: React.ReactNode; title: s
 }
 
 function pluralUsers(n: number): string {
-  if (n % 10 === 1 && n % 100 !== 11) return `${n} пользователь`;
-  if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return `${n} пользователя`;
-  return `${n} пользователей`;
+  if (n % 10 === 1 && n % 100 !== 11) return "пользователь";
+  if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "пользователя";
+  return "пользователей";
 }
 
 function OverviewMockup() {
@@ -59,21 +52,17 @@ function OverviewMockup() {
       className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3"
       style={{ backgroundColor: "var(--color-bg-primary)" }}
     >
-      {/* ── Row 1: Status (2fr) + Protocol (2fr) + Users (1fr) ── */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "2fr 2fr 1fr" }}>
+      {/* ── Row 1: Status + Protocol + Speed + Users ── */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "2fr 1.5fr 1.5fr 0.8fr" }}>
 
-        {/* Статус — redesigned: prominent status, key metrics visible */}
+        {/* Статус */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" />
-
-          {/* Main status line */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-3">
             <StatusIndicator status="success" size="lg" pulse />
             <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
           </div>
-
-          {/* Key info — larger, structured */}
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Activity className="w-3.5 h-3.5" style={muted} />
@@ -102,7 +91,7 @@ function OverviewMockup() {
           </div>
         </div>
 
-        {/* Протокол — TrustTunnel larger */}
+        {/* Протокол */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Radio className="w-5 h-5" />} title="Протокол" clickable />
           <p className="text-2xl font-[var(--font-weight-semibold)] flex-1 flex items-center" style={primary}>TrustTunnel</p>
@@ -112,20 +101,34 @@ function OverviewMockup() {
           </div>
         </div>
 
-        {/* Пользователи — declension */}
+        {/* Скорость — inline Мбит/с рядом с числом */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователи" clickable />
-          <div className="flex-1 flex flex-col items-center justify-center">
-            <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>2</span>
-            <span className="text-xs mt-1" style={muted}>{pluralUsers(2).replace(/^\d+\s/, "")}</span>
+          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
+          <div className="flex-1 flex flex-col justify-center gap-1.5">
+            <div className="flex items-center gap-1">
+              <ArrowDown style={{ width: "1.5rem", height: "1.5rem", color: "var(--color-success-400)" }} />
+              <span className="text-2xl font-[var(--font-weight-semibold)]" style={primary}>124</span>
+              <span className="text-xs self-end mb-0.5" style={muted}>Мбит/с</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <ArrowUp style={{ width: "1.5rem", height: "1.5rem", color: "var(--color-warning-500)" }} />
+              <span className="text-2xl font-[var(--font-weight-semibold)]" style={primary}>98</span>
+              <span className="text-xs self-end mb-0.5" style={muted}>Мбит/с</span>
+            </div>
           </div>
+          <p className="text-xs" style={muted}>2 мин назад</p>
+        </div>
+
+        {/* Пользователи — title склоняется динамически */}
+        <div className={`${card} flex flex-col items-center justify-center`} style={cardBg}>
+          <CardTitle icon={<Users className="w-5 h-5" />} title={`2 ${pluralUsers(2)}`} clickable />
         </div>
       </div>
 
-      {/* ── Row 2: Security (1fr) + Speed (1fr) ── */}
+      {/* ── Row 2: Security (1fr) + Load (1fr) ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
 
-        {/* Безопасность — bg tint only, no border-left */}
+        {/* Безопасность */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Shield className="w-5 h-5" />} title="Безопасность" clickable />
           <div className="grid grid-cols-2 gap-2">
@@ -138,9 +141,7 @@ function OverviewMockup() {
               <div
                 key={item.name}
                 className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1"
-                style={{
-                  backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)",
-                }}
+                style={{ backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)" }}
               >
                 <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</span>
                 <span className="text-sm" style={{
@@ -151,55 +152,28 @@ function OverviewMockup() {
           </div>
         </div>
 
-        {/* Скорость — separated halves with divider */}
-        <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
-          <div className="flex-1 flex items-center justify-center">
-            <div className="flex items-center gap-0">
-              {/* Download */}
-              <div className="flex-1 flex flex-col items-center px-4">
-                <ArrowDown className="w-7 h-7 mb-1" style={{ color: "var(--color-success-400)" }} />
-                <span style={{ fontSize: "clamp(1.8rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>124</span>
-                <span className="text-xs mt-1" style={muted}>Мбит/с</span>
+        {/* Нагрузка */}
+        <div className={card} style={cardBg}>
+          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
+          <div className="flex gap-0">
+            <div className="flex-1 px-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm" style={muted}>CPU</span>
+                <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>12%</span>
               </div>
-              {/* Divider */}
-              <div className="self-stretch mx-2" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-              {/* Upload */}
-              <div className="flex-1 flex flex-col items-center px-4">
-                <ArrowUp className="w-7 h-7 mb-1" style={{ color: "var(--color-warning-500)" }} />
-                <span style={{ fontSize: "clamp(1.8rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>98</span>
-                <span className="text-xs mt-1" style={muted}>Мбит/с</span>
+              <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                <div className="h-full rounded-full" style={{ width: "12%", backgroundColor: "var(--color-success-500)" }} />
               </div>
             </div>
-          </div>
-          <p className="text-xs text-center" style={muted}>2 мин назад</p>
-        </div>
-      </div>
-
-      {/* ── Row 3: Load (full width) — CPU | divider | RAM ── */}
-      <div className={card} style={cardBg}>
-        <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
-        <div className="flex gap-0">
-          {/* CPU */}
-          <div className="flex-1 px-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm" style={muted}>CPU</span>
-              <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>12%</span>
-            </div>
-            <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-              <div className="h-full rounded-full transition-all" style={{ width: "12%", backgroundColor: "var(--color-success-500)" }} />
-            </div>
-          </div>
-          {/* Divider */}
-          <div className="self-stretch mx-4" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-          {/* RAM */}
-          <div className="flex-1 px-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm" style={muted}>RAM</span>
-              <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>340 / 1024 МБ</span>
-            </div>
-            <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-              <div className="h-full rounded-full transition-all" style={{ width: "33%", backgroundColor: "var(--color-accent-interactive)" }} />
+            <div className="self-stretch mx-3" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="flex-1 px-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm" style={muted}>RAM</span>
+                <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>340 / 1024 МБ</span>
+              </div>
+              <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                <div className="h-full rounded-full" style={{ width: "33%", backgroundColor: "var(--color-accent-interactive)" }} />
+              </div>
             </div>
           </div>
         </div>
@@ -215,14 +189,14 @@ function OverviewMockupMixed() {
       className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3"
       style={{ backgroundColor: "var(--color-bg-primary)" }}
     >
-      <div className="grid gap-3" style={{ gridTemplateColumns: "2fr 2fr 1fr" }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "2fr 1.5fr 1.5fr 0.8fr" }}>
         <div className={card} style={cardBg}>
           <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" />
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-3">
             <StatusIndicator status="success" size="lg" pulse />
             <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
           </div>
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Activity className="w-3.5 h-3.5" style={muted} />
@@ -260,12 +234,22 @@ function OverviewMockupMixed() {
           </div>
         </div>
 
+        {/* Скорость — не замерена */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователи" clickable />
-          <div className="flex-1 flex flex-col items-center justify-center">
-            <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>5</span>
-            <span className="text-xs mt-1" style={muted}>{pluralUsers(5).replace(/^\d+\s/, "")}</span>
+          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
+          <div className="flex-1 flex flex-col items-center justify-center gap-2">
+            <p className="text-sm" style={muted}>Не замерена</p>
+            <button
+              className="text-xs px-4 py-2 rounded-[var(--radius-md)] transition-colors font-[var(--font-weight-semibold)]"
+              style={{ backgroundColor: "var(--color-bg-elevated)", color: "var(--color-text-secondary)" }}
+            >
+              Замерить
+            </button>
           </div>
+        </div>
+
+        <div className={`${card} flex flex-col items-center justify-center`} style={cardBg}>
+          <CardTitle icon={<Users className="w-5 h-5" />} title={`5 ${pluralUsers(5)}`} clickable />
         </div>
       </div>
 
@@ -293,40 +277,27 @@ function OverviewMockupMixed() {
           </div>
         </div>
 
-        <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
-          <div className="flex-1 flex flex-col items-center justify-center gap-2">
-            <p className="text-base" style={muted}>Не замерена</p>
-            <button
-              className="text-sm px-5 py-2.5 rounded-[var(--radius-md)] transition-colors font-[var(--font-weight-semibold)]"
-              style={{ backgroundColor: "var(--color-bg-elevated)", color: "var(--color-text-secondary)" }}
-            >
-              Замерить скорость
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className={card} style={cardBg}>
-        <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
-        <div className="flex gap-0">
-          <div className="flex-1 px-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm" style={muted}>CPU</span>
-              <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>67%</span>
+        <div className={card} style={cardBg}>
+          <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
+          <div className="flex gap-0">
+            <div className="flex-1 px-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm" style={muted}>CPU</span>
+                <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>67%</span>
+              </div>
+              <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                <div className="h-full rounded-full" style={{ width: "67%", backgroundColor: "var(--color-warning-500)" }} />
+              </div>
             </div>
-            <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-              <div className="h-full rounded-full" style={{ width: "67%", backgroundColor: "var(--color-warning-500)" }} />
-            </div>
-          </div>
-          <div className="self-stretch mx-4" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-          <div className="flex-1 px-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm" style={muted}>RAM</span>
-              <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>780 / 1024 МБ</span>
-            </div>
-            <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-              <div className="h-full rounded-full" style={{ width: "76%", backgroundColor: "var(--color-danger-500)" }} />
+            <div className="self-stretch mx-3" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="flex-1 px-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm" style={muted}>RAM</span>
+                <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>780 / 1024 МБ</span>
+              </div>
+              <div className="h-2.5 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                <div className="h-full rounded-full" style={{ width: "76%", backgroundColor: "var(--color-danger-500)" }} />
+              </div>
             </div>
           </div>
         </div>
