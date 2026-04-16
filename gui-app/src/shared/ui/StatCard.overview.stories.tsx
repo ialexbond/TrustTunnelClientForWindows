@@ -31,13 +31,17 @@ function Title({ icon, text, onRefresh, clickable }: { icon: React.ReactNode; te
         <span className="flex items-center justify-center w-5 h-5 shrink-0" style={accent}>{icon}</span>
         <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{text}</span>
       </div>
-      <div className="flex items-center gap-1 h-full shrink-0 ml-2">
+      <div className="flex items-center h-full shrink-0 ml-2">
         {onRefresh && (
           <button className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors" aria-label="Обновить" style={muted}>
             <RefreshCw className="w-4 h-4" />
           </button>
         )}
-        {clickable && <ChevronRight className="w-5 h-5" style={muted} />}
+        {clickable && (
+          <span className="flex items-center justify-center w-8 h-8">
+            <ChevronRight className="w-5 h-5" style={muted} />
+          </span>
+        )}
       </div>
     </div>
   );
@@ -294,100 +298,121 @@ export const Load: Story = {
   ),
 };
 
-/* ── Все вместе — края упираются в контейнер ── */
+/* ── Все вместе — masonry: каждая карточка своего размера, заполняют прямоугольник ── */
 export const AllCards: Story = {
   name: "Все карточки",
   decorators: [(S) => <div style={{ width: 1060, backgroundColor: "var(--color-bg-primary)", padding: 16 }}><S /></div>],
   render: () => (
-    <div className="flex flex-col gap-3" style={{ width: "100%" }}>
-      {/* Row 1: Статус + Версия + Скорость + Пользователи */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "minmax(270px, 1.5fr) minmax(230px, 1.2fr) minmax(300px, 2fr) minmax(195px, 1fr)" }}>
-        {/* Статус */}
-        <Card padding="md">
-          <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
-          <div className="flex items-center gap-2 mb-3">
-            <StatusIndicator status="success" size="md" pulse />
-            <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between"><span className="text-sm" style={muted}>Ping</span><span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-success-500)" }}>42ms</span></div>
-            <div className="flex items-center justify-between"><span className="text-sm" style={muted}>IP</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>185.22.153.xx</span></div>
-            <div className="flex items-center justify-between"><span className="text-sm" style={muted}>Страна</span><span className="text-sm" style={primary}>🇩🇪 Германия</span></div>
-            <div className="flex items-center justify-between"><span className="text-sm" style={muted}>Uptime</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>14д 7ч</span></div>
-          </div>
-        </Card>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridAutoRows: "auto", gap: 12, width: "100%" }}>
 
-        {/* Версия */}
-        <Card padding="md">
-          <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
-          <div className="flex items-center justify-center py-3">
-            <span style={bigNum}>1.0.49</span>
-          </div>
-        </Card>
+      {/* Статус — span 1 col */}
+      <Card padding="md">
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+        <div className="flex items-center gap-2 py-1">
+          <StatusIndicator status="success" size="md" pulse />
+          <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
+        </div>
+      </Card>
 
-        {/* Скорость */}
-        <Card padding="md">
-          <Title icon={<Zap className="w-5 h-5" />} text="Скорость" onRefresh />
-          <div className="flex items-center justify-center gap-6 py-2">
-            <div className="flex items-center gap-2">
-              <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
-              <span style={bigNum}>124</span>
-              <span className="text-xs shrink-0" style={muted}>Мбит/с</span>
+      {/* Ping */}
+      <Card padding="md">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm" style={muted}>Ping</span>
+          <span style={{ ...bigNum, color: "var(--color-success-500)" }}>42<span className="text-sm" style={muted}>ms</span></span>
+        </div>
+      </Card>
+
+      {/* Скорость — span 2 cols */}
+      <Card padding="md" className="col-span-2">
+        <Title icon={<Zap className="w-5 h-5" />} text="Скорость" onRefresh />
+        <div className="flex items-center justify-center gap-8 py-1">
+          <div className="flex items-center gap-2">
+            <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
+            <span style={bigNum}>124</span>
+            <span className="text-xs shrink-0" style={muted}>Мбит/с</span>
+          </div>
+          <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+          <div className="flex items-center gap-2">
+            <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
+            <span style={bigNum}>98</span>
+            <span className="text-xs shrink-0" style={muted}>Мбит/с</span>
+          </div>
+        </div>
+      </Card>
+
+      {/* IP */}
+      <Card padding="md">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm" style={muted}>IP-адрес</span>
+          <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>185.22.153.xx</span>
+        </div>
+      </Card>
+
+      {/* Страна */}
+      <Card padding="md">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm" style={muted}>Страна</span>
+          <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>🇩🇪 Германия</span>
+        </div>
+      </Card>
+
+      {/* Версия протокола */}
+      <Card padding="md">
+        <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
+        <div className="flex items-center justify-center py-1">
+          <span style={bigNum}>1.0.49</span>
+        </div>
+      </Card>
+
+      {/* Пользователей */}
+      <Card padding="md">
+        <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
+        <div className="flex items-center justify-center py-1">
+          <span style={bigNum}>2</span>
+        </div>
+      </Card>
+
+      {/* Uptime */}
+      <Card padding="md">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm" style={muted}>Uptime</span>
+          <span style={bigNum}>14д 7ч</span>
+        </div>
+      </Card>
+
+      {/* Безопасность — span 2 cols */}
+      <Card padding="md" className="col-span-2">
+        <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          {[
+            { name: "Firewall", ok: true, label: "Активен" },
+            { name: "Fail2Ban", ok: false, label: "Выключен" },
+            { name: "SSH-ключ", ok: false, label: "Нет" },
+            { name: "TLS", ok: true, label: "89 дн." },
+          ].map((item) => (
+            <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2"
+              style={{ backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)" }}>
+              <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
+              <div className="text-sm" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</div>
             </div>
-            <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-            <div className="flex items-center gap-2">
-              <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
-              <span style={bigNum}>98</span>
-              <span className="text-xs shrink-0" style={muted}>Мбит/с</span>
-            </div>
-          </div>
-        </Card>
+          ))}
+        </div>
+      </Card>
 
-        {/* Пользователей */}
-        <Card padding="md">
-          <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
-          <div className="flex items-center justify-center py-3">
-            <span style={bigNum}>2</span>
+      {/* Нагрузка — span 1 col */}
+      <Card padding="md">
+        <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
+        <div className="space-y-2.5 mt-1">
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>12%</span></div>
+            <ProgressBar value={12} size="sm" color="success" />
           </div>
-        </Card>
-      </div>
-
-      {/* Row 2: Безопасность + Нагрузка — оба упираются в правый край */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        {/* Безопасность */}
-        <Card padding="md">
-          <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
-          <div className="grid grid-cols-2 gap-2 mt-1">
-            {[
-              { name: "Firewall", ok: true, label: "Активен" },
-              { name: "Fail2Ban", ok: false, label: "Выключен" },
-              { name: "SSH-ключ", ok: false, label: "Нет" },
-              { name: "TLS", ok: true, label: "89 дн." },
-            ].map((item) => (
-              <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2"
-                style={{ backgroundColor: item.ok ? "rgba(16, 185, 129, 0.08)" : "rgba(224, 85, 69, 0.08)" }}>
-                <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
-                <div className="text-sm" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</div>
-              </div>
-            ))}
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>340 / 1024 МБ</span></div>
+            <ProgressBar value={33} size="sm" color="accent" />
           </div>
-        </Card>
-
-        {/* Нагрузка */}
-        <Card padding="md">
-          <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
-          <div className="space-y-2.5 mt-1">
-            <div>
-              <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>12%</span></div>
-              <ProgressBar value={12} size="sm" color="success" />
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>340 / 1024 МБ</span></div>
-              <ProgressBar value={33} size="sm" color="accent" />
-            </div>
-          </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
     </div>
   ),
 };
