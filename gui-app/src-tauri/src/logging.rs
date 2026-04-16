@@ -341,8 +341,9 @@ pub fn open_logs_folder() -> Result<(), String> {
     }
     #[cfg(windows)]
     {
+        let canonical = fs::canonicalize(&dir).map_err(|e| e.to_string())?;
         std::process::Command::new("explorer")
-            .arg(dir.to_string_lossy().to_string())
+            .arg(canonical.to_string_lossy().to_string())
             .spawn()
             .map_err(|e| e.to_string())?;
     }
