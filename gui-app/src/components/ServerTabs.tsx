@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useActivityLog } from "../shared/hooks/useActivityLog";
 import {
   LayoutDashboard,
   Users,
@@ -40,6 +41,7 @@ interface ServerTabsProps {
 
 export function ServerTabs({ state }: ServerTabsProps) {
   const { t } = useTranslation();
+  const { log: activityLog } = useActivityLog();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
 
@@ -53,7 +55,10 @@ export function ServerTabs({ state }: ServerTabsProps) {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setActiveTab(tab.id);
+              activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
+            }}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 py-2 mx-1 text-xs font-[var(--font-weight-semibold)] transition-colors rounded-[var(--radius-md)]",
               "focus-visible:shadow-[var(--focus-ring)] outline-none",
@@ -70,7 +75,10 @@ export function ServerTabs({ state }: ServerTabsProps) {
         {/* Disconnect icon - visually separated from tabs */}
         <button
           type="button"
-          onClick={() => setShowDisconnectConfirm(true)}
+          onClick={() => {
+            setShowDisconnectConfirm(true);
+            activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
+          }}
           aria-label={t("control.disconnect")}
           title={t("control.disconnect")}
           className={cn(
@@ -164,10 +172,14 @@ export function ServerTabs({ state }: ServerTabsProps) {
         confirmLabel={t("buttons.confirm")}
         cancelLabel={t("buttons.cancel")}
         onConfirm={() => {
+          activityLog("USER", "server.disconnect.confirmed", "ConfirmDialog");
           setShowDisconnectConfirm(false);
           state.onDisconnect();
         }}
-        onCancel={() => setShowDisconnectConfirm(false)}
+        onCancel={() => {
+          activityLog("USER", "server.disconnect.cancelled", "ConfirmDialog");
+          setShowDisconnectConfirm(false);
+        }}
       />
     </div>
   );
