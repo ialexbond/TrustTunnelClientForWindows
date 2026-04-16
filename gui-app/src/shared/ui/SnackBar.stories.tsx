@@ -83,7 +83,7 @@ export const Error: Story = {
 
 export const Success: Story = {
   render: () => {
-    const [messages, setMessages] = useState<string[]>(["VPN connected successfully"]);
+    const [messages] = useState<string[]>(["VPN connected successfully"]);
     const onShown = () => {};
 
     return (

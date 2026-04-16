@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { cn } from "../lib/cn";
 
 type TooltipPosition = "top" | "bottom" | "left" | "right";
 

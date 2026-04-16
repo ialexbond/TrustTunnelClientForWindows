@@ -60,5 +60,5 @@ export const WithContent: Story = {
 };
 
 export const Empty: Story = {
-  render: () => <Card className="w-72" />,
+  render: () => <Card className="w-72">{null}</Card>,
 };

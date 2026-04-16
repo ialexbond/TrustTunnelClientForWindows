@@ -38,7 +38,7 @@ class PanelErrorBoundaryInner extends React.Component<
     console.error(
       `[ErrorBoundary:${this.props.panelName || "unknown"}]`,
       error,
-      process.env.NODE_ENV !== "production" ? info.componentStack : "",
+      import.meta.env.DEV ? info.componentStack : "",
     );
   }
 
