@@ -20,7 +20,8 @@ vi.mock("./server/useServerState", () => ({
   useServerState: () => mockState,
 }));
 
-// Mock child sections (4-tab structure: Overview, Users, Settings, Service)
+// Mock child sections (5-tab structure per Phase 11: overview / users /
+// configuration / security / utilities).
 vi.mock("./server/OverviewSection", () => ({
   OverviewSection: () => <div data-testid="overview-section">OverviewSection</div>,
 }));
@@ -30,8 +31,11 @@ vi.mock("./server/UsersSection", () => ({
 vi.mock("./server/ServerSettingsSection", () => ({
   ServerSettingsSection: () => <div data-testid="settings-section">ServerSettingsSection</div>,
 }));
-vi.mock("./server/ServiceSection", () => ({
-  ServiceSection: () => <div data-testid="service-section">ServiceSection</div>,
+vi.mock("./server/SecurityTabSection", () => ({
+  SecurityTabSection: () => <div data-testid="security-section">SecurityTabSection</div>,
+}));
+vi.mock("./server/UtilitiesTabSection", () => ({
+  UtilitiesTabSection: () => <div data-testid="utilities-section">UtilitiesTabSection</div>,
 }));
 
 describe("ServerPanel", () => {
@@ -111,7 +115,7 @@ describe("ServerPanel", () => {
     expect(screen.getByText(/не установлен|not.installed/i)).toBeInTheDocument();
   });
 
-  it("renders 4-tab structure when connected and installed", () => {
+  it("renders 5-tab structure when connected and installed", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -124,11 +128,14 @@ describe("ServerPanel", () => {
     expect(screen.getByTestId("overview-section")).toBeInTheDocument();
     // Users tab panel rendered (visibility:hidden, not removed from DOM)
     expect(screen.getByTestId("users-section")).toBeInTheDocument();
-    // 4 tab buttons present
-    expect(screen.getByRole("button", { name: /Обзор/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Пользователи/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Настройки/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Сервис/i })).toBeInTheDocument();
+    // 5 tabs with role="tab" present (WAI-ARIA, Phase 12.5 manual activation)
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(5);
+    expect(screen.getByRole("tab", { name: /Обзор/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Пользователи/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Конфигурация/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Безопасность/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Утилиты/i })).toBeInTheDocument();
   });
 
   it("shows rebooting state", () => {
