@@ -1,58 +1,68 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/cn";
 
-interface ProgressBarProps {
+const trackVariants = cva(
+  ["w-full rounded-full bg-[var(--color-bg-elevated)] overflow-hidden"],
+  {
+    variants: {
+      size: {
+        sm: "h-1.5",
+        md: "h-2.5",
+        lg: "h-3.5",
+      },
+    },
+    defaultVariants: {
+      size: "md",
+    },
+  }
+);
+
+const fillVariants = cva(["h-full rounded-full transition-all duration-[var(--transition-fast)]"], {
+  variants: {
+    color: {
+      accent: "bg-[var(--color-accent-interactive)]",
+      success: "bg-[var(--color-success-500)]",
+      warning: "bg-[var(--color-warning-500)]",
+      danger: "bg-[var(--color-danger-500)]",
+    },
+  },
+  defaultVariants: {
+    color: "accent",
+  },
+});
+
+export interface ProgressBarProps extends VariantProps<typeof trackVariants>, VariantProps<typeof fillVariants> {
   value: number;
+  max?: number;
   label?: string;
-  showValue?: boolean;
   className?: string;
 }
 
 export function ProgressBar({
   value,
+  max = 100,
+  size,
+  color,
   label,
-  showValue,
   className,
 }: ProgressBarProps) {
-  // Clamp value to [0, 100] to prevent overflow (T-02-06-01)
-  const clampedValue = Math.min(100, Math.max(0, value));
+  const safeMax = max > 0 ? max : 100;
+  const clampedValue = Math.min(safeMax, Math.max(0, value));
+  const percentage = (clampedValue / safeMax) * 100;
 
   return (
-    <div className={cn("w-full", className)}>
-      {(label || showValue) && (
-        <div className="flex justify-between items-center mb-1.5">
-          {label && (
-            <span
-              className="text-[var(--color-text-secondary)]"
-              style={{ fontSize: "var(--font-size-sm)" }}
-            >
-              {label}
-            </span>
-          )}
-          {showValue && (
-            <span
-              className="text-[var(--color-text-muted)]"
-              style={{ fontSize: "var(--font-size-xs)" }}
-            >
-              {clampedValue}%
-            </span>
-          )}
-        </div>
-      )}
+    <div
+      className={cn(trackVariants({ size }), className)}
+      role="progressbar"
+      aria-valuenow={clampedValue}
+      aria-valuemin={0}
+      aria-valuemax={safeMax}
+      aria-label={label}
+    >
       <div
-        className="h-2 w-full rounded-[var(--radius-full)] bg-[var(--color-bg-hover)] overflow-hidden"
-        role="progressbar"
-        aria-valuenow={clampedValue}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
-        <div
-          className="h-full rounded-[var(--radius-full)] bg-[var(--color-accent-interactive)] transition-all"
-          style={{
-            width: `${clampedValue}%`,
-            transitionDuration: "var(--transition-fast)",
-          }}
-        />
-      </div>
+        className={cn(fillVariants({ color }))}
+        style={{ width: `${percentage}%` }}
+      />
     </div>
   );
 }
