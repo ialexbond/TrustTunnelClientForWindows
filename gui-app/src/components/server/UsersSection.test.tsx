@@ -301,10 +301,10 @@ describe("UsersSection", () => {
   it("shows selected user with visual indicator", () => {
     const state = makeState({ selectedUser: "alice" });
     render(<UsersSection state={state} />);
-    // The selected user row has a specific background color
+    // The selected user row has a specific background CSS class
     const aliceRow = screen.getByText("alice").closest("div[class*='cursor-pointer']") as HTMLElement;
     expect(aliceRow).toBeTruthy();
-    expect(aliceRow.style.backgroundColor).toBe("var(--color-accent-tint-08)");
+    expect(aliceRow).toHaveClass("bg-[var(--color-accent-tint-08)]");
   });
 
   it("shows separator between users but not after last", () => {
@@ -362,21 +362,19 @@ describe("UsersSection", () => {
   it("user row hover changes background on non-selected user", () => {
     const state = makeState({ selectedUser: "alice" });
     render(<UsersSection state={state} />);
-    // Bob is not selected, hover should change background
+    // Bob is not selected — has hover:bg class but NOT the selected bg class
     const bobRow = screen.getByText("bob").closest("div[class*='cursor-pointer']") as HTMLElement;
-    fireEvent.mouseEnter(bobRow);
-    expect(bobRow.style.backgroundColor).toBe("var(--color-bg-hover)");
-    fireEvent.mouseLeave(bobRow);
-    expect(bobRow.style.backgroundColor).toBe("transparent");
+    expect(bobRow).toHaveClass("hover:bg-[var(--color-bg-hover)]");
+    expect(bobRow).not.toHaveClass("bg-[var(--color-accent-tint-08)]");
   });
 
   it("user row hover does not change background on selected user", () => {
     const state = makeState({ selectedUser: "alice" });
     render(<UsersSection state={state} />);
+    // Alice is selected — has the selected bg class and NOT the hover:bg class
     const aliceRow = screen.getByText("alice").closest("div[class*='cursor-pointer']") as HTMLElement;
-    fireEvent.mouseEnter(aliceRow);
-    // Should stay with selected background
-    expect(aliceRow.style.backgroundColor).toBe("var(--color-accent-tint-08)");
+    expect(aliceRow).toHaveClass("bg-[var(--color-accent-tint-08)]");
+    expect(aliceRow).not.toHaveClass("hover:bg-[var(--color-bg-hover)]");
   });
 
   it("add user handles error from invoke", async () => {
