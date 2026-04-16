@@ -45,20 +45,41 @@ export function ServerTabs({ state }: ServerTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
 
+  const handleTabKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
+    const lastIndex = tabs.length - 1;
+    let nextIndex: number | null = null;
+    if (e.key === "ArrowRight") nextIndex = currentIndex < lastIndex ? currentIndex + 1 : 0;
+    if (e.key === "ArrowLeft") nextIndex = currentIndex > 0 ? currentIndex - 1 : lastIndex;
+    if (nextIndex !== null) {
+      e.preventDefault();
+      setActiveTab(tabs[nextIndex].id);
+      activityLog("USER", `tab.switch target="${tabs[nextIndex].id}"`, "ServerTabs");
+      document.getElementById(`tab-${tabs[nextIndex].id}`)?.focus();
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Tab bar */}
       <div
+        role="tablist"
+        aria-label={t("tabs.server_tabs", "Серверные вкладки")}
         className="flex items-center shrink-0"
         style={{ borderBottom: "1px solid var(--color-border)", padding: "4px 8px" }}
       >
-        {tabs.map((tab) => (
+        {tabs.map((tab, idx) => (
           <button
             key={tab.id}
+            role="tab"
+            id={`tab-${tab.id}`}
+            aria-selected={activeTab === tab.id}
+            aria-controls={`panel-${tab.id}`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
             onClick={() => {
               setActiveTab(tab.id);
               activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
             }}
+            onKeyDown={(e) => handleTabKeyDown(e, idx)}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 py-2 mx-1 text-xs font-[var(--font-weight-semibold)] transition-colors rounded-[var(--radius-md)]",
               "focus-visible:shadow-[var(--focus-ring)] outline-none",
@@ -97,71 +118,29 @@ export function ServerTabs({ state }: ServerTabsProps) {
 
       {/* Tab content — cross-fade with visibility+opacity: mount once, fade between tabs */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
-        <div
-          className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{
-            position: activeTab === "overview" ? "relative" : "absolute",
-            inset: activeTab === "overview" ? undefined : 0,
-            opacity: activeTab === "overview" ? 1 : 0,
-            visibility: activeTab === "overview" ? ("visible" as const) : ("hidden" as const),
-            transition: "opacity var(--transition-fast)",
-          }}
-          aria-hidden={activeTab !== "overview"}
-        >
-          <OverviewSection state={state} />
-        </div>
-        <div
-          className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{
-            position: activeTab === "users" ? "relative" : "absolute",
-            inset: activeTab === "users" ? undefined : 0,
-            opacity: activeTab === "users" ? 1 : 0,
-            visibility: activeTab === "users" ? ("visible" as const) : ("hidden" as const),
-            transition: "opacity var(--transition-fast)",
-          }}
-          aria-hidden={activeTab !== "users"}
-        >
-          <UsersSection state={state} />
-        </div>
-        <div
-          className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{
-            position: activeTab === "configuration" ? "relative" : "absolute",
-            inset: activeTab === "configuration" ? undefined : 0,
-            opacity: activeTab === "configuration" ? 1 : 0,
-            visibility: activeTab === "configuration" ? ("visible" as const) : ("hidden" as const),
-            transition: "opacity var(--transition-fast)",
-          }}
-          aria-hidden={activeTab !== "configuration"}
-        >
-          <ServerSettingsSection state={state} />
-        </div>
-        <div
-          className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{
-            position: activeTab === "security" ? "relative" : "absolute",
-            inset: activeTab === "security" ? undefined : 0,
-            opacity: activeTab === "security" ? 1 : 0,
-            visibility: activeTab === "security" ? ("visible" as const) : ("hidden" as const),
-            transition: "opacity var(--transition-fast)",
-          }}
-          aria-hidden={activeTab !== "security"}
-        >
-          <SecurityTabSection state={state} />
-        </div>
-        <div
-          className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
-          style={{
-            position: activeTab === "utilities" ? "relative" : "absolute",
-            inset: activeTab === "utilities" ? undefined : 0,
-            opacity: activeTab === "utilities" ? 1 : 0,
-            visibility: activeTab === "utilities" ? ("visible" as const) : ("hidden" as const),
-            transition: "opacity var(--transition-fast)",
-          }}
-          aria-hidden={activeTab !== "utilities"}
-        >
-          <UtilitiesTabSection state={state} />
-        </div>
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            role="tabpanel"
+            id={`panel-${tab.id}`}
+            aria-labelledby={`tab-${tab.id}`}
+            className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
+            style={{
+              position: activeTab === tab.id ? "relative" : "absolute",
+              inset: activeTab === tab.id ? undefined : 0,
+              opacity: activeTab === tab.id ? 1 : 0,
+              visibility: activeTab === tab.id ? ("visible" as const) : ("hidden" as const),
+              transition: "opacity var(--transition-fast)",
+            }}
+            aria-hidden={activeTab !== tab.id}
+          >
+            {tab.id === "overview" && <OverviewSection state={state} />}
+            {tab.id === "users" && <UsersSection state={state} />}
+            {tab.id === "configuration" && <ServerSettingsSection state={state} />}
+            {tab.id === "security" && <SecurityTabSection state={state} />}
+            {tab.id === "utilities" && <UtilitiesTabSection state={state} />}
+          </div>
+        ))}
       </div>
 
       <ConfirmDialog
