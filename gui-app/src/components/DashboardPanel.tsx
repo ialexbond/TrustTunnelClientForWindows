@@ -126,7 +126,7 @@ export default function DashboardPanel({
           </div>
           {configPath && (
             <Button
-              variant="success"
+              variant="primary"
               size="sm"
               icon={isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
               onClick={isLoading ? onDisconnect : onConnect}

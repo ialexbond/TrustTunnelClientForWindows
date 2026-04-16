@@ -63,7 +63,8 @@ export function ConnectionOverview({
     <Card padding="md">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Badge variant={statusVariant} size="md" icon={statusIcon}>
+          <Badge variant={statusVariant} size="md">
+            {statusIcon}
             {statusLabel}
           </Badge>
 
@@ -95,7 +96,7 @@ export function ConnectionOverview({
 
         <div>
           {isLoading ? (
-            <Button variant="warning" size="sm" disabled loading>
+            <Button variant="secondary" size="sm" disabled loading>
               {statusLabel}
             </Button>
           ) : isConnected ? (

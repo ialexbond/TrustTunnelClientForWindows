@@ -42,7 +42,7 @@ export function DoneStep(w: WizardState) {
           </Button>
           {w.configPath && (
             <Button
-              variant="success"
+              variant="primary"
               size="sm"
               fullWidth
               icon={<Plug className="w-4 h-4" />}
