@@ -3,12 +3,11 @@ import {
   Shield,
   Users,
   Gauge,
-  Cpu,
   ChevronRight,
   ArrowDown,
   ArrowUp,
-  Radio,
-  Server,
+  HeartPulse,
+  Package,
   RefreshCw,
   ArrowUpCircle,
 } from "lucide-react";
@@ -27,7 +26,7 @@ function CardTitle({ icon, title, clickable, onRefresh }: { icon?: React.ReactNo
         <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{title}</span>
       </div>
       <div className="flex items-center gap-1">
-        {onRefresh && <button className="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--color-bg-hover)] transition-colors" style={muted}><RefreshCw className="w-4 h-4" /></button>}
+        {onRefresh && <button className="p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors" aria-label="Обновить" style={muted}><RefreshCw className="w-4 h-4" /></button>}
         {clickable && <ChevronRight className="w-5 h-5" style={muted} />}
       </div>
     </div>
@@ -43,7 +42,7 @@ function OverviewMockup() {
 
         {/* Статус */}
         <section aria-label="Статус сервера" className={card} style={cardBg}>
-          <CardTitle title="Статус" onRefresh />
+          <CardTitle icon={<HeartPulse className="w-5 h-5" />} title="Статус" onRefresh />
           <div className="flex items-center gap-2 mb-3" aria-live="polite">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
@@ -69,7 +68,7 @@ function OverviewMockup() {
         </section>
 
         <section aria-label="Версия протокола" className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle title="Версия протокола" clickable />
+          <CardTitle icon={<Package className="w-5 h-5" />} title="Версия протокола" clickable />
           <div className="flex-1 flex items-center justify-center">
             <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.49</span>
           </div>
@@ -122,7 +121,7 @@ function OverviewMockup() {
         </section>
 
         <section aria-label="Нагрузка сервера" className={card} style={cardBg}>
-          <CardTitle title="Нагрузка" onRefresh />
+          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -155,7 +154,7 @@ function OverviewMockupMixed() {
     <div className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3" style={{ backgroundColor: "var(--color-bg-primary)" }}>
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
         <div className={card} style={cardBg}>
-          <CardTitle title="Статус" onRefresh />
+          <CardTitle icon={<HeartPulse className="w-5 h-5" />} title="Статус" onRefresh />
           <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
@@ -182,7 +181,7 @@ function OverviewMockupMixed() {
 
         {/* Версия — обновление доступно */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle title="Версия протокола" clickable />
+          <CardTitle icon={<Package className="w-5 h-5" />} title="Версия протокола" clickable />
           <div className="flex-1 flex items-center justify-center gap-2">
             <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.47</span>
             <ArrowUpCircle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
@@ -224,7 +223,7 @@ function OverviewMockupMixed() {
         </div>
 
         <div className={card} style={cardBg}>
-          <CardTitle title="Нагрузка" onRefresh />
+          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Нагрузка" onRefresh />
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
