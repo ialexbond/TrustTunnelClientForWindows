@@ -3,6 +3,7 @@ import {
   Shield,
   Users,
   Gauge,
+  Zap,
   ChevronRight,
   ArrowDown,
   ArrowUp,
@@ -22,8 +23,8 @@ function CardTitle({ icon, title, clickable, onRefresh }: { icon?: React.ReactNo
   return (
     <div className="flex items-center justify-between mb-3">
       <div className="flex items-center gap-2">
-        {icon && <span style={muted}>{icon}</span>}
-        <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{title}</span>
+        {icon && <span className="flex items-center justify-center w-5 h-5 shrink-0" style={muted}>{icon}</span>}
+        <span className="text-lg font-[var(--font-weight-semibold)] leading-none" style={primary}>{title}</span>
       </div>
       <div className="flex items-center gap-1">
         {onRefresh && <button className="p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors" aria-label="Обновить" style={muted}><RefreshCw className="w-4 h-4" /></button>}
@@ -75,7 +76,7 @@ function OverviewMockup() {
         </section>
 
         <section aria-label="Скорость соединения" className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" onRefresh />
+          <CardTitle icon={<Zap className="w-5 h-5" />} title="Скорость" onRefresh />
           <div className="flex-1 flex items-center justify-center">
             <div className="flex items-center gap-2">
               <ArrowDown className="w-8 h-8" style={{ color: "var(--color-success-400)" }} />
@@ -189,7 +190,7 @@ function OverviewMockupMixed() {
         </div>
 
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" onRefresh />
+          <CardTitle icon={<Zap className="w-5 h-5" />} title="Скорость" onRefresh />
           <div className="flex-1 flex items-center justify-center">
             <p className="text-sm" style={muted}>Не замерена</p>
           </div>
