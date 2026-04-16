@@ -26,6 +26,19 @@ export function translateSshError(error: string, t: TFunction): string {
     case "SSH_EXEC_FAILED":
       return t("sshErrors.execFailed", { detail: parts[1] || "" });
 
+    // ─── Network (Phase 12.5) ───
+    case "SSH_DNS_FAILED":
+      return t("sshErrors.dnsFailed", { host: parts[1] || "" });
+    case "SSH_NETWORK_UNREACHABLE":
+      return t("sshErrors.networkUnreachable", { host: parts[1] || "" });
+    case "SSH_CONNECTION_REFUSED":
+      return t("sshErrors.connectionRefused", {
+        host: parts[1] || "",
+        port: parts[2] || "",
+      });
+    case "SSH_TLS_HANDSHAKE_FAILED":
+      return t("sshErrors.tlsHandshakeFailed", { host: parts[1] || "" });
+
     // ─── Authentication ───
     case "SSH_AUTH_FAILED":
       return t("sshErrors.authFailed");
@@ -83,6 +96,13 @@ export function translateSshError(error: string, t: TFunction): string {
       return t("sshErrors.killProcessFailed", { detail: parts[1] || "" });
 
     default:
+      // Dev-warn: surface unknown SSH_* codes for early detection in dev sessions
+      if (import.meta.env.DEV && code.startsWith("SSH_")) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[translateSshError] Unknown SSH error code: ${code}, raw: ${raw}`,
+        );
+      }
       // Fallback: return raw error (already in English or unknown format)
       return raw;
   }

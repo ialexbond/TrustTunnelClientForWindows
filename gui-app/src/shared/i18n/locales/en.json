@@ -1034,7 +1034,11 @@
     "uninstallFailed": "Could not fully uninstall TrustTunnel (code {{code}}). Check logs.",
     "certRenewFailed": "Failed to renew certificate (code {{code}}). Check logs.",
     "mkdirFailed": "Failed to create directory: {{detail}}",
-    "killProcessFailed": "Failed to terminate process: {{detail}}"
+    "killProcessFailed": "Failed to terminate process: {{detail}}",
+    "dnsFailed": "Could not resolve address for {{host}}. Check DNS or use direct IP.",
+    "networkUnreachable": "Network unreachable for {{host}}. Check your internet connection.",
+    "connectionRefused": "Server {{host}}:{{port}} refused the connection. Service not running or port closed.",
+    "tlsHandshakeFailed": "Could not establish secure connection with {{host}}. Check server SSH keys."
   },
   "vpnErrors": {
     "tunnelDown": "VPN connection lost. Check server connectivity and press Connect.",
