@@ -12,6 +12,7 @@ import {
   Radio,
   Server,
   Globe,
+  ArrowUpCircle,
 } from "lucide-react";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { Badge } from "../../shared/ui/Badge";
@@ -33,6 +34,18 @@ function CardTitle({ icon, title, clickable }: { icon: React.ReactNode; title: s
   );
 }
 
+function InfoRow({ icon, label, value }: { icon?: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        {icon && <span style={muted}>{icon}</span>}
+        <span className="text-sm" style={muted}>{label}</span>
+      </div>
+      <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{value}</span>
+    </div>
+  );
+}
+
 function OverviewMockup() {
   return (
     <div className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3" style={{ backgroundColor: "var(--color-bg-primary)" }}>
@@ -40,59 +53,52 @@ function OverviewMockup() {
       {/* ── Row 1: Status + Protocol + Speed + Users ── */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
 
-        {/* Статус — компактный */}
+        {/* Статус */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" />
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
-            <Badge variant="success" size="sm">42ms</Badge>
           </div>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={muted}>IP</span>
-              <span className="text-xs font-[var(--font-weight-semibold)]" style={primary}>185.22.153.xx</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={muted}>&#127465;&#127466;</span>
-              <span className="text-xs" style={primary}>Германия</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={muted}>Uptime</span>
-              <span className="text-xs font-[var(--font-weight-semibold)]" style={primary}>14д 7ч</span>
-            </div>
+          <div className="space-y-2">
+            <InfoRow icon={<Activity className="w-3.5 h-3.5" />} label="Ping" value={<Badge variant="success" size="sm">42ms</Badge>} />
+            <InfoRow icon={<Globe className="w-3.5 h-3.5" />} label="IP" value="185.22.153.xx" />
+            <InfoRow label="Страна" value={<span>&#127465;&#127466; Германия</span>} />
+            <InfoRow icon={<Clock className="w-3.5 h-3.5" />} label="Uptime" value="14д 7ч" />
           </div>
         </div>
 
-        {/* Протокол — компактный */}
+        {/* Протокол — название крупно, версия крупно текстом */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Radio className="w-5 h-5" />} title="Протокол" clickable />
-          <p className="text-lg font-[var(--font-weight-semibold)]" style={primary}>TrustTunnel</p>
+          <p className="text-xl font-[var(--font-weight-semibold)]" style={primary}>TrustTunnel</p>
           <div className="flex items-center gap-2 mt-auto pt-2">
-            <Badge variant="neutral" size="sm">v3.1.0</Badge>
-            <Badge variant="success" size="sm">Актуальная</Badge>
+            <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>v1.0.49</span>
+            <span className="text-xs" style={{ color: "var(--color-success-500)" }}>актуальная</span>
           </div>
         </div>
 
-        {/* Скорость — один ряд, крупные цифры слева и справа */}
+        {/* Скорость — крупные цифры, сепаратор */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
-          <div className="flex-1 flex items-center justify-center gap-8">
+          <div className="flex-1 flex items-center justify-center">
             <div className="flex items-center gap-2">
-              <ArrowDown className="w-7 h-7" style={{ color: "var(--color-success-400)" }} />
-              <span className="text-3xl font-[var(--font-weight-semibold)]" style={primary}>124</span>
+              <ArrowDown className="w-8 h-8" style={{ color: "var(--color-success-400)" }} />
+              <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, ...primary }}>124</span>
               <span className="text-xs" style={muted}>Мбит/с</span>
             </div>
+            {/* Separator */}
+            <div className="self-stretch mx-4" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
             <div className="flex items-center gap-2">
-              <ArrowUp className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
-              <span className="text-3xl font-[var(--font-weight-semibold)]" style={primary}>98</span>
+              <ArrowUp className="w-8 h-8" style={{ color: "var(--color-warning-500)" }} />
+              <span style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)", fontWeight: 600, ...primary }}>98</span>
               <span className="text-xs" style={muted}>Мбит/с</span>
             </div>
           </div>
           <p className="text-xs" style={muted}>2 мин назад</p>
         </div>
 
-        {/* Пользователи — тайтл + крупная цифра */}
+        {/* Пользователей */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователей" clickable />
           <div className="flex-1 flex items-center justify-center">
@@ -123,7 +129,7 @@ function OverviewMockup() {
           </div>
         </div>
 
-        {/* Нагрузка — два ряда, без сепаратора, крупнее */}
+        {/* Нагрузка */}
         <div className={card} style={cardBg}>
           <CardTitle icon={<Cpu className="w-5 h-5" />} title="Нагрузка" />
           <div className="space-y-3">
@@ -152,43 +158,37 @@ function OverviewMockup() {
   );
 }
 
-/* ── Variant 2 ── */
+/* ── Variant 2: update available, speed not measured ── */
 function OverviewMockupMixed() {
   return (
     <div className="flex-1 flex flex-col overflow-auto scroll-overlay py-4 px-6 gap-3" style={{ backgroundColor: "var(--color-bg-primary)" }}>
       <div className="grid gap-3" style={{ gridTemplateColumns: "1.5fr 1.5fr 2fr 1fr" }}>
         <div className={card} style={cardBg}>
           <CardTitle icon={<Server className="w-5 h-5" />} title="Статус" />
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-3">
             <StatusIndicator status="success" size="md" pulse />
             <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
-            <Badge variant="warning" size="sm">187ms</Badge>
           </div>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={muted}>IP</span>
-              <span className="text-xs font-[var(--font-weight-semibold)]" style={primary}>45.87.214.xx</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={muted}>&#127475;&#127473;</span>
-              <span className="text-xs" style={primary}>Нидерланды</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={muted}>Uptime</span>
-              <span className="text-xs font-[var(--font-weight-semibold)]" style={primary}>47д 3ч</span>
-            </div>
+          <div className="space-y-2">
+            <InfoRow icon={<Activity className="w-3.5 h-3.5" />} label="Ping" value={<Badge variant="warning" size="sm">187ms</Badge>} />
+            <InfoRow icon={<Globe className="w-3.5 h-3.5" />} label="IP" value="45.87.214.xx" />
+            <InfoRow label="Страна" value={<span>&#127475;&#127473; Нидерланды</span>} />
+            <InfoRow icon={<Clock className="w-3.5 h-3.5" />} label="Uptime" value="47д 3ч" />
           </div>
         </div>
 
+        {/* Протокол — обновление доступно */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Radio className="w-5 h-5" />} title="Протокол" clickable />
-          <p className="text-lg font-[var(--font-weight-semibold)]" style={primary}>TrustTunnel</p>
+          <p className="text-xl font-[var(--font-weight-semibold)]" style={primary}>TrustTunnel</p>
           <div className="flex items-center gap-2 mt-auto pt-2">
-            <Badge variant="neutral" size="sm">v3.0.2</Badge>
-            <Badge variant="warning" size="sm">Обновление</Badge>
+            <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>v1.0.47</span>
+            <ArrowUpCircle className="w-5 h-5" style={{ color: "var(--color-warning-500)" }} />
+            <span className="text-xs" style={{ color: "var(--color-warning-500)" }}>1.0.49</span>
           </div>
         </div>
 
+        {/* Скорость — не замерена */}
         <div className={`${card} flex flex-col`} style={cardBg}>
           <CardTitle icon={<Gauge className="w-5 h-5" />} title="Скорость" />
           <div className="flex-1 flex items-center justify-center">
