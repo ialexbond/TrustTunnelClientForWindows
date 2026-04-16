@@ -4,6 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { formatError } from "../../shared/utils/formatError";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
+import { useUsersState, type UsersState } from "./useUsersState";
+import { useVersionsState, type VersionsState } from "./useVersionsState";
+import { useLogsState, type LogsState } from "./useLogsState";
+import { useDiagnosticsState, type DiagnosticsState } from "./useDiagnosticsState";
+import { useDangerZoneState, type DangerZoneState } from "./useDangerZoneState";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -37,11 +42,27 @@ export type ActionResult = { type: "ok" | "error"; message: string } | null;
 // Hook
 // ═══════════════════════════════════════════════════════
 
+/**
+ * useServerState (Phase 12.5 refactor):
+ * Core SSH state only — serverInfo, loading/error, sshParams, panel data,
+ * loadServerInfo, runAction, optimistic update helpers.
+ *
+ * Domain slices moved to dedicated hooks and re-exposed on the returned
+ * ServerState so existing sections continue to read via `state.X`:
+ *   - useUsersState      (selectedUser, newUsername, newPassword, etc.)
+ *   - useVersionsState   (availableVersions, selectedVersion, ...)
+ *   - useLogsState       (serverLogs, showLogs, logsLoading)
+ *   - useDiagnosticsState (diagResult, showDiag, diagLoading)
+ *   - useDangerZoneState (rebooting, uninstallLoading)
+ *
+ * This keeps ServerPanelProps stable (D-06) while collapsing useServerState
+ * from 293 lines to ~160.
+ */
 export function useServerState(props: ServerPanelProps) {
   const { t } = useTranslation();
   const { host, port, sshUser, sshPassword, sshKeyPath, onSwitchToSetup, onClearConfig, onConfigExported, onPortChanged } = props;
 
-  // ─── State: Server Info ───
+  // ─── Core Server Info ───
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,40 +70,17 @@ export function useServerState(props: ServerPanelProps) {
   const [actionResult, setActionResult] = useState<ActionResult>(null);
   const pushSuccess = useSnackBar();
 
-  // ─── State: Users ───
-  const [selectedUser, setSelectedUser] = useState<string | null>(null);
-  const [newUsername, setNewUsername] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [showNewPw, setShowNewPw] = useState(false);
-  const [exportingUser, setExportingUser] = useState<string | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [continueLoading, setContinueLoading] = useState(false);
-
-  // ─── State: Versions ───
-  const [availableVersions, setAvailableVersions] = useState<string[]>([]);
-  const [selectedVersion, setSelectedVersion] = useState("");
-  const [showVersions, setShowVersions] = useState(false);
-
-  // ─── State: Panel data (config + cert) ───
+  // ─── Panel data (config + cert) ───
   const [configRaw, setConfigRaw] = useState<string | null>(null);
   const [certRaw, setCertRaw] = useState<unknown>(null);
   const [panelDataLoaded, setPanelDataLoaded] = useState(false);
 
-  // ─── State: Logs ───
-  const [serverLogs, setServerLogs] = useState("");
-  const [showLogs, setShowLogs] = useState(false);
-  const [logsLoading, setLogsLoading] = useState(false);
-
-  // ─── State: Diagnostics ───
-  const [diagResult, setDiagResult] = useState<string | null>(null);
-  const [showDiag, setShowDiag] = useState(false);
-  const [diagLoading, setDiagLoading] = useState(false);
-
-  // ─── State: Reboot ───
-  const [rebooting, setRebooting] = useState(false);
-
-  // ─── State: Danger Zone ───
-  const [uninstallLoading, setUninstallLoading] = useState(false);
+  // ─── Domain slices ───
+  const users = useUsersState();
+  const versions = useVersionsState(serverInfo);
+  const logs = useLogsState();
+  const diagnostics = useDiagnosticsState();
+  const dangerZone = useDangerZoneState();
 
   // ─── SSH params shorthand ───
   const sshParams = {
@@ -117,8 +115,6 @@ export function useServerState(props: ServerPanelProps) {
         }
         if (certResult.status === "fulfilled") setCertRaw(certResult.value);
         setPanelDataLoaded(true);
-      } else if (info.installed && silent) {
-        // Silent refresh — don't reload config/cert
       }
     } catch (e) {
       if (!silent) {
@@ -150,7 +146,7 @@ export function useServerState(props: ServerPanelProps) {
         await fn();
         // Refresh state first, then show snackbar
         await loadServerInfo(true);
-        pushSuccess(successMessage || t('server.actions.success_generic'));
+        pushSuccess(successMessage || t("server.actions.success_generic"));
       } catch (e) {
         setActionResult({ type: "error", message: translateSshError(formatError(e), t) });
       } finally {
@@ -160,43 +156,25 @@ export function useServerState(props: ServerPanelProps) {
     [loadServerInfo, t, pushSuccess]
   );
 
-  // ─── Auto-dismiss action result after 5 seconds (errors only, success goes to snackbar queue) ───
+  // ─── Auto-dismiss action result after 5 seconds (errors only) ───
   useEffect(() => {
     if (!actionResult || actionResult.type === "ok") return;
     const timer = setTimeout(() => setActionResult(null), 5000);
     return () => clearTimeout(timer);
   }, [actionResult]);
 
-  // ─── Load available versions ───
-  useEffect(() => {
-    invoke<string[]>("server_get_available_versions")
-      .then((versions) => {
-        setAvailableVersions(versions);
-        if (versions.length > 0) setSelectedVersion(versions[0]);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Once server info loads, switch selection to current installed version
-  useEffect(() => {
-    if (!serverInfo?.version || availableVersions.length === 0) return;
-    const currentV = serverInfo.version.replace(/^v/, "");
-    const match = availableVersions.find(v => v.replace(/^v/, "") === currentV);
-    if (match) setSelectedVersion(match);
-  }, [serverInfo?.version, availableVersions]);
-
   // ─── Optimistic user state updates ───
   const addUserToState = useCallback((username: string) => {
-    setServerInfo(prev => prev ? { ...prev, users: [...prev.users, username] } : prev);
+    setServerInfo((prev) => (prev ? { ...prev, users: [...prev.users, username] } : prev));
   }, []);
 
   const removeUserFromState = useCallback((username: string) => {
-    setServerInfo(prev => prev ? { ...prev, users: prev.users.filter(u => u !== username) } : prev);
+    setServerInfo((prev) => (prev ? { ...prev, users: prev.users.filter((u) => u !== username) } : prev));
   }, []);
 
-  // ─── Username validation ───
+  // ─── Username validation (depends on users domain + serverInfo) ───
   const usernameError = (() => {
-    const trimmed = newUsername.trim();
+    const trimmed = users.newUsername.trim();
     if (!trimmed) return "";
     if (/\s/.test(trimmed)) return "server.users.username_spaces";
     if (serverInfo?.users.includes(trimmed)) return "server.users.username_exists";
@@ -204,7 +182,7 @@ export function useServerState(props: ServerPanelProps) {
   })();
 
   return {
-    // Server info
+    // Core
     serverInfo,
     loading,
     error,
@@ -213,22 +191,6 @@ export function useServerState(props: ServerPanelProps) {
     setActionResult,
     pushSuccess,
 
-    // Users
-    selectedUser,
-    setSelectedUser,
-    newUsername,
-    setNewUsername,
-    newPassword,
-    setNewPassword,
-    showNewPw,
-    setShowNewPw,
-    exportingUser,
-    setExportingUser,
-    deleteLoading,
-    setDeleteLoading,
-    continueLoading,
-    setContinueLoading,
-
     // Panel data (preloaded)
     configRaw,
     setConfigRaw,
@@ -236,36 +198,12 @@ export function useServerState(props: ServerPanelProps) {
     setCertRaw,
     panelDataLoaded,
 
-    // Versions
-    availableVersions,
-    selectedVersion,
-    setSelectedVersion,
-    showVersions,
-    setShowVersions,
-
-    // Logs
-    serverLogs,
-    setServerLogs,
-    showLogs,
-    setShowLogs,
-    logsLoading,
-    setLogsLoading,
-
-    // Diagnostics
-    diagResult,
-    setDiagResult,
-    showDiag,
-    setShowDiag,
-    diagLoading,
-    setDiagLoading,
-
-    // Reboot
-    rebooting,
-    setRebooting,
-
-    // Danger zone
-    uninstallLoading,
-    setUninstallLoading,
+    // Domain slices — flattened onto ServerState for backward compat (D-06).
+    ...users,
+    ...versions,
+    ...logs,
+    ...diagnostics,
+    ...dangerZone,
 
     // Helpers
     sshParams,
@@ -291,3 +229,6 @@ export function useServerState(props: ServerPanelProps) {
 }
 
 export type ServerState = ReturnType<typeof useServerState>;
+
+// Re-export domain state types for consumers that want to depend on slices.
+export type { UsersState, VersionsState, LogsState, DiagnosticsState, DangerZoneState };
