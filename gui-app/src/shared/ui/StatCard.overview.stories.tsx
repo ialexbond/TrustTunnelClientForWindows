@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import {
   HeartPulse, Package, Zap, Users, Shield, Gauge,
   ArrowDown, ArrowUp, ChevronRight, RefreshCw, ArrowUpCircle,
+  Activity, Globe, Clock, Network,
 } from "lucide-react";
 import { StatusIndicator } from "./StatusIndicator";
 import { ProgressBar } from "./ProgressBar";
@@ -303,29 +304,29 @@ export const AllCards: Story = {
   name: "Все карточки",
   decorators: [(S) => <div style={{ width: 1060, backgroundColor: "var(--color-bg-primary)", padding: 16 }}><S /></div>],
   render: () => (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridAutoRows: "auto", gap: 12, width: "100%" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
 
-      {/* Статус — span 1 col */}
-      <Card padding="md">
+      {/* Статус */}
+      <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
         <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
-        <div className="flex items-center gap-2 py-1">
+        <div className="flex items-center justify-center gap-2 py-2">
           <StatusIndicator status="success" size="md" pulse />
           <span className="text-base font-[var(--font-weight-semibold)]" style={primary}>Работает</span>
         </div>
       </Card>
 
       {/* Ping */}
-      <Card padding="md">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm" style={muted}>Ping</span>
-          <span style={{ ...bigNum, color: "var(--color-success-500)" }}>42<span className="text-sm" style={muted}>ms</span></span>
+      <Card padding="md" style={{ flex: "1 1 140px", maxWidth: 180 }}>
+        <Title icon={<Activity className="w-5 h-5" />} text="Ping" />
+        <div className="flex items-center justify-center py-2">
+          <span style={{ ...bigNum, color: "var(--color-success-500)" }}>42<span className="text-sm ml-0.5" style={muted}>ms</span></span>
         </div>
       </Card>
 
-      {/* Скорость — span 2 cols */}
-      <Card padding="md" className="col-span-2">
+      {/* Скорость */}
+      <Card padding="md" style={{ flex: "2 1 380px" }}>
         <Title icon={<Zap className="w-5 h-5" />} text="Скорость" onRefresh />
-        <div className="flex items-center justify-center gap-8 py-1">
+        <div className="flex items-center justify-center gap-8 py-2">
           <div className="flex items-center gap-2">
             <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
             <span style={bigNum}>124</span>
@@ -341,49 +342,49 @@ export const AllCards: Story = {
       </Card>
 
       {/* IP */}
-      <Card padding="md">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm" style={muted}>IP-адрес</span>
+      <Card padding="md" style={{ flex: "1 1 180px", maxWidth: 240 }}>
+        <Title icon={<Network className="w-5 h-5" />} text="IP-адрес" />
+        <div className="flex items-center justify-center py-2">
           <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>185.22.153.xx</span>
         </div>
       </Card>
 
       {/* Страна */}
-      <Card padding="md">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm" style={muted}>Страна</span>
+      <Card padding="md" style={{ flex: "1 1 160px", maxWidth: 220 }}>
+        <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
+        <div className="flex items-center justify-center py-2">
           <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>🇩🇪 Германия</span>
         </div>
       </Card>
 
+      {/* Uptime */}
+      <Card padding="md" style={{ flex: "1 1 160px", maxWidth: 220 }}>
+        <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
+        <div className="flex items-center justify-center py-2">
+          <span style={bigNum}>14д 7ч</span>
+        </div>
+      </Card>
+
       {/* Версия протокола */}
-      <Card padding="md">
+      <Card padding="md" style={{ flex: "1 1 220px" }}>
         <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
-        <div className="flex items-center justify-center py-1">
+        <div className="flex items-center justify-center py-2">
           <span style={bigNum}>1.0.49</span>
         </div>
       </Card>
 
       {/* Пользователей */}
-      <Card padding="md">
+      <Card padding="md" style={{ flex: "1 1 180px" }}>
         <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
-        <div className="flex items-center justify-center py-1">
+        <div className="flex items-center justify-center py-2">
           <span style={bigNum}>2</span>
         </div>
       </Card>
 
-      {/* Uptime */}
-      <Card padding="md">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm" style={muted}>Uptime</span>
-          <span style={bigNum}>14д 7ч</span>
-        </div>
-      </Card>
-
-      {/* Безопасность — span 2 cols */}
-      <Card padding="md" className="col-span-2">
+      {/* Безопасность */}
+      <Card padding="md" style={{ flex: "2 1 400px" }}>
         <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
-        <div className="grid grid-cols-2 gap-2 mt-1">
+        <div className="grid grid-cols-4 gap-2 mt-1">
           {[
             { name: "Firewall", ok: true, label: "Активен" },
             { name: "Fail2Ban", ok: false, label: "Выключен" },
@@ -399,8 +400,8 @@ export const AllCards: Story = {
         </div>
       </Card>
 
-      {/* Нагрузка — span 1 col */}
-      <Card padding="md">
+      {/* Нагрузка */}
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
         <div className="space-y-2.5 mt-1">
           <div>
