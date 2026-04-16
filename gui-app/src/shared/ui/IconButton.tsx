@@ -14,8 +14,6 @@ export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
   tooltip?: string;
   /** Shows a loading spinner instead of the icon */
   loading?: boolean;
-  /** @deprecated use style prop or className instead */
-  color?: string;
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
@@ -26,7 +24,6 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       children,
       tooltip,
       loading = false,
-      color,
       disabled,
       className,
       onClick,
@@ -34,7 +31,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
     },
     ref,
   ) {
-    if (process.env.NODE_ENV !== "production" && !ariaLabel) {
+    if (import.meta.env.DEV && !ariaLabel) {
       console.error("IconButton requires aria-label for accessibility");
     }
 
@@ -54,7 +51,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
           "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
           className,
         )}
-        style={color ? { color } : { color: "var(--color-text-muted)" }}
+        style={{ color: "var(--color-text-muted)" }}
         {...rest}
       >
         {loading ? (
