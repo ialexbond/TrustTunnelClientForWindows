@@ -94,7 +94,7 @@ function OverviewMockup() {
 
         {/* Пользователи — тайтл + крупная цифра */}
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователи" clickable />
+          <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователей" clickable />
           <div className="flex-1 flex items-center justify-center">
             <span style={{ fontSize: "clamp(2.5rem, 6vw, 4rem)", fontWeight: 600, lineHeight: 1, ...primary }}>2</span>
           </div>
@@ -144,10 +144,6 @@ function OverviewMockup() {
               <div className="h-3 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
                 <div className="h-full rounded-full" style={{ width: "33%", backgroundColor: "var(--color-accent-interactive)" }} />
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4" style={muted} />
-              <span className="text-sm" style={muted}>Uptime: 14 дней 7 часов</span>
             </div>
           </div>
         </div>
@@ -205,7 +201,7 @@ function OverviewMockupMixed() {
         </div>
 
         <div className={`${card} flex flex-col`} style={cardBg}>
-          <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователи" clickable />
+          <CardTitle icon={<Users className="w-5 h-5" />} title="Пользователей" clickable />
           <div className="flex-1 flex items-center justify-center">
             <span style={{ fontSize: "clamp(2.5rem, 6vw, 4rem)", fontWeight: 600, lineHeight: 1, ...primary }}>5</span>
           </div>
@@ -251,10 +247,6 @@ function OverviewMockupMixed() {
               <div className="h-3 rounded-full" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
                 <div className="h-full rounded-full" style={{ width: "76%", backgroundColor: "var(--color-danger-500)" }} />
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4" style={muted} />
-              <span className="text-sm" style={muted}>Uptime: 47 дней 3 часа</span>
             </div>
           </div>
         </div>
