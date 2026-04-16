@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { ControlPanelPage } from "./ControlPanelPage";
-import { Skeleton } from "../shared/ui/Skeleton";
+import { ControlPanelPage, ServerPanelSkeleton } from "./ControlPanelPage";
 
 const meta: Meta<typeof ControlPanelPage> = {
   title: "Screens/ControlPanelPage",
@@ -40,36 +39,9 @@ export const NoCredentials: Story = {
 
 /**
  * Loading state: ServerPanelSkeleton shown during first SSH connection.
- * Replicates the skeleton layout from ControlPanelPage's ServerPanelSkeleton component.
+ * Uses the actual ServerPanelSkeleton component — single source of truth.
  */
 export const Loading: Story = {
   name: "Loading (Skeleton)",
-  render: () => (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header skeleton — address + disconnect */}
-      <div
-        className="flex items-center justify-between px-4 py-2 shrink-0"
-        style={{ borderBottom: "1px solid var(--color-border)" }}
-      >
-        <Skeleton variant="line" width="55%" height={14} />
-        <Skeleton variant="line" width="18%" height={14} />
-      </div>
-      {/* Tab bar skeleton — 5 pills */}
-      <div
-        className="flex items-center shrink-0 gap-1 px-2 py-1"
-        style={{ borderBottom: "1px solid var(--color-border)" }}
-      >
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} variant="card" className="flex-1" height={32} />
-        ))}
-      </div>
-      {/* Content skeleton */}
-      <div className="flex-1 px-6 py-4 space-y-4">
-        <Skeleton variant="card" height={80} />
-        <Skeleton variant="line" width="40%" height={14} />
-        <Skeleton variant="line" width="70%" height={14} />
-        <Skeleton variant="line" width="55%" height={14} />
-      </div>
-    </div>
-  ),
+  render: () => <ServerPanelSkeleton />,
 };
