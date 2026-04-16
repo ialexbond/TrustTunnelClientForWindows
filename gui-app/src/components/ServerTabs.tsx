@@ -13,6 +13,8 @@ import type { ServerState } from "./server/useServerState";
 import { OverviewSection } from "./server/OverviewSection";
 import { UsersSection } from "./server/UsersSection";
 import { ServerSettingsSection } from "./server/ServerSettingsSection";
+import { SecurityTabSection } from "./server/SecurityTabSection";
+import { UtilitiesTabSection } from "./server/UtilitiesTabSection";
 import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 
 type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
@@ -137,7 +139,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
           }}
           aria-hidden={activeTab !== "security"}
         >
-          <div className="text-sm text-[var(--color-text-muted)]">Security tab (Plan 03)</div>
+          <SecurityTabSection state={state} />
         </div>
         <div
           className="h-full flex flex-col overflow-hidden scroll-overlay py-4 px-6 space-y-4"
@@ -150,7 +152,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
           }}
           aria-hidden={activeTab !== "utilities"}
         >
-          <div className="text-sm text-[var(--color-text-muted)]">Utilities tab (Plan 03)</div>
+          <UtilitiesTabSection state={state} />
         </div>
       </div>
 
