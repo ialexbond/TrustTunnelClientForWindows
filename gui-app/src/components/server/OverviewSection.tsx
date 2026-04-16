@@ -2,18 +2,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Tag,
-  Shield,
-  Network,
-  Users,
   Loader2,
   WifiOff,
   Activity,
   RefreshCw,
 } from "lucide-react";
-import { Card, CardHeader } from "../../shared/ui/Card";
+import { Card } from "../../shared/ui/Card";
 import { Badge } from "../../shared/ui/Badge";
-import { StatCard } from "../../shared/ui/StatCard";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { IconButton } from "../../shared/ui/IconButton";
 import { CertSection } from "./CertSection";
@@ -113,87 +108,80 @@ export function OverviewSection({ state }: Props) {
 
   return (
     <>
-      {/* Block 1: Server Status */}
+      {/* Block 1: Server Status — compact single card */}
       <Card padding="lg">
-        <CardHeader
-          title={t("server.status.title")}
-          icon={<Activity className="w-4 h-4" />}
-        />
-
-        {/* Rebooting state */}
         {rebooting ? (
-          <div className="flex items-center gap-3 mb-4 py-2">
+          <div className="flex items-center gap-3 py-1">
             <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-warning-500)" }} />
             <div>
               <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-warning-500)" }}>
                 {t("server.status.rebooting")}
               </span>
-              <span className="text-xs ml-2" style={{ color: "var(--color-text-muted)" }}>
-                {rebootCountdown > 0 ? `${rebootCountdown}s` : ""}
-              </span>
+              {rebootCountdown > 0 && (
+                <span className="text-xs ml-2" style={{ color: "var(--color-text-muted)" }}>
+                  {rebootCountdown}s
+                </span>
+              )}
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {/* StatusIndicator dot — replaces raw div */}
-            <StatusIndicator
-              status={serverInfo.serviceActive ? "success" : "danger"}
-              size="md"
-              pulse={serverInfo.serviceActive}
-              label={serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
-            />
-            <span className="text-base font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
-              {serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
-            </span>
-            {/* IP removed — already shown in ServerTabs header (DC-03 fix) */}
-            <IconButton
-              aria-label={t("server.status.refresh_aria")}
-              icon={refreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              onClick={handleSoftRefresh}
-              disabled={refreshing}
-              className="h-9 w-9"
-            />
-            {ping !== null && ping > 0 && (
-              <Badge variant={pingVariant as "success" | "warning" | "danger" | "neutral"} size="sm">
-                <Activity className="w-2.5 h-2.5" />
-                {ping}ms
-              </Badge>
-            )}
-            {ping !== null && ping <= 0 && (
-              <Badge variant="neutral" size="sm">
-                <WifiOff className="w-2.5 h-2.5" />
-                {t("server.status.no_connection")}
-              </Badge>
-            )}
+          <div className="space-y-3">
+            {/* Status row */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <StatusIndicator
+                  status={serverInfo.serviceActive ? "success" : "danger"}
+                  size="md"
+                  pulse={serverInfo.serviceActive}
+                  label={serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
+                />
+                <span className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+                  {serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
+                </span>
+                {ping !== null && ping > 0 && (
+                  <Badge variant={pingVariant as "success" | "warning" | "danger" | "neutral"} size="sm">
+                    <Activity className="w-2.5 h-2.5" />
+                    {ping}ms
+                  </Badge>
+                )}
+                {ping !== null && ping <= 0 && (
+                  <Badge variant="neutral" size="sm">
+                    <WifiOff className="w-2.5 h-2.5" />
+                    {t("server.status.no_connection")}
+                  </Badge>
+                )}
+              </div>
+              <IconButton
+                aria-label={t("server.status.refresh_aria")}
+                icon={refreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                onClick={handleSoftRefresh}
+                disabled={refreshing}
+              />
+            </div>
+
+            {/* Info rows — clean label:value pairs */}
+            <div
+              className="pt-3 space-y-2"
+              style={{ borderTop: "1px solid var(--color-border)" }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.overview.version")}</span>
+                <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+                  {serverInfo.version || "?"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.overview.protocol")}</span>
+                <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+                  {protocolValue}
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </Card>
 
-      {/* Block 2: StatCard 2×2 grid */}
-      <div className="grid grid-cols-2 gap-4">
-        <StatCard
-          label={t("server.overview.version")}
-          value={serverInfo.version || "?"}
-          icon={<Tag className="w-4 h-4" />}
-        />
-        <StatCard
-          label={t("server.overview.protocol")}
-          value={protocolValue}
-          icon={<Shield className="w-4 h-4" />}
-        />
-        <StatCard
-          label={t("server.overview.port")}
-          value={listenPort ? String(listenPort) : "?"}
-          icon={<Network className="w-4 h-4" />}
-        />
-        <StatCard
-          label={t("server.overview.users")}
-          value={String(serverInfo.users?.length ?? 0)}
-          icon={<Users className="w-4 h-4" />}
-        />
-      </div>
-
-      {/* Block 3: TLS Certificate — use CertSection as sub-component (Pitfall 3) */}
+      {/* Block 2: TLS Certificate */}
       <CertSection state={state} />
     </>
   );

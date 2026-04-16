@@ -9,8 +9,10 @@ import {
   Wrench,
   LogOut,
 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "../shared/lib/cn";
 import { Tooltip } from "../shared/ui/Tooltip";
+import { Skeleton } from "../shared/ui/Skeleton";
 import type { ServerState } from "./server/useServerState";
 import { OverviewSection } from "./server/OverviewSection";
 import { UsersSection } from "./server/UsersSection";
@@ -65,7 +67,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
       <div
         role="tablist"
         aria-label={t("tabs.server_tabs", "Серверные вкладки")}
-        className="flex items-center shrink-0 px-6"
+        className="flex items-center shrink-0 px-6 gap-1"
         style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
       >
         {tabs.map((tab, idx) => (
@@ -82,7 +84,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
             }}
             onKeyDown={(e) => handleTabKeyDown(e, idx)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-2 mx-1 text-xs font-[var(--font-weight-semibold)] transition-colors rounded-[var(--radius-md)]",
+              "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-[var(--font-weight-semibold)] transition-colors rounded-[var(--radius-md)]",
               "focus-visible:shadow-[var(--focus-ring)] outline-none",
               activeTab === tab.id
                 ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-[var(--shadow-xs)]"
@@ -140,11 +142,27 @@ export function ServerTabs({ state }: ServerTabsProps) {
             }}
             aria-hidden={activeTab !== tab.id}
           >
-            {tab.id === "overview" && <OverviewSection state={state} />}
-            {tab.id === "users" && <UsersSection state={state} />}
-            {tab.id === "configuration" && <ServerSettingsSection state={state} />}
-            {tab.id === "security" && <SecurityTabSection state={state} />}
-            {tab.id === "utilities" && <UtilitiesTabSection state={state} />}
+            {state.loading ? (
+              <div className="space-y-4">
+                <Skeleton variant="card" height={100} />
+                <Skeleton variant="line" width="60%" height={14} />
+                <Skeleton variant="line" width="40%" height={14} />
+                <Skeleton variant="card" height={80} />
+              </div>
+            ) : state.error ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3" style={{ color: "var(--color-text-muted)" }}>
+                <AlertTriangle className="w-8 h-8" style={{ color: "var(--color-danger-400)" }} />
+                <p className="text-sm text-center max-w-sm">{state.error}</p>
+              </div>
+            ) : (
+              <>
+                {tab.id === "overview" && <OverviewSection state={state} />}
+                {tab.id === "users" && <UsersSection state={state} />}
+                {tab.id === "configuration" && <ServerSettingsSection state={state} />}
+                {tab.id === "security" && <SecurityTabSection state={state} />}
+                {tab.id === "utilities" && <UtilitiesTabSection state={state} />}
+              </>
+            )}
           </div>
         ))}
       </div>
