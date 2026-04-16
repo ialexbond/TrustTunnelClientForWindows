@@ -77,12 +77,16 @@ describe("ServerSettingsSection", () => {
     expect(screen.getByText(i18n.t("server.config.toggles_title"))).toBeInTheDocument();
   });
 
-  it("renders network section with BBR toggle", () => {
+  it("no longer embeds BBR toggle (moved to UtilitiesTabSection in Phase 11)", () => {
     const state = makeState();
     render(<ServerSettingsSection state={state} />);
-    expect(screen.getByText(i18n.t("server.config.network_title"))).toBeInTheDocument();
-    // BBR label from Toggle component
-    expect(screen.getByText(i18n.t("server.utilities.bbr.label"))).toBeInTheDocument();
+    // BBR and the network_title heading were relocated to UtilitiesTabSection's
+    // "BBR Toggle" block in Phase 11 (4-tab restructure). The feature-toggles
+    // area remains here but no longer contains BBR.
+    expect(screen.queryByText(i18n.t("server.utilities.bbr.label"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("server.config.network_title"))).not.toBeInTheDocument();
+    // Sanity: feature toggles title still rendered by this section.
+    expect(screen.getByText(i18n.t("server.config.toggles_title"))).toBeInTheDocument();
   });
 
   it("renders Advanced accordion collapsed by default", () => {
