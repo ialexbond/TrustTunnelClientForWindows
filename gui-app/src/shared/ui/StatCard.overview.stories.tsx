@@ -297,11 +297,11 @@ export const Load: Story = {
 /* ── Все вместе — края упираются в контейнер ── */
 export const AllCards: Story = {
   name: "Все карточки",
-  decorators: [(S) => <div style={{ width: 960, backgroundColor: "var(--color-bg-primary)", padding: 16 }}><S /></div>],
+  decorators: [(S) => <div style={{ width: 1060, backgroundColor: "var(--color-bg-primary)", padding: 16 }}><S /></div>],
   render: () => (
     <div className="flex flex-col gap-3" style={{ width: "100%" }}>
       {/* Row 1: Статус + Версия + Скорость + Пользователи */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "minmax(250px, 1.5fr) minmax(200px, 1fr) minmax(320px, 2fr) minmax(170px, 0.8fr)" }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "minmax(270px, 1.5fr) minmax(230px, 1.2fr) minmax(300px, 2fr) minmax(195px, 1fr)" }}>
         {/* Статус */}
         <Card padding="md">
           <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
