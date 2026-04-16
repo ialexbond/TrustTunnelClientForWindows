@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "../shared/lib/cn";
+import { Divider } from "../shared/ui/Divider";
 import { Tooltip } from "../shared/ui/Tooltip";
 import { Skeleton } from "../shared/ui/Skeleton";
 import type { ServerState } from "./server/useServerState";
@@ -97,11 +98,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
         ))}
 
         {/* Separator + Disconnect icon */}
-        <div
-          aria-hidden="true"
-          className="shrink-0 mx-2 self-stretch my-1.5"
-          style={{ width: "1px", backgroundColor: "var(--color-border)" }}
-        />
+        <Divider orientation="vertical" className="shrink-0 mx-2 my-1.5" />
         <Tooltip text={t("control.disconnect")} position="bottom">
           <button
             type="button"
