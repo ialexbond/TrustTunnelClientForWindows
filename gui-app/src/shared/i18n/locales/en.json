@@ -26,7 +26,9 @@
     "danger": "Danger Zone",
     "overview": "Overview",
     "settings_server": "Settings",
-    "service": "Service"
+    "service": "Service",
+    "configuration": "Configuration",
+    "utilities": "Utilities"
   },
   "status": {
     "connected": "Connected",
@@ -233,7 +235,9 @@
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
     "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them.",
     "panelCrash": "An error occurred in the {{panel}} panel. Other panels still work.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "download_logs": "Download logs",
+    "go_home": "Go home"
   },
   "confirmations": {
     "irreversible_action": "This action cannot be undone. Continue?"
@@ -688,7 +692,12 @@
       "toggles_title": "Server parameters",
       "network_title": "Network",
       "advanced": "Advanced",
-      "save_settings": "Apply Settings"
+      "save_settings": "Apply Settings",
+      "port_title": "SSH Port"
+    },
+    "disconnect": {
+      "confirm_title": "Disconnect from server?",
+      "confirm_message": "The server will keep running. You can reconnect at any time."
     },
     "cert": {
       "title": "TLS Certificate",
@@ -992,7 +1001,7 @@
     "ssh_title": "Server Connection",
     "ssh_description": "Enter SSH credentials to manage server",
     "connect": "Connect",
-    "disconnect": "Change Server",
+    "disconnect": "Disconnect from server",
     "connecting": "Connecting...",
     "connection_error": "Connection error",
     "remember": "Credentials stored locally",
