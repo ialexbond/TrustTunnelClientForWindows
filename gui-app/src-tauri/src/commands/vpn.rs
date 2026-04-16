@@ -170,6 +170,12 @@ pub async fn vpn_connect(
         level: "info".into(),
     }).ok();
 
+    // Canonicalize config_path to prevent path traversal before passing to sidecar
+    let config_path = std::fs::canonicalize(&config_path)
+        .map_err(|e| format!("Invalid config path: {e}"))?
+        .to_string_lossy()
+        .to_string();
+
     // Resolve routing rules and write config files before starting sidecar
     let rules = routing_rules::load_routing_rules().unwrap_or_default();
     if let Err(e) = routing_rules::resolve_and_apply_inner(&config_path, &rules, geodata_state.as_ref()) {
