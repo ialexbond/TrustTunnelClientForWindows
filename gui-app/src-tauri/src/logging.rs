@@ -23,7 +23,7 @@ enum LogEntry {
 static LOG_TX: Mutex<Option<mpsc::Sender<LogEntry>>> = Mutex::new(None);
 
 /// Sensitive keys whose values must never appear in logs.
-const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client_random"];
+const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client_random", "host"];
 
 /// Replace values of sensitive keys with `***`.
 /// Handles patterns like `key = "value"`, `key: value`, `key=value`.
