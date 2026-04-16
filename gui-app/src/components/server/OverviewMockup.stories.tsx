@@ -74,7 +74,6 @@ function OverviewMockup() {
           <div className="flex-1 flex items-center justify-center">
             <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.49</span>
           </div>
-          <span className="text-xs" style={{ color: "var(--color-success-500)" }}>актуальная</span>
         </div>
 
         {/* Скорость — сепаратор короче, кнопка обновить */}
@@ -93,7 +92,6 @@ function OverviewMockup() {
               <span className="text-xs" style={muted}>Мбит/с</span>
             </div>
           </div>
-          <p className="text-xs" style={muted}>2 мин назад</p>
         </div>
 
         {/* Пользователей */}
@@ -194,7 +192,6 @@ function OverviewMockupMixed() {
             <span style={{ fontSize: "clamp(2rem, 5vw, 3rem)", fontWeight: 600, lineHeight: 1, ...primary }}>1.0.47</span>
             <ArrowUpCircle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
           </div>
-          <span className="text-xs" style={{ color: "var(--color-warning-500)" }}>доступна 1.0.49</span>
         </div>
 
         <div className={`${card} flex flex-col`} style={cardBg}>
