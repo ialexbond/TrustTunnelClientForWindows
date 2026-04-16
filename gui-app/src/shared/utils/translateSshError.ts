@@ -98,7 +98,6 @@ export function translateSshError(error: string, t: TFunction): string {
     default:
       // Dev-warn: surface unknown SSH_* codes for early detection in dev sessions
       if (import.meta.env.DEV && code.startsWith("SSH_")) {
-        // eslint-disable-next-line no-console
         console.warn(
           `[translateSshError] Unknown SSH error code: ${code}, raw: ${raw}`,
         );

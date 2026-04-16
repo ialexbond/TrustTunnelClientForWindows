@@ -1,20 +1,13 @@
 import { useRef, useState, useEffect, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Monitor, Cable, GitBranch, Settings, Info } from "lucide-react";
+import { getTabPanelId, getTabButtonId } from "./tabIds";
 import type { AppTab } from "../../shared/types";
 
 interface TabNavigationProps {
   activeTab: AppTab;
   onTabChange: (tab: AppTab) => void;
 }
-
-/**
- * Stable id for cross-referencing tabs ↔ panels (aria-controls / aria-labelledby).
- * App.tsx renders panels with id=`tabpanel-${tab.id}`. Using a constant avoids
- * remount churn and keeps DOM ids deterministic across renders.
- */
-export const getTabPanelId = (tabId: AppTab) => `tabpanel-${tabId}`;
-const getTabButtonId = (tabId: AppTab) => `tab-${tabId}`;
 
 interface TabDef {
   id: AppTab;
