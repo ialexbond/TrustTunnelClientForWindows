@@ -1,9 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { useState, useRef, useMemo, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import { getVersion } from "@tauri-apps/api/app";
-import { useActivityLog } from "./shared/hooks/useActivityLog";
 import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
@@ -14,7 +10,6 @@ import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
 import { PanelErrorBoundary } from "./shared/ui/PanelErrorBoundary";
-import { formatError } from "./shared/utils/formatError";
 import { VpnProvider } from "./shared/context/VpnContext";
 import { useKeyboardShortcuts } from "./shared/hooks/useKeyboardShortcuts";
 import { useTheme } from "./shared/hooks/useTheme";
@@ -25,6 +20,11 @@ import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
 import { useFileDrop } from "./shared/hooks/useFileDrop";
 import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
+import { useConfigLifecycle } from "./shared/hooks/useConfigLifecycle";
+import { useAutoConnect } from "./shared/hooks/useAutoConnect";
+import { useTabPersistence } from "./shared/hooks/useTabPersistence";
+import { useActivityLogStartup } from "./shared/hooks/useActivityLogStartup";
+import { useAppShellActions } from "./shared/hooks/useAppShellActions";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { EmptyState } from "./shared/ui/EmptyState";
 import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
@@ -32,23 +32,17 @@ import { Settings } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
 function App() {
-  // ─── Activity Log ───
-  const { log: activityLog } = useActivityLog();
-
-  // ─── Theme ───
+  // ─── Theme & Language ───
   const { themeMode, handleThemeChange, toggleTheme } = useTheme();
-
-  // ─── Language ───
   const { i18n, handleLanguageChange, toggleLanguage } = useLanguage();
 
   // ─── Navigation ───
   const [activeTab, setActiveTab] = useState<AppTab>(() => {
-    // Fresh start: config exists → connection, no config → control panel
-    // Tab is NOT restored from localStorage — always fresh on app start
     const savedConfig = localStorage.getItem("tt_config_path");
     return savedConfig ? "connection" : "control";
   });
 
+  // ─── Core VPN state ───
   const [status, setStatus] = useState<VpnStatus>("disconnected");
   const [config, setConfig] = useState<VpnConfig>(() => {
     const savedPath = localStorage.getItem("tt_config_path") || "";
@@ -58,19 +52,20 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
   const [_vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
-
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
   });
 
-  // ─── Update check ───
+  // ─── Panel remount keys ───
+  const [, setWizardKey] = useState(0);
+  const [controlKey] = useState(0);
+  const [settingsKey, setSettingsKey] = useState(0);
+  const [routingKey, setRoutingKey] = useState(0);
+
+  // ─── External integrations ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
-
-  // ─── Host Key Verification (TOFU) ───
   const { pending: hostKeyPending, respond: hostKeyRespond } = useHostKeyVerification();
-
-  // ─── VPN event listeners (status, internet-status, vpn-log, reconnect resolver) ───
   const reconnectResolve = useRef<(() => void) | null>(null);
   const pushSuccess = useSnackBar();
 
@@ -84,116 +79,21 @@ function App() {
     pushSuccess,
   });
 
-  // Deep-link state (used by ImportConfigModal in WelcomeStep, future installer support)
-  // For portable builds, deep-link is manual only (paste URL in import modal)
-
-  // ─── Config validation on startup ───
-  useEffect(() => {
-    const savedPath = localStorage.getItem("tt_config_path");
-    if (savedPath) {
-      invoke<{ vpn_mode?: string }>("read_client_config", { configPath: savedPath }).then((cfg) => {
-        if (cfg?.vpn_mode) setVpnMode(cfg.vpn_mode);
-      }).catch(() => {
-        localStorage.removeItem("tt_config_path");
-        localStorage.removeItem("tt_active_page");
-        localStorage.removeItem("tt_active_tab");
-        localStorage.removeItem("tt_connected_since");
-        localStorage.removeItem("trusttunnel_wizard");
-        setConfig({ configPath: "", logLevel: "info" });
-        setWizardKey(k => k + 1);
-        // Control tab auto-shows wizard when hasConfig is false
-      });
-    } else {
-      localStorage.removeItem("trusttunnel_wizard");
-      localStorage.removeItem("tt_active_page");
-      localStorage.removeItem("tt_active_tab");
-      localStorage.removeItem("tt_connected_since");
-
-      // Skip auto-detect if user explicitly cleared config
-      const wasCleared = localStorage.getItem("tt_config_cleared");
-      if (!wasCleared) {
-        invoke<string | null>("auto_detect_config").then((detected) => {
-          if (detected) {
-            setConfig(prev => ({ ...prev, configPath: detected }));
-            if (activeTab === "control") setActiveTab("connection");
-          }
-        }).catch(() => {});
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ─── Watch config file for external deletion ───
-  useEffect(() => {
-    if (config.configPath) {
-      invoke("watch_config_file", { configPath: config.configPath }).catch(() => {});
-    }
-    return () => { invoke("unwatch_config_file").catch(() => {}); };
-  }, [config.configPath]);
-
-  useEffect(() => {
-    const unlisten = listen<{ exists: boolean; path: string }>("config-file-changed", (event) => {
-      const { exists, path } = event.payload;
-      if (!exists && path === config.configPath) {
-        // Config file was deleted externally
-        localStorage.removeItem("tt_config_path");
-        setConfig({ configPath: "", logLevel: "info" });
-        setWizardKey(k => k + 1);
-        // Control tab auto-shows wizard when hasConfig is false
-        pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
-      } else if (exists && !config.configPath) {
-        // Config file appeared — reload it (dismisses error snackbar via success message)
-        setConfig({ configPath: path, logLevel: "info" });
-        localStorage.setItem("tt_config_path", path);
-        setSettingsKey(k => k + 1);
-        setActiveTab("connection");
-        pushSuccess(i18n.t("messages.config_file_restored", "Config loaded"));
-      }
-    });
-    return () => { unlisten.then(f => f()); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.configPath]);
-
-  // ─── Persist state ───
-  useEffect(() => {
-    localStorage.setItem("tt_active_tab", activeTab);
-    // Also persist with old key for backward compat
-    localStorage.setItem("tt_active_page", activeTab);
-  }, [activeTab]);
-  useEffect(() => {
-    localStorage.setItem("tt_config_path", config.configPath);
-    localStorage.setItem("tt_log_level", config.logLevel);
-  }, [config]);
-  useEffect(() => { localStorage.setItem("tt_vpn_status", status); }, [status]);
-  useEffect(() => {
-    if (connectedSince) {
-      localStorage.setItem("tt_connected_since", connectedSince.toISOString());
-    } else {
-      localStorage.removeItem("tt_connected_since");
-    }
-  }, [connectedSince]);
-
-  // ─── Auto-connect on startup ───
-  const autoConnectDone = useRef(false);
-  useEffect(() => {
-    if (autoConnectDone.current) return;
-    if (localStorage.getItem("tt_auto_connect") !== "true") return;
-    if (!config.configPath) return;
-    if (status !== "disconnected") return;
-    autoConnectDone.current = true;
-    const timer = setTimeout(() => {
-      invoke("vpn_connect", {
-        configPath: config.configPath,
-        logLevel: config.logLevel,
-      }).catch((e) => {
-        setError(formatError(e));
-        setStatus("error");
-      });
-      setStatus("connecting");
-    }, 1500);
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.configPath]);
+  // ─── Shell hooks (Phase 12.5 decomposition) ───
+  useConfigLifecycle({
+    config,
+    setConfig,
+    setVpnMode,
+    setWizardKey,
+    setSettingsKey,
+    activeTab,
+    setActiveTab,
+    pushSuccess,
+    i18n,
+  });
+  useAutoConnect({ config, status, setStatus, setError });
+  useTabPersistence({ activeTab, config, status, connectedSince });
+  useActivityLogStartup();
 
   // ─── VPN Actions ───
   const { handleConnect, handleDisconnect, handleReconnect } = useVpnActions({
@@ -205,54 +105,16 @@ function App() {
     reconnectResolve,
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [, setWizardKey] = useState(0);
-  const [controlKey] = useState(0);
-  const [settingsKey, setSettingsKey] = useState(0);
-  const [routingKey, setRoutingKey] = useState(0);
-
-  const handleClearConfig = useCallback(async () => {
-    // Disconnect VPN first if running
-    if (status === "connected" || status === "connecting") {
-      try {
-        setStatus("disconnecting");
-        await invoke("vpn_disconnect");
-      } catch { /* ignore */ }
-    }
-    setConfig({ configPath: "", logLevel: "info" });
-    localStorage.removeItem("tt_config_path");
-    localStorage.setItem("tt_config_cleared", "true"); // prevent auto-detect on restart
-    try {
-      const raw = localStorage.getItem("trusttunnel_wizard");
-      const obj = raw ? JSON.parse(raw) : {};
-      obj.wizardStep = "welcome";
-      obj.deploySteps = "{}";
-      obj.deployLogs = "[]";
-      obj.configPath = "";
-      obj.errorMessage = "";
-      localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
-    } catch { /* ignore */ }
-    setWizardKey(k => k + 1);
-    // Control tab auto-shows wizard when hasConfig is false
-  }, [status]);
-
-  // ─── Activity Log: app.start ───
-  useEffect(() => {
-    getVersion()
-      .then((version) => {
-        activityLog("STATE", `app.start version=${version}`, "App");
-      })
-      .catch(() => {
-        activityLog("STATE", "app.start version=unknown", "App");
-      });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset scroll on tab change
-  useEffect(() => {
-    document.querySelectorAll('[class*="overflow"]').forEach((el) => {
-      el.scrollTop = 0;
-    });
-  }, [activeTab]);
+  // ─── Shell action callbacks ───
+  const { handleClearConfig, handleDropConfig, handleDropRouting } = useAppShellActions({
+    status,
+    setStatus,
+    setConfig,
+    setWizardKey,
+    setSettingsKey,
+    setRoutingKey,
+    setActiveTab,
+  });
 
   // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..5 = navigate, etc.)
   useKeyboardShortcuts({
@@ -266,39 +128,29 @@ function App() {
   });
 
   // ─── File drag-and-drop ───
-  const handleDropConfig = useCallback((configPath: string) => {
-    setConfig(prev => ({ ...prev, configPath }));
-    localStorage.setItem("tt_config_path", configPath);
-    localStorage.removeItem("tt_config_cleared");
-    setSettingsKey(k => k + 1);
-    setActiveTab("connection");
-  }, []);
-
-  const handleDropRouting = useCallback(() => {
-    setRoutingKey(k => k + 1);
-    setActiveTab("routing");
-  }, []);
-
   const { isDragging } = useFileDrop({
     status,
     onConfigImported: handleDropConfig,
     onRoutingImported: handleDropRouting,
     pushSuccess,
-    isBusy: false, // drag-drop is safe on any tab — import uses a separate SSH session
+    isBusy: false,
   });
 
   const hasConfig = !!config.configPath;
   const showStatusPanel = hasConfig && activeTab !== "control";
 
-  const vpnContextValue = useMemo(() => ({
-    status,
-    connectedSince,
-    configPath: config.configPath,
-    vpnMode,
-    onConnect: handleConnect,
-    onDisconnect: handleDisconnect,
-    onReconnect: handleReconnect,
-  }), [status, connectedSince, config.configPath, vpnMode, handleConnect, handleDisconnect, handleReconnect]);
+  const vpnContextValue = useMemo(
+    () => ({
+      status,
+      connectedSince,
+      configPath: config.configPath,
+      vpnMode,
+      onConnect: handleConnect,
+      onDisconnect: handleDisconnect,
+      onReconnect: handleReconnect,
+    }),
+    [status, connectedSince, config.configPath, vpnMode, handleConnect, handleDisconnect, handleReconnect],
+  );
 
   const statusPanelNode = showStatusPanel ? (
     <StatusPanel
@@ -334,7 +186,7 @@ function App() {
           transition: "padding var(--transition-fast) var(--ease-out)",
         }}
       >
-        {/* Control Panel — always shows ControlPanelPage (handles no-creds internally) */}
+        {/* Control Panel */}
         <div
           className="h-full flex flex-col overflow-hidden"
           style={{
@@ -350,12 +202,12 @@ function App() {
             <ControlPanelPage
               key={controlKey}
               onConfigExported={(path) => {
-                setConfig(prev => ({ ...prev, configPath: path }));
+                setConfig((prev) => ({ ...prev, configPath: path }));
                 localStorage.setItem("tt_config_path", path);
-                setSettingsKey(k => k + 1);
+                setSettingsKey((k) => k + 1);
               }}
               onSwitchToSetup={() => {
-                setWizardKey(k => k + 1);
+                setWizardKey((k) => k + 1);
               }}
               onNavigateToSettings={() => {
                 setActiveTab("settings");
@@ -364,7 +216,7 @@ function App() {
           </PanelErrorBoundary>
         </div>
 
-        {/* Connection — VPN Settings or placeholder */}
+        {/* Connection */}
         <div
           className="h-full flex flex-col overflow-hidden"
           style={{
@@ -428,7 +280,7 @@ function App() {
           </PanelErrorBoundary>
         </div>
 
-        {/* Settings — App settings (theme, language, autostart) */}
+        {/* Settings */}
         <div
           className="h-full flex flex-col overflow-hidden"
           style={{
@@ -466,16 +318,15 @@ function App() {
           <AboutPanel
             updateInfo={updateInfo}
             onCheckUpdates={() => checkForUpdates(false)}
-            onOpenDownload={() => { if (updateInfo.downloadUrl) open(updateInfo.downloadUrl); }}
+            onOpenDownload={() => {
+              if (updateInfo.downloadUrl) open(updateInfo.downloadUrl);
+            }}
           />
         </div>
       </div>
 
       {/* Bottom tab navigation */}
-      <TabNavigation
-        activeTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
-      />
+      <TabNavigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab)} />
     </div>
 
     <ConfirmDialog
