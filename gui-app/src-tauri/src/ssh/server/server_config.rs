@@ -249,6 +249,12 @@ pub async fn update_config_feature(
     feature: String,
     enabled: bool,
 ) -> Result<(), String> {
+    // Whitelist: only known feature names may be interpolated into shell commands
+    let allowed_features = ["ping_enable", "speedtest_enable", "ipv6_available"];
+    if !allowed_features.contains(&feature.as_str()) {
+        return Err(format!("Invalid feature name: {}", feature));
+    }
+
     let sudo = detect_sudo(handle, app).await;
 
     let value = if enabled { "true" } else { "false" };
