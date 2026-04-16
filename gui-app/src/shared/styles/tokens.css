@@ -146,6 +146,7 @@
   /* Toggle */
   --color-toggle-off: rgba(255, 255, 255, 0.12);
   --color-toggle-on: var(--color-accent-400);
+  --color-toggle-thumb: #ffffff;
 
   /* Accent semantic aliases */
   --color-accent-interactive: var(--color-accent-400);
@@ -255,6 +256,7 @@
   /* Toggle */
   --color-toggle-off: rgba(0, 0, 0, 0.14);
   --color-toggle-on: var(--color-accent-500);
+  --color-toggle-thumb: #ffffff;
 
   /* Accent semantic aliases */
   --color-accent-interactive: var(--color-accent-500);

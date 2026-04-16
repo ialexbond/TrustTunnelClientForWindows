@@ -132,7 +132,7 @@ export function ServerStep(w: WizardState) {
                     className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
                     style={{
                       backgroundColor: keyInputMode === "file" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
-                      color: keyInputMode === "file" ? "#fff" : "var(--color-text-secondary)",
+                      color: keyInputMode === "file" ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
                     }}
                     onClick={() => setKeyInputMode("file")}
                   >
@@ -143,7 +143,7 @@ export function ServerStep(w: WizardState) {
                     className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
                     style={{
                       backgroundColor: keyInputMode === "paste" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
-                      color: keyInputMode === "paste" ? "#fff" : "var(--color-text-secondary)",
+                      color: keyInputMode === "paste" ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
                     }}
                     onClick={() => setKeyInputMode("paste")}
                   >
