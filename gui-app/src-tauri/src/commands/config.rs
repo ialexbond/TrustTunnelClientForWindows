@@ -4,6 +4,31 @@ use std::sync::Mutex;
 use tauri::Emitter;
 
 use crate::routing_rules::RoutingRules;
+use crate::ssh::portable_data_dir;
+
+/// Validate that a path is within the app's portable data directory (next to the exe).
+/// Prevents path traversal attacks where the frontend could read/write arbitrary files.
+fn validate_app_path(path: &str) -> Result<(), String> {
+    let canonical = std::fs::canonicalize(path)
+        .or_else(|_| {
+            // File may not exist yet (e.g. copy destination) — canonicalize parent
+            let p = std::path::Path::new(path);
+            if let Some(parent) = p.parent() {
+                std::fs::canonicalize(parent).map(|cp| cp.join(p.file_name().unwrap_or_default()))
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Invalid path"))
+            }
+        })
+        .map_err(|e| format!("Invalid path: {e}"))?;
+
+    let allowed_dir = std::fs::canonicalize(portable_data_dir())
+        .unwrap_or_else(|_| portable_data_dir());
+
+    if !canonical.starts_with(&allowed_dir) {
+        return Err("Access denied: path is outside the application data directory".into());
+    }
+    Ok(())
+}
 
 // ─── Config file watcher state ───────────────────────────────
 
@@ -59,6 +84,8 @@ impl ClientConfig {
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
 #[tauri::command]
 pub fn copy_file(source: String, destination: String) -> Result<(), String> {
+    validate_app_path(&source)?;
+    validate_app_path(&destination)?;
     std::fs::copy(&source, &destination)
         .map_err(|e| format!("Failed to copy file: {e}"))?;
     Ok(())
@@ -205,6 +232,7 @@ pub fn unwatch_config_file() {
 
 #[tauri::command]
 pub fn read_client_config(config_path: String) -> Result<serde_json::Value, String> {
+    validate_app_path(&config_path)?;
     let content = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read config: {e}"))?;
 
@@ -268,6 +296,7 @@ pub fn read_client_config(config_path: String) -> Result<serde_json::Value, Stri
 
 #[tauri::command]
 pub fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
+    validate_app_path(&config_path)?;
     // Safety: refuse to save config that's missing [endpoint] — would break the sidecar
     if config.get("endpoint").and_then(|e| e.as_object()).map_or(true, |e| e.is_empty()) {
         return Err("Refusing to save: endpoint section is missing or empty".into());
