@@ -27,6 +27,7 @@ const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client
 
 /// Replace values of sensitive keys with `***`.
 /// Handles patterns like `key = "value"`, `key: value`, `key=value`.
+/// Also masks bare IPv4 addresses in freetext (e.g. "Connected to 1.2.3.4:443").
 pub fn sanitize(text: &str) -> String {
     let mut result = text.to_string();
     for key in SENSITIVE_KEYS {
@@ -55,7 +56,85 @@ pub fn sanitize(text: &str) -> String {
             }
         }
     }
+
+    // Mask bare IPv4 addresses in freetext (e.g. "Connected to 1.2.3.4:443").
+    // Uses a manual scan to avoid pulling in the `regex` crate.
+    result = mask_ipv4_addresses(&result);
+
     result
+}
+
+/// Replace all bare IPv4 addresses (e.g. `1.2.3.4`) with `***`.
+/// A "bare" address is one not immediately preceded or followed by a digit or dot,
+/// so CIDR suffixes and decimal-heavy version strings are left untouched only when
+/// they don't form a valid quad. Each octet must be 1–3 decimal digits.
+fn mask_ipv4_addresses(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len);
+    let mut i = 0usize;
+
+    while i < len {
+        // A potential IP can only start with a digit that is NOT preceded by a digit or dot.
+        if bytes[i].is_ascii_digit() && (i == 0 || (!bytes[i - 1].is_ascii_digit() && bytes[i - 1] != b'.')) {
+            if let Some((ip_len, valid)) = try_parse_ipv4(bytes, i) {
+                if valid {
+                    out.push_str("***");
+                    i += ip_len;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+
+    out
+}
+
+/// Try to parse an IPv4 address starting at `pos` in `bytes`.
+/// Returns `Some((length, true))` if a valid quad was found,
+/// `Some((length, false))` if it looked like a quad but was invalid,
+/// or `None` if it doesn't start with an octet pattern.
+fn try_parse_ipv4(bytes: &[u8], pos: usize) -> Option<(usize, bool)> {
+    let len = bytes.len();
+    let mut i = pos;
+    let mut octets: [u16; 4] = [0; 4];
+
+    for oct_idx in 0..4 {
+        // Read up to 3 digits
+        let start = i;
+        let mut val: u16 = 0;
+        let mut digit_count = 0usize;
+        while i < len && bytes[i].is_ascii_digit() && digit_count < 3 {
+            val = val * 10 + (bytes[i] - b'0') as u16;
+            i += 1;
+            digit_count += 1;
+        }
+        if digit_count == 0 {
+            return None; // no digits at all
+        }
+        octets[oct_idx] = val;
+
+        if oct_idx < 3 {
+            // Must be followed by a dot
+            if i >= len || bytes[i] != b'.' {
+                return None;
+            }
+            i += 1; // consume dot
+        }
+        let _ = start;
+    }
+
+    // The character after the 4th octet must NOT be a digit or dot
+    // (to avoid matching inside longer number sequences like version strings).
+    if i < len && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+        return None;
+    }
+
+    let ip_len = i - pos;
+    let valid = octets.iter().all(|&o| o <= 255);
+    Some((ip_len, valid))
 }
 
 fn logs_dir() -> PathBuf {
@@ -338,5 +417,29 @@ mod tests {
         let result = sanitize(input);
         assert!(!result.contains("abc"), "value inside quotes not sanitized");
         assert!(result.contains("def"), "text after closing quote should remain");
+    }
+
+    #[test]
+    fn sanitize_masks_bare_ipv4_in_freetext() {
+        let input = "Connected to 1.2.3.4:443";
+        let result = sanitize(input);
+        assert!(!result.contains("1.2.3.4"), "bare IP not masked");
+        assert!(result.contains("***"), "masked placeholder missing");
+    }
+
+    #[test]
+    fn sanitize_masks_multiple_ips() {
+        let input = "peer 10.0.0.1 via gateway 192.168.1.1";
+        let result = sanitize(input);
+        assert!(!result.contains("10.0.0.1"), "first IP not masked");
+        assert!(!result.contains("192.168.1.1"), "second IP not masked");
+    }
+
+    #[test]
+    fn sanitize_does_not_mask_non_ip_numbers() {
+        let input = "version 1.2.3 and build 10.0";
+        let result = sanitize(input);
+        // These do not form valid IPv4 quads (only 3 / 2 octets)
+        assert_eq!(result, input, "non-IP numbers should not be modified");
     }
 }
