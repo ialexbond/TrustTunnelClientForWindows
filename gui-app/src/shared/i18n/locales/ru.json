@@ -982,7 +982,30 @@
       "version": "Версия",
       "protocol": "Протокол",
       "port": "Порт",
-      "users": "Подключений"
+      "users": "Подключений",
+      "cards": {
+        "status": "Статус",
+        "ping": "Ping",
+        "speed": "Скорость",
+        "userCount": "Пользователей",
+        "ip": "IP-адрес",
+        "country": "Страна",
+        "uptime": "Uptime",
+        "protocolVersion": "Версия протокола",
+        "security": "Безопасность",
+        "load": "Нагрузка"
+      },
+      "rebootingCountdown": "Перезагрузка",
+      "speedNotMeasured": "Не измерялась",
+      "refreshAria": "Обновить",
+      "security": {
+        "firewall": "Firewall",
+        "fail2ban": "Fail2Ban",
+        "sshKey": "SSH-ключ",
+        "tls": "TLS",
+        "tlsActive": "Активен",
+        "placeholder": "—"
+      }
     }
   },
   "users": {
