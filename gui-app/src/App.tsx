@@ -205,44 +205,9 @@ function App() {
     reconnectResolve,
   });
 
-  // ─── Setup / Config ───
-  const _handleSetupComplete = useCallback((configPath: string) => {
-    setConfig((prev) => ({ ...prev, configPath }));
-    localStorage.setItem("tt_config_path", configPath);
-    localStorage.removeItem("tt_config_cleared"); // re-enable auto-detect for future
-
-    // Copy SSH credentials from wizard to Rust backend storage (not localStorage)
-    try {
-      const raw = localStorage.getItem("trusttunnel_wizard");
-      if (raw) {
-        const obj = JSON.parse(raw);
-        if (obj.host && (obj.sshPassword || obj.sshKeyPath)) {
-          invoke("save_ssh_credentials", {
-            host: obj.host,
-            port: obj.port || "22",
-            user: obj.sshUser || "root",
-            password: obj.sshPassword || "",
-            keyPath: obj.sshKeyPath || null,
-          }).catch(() => {});
-        }
-      }
-    } catch { /* ignore */ }
-
-    // Check if user wants to go to settings instead of control panel
-    const navigateTo = localStorage.getItem("tt_navigate_after_setup");
-    localStorage.removeItem("tt_navigate_after_setup");
-
-    if (navigateTo === "settings") {
-      setSettingsKey(k => k + 1);
-      setActiveTab("settings");
-    } else {
-      setControlKey(k => k + 1);
-      setActiveTab("control");
-    }
-  }, []);
-
-  const [_wizardKey, setWizardKey] = useState(0);
-  const [controlKey, setControlKey] = useState(0);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [, setWizardKey] = useState(0);
+  const [controlKey] = useState(0);
   const [settingsKey, setSettingsKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
 
