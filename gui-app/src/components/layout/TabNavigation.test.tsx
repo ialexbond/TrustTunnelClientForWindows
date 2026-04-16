@@ -90,7 +90,7 @@ describe("TabNavigation", () => {
     const nav = container.querySelector("nav") || container.firstChild as HTMLElement;
     expect(nav).toBeTruthy();
     // At least the border-bottom of nav uses tokens
-    const rootStyle = nav?.getAttribute("style") || "";
+    void (nav?.getAttribute("style") || "");
     // We just verify a token var is present somewhere in tab container
     expect(container.innerHTML).toMatch(/var\(--/);
   });
