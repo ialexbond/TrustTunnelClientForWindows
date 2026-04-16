@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, RefreshCw, Home } from "lucide-react";
+import { AlertTriangle, RefreshCw, Home, Download } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../lib/cn";
 import { Button } from "./Button";
 
@@ -68,6 +69,18 @@ class PanelErrorBoundaryInner extends React.Component<
             >
               {t("errors.retry")}
             </Button>
+            <Button
+              variant="ghost"
+              size="md"
+              icon={<Download className="w-4 h-4" />}
+              onClick={() => {
+                invoke("open_logs_folder").catch((e) =>
+                  console.error("open_logs_folder failed:", e)
+                );
+              }}
+            >
+              {t("errors.download_logs")}
+            </Button>
             {this.props.onNavigateHome && (
               <Button
                 variant="ghost"
@@ -78,7 +91,7 @@ class PanelErrorBoundaryInner extends React.Component<
                   this.props.onNavigateHome?.();
                 }}
               >
-                {t("errors.go_home", { defaultValue: "На главную" })}
+                {t("errors.go_home")}
               </Button>
             )}
           </div>
