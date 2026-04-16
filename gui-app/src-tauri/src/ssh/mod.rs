@@ -331,8 +331,30 @@ pub async fn ssh_connect(
     .map_err(|_| format!("SSH_TIMEOUT|{host}:{port}"))?
     .map_err(|e| {
         let msg = e.to_string();
+        let lower = msg.to_lowercase();
         if msg.contains("UnknownKey") || msg.contains("unknown key") {
             "SSH_HOST_KEY_CHANGED".to_string()
+        } else if lower.contains("failed to lookup address")
+            || lower.contains("dns error")
+            || lower.contains("name or service not known")
+            || lower.contains("no such host is known")
+        {
+            format!("SSH_DNS_FAILED|{host}")
+        } else if lower.contains("network is unreachable")
+            || lower.contains("enetunreach")
+        {
+            format!("SSH_NETWORK_UNREACHABLE|{host}")
+        } else if lower.contains("connection refused")
+            || lower.contains("econnrefused")
+            || lower.contains("actively refused")
+        {
+            format!("SSH_CONNECTION_REFUSED|{host}|{port}")
+        } else if lower.contains("handshake")
+            || lower.contains("key exchange")
+            || lower.contains("kex")
+            || lower.contains("negotiate")
+        {
+            format!("SSH_TLS_HANDSHAKE_FAILED|{host}")
         } else {
             format!("SSH_CONNECT_FAILED|{e}")
         }

@@ -160,4 +160,29 @@ describe("translateSshError", () => {
   it("returns string as-is when no pipe separator", () => {
     expect(translateSshError("some plain error text", mockT)).toBe("some plain error text");
   });
+
+  // ─── Network (Phase 12.5) ───
+  it("translates SSH_DNS_FAILED with host", () => {
+    expect(translateSshError("SSH_DNS_FAILED|example.com", mockT)).toBe(
+      'sshErrors.dnsFailed:{"host":"example.com"}',
+    );
+  });
+
+  it("translates SSH_NETWORK_UNREACHABLE with host", () => {
+    expect(translateSshError("SSH_NETWORK_UNREACHABLE|10.0.0.1", mockT)).toBe(
+      'sshErrors.networkUnreachable:{"host":"10.0.0.1"}',
+    );
+  });
+
+  it("translates SSH_CONNECTION_REFUSED with host+port", () => {
+    expect(translateSshError("SSH_CONNECTION_REFUSED|localhost|22", mockT)).toBe(
+      'sshErrors.connectionRefused:{"host":"localhost","port":"22"}',
+    );
+  });
+
+  it("translates SSH_TLS_HANDSHAKE_FAILED with host", () => {
+    expect(translateSshError("SSH_TLS_HANDSHAKE_FAILED|example.com", mockT)).toBe(
+      'sshErrors.tlsHandshakeFailed:{"host":"example.com"}',
+    );
+  });
 });
