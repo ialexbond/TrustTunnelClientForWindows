@@ -86,10 +86,11 @@ describe("ProcessFilterSection", () => {
 
   it("calls onLoadProcesses and opens picker on add click", async () => {
     renderSection();
-    await userEvent.click(screen.getByText("Добавить процесс"));
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Добавить процесс"));
     expect(onLoadProcesses).toHaveBeenCalledTimes(1);
-    // Picker modal should open (look for picker header)
-    expect(screen.getByText("Выберите процессы")).toBeInTheDocument();
+    // Picker modal opens via Modal portal (async); wait for the header.
+    expect(await screen.findByText("Выберите процессы")).toBeInTheDocument();
   });
 
   it("remove button calls onRemove on hover and click", () => {
@@ -155,9 +156,10 @@ describe("ProcessFilterSection", () => {
 
   it("picker modal opens and shows available processes", async () => {
     renderSection({ processes: [] });
+    const user = userEvent.setup();
     // Open the picker
-    await userEvent.click(screen.getByText("Добавить процесс"));
-    expect(screen.getByText("Выберите процессы")).toBeInTheDocument();
+    await user.click(screen.getByText("Добавить процесс"));
+    expect(await screen.findByText("Выберите процессы")).toBeInTheDocument();
 
     // The picker shows available processes (all 3 since none already added)
     expect(screen.getByText("chrome.exe")).toBeInTheDocument();
@@ -167,12 +169,13 @@ describe("ProcessFilterSection", () => {
 
   it("closes picker modal without adding when cancelled", async () => {
     renderSection({ processes: [] });
-    await userEvent.click(screen.getByText("Добавить процесс"));
-    expect(screen.getByText("Выберите процессы")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Добавить процесс"));
+    expect(await screen.findByText("Выберите процессы")).toBeInTheDocument();
 
     // Close the modal
     const closeBtn = screen.getByText("Отмена");
-    await userEvent.click(closeBtn);
+    await user.click(closeBtn);
 
     expect(onAdd).not.toHaveBeenCalled();
   });
