@@ -19,15 +19,16 @@ fn activity_log_path() -> PathBuf {
 }
 
 /// Rotate activity.log if it exceeds size limit or age limit.
-fn rotate_if_needed(path: &PathBuf) {
-    let Ok(meta) = fs::metadata(path) else { return };
+/// Returns `true` when rotation happened so the caller can re-open the file.
+fn rotate_if_needed(path: &PathBuf) -> bool {
+    let Ok(meta) = fs::metadata(path) else { return false };
 
     // Rotation by size
     if meta.len() > MAX_ACTIVITY_LOG_SIZE {
         let backup = path.with_extension("log.1");
         let _ = fs::copy(path, &backup);
         let _ = fs::write(path, "");
-        return;
+        return true;
     }
 
     // Rotation by age
@@ -41,8 +42,11 @@ fn rotate_if_needed(path: &PathBuf) {
             let backup = path.with_extension("log.1");
             let _ = fs::copy(path, &backup);
             let _ = fs::write(path, "");
+            return true;
         }
     }
+
+    false
 }
 
 /// Initialize activity log at application startup.
@@ -55,7 +59,7 @@ pub fn init_activity_log() {
     }
 
     let path = activity_log_path();
-    rotate_if_needed(&path);
+    rotate_if_needed(&path); // return value ignored here — file not yet open
 
     match OpenOptions::new().create(true).append(true).open(&path) {
         Ok(file) => {
@@ -79,20 +83,32 @@ pub fn init_activity_log() {
 pub fn write_activity_log(tag: String, message: String, details: Option<String>) -> Result<(), String> {
     let ts = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
 
+    // L-03: strip characters that break the structured log format from tag
+    let safe_tag = tag.replace(['[', ']', '\n', '\r'], "");
+
     // Prevent log injection: replace embedded newlines inside message and details
     let safe_message = message.replace('\n', "\\n").replace('\r', "\\r");
     let safe_details = details.map(|d| d.replace('\n', "\\n").replace('\r', "\\r"));
 
     let raw_line = if let Some(d) = safe_details {
-        format!("[{ts}] [{tag}] {safe_message} ({d})\n")
+        format!("[{ts}] [{safe_tag}] {safe_message} ({d})\n")
     } else {
-        format!("[{ts}] [{tag}] {safe_message}\n")
+        format!("[{ts}] [{safe_tag}] {safe_message}\n")
     };
 
     // Sanitize to mask IP addresses and other sensitive values (D-13)
     let sanitized = sanitize(&raw_line);
 
+    let path = activity_log_path();
     let mut guard = ACTIVITY_LOG.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Rotation: if the file exceeds limits, truncate and re-open to avoid stale handle
+    if rotate_if_needed(&path) {
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) {
+            *guard = Some(file);
+        }
+    }
+
     if let Some(ref mut file) = *guard {
         file.write_all(sanitized.as_bytes())
             .and_then(|_| file.flush())
