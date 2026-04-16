@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { SlidersHorizontal, Network, Zap, AlertTriangle } from "lucide-react";
+import { SlidersHorizontal, Network, AlertTriangle } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Toggle } from "../../shared/ui/Toggle";
@@ -9,12 +9,9 @@ import { Accordion } from "../../shared/ui/Accordion";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
-import { useBbrState } from "./useBbrState";
-import { useMtProtoState } from "./useMtProtoState";
 import { useSecurityState } from "./useSecurityState";
 import { SshPortSection } from "./SshPortSection";
 import { VersionSection } from "./VersionSection";
-import { MtProtoSection } from "./MtProtoSection";
 
 interface Props {
   state: ServerState;
@@ -43,8 +40,6 @@ export function ServerSettingsSection({ state }: Props) {
   const activeTogglesRef = useRef(0);
 
   // ─── Sub-hooks ───
-  const bbr = useBbrState(sshParams, state.pushSuccess);
-  const mtproto = useMtProtoState(sshParams, state.pushSuccess);
   const security = useSecurityState(sshParams, state.pushSuccess, state.onPortChanged);
 
   // ─── Save settings state ───
@@ -170,29 +165,13 @@ export function ServerSettingsSection({ state }: Props) {
         )}
       </Card>
 
-      {/* Block 2: Network */}
+      {/* Block 2: SSH Port */}
       <Card>
         <CardHeader
-          title={t("server.config.network_title")}
+          title={t("server.config.port_title")}
           icon={<Network className="w-3.5 h-3.5" />}
         />
-        <div className="space-y-2">
-          {/* BBR Toggle */}
-          <Toggle
-            value={bbr.enabled}
-            onChange={() => void bbr.toggle()}
-            label={t("server.utilities.bbr.label")}
-            description={
-              bbr.loading
-                ? t("server.utilities.bbr.detecting")
-                : t("server.utilities.bbr.description")
-            }
-            icon={<Zap className="w-3 h-3" />}
-            disabled={bbr.loading}
-          />
-          {/* SSH Port Section */}
-          <SshPortSection state={security} />
-        </div>
+        <SshPortSection state={security} />
       </Card>
 
       {/* Block 3: Advanced Accordion */}
@@ -237,19 +216,6 @@ export function ServerSettingsSection({ state }: Props) {
                   </div>
                 )}
 
-                {/* MTProto Section */}
-                {mtproto.status && <MtProtoSection state={mtproto} />}
-
-                <ConfirmDialog
-                  open={!!mtproto.confirm}
-                  title={mtproto.confirm?.title ?? ""}
-                  message={mtproto.confirm?.message ?? ""}
-                  confirmLabel={t("server.utilities.mtproto.uninstall")}
-                  cancelLabel={t("buttons.cancel")}
-                  variant="warning"
-                  onCancel={() => mtproto.setConfirm(null)}
-                  onConfirm={() => mtproto.confirm?.onConfirm()}
-                />
               </div>
             ),
           },
