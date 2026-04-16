@@ -50,15 +50,7 @@ async function readStoredCredentials(): Promise<SshCredentials | null> {
 function ServerPanelSkeleton() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header skeleton — address bar + disconnect button */}
-      <div
-        className="flex items-center justify-between px-4 py-2 shrink-0"
-        style={{ borderBottom: "1px solid var(--color-border)" }}
-      >
-        <Skeleton variant="line" width="55%" height={14} />
-        <Skeleton variant="line" width="18%" height={14} />
-      </div>
-      {/* Tab bar skeleton — 5 tab pills */}
+      {/* Tab bar skeleton - 5 tab pills + disconnect icon placeholder */}
       <div
         className="flex items-center shrink-0 gap-1 px-2 py-1"
         style={{ borderBottom: "1px solid var(--color-border)" }}
@@ -66,6 +58,7 @@ function ServerPanelSkeleton() {
         {[...Array(5)].map((_, i) => (
           <Skeleton key={i} variant="card" className="flex-1" height={32} />
         ))}
+        <Skeleton variant="card" width={36} height={32} className="ml-2" />
       </div>
       {/* Content area skeleton */}
       <div className="flex-1 px-6 py-4 space-y-4">
