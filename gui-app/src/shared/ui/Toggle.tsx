@@ -90,7 +90,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
         >
           <div
             className={`
-              absolute top-0.5 w-4 h-4 rounded-full bg-[var(--color-toggle-thumb,#fff)] shadow
+              absolute top-0.5 w-4 h-4 rounded-full bg-[var(--color-toggle-thumb)] shadow
               transition-transform duration-[var(--transition-fast)]
               ${isChecked ? "translate-x-[18px]" : "translate-x-0.5"}
             `}
