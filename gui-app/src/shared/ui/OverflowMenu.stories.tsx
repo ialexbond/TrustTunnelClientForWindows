@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Pencil, Trash2, Copy, RefreshCw } from "lucide-react";
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
 
-const meta = {
+const meta: Meta<typeof OverflowMenu> = {
   title: "Primitives/OverflowMenu",
   component: OverflowMenu,
   tags: ["autodocs"],
