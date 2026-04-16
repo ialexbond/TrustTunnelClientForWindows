@@ -7,12 +7,12 @@ function createMockServerState(overrides?: Partial<ServerState>): ServerState {
     // Server info
     serverInfo: {
       installed: true,
-      version: "1.4.0",
+      version: "3.1.0",
       serviceActive: true,
-      users: ["admin", "user1", "mobile"],
+      users: ["admin", "user1"],
       listenPort: 443,
-      protocol: "udp",
-      cipher: "AES-256-GCM",
+      protocol: "xray-vless-reality",
+      cipher: "ECDHE-RSA-AES256-GCM-SHA384",
       dns: "1.1.1.1",
       mtu: 1420,
     },

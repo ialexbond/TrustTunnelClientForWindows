@@ -10,6 +10,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { cn } from "../shared/lib/cn";
+import { Tooltip } from "../shared/ui/Tooltip";
 import type { ServerState } from "./server/useServerState";
 import { OverviewSection } from "./server/OverviewSection";
 import { UsersSection } from "./server/UsersSection";
@@ -64,8 +65,8 @@ export function ServerTabs({ state }: ServerTabsProps) {
       <div
         role="tablist"
         aria-label={t("tabs.server_tabs", "Серверные вкладки")}
-        className="flex items-center shrink-0"
-        style={{ borderBottom: "1px solid var(--color-border)", padding: "4px 8px" }}
+        className="flex items-center shrink-0 px-6"
+        style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
       >
         {tabs.map((tab, idx) => (
           <button
@@ -93,27 +94,32 @@ export function ServerTabs({ state }: ServerTabsProps) {
           </button>
         ))}
 
-        {/* Disconnect icon - visually separated from tabs */}
-        <button
-          type="button"
-          onClick={() => {
-            setShowDisconnectConfirm(true);
-            activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
-          }}
-          aria-label={t("control.disconnect")}
-          title={t("control.disconnect")}
-          className={cn(
-            "shrink-0 flex items-center justify-center",
-            "h-9 w-9 rounded-[var(--radius-md)]",
-            "text-[var(--color-text-muted)]",
-            "hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
-            "transition-colors",
-            "focus-visible:shadow-[var(--focus-ring)] outline-none",
-            "border-l border-[var(--color-border)] ml-2 pl-2"
-          )}
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
+        {/* Separator + Disconnect icon */}
+        <div
+          aria-hidden="true"
+          className="shrink-0 mx-2 self-stretch my-1.5"
+          style={{ width: "1px", backgroundColor: "var(--color-border)" }}
+        />
+        <Tooltip text={t("control.disconnect")} position="bottom">
+          <button
+            type="button"
+            onClick={() => {
+              setShowDisconnectConfirm(true);
+              activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
+            }}
+            aria-label={t("control.disconnect")}
+            className={cn(
+              "shrink-0 flex items-center justify-center",
+              "h-8 w-8 rounded-[var(--radius-md)]",
+              "text-[var(--color-text-muted)]",
+              "hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
+              "transition-colors",
+              "focus-visible:shadow-[var(--focus-ring)] outline-none"
+            )}
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Tab content — cross-fade with visibility+opacity: mount once, fade between tabs */}
