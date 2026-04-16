@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.1
 milestone_name: Stabilization & UX Redesign
 status: executing
-stopped_at: Phase 9 complete — 4 new components, 39 tests, verification passed
-last_updated: "2026-04-15T13:00:00.000Z"
-last_activity: 2026-04-15
+stopped_at: Phase 12.5 UI-SPEC approved
+last_updated: "2026-04-16T18:15:54.041Z"
+last_activity: 2026-04-16 -- Phase 12.5 planning complete
 progress:
-  total_phases: 4
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
-  percent: 50
+  total_phases: 12
+  completed_phases: 5
+  total_plans: 27
+  completed_plans: 21
+  percent: 78
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Пользователь устанавливает приложение, вставляет ссылку/конфиг и подключается к VPN — без CLI и технической настройки
-**Current focus:** Phase 10 — Tab Bar & Control Panel
+**Current focus:** Phase 12 — Инфраструктура панели
 
 ## Current Position
 
-Phase: 9 (New Components) — COMPLETE
-Plan: 3 of 3
-Status: Verified — 4/4 must-haves passed
-Last activity: 2026-04-15
+Phase: 13
+Plan: Not started
+Status: Ready to execute
+Last activity: 2026-04-16 -- Phase 12.5 planning complete
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -36,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 27 (v3.0)
+- Total plans completed: 31 (v3.0)
 - Average duration: —
 - Total execution time: —
 
@@ -45,6 +45,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | v3.0 (1-6) | 27 | — | — |
+| 12 | 4 | - | - |
 
 *Updated after each plan completion*
 | Phase 08-stabilization P01 | 5m | 2 tasks | 4 files |
@@ -83,6 +84,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-15T10:22:00.889Z
-Stopped at: Completed 08-03-PLAN.md — all 1361 tests passing
-Resume file: None
+Last session: 2026-04-16T16:27:16.696Z
+Stopped at: Phase 12.5 UI-SPEC approved
+Resume file: .planning/phases/12.5-app-tsx-useserverstate-confirmdialog-dedup/12.5-UI-SPEC.md
