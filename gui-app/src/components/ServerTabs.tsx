@@ -9,7 +9,7 @@ import {
   Wrench,
   LogOut,
 } from "lucide-react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "../shared/lib/cn";
 import { Tooltip } from "../shared/ui/Tooltip";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -150,9 +150,24 @@ export function ServerTabs({ state }: ServerTabsProps) {
                 <Skeleton variant="card" height={80} />
               </div>
             ) : state.error ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3" style={{ color: "var(--color-text-muted)" }}>
+              <div className="flex flex-col items-center justify-center py-12 gap-4" style={{ color: "var(--color-text-muted)" }}>
                 <AlertTriangle className="w-8 h-8" style={{ color: "var(--color-danger-400)" }} />
                 <p className="text-sm text-center max-w-sm">{state.error}</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => state.loadServerInfo()}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-[var(--font-weight-semibold)] rounded-[var(--radius-md)]",
+                      "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]",
+                      "hover:bg-[var(--color-bg-hover)] transition-colors",
+                      "focus-visible:shadow-[var(--focus-ring)] outline-none"
+                    )}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {t("errors.retry")}
+                  </button>
+                </div>
               </div>
             ) : (
               <>
