@@ -21,13 +21,21 @@ const primary = { color: "var(--color-text-primary)" };
 
 function CardTitle({ icon, title, clickable, onRefresh }: { icon?: React.ReactNode; title: string; clickable?: boolean; onRefresh?: boolean }) {
   return (
-    <div className="flex items-center justify-between mb-3">
-      <div className="flex items-center gap-2">
+    <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
+      <div className="flex items-center gap-2 h-full">
         {icon && <span className="flex items-center justify-center w-5 h-5 shrink-0" style={muted}>{icon}</span>}
-        <span className="text-lg font-[var(--font-weight-semibold)] leading-none" style={primary}>{title}</span>
+        <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{title}</span>
       </div>
-      <div className="flex items-center gap-1">
-        {onRefresh && <button className="p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors" aria-label="Обновить" style={muted}><RefreshCw className="w-4 h-4" /></button>}
+      <div className="flex items-center gap-1 h-full">
+        {onRefresh && (
+          <button
+            className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            aria-label="Обновить"
+            style={muted}
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        )}
         {clickable && <ChevronRight className="w-5 h-5" style={muted} />}
       </div>
     </div>
