@@ -64,7 +64,10 @@ function ServerPanelSkeleton() {
       {/* Content area skeleton — mirrors OverviewSection Default layout */}
       <div className="flex-1 px-6 py-4 space-y-4">
         {/* Block 1: Status card — status row + info rows */}
-        <div className="rounded-[var(--radius-lg)] p-[var(--space-4)]" style={{ backgroundColor: "var(--color-bg-surface)" }}>
+        <div
+          className="rounded-[var(--radius-lg)] p-[var(--space-4)]"
+          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+        >
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2.5">
               <Skeleton variant="card" width={10} height={10} className="rounded-full" />
@@ -84,7 +87,10 @@ function ServerPanelSkeleton() {
           </div>
         </div>
         {/* Block 2: TLS Certificate card */}
-        <div className="rounded-[var(--radius-lg)] p-[var(--space-4)]" style={{ backgroundColor: "var(--color-bg-surface)" }}>
+        <div
+          className="rounded-[var(--radius-lg)] p-[var(--space-4)]"
+          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+        >
           <div className="flex items-center gap-2 mb-3">
             <Skeleton variant="card" width={16} height={16} />
             <Skeleton variant="line" width={130} height={14} />
