@@ -241,6 +241,9 @@ pub async fn server_remove_user(
     handle: &client::Handle<SshHandler>,
     vpn_username: String,
 ) -> Result<(), String> {
+    // Validate before interpolating into shell command
+    validate_vpn_username(&vpn_username)?;
+
     let sudo = detect_sudo(handle, app).await;
 
     // Use sed to remove the [[client]] block matching the username.
