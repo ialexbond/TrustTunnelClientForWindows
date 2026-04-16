@@ -4,7 +4,6 @@ import {
   ArrowDown, ArrowUp, ChevronRight, RefreshCw, ArrowUpCircle,
   Activity, Globe, Clock, Network, AlertTriangle,
 } from "lucide-react";
-import { StatusIndicator } from "./StatusIndicator";
 import { ProgressBar } from "./ProgressBar";
 import { Skeleton } from "./Skeleton";
 import { Card } from "./Card";
