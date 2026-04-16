@@ -101,7 +101,7 @@ export function DangerZoneSection({ state }: Props) {
       </div>
 
       <ConfirmDialog
-        open={confirmUninstall}
+        isOpen={confirmUninstall}
         title={t("server.danger.confirm_uninstall_title")}
         message={t("server.danger.confirm_uninstall_message")}
         confirmLabel={t("server.danger.confirm_delete_btn")}

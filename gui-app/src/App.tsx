@@ -57,7 +57,7 @@ function App() {
   });
   const [error, setError] = useState<string | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
-  const [vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
+  const [_vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
 
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
@@ -206,7 +206,7 @@ function App() {
   });
 
   // ─── Setup / Config ───
-  const handleSetupComplete = useCallback((configPath: string) => {
+  const _handleSetupComplete = useCallback((configPath: string) => {
     setConfig((prev) => ({ ...prev, configPath }));
     localStorage.setItem("tt_config_path", configPath);
     localStorage.removeItem("tt_config_cleared"); // re-enable auto-detect for future
@@ -241,7 +241,7 @@ function App() {
     }
   }, []);
 
-  const [wizardKey, setWizardKey] = useState(0);
+  const [_wizardKey, setWizardKey] = useState(0);
   const [controlKey, setControlKey] = useState(0);
   const [settingsKey, setSettingsKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
@@ -513,7 +513,7 @@ function App() {
     </div>
 
     <ConfirmDialog
-      open={hostKeyPending !== null}
+      isOpen={hostKeyPending !== null}
       title={i18n.t("hostKey.title")}
       message={
         hostKeyPending

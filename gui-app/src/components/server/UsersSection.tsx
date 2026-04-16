@@ -330,7 +330,7 @@ export function UsersSection({ state }: Props) {
       </Card>
 
       {/* QR Code fullscreen popup */}
-      <Modal open={!!qrUser} onClose={() => setQrUser(null)} closeOnBackdrop>
+      <Modal isOpen={!!qrUser} onClose={() => setQrUser(null)} closeOnBackdrop>
         <div
           className="max-w-xs w-full mx-4 p-6 rounded-2xl shadow-2xl text-center"
           style={{ backgroundColor: "var(--color-bg-elevated)" }}
@@ -369,7 +369,7 @@ export function UsersSection({ state }: Props) {
 
       {/* Delete user confirmation */}
       <ConfirmDialog
-        open={!!confirmDeleteUser}
+        isOpen={!!confirmDeleteUser}
         title={t("server.users.confirm_delete_title")}
         message={t("server.users.confirm_delete_message", { user: confirmDeleteUser ?? "" })}
         confirmLabel={t("buttons.confirm_delete")}

@@ -47,7 +47,7 @@ export function SecuritySection({ state }: Props) {
 
       {/* Confirm dialog — shared overlay for all sub-components */}
       <ConfirmDialog
-        open={!!security.confirm}
+        isOpen={!!security.confirm}
         title={security.confirm?.title ?? ""}
         message={security.confirm?.message ?? ""}
         variant={security.confirm?.variant ?? "danger"}

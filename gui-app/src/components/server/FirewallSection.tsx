@@ -212,7 +212,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
       })()}
 
       {/* Add rule modal */}
-      <Modal open={state.showAddRule} onClose={() => state.setShowAddRule(false)}>
+      <Modal isOpen={state.showAddRule} onClose={() => state.setShowAddRule(false)}>
         <div className="max-w-sm w-full mx-4 p-5 rounded-2xl space-y-3 shadow-2xl" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
           <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
             {t("server.security.firewall.add_rule_title")}

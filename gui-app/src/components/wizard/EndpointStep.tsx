@@ -224,7 +224,7 @@ export function EndpointStep(w: WizardState) {
                     <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_ping_desc')}</p>
                   </div>
                 </div>
-                <Toggle value={w.pingEnable} onChange={w.setPingEnable} label="" />
+                <Toggle checked={w.pingEnable} onChange={w.setPingEnable} label="" />
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -234,7 +234,7 @@ export function EndpointStep(w: WizardState) {
                     <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_speedtest_desc')}</p>
                   </div>
                 </div>
-                <Toggle value={w.speedtestEnable} onChange={w.setSpeedtestEnable} label="" />
+                <Toggle checked={w.speedtestEnable} onChange={w.setSpeedtestEnable} label="" />
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -244,7 +244,7 @@ export function EndpointStep(w: WizardState) {
                     <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_ipv6_desc')}</p>
                   </div>
                 </div>
-                <Toggle value={w.ipv6Available} onChange={w.setIpv6Available} label="" />
+                <Toggle checked={w.ipv6Available} onChange={w.setIpv6Available} label="" />
               </div>
             </div>
           </div>

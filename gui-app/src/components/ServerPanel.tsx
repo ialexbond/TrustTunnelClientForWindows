@@ -195,7 +195,7 @@ export function ServerPanel(props: ServerPanelProps) {
 
       {/* Reboot server confirmation */}
       <ConfirmDialog
-        open={state.confirmReboot}
+        isOpen={state.confirmReboot}
         title={t("server.danger.confirm_reboot_title")}
         message={t("server.danger.confirm_reboot_message")}
         confirmLabel={t("server.danger.confirm_reboot_btn")}

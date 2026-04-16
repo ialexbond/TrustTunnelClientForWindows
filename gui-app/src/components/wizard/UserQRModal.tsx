@@ -14,7 +14,7 @@ export function UserQRModal({ qrUser, qrLink, qrLoading, onClose }: UserQRModalP
   const { t } = useTranslation();
 
   return (
-    <Modal open={!!qrUser} onClose={onClose} closeOnBackdrop>
+    <Modal isOpen={!!qrUser} onClose={onClose} closeOnBackdrop>
       <div className="max-w-xs w-full mx-4 p-6 rounded-2xl shadow-2xl text-center" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
         {qrLoading ? (
           <div className="flex items-center justify-center py-8">
