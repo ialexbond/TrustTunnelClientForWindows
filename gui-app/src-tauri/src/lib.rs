@@ -83,6 +83,8 @@ pub fn run() {
         .setup(|app| {
             // Initialize file logging (if enabled via flag file)
             logging::init_logging();
+            // Initialize activity log (always active, fire-and-forget from UI)
+            commands::activity_log::init_activity_log();
 
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {
@@ -340,7 +342,9 @@ pub fn run() {
             commands::deeplink::import_config_from_string,
             commands::protocol::register_url_protocols,
             commands::protocol::check_url_protocols,
-            commands::protocol::poll_pending_deeplink
+            commands::protocol::poll_pending_deeplink,
+            commands::activity_log::write_activity_log,
+            commands::activity_log::export_activity_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
