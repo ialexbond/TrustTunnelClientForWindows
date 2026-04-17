@@ -385,7 +385,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           Измеряет server bandwidth (потолок VPN throughput). Refresh disabled
           когда протокол остановлен или ребутится — тест бессмысленный.
           Design: StatCard/Overview Variants story 3a — coloured ↓↑ icons + значение + Мбит/с. */}
-      <Card padding="md" style={{ flex: "2 1 340px" }}>
+      <Card padding="md" style={{ flex: "1 1 280px", maxWidth: 360 }}>
         <Title
           icon={<Zap className="w-5 h-5" />}
           text={t("server.overview.cards.speed")}
@@ -398,29 +398,29 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
             <span className="text-sm" style={muted}>{t("server.overview.speedRequiresProtocol")}</span>
           </div>
         ) : speedTesting ? (
-          <div className="flex items-center justify-center gap-8 py-2">
-            <div className="flex items-center gap-2">
-              <Skeleton variant="circle" width={28} height={28} />
-              <Skeleton variant="line" width={80} height={32} />
+          <div className="flex items-center justify-center gap-4 py-2" style={{ minHeight: 48 }}>
+            <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
+              <Skeleton variant="circle" width={24} height={24} />
+              <Skeleton variant="line" width={60} height={28} />
             </div>
-            <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-            <div className="flex items-center gap-2">
-              <Skeleton variant="circle" width={28} height={28} />
-              <Skeleton variant="line" width={80} height={32} />
+            <div className="h-7 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
+              <Skeleton variant="circle" width={24} height={24} />
+              <Skeleton variant="line" width={60} height={28} />
             </div>
           </div>
         ) : speed ? (
-          <div className="flex items-center justify-center gap-8 py-2">
-            <div className="flex items-center gap-2">
-              <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
+          <div className="flex items-center justify-center gap-4 py-2" style={{ minHeight: 48 }}>
+            <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
+              <ArrowDown className="w-6 h-6 shrink-0" style={{ color: "var(--color-success-400)" }} />
               <div className="flex items-baseline gap-1">
                 <span style={bigNum}>{Math.round(speed.download_mbps)}</span>
                 <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
               </div>
             </div>
-            <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-            <div className="flex items-center gap-2">
-              <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
+            <div className="h-7 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
+              <ArrowUp className="w-6 h-6 shrink-0" style={{ color: "var(--color-warning-500)" }} />
               <div className="flex items-baseline gap-1">
                 <span style={bigNum}>{Math.round(speed.upload_mbps)}</span>
                 <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>

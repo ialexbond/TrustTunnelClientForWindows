@@ -49,7 +49,7 @@ const ecgLayers = [
 function EcgSvg({ color, path, anim }: { color: string; path: string; anim: string }) {
   return (
     <svg width="160" height="36" viewBox="0 0 160 36" fill="none">
-      <style>{`@keyframes ${anim} { from { stroke-dashoffset: -100; } to { stroke-dashoffset: 20; } }`}</style>
+      <style>{`@keyframes ${anim} { from { stroke-dashoffset: 20; } to { stroke-dashoffset: -100; } }`}</style>
       <path d={path} stroke={color} strokeWidth="1.5" fill="none" opacity="0.15"
         strokeLinecap="round" strokeLinejoin="round" pathLength={100} />
       {ecgLayers.map((l, i) => (

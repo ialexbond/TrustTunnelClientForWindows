@@ -2,11 +2,14 @@
  * EcgSvg — анимированная ECG-линия с 12-слойным градиентным хвостом.
  *
  * Используется в карточке «Статус» таба «Обзор».
- * - Работает: зелёный пульс (ecgHeartbeat path)
- * - Остановлен: красная плоская линия (ecgFlatline path)
- * - Каждый слой — stroke-dasharray с animationDelay,
- *   opacity нарастает экспоненциально от хвоста к голове.
- * - CSS @keyframes инжектируется внутри SVG <style>.
+ * - Работает: зелёный пульс (ecgHeartbeat path) — animated layered gradient
+ * - Остановлен: красная плоская линия (ecgFlatline path) — STATIC (no animation),
+ *   потому что без визуальных features (peaks/zigzag) layered gradient на flat line
+ *   воспринимается как инверсия (head/tail). Static line однозначна и читается легко.
+ *
+ * Каждый layered (для heartbeat) — stroke-dasharray с animationDelay,
+ * opacity нарастает экспоненциально от хвоста к голове.
+ * CSS @keyframes инжектируется внутри SVG <style>.
  */
 
 /** ECG path — двойной зигзаг на 30% и 70% пути */
@@ -42,20 +45,27 @@ interface EcgSvgProps {
 }
 
 export function EcgSvg({ color, path, anim }: EcgSvgProps) {
+  // Flatline (stopped state) — static line без animation gradient.
+  // Layered animation на flatline без визуальных features воспринимается инверсивно
+  // (head/tail переставлены) — static решает проблему однозначно.
+  const isFlatline = path === ecgFlatline;
+
   return (
     <svg width="160" height="36" viewBox="0 0 160 36" fill="none">
-      <style>{`@keyframes ${anim} { from { stroke-dashoffset: -100; } to { stroke-dashoffset: 20; } }`}</style>
+      {!isFlatline && (
+        <style>{`@keyframes ${anim} { from { stroke-dashoffset: 20; } to { stroke-dashoffset: -100; } }`}</style>
+      )}
       <path
         d={path}
         stroke={color}
-        strokeWidth="1.5"
+        strokeWidth={isFlatline ? 2 : 1.5}
         fill="none"
-        opacity="0.15"
+        opacity={isFlatline ? 0.85 : 0.15}
         strokeLinecap="round"
         strokeLinejoin="round"
         pathLength={100}
       />
-      {layers.map((l, i) => (
+      {!isFlatline && layers.map((l, i) => (
         <path
           key={i}
           d={path}
