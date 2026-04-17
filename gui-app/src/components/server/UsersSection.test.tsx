@@ -100,7 +100,7 @@ describe("UsersSection (Phase 14 redesign)", () => {
     expect(screen.getByText(i18n.t("server.users.title"))).toBeInTheDocument();
   });
 
-  it("renders user names as role=option in role=listbox (D-02 WAI-ARIA)", () => {
+  it("renders user names in a <ul> list (static, no selection)", () => {
     const state = makeState({
       serverInfo: {
         installed: true,
@@ -110,12 +110,15 @@ describe("UsersSection (Phase 14 redesign)", () => {
       },
     });
     render(<UsersSection state={state} />);
-    const listbox = screen.getByRole("listbox");
-    expect(listbox).toBeInTheDocument();
-    const options = within(listbox).getAllByRole("option");
-    expect(options.length).toBe(2);
-    expect(options[0]).toHaveTextContent("alice");
-    expect(options[1]).toHaveTextContent("bob");
+    // After Continue-as removal (Phase 14 post-install) row selection is gone:
+    // rows are static <li> elements, no role=option / role=listbox / aria-selected.
+    // Action surface moved entirely to inline FileText / Trash icons per row.
+    const list = screen.getByRole("list");
+    expect(list).toBeInTheDocument();
+    const items = within(list).getAllByRole("listitem");
+    expect(items.length).toBe(2);
+    expect(items[0]).toHaveTextContent("alice");
+    expect(items[1]).toHaveTextContent("bob");
   });
 
   it("renders EmptyState when users.length === 0", () => {
@@ -134,31 +137,14 @@ describe("UsersSection (Phase 14 redesign)", () => {
     expect(
       screen.getByText(i18n.t("server.users.empty_body")),
     ).toBeInTheDocument();
-    // listbox not rendered when empty
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    // list not rendered when empty
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
   // ══════════════════════════════════════════════════════
-  // D-02: Row click selection
+  // Row selection REMOVED — Continue-as button удалён, row click бесполезен.
+  // (Ранее D-02 тесты проверяли setSelectedUser/aria-selected — удалены.)
   // ══════════════════════════════════════════════════════
-
-  it("D-02: clicking a row calls setSelectedUser with that user", () => {
-    const setSelectedUser = vi.fn();
-    const state = makeState({ setSelectedUser });
-    render(<UsersSection state={state} />);
-    const aliceRow = screen.getByRole("option", { name: /alice/i });
-    fireEvent.click(aliceRow);
-    expect(setSelectedUser).toHaveBeenCalledWith("alice");
-  });
-
-  it("D-02: selected row has aria-selected=true", () => {
-    const state = makeState({ selectedUser: "bob" });
-    render(<UsersSection state={state} />);
-    const bobRow = screen.getByRole("option", { name: /bob/i });
-    expect(bobRow).toHaveAttribute("aria-selected", "true");
-    const aliceRow = screen.getByRole("option", { name: /alice/i });
-    expect(aliceRow).toHaveAttribute("aria-selected", "false");
-  });
 
   // ══════════════════════════════════════════════════════
   // D-03: 2 inline icons (FileText + Trash), NO OverflowMenu
@@ -569,11 +555,11 @@ describe("UsersSection (Phase 14 redesign)", () => {
   it("D-06: Row does not render avatar/status/metadata — only name + 2 icons", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    const aliceRow = screen.getByRole("option", { name: /alice/i });
-    // Внутри row должны быть 2 buttons (FileText + Trash) — никаких <img>
+    const items = screen.getAllByRole("listitem");
+    const aliceRow = items.find((el) => el.textContent?.includes("alice"))!;
+    // Row должен содержать 2 buttons (FileText + Trash) — никаких <img>/avatars
     const buttonsInRow = within(aliceRow).getAllByRole("button");
     expect(buttonsInRow.length).toBe(2);
-    // Нет <img> (avatars)
     expect(within(aliceRow).queryByRole("img")).not.toBeInTheDocument();
   });
 });
