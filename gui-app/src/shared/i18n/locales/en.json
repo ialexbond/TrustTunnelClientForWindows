@@ -1004,6 +1004,8 @@
         "sshKey": "SSH key",
         "tls": "TLS",
         "tlsActive": "Active",
+        "tlsDays": "{{days}}d left",
+        "tlsExpired": "Expired",
         "active": "Active",
         "inactive": "Disabled",
         "notInstalled": "Not installed",

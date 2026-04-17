@@ -47,64 +47,165 @@ async function readStoredCredentials(): Promise<SshCredentials | null> {
 // ServerPanelSkeleton — shown during first SSH connect
 // ═══════════════════════════════════════════════════════
 
+// ── OverviewSkeletonCard — single card placeholder mirroring OverviewSection Card layout
+function OverviewSkeletonCard({
+  flex,
+  maxWidth,
+  body,
+}: {
+  flex: string;
+  maxWidth?: number;
+  body: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-[var(--radius-lg)] p-[var(--space-4)]"
+      style={{
+        flex,
+        maxWidth,
+        backgroundColor: "var(--color-bg-surface)",
+        border: "1px solid var(--color-border)",
+      }}
+    >
+      {/* Title row — icon + label (left), refresh slot (right) — matches OverviewSection Title height */}
+      <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
+        <div className="flex items-center gap-2 h-full">
+          <Skeleton variant="card" width={20} height={20} />
+          <Skeleton variant="line" width={90} height={14} />
+        </div>
+        <Skeleton variant="card" width={32} height={32} />
+      </div>
+      {body}
+    </div>
+  );
+}
+
 export function ServerPanelSkeleton() {
+  // Mirrors OverviewSection grid: flex-wrap, gap 12px, 10 cards in 3 rows.
+  // Card flex/maxWidth values copied from OverviewSection.tsx so collapse points match.
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar skeleton - 5 tab pills + separator + disconnect icon */}
-      <div
-        className="flex items-center shrink-0 gap-1 px-6 py-1"
-        style={{ borderBottom: "1px solid var(--color-border)" }}
-      >
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} variant="card" className="flex-1" height={32} />
-        ))}
-        <div className="shrink-0 mx-2 self-stretch my-1.5" style={{ width: "1px", backgroundColor: "var(--color-border)" }} />
-        <Skeleton variant="card" width={32} height={32} className="shrink-0" />
-      </div>
-      {/* Content area skeleton — mirrors OverviewSection Default layout */}
-      <div className="flex-1 px-6 py-4 space-y-4">
-        {/* Block 1: Status card — status row + info rows */}
+      {/* Tab bar skeleton — 5 tab pills + separator + disconnect icon (matches ServerTabs) */}
+      <div className="px-6 shrink-0">
         <div
-          className="rounded-[var(--radius-lg)] p-[var(--space-4)]"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+          className="flex items-center gap-1"
+          style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
         >
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2.5">
-              <Skeleton variant="card" width={10} height={10} className="rounded-full" />
-              <Skeleton variant="line" width={80} height={14} />
-            </div>
-            <Skeleton variant="card" width={28} height={28} />
-          </div>
-          <div style={{ borderTop: "1px solid var(--color-border)" }} className="pt-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <Skeleton variant="line" width={60} height={12} />
-              <Skeleton variant="line" width={40} height={12} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Skeleton variant="line" width={70} height={12} />
-              <Skeleton variant="line" width={120} height={12} />
-            </div>
-          </div>
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} variant="card" className="flex-1" height={32} />
+          ))}
+          <div className="shrink-0 mx-2 self-stretch my-1.5" style={{ width: "1px", backgroundColor: "var(--color-border)" }} />
+          <Skeleton variant="card" width={32} height={32} className="shrink-0" />
         </div>
-        {/* Block 2: TLS Certificate card */}
-        <div
-          className="rounded-[var(--radius-lg)] p-[var(--space-4)]"
-          style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Skeleton variant="card" width={16} height={16} />
-            <Skeleton variant="line" width={130} height={14} />
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Skeleton variant="line" width={40} height={12} />
-              <Skeleton variant="line" width={90} height={12} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Skeleton variant="line" width={100} height={12} />
-              <Skeleton variant="line" width={110} height={12} />
-            </div>
-          </div>
+      </div>
+
+      {/* Content area — mirrors OverviewSection 10-card layout */}
+      <div className="flex-1 py-4 px-6 overflow-hidden">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
+
+          {/* ── Row 1: Status | Ping | Speed | Users ── */}
+          <OverviewSkeletonCard
+            flex="1 1 220px"
+            body={
+              <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+                <Skeleton variant="card" width={120} height={28} />
+                <Skeleton variant="line" width={60} height={12} />
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="1 1 140px"
+            body={
+              <div className="flex items-center justify-center py-2">
+                <Skeleton variant="line" width={70} height={32} />
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="2 1 340px"
+            body={
+              <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
+                <Skeleton variant="line" width={200} height={28} />
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="1 1 180px"
+            body={
+              <div className="flex items-center justify-center py-2">
+                <Skeleton variant="line" width={50} height={32} />
+              </div>
+            }
+          />
+
+          {/* ── Row 2: IP | Country | Uptime | Version ── */}
+          <OverviewSkeletonCard
+            flex="1 1 240px"
+            body={
+              <div className="flex items-center justify-center py-2">
+                <Skeleton variant="line" width={140} height={32} />
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="1 1 180px"
+            body={
+              <div className="flex items-center justify-center py-2">
+                <Skeleton variant="line" width={120} height={28} />
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="1 1 160px"
+            body={
+              <div className="flex items-center justify-center py-2">
+                <Skeleton variant="line" width={80} height={28} />
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="1 1 220px"
+            body={
+              <div className="flex items-center justify-center py-2">
+                <Skeleton variant="line" width={100} height={32} />
+              </div>
+            }
+          />
+
+          {/* ── Row 3: Security (4 sub-tiles) | Load (CPU + RAM bars) ── */}
+          <OverviewSkeletonCard
+            flex="1 1 340px"
+            body={
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="rounded-[var(--radius-md)] px-3 py-2"
+                    style={{ backgroundColor: "var(--color-bg-elevated)" }}
+                  >
+                    <Skeleton variant="line" width={70} height={12} className="mb-1.5" />
+                    <Skeleton variant="line" width={50} height={12} />
+                  </div>
+                ))}
+              </div>
+            }
+          />
+          <OverviewSkeletonCard
+            flex="2 1 400px"
+            body={
+              <div className="space-y-2.5 mt-1">
+                {[1, 2].map((i) => (
+                  <div key={i}>
+                    <div className="flex items-center justify-between mb-1">
+                      <Skeleton variant="line" width={30} height={14} />
+                      <Skeleton variant="line" width={40} height={14} />
+                    </div>
+                    <Skeleton variant="line" width="100%" height={6} />
+                  </div>
+                ))}
+              </div>
+            }
+          />
         </div>
       </div>
     </div>
