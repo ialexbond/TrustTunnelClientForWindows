@@ -118,14 +118,6 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
             {...rest}
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-            {actions?.map((action, i) => (
-              <span
-                key={i}
-                className="flex items-center p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-              >
-                {action}
-              </span>
-            ))}
             {showClear && (
               <button
                 type="button"
@@ -141,6 +133,14 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
+            {actions?.map((action, i) => (
+              <span
+                key={i}
+                className="flex items-center p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+              >
+                {action}
+              </span>
+            ))}
             <button
               type="button"
               tabIndex={-1}
