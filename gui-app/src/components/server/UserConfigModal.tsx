@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -78,6 +78,37 @@ export function UserConfigModal({
   const qrContainerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
+  // ── Shared deeplink fetch (used by effect + Retry) — WR-04 deduplication. ──
+  // WR-05: depend on primitives (host/port/user) rather than the sshParams object
+  // reference, so non-memoized parents don't trigger extra fetches. Parent
+  // currently memoizes sshParams in useServerState, but this is defense in depth.
+  // WR-06: the cancelled-flag helper is closed over by useEffect to drop stale
+  // replies when username/sshParams change mid-flight.
+  const { host: sshHost, port: sshPort, user: sshUser, password: sshPassword, keyPath: sshKeyPath } = sshParams;
+  const fetchDeeplink = useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!username) return;
+      setDeeplinkLoading(true);
+      setDeeplinkError(null);
+      try {
+        const link = await invoke<string>("server_export_config_deeplink", {
+          host: sshHost,
+          port: sshPort,
+          user: sshUser,
+          password: sshPassword,
+          keyPath: sshKeyPath,
+          clientName: username,
+        });
+        if (!isCancelled?.()) setDeeplink(link);
+      } catch (e) {
+        if (!isCancelled?.()) setDeeplinkError(formatError(e));
+      } finally {
+        if (!isCancelled?.()) setDeeplinkLoading(false);
+      }
+    },
+    [username, sshHost, sshPort, sshUser, sshPassword, sshKeyPath],
+  );
+
   // ── Fetch deeplink when opening ──
   useEffect(() => {
     if (!isOpen || !username) {
@@ -97,16 +128,12 @@ export function UserConfigModal({
       setDeeplinkLoading(false);
       return;
     }
-    setDeeplinkLoading(true);
-    setDeeplinkError(null);
-    invoke<string>("server_export_config_deeplink", {
-      ...sshParams,
-      clientName: username,
-    })
-      .then((link) => setDeeplink(link))
-      .catch((e) => setDeeplinkError(formatError(e)))
-      .finally(() => setDeeplinkLoading(false));
-  }, [isOpen, username, _deeplinkOverride, _forceLoading, _forceError, sshParams]);
+    let cancelled = false;
+    void fetchDeeplink(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, username, _deeplinkOverride, _forceLoading, _forceError, fetchDeeplink]);
 
   // ── Auto-focus X button on open (Modal primitive does not trap focus) ──
   useEffect(() => {
@@ -115,18 +142,9 @@ export function UserConfigModal({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
-  // ── Retry deeplink fetch after an error ──
+  // ── Retry deeplink fetch after an error (WR-04 dedup). ──
   const handleRetry = () => {
-    if (!username) return;
-    setDeeplinkLoading(true);
-    setDeeplinkError(null);
-    invoke<string>("server_export_config_deeplink", {
-      ...sshParams,
-      clientName: username,
-    })
-      .then((link) => setDeeplink(link))
-      .catch((e) => setDeeplinkError(formatError(e)))
-      .finally(() => setDeeplinkLoading(false));
+    void fetchDeeplink();
   };
 
   // ── Copy deeplink text (D-23) ──
