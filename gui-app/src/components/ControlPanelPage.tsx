@@ -121,19 +121,20 @@ export function ServerPanelSkeleton() {
               </div>
             }
           />
-          {/* Speed skeleton — matches StatCard/Overview Variants story 3d (circle+line ×2 with divider) */}
+          {/* Speed skeleton — compact (Phase 13.UAT): меньше gap, более узкая карточка */}
           <OverviewSkeletonCard
-            flex="2 1 340px"
+            flex="1 1 280px"
+            maxWidth={360}
             body={
-              <div className="flex items-center justify-center gap-8 py-2">
-                <div className="flex items-center gap-2">
-                  <Skeleton variant="circle" width={28} height={28} />
-                  <Skeleton variant="line" width={80} height={32} />
+              <div className="flex items-center justify-center gap-4 py-2" style={{ minHeight: 48 }}>
+                <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
+                  <Skeleton variant="circle" width={24} height={24} />
+                  <Skeleton variant="line" width={60} height={28} />
                 </div>
-                <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
-                <div className="flex items-center gap-2">
-                  <Skeleton variant="circle" width={28} height={28} />
-                  <Skeleton variant="line" width={80} height={32} />
+                <div className="h-7 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+                <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
+                  <Skeleton variant="circle" width={24} height={24} />
+                  <Skeleton variant="line" width={60} height={28} />
                 </div>
               </div>
             }

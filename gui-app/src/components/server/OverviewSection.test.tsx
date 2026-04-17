@@ -600,9 +600,6 @@ describe("OverviewSection", () => {
           users: [],
           listenPort: 443,
           protocol: "x",
-          cipher: "x",
-          dns: "x",
-          mtu: 1420,
         },
       });
       render(<OverviewSection state={state} />);
@@ -628,9 +625,6 @@ describe("OverviewSection", () => {
           users: [],
           listenPort: 443,
           protocol: "x",
-          cipher: "x",
-          dns: "x",
-          mtu: 1420,
         },
       });
       render(<OverviewSection state={state} />);
