@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState, useEffect } from "react";
+import { useEffect, useRef } from "react";
 import i18n from "../i18n";
 import { ConfirmDialogProvider } from "./ConfirmDialogProvider";
 import { useConfirm } from "./useConfirm";
@@ -73,10 +73,10 @@ describe("ConfirmDialogProvider", () => {
 
     function DoubleTrigger() {
       const confirm = useConfirm();
-      const [fired, setFired] = useState(false);
+      const firedRef = useRef(false);
       useEffect(() => {
-        if (fired) return;
-        setFired(true);
+        if (firedRef.current) return;
+        firedRef.current = true;
         void (async () => {
           const a = await confirm({
             title: "first",
@@ -93,7 +93,7 @@ describe("ConfirmDialogProvider", () => {
           });
           results.push(["second", b]);
         })();
-      }, [confirm, fired]);
+      }, [confirm]);
       return null;
     }
 

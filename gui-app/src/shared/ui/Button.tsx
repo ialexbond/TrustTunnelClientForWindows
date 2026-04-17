@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- CVA variants are co-located with the component by design */
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Loader2 } from "lucide-react";

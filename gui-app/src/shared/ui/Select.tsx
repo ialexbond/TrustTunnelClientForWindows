@@ -52,6 +52,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   // Reset highlight when dropdown opens/closes
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- highlight must be ready before keyboard navigation; defer would let first ArrowDown skip the initial item
       setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
     } else {
       setHighlightedIndex(-1);
@@ -136,9 +137,9 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
       <div className={cn("relative", className)} ref={containerRef}>
         <button
           ref={(node) => {
-            (triggerRef as React.MutableRefObject<HTMLButtonElement | null>).current = node;
+            triggerRef.current = node;
             if (typeof ref === "function") ref(node);
-            else if (ref) (ref as React.MutableRefObject<HTMLButtonElement | null>).current = node;
+            else if (ref) ref.current = node;
           }}
           type="button"
           role="combobox"

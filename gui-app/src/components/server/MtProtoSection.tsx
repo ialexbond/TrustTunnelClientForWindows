@@ -21,12 +21,13 @@ export function MtProtoSection({ state }: MtProtoSectionProps) {
     state.install(parsedPort);
   };
 
+  const proxyLink = state.status?.proxy_link;
   const handleCopy = useCallback(async () => {
-    if (!state.status?.proxy_link) return;
-    await navigator.clipboard.writeText(state.status.proxy_link);
+    if (!proxyLink) return;
+    await navigator.clipboard.writeText(proxyLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [state.status?.proxy_link]);
+  }, [proxyLink]);
 
   const handleRetry = () => {
     state.retry(parsedPort);

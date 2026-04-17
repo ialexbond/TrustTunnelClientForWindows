@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- Provider/Context co-located here intentionally; splitting hurts call-site ergonomics */
 import {
   createContext,
   useCallback,
