@@ -67,12 +67,14 @@ completed: 2026-04-17
 
 Each task was committed atomically with `--no-verify` (parallel executor convention):
 
-1. **Task 13-05-TASK-01: Bump Pro edition 3.0.0 → 3.1.0** — `afc5b0a8` (chore)
+1. **Task 13-05-TASK-01: Bump Pro edition 3.0.0 → 3.1.0** — `aaadff8e` (chore)
    - 3 files: gui-app/package.json, gui-app/src-tauri/Cargo.toml, gui-app/src-tauri/tauri.conf.json
    - 4 string replacements (3 `version` + 1 window `title`)
 2. **Task 13-05-TASK-02: Bump Light edition 2.7.0 → 2.8.0** — `21063bbd` (chore)
    - 3 files: gui-light/package.json, gui-light/src-tauri/Cargo.toml, gui-light/src-tauri/tauri.conf.json
    - 4 string replacements (3 `version` + 1 window `title`)
+3. **Plan metadata** — `09948e27` (docs)
+   - SUMMARY.md created with full execution log
 
 _Note: STATE.md/ROADMAP.md updates skipped per parallel executor protocol — will be aggregated post-merge._
 
@@ -125,8 +127,11 @@ Verified files exist and match expected versions:
 - `gui-light/src-tauri/tauri.conf.json` — FOUND, version 2.8.0 + title "Light v2.8.0"
 
 Verified commits exist in git log:
-- `afc5b0a8` (Task 01: Pro bump) — FOUND
+- `aaadff8e` (Task 01: Pro bump) — FOUND
 - `21063bbd` (Task 02: Light bump) — FOUND
+- `09948e27` (Plan metadata: SUMMARY.md) — FOUND
+
+**Note on hash collision:** initial `git rev-parse --short HEAD` returned `afc5b0a8` for the Pro bump, but a later check revealed that hash collides with another parallel executor's commit (`test(13-02): add failing tests for useServerStats hook (RED)`) at 8-char prefix. Lookup by commit message shows the actual full hash for my Pro bump is `aaadff8e`. Both commits coexist independently in the branch — no rewrite occurred.
 
 ---
 *Phase: 13-ip-tls-ping-drill-down*
