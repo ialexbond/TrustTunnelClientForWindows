@@ -180,7 +180,7 @@ function App() {
       <div
         className="flex-1 min-h-0 overflow-hidden relative"
         style={{
-          maxWidth: 1200,
+          maxWidth: 1000,
           width: "100%",
           margin: "0 auto",
           transition: "padding var(--transition-fast) var(--ease-out)",
@@ -345,8 +345,10 @@ function App() {
         </div>
       </div>
 
-      {/* Bottom tab navigation */}
-      <TabNavigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab)} />
+      {/* Bottom tab navigation — wrapped in same maxWidth as content area so it aligns with the rest of the UI */}
+      <div style={{ maxWidth: 1000, width: "100%", margin: "0 auto", flexShrink: 0 }}>
+        <TabNavigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab)} />
+      </div>
     </div>
 
     <ConfirmDialog
