@@ -1,6 +1,8 @@
 /* eslint-disable no-console -- storybook stories use console.log to demo callbacks */
 import type { Meta, StoryObj } from "@storybook/react";
 import { ServerTabs } from "./ServerTabs";
+import { SnackBarProvider } from "../shared/ui/SnackBarContext";
+import { ConfirmDialogProvider } from "../shared/ui/ConfirmDialogProvider";
 import type { ServerState } from "./server/useServerState";
 
 function createMockServerState(overrides?: Partial<ServerState>): ServerState {
@@ -122,16 +124,20 @@ const meta: Meta<typeof ServerTabs> = {
   parameters: { layout: "fullscreen" },
   decorators: [
     (Story) => (
-      <div
-        style={{
-          height: 600,
-          backgroundColor: "var(--color-bg-primary)",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <Story />
-      </div>
+      <SnackBarProvider>
+        <ConfirmDialogProvider>
+          <div
+            style={{
+              height: 600,
+              backgroundColor: "var(--color-bg-primary)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <Story />
+          </div>
+        </ConfirmDialogProvider>
+      </SnackBarProvider>
     ),
   ],
 };
