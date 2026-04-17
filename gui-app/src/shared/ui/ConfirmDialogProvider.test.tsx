@@ -166,4 +166,134 @@ describe("ConfirmDialogProvider", () => {
     ).toThrow(/useConfirm must be used within ConfirmDialogProvider/);
     spy.mockRestore();
   });
+
+  // ══════════════════════════════════════════════════════
+  // Phase 14 post-install: async action API + 200ms exit-lag
+  // ══════════════════════════════════════════════════════
+
+  it("action prop: modal stays open while async action is pending", async () => {
+    const results: boolean[] = [];
+    let resolveAction!: () => void;
+    const actionPromise = new Promise<void>((res) => {
+      resolveAction = res;
+    });
+    const action = vi.fn().mockReturnValue(actionPromise);
+
+    render(
+      <ConfirmDialogProvider>
+        <TriggerHarness
+          onResult={(v) => results.push(v)}
+          options={{ title: "Delete", message: "sure?", variant: "danger", action }}
+        />
+      </ConfirmDialogProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "ask" }));
+    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+
+    // Action was invoked but its promise is pending — dialog MUST stay open.
+    expect(action).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("sure?")).toBeInTheDocument();
+    expect(results).toEqual([]);
+
+    // Resolve action — dialog closes, confirm() resolves true.
+    await act(async () => {
+      resolveAction();
+      await Promise.resolve();
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(results).toEqual([true]);
+  });
+
+  it("action prop: resolves false when action throws, modal closes", async () => {
+    const results: boolean[] = [];
+    const action = vi.fn().mockRejectedValue(new Error("backend exploded"));
+
+    render(
+      <ConfirmDialogProvider>
+        <TriggerHarness
+          onResult={(v) => results.push(v)}
+          options={{ title: "Delete", message: "sure?", variant: "danger", action }}
+        />
+      </ConfirmDialogProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "ask" }));
+    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(results).toEqual([false]);
+  });
+
+  it("action prop: Cancel is ignored while action is in flight", async () => {
+    const results: boolean[] = [];
+    let resolveAction!: () => void;
+    const actionPromise = new Promise<void>((res) => {
+      resolveAction = res;
+    });
+    const action = vi.fn().mockReturnValue(actionPromise);
+
+    render(
+      <ConfirmDialogProvider>
+        <TriggerHarness
+          onResult={(v) => results.push(v)}
+          options={{ title: "Delete", message: "sure?", variant: "danger", action }}
+        />
+      </ConfirmDialogProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "ask" }));
+    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+    // Try Cancel while action is still running — should be ignored.
+    // Cancel button is disabled via loading=true, but belt-and-suspenders: click does nothing.
+    const cancelBtn = screen.getByRole("button", { name: /Отмена/i });
+    expect(cancelBtn).toBeDisabled();
+
+    await act(async () => {
+      resolveAction();
+      await Promise.resolve();
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(results).toEqual([true]);
+  });
+
+  it("exit animation: content stays rendered briefly after close, then unmounts", async () => {
+    // Regression guard for the 200ms exit lag (see Modal lifecycle contract —
+    // Modal.tsx JSDoc + known-issues #10). Provider must NOT immediately
+    // unmount ConfirmDialog when current goes null — that would kill the
+    // 200ms exit animation of Modal primitive.
+    //
+    // Approach: use fireEvent (synchronous) + real timers. Content must still
+    // be in DOM at least for one React commit after close before Modal unmounts.
+    const results: boolean[] = [];
+    render(
+      <ConfirmDialogProvider>
+        <TriggerHarness
+          onResult={(v) => results.push(v)}
+          options={{ title: "Hold me", message: "body-stays-during-exit", variant: "danger" }}
+        />
+      </ConfirmDialogProvider>,
+    );
+
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(screen.getByRole("button", { name: "ask" }));
+    expect(screen.getByText("body-stays-during-exit")).toBeInTheDocument();
+
+    // Cancel click — Provider sets current=null immediately, but Modal's own
+    // exit transition + our displayed-lag keep content in DOM.
+    fireEvent.click(screen.getByRole("button", { name: /Отмена/i }));
+
+    // Content must still be mounted right after click (exit animation starts).
+    expect(screen.getByText("body-stays-during-exit")).toBeInTheDocument();
+    // After 250ms (> 200ms lag) content should be unmounted.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(screen.queryByText("body-stays-during-exit")).not.toBeInTheDocument();
+    expect(results).toEqual([false]);
+  }, 10000);
 });

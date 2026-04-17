@@ -394,4 +394,76 @@ describe("UserConfigModal", () => {
     );
     expect(screen.getByText(/Mock error for storybook/)).toBeInTheDocument();
   });
+
+  // ══════════════════════════════════════════════════════
+  // Phase 14 post-install: download blocks close
+  // ══════════════════════════════════════════════════════
+
+  it("Download in-flight: X close button is disabled (can't dismiss during SSH)", async () => {
+    const onClose = vi.fn();
+    // fetch_server_config returns a pending promise — download never completes.
+    let resolveFetch!: (v: string) => void;
+    const fetchPromise = new Promise<string>((res) => {
+      resolveFetch = res;
+    });
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "server_export_config_deeplink") {
+        return Promise.resolve("tt://?test");
+      }
+      if (cmd === "fetch_server_config") return fetchPromise;
+      return Promise.resolve();
+    });
+    vi.mocked(save).mockResolvedValue(null);
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={onClose}
+      />,
+    );
+
+    // Wait for deeplink ready + download button visible
+    const downloadBtn = await screen.findByRole("button", {
+      name: new RegExp(i18n.t("server.users.download_config"), "i"),
+    });
+
+    // Click download — isDownloading becomes true, fetch_server_config pending
+    fireEvent.click(downloadBtn);
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("fetch_server_config", expect.anything()));
+
+    // X close button is disabled during download
+    const closeBtn = screen.getByRole("button", { name: i18n.t("buttons.close") });
+    expect(closeBtn).toBeDisabled();
+
+    // Clicking X doesn't trigger onClose
+    fireEvent.click(closeBtn);
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Release the fetch — download completes
+    resolveFetch("/tmp/ok.toml");
+  });
+
+  it("Download NOT in-flight: X close button is enabled", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "server_export_config_deeplink") {
+        return Promise.resolve("tt://?ready");
+      }
+      return Promise.resolve();
+    });
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await screen.findByTestId("qr-code");
+    const closeBtn = screen.getByRole("button", { name: i18n.t("buttons.close") });
+    expect(closeBtn).not.toBeDisabled();
+  });
 });

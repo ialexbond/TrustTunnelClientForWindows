@@ -562,4 +562,51 @@ describe("UsersSection (Phase 14 redesign)", () => {
     expect(buttonsInRow.length).toBe(2);
     expect(within(aliceRow).queryByRole("img")).not.toBeInTheDocument();
   });
+
+  // ══════════════════════════════════════════════════════
+  // Phase 14 post-install: isBusy disables row-level actions
+  // ══════════════════════════════════════════════════════
+
+  it("isBusy (actionLoading='add_user'): FileText + Trash icons disabled on all rows", () => {
+    const state = makeState({ actionLoading: "add_user" });
+    render(<UsersSection state={state} />);
+    const items = screen.getAllByRole("listitem");
+    // Find all icon buttons — they should all be disabled while adding.
+    for (const row of items) {
+      const buttons = within(row).getAllByRole("button");
+      for (const btn of buttons) {
+        expect(btn).toBeDisabled();
+      }
+    }
+  });
+
+  it("isBusy (deleteLoading=true): FileText + Trash icons disabled", () => {
+    const state = makeState({ deleteLoading: true });
+    render(<UsersSection state={state} />);
+    const items = screen.getAllByRole("listitem");
+    for (const row of items) {
+      const buttons = within(row).getAllByRole("button");
+      for (const btn of buttons) {
+        expect(btn).toBeDisabled();
+      }
+    }
+  });
+
+  it("Not busy: FileText enabled, Trash enabled (except last-user case D-21)", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice", "bob"],  // 2 users → Trash NOT disabled by D-21
+      },
+    });
+    render(<UsersSection state={state} />);
+    const items = screen.getAllByRole("listitem");
+    const aliceRow = items.find((el) => el.textContent?.includes("alice"))!;
+    const buttons = within(aliceRow).getAllByRole("button");
+    for (const btn of buttons) {
+      expect(btn).not.toBeDisabled();
+    }
+  });
 });
