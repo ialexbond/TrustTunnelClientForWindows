@@ -282,6 +282,7 @@ pub fn run() {
             commands::ssh_commands::server_get_available_versions,
             commands::ssh_commands::server_upgrade,
             commands::ssh_commands::server_get_stats,
+            commands::ssh_commands::server_get_uptime,
             commands::ssh_commands::security_get_status,
             commands::ssh_commands::security_install_fail2ban,
             commands::ssh_commands::security_uninstall_fail2ban,

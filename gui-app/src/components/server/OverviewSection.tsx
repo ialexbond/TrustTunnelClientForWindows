@@ -164,6 +164,25 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
     }
   }, [speedTesting, activityLog]);
 
+  // ── Fast standalone uptime poller (Phase 13.UAT G-01 C) — независимо от
+  //    server_get_stats (который тормозится sleep 1 для CPU sampling).
+  //    `cat /proc/uptime` возвращается за <100ms → Uptime card появляется
+  //    почти мгновенно, не ждёт CPU/RAM. Polling 10s как и у stats.
+  const [fastUptime, setFastUptime] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!serverInfo?.serviceActive || rebooting || !isOverviewVisible) return;
+    let cancelled = false;
+    const fetchUptime = () => {
+      invoke<{ uptime_seconds: number }>("server_get_uptime", sshParams)
+        .then((r) => { if (!cancelled) setFastUptime(r.uptime_seconds); })
+        .catch(() => { /* silent — stats fallback handles display */ });
+    };
+    fetchUptime(); // immediate
+    const interval = setInterval(fetchUptime, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [sshParams, serverInfo?.serviceActive, rebooting, isOverviewVisible]);
+
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
@@ -488,14 +507,17 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         </div>
       </Card>
 
-      {/* Uptime — live */}
+      {/* Uptime — fast uptime (server_get_uptime, <100ms) fallback на stats.uptime_seconds.
+          Fast polling независим от server_get_stats (тормозится sleep 1 для CPU%). */}
       <Card padding="md" style={{ flex: "1 1 160px" }}>
         <Title icon={<Clock className="w-5 h-5" />} text={t("server.overview.cards.uptime")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          {stats === null && statsLoading ? (
-            <Skeleton variant="line" width={80} height={28} />
+          {fastUptime !== null ? (
+            <span style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
           ) : stats ? (
             <span style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
+          ) : statsLoading ? (
+            <Skeleton variant="line" width={80} height={28} />
           ) : (
             <span style={{ ...bigNum, ...muted }}>—</span>
           )}

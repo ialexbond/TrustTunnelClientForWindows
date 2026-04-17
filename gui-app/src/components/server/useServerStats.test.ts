@@ -141,18 +141,18 @@ describe("useServerStats", () => {
 
     renderHook(() => useServerStats(mockSshParams, { enabled: true }));
 
-    // Tick 1 — fail
-    await settleAndTick();
+    // Tick 1 — IMMEDIATE fire on mount (Phase 13.UAT G-01 A: было через 10s, стало
+    // immediate). Flush microtasks через advance(0). Result: fail, failureRef=1.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(callCount).toBe(1);
 
-    // Tick 2 — fail (10s позже)
+    // Tick 2 — fail (10s позже, intervalMs default)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
     expect(callCount).toBe(2);
 
-    // Tick 3 — fail (10s либо 30s в зависимости от шага).
-    // Более надёжный способ: advance 30_000 → хотя бы ещё один вызов.
+    // Tick 3 — после 2 fails backoff = 30s
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
