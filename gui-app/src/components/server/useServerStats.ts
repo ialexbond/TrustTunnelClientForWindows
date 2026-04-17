@@ -64,7 +64,9 @@ export function useServerStats(sshParams: SshParams, options: Options) {
   const { enabled, intervalMs = 10_000 } = options;
 
   const [stats, setStats] = useState<ServerStats | null>(null);
-  const [loading, setLoading] = useState(false);
+  // BUG-02 fix: init loading=true if polling enabled at mount, so OverviewSection
+  // shows Skeleton during the initial 10s setTimeout gap (before first fetch fires).
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const [failureCount, setFailureCount] = useState(0);
   const failureRef = useRef(0);

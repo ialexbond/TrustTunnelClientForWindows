@@ -85,11 +85,12 @@ export function ServerTabs({ state }: ServerTabsProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar */}
+      {/* Tab bar — separator (border-bottom) constrained to button extent (BUG-05) */}
+      <div className="px-6 shrink-0">
       <div
         role="tablist"
         aria-label={t("tabs.server_tabs", "Серверные вкладки")}
-        className="flex items-center shrink-0 px-6 gap-1"
+        className="flex items-center gap-1"
         style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
       >
         {tabs.map((tab, idx) => (
@@ -137,6 +138,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
             <LogOut className="w-4 h-4" />
           </button>
         </Tooltip>
+      </div>
       </div>
 
       {/* Tab content — cross-fade with visibility+opacity: mount once, fade between tabs */}

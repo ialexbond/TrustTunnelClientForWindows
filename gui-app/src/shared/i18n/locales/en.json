@@ -984,7 +984,7 @@
       "port": "Port",
       "users": "Connections",
       "cards": {
-        "status": "Status",
+        "status": "Protocol status",
         "ping": "Ping",
         "speed": "Speed",
         "userCount": "Users",
@@ -1004,6 +1004,9 @@
         "sshKey": "SSH key",
         "tls": "TLS",
         "tlsActive": "Active",
+        "active": "Active",
+        "inactive": "Disabled",
+        "notInstalled": "Not installed",
         "placeholder": "—"
       },
       "uptimeFormat": {
