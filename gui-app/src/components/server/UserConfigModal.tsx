@@ -112,13 +112,11 @@ export function UserConfigModal({
   );
 
   // ── Fetch deeplink when opening ──
+  // NOTE: on close (!isOpen) we DO NOT clear state — Modal primitive runs a
+  // 200ms exit animation and the content must stay rendered during it.
+  // A delayed reset is triggered in the cleanup effect below.
   useEffect(() => {
-    if (!isOpen || !username) {
-      setDeeplink(null);
-      setDeeplinkError(null);
-      setDeeplinkLoading(false);
-      return;
-    }
+    if (!isOpen || !username) return;
     // Storybook escape hatches short-circuit the invoke path.
     if (_forceLoading || _forceError !== undefined) {
       setDeeplinkLoading(false);
@@ -136,6 +134,20 @@ export function UserConfigModal({
       cancelled = true;
     };
   }, [isOpen, username, _deeplinkOverride, _forceLoading, _forceError, fetchDeeplink]);
+
+  // ── Delayed cleanup after close ──
+  // Runs 200ms after isOpen flips to false — matches Modal exit animation.
+  // Keeps deeplink+loading+error rendered during the fade-out so the modal
+  // doesn't empty itself while transitioning away.
+  useEffect(() => {
+    if (isOpen) return;
+    const timer = setTimeout(() => {
+      setDeeplink(null);
+      setDeeplinkError(null);
+      setDeeplinkLoading(false);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [isOpen]);
 
   // ── Auto-focus X button on open (Modal primitive does not trap focus) ──
   useEffect(() => {
@@ -275,8 +287,9 @@ export function UserConfigModal({
   const effectiveError = _forceError ?? deeplinkError;
   const effectiveDeeplink = effectiveError ? null : deeplink ?? "";
 
-  if (!isOpen) return null;
-
+  // NOTE: no early `return null` on !isOpen — Modal primitive manages its own
+  // mounted/animating lifecycle (200ms exit animation). Returning null here
+  // would unmount the tree instantly and kill the exit transition.
   return (
     <Modal
       isOpen={isOpen}
@@ -389,17 +402,18 @@ export function UserConfigModal({
                 "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               )}
             />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2">
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center leading-none">
               <Tooltip text={t("server.users.copy_deeplink_tooltip")}>
                 <button
                   type="button"
                   aria-label={t("server.users.copy_deeplink_tooltip")}
                   onClick={() => void handleCopyLink()}
                   className={cn(
-                    "p-1 rounded",
+                    "p-1 rounded flex items-center",
                     "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
                     "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                    "transition-colors",
+                    "transition-[color,transform] duration-[var(--transition-fast)]",
+                    "active:scale-[0.92]"
                   )}
                 >
                   <Copy className="w-3.5 h-3.5" />

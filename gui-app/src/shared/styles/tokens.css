@@ -90,6 +90,7 @@
   --z-sticky: 200;
   --z-modal: 300;
   --z-snackbar: 400;
+  --z-tooltip: 450;    /* above modal — tooltip inside modal must be visible */
   --z-titlebar: 500;
 
   /* ── Opacity ───────────────────────────────────── */

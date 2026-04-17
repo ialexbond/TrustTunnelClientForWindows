@@ -108,7 +108,7 @@ describe("Tooltip", () => {
     expect(screen.queryByText("Delayed tip")).not.toBeInTheDocument();
   });
 
-  it("uses z-[var(--z-dropdown)] not hardcoded 9500", () => {
+  it("uses z-[var(--z-tooltip)] above modal (not hardcoded, not below modal)", () => {
     render(
       <Tooltip text="Z-check" delay={0}>
         <span>Trigger</span>
@@ -123,7 +123,9 @@ describe("Tooltip", () => {
     });
 
     const tip = screen.getByText("Z-check").closest("div[class*='fixed']")!;
-    expect(tip.className).toContain("z-[var(--z-dropdown)]");
+    // Tooltip must sit above Modal (z-modal=300). Dedicated --z-tooltip=450 token.
+    expect(tip.className).toContain("z-[var(--z-tooltip)]");
     expect(tip.className).not.toContain("9500");
+    expect(tip.className).not.toContain("z-[var(--z-dropdown)]");
   });
 });
