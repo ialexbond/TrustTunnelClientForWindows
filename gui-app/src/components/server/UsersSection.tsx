@@ -126,12 +126,14 @@ export function UsersSection({ state }: Props) {
   // ── Continue as selected user ──
   const handleContinueAsUser = async () => {
     if (!selectedUser) return;
+    activityLog("USER", `user.continue_as.clicked user=${selectedUser}`);
     setContinueLoading(true);
     try {
       const path = await invoke<string>("fetch_server_config", {
         ...sshParams,
         clientName: selectedUser,
       });
+      activityLog("STATE", `user.continue_as.completed user=${selectedUser}`);
       onConfigExported(path);
     } catch (e) {
       activityLog(
@@ -157,13 +159,15 @@ export function UsersSection({ state }: Props) {
   // model: «модалка закрывается в момент, когда пользователь исчезает».
   const handleDeleteUser = async (user: string) => {
     activityLog("USER", `user.remove.initiated user=${user}`);
-    await confirm({
+    let actionRan = false;
+    const ok = await confirm({
       title: t("server.users.confirm_delete_title"),
       message: t("server.users.confirm_delete_message", { user }),
       variant: "danger",
       confirmText: t("buttons.confirm_delete"),
       cancelText: t("buttons.cancel"),
       action: async () => {
+        actionRan = true;
         activityLog("USER", `user.remove.confirmed user=${user}`);
         setDeleteLoading(true);
         try {
@@ -186,6 +190,13 @@ export function UsersSection({ state }: Props) {
         }
       },
     });
+    // Disambiguate the three outcomes:
+    //   ok=true  → success (user.remove.completed already logged)
+    //   ok=false + actionRan → action threw (user.remove.failed already logged)
+    //   ok=false + !actionRan → user dismissed dialog (cancel button / Escape / backdrop)
+    if (!ok && !actionRan) {
+      activityLog("USER", `user.remove.cancelled user=${user}`);
+    }
   };
 
   // ── Add user (Pitfall 4 ordering: unlock → pre-fill → pending modal) ──
@@ -256,12 +267,15 @@ export function UsersSection({ state }: Props) {
                     aria-disabled={isBusy}
                     tabIndex={isSelected && !isBusy ? 0 : -1}
                     onClick={() => {
-                      if (!isBusy) setSelectedUser(u);
+                      if (isBusy) return;
+                      if (!isSelected) activityLog("USER", `user.row.selected user=${u}`);
+                      setSelectedUser(u);
                     }}
                     onKeyDown={(e) => {
                       if (isBusy) return;
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
+                        if (!isSelected) activityLog("USER", `user.row.selected user=${u} via=keyboard`);
                         setSelectedUser(u);
                       }
                     }}
@@ -330,7 +344,12 @@ export function UsersSection({ state }: Props) {
                           aria-disabled={isLast || isBusy}
                           disabled={isLast || isBusy}
                           onClick={() => {
-                            if (!isLast && !isBusy) void handleDeleteUser(u);
+                            if (isLast) {
+                              activityLog("USER", `user.remove.blocked reason=last-user user=${u}`);
+                              return;
+                            }
+                            if (isBusy) return;
+                            void handleDeleteUser(u);
                           }}
                           className={cn(
                             "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",

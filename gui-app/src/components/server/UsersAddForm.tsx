@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { UserPlus, Loader2, Shuffle } from "lucide-react";
 import { ActionInput } from "../../shared/ui/ActionInput";
@@ -6,6 +7,33 @@ import { Button } from "../../shared/ui/Button";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
+
+/**
+ * Client-side validation (matches Linux useradd constraints).
+ * Returns i18n key for error, or empty string if valid.
+ * Empty input is considered valid (submit is gated by `newUsername.trim().length > 0` separately).
+ */
+function validateUsername(v: string): string {
+  if (!v) return "";
+  if (/\s/.test(v)) return "server.users.username_spaces";
+  // ASCII-only: letters, digits, `. _ -` — matches the char set the backend accepts (useradd NAME_REGEX).
+  if (!/^[a-zA-Z0-9._-]+$/.test(v)) return "server.users.username_ascii_only";
+  if (v.length > 32) return "server.users.username_too_long";
+  return "";
+}
+
+/**
+ * Password client-side validation. Linux passwords can contain almost anything;
+ * we only reject leading/trailing spaces (often invisible, cause login failures)
+ * and non-ASCII (SSH deploy pipeline struggles with UTF-8 in some shells).
+ */
+function validatePassword(v: string): string {
+  if (!v) return "";
+  if (v !== v.trim()) return "server.users.password_no_edge_spaces";
+  // eslint-disable-next-line no-control-regex -- we explicitly want \x00-\x7F boundary
+  if (/[^\x00-\x7F]/.test(v)) return "server.users.password_ascii_only";
+  return "";
+}
 
 interface UsersAddFormProps {
   newUsername: string;
@@ -54,6 +82,31 @@ export function UsersAddForm({
   const { t } = useTranslation();
   const { log: activityLog } = useActivityLog();
 
+  // ── Client-side validation (logs transitions, gates submit) ──
+  const localUsernameError = validateUsername(newUsername);
+  const localPasswordError = validatePassword(newPassword);
+  const prevUsernameError = useRef(localUsernameError);
+  const prevPasswordError = useRef(localPasswordError);
+  useEffect(() => {
+    // Log when a new validation error appears (transition empty → error or error → different error).
+    // D-29: do NOT include the value itself — only the error type.
+    if (localUsernameError && localUsernameError !== prevUsernameError.current) {
+      const type = localUsernameError.split(".").pop();
+      activityLog("USER", `user.form.validation_error field=username type=${type}`);
+    }
+    prevUsernameError.current = localUsernameError;
+  }, [localUsernameError, activityLog]);
+  useEffect(() => {
+    if (localPasswordError && localPasswordError !== prevPasswordError.current) {
+      const type = localPasswordError.split(".").pop();
+      activityLog("USER", `user.form.validation_error field=password type=${type}`);
+    }
+    prevPasswordError.current = localPasswordError;
+  }, [localPasswordError, activityLog]);
+
+  // Merge local validation with parent's error (backend-reported errors like `username_exists`).
+  const displayedUsernameError = localUsernameError || usernameError;
+
   const handleRegenerateName = () => {
     activityLog("USER", "user.form.name_generated");
     // D-14: parent-delegated generator with collision-check when provided,
@@ -82,13 +135,25 @@ export function UsersAddForm({
   };
 
   const canSubmit =
-    !isAdding && newUsername.trim().length > 0 && newPassword.trim().length > 0 && !usernameError;
+    !isAdding &&
+    newUsername.trim().length > 0 &&
+    newPassword.trim().length > 0 &&
+    !displayedUsernameError &&
+    !localPasswordError;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (canSubmit) {
-      onAdd();
+    if (!canSubmit) {
+      // Log blocked submit so user can see in activity log WHY nothing happened.
+      if (displayedUsernameError || localPasswordError) {
+        activityLog(
+          "USER",
+          `user.add.blocked reason=${displayedUsernameError ? "username" : "password"}`,
+        );
+      }
+      return;
     }
+    onAdd();
   };
 
   return (
@@ -101,7 +166,7 @@ export function UsersAddForm({
             onChange={(e) => setNewUsername(e.target.value)}
             placeholder={t("server.users.username_placeholder")}
             aria-label={t("server.users.username_placeholder")}
-            error={usernameError ? t(usernameError) : undefined}
+            error={displayedUsernameError ? t(displayedUsernameError) : undefined}
             disabled={isAdding}
             clearable
             onClear={handleClearName}
@@ -129,6 +194,7 @@ export function UsersAddForm({
             onChange={(e) => setNewPassword(e.target.value)}
             placeholder={t("server.users.password_placeholder")}
             aria-label={t("server.users.password_placeholder")}
+            error={localPasswordError ? t(localPasswordError) : undefined}
             disabled={isAdding}
             showLockIcon={false}
             clearable
