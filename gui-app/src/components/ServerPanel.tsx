@@ -37,13 +37,14 @@ interface ServerPanelProps {
 export function ServerPanel(props: ServerPanelProps) {
   const { t } = useTranslation();
   const state = useServerState(props);
+  const { onPanelReady } = props;
 
   // Signal to parent when panel data is loaded (for skeleton dismissal)
   useEffect(() => {
-    if (state.panelDataLoaded && props.onPanelReady) {
-      props.onPanelReady();
+    if (state.panelDataLoaded && onPanelReady) {
+      onPanelReady();
     }
-  }, [state.panelDataLoaded, props.onPanelReady]);
+  }, [state.panelDataLoaded, onPanelReady]);
 
   // Reboot polling is handled by OverviewSection (inside the Overview tab) —
   // see `useEffect` keyed on `rebooting` there for the 10s poll + 2min timeout.

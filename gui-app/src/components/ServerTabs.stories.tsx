@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- storybook stories use console.log to demo callbacks */
 import type { Meta, StoryObj } from "@storybook/react";
 import { ServerTabs } from "./ServerTabs";
 import type { ServerState } from "./server/useServerState";

@@ -38,7 +38,6 @@ export const Loading: Story = {
 };
 
 export const DashboardGrid: Story = {
-  name: "Dashboard Grid",
   render: () => (
     <div className="grid grid-cols-2 gap-3" style={{ width: 400 }}>
       <StatCard label="Download" value="1.24 MB/s" trend={12} icon={<ArrowDownToLine size={16} />} />

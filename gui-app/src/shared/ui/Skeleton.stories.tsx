@@ -30,7 +30,6 @@ export const Variants: Story = {
 };
 
 export const TextBlock: Story = {
-  name: "Text Block",
   render: () => (
     <div className="flex flex-col gap-2" style={{ width: 300 }}>
       <Skeleton variant="line" width="100%" height={16} />
