@@ -366,9 +366,14 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         )}
       </Card>
 
-      {/* Ping */}
+      {/* Ping — refresh скрыт когда протокол off (UAT consistency со Speed карточкой) */}
       <Card padding="md" style={{ flex: "1 1 140px" }}>
-        <Title icon={<Activity className="w-5 h-5" />} text={t("server.overview.cards.ping")} onRefresh={refreshPing} refreshAriaLabel={refreshAriaLabel} />
+        <Title
+          icon={<Activity className="w-5 h-5" />}
+          text={t("server.overview.cards.ping")}
+          onRefresh={isRunning && !rebooting ? refreshPing : undefined}
+          refreshAriaLabel={refreshAriaLabel}
+        />
         <div className="flex items-baseline justify-center gap-1 py-2">
           {ping !== null && ping > 0 ? (
             <>
