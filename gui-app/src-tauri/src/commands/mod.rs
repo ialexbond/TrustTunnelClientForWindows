@@ -2,6 +2,7 @@ pub mod vpn;
 pub mod ssh_commands;
 pub mod config;
 pub mod network;
+pub mod geoip;
 pub mod updater;
 pub mod history;
 pub mod deeplink;
