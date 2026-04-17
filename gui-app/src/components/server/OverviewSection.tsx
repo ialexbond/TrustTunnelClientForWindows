@@ -163,11 +163,16 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   // ── Speed test (BUG fix — manual, не polling) ──
   const [speed, setSpeed] = useState<{ download_mbps: number; upload_mbps: number } | null>(null);
   const [speedTesting, setSpeedTesting] = useState(false);
+  // G-05: различаем "ни разу не запускался" (null + !failed → "Не измерялась")
+  // от "попробовал, упало" (null + failed → "—"). Иначе после failed test UI
+  // выглядит как будто speedtest не запускался.
+  const [speedFailed, setSpeedFailed] = useState(false);
 
   const runSpeedTest = useCallback(async () => {
     if (speedTesting) return;
     activityLog("USER", "overview.speedtest.started", "OverviewSection.SpeedRefresh");
     setSpeedTesting(true);
+    setSpeedFailed(false);
     try {
       // Client-side speedtest: твой ПК → Cloudflare. Если VPN-клиент подключён к этому
       // серверу — трафик идёт через VPN-туннель, измеряется реальная VPN throughput
@@ -178,6 +183,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       activityLog("STATE", `overview.speedtest.completed dl=${r.download_mbps.toFixed(1)} ul=${r.upload_mbps.toFixed(1)}`, "speedtest_run");
     } catch (e) {
       setSpeed(null);
+      setSpeedFailed(true);
       activityLog("ERROR", `overview.speedtest.failed err=${String(e)}`, "speedtest_run");
     } finally {
       setSpeedTesting(false);
@@ -487,6 +493,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                 <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
               </div>
             </div>
+          </div>
+        ) : speedFailed ? (
+          <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
+            <span style={{ ...bigNum, ...muted }}>—</span>
           </div>
         ) : (
           <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
