@@ -95,9 +95,22 @@ export function translateSshError(error: string, t: TFunction): string {
     case "SSH_KILL_PROCESS_FAILED":
       return t("sshErrors.killProcessFailed", { detail: parts[1] || "" });
 
+    // ─── GeoIP (Phase 13) ───
+    case "GEOIP_TIMEOUT":
+      return t("geoipErrors.timeout");
+    case "GEOIP_NO_NETWORK":
+      return t("geoipErrors.noNetwork");
+    case "GEOIP_RATE_LIMITED":
+      return t("geoipErrors.rateLimited");
+    case "GEOIP_INVALID_RESPONSE":
+      return t("geoipErrors.invalidResponse", { detail: parts[1] || "" });
+
     default:
-      // Dev-warn: surface unknown SSH_* codes for early detection in dev sessions
-      if (import.meta.env.DEV && code.startsWith("SSH_")) {
+      // Dev-warn: surface unknown SSH_*/GEOIP_* codes for early detection in dev sessions
+      if (
+        import.meta.env.DEV &&
+        (code.startsWith("SSH_") || code.startsWith("GEOIP_"))
+      ) {
         console.warn(
           `[translateSshError] Unknown SSH error code: ${code}, raw: ${raw}`,
         );
