@@ -23,6 +23,45 @@ const sizeClasses: Record<ModalSize, string> = {
   lg: "max-w-lg",
 };
 
+/**
+ * Modal primitive — lifecycle contract.
+ *
+ * Плавный open/close обеспечивается ДВУМЯ state'ами:
+ *   - `mounted`: в DOM / не в DOM (React unmount)
+ *   - `animating`: визуально видимо / скрыто (opacity + scale + translateY transition 200ms ease-out)
+ *
+ * Жизненный цикл:
+ *   1. isVisible=false → isVisible=true: `mounted=true` сразу → двойной RAF → `animating=true` → enter 200ms
+ *   2. isVisible=true → isVisible=false: `animating=false` сразу → exit 200ms → setTimeout(200) → `mounted=false`
+ *
+ * ⚠ ПРАВИЛО ДЛЯ CALLER'ов (parent-компонентов):
+ * **НИКОГДА не делайте `if (!isOpen) return null` до `<Modal>`** — это отключит
+ * exit-анимацию, потому что React unmount'ит всё дерево раньше чем Modal
+ * успеет проиграть свои 200ms.
+ *
+ * ❌ НЕ ТАК:
+ *   function MyModal({ isOpen, onClose }) {
+ *     if (!isOpen) return null;       // 🐛 Модалка закрывается МГНОВЕННО
+ *     return <Modal isOpen={isOpen} onClose={onClose}>...</Modal>;
+ *   }
+ *
+ * ✓ ПРАВИЛЬНО:
+ *   function MyModal({ isOpen, onClose }) {
+ *     return <Modal isOpen={isOpen} onClose={onClose}>...</Modal>;
+ *   }
+ *
+ * Modal САМ управляет visibility + mount/unmount timing. Parent лишь передаёт
+ * `isOpen` boolean и `onClose` callback.
+ *
+ * Если содержимое Modal зависит от async-state (fetch'ит данные при open), не
+ * очищайте state в useEffect на `!isOpen` — используйте `setTimeout(200)` чтобы
+ * cleanup прошёл ПОСЛЕ exit-анимации (см. UserConfigModal.tsx как эталон).
+ *
+ * Этот anti-pattern задокументирован в:
+ *   - memory/v3/design-system/known-issues.md #10
+ *   - memory/v3/design-system/animations.md (Modal section)
+ *   - CLAUDE.md Gotchas
+ */
 export function Modal({
   isOpen,
   open,
