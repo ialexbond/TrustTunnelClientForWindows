@@ -86,7 +86,40 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel 
   );
 }
 
-export function OverviewSection({ state, activeServerTab, onNavigate: _onNavigate }: Props) {
+/* ── ClickableCard — вся карточка как кнопка (D-09 a11y) ── */
+function ClickableCard({
+  children,
+  onClick,
+  ariaLabel,
+  style,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  ariaLabel: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <Card
+      padding="md"
+      style={style}
+      className="cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors focus-visible:shadow-[var(--focus-ring)] outline-none"
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      {children}
+    </Card>
+  );
+}
+
+export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   const { t } = useTranslation();
   const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
 
@@ -277,13 +310,17 @@ export function OverviewSection({ state, activeServerTab, onNavigate: _onNavigat
         </div>
       </Card>
 
-      {/* Users */}
-      <Card padding="md" style={{ flex: "1 1 180px" }}>
+      {/* Users — drill-down (D-11) */}
+      <ClickableCard
+        style={{ flex: "1 1 180px" }}
+        onClick={() => onNavigate?.("users")}
+        ariaLabel={t("server.overview.cards.userCount")}
+      >
         <Title icon={<Users className="w-5 h-5" />} text={t("server.overview.cards.userCount")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
         </div>
-      </Card>
+      </ClickableCard>
 
       {/* ── Row 2: IP | Country | Uptime | Version ── */}
 
@@ -323,18 +360,26 @@ export function OverviewSection({ state, activeServerTab, onNavigate: _onNavigat
         </div>
       </Card>
 
-      {/* Protocol version */}
-      <Card padding="md" style={{ flex: "1 1 220px" }}>
+      {/* Protocol version — drill-down (D-11) */}
+      <ClickableCard
+        style={{ flex: "1 1 220px" }}
+        onClick={() => onNavigate?.("configuration")}
+        ariaLabel={t("server.overview.cards.protocolVersion")}
+      >
         <Title icon={<Package className="w-5 h-5" />} text={t("server.overview.cards.protocolVersion")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span style={bigNum}>{version}</span>
         </div>
-      </Card>
+      </ClickableCard>
 
       {/* ── Row 3: Security | Load ── */}
 
-      {/* Security — partially live data */}
-      <Card padding="md" style={{ flex: "1 1 340px" }}>
+      {/* Security — drill-down (D-11) */}
+      <ClickableCard
+        style={{ flex: "1 1 340px" }}
+        onClick={() => onNavigate?.("security")}
+        ariaLabel={t("server.overview.cards.security")}
+      >
         <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="grid grid-cols-2 gap-2 mt-1">
           {[
@@ -359,7 +404,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate: _onNavigat
             );
           })}
         </div>
-      </Card>
+      </ClickableCard>
 
       {/* Load — live (CPU + RAM) */}
       <Card padding="md" style={{ flex: "2 1 400px" }}>
