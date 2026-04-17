@@ -173,41 +173,43 @@ export function UserConfigModal({
       });
       const svgUrl = URL.createObjectURL(svgBlob);
 
-      const canvas = document.createElement("canvas");
-      canvas.width = 240;
-      canvas.height = 240;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
+      // WR-01: try/finally guarantees revokeObjectURL on every path
+      // (including img.onerror reject and canvas.toBlob reject).
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 240;
+        canvas.height = 240;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        // Paint white background — без fillRect PNG может выглядеть чёрным
+        // при paste в некоторых target-приложениях (alpha handling в Paint).
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, 240, 240);
+
+        const img = new Image();
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("QR image load failed"));
+          img.src = svgUrl;
+        });
+        ctx.drawImage(img, 0, 0, 240, 240);
+
+        const blob: Blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((b) => {
+            if (b) resolve(b);
+            else reject(new Error("Canvas toBlob returned null"));
+          }, "image/png");
+        });
+
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]);
+        activityLog("USER", `user.config.qr_copied user=${username}`);
+        pushSuccess(t("server.users.qr_copied"));
+      } finally {
         URL.revokeObjectURL(svgUrl);
-        return;
       }
-
-      // Paint white background — без fillRect PNG может выглядеть чёрным
-      // при paste в некоторых target-приложениях (alpha handling в Paint).
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, 240, 240);
-
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("QR image load failed"));
-        img.src = svgUrl;
-      });
-      ctx.drawImage(img, 0, 0, 240, 240);
-      URL.revokeObjectURL(svgUrl);
-
-      const blob: Blob = await new Promise((resolve, reject) => {
-        canvas.toBlob((b) => {
-          if (b) resolve(b);
-          else reject(new Error("Canvas toBlob returned null"));
-        }, "image/png");
-      });
-
-      await navigator.clipboard.write([
-        new ClipboardItem({ "image/png": blob }),
-      ]);
-      activityLog("USER", `user.config.qr_copied user=${username}`);
-      pushSuccess(t("server.users.qr_copied"));
     } catch (e) {
       activityLog("ERROR", `user.config.qr_copy_failed err=${formatError(e)}`);
       // Graceful fallback: copy text so the user at least gets something.
