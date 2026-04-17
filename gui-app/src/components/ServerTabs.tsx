@@ -119,7 +119,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
           </button>
         ))}
 
-        {/* Separator + Disconnect icon */}
+        {/* Separator + Disconnect icon (semi-destructive action — hover красным). */}
         <Divider orientation="vertical" className="shrink-0 mx-2 my-1.5" />
         <Tooltip text={t("control.disconnect")} position="bottom">
           <button
@@ -130,7 +130,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
               "shrink-0 flex items-center justify-center",
               "h-8 w-8 rounded-[var(--radius-md)]",
               "text-[var(--color-text-muted)]",
-              "hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
+              "hover:text-[var(--color-destructive)] hover:bg-[var(--color-danger-tint-08)]",
               "transition-colors",
               "focus-visible:shadow-[var(--focus-ring)] outline-none"
             )}

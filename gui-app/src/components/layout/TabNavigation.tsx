@@ -102,7 +102,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
       ref={navRef}
       onKeyDown={handleKeyDown}
     >
-      <div ref={containerRef} className="relative flex items-stretch w-full">
+      <div ref={containerRef} className="relative flex items-stretch w-full gap-[var(--space-2)]">
         {/* Pill indicator — per D-01, D-02. Animated via translateX per NAV-01.
             Phase 13.UAT G-06: width = pillWidth (full button width) вместо pillWidth-8,
             marginLeft: 0 — убраны 4px cushion, чтобы pill + button visible area
