@@ -28,6 +28,7 @@ export function useVersionsState(serverInfo: ServerInfo | null) {
     if (!serverInfo?.version || availableVersions.length === 0) return;
     const currentV = serverInfo.version.replace(/^v/, "");
     const match = availableVersions.find((v) => v.replace(/^v/, "") === currentV);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot sync auto-selection of installed version when serverInfo arrives; deferring would briefly show stale selection
     if (match) setSelectedVersion(match);
   }, [serverInfo?.version, availableVersions]);
 

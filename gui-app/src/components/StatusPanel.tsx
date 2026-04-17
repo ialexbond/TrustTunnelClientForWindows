@@ -42,6 +42,7 @@ function StatusPanel({
   const [errorDismissed, setErrorDismissed] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- dismissal must reset synchronously when status changes so the new error banner renders on the same frame
     setErrorDismissed(false);
   }, [status]);
 

@@ -40,6 +40,7 @@ export function Modal({
 
   useEffect(() => {
     if (isVisible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal must mount before exit-animation cleanup so backdrop is hit-testable on first paint
       setMounted(true);
       requestAnimationFrame(() => requestAnimationFrame(() => setAnimating(true)));
     } else {

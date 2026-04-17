@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- CVA variants are co-located with the component by design */
 import { cva, type VariantProps } from "class-variance-authority";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
