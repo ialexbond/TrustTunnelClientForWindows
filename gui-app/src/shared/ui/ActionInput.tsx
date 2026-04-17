@@ -1,4 +1,5 @@
-import { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
+import React, { forwardRef, useRef, type InputHTMLAttributes, type ReactNode } from "react";
+import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 
 interface ActionInputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -9,6 +10,10 @@ interface ActionInputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   helperText?: string;
   fullWidth?: boolean;
+  /** When true, X icon appears when value.length > 0. Clicking clears the field. */
+  clearable?: boolean;
+  /** Called when Clear (X) icon clicked. If not provided, onChange is called with empty value. */
+  onClear?: () => void;
 }
 
 export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
@@ -23,13 +28,44 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
       fullWidth = true,
       className,
       style,
+      clearable,
+      onClear,
       ...rest
     },
     ref
   ) => {
+    const internalRef = useRef<HTMLInputElement | null>(null);
+    const setRefs = (node: HTMLInputElement | null) => {
+      internalRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    };
+
+    const value = rest.value;
+    const showClear =
+      clearable !== undefined &&
+      clearable &&
+      value !== undefined &&
+      String(value).length > 0;
+
+    const handleClear = () => {
+      if (onClear) {
+        onClear();
+      } else if (rest.onChange) {
+        const event = {
+          target: { value: "" },
+        } as React.ChangeEvent<HTMLInputElement>;
+        rest.onChange(event);
+      }
+      internalRef.current?.focus();
+    };
+
     const actionCount = actions?.length ?? 0;
+    const clearCount = showClear ? 1 : 0;
+    const effectiveActionCount = actionCount + clearCount;
     // Each action ~28px (icon 14px + gap 4px + padding), base right padding 8px
-    const rightPadding = actionCount > 0 ? `${8 + actionCount * 28}px` : undefined;
+    const rightPadding =
+      effectiveActionCount > 0 ? `${8 + effectiveActionCount * 28}px` : undefined;
 
     return (
       <div className={fullWidth ? "w-full" : ""}>
@@ -50,7 +86,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
             </span>
           )}
           <input
-            ref={ref}
+            ref={setRefs}
             className={cn(
               "h-8 w-full rounded-[var(--radius-md)]",
               "border border-[var(--color-input-border)]",
@@ -72,10 +108,28 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
             }}
             {...rest}
           />
-          {actionCount > 0 && (
+          {(actionCount > 0 || showClear) && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              {actions!.map((action, i) => (
-                <span key={i} className="flex items-center p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
+              {showClear && (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={handleClear}
+                  aria-label="Clear field"
+                  className={cn(
+                    "flex items-center p-1 rounded",
+                    "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
+                    "transition-colors duration-[var(--transition-fast)]"
+                  )}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {actions?.map((action, i) => (
+                <span
+                  key={i}
+                  className="flex items-center p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                >
                   {action}
                 </span>
               ))}
