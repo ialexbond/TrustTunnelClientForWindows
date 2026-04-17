@@ -199,10 +199,9 @@ describe("OverviewSection", () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
       await waitFor(() => {
-        // formatted: "🇺🇸 United States"
+        // Country card now shows just the country name (flag emoji removed per UX)
         const bodyText = document.body.textContent || "";
         expect(bodyText).toContain("United States");
-        expect(bodyText).toContain("🇺🇸");
       });
     });
 
@@ -233,8 +232,8 @@ describe("OverviewSection", () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
       await waitFor(() => {
+        // Country card shows just the country name (flag emoji removed per UX)
         expect(document.body.textContent || "").toContain("Germany");
-        expect(document.body.textContent || "").toContain("🇩🇪");
       });
     });
 
