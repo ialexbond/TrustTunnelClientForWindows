@@ -627,7 +627,13 @@
       "config_export_error": "Config export: {{error}}",
       "tooltip": "VPN client accounts. Each device should connect with its own user.",
       "empty_heading": "No users",
-      "empty_body": "Add your first VPN user"
+      "empty_body": "Add your first VPN user",
+      "show_config_tooltip": "Show config",
+      "qr_copied": "QR code copied",
+      "qr_click_to_copy": "QR code — click to copy image",
+      "deeplink_aria": "Connection deeplink",
+      "copy_deeplink_tooltip": "Copy link",
+      "download_config": "Download file"
     },
     "logs": {
       "title": "Server Logs",
@@ -1114,7 +1120,10 @@
   },
   "common": {
     "generate_username": "Generate random username",
-    "generate_password": "Generate random password"
+    "generate_password": "Generate random password",
+    "clear_field": "Clear field",
+    "show_password": "Show password",
+    "hide_password": "Hide password"
   },
   "sidebar": {
     "servers": "Servers",

@@ -627,7 +627,13 @@
       "config_export_error": "Экспорт конфига: {{error}}",
       "tooltip": "Учётные записи VPN-клиентов. Каждое устройство должно подключаться под своим пользователем.",
       "empty_heading": "Нет пользователей",
-      "empty_body": "Добавьте первого пользователя VPN"
+      "empty_body": "Добавьте первого пользователя VPN",
+      "show_config_tooltip": "Показать конфиг",
+      "qr_copied": "QR-код скопирован",
+      "qr_click_to_copy": "QR-код — нажмите, чтобы скопировать изображение",
+      "deeplink_aria": "Deeplink для подключения",
+      "copy_deeplink_tooltip": "Скопировать ссылку",
+      "download_config": "Скачать файл"
     },
     "logs": {
       "title": "Логи сервера",
@@ -1114,7 +1120,10 @@
   },
   "common": {
     "generate_username": "Сгенерировать имя пользователя",
-    "generate_password": "Сгенерировать пароль"
+    "generate_password": "Сгенерировать пароль",
+    "clear_field": "Очистить поле",
+    "show_password": "Показать пароль",
+    "hide_password": "Скрыть пароль"
   },
   "sidebar": {
     "servers": "Серверы",
