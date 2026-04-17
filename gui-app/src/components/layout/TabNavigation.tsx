@@ -97,12 +97,12 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
   return (
     <nav
       role="tablist"
-      className="flex items-center justify-center shrink-0"
+      className="flex items-center justify-center shrink-0 px-6"
       style={{ height: 64 }}
       ref={navRef}
       onKeyDown={handleKeyDown}
     >
-      <div ref={containerRef} className="relative flex items-stretch w-full" style={{ maxWidth: 720 }}>
+      <div ref={containerRef} className="relative flex items-stretch w-full">
         {/* Pill indicator — per D-01, D-02. Animated via translateX per NAV-01. */}
         <div
           aria-hidden="true"

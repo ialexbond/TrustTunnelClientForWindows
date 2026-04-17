@@ -144,6 +144,9 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   useEffect(() => {
     readStoredCredentials().then((c) => {
       setCreds(c);
+      // BUG-01: при auto-reconnect показываем skeleton (а не полноэкранный лоадер
+      // ServerPanel.state.loading). Сбросится в false по onPanelReady.
+      if (c) setIsFirstConnect(true);
       setLoading(false);
     });
   }, []);

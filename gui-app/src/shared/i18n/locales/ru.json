@@ -984,7 +984,7 @@
       "port": "Порт",
       "users": "Подключений",
       "cards": {
-        "status": "Статус",
+        "status": "Статус протокола",
         "ping": "Ping",
         "speed": "Скорость",
         "userCount": "Пользователей",
@@ -1004,6 +1004,9 @@
         "sshKey": "SSH-ключ",
         "tls": "TLS",
         "tlsActive": "Активен",
+        "active": "Активен",
+        "inactive": "Выключен",
+        "notInstalled": "Не установлен",
         "placeholder": "—"
       },
       "uptimeFormat": {
