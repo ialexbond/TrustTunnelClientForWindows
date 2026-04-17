@@ -239,6 +239,11 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       }
     }, 10000);
     return () => clearInterval(interval);
+    // Why eslint-disable below: reboot poller должен start ровно один раз когда
+    // rebooting=true и работать до завершения reboot (~120s). Перезапуск эффекта
+    // при изменении sshParams/state.host/setRebooting/setServerInfo/t/state.pushSuccess
+    // создаст дублированные интервалы → SSH-storm на пробуждении сервера.
+    // Правильный fix — useRef-based stable refs, deferred до Phase 14+.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rebooting]);
 
