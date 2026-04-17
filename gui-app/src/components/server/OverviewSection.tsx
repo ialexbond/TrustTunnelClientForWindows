@@ -21,6 +21,11 @@ import { ProgressBar } from "../../shared/ui/ProgressBar";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { EcgSvg, ecgHeartbeat, ecgFlatline } from "../../shared/ui/EcgSvg";
 import type { ServerState } from "./useServerState";
+import { useServerStats } from "./useServerStats";
+import { useServerGeoIp } from "./useServerGeoIp";
+import { formatServerUptime } from "../../shared/utils/uptime";
+
+type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
 
 /* ═══════════════════════════════════════════════════════
    OverviewSection — 10 карточек обзора сервера
@@ -29,7 +34,11 @@ import type { ServerState } from "./useServerState";
 
 interface Props {
   state: ServerState;
+  activeServerTab?: TabId;
+  onNavigate?: (tab: TabId) => void;
 }
+
+export type { TabId };
 
 /* ── Shared styles ── */
 const muted: React.CSSProperties = { color: "var(--color-text-muted)" };
@@ -77,9 +86,17 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel 
   );
 }
 
-export function OverviewSection({ state }: Props) {
+export function OverviewSection({ state, activeServerTab, onNavigate: _onNavigate }: Props) {
   const { t } = useTranslation();
   const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
+
+  // ─── Live data hooks (Phase 13) ───
+  const isOverviewVisible = activeServerTab === undefined || activeServerTab === "overview";
+  const { stats, loading: statsLoading } = useServerStats(sshParams, {
+    enabled: isOverviewVisible && !rebooting && !!serverInfo,
+    intervalMs: 10_000,
+  });
+  const { geo, loading: geoLoading } = useServerGeoIp({ host: state.host });
 
   const [ping, setPing] = useState<number | null>(null);
   const [rebootCountdown, setRebootCountdown] = useState(0);
@@ -278,19 +295,31 @@ export function OverviewSection({ state }: Props) {
         </div>
       </Card>
 
-      {/* Country — placeholder */}
+      {/* Country — live (D-05) */}
       <Card padding="md" style={{ flex: "1 1 180px" }}>
         <Title icon={<Globe className="w-5 h-5" />} text={t("server.overview.cards.country")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
+          {geoLoading ? (
+            <Skeleton variant="line" width={120} height={28} />
+          ) : geo ? (
+            <span style={bigNum}>{geo.flag_emoji} {geo.country}</span>
+          ) : (
+            <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
+          )}
         </div>
       </Card>
 
-      {/* Uptime — placeholder */}
+      {/* Uptime — live */}
       <Card padding="md" style={{ flex: "1 1 160px" }}>
         <Title icon={<Clock className="w-5 h-5" />} text={t("server.overview.cards.uptime")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          <span style={{ ...bigNum, ...muted }}>—</span>
+          {stats === null && statsLoading ? (
+            <Skeleton variant="line" width={80} height={28} />
+          ) : stats ? (
+            <span style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
+          ) : (
+            <span style={{ ...bigNum, ...muted }}>—</span>
+          )}
         </div>
       </Card>
 
@@ -332,23 +361,39 @@ export function OverviewSection({ state }: Props) {
         </div>
       </Card>
 
-      {/* Load — placeholder */}
+      {/* Load — live (CPU + RAM) */}
       <Card padding="md" style={{ flex: "2 1 400px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
         <div className="space-y-2.5 mt-1">
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm" style={muted}>CPU</span>
-              <span className="text-sm" style={muted}>—</span>
+              {stats === null && statsLoading ? (
+                <Skeleton variant="line" width={50} height={18} />
+              ) : stats ? (
+                <span className="text-sm" style={primary}>{Math.round(stats.cpu_percent)}%</span>
+              ) : (
+                <span className="text-sm" style={muted}>—</span>
+              )}
             </div>
-            <ProgressBar value={0} size="sm" color="success" />
+            <ProgressBar value={stats ? Math.min(100, Math.max(0, stats.cpu_percent)) : 0} size="sm" color="success" />
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm" style={muted}>RAM</span>
-              <span className="text-sm" style={muted}>—</span>
+              {stats === null && statsLoading ? (
+                <Skeleton variant="line" width={50} height={18} />
+              ) : stats && stats.mem_total > 0 ? (
+                <span className="text-sm" style={primary}>{Math.round((stats.mem_used / stats.mem_total) * 100)}%</span>
+              ) : (
+                <span className="text-sm" style={muted}>—</span>
+              )}
             </div>
-            <ProgressBar value={0} size="sm" color="accent" />
+            <ProgressBar
+              value={stats && stats.mem_total > 0 ? Math.round((stats.mem_used / stats.mem_total) * 100) : 0}
+              size="sm"
+              color="accent"
+            />
           </div>
         </div>
       </Card>
