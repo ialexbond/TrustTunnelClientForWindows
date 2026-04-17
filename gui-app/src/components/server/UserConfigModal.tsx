@@ -386,17 +386,11 @@ export function UserConfigModal({
             </button>
           </div>
 
-          {/* Download button. */}
+          {/* Download button. Button primitive itself renders a Loader2 when loading=true. */}
           <Button
             variant="primary"
             fullWidth
-            icon={
-              isDownloading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5" />
-              )
-            }
+            icon={<Download className="w-3.5 h-3.5" />}
             loading={isDownloading}
             disabled={isDownloading}
             onClick={() => void handleDownload()}
