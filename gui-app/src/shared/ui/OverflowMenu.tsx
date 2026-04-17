@@ -26,18 +26,6 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
   const menuRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // Recalculate position when opening
-  const recalcPosition = useCallback(() => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    setMenuStyle({
-      position: "fixed",
-      top: rect.bottom + 4,
-      left: rect.left,
-      zIndex: "var(--z-dropdown)",
-    });
-  }, []);
-
   // Close on outside click
   useEffect(() => {
     if (!open) return;
@@ -67,6 +55,82 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
     return () => document.removeEventListener("keydown", handler);
   }, [open]);
 
+  // Position menu relative to trigger with viewport auto-flip (D-12).
+  // Algorithm ported from Tooltip.tsx (WR-08 fix included — when neither
+  // direction fits, pick the side with more available space instead of
+  // clipping at the requested direction).
+  //
+  // Flow: handleToggle renders menu with visibility:hidden → this effect
+  // measures both rects → computes top/left with clamp → sets visibility:visible.
+  useEffect(() => {
+    if (!open) return;
+    const menuEl = menuRef.current;
+    const triggerEl = triggerRef.current;
+    if (!menuEl || !triggerEl) return;
+
+    const triggerRect = triggerEl.getBoundingClientRect();
+    const menuRect = menuEl.getBoundingClientRect();
+    const gap = 4; // OverflowMenu gap (UI-SPEC §Spacing — Menu gap from trigger)
+    const pad = 8; // viewport edge padding (matches Tooltip `pad`)
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Vertical fit check
+    const fitsBelow = triggerRect.bottom + gap + menuRect.height <= vh - pad;
+    const fitsAbove = triggerRect.top - gap - menuRect.height >= pad;
+
+    // Choose vertical position: below preferred, above if doesn't fit below,
+    // neither fits → pick the side with more available space (WR-08 fallback)
+    let top: number;
+    if (fitsBelow) {
+      top = triggerRect.bottom + gap;
+    } else if (fitsAbove) {
+      top = triggerRect.top - menuRect.height - gap;
+    } else {
+      const spaceBelow = vh - triggerRect.bottom;
+      const spaceAbove = triggerRect.top;
+      top =
+        spaceBelow > spaceAbove
+          ? triggerRect.bottom + gap
+          : triggerRect.top - menuRect.height - gap;
+    }
+
+    // Horizontal: prefer left-align, flip to right-align if overflow
+    let left: number;
+    const rightEdgeIfLeftAligned = triggerRect.left + menuRect.width;
+    if (rightEdgeIfLeftAligned <= vw - pad) {
+      left = triggerRect.left;
+    } else {
+      left = triggerRect.right - menuRect.width;
+    }
+
+    // Clamp to viewport edges (prevents negative values / over-right overflow
+    // when menu wider than viewport-minus-padding)
+    left = Math.max(pad, Math.min(left, vw - pad - menuRect.width));
+    top = Math.max(pad, Math.min(top, vh - pad - menuRect.height));
+
+    setMenuStyle({
+      position: "fixed",
+      top,
+      left,
+      zIndex: "var(--z-dropdown)",
+      visibility: "visible",
+    });
+  }, [open]);
+
+  // Close menu on scroll/resize (simpler than recompute; matches Select
+  // primitive behaviour — menu is transient). D-12 decision.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, { capture: true, passive: true });
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, { capture: true });
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
   // Focus first non-disabled item when menu opens
   useEffect(() => {
     if (!open) return;
@@ -79,10 +143,17 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
 
   const handleToggle = useCallback(() => {
     if (!open) {
-      recalcPosition();
+      // Render hidden first — auto-flip useEffect measures + positions
+      setMenuStyle({
+        position: "fixed",
+        top: 0,
+        left: 0,
+        zIndex: "var(--z-dropdown)",
+        visibility: "hidden",
+      });
     }
     setOpen((prev) => !prev);
-  }, [open, recalcPosition]);
+  }, [open]);
 
   const handleItemKeyDown = (
     e: React.KeyboardEvent<HTMLButtonElement>,
