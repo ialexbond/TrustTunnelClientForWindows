@@ -183,7 +183,7 @@ describe("OverviewSection", () => {
     expect(screen.getByText(i18n.t("server.overview.cards.status"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("server.status.running"))).toBeInTheDocument();
     // Explicit English check so a regression (hardcoded RU) would fail here.
-    expect(screen.getByText("Status")).toBeInTheDocument();
+    expect(screen.getByText("Protocol status")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("IP address")).toBeInTheDocument();
     expect(screen.getByText("Protocol version")).toBeInTheDocument();

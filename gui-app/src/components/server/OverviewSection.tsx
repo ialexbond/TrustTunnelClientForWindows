@@ -135,6 +135,36 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   const [rebootCountdown, setRebootCountdown] = useState(0);
   const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Speed test (BUG fix — manual, не polling) ──
+  const [speed, setSpeed] = useState<{ download_mbps: number; upload_mbps: number } | null>(null);
+  const [speedTesting, setSpeedTesting] = useState(false);
+
+  const runSpeedTest = useCallback(async () => {
+    if (speedTesting) return;
+    setSpeedTesting(true);
+    try {
+      const r = await invoke<{ download_mbps: number; upload_mbps: number }>("speedtest_run");
+      setSpeed(r);
+    } catch {
+      setSpeed(null);
+    } finally {
+      setSpeedTesting(false);
+    }
+  }, [speedTesting]);
+
+  // ── Security status (firewall + fail2ban) — on-demand, не polling ──
+  const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
+
+  useEffect(() => {
+    if (!serverInfo?.serviceActive || rebooting) return;
+    invoke<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } }>(
+      "security_get_status",
+      sshParams,
+    )
+      .then(setSecurity)
+      .catch(() => setSecurity(null));
+  }, [sshParams, serverInfo?.serviceActive, rebooting]);
+
   // ── Initial ping ──
   useEffect(() => {
     if (!serverInfo?.serviceActive) { setPing(null); return; }
@@ -302,11 +332,17 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         </div>
       </Card>
 
-      {/* Speed — placeholder */}
+      {/* Speed — manual measurement via Cloudflare speedtest_run */}
       <Card padding="md" style={{ flex: "2 1 340px" }}>
-        <Title icon={<Zap className="w-5 h-5" />} text={t("server.overview.cards.speed")} onRefresh={() => {}} refreshAriaLabel={refreshAriaLabel} />
+        <Title icon={<Zap className="w-5 h-5" />} text={t("server.overview.cards.speed")} onRefresh={runSpeedTest} refreshing={speedTesting} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
-          <span className="text-sm" style={muted}>{t("server.overview.speedNotMeasured")}</span>
+          {speedTesting ? (
+            <Skeleton variant="line" width={200} height={28} />
+          ) : speed ? (
+            <span style={bigNum}>{speed.download_mbps.toFixed(1)} ↓ / {speed.upload_mbps.toFixed(1)} ↑ <span className="text-sm" style={muted}>Mbps</span></span>
+          ) : (
+            <span className="text-sm" style={muted}>{t("server.overview.speedNotMeasured")}</span>
+          )}
         </div>
       </Card>
 
@@ -383,8 +419,28 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="grid grid-cols-2 gap-2 mt-1">
           {[
-            { name: t("server.overview.security.firewall"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
-            { name: t("server.overview.security.fail2ban"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
+            {
+              name: t("server.overview.security.firewall"),
+              ok: security?.firewall.active ?? null,
+              label: security?.firewall.active
+                ? t("server.overview.security.active")
+                : security?.firewall.installed === false
+                  ? t("server.overview.security.notInstalled")
+                  : security?.firewall.installed
+                    ? t("server.overview.security.inactive")
+                    : t("server.overview.security.placeholder"),
+            },
+            {
+              name: t("server.overview.security.fail2ban"),
+              ok: security?.fail2ban.active ?? null,
+              label: security?.fail2ban.active
+                ? t("server.overview.security.active")
+                : security?.fail2ban.installed === false
+                  ? t("server.overview.security.notInstalled")
+                  : security?.fail2ban.installed
+                    ? t("server.overview.security.inactive")
+                    : t("server.overview.security.placeholder"),
+            },
             { name: t("server.overview.security.sshKey"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
             { name: t("server.overview.security.tls"), ok: hasTls, label: hasTls ? t("server.overview.security.tlsActive") : t("server.overview.security.placeholder") },
           ].map((item) => {
