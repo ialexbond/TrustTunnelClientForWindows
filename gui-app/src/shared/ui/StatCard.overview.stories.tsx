@@ -112,11 +112,11 @@ type Story = StoryObj;
 
 /** Протокол работает — анимированный ECG пульс с двойным зигзагом */
 export const StatusActive: Story = {
-  name: "1a. Статус — работает",
+  name: "1a. Статус протокола — работает",
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус протокола" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1">
         <EcgSvg color="var(--color-success-500)" path={ecgPath} anim="ecg-trace" />
         <span className="text-sm" style={muted}>Работает</span>
@@ -127,11 +127,11 @@ export const StatusActive: Story = {
 
 /** Протокол остановлен — плоская линия с красным градиентным трейсером */
 export const StatusStopped: Story = {
-  name: "1b. Статус — остановлен",
+  name: "1b. Статус протокола — остановлен",
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус протокола" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1">
         <EcgSvg color="var(--color-danger-500)" path={ecgFlat} anim="ecg-flat" />
         <span className="text-sm" style={danger}>Остановлен</span>
@@ -142,11 +142,11 @@ export const StatusStopped: Story = {
 
 /** Сервер недоступен — прочерк */
 export const StatusUnavailable: Story = {
-  name: "1c. Статус — недоступен",
+  name: "1c. Статус протокола — недоступен",
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус протокола" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1" style={{ minHeight: 56 }}>
         <span style={{ ...bigNum, ...muted }}>—</span>
       </div>
@@ -156,11 +156,11 @@ export const StatusUnavailable: Story = {
 
 /** Загрузка данных статуса */
 export const StatusSkeleton: Story = {
-  name: "1d. Статус — skeleton",
+  name: "1d. Статус протокола — skeleton",
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус протокола" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1">
         <Skeleton variant="line" width={160} height={36} />
         <Skeleton variant="line" width={70} height={20} />
@@ -801,7 +801,7 @@ export const AllCards: Story = {
       {/* ── Row 1: Статус | Ping | Скорость | Пользователей ── */}
 
       <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
-        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус протокола" />
         <div className="flex flex-col items-center justify-center gap-1.5 py-1">
           <EcgSvg color="var(--color-success-500)" path={ecgPath} anim="ecg-trace-all" />
           <span className="text-sm" style={muted}>Работает</span>
@@ -912,7 +912,7 @@ export const AllCardsSkeleton: Story = {
 
       {/* Row 1 */}
       <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
-        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус протокола" />
         <div className="flex flex-col items-center justify-center gap-1.5 py-1">
           <Skeleton variant="line" width={160} height={36} />
           <Skeleton variant="line" width={70} height={20} />
