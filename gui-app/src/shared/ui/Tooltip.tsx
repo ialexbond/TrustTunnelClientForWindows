@@ -122,7 +122,7 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
         createPortal(
           <div
             ref={positionTip}
-            className="fixed z-[var(--z-dropdown)] px-[var(--space-2)] py-1 rounded-[var(--radius-sm)] shadow-[var(--shadow-md)] pointer-events-none animate-[fadeIn_var(--transition-fast)_var(--ease-out)]"
+            className="fixed z-[var(--z-tooltip)] px-[var(--space-2)] py-1 rounded-[var(--radius-sm)] shadow-[var(--shadow-md)] pointer-events-none animate-[fadeIn_var(--transition-fast)_var(--ease-out)]"
             style={{
               visibility: "hidden",
               maxWidth,

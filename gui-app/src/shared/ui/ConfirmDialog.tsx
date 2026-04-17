@@ -60,7 +60,7 @@ export function ConfirmDialog({
           {title}
         </h3>
         <p
-          className="text-sm text-center leading-relaxed text-[var(--color-text-secondary)]"
+          className="text-sm text-center leading-relaxed text-[var(--color-text-secondary)] whitespace-pre-line"
         >
           {message}
         </p>
