@@ -186,7 +186,20 @@ export function ServerTabs({ state }: ServerTabsProps) {
               </div>
             ) : (
               <>
-                {tab.id === "overview" && <OverviewSection state={state} />}
+                {tab.id === "overview" && (
+                  <OverviewSection
+                    state={state}
+                    activeServerTab={activeTab}
+                    onNavigate={(nextTab) => {
+                      setActiveTab(nextTab);
+                      activityLog(
+                        "USER",
+                        `tab.switch target="${nextTab}" source="overview-drilldown"`,
+                        "OverviewSection",
+                      );
+                    }}
+                  />
+                )}
                 {tab.id === "users" && <UsersSection state={state} />}
                 {tab.id === "configuration" && <ServerSettingsSection state={state} />}
                 {tab.id === "security" && <SecurityTabSection state={state} />}
