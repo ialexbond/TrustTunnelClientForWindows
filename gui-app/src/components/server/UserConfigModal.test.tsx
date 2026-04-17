@@ -311,7 +311,7 @@ describe("UserConfigModal", () => {
     );
   });
 
-  it("shows loading state when deeplink fetch is in flight", () => {
+  it("shows skeleton loading state when deeplink fetch is in flight", () => {
     vi.mocked(invoke).mockReturnValueOnce(new Promise(() => {}));
     render(
       <UserConfigModal
@@ -321,8 +321,12 @@ describe("UserConfigModal", () => {
         onClose={vi.fn()}
       />,
     );
-    const spinner = document.querySelector("svg.animate-spin");
-    expect(spinner).toBeInTheDocument();
+    // Skeleton layout replaces the old spinner — 4 placeholders matching QR/caption/deeplink/download.
+    const busyRegion = document.querySelector('[aria-busy="true"]');
+    expect(busyRegion).toBeInTheDocument();
+    expect(screen.getByTestId("qr-skeleton")).toBeInTheDocument();
+    expect(screen.getByTestId("deeplink-skeleton")).toBeInTheDocument();
+    expect(screen.getByTestId("download-skeleton")).toBeInTheDocument();
   });
 
   it("shows error state with retry button when deeplink fetch fails", async () => {
@@ -364,7 +368,7 @@ describe("UserConfigModal", () => {
     });
   });
 
-  it("_forceLoading prop displays loading state (storybook)", () => {
+  it("_forceLoading prop displays skeleton loading state (storybook)", () => {
     render(
       <UserConfigModal
         isOpen={true}
@@ -374,8 +378,8 @@ describe("UserConfigModal", () => {
         _forceLoading
       />,
     );
-    const spinner = document.querySelector("svg.animate-spin");
-    expect(spinner).toBeInTheDocument();
+    expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+    expect(screen.getByTestId("qr-skeleton")).toBeInTheDocument();
   });
 
   it("_forceError prop displays error state (storybook)", () => {

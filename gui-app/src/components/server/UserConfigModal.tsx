@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { X, Copy, Download, Loader2 } from "lucide-react";
+import { X, Copy, Download } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
+import { Skeleton } from "../../shared/ui/Skeleton";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
@@ -301,10 +302,30 @@ export function UserConfigModal({
       </button>
 
       {effectiveLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2
-            className="w-8 h-8 animate-spin"
-            style={{ color: "var(--color-accent-500)" }}
+        // Skeleton, отражающий финальный layout (QR + caption + deeplink + download).
+        // Модалка всегда показывает одни и те же 4 блока, поэтому скелетон
+        // статически повторяет их пропорции — предотвращает CLS при догрузке.
+        <div aria-busy="true" aria-label={t("common.loading") || "Загрузка"}>
+          <div className="flex justify-center">
+            <Skeleton
+              variant="card"
+              width={240}
+              height={240}
+              data-testid="qr-skeleton"
+            />
+          </div>
+          <div className="flex justify-center mt-[var(--space-2)]">
+            <Skeleton width={180} height={14} data-testid="caption-skeleton" />
+          </div>
+          <Skeleton
+            className="mt-[var(--space-4)] w-full"
+            height={32}
+            data-testid="deeplink-skeleton"
+          />
+          <Skeleton
+            className="mt-[var(--space-4)] w-full"
+            height={36}
+            data-testid="download-skeleton"
           />
         </div>
       ) : effectiveError ? (
