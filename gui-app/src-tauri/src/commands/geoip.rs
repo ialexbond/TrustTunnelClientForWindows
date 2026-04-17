@@ -2,6 +2,7 @@
 // Pattern source: gui-app/src-tauri/src/commands/network.rs:4-54 (speedtest_run).
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Публичная структура — форма ответа к фронту.
 /// Поля совпадают с TS-интерфейсом GeoIpInfo в useServerGeoIp.ts.
@@ -36,9 +37,40 @@ struct IpWhoFlag {
 /// - GEOIP_RATE_LIMITED — HTTP 429 от ipwho.is
 /// - GEOIP_INVALID_RESPONSE|{detail} — parse fail или success=false от API
 #[tauri::command]
-pub async fn get_server_geoip(_host: String) -> Result<GeoIpInfo, String> {
-    // RED phase placeholder — replaced with real implementation in GREEN commit.
-    unimplemented!("get_server_geoip not yet implemented (RED phase)")
+pub async fn get_server_geoip(host: String) -> Result<GeoIpInfo, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5)) // D-08: GEOIP_TIMEOUT >5s
+        .build()
+        .map_err(|e| format!("GEOIP_INVALID_RESPONSE|{e}"))?;
+
+    let url = format!("https://ipwho.is/{host}");
+
+    let resp = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) if e.is_timeout() => return Err("GEOIP_TIMEOUT".to_string()),
+        Err(e) if e.is_connect() => return Err("GEOIP_NO_NETWORK".to_string()),
+        Err(e) => return Err(format!("GEOIP_NO_NETWORK|{e}")),
+    };
+
+    if resp.status().as_u16() == 429 {
+        return Err("GEOIP_RATE_LIMITED".to_string());
+    }
+
+    let body: IpWhoResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("GEOIP_INVALID_RESPONSE|{e}"))?;
+
+    if !body.success {
+        let msg = body.message.unwrap_or_else(|| "unknown".into());
+        return Err(format!("GEOIP_INVALID_RESPONSE|{msg}"));
+    }
+
+    Ok(GeoIpInfo {
+        country: body.country.unwrap_or_default(),
+        country_code: body.country_code.unwrap_or_default(),
+        flag_emoji: body.flag.and_then(|f| f.emoji).unwrap_or_default(),
+    })
 }
 
 #[cfg(test)]
