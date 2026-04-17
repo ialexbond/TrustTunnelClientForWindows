@@ -1,6 +1,6 @@
 [package]
 name = "trusttunnel-light"
-version = "2.8.0"
+version = "2.7.0"
 description = "TrustTunnel Light VPN Client"
 authors = ["Alex Bond"]
 edition = "2021"
