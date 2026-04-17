@@ -49,14 +49,20 @@ type Story = StoryObj<typeof meta>;
  * deeplink input with inline Copy icon, primary Download button, and
  * absolute-positioned X close (D-10/D-11).
  */
+// DEEP_LINK spec: tt://?<base64url-encoded TLV payload>
+// See https://github.com/TrustTunnel/TrustTunnel/blob/master/DEEP_LINK.md
+// These examples use fake base64url strings for visual layout only —
+// production deeplinks come from invoke("server_export_config_deeplink").
+const FAKE_DEEPLINK_SHORT =
+  "tt://?AQtleGFtcGxlLmNvbQIJMTkyLjE2OC4xLjE6NDQzBQlzd2lmdC1mb3gGCHBhc3N3b3Jk";
+
 export const Default: Story = {
   args: {
     isOpen: true,
     username: "swift-fox",
     sshParams: mockSshParams,
     onClose: () => {},
-    _deeplinkOverride:
-      "tt://example.com/config?token=abc123xyz&user=swift-fox",
+    _deeplinkOverride: FAKE_DEEPLINK_SHORT,
   },
 };
 
@@ -92,8 +98,8 @@ export const LongDeeplink: Story = {
     username: "bold-eagle42",
     sshParams: mockSshParams,
     onClose: () => {},
-    _deeplinkOverride:
-      "tt://example.com/config?token=" + "a".repeat(400) + "&user=bold-eagle42",
+    // Long base64url payload (e.g., when pinned certificate chain is embedded).
+    _deeplinkOverride: "tt://?" + "A".repeat(400),
   },
 };
 
@@ -104,8 +110,7 @@ export const LightTheme: Story = {
     username: "swift-fox",
     sshParams: mockSshParams,
     onClose: () => {},
-    _deeplinkOverride:
-      "tt://example.com/config?token=abc123&user=swift-fox",
+    _deeplinkOverride: FAKE_DEEPLINK_SHORT,
   },
   decorators: [
     (Story) => (
