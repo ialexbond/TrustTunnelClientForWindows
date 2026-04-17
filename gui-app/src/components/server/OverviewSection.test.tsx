@@ -535,7 +535,7 @@ describe("OverviewSection", () => {
         if (cmd === "ping_endpoint") return 42;
         if (cmd === "server_get_stats") return null;
         if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
-        if (cmd === "server_speedtest_run") return { download_mbps: 100, upload_mbps: 50 };
+        if (cmd === "speedtest_run") return { download_mbps: 100, upload_mbps: 50 };
         if (cmd === "write_activity_log") {
           const p = params as { tag: string; message: string };
           logged.push({ tag: p.tag, message: p.message });
@@ -614,7 +614,7 @@ describe("OverviewSection", () => {
         if (cmd === "ping_endpoint") return 42;
         if (cmd === "server_get_stats") return null;
         if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
-        if (cmd === "server_speedtest_run") { speedtestCalled = true; return { download_mbps: 100, upload_mbps: 50 }; }
+        if (cmd === "speedtest_run") { speedtestCalled = true; return { download_mbps: 100, upload_mbps: 50 }; }
         return null;
       });
       const state = makeState({
@@ -638,27 +638,24 @@ describe("OverviewSection", () => {
       expect(speedtestCalled).toBe(false);
     });
 
-    it("calls server_speedtest_run with sshParams when refresh clicked while running", async () => {
-      const calls: Array<{ cmd: string; params?: unknown }> = [];
-      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
-        calls.push({ cmd, params });
+    it("calls speedtest_run when refresh clicked while running", async () => {
+      const calls: string[] = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        calls.push(cmd);
         if (cmd === "ping_endpoint") return 42;
         if (cmd === "server_get_stats") return null;
         if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
-        if (cmd === "server_speedtest_run") return { download_mbps: 200, upload_mbps: 80 };
+        if (cmd === "speedtest_run") return { download_mbps: 200, upload_mbps: 80 };
         return null;
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
 
       const refreshButtons = await screen.findAllByLabelText(i18n.t("server.overview.refreshAria"));
-      fireEvent.click(refreshButtons[1]); // Speed refresh
+      fireEvent.click(refreshButtons[1]); // Speed refresh (after Ping)
 
       await waitFor(() => {
-        const speedCalls = calls.filter((c) => c.cmd === "server_speedtest_run");
-        expect(speedCalls.length).toBeGreaterThan(0);
-        // Verify sshParams passed (host/port/user/etc.)
-        expect(speedCalls[0].params).toMatchObject({ host: "10.0.0.1" });
+        expect(calls.filter((c) => c === "speedtest_run").length).toBeGreaterThan(0);
       }, { timeout: 5_000 });
     });
   });
