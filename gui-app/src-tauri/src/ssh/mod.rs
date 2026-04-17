@@ -157,7 +157,11 @@ pub fn forget_known_host(host: &str, port: u16) {
 
 #[tauri::command]
 pub fn confirm_host_key(accepted: bool) {
-    let mut pending = PENDING_HOST_VERIFY.lock().unwrap();
+    // WR-05 fix: tolerate poisoned Mutex. If a prior thread panicked while
+    // holding this lock, `.unwrap()` would panic again (process crash triggered
+    // by frontend IPC input). Recover the inner value as other call sites do
+    // (see lib.rs:225, logging.rs:156, commands/activity_log.rs:66).
+    let mut pending = PENDING_HOST_VERIFY.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(tx) = pending.take() {
         let _ = tx.send(accepted);
     }
@@ -187,7 +191,8 @@ impl client::Handler for SshHandler {
                     // Create oneshot channel for user response
                     let (tx, rx) = oneshot::channel();
                     {
-                        let mut pending = PENDING_HOST_VERIFY.lock().unwrap();
+                        // WR-05 fix: tolerate poisoned Mutex (see confirm_host_key).
+                        let mut pending = PENDING_HOST_VERIFY.lock().unwrap_or_else(|e| e.into_inner());
                         *pending = Some(tx);
                     }
 
