@@ -157,15 +157,18 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
 
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
+  const [securityLoading, setSecurityLoading] = useState(false);
 
   useEffect(() => {
     if (!serverInfo?.serviceActive || rebooting) return;
+    setSecurityLoading(true);
     invoke<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } }>(
       "security_get_status",
       sshParams,
     )
       .then(setSecurity)
-      .catch(() => setSecurity(null));
+      .catch(() => setSecurity(null))
+      .finally(() => setSecurityLoading(false));
   }, [sshParams, serverInfo?.serviceActive, rebooting]);
 
   // ── Initial ping ──
@@ -459,13 +462,23 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
 
       {/* ── Row 3: Security | Load ── */}
 
-      {/* Security — drill-down (D-11) */}
+      {/* Security — drill-down (D-11). Skeleton state per StatCard/Overview Variants 9f. */}
       <ClickableCard
         style={{ flex: "1 1 340px" }}
         onClick={() => onNavigate?.("security")}
         ariaLabel={t("server.overview.cards.security")}
       >
         <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} clickable refreshAriaLabel={refreshAriaLabel} />
+        {security === null && securityLoading ? (
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+                <Skeleton variant="line" width={70} height={14} className="mb-1.5" />
+                <Skeleton variant="line" width={50} height={14} />
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="grid grid-cols-2 gap-2 mt-1">
           {[
             {
@@ -518,6 +531,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
             );
           })}
         </div>
+        )}
       </ClickableCard>
 
       {/* Load — live (CPU + RAM). Skeleton state per StatCard/Overview Variants 10c:
