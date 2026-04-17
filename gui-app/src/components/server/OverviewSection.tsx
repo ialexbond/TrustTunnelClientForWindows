@@ -15,6 +15,8 @@ import {
   Gauge,
   RefreshCw,
   ChevronRight,
+  ArrowDown,
+  ArrowUp,
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { ProgressBar } from "../../shared/ui/ProgressBar";
@@ -352,18 +354,45 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         </div>
       </Card>
 
-      {/* Speed — manual measurement via Cloudflare speedtest_run */}
+      {/* Speed — manual measurement via Cloudflare speedtest_run.
+          Design: StatCard/Overview Variants story 3a — coloured ↓↑ icons + value + Мбит/с, divider in middle. */}
       <Card padding="md" style={{ flex: "2 1 340px" }}>
         <Title icon={<Zap className="w-5 h-5" />} text={t("server.overview.cards.speed")} onRefresh={runSpeedTest} refreshing={speedTesting} refreshAriaLabel={refreshAriaLabel} />
-        <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
-          {speedTesting ? (
-            <Skeleton variant="line" width={200} height={28} />
-          ) : speed ? (
-            <span style={bigNum}>{speed.download_mbps.toFixed(1)} ↓ / {speed.upload_mbps.toFixed(1)} ↑ <span className="text-sm" style={muted}>Mbps</span></span>
-          ) : (
+        {speedTesting ? (
+          <div className="flex items-center justify-center gap-8 py-2">
+            <div className="flex items-center gap-2">
+              <Skeleton variant="circle" width={28} height={28} />
+              <Skeleton variant="line" width={80} height={32} />
+            </div>
+            <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="flex items-center gap-2">
+              <Skeleton variant="circle" width={28} height={28} />
+              <Skeleton variant="line" width={80} height={32} />
+            </div>
+          </div>
+        ) : speed ? (
+          <div className="flex items-center justify-center gap-8 py-2">
+            <div className="flex items-center gap-2">
+              <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
+              <div className="flex items-baseline gap-1">
+                <span style={bigNum}>{Math.round(speed.download_mbps)}</span>
+                <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
+              </div>
+            </div>
+            <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+            <div className="flex items-center gap-2">
+              <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
+              <div className="flex items-baseline gap-1">
+                <span style={bigNum}>{Math.round(speed.upload_mbps)}</span>
+                <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
             <span className="text-sm" style={muted}>{t("server.overview.speedNotMeasured")}</span>
-          )}
-        </div>
+          </div>
+        )}
       </Card>
 
       {/* Users — drill-down (D-11) */}
@@ -491,40 +520,54 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         </div>
       </ClickableCard>
 
-      {/* Load — live (CPU + RAM) */}
+      {/* Load — live (CPU + RAM). Skeleton state per StatCard/Overview Variants 10c:
+          ALL elements skeletoned (label + value + bar) — никаких текстов CPU/RAM. */}
       <Card padding="md" style={{ flex: "2 1 400px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
         <div className="space-y-2.5 mt-1">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm" style={muted}>CPU</span>
-              {stats === null && statsLoading ? (
-                <Skeleton variant="line" width={50} height={18} />
-              ) : stats ? (
-                <span className="text-sm" style={primary}>{Math.round(stats.cpu_percent)}%</span>
-              ) : (
-                <span className="text-sm" style={muted}>—</span>
-              )}
-            </div>
-            <ProgressBar value={stats ? Math.min(100, Math.max(0, stats.cpu_percent)) : 0} size="sm" color="success" />
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm" style={muted}>RAM</span>
-              {stats === null && statsLoading ? (
-                <Skeleton variant="line" width={50} height={18} />
-              ) : stats && stats.mem_total > 0 ? (
-                <span className="text-sm" style={primary}>{Math.round((stats.mem_used / stats.mem_total) * 100)}%</span>
-              ) : (
-                <span className="text-sm" style={muted}>—</span>
-              )}
-            </div>
-            <ProgressBar
-              value={stats && stats.mem_total > 0 ? Math.round((stats.mem_used / stats.mem_total) * 100) : 0}
-              size="sm"
-              color="accent"
-            />
-          </div>
+          {stats === null && statsLoading ? (
+            // Full skeleton state — no labels, just placeholders
+            [1, 2].map((i) => (
+              <div key={i}>
+                <div className="flex items-center justify-between mb-1">
+                  <Skeleton variant="line" width={30} height={20} />
+                  <Skeleton variant="line" width={60} height={20} />
+                </div>
+                <Skeleton variant="line" width="100%" height={6} />
+              </div>
+            ))
+          ) : (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm" style={muted}>CPU</span>
+                  {stats ? (
+                    <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{Math.round(stats.cpu_percent)}%</span>
+                  ) : (
+                    <span className="text-sm" style={muted}>—</span>
+                  )}
+                </div>
+                <ProgressBar value={stats ? Math.min(100, Math.max(0, stats.cpu_percent)) : 0} size="sm" color="success" />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm" style={muted}>RAM</span>
+                  {stats && stats.mem_total > 0 ? (
+                    <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>
+                      {Math.round(stats.mem_used / 1024 / 1024)} / {Math.round(stats.mem_total / 1024 / 1024)} {t("server.overview.ramUnit")}
+                    </span>
+                  ) : (
+                    <span className="text-sm" style={muted}>—</span>
+                  )}
+                </div>
+                <ProgressBar
+                  value={stats && stats.mem_total > 0 ? Math.round((stats.mem_used / stats.mem_total) * 100) : 0}
+                  size="sm"
+                  color="accent"
+                />
+              </div>
+            </>
+          )}
         </div>
       </Card>
     </div>

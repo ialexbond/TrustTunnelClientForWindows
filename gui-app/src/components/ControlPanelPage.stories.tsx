@@ -67,24 +67,13 @@ export const LoadingMinWidth: Story = {
 };
 
 /**
- * Loading at default window width (1000px).
- */
-export const LoadingDefaultWidth: Story = {
-  name: "Loading @ 1000px (default)",
-  render: () => (
-    <div style={{ width: 1000, margin: "0 auto", height: "100%", display: "flex", flexDirection: "column", border: "1px dashed var(--color-border)" }}>
-      <ServerPanelSkeleton />
-    </div>
-  ),
-};
-
-/**
- * Loading at max window width (1200px) — Pro app's enforced maximum.
+ * Loading at max interface width (1000px) — UI cap. Window can resize wider,
+ * but content area + bottom TabNavigation are constrained to 1000px max.
  */
 export const LoadingMaxWidth: Story = {
-  name: "Loading @ 1200px (max)",
+  name: "Loading @ 1000px (max)",
   render: () => (
-    <div style={{ width: 1200, margin: "0 auto", height: "100%", display: "flex", flexDirection: "column", border: "1px dashed var(--color-border)" }}>
+    <div style={{ width: 1000, margin: "0 auto", height: "100%", display: "flex", flexDirection: "column", border: "1px dashed var(--color-border)" }}>
       <ServerPanelSkeleton />
     </div>
   ),

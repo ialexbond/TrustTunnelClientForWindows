@@ -116,7 +116,7 @@ export const StatusActive: Story = {
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1">
         <EcgSvg color="var(--color-success-500)" path={ecgPath} anim="ecg-trace" />
         <span className="text-sm" style={muted}>Работает</span>
@@ -131,7 +131,7 @@ export const StatusStopped: Story = {
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1">
         <EcgSvg color="var(--color-danger-500)" path={ecgFlat} anim="ecg-flat" />
         <span className="text-sm" style={danger}>Остановлен</span>
@@ -146,7 +146,7 @@ export const StatusUnavailable: Story = {
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1" style={{ minHeight: 56 }}>
         <span style={{ ...bigNum, ...muted }}>—</span>
       </div>
@@ -160,7 +160,7 @@ export const StatusSkeleton: Story = {
   decorators: wrap(220, 280),
   render: () => (
     <Card padding="md">
-      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+      <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
       <div className="flex flex-col items-center justify-center gap-1.5 py-1">
         <Skeleton variant="line" width={160} height={36} />
         <Skeleton variant="line" width={70} height={20} />
@@ -432,7 +432,7 @@ export const CountryKnown: Story = {
     <Card padding="md">
       <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
       <div className="flex items-center justify-center py-2">
-        <span className="text-xl font-[var(--font-weight-semibold)]" style={primary}>🇩🇪 Германия</span>
+        <span className="text-xl font-[var(--font-weight-semibold)]" style={primary}>Германия</span>
       </div>
     </Card>
   ),
@@ -801,7 +801,7 @@ export const AllCards: Story = {
       {/* ── Row 1: Статус | Ping | Скорость | Пользователей ── */}
 
       <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
-        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
         <div className="flex flex-col items-center justify-center gap-1.5 py-1">
           <EcgSvg color="var(--color-success-500)" path={ecgPath} anim="ecg-trace-all" />
           <span className="text-sm" style={muted}>Работает</span>
@@ -856,7 +856,7 @@ export const AllCards: Story = {
       <Card padding="md" style={{ flex: "1 1 180px" }}>
         <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
         <div className="flex items-center justify-center py-2">
-          <span className="text-xl font-[var(--font-weight-semibold)]" style={primary}>🇩🇪 Германия</span>
+          <span className="text-xl font-[var(--font-weight-semibold)]" style={primary}>Германия</span>
         </div>
       </Card>
 
@@ -912,7 +912,7 @@ export const AllCardsSkeleton: Story = {
 
       {/* Row 1 */}
       <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
-        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" onRefresh />
+        <Title icon={<HeartPulse className="w-5 h-5" />} text="Статус" />
         <div className="flex flex-col items-center justify-center gap-1.5 py-1">
           <Skeleton variant="line" width={160} height={36} />
           <Skeleton variant="line" width={70} height={20} />

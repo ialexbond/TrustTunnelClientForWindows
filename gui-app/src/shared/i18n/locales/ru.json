@@ -997,6 +997,8 @@
       },
       "rebootingCountdown": "Перезагрузка",
       "speedNotMeasured": "Не измерялась",
+      "speedUnit": "Мбит/с",
+      "ramUnit": "МБ",
       "refreshAria": "Обновить",
       "security": {
         "firewall": "Firewall",
