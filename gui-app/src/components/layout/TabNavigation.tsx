@@ -103,16 +103,19 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
       onKeyDown={handleKeyDown}
     >
       <div ref={containerRef} className="relative flex items-stretch w-full">
-        {/* Pill indicator — per D-01, D-02. Animated via translateX per NAV-01. */}
+        {/* Pill indicator — per D-01, D-02. Animated via translateX per NAV-01.
+            Phase 13.UAT G-06: width = pillWidth (full button width) вместо pillWidth-8,
+            marginLeft: 0 — убраны 4px cushion, чтобы pill + button visible area
+            выровнены по краям nav wrapper (совпадает с px-6 tabpanel → визуальные
+            вертикальные линии). */}
         <div
           aria-hidden="true"
           style={{
             position: "absolute",
             left: 0,
             top: "50%",
-            width: pillWidth > 0 ? pillWidth - 8 : `calc(100% / ${TABS.length} - 8px)`,
+            width: pillWidth > 0 ? pillWidth : `calc(100% / ${TABS.length})`,
             height: 50,
-            marginLeft: 4,
             transform: `translateX(${pillOffset}px) translateY(-50%)`,
             backgroundColor: "var(--color-bg-elevated)",
             boxShadow: "var(--shadow-xs)",
@@ -147,7 +150,7 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
                   !active ? "hover:bg-[var(--color-bg-hover)]" : "",
                 ].join(" ")}
                 style={{
-                  width: "calc(100% - 8px)",
+                  width: "100%",
                   height: 50,
                 }}
               >
