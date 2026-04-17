@@ -260,7 +260,11 @@ pub fn save_ssh_credentials(
         "user": user,
         "keyPath": key_path.unwrap_or_default(),
     });
-    std::fs::write(ssh_creds_path(), serde_json::to_string_pretty(&data).unwrap_or_default())
+    // WR-06 fix: propagate serialization error instead of writing "" (which
+    // would silently clobber any existing valid credentials file).
+    let data_str = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("Failed to serialize credentials: {e}"))?;
+    std::fs::write(ssh_creds_path(), data_str)
         .map_err(|e| format!("Failed to save credentials: {e}"))
 }
 
@@ -291,8 +295,14 @@ pub fn load_ssh_credentials() -> Option<serde_json::Value> {
                 };
                 // Store decoded password in keyring (best-effort migration)
                 let _ = keyring_save(&host, &port, &user, &decoded);
-                // Rewrite JSON without password field
-                let _ = std::fs::write(&path, serde_json::to_string_pretty(&obj).unwrap_or_default());
+                // Rewrite JSON without password field.
+                // WR-06 fix: skip write on serialization failure instead of
+                // clobbering the file with an empty string. Migration is best-
+                // effort — if we can't rewrite cleanly we leave the legacy file
+                // alone; next load_ssh_credentials pass retries migration.
+                if let Ok(stripped_json) = serde_json::to_string_pretty(&obj) {
+                    let _ = std::fs::write(&path, stripped_json);
+                }
             }
         }
     }
