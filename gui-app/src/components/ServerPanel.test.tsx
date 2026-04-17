@@ -7,6 +7,7 @@ import { renderWithProviders as render } from "../test/test-utils";
 // Mock useServerState to control panel states
 const mockLoadServerInfo = vi.fn();
 const mockOnSwitchToSetup = vi.fn();
+const mockOnDisconnect = vi.fn();
 const mockSetRebooting = vi.fn();
 const mockSetServerInfo = vi.fn();
 const mockSetConfirmReboot = vi.fn();
@@ -46,7 +47,7 @@ describe("ServerPanel", () => {
     sshPassword: "pass",
     onSwitchToSetup: mockOnSwitchToSetup,
     onClearConfig: vi.fn(),
-    onDisconnect: vi.fn(),
+    onDisconnect: mockOnDisconnect,
     onConfigExported: vi.fn(),
   };
 
@@ -67,6 +68,7 @@ describe("ServerPanel", () => {
       successQueue: [],
       loadServerInfo: mockLoadServerInfo,
       onSwitchToSetup: mockOnSwitchToSetup,
+      onDisconnect: mockOnDisconnect,
       setRebooting: mockSetRebooting,
       setServerInfo: mockSetServerInfo,
       setConfirmReboot: mockSetConfirmReboot,
@@ -92,7 +94,7 @@ describe("ServerPanel", () => {
     expect(screen.getByText("Connection refused")).toBeInTheDocument();
   });
 
-  it("shows retry and configure buttons on error", () => {
+  it("shows retry and disconnect buttons on error", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -101,7 +103,10 @@ describe("ServerPanel", () => {
     };
     render(<ServerPanel {...defaultProps} />);
     expect(screen.getByRole("button", { name: /Повторить|retry/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Настроить SSH|configure/i })).toBeInTheDocument();
+    // Phase 13.UAT G-04b: "Настроить SSH" replaced с "Отключиться" — чистый exit
+    // на SshConnectForm вместо wizard. "Настроить SSH" вёл в setup wizard, но
+    // юзер ожидал логин-экран.
+    expect(screen.getByRole("button", { name: /Отключ|disconnect/i })).toBeInTheDocument();
   });
 
   it("shows not installed state", () => {
@@ -188,7 +193,7 @@ describe("ServerPanel", () => {
     expect(mockLoadServerInfo).toHaveBeenCalled();
   });
 
-  it("configure SSH button calls onSwitchToSetup", () => {
+  it("disconnect button on error screen calls onDisconnect (G-04b)", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -196,9 +201,9 @@ describe("ServerPanel", () => {
       serverInfo: null,
     };
     render(<ServerPanel {...defaultProps} />);
-    const configBtn = screen.getByRole("button", { name: /Настроить SSH|configure/i });
-    configBtn.click();
-    expect(mockOnSwitchToSetup).toHaveBeenCalled();
+    const disconnectBtn = screen.getByRole("button", { name: /Отключ|disconnect/i });
+    disconnectBtn.click();
+    expect(mockOnDisconnect).toHaveBeenCalled();
   });
 
   it("not installed state shows install button", () => {
