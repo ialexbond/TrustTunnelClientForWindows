@@ -65,12 +65,31 @@ export const ConfirmDialogContext = createContext<ConfirmFn | null>(null);
 export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<PendingRequest | null>(null);
   const [actionRunning, setActionRunning] = useState(false);
+  // `displayed` is what actually renders in the Modal. It lags behind `current`
+  // by 200ms on close so the exit animation can play with valid content (see
+  // Modal primitive lifecycle contract in Modal.tsx JSDoc + known-issues #10).
+  // When `current` goes null → isOpen=false triggers Modal's 200ms fade-out →
+  // setTimeout 200ms clears `displayed` → ConfirmDialog unmounts cleanly.
+  const [displayed, setDisplayed] = useState<PendingRequest | null>(null);
   const currentRef = useRef<PendingRequest | null>(null);
   const queueRef = useRef<PendingRequest[]>([]);
 
   // Keep ref in sync so the unmount cleanup sees the latest value.
   useEffect(() => {
     currentRef.current = current;
+  }, [current]);
+
+  // Sync `displayed` with `current`, but delay the clear by 200ms to allow
+  // Modal exit animation to finish with still-valid title/message content.
+  useEffect(() => {
+    if (current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: `displayed` must lag `current` by 200ms on close so Modal exit animation has valid content; on open it must immediately adopt the new request
+      setDisplayed(current);
+      return;
+    }
+    // current === null — start the clear timer; Modal's own exit runs in parallel.
+    const t = setTimeout(() => setDisplayed(null), 200);
+    return () => clearTimeout(t);
   }, [current]);
 
   const pump = useCallback(() => {
@@ -162,14 +181,20 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   return (
     <ConfirmDialogContext.Provider value={confirm}>
       {children}
-      {current && (
+      {/*
+        ALWAYS render ConfirmDialog while `displayed` has content (lags `current`
+        by 200ms on close). `isOpen` is driven by `current !== null` so Modal's
+        exit animation plays for 200ms before displayed clears and tree unmounts.
+        Parent MUST NOT return null early (see known-issues #10).
+      */}
+      {displayed && (
         <ConfirmDialog
-          isOpen={true}
-          title={current.title}
-          message={current.message}
-          variant={current.variant}
-          confirmLabel={current.confirmText}
-          cancelLabel={current.cancelText}
+          isOpen={current !== null}
+          title={displayed.title}
+          message={displayed.message}
+          variant={displayed.variant}
+          confirmLabel={displayed.confirmText}
+          cancelLabel={displayed.cancelText}
           loading={actionRunning}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
