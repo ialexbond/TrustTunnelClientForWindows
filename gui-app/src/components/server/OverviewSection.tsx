@@ -149,16 +149,18 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
     activityLog("USER", "overview.speedtest.started", "OverviewSection.SpeedRefresh");
     setSpeedTesting(true);
     try {
-      const r = await invoke<{ download_mbps: number; upload_mbps: number }>("speedtest_run");
+      // Server-side speedtest via SSH+curl на Cloudflare. Измеряет server bandwidth
+      // (потолок VPN-throughput для всех клиентов), а не клиентскую сеть.
+      const r = await invoke<{ download_mbps: number; upload_mbps: number }>("server_speedtest_run", sshParams);
       setSpeed(r);
-      activityLog("STATE", `overview.speedtest.completed dl=${r.download_mbps.toFixed(1)} ul=${r.upload_mbps.toFixed(1)}`, "speedtest_run");
+      activityLog("STATE", `overview.speedtest.completed dl=${r.download_mbps.toFixed(1)} ul=${r.upload_mbps.toFixed(1)}`, "server_speedtest_run");
     } catch (e) {
       setSpeed(null);
-      activityLog("ERROR", `overview.speedtest.failed err=${String(e)}`, "speedtest_run");
+      activityLog("ERROR", `overview.speedtest.failed err=${String(e)}`, "server_speedtest_run");
     } finally {
       setSpeedTesting(false);
     }
-  }, [speedTesting, activityLog]);
+  }, [speedTesting, activityLog, sshParams]);
 
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
@@ -379,11 +381,23 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         </div>
       </Card>
 
-      {/* Speed — manual measurement via Cloudflare speedtest_run.
-          Design: StatCard/Overview Variants story 3a — coloured ↓↑ icons + value + Мбит/с, divider in middle. */}
+      {/* Speed — server-side speedtest via SSH+curl на Cloudflare (Phase 13.UAT).
+          Измеряет server bandwidth (потолок VPN throughput). Refresh disabled
+          когда протокол остановлен или ребутится — тест бессмысленный.
+          Design: StatCard/Overview Variants story 3a — coloured ↓↑ icons + значение + Мбит/с. */}
       <Card padding="md" style={{ flex: "2 1 340px" }}>
-        <Title icon={<Zap className="w-5 h-5" />} text={t("server.overview.cards.speed")} onRefresh={runSpeedTest} refreshing={speedTesting} refreshAriaLabel={refreshAriaLabel} />
-        {speedTesting ? (
+        <Title
+          icon={<Zap className="w-5 h-5" />}
+          text={t("server.overview.cards.speed")}
+          onRefresh={isRunning && !rebooting ? runSpeedTest : undefined}
+          refreshing={speedTesting}
+          refreshAriaLabel={refreshAriaLabel}
+        />
+        {!isRunning || rebooting ? (
+          <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
+            <span className="text-sm" style={muted}>{t("server.overview.speedRequiresProtocol")}</span>
+          </div>
+        ) : speedTesting ? (
           <div className="flex items-center justify-center gap-8 py-2">
             <div className="flex items-center gap-2">
               <Skeleton variant="circle" width={28} height={28} />

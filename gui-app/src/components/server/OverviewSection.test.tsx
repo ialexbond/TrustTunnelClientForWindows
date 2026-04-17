@@ -535,7 +535,7 @@ describe("OverviewSection", () => {
         if (cmd === "ping_endpoint") return 42;
         if (cmd === "server_get_stats") return null;
         if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
-        if (cmd === "speedtest_run") return { download_mbps: 100, upload_mbps: 50 };
+        if (cmd === "server_speedtest_run") return { download_mbps: 100, upload_mbps: 50 };
         if (cmd === "write_activity_log") {
           const p = params as { tag: string; message: string };
           logged.push({ tag: p.tag, message: p.message });
@@ -582,6 +582,89 @@ describe("OverviewSection", () => {
               e.message.includes("fail2ban=inactive"),
           ),
         ).toBe(true);
+      }, { timeout: 5_000 });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 13.UAT: Speed card disabled state when protocol stopped
+  // ═══════════════════════════════════════════════════════
+
+  describe("Speed card protocol gating (UAT)", () => {
+    it("shows 'Запустите протокол' message when serviceActive=false", async () => {
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.0",
+          serviceActive: false,
+          users: [],
+          listenPort: 443,
+          protocol: "x",
+          cipher: "x",
+          dns: "x",
+          mtu: 1420,
+        },
+      });
+      render(<OverviewSection state={state} />);
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t("server.overview.speedRequiresProtocol"))).toBeInTheDocument();
+      });
+    });
+
+    it("does NOT call server_speedtest_run when serviceActive=false (refresh disabled)", async () => {
+      let speedtestCalled = false;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_speedtest_run") { speedtestCalled = true; return { download_mbps: 100, upload_mbps: 50 }; }
+        return null;
+      });
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.0",
+          serviceActive: false,
+          users: [],
+          listenPort: 443,
+          protocol: "x",
+          cipher: "x",
+          dns: "x",
+          mtu: 1420,
+        },
+      });
+      render(<OverviewSection state={state} />);
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t("server.overview.speedRequiresProtocol"))).toBeInTheDocument();
+      });
+      // Refresh button absent because onRefresh={undefined} when !isRunning
+      const speedTitle = screen.getByText(i18n.t("server.overview.cards.speed"));
+      const speedCard = speedTitle.closest("div")?.parentElement;
+      expect(speedCard?.querySelector('button[aria-label]')).toBeNull();
+      expect(speedtestCalled).toBe(false);
+    });
+
+    it("calls server_speedtest_run with sshParams when refresh clicked while running", async () => {
+      const calls: Array<{ cmd: string; params?: unknown }> = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+        calls.push({ cmd, params });
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_speedtest_run") return { download_mbps: 200, upload_mbps: 80 };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+
+      const refreshButtons = await screen.findAllByLabelText(i18n.t("server.overview.refreshAria"));
+      fireEvent.click(refreshButtons[1]); // Speed refresh
+
+      await waitFor(() => {
+        const speedCalls = calls.filter((c) => c.cmd === "server_speedtest_run");
+        expect(speedCalls.length).toBeGreaterThan(0);
+        // Verify sshParams passed (host/port/user/etc.)
+        expect(speedCalls[0].params).toMatchObject({ host: "10.0.0.1" });
       }, { timeout: 5_000 });
     });
   });
