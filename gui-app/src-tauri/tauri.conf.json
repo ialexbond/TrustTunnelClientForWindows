@@ -17,7 +17,7 @@
         "height": 1000,
         "minWidth": 800,
         "minHeight": 1000,
-        "maxWidth": 1200,
+        "maxWidth": 1000,
         "resizable": true,
         "decorations": false,
         "shadow": true,
