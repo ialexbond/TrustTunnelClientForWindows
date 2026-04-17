@@ -398,4 +398,101 @@ describe("OverviewSection", () => {
       expect(statsCallCount).toBe(0);
     });
   });
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 13: Drill-down navigation (D-09, D-10, D-11)
+  // ═══════════════════════════════════════════════════════
+
+  describe("OverviewSection drill-down (D-09, D-11)", () => {
+    it("drill-down: calls onNavigate('users') when Users card is clicked", async () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={onNavigate} />);
+
+      const usersTitle = screen.getByText(i18n.t("server.overview.cards.userCount"));
+      const card = usersTitle.closest('[role="button"]');
+      expect(card).not.toBeNull();
+
+      fireEvent.click(card!);
+      expect(onNavigate).toHaveBeenCalledWith("users");
+    });
+
+    it("drill-down: calls onNavigate('configuration') on Enter key on Protocol version card", async () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={onNavigate} />);
+
+      const versionTitle = screen.getByText(i18n.t("server.overview.cards.protocolVersion"));
+      const card = versionTitle.closest('[role="button"]');
+      expect(card).not.toBeNull();
+
+      fireEvent.keyDown(card!, { key: "Enter" });
+      expect(onNavigate).toHaveBeenCalledWith("configuration");
+    });
+
+    it("drill-down: calls onNavigate('security') on Space key on Security card", async () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={onNavigate} />);
+
+      const securityTitle = screen.getByText(i18n.t("server.overview.cards.security"));
+      const card = securityTitle.closest('[role="button"]');
+      expect(card).not.toBeNull();
+
+      fireEvent.keyDown(card!, { key: " " });
+      expect(onNavigate).toHaveBeenCalledWith("security");
+    });
+
+    it("drill-down: non-clickable cards do NOT have role=button (display-only)", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+
+      const nonClickableKeys = [
+        "server.overview.cards.status",
+        "server.overview.cards.ping",
+        "server.overview.cards.speed",
+        "server.overview.cards.ip",
+        "server.overview.cards.country",
+        "server.overview.cards.uptime",
+        "server.overview.cards.load",
+      ];
+
+      for (const key of nonClickableKeys) {
+        const title = screen.getByText(i18n.t(key));
+        const card = title.closest('[role="button"]');
+        expect(card, `card "${key}" unexpectedly has role=button`).toBeNull();
+      }
+    });
+
+    it("drill-down: clickable cards have role=button with descriptive aria-label", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+
+      const clickableKeys = [
+        "server.overview.cards.userCount",
+        "server.overview.cards.protocolVersion",
+        "server.overview.cards.security",
+      ];
+
+      for (const key of clickableKeys) {
+        const label = i18n.t(key);
+        const title = screen.getByText(label);
+        const card = title.closest('[role="button"]');
+        expect(card, `card "${key}" must be role=button`).not.toBeNull();
+        expect(card?.getAttribute("aria-label")).toBe(label);
+      }
+    });
+
+    it("drill-down: does NOT throw when onNavigate is undefined (backward compat)", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} />); // no onNavigate
+
+      const usersTitle = screen.getByText(i18n.t("server.overview.cards.userCount"));
+      const card = usersTitle.closest('[role="button"]');
+      expect(card).not.toBeNull();
+
+      // Clicking должен не падать даже без onNavigate (optional chain в handler)
+      expect(() => fireEvent.click(card!)).not.toThrow();
+    });
+  });
 });
