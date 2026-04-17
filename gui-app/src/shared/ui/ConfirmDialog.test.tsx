@@ -102,4 +102,50 @@ describe("ConfirmDialog", () => {
     const title = screen.getByText("Delete item?");
     expect(title.style.color).toContain("warning");
   });
+
+  // ══════════════════════════════════════════════════════
+  // Phase 14 post-install additions
+  // ══════════════════════════════════════════════════════
+
+  it("body text is text-sm (14px), not text-xs (12px)", () => {
+    // Regression guard for the typography critique — body должен быть
+    // читаемым (14px), не caption-size (12px).
+    render(<ConfirmDialog {...defaults} />);
+    const body = screen.getByText("This action cannot be undone.");
+    expect(body.className).toContain("text-sm");
+    expect(body.className).not.toContain("text-xs");
+  });
+
+  it("body supports \\n via whitespace-pre-line (2-line message splitting)", () => {
+    render(
+      <ConfirmDialog {...defaults} message={"First line.\nSecond line."} />,
+    );
+    const body = screen.getByText(/First line\./);
+    expect(body.className).toContain("whitespace-pre-line");
+    // textContent contains the \n raw, CSS handles rendering
+    expect(body.textContent).toContain("\n");
+  });
+
+  it("size prop defaults to 'md' (was 'sm' before Phase 14 post-install)", () => {
+    render(<ConfirmDialog {...defaults} />);
+    // Modal panel has max-w-md class (via sizeClasses map in Modal.tsx).
+    const panel = screen.getByText("Delete item?").closest("div[class*='max-w']");
+    expect(panel?.className).toContain("max-w-md");
+  });
+
+  it("size prop accepts 'sm' for super-short confirmations", () => {
+    render(<ConfirmDialog {...defaults} size="sm" />);
+    const panel = screen.getByText("Delete item?").closest("div[class*='max-w']");
+    expect(panel?.className).toContain("max-w-sm");
+  });
+
+  it("loading=true disables Cancel button + shows Confirm spinner", () => {
+    render(<ConfirmDialog {...defaults} loading={true} />);
+    const cancel = screen.getByRole("button", { name: /Отмена/i });
+    const confirm = screen.getByRole("button", { name: /Удалить|Подтвердить/i });
+    expect(cancel).toBeDisabled();
+    expect(confirm).toBeDisabled();
+    // Button primitive renders Loader2 with animate-spin when loading
+    expect(confirm.querySelector("svg.animate-spin")).toBeInTheDocument();
+  });
 });
