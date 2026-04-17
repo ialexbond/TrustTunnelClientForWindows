@@ -123,8 +123,24 @@ function ClickableCard({
   );
 }
 
+/**
+ * Localize country name based on i18n locale via browser Intl.DisplayNames API.
+ * Returns localized name (e.g. "DE" + "ru" → "Германия", "DE" + "en" → "Germany").
+ * Fallback на оригинальное name если API не сработает (старые webview, missing data).
+ */
+function getLocalizedCountry(countryCode: string, fallback: string, locale: string): string {
+  if (!countryCode) return fallback;
+  try {
+    const display = new Intl.DisplayNames([locale], { type: "region" });
+    const localized = display.of(countryCode.toUpperCase());
+    return localized && localized !== countryCode.toUpperCase() ? localized : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { log: activityLog } = useActivityLog();
   const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
 
@@ -500,7 +516,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           {geoLoading ? (
             <Skeleton variant="line" width={120} height={28} />
           ) : geo ? (
-            <span style={bigNum}>{geo.country}</span>
+            <span style={bigNum}>{getLocalizedCountry(geo.country_code, geo.country, i18n.language)}</span>
           ) : (
             <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
           )}
