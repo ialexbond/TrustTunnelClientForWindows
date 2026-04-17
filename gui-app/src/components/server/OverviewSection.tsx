@@ -149,18 +149,20 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
     activityLog("USER", "overview.speedtest.started", "OverviewSection.SpeedRefresh");
     setSpeedTesting(true);
     try {
-      // Server-side speedtest via SSH+curl на Cloudflare. Измеряет server bandwidth
-      // (потолок VPN-throughput для всех клиентов), а не клиентскую сеть.
-      const r = await invoke<{ download_mbps: number; upload_mbps: number }>("server_speedtest_run", sshParams);
+      // Client-side speedtest: твой ПК → Cloudflare. Если VPN-клиент подключён к этому
+      // серверу — трафик идёт через VPN-туннель, измеряется реальная VPN throughput
+      // (включая overhead encryption + MTU + server queue). Если VPN не подключён —
+      // измеряется голая клиентская сеть.
+      const r = await invoke<{ download_mbps: number; upload_mbps: number }>("speedtest_run");
       setSpeed(r);
-      activityLog("STATE", `overview.speedtest.completed dl=${r.download_mbps.toFixed(1)} ul=${r.upload_mbps.toFixed(1)}`, "server_speedtest_run");
+      activityLog("STATE", `overview.speedtest.completed dl=${r.download_mbps.toFixed(1)} ul=${r.upload_mbps.toFixed(1)}`, "speedtest_run");
     } catch (e) {
       setSpeed(null);
-      activityLog("ERROR", `overview.speedtest.failed err=${String(e)}`, "server_speedtest_run");
+      activityLog("ERROR", `overview.speedtest.failed err=${String(e)}`, "speedtest_run");
     } finally {
       setSpeedTesting(false);
     }
-  }, [speedTesting, activityLog, sshParams]);
+  }, [speedTesting, activityLog]);
 
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
