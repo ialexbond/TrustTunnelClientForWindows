@@ -153,6 +153,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   const { geo, loading: geoLoading } = useServerGeoIp({ host: state.host });
 
   const [ping, setPing] = useState<number | null>(null);
+  // G-08: guard против rapid-fire ping клика — иначе каждый tick открывает новый
+  // SSH channel на общий pool (single handle, MaxSessions ~10). 4 пинга за секунду
+  // + stats poller + security + fastUptime → SSH_CHANNEL_FAILED на следующей команде.
+  const [pingLoading, setPingLoading] = useState(false);
   const [rebootCountdown, setRebootCountdown] = useState(0);
   const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -283,7 +287,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   }, [rebooting]);
 
   const refreshPing = useCallback(() => {
+    if (pingLoading) return;
     activityLog("USER", "overview.ping.manual_refresh", "OverviewSection.PingRefresh");
+    setPingLoading(true);
     invoke<number>("ping_endpoint", { host: state.host, port: 443 })
       .then((ms) => {
         setPing(ms);
@@ -292,8 +298,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       .catch((e) => {
         setPing(-1);
         activityLog("ERROR", `overview.ping.failed err=${String(e)}`, "ping_endpoint");
-      });
-  }, [state.host, activityLog]);
+      })
+      .finally(() => setPingLoading(false));
+  }, [pingLoading, state.host, activityLog]);
 
   // ── Skeleton: пока нет данных ──
   const refreshAriaLabel = t("server.overview.refreshAria");
@@ -420,6 +427,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           icon={<Activity className="w-5 h-5" />}
           text={t("server.overview.cards.ping")}
           onRefresh={isRunning && !rebooting ? refreshPing : undefined}
+          refreshing={pingLoading}
           refreshAriaLabel={refreshAriaLabel}
         />
         <div className="flex items-baseline justify-center gap-1 py-2">
