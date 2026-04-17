@@ -14,11 +14,25 @@ export function translateSshError(error: string, t: TFunction): string {
     // ─── Connection ───
     case "SSH_TIMEOUT":
       return t("sshErrors.timeout", { target: parts[1] || "" });
-    case "SSH_CONNECT_FAILED":
-      if ((parts[1] || "").includes("Unknown server key")) {
+    case "SSH_CONNECT_FAILED": {
+      // WR-04 fix (a): case-insensitive host-key detection — russh occasionally
+      // lowercases the key variant in error messages.
+      const rawDetail = parts[1] || "";
+      if (rawDetail.toLowerCase().includes("unknown server key")) {
         return t("sshErrors.hostKeyChanged");
       }
-      return t("sshErrors.connectFailed", { detail: parts[1] || "" });
+      // WR-04 fix (b): strip misleading "authentication disabled" noise from
+      // network-level/handshake errors. russh's kex failures sometimes include
+      // phrases like "Authentication disabled" referring to the auth METHOD
+      // the server advertises, not an auth failure. Surfacing that raw text
+      // in the connectFailed i18n string reads like "wrong password" to users
+      // (reported false positive from Phase 13 UAT).
+      const cleanDetail = rawDetail.replace(
+        /authentication[\s\w]*disabled/gi,
+        "handshake failed",
+      );
+      return t("sshErrors.connectFailed", { detail: cleanDetail });
+    }
     case "SSH_HOST_KEY_CHANGED":
       return t("sshErrors.hostKeyChanged");
     case "SSH_CHANNEL_FAILED":
