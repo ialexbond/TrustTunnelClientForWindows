@@ -16,6 +16,8 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
+  /** Modal size (default: "md"). Use "sm" for very short confirmations. */
+  size?: "sm" | "md" | "lg";
 }
 
 export function ConfirmDialog({
@@ -31,6 +33,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   loading,
+  size = "md",
 }: ConfirmDialogProps) {
   const { t } = useTranslation();
   const isVisible = isOpen ?? open ?? false;
@@ -42,7 +45,7 @@ export function ConfirmDialog({
       isOpen={isVisible}
       onClose={loading ? undefined : onCancel}
       closeOnBackdrop={!loading}
-      size="sm"
+      size={size}
     >
       <div className="space-y-[var(--space-4)]">
         <h3
@@ -57,8 +60,7 @@ export function ConfirmDialog({
           {title}
         </h3>
         <p
-          className="text-xs text-center leading-relaxed"
-          style={{ color: "var(--color-text-secondary)" }}
+          className="text-sm text-center leading-relaxed text-[var(--color-text-secondary)]"
         >
           {message}
         </p>
