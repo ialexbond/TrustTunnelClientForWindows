@@ -121,8 +121,11 @@ export function useServerState(props: ServerPanelProps) {
           setConfigRaw(typeof val === "string" ? val : JSON.stringify(val));
         }
         if (certResult.status === "fulfilled") setCertRaw(certResult.value);
-        setPanelDataLoaded(true);
       }
+      // Phase 13.UAT G-02: panelDataLoaded=true даже если server NOT installed.
+      // Иначе ControlPanelPage skeleton overlay не снимается (isFirstConnect стоит
+      // ждёт onPanelReady), пользователь видит вечный skeleton вместо install screen.
+      if (!silent) setPanelDataLoaded(true);
     } catch (e) {
       if (!silent) {
         const errStr = formatError(e);
@@ -133,6 +136,8 @@ export function useServerState(props: ServerPanelProps) {
           setError(translateSshError(errStr, t));
         }
         setServerInfo(null);
+        // Также при ошибке — снимаем skeleton, ServerPanel покажет error UI с retry.
+        setPanelDataLoaded(true);
       }
     } finally {
       if (!silent) setLoading(false);

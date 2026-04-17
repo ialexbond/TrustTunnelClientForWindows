@@ -195,6 +195,13 @@ describe("OverviewSection", () => {
   // ═══════════════════════════════════════════════════════
 
   describe("Country card (D-05, D-14)", () => {
+    // Phase 13.UAT: country name локализован через Intl.DisplayNames по i18n.language.
+    // beforeEach устанавливает 'ru' → "США" вместо "United States". Для предсказуемости
+    // в этих тестах временно switch на 'en'.
+    beforeEach(async () => {
+      await i18n.changeLanguage("en");
+    });
+
     it("shows flag emoji + country name when geo resolves", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
