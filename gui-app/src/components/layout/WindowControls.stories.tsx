@@ -2,13 +2,20 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { WindowControls } from "./WindowControls";
 
 /**
- * WindowControls -- minimize / maximize / close buttons for the custom Tauri title bar.
+ * WindowControls -- minimize / close buttons for the custom Tauri title bar.
  *
- * Three buttons with rounded square hover states:
- * - Minimize / Maximize: --color-bg-hover background on hover
+ * **Phase 13.UAT:** Maximize removed. Window is resizable within min/max bounds
+ * but cannot be maximized (tauri.conf.json `maximizable: false`). Matches the
+ * UX pattern of compact single-view desktop apps (Amnezia VPN and similar).
+ *
+ * Two buttons with rounded square hover states:
+ * - Minimize: --color-bg-hover background on hover
  * - Close: --color-destructive background + --color-text-inverse on hover
  *
- * Tauri window API (minimize, toggleMaximize, close) is mocked via
+ * Tooltips provided via shared Tooltip primitive (not native `title=`) — portal,
+ * 400ms delay, `position="bottom"` so they don't clip above the title bar.
+ *
+ * Tauri window API (minimize, close) is mocked via
  * .storybook/tauri-mocks/api-window.ts -- clicks are no-ops in Storybook.
  */
 const meta: Meta<typeof WindowControls> = {

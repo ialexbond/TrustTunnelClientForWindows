@@ -11,7 +11,7 @@ import { Card } from "./Card";
 /* ═══════════════════════════════════════════════════════
    Overview Cards — карточки обзора серверной панели
 
-   Layout: flex-wrap masonry, 800–1200px контейнер
+   Layout: flex-wrap masonry, 800–1000px контейнер
    Row 1: Статус | Ping | Скорость | Пользователей
    Row 2: IP-адрес | Страна | Uptime | Версия протокола
    Row 3: Безопасность (2×2) | Нагрузка
@@ -91,13 +91,13 @@ const wrap = (minW: number, maxW: number): Story["decorators"] =>
 
 /* ── Meta ── */
 const meta: Meta = {
-  title: "Primitives/StatCard/Overview Variants",
+  title: "Screens/Overview Cards",
   tags: ["autodocs"],
   parameters: {
     layout: "centered",
     docs: {
       description: {
-        component: "Карточки обзора серверной панели. 10 карточек в 3 ряда, адаптивный flex-wrap layout (800–1200px). Каждая карточка имеет позитивное, негативное и skeleton состояния.",
+        component: "Карточки обзора серверной панели (OverviewSection). 10 карточек в 3 ряда, адаптивный flex-wrap layout (800–1000px). Каждая карточка имеет позитивное, негативное и skeleton состояния.\n\n**Архитектурная заметка:** эти stories не используют примитив `<StatCard>` — OverviewSection строится из `<Card>` + кастомных `<Title>`. Поэтому раньше жили под `Primitives/StatCard/Overview Variants` (misnomer) — перенесены в Screens (Phase 13.UAT).",
       },
     },
   },
@@ -789,7 +789,7 @@ export const LoadSkeleton: Story = {
    ═══════════════════════════════════════════════════════ */
 
 const compositeDecorator: Story["decorators"] =
-  [(S) => <div style={{ minWidth: 800, maxWidth: 1200, width: "100%", backgroundColor: "var(--color-bg-primary)", padding: 16 }}><S /></div>];
+  [(S) => <div style={{ minWidth: 800, maxWidth: 1000, width: "100%", backgroundColor: "var(--color-bg-primary)", padding: 16 }}><S /></div>];
 
 /** Все карточки — данные загружены, позитивные значения */
 export const AllCards: Story = {
@@ -876,7 +876,7 @@ export const AllCards: Story = {
 
       {/* ── Row 3: Безопасность | Нагрузка ── */}
 
-      <Card padding="md" style={{ flex: "1 1 340px" }}>
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
         {securityItems([
           { name: "Firewall", ok: true, label: "Активен" },
@@ -886,7 +886,7 @@ export const AllCards: Story = {
         ])}
       </Card>
 
-      <Card padding="md" style={{ flex: "2 1 400px" }}>
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
         <div className="space-y-2.5 mt-1">
           <div>
@@ -972,7 +972,7 @@ export const AllCardsSkeleton: Story = {
       </Card>
 
       {/* Row 3 */}
-      <Card padding="md" style={{ flex: "1 1 340px" }}>
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Shield className="w-5 h-5" />} text="Безопасность" clickable />
         <div className="grid grid-cols-2 gap-2 mt-1">
           {[1, 2, 3, 4].map(i => (
@@ -984,7 +984,7 @@ export const AllCardsSkeleton: Story = {
         </div>
       </Card>
 
-      <Card padding="md" style={{ flex: "2 1 400px" }}>
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
         <div className="space-y-2.5 mt-1">
           {[1, 2].map(i => (

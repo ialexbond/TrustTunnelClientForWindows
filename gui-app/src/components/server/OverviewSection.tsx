@@ -451,7 +451,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       {/* Speed — server-side speedtest via SSH+curl на Cloudflare (Phase 13.UAT).
           Измеряет server bandwidth (потолок VPN throughput). Refresh disabled
           когда протокол остановлен или ребутится — тест бессмысленный.
-          Design: StatCard/Overview Variants story 3a — coloured ↓↑ icons + значение + Мбит/с. */}
+          Design: Screens/Overview Cards story 3a — coloured ↓↑ icons + значение + Мбит/с. */}
       <Card padding="md" style={{ flex: "1 1 280px", maxWidth: 360 }}>
         <Title
           icon={<Zap className="w-5 h-5" />}
@@ -572,9 +572,11 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
 
       {/* ── Row 3: Security | Load ── */}
 
-      {/* Security — drill-down (D-11). Skeleton state per StatCard/Overview Variants 9f. */}
+      {/* Security — drill-down (D-11). Skeleton state per Screens/Overview Cards 9f.
+          flex basis 300 + Load 300 = 600, помещаются в одном ряду даже при minWidth
+          800px контейнера (G-09 fix — убрать split в 5-й ряд на узкой ширине). */}
       <ClickableCard
-        style={{ flex: "1 1 340px" }}
+        style={{ flex: "1 1 300px" }}
         onClick={() => onNavigate?.("security")}
         ariaLabel={t("server.overview.cards.security")}
       >
@@ -644,9 +646,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         )}
       </ClickableCard>
 
-      {/* Load — live (CPU + RAM). Skeleton state per StatCard/Overview Variants 10c:
-          ALL elements skeletoned (label + value + bar) — никаких текстов CPU/RAM. */}
-      <Card padding="md" style={{ flex: "2 1 400px" }}>
+      {/* Load — live (CPU + RAM). Skeleton state per Screens/Overview Cards 10c:
+          ALL elements skeletoned (label + value + bar) — никаких текстов CPU/RAM.
+          flex basis 300 (G-09) — парный с Security чтобы держать Row 3 в одну строку. */}
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
         <div className="space-y-2.5 mt-1">
           {stats === null && statsLoading ? (
