@@ -255,28 +255,50 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   }, [state.host, serverInfo?.serviceActive, rebooting]);
 
   // ── Reboot polling ──
+  // WR-01 fix: use a ref-based stable handle so the 1-shot effect (deps=[rebooting]) always
+  // reads CURRENT sshParams/host/callbacks, not the stale values captured when rebooting=true.
+  // Pre-fix symptom: if user changed SSH port via handlePortChanged during reboot, poller
+  // kept calling check_server_installation / ping_endpoint on the OLD port until 2-min timeout.
+  const rebootRefs = useRef({
+    sshParams,
+    host: state.host,
+    setRebooting,
+    setServerInfo,
+    t,
+    pushSuccess: state.pushSuccess,
+  });
+  rebootRefs.current = {
+    sshParams,
+    host: state.host,
+    setRebooting,
+    setServerInfo,
+    t,
+    pushSuccess: state.pushSuccess,
+  };
+
   useEffect(() => {
     if (!rebooting) return;
     let elapsed = 0;
     const interval = setInterval(async () => {
       elapsed += 10;
       setRebootCountdown(elapsed);
+      const refs = rebootRefs.current;
       try {
         const info = await invoke<{ installed: boolean; version: string; serviceActive: boolean; users: string[] }>(
-          "check_server_installation", sshParams
+          "check_server_installation", refs.sshParams
         );
         if (info) {
-          setRebooting(false);
+          refs.setRebooting(false);
           setRebootCountdown(0);
-          setServerInfo(info);
-          state.pushSuccess(t("server.actions.success_reboot_done"));
-          invoke<number>("ping_endpoint", { host: state.host, port: 443 })
+          refs.setServerInfo(info);
+          refs.pushSuccess(refs.t("server.actions.success_reboot_done"));
+          invoke<number>("ping_endpoint", { host: refs.host, port: 443 })
             .then((ms) => setPing(ms))
             .catch(() => setPing(-1));
         }
       } catch {
         if (elapsed >= 120) {
-          setRebooting(false);
+          refs.setRebooting(false);
           setRebootCountdown(0);
           invoke("clear_ssh_credentials").catch(() => {});
           localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
@@ -284,12 +306,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       }
     }, 10000);
     return () => clearInterval(interval);
-    // Why eslint-disable below: reboot poller должен start ровно один раз когда
-    // rebooting=true и работать до завершения reboot (~120s). Перезапуск эффекта
-    // при изменении sshParams/state.host/setRebooting/setServerInfo/t/state.pushSuccess
-    // создаст дублированные интервалы → SSH-storm на пробуждении сервера.
-    // Правильный fix — useRef-based stable refs, deferred до Phase 14+.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Effect intentionally runs once per reboot cycle (deps=[rebooting]). Fresh closures
+    // would spawn duplicate intervals → SSH-storm on wake. All mutable refs come via
+    // rebootRefs.current, which is updated on every render above.
   }, [rebooting]);
 
   const refreshPing = useCallback(() => {
