@@ -259,7 +259,7 @@ export function UsersSection({ state }: Props) {
                     }}
                     className={cn(
                       "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)]",
-                      "transition-all duration-200",
+                      "transition-colors duration-[var(--transition-fast)]",
                       "focus-visible:shadow-[var(--focus-ring)] outline-none",
                       isBusy
                         ? "opacity-[var(--opacity-disabled)] cursor-not-allowed"

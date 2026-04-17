@@ -103,7 +103,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
               "text-sm text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
-              "transition-all duration-[var(--transition-fast)]",
+              "transition-[border-color,box-shadow,background-color] duration-[var(--transition-fast)]",
               "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
               error && "border-[var(--color-danger-500)] bg-[var(--color-status-error-bg)]",
