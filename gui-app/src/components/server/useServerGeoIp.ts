@@ -79,18 +79,30 @@ function saveCache(host: string, info: GeoIpInfo): void {
 export function useServerGeoIp(sshParams: { host: string }) {
   const { host } = sshParams;
 
+  // WR-03 fix: reduce loadCache calls per mount (was 3 — two lazy initializers
+  // plus one in the effect body). Now: 1 call at mount for `geo` lazy init +
+  // 1 call in the effect body for consistency (same-tick race protection if
+  // localStorage is mutated between init and effect). `loading` derives from
+  // the already-initialized `geo` closure value — no extra localStorage read.
   const [geo, setGeo] = useState<GeoIpInfo | null>(() => loadCache(host));
-  const [loading, setLoading] = useState<boolean>(() => loadCache(host) === null);
+  // React guarantees useState initializers run in order — `geo` is already set
+  // via the previous useState call when this one runs, so reading `geo` here
+  // is safe and avoids a second loadCache.
+  const [loading, setLoading] = useState<boolean>(() => geo === null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    // Cache lookup runs asynchronously to avoid sync setState in effect body
-    // (react-hooks/set-state-in-effect). The microtask resolves before paint, so
-    // there is no visible flash for cache-hit users.
+    // Microtask hop so setState calls aren't synchronous in effect body
+    // (react-hooks/set-state-in-effect). Microtask resolves before paint — no
+    // visible flash for cache-hit users.
     void Promise.resolve().then(() => {
       if (cancelled) return;
+
+      // Single loadCache call per effect run (WR-03 — was duplicated across init
+      // and effect body before). On first mount with a fresh cache hit, this
+      // matches the lazy-init already done in useState, so setGeo is a no-op.
       const cached = loadCache(host);
       if (cached) {
         setGeo(cached);
@@ -99,6 +111,8 @@ export function useServerGeoIp(sshParams: { host: string }) {
         return;
       }
 
+      // Cache miss — invoke and persist.
+      setGeo(null);
       setLoading(true);
       setError(null);
 
