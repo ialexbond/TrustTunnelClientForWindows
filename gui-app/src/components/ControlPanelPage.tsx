@@ -183,8 +183,10 @@ export function ServerPanelSkeleton() {
           />
 
           {/* ── Row 3: Security (4 sub-tiles) | Load (CPU + RAM bars) ── */}
+          {/* G-09: flex-basis 300 каждая — Security+Load помещаются в одну строку
+              даже при minWidth 800px контейнера. Раньше split в отдельный ряд. */}
           <OverviewSkeletonCard
-            flex="1 1 340px"
+            flex="1 1 300px"
             body={
               <div className="grid grid-cols-2 gap-2 mt-1">
                 {[1, 2, 3, 4].map((i) => (
@@ -200,9 +202,9 @@ export function ServerPanelSkeleton() {
               </div>
             }
           />
-          {/* Load skeleton — matches StatCard/Overview Variants 10c (no CPU/RAM text, full skeletons) */}
+          {/* Load skeleton — matches Screens/Overview Cards 10c (no CPU/RAM text, full skeletons) */}
           <OverviewSkeletonCard
-            flex="2 1 400px"
+            flex="1 1 300px"
             body={
               <div className="space-y-2.5 mt-1">
                 {[1, 2].map((i) => (
