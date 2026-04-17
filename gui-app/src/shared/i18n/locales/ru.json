@@ -633,7 +633,7 @@
       "qr_click_to_copy": "QR-код — нажмите, чтобы скопировать изображение",
       "deeplink_aria": "Deeplink для подключения",
       "copy_deeplink_tooltip": "Скопировать ссылку",
-      "download_config": "Скачать файл"
+      "download_config": "Скачать конфиг"
     },
     "logs": {
       "title": "Логи сервера",
