@@ -301,13 +301,25 @@ pub async fn renew_cert(
     ).await;
 
     // Always close 80/tcp if we opened it — even if the renewal above failed at the SSH level.
-    if temporarily_opened_80 {
-        emit_log(app, "info", "UFW: closing 80/tcp after cert renewal");
-        let _ = exec_command(handle, app, &format!("{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true")).await;
-    }
+    // Note: this runs on BOTH the happy path and before the early Err(...) below so that a
+    // non-zero certbot exit code cannot leak the temporarily-opened port. Ideally this would
+    // be wrapped in an RAII scope guard (so a panic/cancellation between the `ufw allow` and
+    // here also closes the port), but Rust async closures + borrow checker on `handle`/`app`
+    // make a clean Drop impl non-trivial. Best-effort duplicated close is pragmatic here.
+    let close_temp_port_80 = || async {
+        if temporarily_opened_80 {
+            emit_log(app, "info", "UFW: closing 80/tcp after cert renewal");
+            let _ = exec_command(handle, app, &format!("{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true")).await;
+        }
+    };
+    close_temp_port_80().await;
 
     // Return based on certbot's actual exit code.
     if !certbot_ok {
+        // Defense in depth: if the logic above changes and the happy-path close is skipped
+        // (e.g. an early return gets added between the ufw allow and here), this second call
+        // still runs before the error surface. The underlying `ufw --force delete` is idempotent.
+        close_temp_port_80().await;
         let code = renew_result.as_ref().map(|(_, c)| *c).unwrap_or(-1);
         return Err(format!("SSH_CERT_RENEW_FAILED|{code}"));
     }
