@@ -2,19 +2,18 @@
  * EcgSvg — анимированная ECG-линия с 12-слойным градиентным хвостом.
  *
  * Используется в карточке «Статус» таба «Обзор».
- * - Работает: зелёный пульс (ecgHeartbeat path) — animated layered gradient
- * - Остановлен: красная плоская линия (ecgFlatline path) — animated layered gradient
- *   (та же логика, head leads, tail trails)
+ * - Работает: зелёный пульс (ecgHeartbeat path)
+ * - Остановлен: красная плоская линия (ecgFlatline path)
  *
  * Каждый слой — stroke-dasharray с animationDelay,
  * opacity нарастает экспоненциально от хвоста (delay 0s, opacity 0.02) к голове
  * (delay -0.55s, opacity 1.0). Голова всегда впереди по направлению движения
  * (left-to-right при offset 20 → -100).
  *
- * strokeLinecap="butt" (НЕ round) — на плоской линии round-caps на тонких dashes
- * добавляют видимые полукруги по краям, что создаёт визуальную инверсию
- * (eye видит "head" на левом round-cap вместо правого dash-end). Butt caps
- * однозначны: dash имеет четкие плоские концы, head всегда справа.
+ * IMPORTANT: при переключении статуса (running ↔ stopped) родитель ДОЛЖЕН
+ * передавать разный `key` prop (например, `key={isRunning ? "live" : "dead"}`)
+ * чтобы React unmount + mount SVG, иначе negative animation delays не
+ * пересчитываются на новые слои → визуально tail/head перепутаются.
  */
 
 /** ECG path — двойной зигзаг на 30% и 70% пути */
@@ -50,11 +49,6 @@ interface EcgSvgProps {
 }
 
 export function EcgSvg({ color, path, anim }: EcgSvgProps) {
-  // strokeLinecap="butt" для flatline (плоский конец без полукруга),
-  // "round" для heartbeat (мягкие закругления на zigzag peaks).
-  const isFlatline = path === ecgFlatline;
-  const cap = isFlatline ? "butt" : "round";
-
   return (
     <svg width="160" height="36" viewBox="0 0 160 36" fill="none">
       <style>{`@keyframes ${anim} { from { stroke-dashoffset: 20; } to { stroke-dashoffset: -100; } }`}</style>
@@ -64,7 +58,7 @@ export function EcgSvg({ color, path, anim }: EcgSvgProps) {
         strokeWidth="1.5"
         fill="none"
         opacity="0.15"
-        strokeLinecap={cap}
+        strokeLinecap="round"
         strokeLinejoin="round"
         pathLength={100}
       />
@@ -76,7 +70,7 @@ export function EcgSvg({ color, path, anim }: EcgSvgProps) {
           strokeWidth="2"
           fill="none"
           opacity={l.opacity}
-          strokeLinecap={cap}
+          strokeLinecap="round"
           strokeLinejoin="round"
           pathLength={100}
           style={{
