@@ -59,8 +59,6 @@ export function UsersSection({ state }: Props) {
   const { log: activityLog } = useActivityLog();
   const {
     serverInfo,
-    selectedUser,
-    setSelectedUser,
     newUsername,
     setNewUsername,
     newPassword,
@@ -213,66 +211,38 @@ export function UsersSection({ state }: Props) {
             body={t("server.users.empty_body")}
           />
         ) : (
-          <div
-            role="listbox"
-            aria-label={t("tabs.users")}
-            className="mb-3"
-          >
+          // Раньше это был role="listbox" с кликом по строке (selection для
+          // кнопки Continue-as). После удаления Continue-as выделение строки
+          // стало бессмысленным — ряд теперь static list, action'ы доступны
+          // только через inline FileText/Trash иконки справа.
+          <ul className="mb-3" aria-label={t("tabs.users")}>
             {serverInfo.users.map((u, idx) => {
-              const isSelected = selectedUser === u;
               // D-21: Trash disabled when only one user remains.
               const isLast = serverInfo.users.length === 1;
               const isRowLast = idx === serverInfo.users.length - 1;
 
               return (
-                <div key={u}>
-                  {/* Row */}
+                <li key={u}>
+                  {/* Row — static, no click handler, no aria-selected */}
                   <div
-                    role="option"
-                    aria-selected={isSelected}
-                    aria-disabled={isBusy}
-                    tabIndex={isSelected && !isBusy ? 0 : -1}
-                    onClick={() => {
-                      if (isBusy) return;
-                      if (!isSelected) activityLog("USER", `user.row.selected user=${u}`);
-                      setSelectedUser(u);
-                    }}
-                    onKeyDown={(e) => {
-                      if (isBusy) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        if (!isSelected) activityLog("USER", `user.row.selected user=${u} via=keyboard`);
-                        setSelectedUser(u);
-                      }
-                    }}
                     className={cn(
                       "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)]",
                       "transition-colors duration-[var(--transition-fast)]",
-                      "focus-visible:shadow-[var(--focus-ring)] outline-none",
                       isBusy
-                        ? "opacity-[var(--opacity-disabled)] cursor-not-allowed"
-                        : "cursor-pointer",
-                      isSelected
-                        ? "bg-[var(--color-accent-tint-08)]"
-                        : !isBusy && "hover:bg-[var(--color-bg-hover)]"
+                        ? "opacity-[var(--opacity-disabled)]"
+                        : "hover:bg-[var(--color-bg-hover)]"
                     )}
                   >
                     {/* Username — left, truncates with ellipsis */}
                     <span
-                      className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1"
-                      style={{ color: "var(--color-text-primary)" }}
+                      className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-[var(--color-text-primary)]"
                       title={u}
                     >
                       {u}
                     </span>
 
-                    {/* Inline icon cluster — 2 icons (D-03). stopPropagation
-                        prevents row selection when clicking icons. */}
-                    <div
-                      className="flex items-center gap-[var(--space-1)] shrink-0 ml-2"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
+                    {/* Inline icon cluster — 2 icons (D-03). */}
+                    <div className="flex items-center gap-[var(--space-1)] shrink-0 ml-2">
                       {/* FileText — show config (D-03). Disabled during any in-flight action. */}
                       <Tooltip text={t("server.users.show_config_tooltip")}>
                         <button
@@ -339,10 +309,10 @@ export function UsersSection({ state }: Props) {
                       style={{ borderBottom: "1px solid var(--color-border)" }}
                     />
                   )}
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
 
         {/* Divider before inline add form (D-20) */}
