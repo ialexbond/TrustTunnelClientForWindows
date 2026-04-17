@@ -74,7 +74,15 @@ export function useServerStats(sshParams: SshParams, options: Options) {
   // Destructure primitives for стабильных deps (pattern: useSecurityState.ts:147-162).
   const { host, port, user, password, keyPath } = sshParams;
 
-  const fetchStats = useCallback(async () => {
+  // WR-02 fix: `t` from useTranslation changes reference on language switch.
+  // If we include it in fetchStats deps, the polling effect tears down mid-flight
+  // and fires a new immediate fetch → doubles SSH channel pressure on the pool
+  // (single-handle per server, MaxSessions ~10). Use a ref so translation stays
+  // current for error messages WITHOUT retriggering the effect.
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  const fetchStats = useCallback(async (signal?: { cancelled: boolean }) => {
     setLoading(true);
     try {
       const s = await invoke<ServerStats>("server_get_stats", {
@@ -84,27 +92,35 @@ export function useServerStats(sshParams: SshParams, options: Options) {
         password,
         keyPath,
       });
+      if (signal?.cancelled) return;
       setStats(s);
       setError(null);
       failureRef.current = 0;
       setFailureCount(0);
     } catch (e) {
+      if (signal?.cancelled) return;
       failureRef.current += 1;
       setFailureCount(failureRef.current);
-      setError(translateSshError(formatError(e), t));
+      setError(translateSshError(formatError(e), tRef.current));
     } finally {
-      setLoading(false);
+      // Guard unmounted setState (WR-02b): consumer may have navigated away
+      // during the ~2s server_get_stats (sleep 1 for CPU sampling). Without this
+      // guard, setLoading(false) fires on an unmounted hook → React warning.
+      if (!signal?.cancelled) setLoading(false);
     }
-  }, [host, port, user, password, keyPath, t]);
+  }, [host, port, user, password, keyPath]);
 
   useEffect(() => {
     if (!enabled) return;
 
-    let cancelled = false;
+    // WR-02 fix: share cancelled flag with in-flight fetchStats via the signal object.
+    // Mutating signal.cancelled in cleanup ensures setState calls inside fetchStats
+    // are skipped after unmount — prevents "setState on unmounted component" warnings.
+    const signal = { cancelled: false };
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleNext = () => {
-      if (cancelled) return;
+      if (signal.cancelled) return;
       // Compute backoff based on current failure count (D-13):
       // 0-1 fails → intervalMs, 2 fails → 30s, 3+ fails → 60s.
       const nextDelay =
@@ -115,9 +131,9 @@ export function useServerStats(sshParams: SshParams, options: Options) {
             : intervalMs;
 
       timeoutId = setTimeout(async () => {
-        if (cancelled) return;
-        await fetchStats();
-        if (cancelled) return;
+        if (signal.cancelled) return;
+        await fetchStats(signal);
+        if (signal.cancelled) return;
         scheduleNext();
       }, nextDelay);
     };
@@ -127,14 +143,14 @@ export function useServerStats(sshParams: SshParams, options: Options) {
     // "—" / Skeleton 10+ секунд после auto-reconnect. Immediate fire сокращает
     // latency до ~2s (время выполнения SSH-команды).
     void (async () => {
-      if (cancelled) return;
-      await fetchStats();
-      if (cancelled) return;
+      if (signal.cancelled) return;
+      await fetchStats(signal);
+      if (signal.cancelled) return;
       scheduleNext();
     })();
 
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
   }, [enabled, fetchStats, intervalMs]);
