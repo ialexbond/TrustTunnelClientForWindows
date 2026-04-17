@@ -308,13 +308,13 @@ export function UserConfigModal({
           />
         </div>
       ) : effectiveError ? (
-        <div className="py-4">
-          <ErrorBanner severity="error" message={effectiveError} />
-          <Button
-            variant="secondary"
-            onClick={handleRetry}
-            className="mt-[var(--space-3)]"
-          >
+        <div className="flex flex-col items-center gap-[var(--space-3)] py-4">
+          <ErrorBanner
+            severity="error"
+            message={effectiveError}
+            className="w-full"
+          />
+          <Button variant="secondary" onClick={handleRetry}>
             {t("buttons.retry")}
           </Button>
         </div>
