@@ -237,9 +237,28 @@ describe("OverviewSection", () => {
         expect(document.body.textContent || "").toContain("🇩🇪");
       });
     });
+
+    it("expired localStorage cache (>30 days) refetches geoip", async () => {
+      // Set up cache that is 31 days old → loadCache evicts it → refetch path.
+      const expiredISO = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+      localStorage.setItem("tt_geoip_10.0.0.1", JSON.stringify({
+        country: "Germany", country_code: "DE", flag_emoji: "🇩🇪",
+        fetched_at: expiredISO,
+      }));
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // After refetch from default mock — country becomes "United States", not "Germany".
+      await waitFor(() => {
+        expect(document.body.textContent || "").toContain("United States");
+      });
+      // Expired entry was removed.
+      expect(localStorage.getItem("tt_geoip_10.0.0.1")).not.toContain("Germany");
+    });
   });
 
   describe("Uptime card (D-17)", () => {
+    // useServerStats first fire triggers via 10s setTimeout (per 13-02-SUMMARY decision).
+    // Tests that observe live stats must wait at least one polling tick + buffer.
     it("shows formatted uptime for 90061 seconds (1д 1ч)", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
@@ -247,8 +266,8 @@ describe("OverviewSection", () => {
         // 90061s → formatServerUptime returns "1д 1ч" (в ru локали)
         const bodyText = document.body.textContent || "";
         expect(bodyText).toMatch(/1д\s*1ч|1d\s*1h/);
-      });
-    });
+      }, { timeout: 15_000 });
+    }, 20_000);
 
     it("shows '—' when stats is null (no data yet or error)", async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -275,8 +294,8 @@ describe("OverviewSection", () => {
       await waitFor(() => {
         // 35.5 → Math.round → 36
         expect(screen.getByText("36%")).toBeInTheDocument();
-      });
-    });
+      }, { timeout: 15_000 });
+    }, 20_000);
 
     it("shows RAM percent computed from mem_used/mem_total", async () => {
       const state = makeState();
@@ -284,8 +303,8 @@ describe("OverviewSection", () => {
       await waitFor(() => {
         // 4e9 / 8e9 = 0.5 → 50%
         expect(screen.getByText("50%")).toBeInTheDocument();
-      });
-    });
+      }, { timeout: 15_000 });
+    }, 20_000);
 
     it("shows 2x '—' when stats is null", async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -323,8 +342,8 @@ describe("OverviewSection", () => {
       await waitFor(() => {
         expect(screen.getByText("42%")).toBeInTheDocument();
         expect(screen.queryByText(/United States/)).not.toBeInTheDocument();
-      });
-    });
+      }, { timeout: 15_000 });
+    }, 20_000);
   });
 
   describe("Visibility pause (D-02)", () => {
