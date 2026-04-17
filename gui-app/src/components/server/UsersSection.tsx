@@ -1,36 +1,69 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../shared/lib/cn";
-import { save } from "@tauri-apps/plugin-dialog";
 import {
   Users,
-  UserPlus,
   ChevronRight,
   Loader2,
-  X,
-  Shuffle,
+  FileText,
+  Trash2,
 } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { ActionInput } from "../../shared/ui/ActionInput";
-import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
-import { useConfirm } from "../../shared/ui/useConfirm";
-import { Modal } from "../../shared/ui/Modal";
-import { OverflowMenu } from "../../shared/ui/OverflowMenu";
-import { formatError } from "../../shared/utils/formatError";
+import { EmptyState } from "../../shared/ui/EmptyState";
+import { Divider } from "../../shared/ui/Divider";
 import { Tooltip } from "../../shared/ui/Tooltip";
-import { generateUsername, generatePassword } from "../../shared/utils/credentialGenerator";
+import { useConfirm } from "../../shared/ui/useConfirm";
+import { useActivityLog } from "../../shared/hooks/useActivityLog";
+import { formatError } from "../../shared/utils/formatError";
+import {
+  generateUsername,
+  generatePassword,
+} from "../../shared/utils/credentialGenerator";
+import { UserConfigModal } from "./UserConfigModal";
+import { UsersAddForm } from "./UsersAddForm";
 import type { ServerState } from "./useServerState";
 
 interface Props {
   state: ServerState;
 }
 
+/**
+ * D-14: collision-check helper.
+ * Generates a unique username against the `existing` list.
+ * Retries up to `attempts` times (default 10). If still colliding after
+ * attempts — returns the last generated candidate; backend will surface a
+ * protocol-level duplicate and UI's `usernameError` will reflect it.
+ */
+function generateUniqueUsername(existing: string[], attempts = 10): string {
+  const taken = new Set(existing);
+  let name = generateUsername();
+  let i = 0;
+  while (taken.has(name) && i < attempts) {
+    name = generateUsername();
+    i++;
+  }
+  return name;
+}
+
+/**
+ * UsersSection — Phase 14 redesign per UI-SPEC §Surface 1.
+ *
+ * Changes from pre-Phase-14 implementation:
+ * - Removed the legacy overflow trigger + radio-circle (D-03). Rows now show
+ *   the user name left-aligned and a 2-icon action cluster right-aligned:
+ *   FileText (open UserConfigModal) + Trash (delete with confirmation).
+ * - Inline add-form extracted to UsersAddForm (D-20). Pre-filled on mount
+ *   (D-13) via generateUniqueUsername (D-14 collision-check).
+ * - Successful user_add auto-opens UserConfigModal for the new user (D-07).
+ * - Trash is disabled when users.length === 1 (D-21 — protocol requires >=1).
+ * - Full activity-log coverage (D-28); password never logged (D-29).
+ */
 export function UsersSection({ state }: Props) {
   const { t } = useTranslation();
   const confirm = useConfirm();
+  const { log: activityLog } = useActivityLog();
   const {
     serverInfo,
     selectedUser,
@@ -39,8 +72,6 @@ export function UsersSection({ state }: Props) {
     setNewUsername,
     newPassword,
     setNewPassword,
-    exportingUser,
-    setExportingUser,
     setDeleteLoading,
     continueLoading,
     setContinueLoading,
@@ -49,86 +80,47 @@ export function UsersSection({ state }: Props) {
     usernameError,
     onConfigExported,
     setActionResult,
+    addUserToState,
+    removeUserFromState,
+    setActionLoading,
   } = state;
 
   const isAdding = !!actionLoading?.startsWith("add_user");
 
-  // QR popup state
-  const [qrUser, setQrUser] = useState<string | null>(null);
-  const [qrLink, setQrLink] = useState("");
-  const [qrLoading, setQrLoading] = useState(false);
+  // Modal state — single source of truth for the UserConfigModal.
+  const [modalUsername, setModalUsername] = useState<string | null>(null);
+  // After successful add — processed via useEffect to let setActionLoading(null)
+  // and the pre-fill state writes apply before the modal opens (Pitfall 4).
+  const [pendingExportUsername, setPendingExportUsername] = useState<string | null>(null);
 
-  // Link copy loading per user
-  const [linkLoadingUser, setLinkLoadingUser] = useState<string | null>(null);
+  // D-14: handler for UsersAddForm onRegenerateName — closure captures current serverInfo.users.
+  const handleRegenerateUniqueName = useCallback((): string => {
+    const existing = serverInfo?.users ?? [];
+    return generateUniqueUsername(existing, 10);
+  }, [serverInfo]);
+
+  // Pre-fill credentials on first mount (D-13) with D-14 collision-check.
+  // We deliberately run only once; subsequent pre-fill happens after add.
+  useEffect(() => {
+    const existing = serverInfo?.users ?? [];
+    setNewUsername(generateUniqueUsername(existing, 10));
+    setNewPassword(generatePassword());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-open modal after add (D-07). Drained via an effect so state writes
+  // from handleAddUser flush before modal mounts.
+  useEffect(() => {
+    if (pendingExportUsername) {
+      activityLog("USER", `user.config.modal_opened user=${pendingExportUsername} source=add`);
+      setModalUsername(pendingExportUsername);
+      setPendingExportUsername(null);
+    }
+  }, [pendingExportUsername, activityLog]);
 
   if (!serverInfo) return null;
 
-  // ── Generate deeplink for a user ──
-  const getDeeplink = async (username: string): Promise<string> => {
-    return invoke<string>("server_export_config_deeplink", {
-      ...sshParams,
-      clientName: username,
-    });
-  };
-
-  // ── QR: show fullscreen popup ──
-  const handleShowQR = async (username: string) => {
-    setQrUser(username);
-    setQrLink("");
-    setQrLoading(true);
-    try {
-      const link = await getDeeplink(username);
-      setQrLink(link);
-    } catch (e) {
-      setActionResult({ type: "error", message: formatError(e) });
-      setQrUser(null);
-    } finally {
-      setQrLoading(false);
-    }
-  };
-
-  // ── Link: copy to clipboard ──
-  const handleCopyLink = async (username: string) => {
-    setLinkLoadingUser(username);
-    try {
-      const link = await getDeeplink(username);
-      await navigator.clipboard.writeText(link);
-      state.pushSuccess(t("server.users.link_copied"));
-    } catch (e) {
-      setActionResult({ type: "error", message: formatError(e) });
-    } finally {
-      setLinkLoadingUser(null);
-    }
-  };
-
-  // ── Download config (save to file dialog) ──
-  const handleDownloadConfig = async (username: string) => {
-    setExportingUser(username);
-    try {
-      const path = await invoke<string>("fetch_server_config", {
-        ...sshParams,
-        clientName: username,
-      });
-      const dest = await save({
-        defaultPath: `trusttunnel_${username}.toml`,
-        filters: [{ name: "TOML Config", extensions: ["toml"] }],
-      });
-      if (dest) {
-        try {
-          await invoke("copy_file", { source: path, destination: dest });
-          state.pushSuccess(t("server.users.config_saved", { user: username }));
-        } catch {
-          state.pushSuccess(t("server.users.config_saved", { user: username }));
-        }
-      }
-    } catch (e) {
-      setActionResult({ type: "error", message: t("server.users.config_export_error", { error: formatError(e) }) });
-    } finally {
-      setExportingUser(null);
-    }
-  };
-
-  // ── Continue as user ──
+  // ── Continue as selected user ──
   const handleContinueAsUser = async () => {
     if (!selectedUser) return;
     setContinueLoading(true);
@@ -139,16 +131,25 @@ export function UsersSection({ state }: Props) {
       });
       onConfigExported(path);
     } catch (e) {
+      activityLog(
+        "ERROR",
+        `user.continue_as.failed user=${selectedUser} err=${formatError(e)}`
+      );
       setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setContinueLoading(false);
     }
   };
 
-  const { addUserToState, removeUserFromState, setActionLoading } = state;
+  // ── Show config modal for a user (inline FileText icon trigger) ──
+  const handleShowConfig = (user: string) => {
+    activityLog("USER", `user.config.modal_opened user=${user} source=inline_icon`);
+    setModalUsername(user);
+  };
 
-  // ── Delete user ──
+  // ── Delete user (destructive, confirm-guarded) ──
   const handleDeleteUser = async (user: string) => {
+    activityLog("USER", `user.remove.initiated user=${user}`);
     const ok = await confirm({
       title: t("server.users.confirm_delete_title"),
       message: t("server.users.confirm_delete_message", { user }),
@@ -156,7 +157,8 @@ export function UsersSection({ state }: Props) {
       confirmText: t("buttons.confirm_delete"),
       cancelText: t("buttons.cancel"),
     });
-    if (!ok) return;
+    if (!ok) return; // cancelled — not logged (D-28 rule: user may reconsider freely)
+    activityLog("USER", `user.remove.confirmed user=${user}`);
     setDeleteLoading(true);
     try {
       await invoke("server_remove_user", {
@@ -164,19 +166,23 @@ export function UsersSection({ state }: Props) {
         vpnUsername: user,
       });
       removeUserFromState(user);
+      activityLog("STATE", `user.remove.completed user=${user}`);
+      // D-26: SnackBar «Пользователь «{user}» удалён»
       state.pushSuccess(t("server.users.user_deleted", { user }));
     } catch (e) {
+      activityLog("ERROR", `user.remove.failed user=${user} err=${formatError(e)}`);
       setActionResult({ type: "error", message: formatError(e) });
     } finally {
       setDeleteLoading(false);
     }
   };
 
-  // ── Add user ──
+  // ── Add user (Pitfall 4 ordering: unlock → pre-fill → pending modal) ──
   const handleAddUser = async () => {
     if (!newUsername.trim() || !newPassword.trim() || usernameError) return;
     const username = newUsername.trim();
     const password = newPassword.trim();
+    activityLog("USER", "user.add.clicked"); // D-29: no password in payload
     setActionLoading("add_user");
     try {
       await invoke("add_server_user", {
@@ -185,12 +191,20 @@ export function UsersSection({ state }: Props) {
         vpnPassword: password,
       });
       addUserToState(username);
-      setNewUsername("");
-      setNewPassword("");
+      activityLog("STATE", `user.add.completed user=${username}`);
       state.pushSuccess(t("server.users.user_added", { user: username }));
+      // CRITICAL ORDER (Pitfall 4):
+      // 1. Unlock form first
+      setActionLoading(null);
+      // 2. Pre-fill next pair with collision-check (D-14) — include just-added name
+      const nextExisting = [...(serverInfo?.users ?? []), username];
+      setNewUsername(generateUniqueUsername(nextExisting, 10));
+      setNewPassword(generatePassword());
+      // 3. Trigger modal via pending state (useEffect drains on next tick)
+      setPendingExportUsername(username);
     } catch (e) {
+      activityLog("ERROR", `user.add.failed err=${formatError(e)}`);
       setActionResult({ type: "error", message: formatError(e) });
-    } finally {
       setActionLoading(null);
     }
   };
@@ -203,172 +217,183 @@ export function UsersSection({ state }: Props) {
           icon={<Users className="w-3.5 h-3.5" />}
         />
 
-        {/* User list */}
-        <div className="mb-3">
-          {serverInfo.users.map((u, idx) => {
-            const isSelected = selectedUser === u;
-            const isLast = idx === serverInfo.users.length - 1;
-            return (
-              <div key={u}>
-                <div
-                  onClick={() => setSelectedUser(u)}
-                  className={cn(
-                    "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer",
-                    isSelected
-                      ? "bg-[var(--color-accent-tint-08)]"
-                      : "hover:bg-[var(--color-bg-hover)]"
-                  )}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className="w-4 h-4 rounded-full flex items-center justify-center shrink-0"
-                      style={{ border: `2px solid ${isSelected ? "var(--color-accent-500)" : "var(--color-border)"}` }}
-                    >
-                      {isSelected && (
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />
-                      )}
-                    </div>
-                    <span className="text-xs" style={{ color: "var(--color-text-primary)" }}>{u}</span>
-                  </div>
-                  <div onClick={(e) => e.stopPropagation()}>
-                    <OverflowMenu
-                      triggerAriaLabel={t("users.actions_menu")}
-                      items={[
-                        { label: t("server.users.qr_tooltip"), onSelect: () => handleShowQR(u), loading: qrLoading && qrUser === u },
-                        { label: t("server.users.link_tooltip"), onSelect: () => handleCopyLink(u), loading: linkLoadingUser === u },
-                        { label: t("server.users.export_tooltip"), onSelect: () => handleDownloadConfig(u), loading: exportingUser === u },
-                        { label: t("server.users.delete_tooltip"), onSelect: () => { void handleDeleteUser(u); }, destructive: true, disabled: serverInfo.users.length <= 1 },
-                      ]}
-                    />
-                  </div>
-                </div>
-                {!isLast && <div className="mx-3 my-1" style={{ borderBottom: "1px solid var(--color-border)" }} />}
-              </div>
-            );
-          })}
-          {serverInfo.users.length === 0 && (
-            <p className="text-xs text-center py-2" style={{ color: "var(--color-text-muted)" }}>
-              {t("server.users.no_users")}
-            </p>
-          )}
-        </div>
+        {/* Users list OR EmptyState */}
+        {serverInfo.users.length === 0 ? (
+          <EmptyState
+            icon={<Users className="w-10 h-10" />}
+            heading={t("server.users.empty_heading")}
+            body={t("server.users.empty_body")}
+          />
+        ) : (
+          <div
+            role="listbox"
+            aria-label={t("tabs.users")}
+            className="mb-3"
+          >
+            {serverInfo.users.map((u, idx) => {
+              const isSelected = selectedUser === u;
+              // D-21: Trash disabled when only one user remains.
+              const isLast = serverInfo.users.length === 1;
+              const isRowLast = idx === serverInfo.users.length - 1;
 
-        {/* Connect as user button */}
+              return (
+                <div key={u}>
+                  {/* Row */}
+                  <div
+                    role="option"
+                    aria-selected={isSelected}
+                    tabIndex={isSelected ? 0 : -1}
+                    onClick={() => setSelectedUser(u)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedUser(u);
+                      }
+                    }}
+                    className={cn(
+                      "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)]",
+                      "transition-all duration-200 cursor-pointer",
+                      "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                      isSelected
+                        ? "bg-[var(--color-accent-tint-08)]"
+                        : "hover:bg-[var(--color-bg-hover)]"
+                    )}
+                  >
+                    {/* Username — left, truncates with ellipsis */}
+                    <span
+                      className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1"
+                      style={{ color: "var(--color-text-primary)" }}
+                      title={u}
+                    >
+                      {u}
+                    </span>
+
+                    {/* Inline icon cluster — 2 icons (D-03). stopPropagation
+                        prevents row selection when clicking icons. */}
+                    <div
+                      className="flex items-center gap-[var(--space-1)] shrink-0 ml-2"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      {/* FileText — show config (D-03) */}
+                      <Tooltip text={t("server.users.show_config_tooltip")}>
+                        <button
+                          type="button"
+                          aria-label={t("server.users.show_config_tooltip")}
+                          onClick={() => handleShowConfig(u)}
+                          className={cn(
+                            "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
+                            "transition-colors",
+                            "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                            "focus-visible:shadow-[var(--focus-ring)] outline-none"
+                          )}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
+
+                      {/* Trash — delete (disabled if last user, D-21) */}
+                      <Tooltip
+                        text={
+                          isLast
+                            ? t("server.users.cant_delete_last")
+                            : t("server.users.delete_tooltip")
+                        }
+                      >
+                        <button
+                          type="button"
+                          aria-label={
+                            isLast
+                              ? t("server.users.cant_delete_last")
+                              : t("server.users.delete_tooltip")
+                          }
+                          aria-disabled={isLast}
+                          disabled={isLast}
+                          onClick={() => {
+                            if (!isLast) void handleDeleteUser(u);
+                          }}
+                          className={cn(
+                            "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
+                            "transition-colors",
+                            "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                            isLast
+                              ? "opacity-[var(--opacity-disabled)] cursor-not-allowed"
+                              : "hover:text-[var(--color-destructive)]"
+                          )}
+                          style={{
+                            color: isLast
+                              ? "var(--color-text-muted)"
+                              : "var(--color-text-secondary)",
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+
+                  {/* Divider between rows (not after last) */}
+                  {!isRowLast && (
+                    <div
+                      className="mx-3 my-1"
+                      style={{ borderBottom: "1px solid var(--color-border)" }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Continue as selected user button — only when users exist */}
         {serverInfo.users.length > 0 && (
           <div className="mb-3">
             <Button
               variant={selectedUser ? "primary" : "ghost"}
               fullWidth
-              icon={continueLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              icon={
+                continueLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )
+              }
               loading={continueLoading}
               disabled={!selectedUser}
               onClick={handleContinueAsUser}
             >
-              {selectedUser ? t("server.users.continue_as", { user: selectedUser }) : t("server.users.select_user")}
+              {selectedUser
+                ? t("server.users.continue_as", { user: selectedUser })
+                : t("server.users.select_user")}
             </Button>
           </div>
         )}
 
-        {/* Add user form */}
-        <div className="space-y-1.5">
-          <div className="flex gap-1.5">
-            <div className="flex-1">
-              <ActionInput
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, ""))}
-                placeholder={t("server.users.username_placeholder")}
-                error={usernameError ? t(usernameError) : undefined}
-                disabled={isAdding}
-                actions={[
-                  <Tooltip key="gen" text={t("common.generate_username")}>
-                    <button
-                      type="button"
-                      onClick={() => setNewUsername(generateUsername())}
-                      disabled={isAdding}
-                      className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      <Shuffle className="w-3.5 h-3.5" />
-                    </button>
-                  </Tooltip>,
-                ]}
-              />
-            </div>
-            <div className="flex-1">
-              <ActionPasswordInput
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, ""))}
-                placeholder={t("server.users.password_placeholder")}
-                disabled={isAdding}
-                showLockIcon={false}
-                actions={[
-                  <Tooltip key="gen" text={t("common.generate_password")}>
-                    <button
-                      type="button"
-                      onClick={() => setNewPassword(generatePassword())}
-                      disabled={isAdding}
-                      className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      <Shuffle className="w-3.5 h-3.5" />
-                    </button>
-                  </Tooltip>,
-                ]}
-              />
-            </div>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<UserPlus className="w-3.5 h-3.5" />}
-              loading={isAdding}
-              disabled={!newUsername.trim() || !newPassword.trim() || !!usernameError}
-              onClick={handleAddUser}
-              className="shrink-0"
-            >
-              {t("server.users.add_user")}
-            </Button>
-          </div>
-        </div>
+        {/* Divider before inline add form (D-20) */}
+        <Divider className="my-3" />
+
+        {/* Inline add-user form (D-20). Always visible so first add works.
+             D-14: onRegenerateName delegates collision-check to this component. */}
+        <UsersAddForm
+          newUsername={newUsername}
+          setNewUsername={setNewUsername}
+          newPassword={newPassword}
+          setNewPassword={setNewPassword}
+          isAdding={isAdding}
+          usernameError={usernameError}
+          onAdd={handleAddUser}
+          onRegenerateName={handleRegenerateUniqueName}
+        />
       </Card>
 
-      {/* QR Code fullscreen popup */}
-      <Modal isOpen={!!qrUser} onClose={() => setQrUser(null)} closeOnBackdrop>
-        <div
-          className="max-w-xs w-full mx-4 p-6 rounded-2xl shadow-2xl text-center"
-          style={{ backgroundColor: "var(--color-bg-elevated)" }}
-        >
-          {qrLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-accent-500)" }} />
-            </div>
-          ) : qrLink ? (
-            <>
-              <div className="flex justify-center mb-4">
-                <QRCodeSVG
-                  value={qrLink}
-                  size={200}
-                  bgColor="transparent"
-                  fgColor="currentColor"
-                  level="M"
-                  style={{ color: "var(--color-text-primary)", opacity: 0.85 }}
-                />
-              </div>
-              <p className="text-xs mb-1" style={{ color: "var(--color-text-primary)" }}>{qrUser}</p>
-              <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                {t("server.export.scan_qr")}
-              </p>
-            </>
-          ) : null}
-          <button
-            onClick={() => setQrUser(null)}
-            className="absolute top-3 right-3 p-1 rounded-full transition-opacity hover:opacity-70"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </Modal>
-
+      {/* UserConfigModal — controlled by modalUsername state.
+           Opens on FileText click OR auto-after-add via pendingExportUsername. */}
+      <UserConfigModal
+        isOpen={!!modalUsername}
+        username={modalUsername}
+        sshParams={sshParams}
+        onClose={() => setModalUsername(null)}
+      />
     </>
   );
 }
