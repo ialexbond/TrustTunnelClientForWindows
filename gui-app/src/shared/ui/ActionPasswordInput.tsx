@@ -14,6 +14,13 @@ interface ActionPasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputEle
   onClear?: () => void;
   /** Called when eye-toggle clicked (for activity logging — D-28). */
   onVisibilityToggle?: () => void;
+  /**
+   * i18n aria-labels; shared/ui may not import useTranslation (layer separation).
+   * Defaults are English fallbacks so Storybook usage without i18n still passes A11y.
+   */
+  clearAriaLabel?: string;
+  showPasswordAriaLabel?: string;
+  hidePasswordAriaLabel?: string;
 }
 
 export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordInputProps>(
@@ -29,6 +36,9 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
       clearable,
       onClear,
       onVisibilityToggle,
+      clearAriaLabel,
+      showPasswordAriaLabel,
+      hidePasswordAriaLabel,
       ...rest
     },
     ref
@@ -121,7 +131,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
                 type="button"
                 tabIndex={-1}
                 onClick={handleClear}
-                aria-label="Clear field"
+                aria-label={clearAriaLabel ?? "Clear field"}
                 className={cn(
                   "p-1 rounded",
                   "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
@@ -135,6 +145,11 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
               type="button"
               tabIndex={-1}
               onClick={handleVisibilityClick}
+              aria-label={
+                visible
+                  ? hidePasswordAriaLabel ?? "Hide password"
+                  : showPasswordAriaLabel ?? "Show password"
+              }
               className={cn(
                 "p-1 rounded",
                 "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",

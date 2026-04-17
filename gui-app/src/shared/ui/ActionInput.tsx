@@ -14,6 +14,12 @@ interface ActionInputProps extends InputHTMLAttributes<HTMLInputElement> {
   clearable?: boolean;
   /** Called when Clear (X) icon clicked. If not provided, onChange is called with empty value. */
   onClear?: () => void;
+  /**
+   * aria-label for the Clear button. i18n is owned by the caller; shared/ui must
+   * not import useTranslation directly (layer separation). Defaults to English
+   * "Clear field" so Storybook usage without i18n still passes A11y.
+   */
+  clearAriaLabel?: string;
 }
 
 export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
@@ -30,6 +36,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
       style,
       clearable,
       onClear,
+      clearAriaLabel,
       ...rest
     },
     ref
@@ -115,7 +122,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
                   type="button"
                   tabIndex={-1}
                   onClick={handleClear}
-                  aria-label="Clear field"
+                  aria-label={clearAriaLabel ?? "Clear field"}
                   className={cn(
                     "flex items-center p-1 rounded",
                     "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
