@@ -6,7 +6,7 @@
 </picture>
 </p>
 
-<h2 align="center">TrustTunnel Client for Windows v2.6.0</h2>
+<h2 align="center">TrustTunnel Client for Windows — Pro v3.0.0 · Light v2.7.0</h2>
 
 <p align="center">
 Графический клиент для безопасного сетевого соединения по протоколу TrustTunnel.<br>
@@ -54,6 +54,16 @@
 
 ---
 
+## Что нового в v3
+
+Pro-редакция получила полный визуальный редизайн: двухуровневая дизайн-система
+(токены + семантические переменные), нижний таббар с pill-индикатором, серверная
+панель управления на 5 вкладок — **Обзор**, **Пользователи**, **Конфигурация**,
+**Безопасность**, **Утилиты** — с живыми данными, skeleton loading при SSH-операциях
+и встроенным Activity Log. Компоненты переведены на CVA, шрифт — Geist Sans/Mono.
+
+---
+
 ## Что такое TrustTunnel
 
 **TrustTunnel** — протокол адаптивного сетевого взаимодействия, работающий
@@ -77,7 +87,7 @@
 ### Pro — для администраторов
 
 1. Арендуйте Linux-сервер (Ubuntu 22+, Debian 11+), купите домен
-2. Скачайте `TrustTunnel-Pro-v2.6.0-portable-win64.zip`
+2. Скачайте `TrustTunnel-Pro-v3.0.0-portable-win64.zip`
     из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
 3. Распакуйте и запустите `TrustTunnel.exe`
 4. В мастере введите SSH-данные сервера (IP, порт, логин, пароль или SSH-ключ)
@@ -87,7 +97,7 @@
 ### Light — для пользователей
 
 1. Получите конфиг-файл (.toml) или ссылку (tt://) от администратора
-2. Скачайте `TrustTunnel-Light-v2.6.0-portable-win64.zip`
+2. Скачайте `TrustTunnel-Light-v2.7.0-portable-win64.zip`
     из [Releases](https://github.com/ialexbond/TrustTunnelClientForWindows/releases)
 3. Распакуйте и запустите `TrustTunnel Light.exe`
 4. Импортируйте конфиг (файл или ссылка)
@@ -103,7 +113,7 @@
 ┌──────────────────────────────────────────────────┐
 │  GUI (Tauri v2 + React + TypeScript + Tailwind)  │
 │                                                  │
-│  Pro: sidebar, 8 панелей, SSH-деплой             │
+│  Pro: bottom nav, серверная панель 5 табов, SSH  │
 │  Light: bottom nav, 4 экрана, без SSH            │
 │                                                  │
 │  Shared: UI-компоненты, хуки, i18n, tokens.css   │
