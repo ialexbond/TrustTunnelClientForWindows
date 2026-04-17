@@ -997,6 +997,8 @@
       },
       "rebootingCountdown": "Rebooting",
       "speedNotMeasured": "Not measured",
+      "speedUnit": "Mbps",
+      "ramUnit": "MB",
       "refreshAria": "Refresh",
       "security": {
         "firewall": "Firewall",
@@ -1004,7 +1006,7 @@
         "sshKey": "SSH key",
         "tls": "TLS",
         "tlsActive": "Active",
-        "tlsDays": "{{days}}d left",
+        "tlsDays": "{{days}}d",
         "tlsExpired": "Expired",
         "active": "Active",
         "inactive": "Disabled",

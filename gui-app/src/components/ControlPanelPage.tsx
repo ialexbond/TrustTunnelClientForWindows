@@ -121,11 +121,20 @@ export function ServerPanelSkeleton() {
               </div>
             }
           />
+          {/* Speed skeleton — matches StatCard/Overview Variants story 3d (circle+line ×2 with divider) */}
           <OverviewSkeletonCard
             flex="2 1 340px"
             body={
-              <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
-                <Skeleton variant="line" width={200} height={28} />
+              <div className="flex items-center justify-center gap-8 py-2">
+                <div className="flex items-center gap-2">
+                  <Skeleton variant="circle" width={28} height={28} />
+                  <Skeleton variant="line" width={80} height={32} />
+                </div>
+                <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
+                <div className="flex items-center gap-2">
+                  <Skeleton variant="circle" width={28} height={28} />
+                  <Skeleton variant="line" width={80} height={32} />
+                </div>
               </div>
             }
           />
@@ -190,6 +199,7 @@ export function ServerPanelSkeleton() {
               </div>
             }
           />
+          {/* Load skeleton — matches StatCard/Overview Variants 10c (no CPU/RAM text, full skeletons) */}
           <OverviewSkeletonCard
             flex="2 1 400px"
             body={
@@ -197,8 +207,8 @@ export function ServerPanelSkeleton() {
                 {[1, 2].map((i) => (
                   <div key={i}>
                     <div className="flex items-center justify-between mb-1">
-                      <Skeleton variant="line" width={30} height={14} />
-                      <Skeleton variant="line" width={40} height={14} />
+                      <Skeleton variant="line" width={30} height={20} />
+                      <Skeleton variant="line" width={60} height={20} />
                     </div>
                     <Skeleton variant="line" width="100%" height={6} />
                   </div>
