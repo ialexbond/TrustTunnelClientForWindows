@@ -327,11 +327,10 @@ export function UserConfigModal({
               aria-label={t("server.users.qr_click_to_copy")}
               onClick={() => void handleCopyQr()}
               className={cn(
-                "rounded-md p-2 transition-all cursor-pointer",
-                "hover:opacity-100 active:scale-[0.98]",
+                "rounded-md p-2 transition-transform cursor-pointer",
+                "active:scale-[0.98]",
                 "focus-visible:shadow-[var(--focus-ring)] outline-none",
               )}
-              style={{ opacity: 0.85 }}
             >
               <div ref={qrContainerRef}>
                 <QRCodeSVG
@@ -347,10 +346,7 @@ export function UserConfigModal({
           </div>
 
           {/* Caption under QR. */}
-          <p
-            className="text-xs text-center mt-[var(--space-2)]"
-            style={{ color: "var(--color-text-muted)" }}
-          >
+          <p className="text-sm text-center mt-[var(--space-2)] text-[var(--color-text-muted)]">
             {t("server.export.scan_qr")}
           </p>
 
@@ -394,7 +390,7 @@ export function UserConfigModal({
             loading={isDownloading}
             disabled={isDownloading}
             onClick={() => void handleDownload()}
-            className="mt-[var(--space-3)]"
+            className="mt-[var(--space-4)]"
           >
             {t("server.users.download_config")}
           </Button>
