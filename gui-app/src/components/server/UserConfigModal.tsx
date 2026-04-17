@@ -86,6 +86,11 @@ export function UserConfigModal({
       setDeeplinkLoading(false);
       return;
     }
+    // Storybook escape hatches short-circuit the invoke path.
+    if (_forceLoading || _forceError !== undefined) {
+      setDeeplinkLoading(false);
+      return;
+    }
     if (_deeplinkOverride !== undefined) {
       setDeeplink(_deeplinkOverride);
       setDeeplinkError(null);
@@ -101,7 +106,7 @@ export function UserConfigModal({
       .then((link) => setDeeplink(link))
       .catch((e) => setDeeplinkError(formatError(e)))
       .finally(() => setDeeplinkLoading(false));
-  }, [isOpen, username, _deeplinkOverride, sshParams]);
+  }, [isOpen, username, _deeplinkOverride, _forceLoading, _forceError, sshParams]);
 
   // ── Auto-focus X button on open (Modal primitive does not trap focus) ──
   useEffect(() => {
