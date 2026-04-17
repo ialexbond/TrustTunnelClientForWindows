@@ -356,7 +356,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+            {/* key={isRunning ? "live" : "dead"} — заставит React unmount + remount SVG
+                при смене состояния, чтобы CSS animationDelay (-0.55s ... 0s) применились
+                к свежим layered paths и фазы layer-ов синхронизировались.
+                Без key React переиспользует старый <svg>, animations продолжают идти
+                с прежнего timing → bright/dim layers рассогласовываются → tail/head перепутываются. */}
             <EcgSvg
+              key={isRunning ? "live" : "dead"}
               color={isRunning ? "var(--color-success-500)" : "var(--color-danger-500)"}
               path={isRunning ? ecgHeartbeat : ecgFlatline}
               anim={isRunning ? "ecg-live" : "ecg-dead"}
