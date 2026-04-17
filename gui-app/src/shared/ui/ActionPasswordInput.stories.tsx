@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { Copy } from "lucide-react";
+import { Copy, Shuffle } from "lucide-react";
 import { ActionPasswordInput } from "./ActionPasswordInput";
 
 const meta: Meta<typeof ActionPasswordInput> = {
@@ -86,5 +87,63 @@ export const Disabled: Story = {
     disabled: true,
     value: "hidden-secret",
     onChange: () => {},
+  },
+};
+
+export const WithClearable: Story = {
+  render: () => {
+    const [value, setValue] = useState("p@ssw0rd123");
+    return (
+      <ActionPasswordInput
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        clearable
+        onClear={() => setValue("")}
+        onVisibilityToggle={() => {
+          // Demo hook for activity log callback — D-28
+        }}
+        placeholder="Password"
+        label="Password (clearable + visibility)"
+      />
+    );
+  },
+};
+
+export const WithClearableAndRegenerate: Story = {
+  render: () => {
+    const [value, setValue] = useState("Xk8mN2pQrS9tVwYz");
+    return (
+      <ActionPasswordInput
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        clearable
+        onClear={() => setValue("")}
+        onVisibilityToggle={() => {
+          // Demo hook for activity log callback — D-28
+        }}
+        placeholder="Password"
+        label="Full set: regen + clear + eye"
+        showLockIcon={false}
+        actions={[
+          <button
+            key="gen"
+            type="button"
+            onClick={() => {
+              const charset =
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+              setValue(
+                Array.from({ length: 16 }, () =>
+                  charset[Math.floor(Math.random() * charset.length)]
+                ).join("")
+              );
+            }}
+            style={{ cursor: "pointer", background: "transparent", border: 0, padding: 0 }}
+            aria-label="Regenerate password"
+          >
+            <Shuffle size={14} />
+          </button>,
+        ]}
+      />
+    );
   },
 };
