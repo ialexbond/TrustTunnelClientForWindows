@@ -7,6 +7,7 @@ import {
   XCircle,
   Loader2,
   AlertTriangle,
+  LogOut,
 } from "lucide-react";
 import { Button } from "../shared/ui/Button";
 import { useServerState } from "./server/useServerState";
@@ -120,28 +121,39 @@ export function ServerPanel(props: ServerPanelProps) {
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
             {t("server.status.not_installed_desc", { host: state.host })}
           </p>
-          <Button
-            variant="primary"
-            icon={<Download className="w-4 h-4" />}
-            onClick={() => {
-              // Pre-fill wizard with current SSH and skip to endpoint
-              try {
-                const existing = localStorage.getItem("trusttunnel_wizard");
-                const obj = existing ? JSON.parse(existing) : {};
-                obj.host = state.host;
-                obj.port = state.sshParams.port.toString();
-                obj.sshUser = state.sshParams.user;
-                obj.sshPassword = state.sshParams.password || "";
-                if (state.sshParams.keyPath) obj.sshKeyPath = state.sshParams.keyPath;
-                obj.wizardStep = "endpoint";
-                obj.wizardMode = "deploy";
-                localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
-              } catch { /* ignore */ }
-              state.onSwitchToSetup();
-            }}
-          >
-            {t("server.actions.install")}
-          </Button>
+          <div className="flex items-center justify-center gap-2">
+            <Button
+              variant="primary"
+              icon={<Download className="w-4 h-4" />}
+              onClick={() => {
+                // Pre-fill wizard with current SSH and skip to endpoint
+                try {
+                  const existing = localStorage.getItem("trusttunnel_wizard");
+                  const obj = existing ? JSON.parse(existing) : {};
+                  obj.host = state.host;
+                  obj.port = state.sshParams.port.toString();
+                  obj.sshUser = state.sshParams.user;
+                  obj.sshPassword = state.sshParams.password || "";
+                  if (state.sshParams.keyPath) obj.sshKeyPath = state.sshParams.keyPath;
+                  obj.wizardStep = "endpoint";
+                  obj.wizardMode = "deploy";
+                  localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
+                } catch { /* ignore */ }
+                state.onSwitchToSetup();
+              }}
+            >
+              {t("server.actions.install")}
+            </Button>
+            {/* Phase 13.UAT G-04: Disconnect button для выхода на SshConnectForm
+                (ранее с этого экрана не было как уйти, только force-kill app). */}
+            <Button
+              variant="secondary"
+              icon={<LogOut className="w-4 h-4" />}
+              onClick={state.onDisconnect}
+            >
+              {t("control.disconnect")}
+            </Button>
+          </div>
         </div>
       </div>
     );
