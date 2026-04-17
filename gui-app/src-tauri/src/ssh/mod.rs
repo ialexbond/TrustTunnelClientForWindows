@@ -19,6 +19,7 @@ pub use server::{
     add_server_user, server_restart_service, server_stop_service,
     server_start_service, server_reboot, server_get_logs, server_remove_user,
     server_get_available_versions, server_upgrade, server_get_stats,
+    server_speedtest_run,
     get_server_config, get_cert_info, renew_cert, export_config_deeplink,
     update_config_feature,
     get_security_status, install_fail2ban, uninstall_fail2ban,

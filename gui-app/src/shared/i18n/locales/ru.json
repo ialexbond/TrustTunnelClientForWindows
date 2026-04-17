@@ -997,6 +997,7 @@
       },
       "rebootingCountdown": "Перезагрузка",
       "speedNotMeasured": "Не измерялась",
+      "speedRequiresProtocol": "Запустите протокол",
       "speedUnit": "Мбит/с",
       "ramUnit": "МБ",
       "refreshAria": "Обновить",

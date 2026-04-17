@@ -997,6 +997,7 @@
       },
       "rebootingCountdown": "Rebooting",
       "speedNotMeasured": "Not measured",
+      "speedRequiresProtocol": "Start protocol",
       "speedUnit": "Mbps",
       "ramUnit": "MB",
       "refreshAria": "Refresh",
