@@ -151,33 +151,41 @@ export function UsersSection({ state }: Props) {
   };
 
   // ── Delete user (destructive, confirm-guarded) ──
+  // The ConfirmDialog stays open for the whole SSH round-trip via the
+  // `action` prop (new ConfirmOptions API). Modal closes only when the
+  // user is actually removed from state — matches the user's mental
+  // model: «модалка закрывается в момент, когда пользователь исчезает».
   const handleDeleteUser = async (user: string) => {
     activityLog("USER", `user.remove.initiated user=${user}`);
-    const ok = await confirm({
+    await confirm({
       title: t("server.users.confirm_delete_title"),
       message: t("server.users.confirm_delete_message", { user }),
       variant: "danger",
       confirmText: t("buttons.confirm_delete"),
       cancelText: t("buttons.cancel"),
+      action: async () => {
+        activityLog("USER", `user.remove.confirmed user=${user}`);
+        setDeleteLoading(true);
+        try {
+          await invoke("server_remove_user", {
+            ...sshParams,
+            vpnUsername: user,
+          });
+          removeUserFromState(user);
+          activityLog("STATE", `user.remove.completed user=${user}`);
+          // D-26: SnackBar «Пользователь «{user}» удалён»
+          state.pushSuccess(t("server.users.user_deleted", { user }));
+        } catch (e) {
+          activityLog("ERROR", `user.remove.failed user=${user} err=${formatError(e)}`);
+          setActionResult({ type: "error", message: formatError(e) });
+          // Rethrow so ConfirmDialogProvider closes modal with false and the
+          // outer `await confirm()` resolves false (caller already handled error).
+          throw e;
+        } finally {
+          setDeleteLoading(false);
+        }
+      },
     });
-    if (!ok) return; // cancelled — not logged (D-28 rule: user may reconsider freely)
-    activityLog("USER", `user.remove.confirmed user=${user}`);
-    setDeleteLoading(true);
-    try {
-      await invoke("server_remove_user", {
-        ...sshParams,
-        vpnUsername: user,
-      });
-      removeUserFromState(user);
-      activityLog("STATE", `user.remove.completed user=${user}`);
-      // D-26: SnackBar «Пользователь «{user}» удалён»
-      state.pushSuccess(t("server.users.user_deleted", { user }));
-    } catch (e) {
-      activityLog("ERROR", `user.remove.failed user=${user} err=${formatError(e)}`);
-      setActionResult({ type: "error", message: formatError(e) });
-    } finally {
-      setDeleteLoading(false);
-    }
   };
 
   // ── Add user (Pitfall 4 ordering: unlock → pre-fill → pending modal) ──
