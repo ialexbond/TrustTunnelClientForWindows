@@ -321,8 +321,14 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     }
   }, [creds]);
 
-  const handleDisconnect = useCallback(() => {
-    invoke("clear_ssh_credentials").catch(() => {});
+  const handleDisconnect = useCallback(async () => {
+    // WR-09 fix: await keyring cleanup before clearing state. Previously the
+    // un-awaited invoke could race the 2s polling interval: user clicks
+    // Disconnect → setCreds(null) runs → interval fires with !creds → reads
+    // ssh_credentials.json which still exists because clear_ssh_credentials
+    // hasn't completed yet → resurrects stale creds. Await guarantees the
+    // keyring file is gone before we flip local state.
+    await invoke("clear_ssh_credentials").catch(() => {});
     localStorage.removeItem("trusttunnel_control_refresh");
     setIsFirstConnect(false);
     // Per D-10: lastHost/lastUser/lastPort are NOT cleared on disconnect
