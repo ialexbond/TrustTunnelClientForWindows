@@ -337,6 +337,7 @@ pub fn run() {
             commands::history::get_connection_history,
             commands::history::clear_connection_history,
             commands::network::speedtest_run,
+            commands::geoip::get_server_geoip,
             commands::updater::self_update,
             commands::deeplink::decode_deeplink,
             commands::deeplink::import_config_from_string,
