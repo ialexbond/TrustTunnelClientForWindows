@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
 import { formatError } from "../../shared/utils/formatError";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
+import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { useUsersState, type UsersState } from "./useUsersState";
 import { useVersionsState, type VersionsState } from "./useVersionsState";
 import { useLogsState, type LogsState } from "./useLogsState";
@@ -69,6 +70,7 @@ export function useServerState(props: ServerPanelProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<ActionResult>(null);
   const pushSuccess = useSnackBar();
+  const { log: activityLog } = useActivityLog();
 
   // ─── Panel data (config + cert) ───
   const [configRaw, setConfigRaw] = useState<string | null>(null);
@@ -104,7 +106,11 @@ export function useServerState(props: ServerPanelProps) {
     if (!silent) {
       setLoading(true);
       setError("");
+      // Phase 13.UAT G-07: log panel load start для трассировки "skeleton hangs"
+      // и "неверный пароль" edge cases. Включает host для мульти-сервера.
+      activityLog("STATE", `panel.load.start host=${host}`, "useServerState.loadServerInfo");
     }
+    const loadStartMs = Date.now();
     try {
       const info = await invoke<ServerInfo>("check_server_installation", sshParams);
       setServerInfo(info);
@@ -125,10 +131,27 @@ export function useServerState(props: ServerPanelProps) {
       // Phase 13.UAT G-02: panelDataLoaded=true даже если server NOT installed.
       // Иначе ControlPanelPage skeleton overlay не снимается (isFirstConnect стоит
       // ждёт onPanelReady), пользователь видит вечный skeleton вместо install screen.
-      if (!silent) setPanelDataLoaded(true);
+      if (!silent) {
+        setPanelDataLoaded(true);
+        const dur = Date.now() - loadStartMs;
+        activityLog(
+          "STATE",
+          `panel.load.completed installed=${info.installed} version=${info.version || "-"} dur=${dur}ms`,
+          "useServerState.loadServerInfo",
+        );
+      }
     } catch (e) {
       if (!silent) {
         const errStr = formatError(e);
+        // G-07: log RAW error до translateSshError — чтобы видеть настоящую причину
+        // даже если UI показывает "неверный пароль" (translateSshError может
+        // переклассифицировать SSH timeout / network / broken pipe как auth fail).
+        const dur = Date.now() - loadStartMs;
+        activityLog(
+          "ERROR",
+          `panel.load.failed dur=${dur}ms raw="${errStr.replace(/"/g, "'").slice(0, 300)}"`,
+          "useServerState.loadServerInfo",
+        );
         if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {
           await invoke("forget_ssh_host_key", { host, port: parseInt(port) || 22 }).catch(() => {});
           setError(t("sshErrors.hostKeyReset", "Host key was reset. Please retry."));
