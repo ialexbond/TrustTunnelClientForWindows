@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 type TooltipPosition = "top" | "bottom" | "left" | "right";
@@ -27,6 +27,19 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
     }
     setShow(false);
   };
+
+  // WR-07 fix: clear any pending show-timer on unmount so we don't call setShow
+  // on an unmounted component. Symptom without this: user hovers trigger →
+  // parent unmounts during the 400ms delay (e.g. VPN event rerender swaps the
+  // titlebar button) → setTimeout fires → setState warning.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   const positionTip = useCallback(
     (tip: HTMLDivElement | null) => {
