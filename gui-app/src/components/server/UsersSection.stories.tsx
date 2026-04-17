@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { userEvent, within, waitFor } from "storybook/test";
 import { UsersSection } from "./UsersSection";
 import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 import { ConfirmDialogProvider } from "../../shared/ui/ConfirmDialogProvider";
@@ -304,4 +305,48 @@ export const LightTheme: Story = {
       </SnackBarProvider>
     ),
   ],
+};
+
+/** Demonstrates UserConfigModal opening when FileText icon is clicked (D-03/D-07). */
+export const WithUserConfigModal: Story = {
+  args: {
+    state: createMockServerState({
+      serverInfo: { ...baseServerInfo, users: ["swift-fox", "bold-eagle42"] },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const buttons = await canvas.findAllByLabelText(/показать конфиг|show config/i);
+    if (buttons.length > 0) {
+      await userEvent.click(buttons[0]);
+    }
+    await waitFor(() => {
+      const modalRoot = document.body.querySelector(
+        '[aria-label*="скопировать"i], [aria-label*="copy"i]',
+      );
+      if (!modalRoot) throw new Error("UserConfigModal did not open");
+    });
+  },
+};
+
+/** Demonstrates ConfirmDialog opening when Trash icon is clicked (D-22). */
+export const WithDeleteConfirm: Story = {
+  args: {
+    state: createMockServerState({
+      serverInfo: { ...baseServerInfo, users: ["swift-fox", "bold-eagle42"] },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const buttons = await canvas.findAllByLabelText(/удалить|delete/i);
+    const enabled = buttons.find((b) => !(b as HTMLButtonElement).disabled);
+    if (enabled) await userEvent.click(enabled);
+    await waitFor(() => {
+      const dialog = document.body.querySelector('[role="dialog"], [role="alertdialog"]');
+      const titleNode = Array.from(document.body.querySelectorAll("h2, h3")).find((n) =>
+        /удал|delete/i.test(n.textContent ?? ""),
+      );
+      if (!dialog && !titleNode) throw new Error("ConfirmDialog did not open");
+    });
+  },
 };
