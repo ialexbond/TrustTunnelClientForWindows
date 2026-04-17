@@ -185,4 +185,27 @@ describe("translateSshError", () => {
       'sshErrors.tlsHandshakeFailed:{"host":"example.com"}',
     );
   });
+
+  // ─── GeoIP (Phase 13) ───
+  it("translates GEOIP_TIMEOUT without params", () => {
+    expect(translateSshError("GEOIP_TIMEOUT", mockT)).toBe("geoipErrors.timeout");
+  });
+
+  it("translates GEOIP_NO_NETWORK without params", () => {
+    expect(translateSshError("GEOIP_NO_NETWORK", mockT)).toBe(
+      "geoipErrors.noNetwork",
+    );
+  });
+
+  it("translates GEOIP_RATE_LIMITED without params", () => {
+    expect(translateSshError("GEOIP_RATE_LIMITED", mockT)).toBe(
+      "geoipErrors.rateLimited",
+    );
+  });
+
+  it("translates GEOIP_INVALID_RESPONSE with detail", () => {
+    expect(
+      translateSshError("GEOIP_INVALID_RESPONSE|Reserved range", mockT),
+    ).toBe('geoipErrors.invalidResponse:{"detail":"Reserved range"}');
+  });
 });
