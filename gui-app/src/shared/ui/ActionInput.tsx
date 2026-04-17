@@ -1,6 +1,7 @@
 import React, { forwardRef, useRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { Tooltip } from "./Tooltip";
 
 interface ActionInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -118,25 +119,26 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
           {(actionCount > 0 || showClear) && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
               {showClear && (
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={handleClear}
-                  aria-label={clearAriaLabel ?? "Clear field"}
-                  className={cn(
-                    "flex items-center p-1 rounded",
-                    "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
-                    "transition-colors duration-[var(--transition-fast)]"
-                  )}
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <Tooltip text={clearAriaLabel ?? "Clear field"}>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={handleClear}
+                    disabled={rest.disabled}
+                    aria-label={clearAriaLabel ?? "Clear field"}
+                    className={cn(
+                      "flex items-center p-1 rounded",
+                      "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+                      "transition-colors duration-[var(--transition-fast)]",
+                      "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
+                    )}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </Tooltip>
               )}
               {actions?.map((action, i) => (
-                <span
-                  key={i}
-                  className="flex items-center p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                >
+                <span key={i} className="flex items-center">
                   {action}
                 </span>
               ))}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { Eye, EyeOff, Lock, X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { Tooltip } from "./Tooltip";
 
 interface ActionPasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   label?: string;
@@ -119,45 +120,56 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
             {showClear && (
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={handleClear}
-                aria-label={clearAriaLabel ?? "Clear field"}
-                className={cn(
-                  "p-1 rounded",
-                  "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
-                  "transition-colors duration-[var(--transition-fast)]"
-                )}
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <Tooltip text={clearAriaLabel ?? "Clear field"}>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={handleClear}
+                  disabled={rest.disabled}
+                  aria-label={clearAriaLabel ?? "Clear field"}
+                  className={cn(
+                    "p-1 rounded",
+                    "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+                    "transition-colors duration-[var(--transition-fast)]",
+                    "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
+                  )}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
             )}
             {actions?.map((action, i) => (
-              <span
-                key={i}
-                className="flex items-center p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-              >
+              <span key={i} className="flex items-center">
                 {action}
               </span>
             ))}
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={handleVisibilityClick}
-              aria-label={
+            <Tooltip
+              text={
                 visible
                   ? hidePasswordAriaLabel ?? "Hide password"
                   : showPasswordAriaLabel ?? "Show password"
               }
-              className={cn(
-                "p-1 rounded",
-                "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
-                "transition-colors duration-[var(--transition-fast)]"
-              )}
             >
-              {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={handleVisibilityClick}
+                disabled={rest.disabled}
+                aria-label={
+                  visible
+                    ? hidePasswordAriaLabel ?? "Hide password"
+                    : showPasswordAriaLabel ?? "Show password"
+                }
+                className={cn(
+                  "p-1 rounded",
+                  "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+                  "transition-colors duration-[var(--transition-fast)]",
+                  "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
+                )}
+              >
+                {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </Tooltip>
           </div>
         </div>
         {error && (

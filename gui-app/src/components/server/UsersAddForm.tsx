@@ -98,9 +98,7 @@ export function UsersAddForm({
         <div className="flex-1">
           <ActionInput
             value={newUsername}
-            onChange={(e) =>
-              setNewUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, ""))
-            }
+            onChange={(e) => setNewUsername(e.target.value)}
             placeholder={t("server.users.username_placeholder")}
             aria-label={t("server.users.username_placeholder")}
             error={usernameError ? t(usernameError) : undefined}
@@ -114,7 +112,7 @@ export function UsersAddForm({
                   type="button"
                   onClick={handleRegenerateName}
                   disabled={isAdding}
-                  className="text-[var(--color-text-muted)] transition-opacity hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label={t("common.generate_username")}
                 >
                   <Shuffle className="w-3.5 h-3.5" />
@@ -128,11 +126,7 @@ export function UsersAddForm({
         <div className="flex-1">
           <ActionPasswordInput
             value={newPassword}
-            onChange={(e) =>
-              setNewPassword(
-                e.target.value.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"|,./<>?`~\\]/g, "")
-              )
-            }
+            onChange={(e) => setNewPassword(e.target.value)}
             placeholder={t("server.users.password_placeholder")}
             aria-label={t("server.users.password_placeholder")}
             disabled={isAdding}
@@ -149,7 +143,7 @@ export function UsersAddForm({
                   type="button"
                   onClick={handleRegeneratePassword}
                   disabled={isAdding}
-                  className="text-[var(--color-text-muted)] transition-opacity hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label={t("common.generate_password")}
                 >
                   <Shuffle className="w-3.5 h-3.5" />
