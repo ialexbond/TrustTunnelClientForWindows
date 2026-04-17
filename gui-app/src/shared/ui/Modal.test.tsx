@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { Modal } from "./Modal";
 
 describe("Modal", () => {
@@ -141,5 +141,41 @@ describe("Modal", () => {
     const overlay = panel.parentElement!;
     expect(overlay.className).toContain("z-[var(--z-modal)]");
     expect(overlay.className).not.toContain("9000");
+  });
+
+  // ── Lifecycle contract: exit animation must render for 200ms ──
+  // Guards the rule documented in known-issues.md #10 + Modal.tsx JSDoc:
+  // Modal manages its own mount/unmount timing. When isOpen flips true→false,
+  // the DOM must stay mounted for 200ms so the fade/scale/translate transition
+  // can play. Caller MUST NOT `if (!isOpen) return null` before <Modal> — that
+  // would unmount the tree instantly and kill the exit animation.
+  it("keeps DOM mounted during 200ms exit transition (lifecycle contract)", async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(
+      <Modal isOpen onClose={onClose}>
+        <p>Will fade out</p>
+      </Modal>
+    );
+    expect(screen.getByText("Will fade out")).toBeInTheDocument();
+
+    // Close the modal — DOM must stay mounted during exit animation.
+    rerender(
+      <Modal isOpen={false} onClose={onClose}>
+        <p>Will fade out</p>
+      </Modal>
+    );
+
+    // Immediately after close: panel still mounted (fade-out in progress)
+    expect(screen.queryByText("Will fade out")).toBeInTheDocument();
+
+    // Advance by 100ms — still within exit animation
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(screen.queryByText("Will fade out")).toBeInTheDocument();
+
+    // After 200ms — Modal unmounts
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(screen.queryByText("Will fade out")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });
