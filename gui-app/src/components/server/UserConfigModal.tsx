@@ -290,26 +290,32 @@ export function UserConfigModal({
   // NOTE: no early `return null` on !isOpen — Modal primitive manages its own
   // mounted/animating lifecycle (200ms exit animation). Returning null here
   // would unmount the tree instantly and kill the exit transition.
+  // Block all close paths while download is in flight — user triggered a
+  // mutating server action (fetch_server_config + save dialog + copy_file)
+  // and must wait for its completion/error before dismissing the modal.
+  // (Read-only deeplink copy doesn't block — it's clipboard-only, no server state change.)
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
-      closeOnBackdrop
-      closeOnEscape
+      onClose={isDownloading ? undefined : onClose}
+      closeOnBackdrop={!isDownloading}
+      closeOnEscape={!isDownloading}
       size="md"
       className="relative"
     >
-      {/* X close button — absolute top-right (D-10, D-11). */}
+      {/* X close button — absolute top-right (D-10, D-11). Disabled during isDownloading. */}
       <button
         ref={closeButtonRef}
         type="button"
         aria-label={t("buttons.close")}
         onClick={onClose}
+        disabled={isDownloading}
         className={cn(
           "absolute top-3 right-3 p-1 rounded",
           "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
           "focus-visible:shadow-[var(--focus-ring)] outline-none",
           "transition-colors",
+          "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
         )}
       >
         <X className="w-4 h-4" />

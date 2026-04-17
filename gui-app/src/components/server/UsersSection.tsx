@@ -2,15 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../shared/lib/cn";
-import {
-  Users,
-  ChevronRight,
-  Loader2,
-  FileText,
-  Trash2,
-} from "lucide-react";
+import { Users, FileText, Trash2 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
-import { Button } from "../../shared/ui/Button";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { Divider } from "../../shared/ui/Divider";
 import { Tooltip } from "../../shared/ui/Tooltip";
@@ -73,12 +66,9 @@ export function UsersSection({ state }: Props) {
     newPassword,
     setNewPassword,
     setDeleteLoading,
-    continueLoading,
-    setContinueLoading,
     actionLoading,
     sshParams,
     usernameError,
-    onConfigExported,
     setActionResult,
     addUserToState,
     removeUserFromState,
@@ -86,9 +76,8 @@ export function UsersSection({ state }: Props) {
   } = state;
 
   const isAdding = !!actionLoading?.startsWith("add_user");
-  // Disable ALL row-level actions when anything is in flight (add/delete/continue)
-  // — prevents stray clicks during the 1-3s SSH round-trip.
-  const isBusy = !!actionLoading || state.deleteLoading || continueLoading;
+  // Disable ALL row-level actions when anything mutates server state.
+  const isBusy = !!actionLoading || state.deleteLoading;
 
   // Modal state — single source of truth for the UserConfigModal.
   const [modalUsername, setModalUsername] = useState<string | null>(null);
@@ -122,29 +111,6 @@ export function UsersSection({ state }: Props) {
   }, [pendingExportUsername, activityLog]);
 
   if (!serverInfo) return null;
-
-  // ── Continue as selected user ──
-  const handleContinueAsUser = async () => {
-    if (!selectedUser) return;
-    activityLog("USER", `user.continue_as.clicked user=${selectedUser}`);
-    setContinueLoading(true);
-    try {
-      const path = await invoke<string>("fetch_server_config", {
-        ...sshParams,
-        clientName: selectedUser,
-      });
-      activityLog("STATE", `user.continue_as.completed user=${selectedUser}`);
-      onConfigExported(path);
-    } catch (e) {
-      activityLog(
-        "ERROR",
-        `user.continue_as.failed user=${selectedUser} err=${formatError(e)}`
-      );
-      setActionResult({ type: "error", message: formatError(e) });
-    } finally {
-      setContinueLoading(false);
-    }
-  };
 
   // ── Show config modal for a user (inline FileText icon trigger) ──
   const handleShowConfig = (user: string) => {
@@ -376,30 +342,6 @@ export function UsersSection({ state }: Props) {
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {/* Continue as selected user button — only when users exist */}
-        {serverInfo.users.length > 0 && (
-          <div className="mb-3">
-            <Button
-              variant={selectedUser ? "primary" : "ghost"}
-              fullWidth
-              icon={
-                continueLoading ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5" />
-                )
-              }
-              loading={continueLoading}
-              disabled={!selectedUser}
-              onClick={handleContinueAsUser}
-            >
-              {selectedUser
-                ? t("server.users.continue_as", { user: selectedUser })
-                : t("server.users.select_user")}
-            </Button>
           </div>
         )}
 
