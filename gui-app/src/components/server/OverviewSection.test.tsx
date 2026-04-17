@@ -296,12 +296,12 @@ describe("OverviewSection", () => {
       }, { timeout: 15_000 });
     }, 20_000);
 
-    it("shows RAM percent computed from mem_used/mem_total", async () => {
+    it("shows RAM in USED / TOTAL МБ format", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
       await waitFor(() => {
-        // 4e9 / 8e9 = 0.5 → 50%
-        expect(screen.getByText("50%")).toBeInTheDocument();
+        // 4e9 / 1024^2 ≈ 3815 МБ used; 8e9 / 1024^2 ≈ 7629 МБ total
+        expect(screen.getByText(/3815\s*\/\s*7629/)).toBeInTheDocument();
       }, { timeout: 15_000 });
     }, 20_000);
 
@@ -492,6 +492,97 @@ describe("OverviewSection", () => {
 
       // Clicking должен не падать даже без onNavigate (optional chain в handler)
       expect(() => fireEvent.click(card!)).not.toThrow();
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 13.UAT: activityLog coverage for new functionality
+  // ═══════════════════════════════════════════════════════
+
+  describe("activityLog coverage (UAT)", () => {
+    it("logs ping manual refresh + result via write_activity_log", async () => {
+      const logged: Array<{ tag: string; message: string }> = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "write_activity_log") {
+          const p = params as { tag: string; message: string };
+          logged.push({ tag: p.tag, message: p.message });
+        }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+
+      // Wait for initial mount + ping fetch
+      await waitFor(() => {
+        const pingButtons = screen.getAllByLabelText(i18n.t("server.overview.refreshAria"));
+        expect(pingButtons.length).toBeGreaterThan(0);
+      });
+      const pingButton = screen.getAllByLabelText(i18n.t("server.overview.refreshAria"))[0];
+      fireEvent.click(pingButton);
+
+      await waitFor(() => {
+        expect(logged.some((e) => e.tag === "USER" && e.message.includes("overview.ping.manual_refresh"))).toBe(true);
+        expect(logged.some((e) => e.tag === "STATE" && e.message.includes("overview.ping.result"))).toBe(true);
+      }, { timeout: 5_000 });
+    });
+
+    it("logs speedtest start + completed via write_activity_log", async () => {
+      const logged: Array<{ tag: string; message: string }> = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "speedtest_run") return { download_mbps: 100, upload_mbps: 50 };
+        if (cmd === "write_activity_log") {
+          const p = params as { tag: string; message: string };
+          logged.push({ tag: p.tag, message: p.message });
+        }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+
+      // Speed card has its own refresh button — second one in DOM (after ping)
+      const refreshButtons = await screen.findAllByLabelText(i18n.t("server.overview.refreshAria"));
+      // Speed is index 1 (after Ping). Click it.
+      fireEvent.click(refreshButtons[1]);
+
+      await waitFor(() => {
+        expect(logged.some((e) => e.tag === "USER" && e.message.includes("overview.speedtest.started"))).toBe(true);
+        expect(logged.some((e) => e.tag === "STATE" && e.message.includes("overview.speedtest.completed"))).toBe(true);
+      }, { timeout: 5_000 });
+    });
+
+    it("logs security_get_status loaded with firewall + fail2ban states", async () => {
+      const logged: Array<{ tag: string; message: string }> = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: false } };
+        if (cmd === "write_activity_log") {
+          const p = params as { tag: string; message: string };
+          logged.push({ tag: p.tag, message: p.message });
+        }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+
+      await waitFor(() => {
+        expect(
+          logged.some(
+            (e) =>
+              e.tag === "STATE" &&
+              e.message.includes("overview.security.loaded") &&
+              e.message.includes("firewall=active") &&
+              e.message.includes("fail2ban=inactive"),
+          ),
+        ).toBe(true);
+      }, { timeout: 5_000 });
     });
   });
 });
