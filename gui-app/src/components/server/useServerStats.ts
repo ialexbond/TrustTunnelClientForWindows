@@ -122,9 +122,16 @@ export function useServerStats(sshParams: SshParams, options: Options) {
       }, nextDelay);
     };
 
-    // First fire: planned at intervalMs, NOT immediate. Tests rely on
-    // `settleAndTick` (advance 0 + advance 10_000) producing exactly 1 call.
-    scheduleNext();
+    // First fire: IMMEDIATE on mount (Phase 13.UAT G-01 optimization), затем polling
+    // каждые intervalMs. До UAT был 10s delay на первый fire — пользователь видел
+    // "—" / Skeleton 10+ секунд после auto-reconnect. Immediate fire сокращает
+    // latency до ~2s (время выполнения SSH-команды).
+    void (async () => {
+      if (cancelled) return;
+      await fetchStats();
+      if (cancelled) return;
+      scheduleNext();
+    })();
 
     return () => {
       cancelled = true;
