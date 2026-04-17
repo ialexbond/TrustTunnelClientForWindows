@@ -64,6 +64,7 @@ ssh_command!(server_upgrade, ssh::server_upgrade, version: String);
 // ─── Pooled server management commands ────────────────────────────
 
 ssh_pool_command!(server_get_stats, ssh::server_get_stats);
+ssh_pool_command!(server_speedtest_run, ssh::server_speedtest_run);
 ssh_pool_command!(server_get_config, ssh::get_server_config);
 ssh_pool_command!(server_get_cert_info, ssh::get_cert_info);
 ssh_pool_command!(server_get_logs, ssh::server_get_logs);
