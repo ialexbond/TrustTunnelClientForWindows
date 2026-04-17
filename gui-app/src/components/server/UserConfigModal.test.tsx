@@ -70,7 +70,11 @@ describe("UserConfigModal", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    // WR-03: UserConfigModal returns null when isOpen=false — container stays empty.
+    // (Prior assertion `[role="dialog"]` was a false-positive — Modal primitive
+    // does not set role="dialog", so the selector was null regardless of state.)
+    expect(container.innerHTML).toBe("");
+    expect(screen.queryByTestId("qr-code")).not.toBeInTheDocument();
   });
 
   it("fetches deeplink via invoke when opened", async () => {
