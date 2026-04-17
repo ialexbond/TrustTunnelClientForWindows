@@ -93,7 +93,7 @@ export function UsersAddForm({
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="flex gap-[var(--space-2)]">
+      <div className="flex gap-[var(--space-3)]">
         {/* Name input: Regenerate action + clearable X (appears when value.length > 0) */}
         <div className="flex-1">
           <ActionInput
@@ -114,8 +114,7 @@ export function UsersAddForm({
                   type="button"
                   onClick={handleRegenerateName}
                   disabled={isAdding}
-                  className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: "var(--color-text-muted)" }}
+                  className="text-[var(--color-text-muted)] transition-opacity hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label={t("common.generate_username")}
                 >
                   <Shuffle className="w-3.5 h-3.5" />
@@ -150,8 +149,7 @@ export function UsersAddForm({
                   type="button"
                   onClick={handleRegeneratePassword}
                   disabled={isAdding}
-                  className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: "var(--color-text-muted)" }}
+                  className="text-[var(--color-text-muted)] transition-opacity hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label={t("common.generate_password")}
                 >
                   <Shuffle className="w-3.5 h-3.5" />
