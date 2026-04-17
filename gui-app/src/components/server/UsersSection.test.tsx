@@ -1,20 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { UsersSection } from "./UsersSection";
 import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
 
-// Mock qrcode.react
+// Mock qrcode.react — avoids pulling real SVG renderer (used by UserConfigModal).
 vi.mock("qrcode.react", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  QRCodeSVG: (props: any) => <svg data-testid="qr-code" data-value={props.value} />,
+  QRCodeSVG: (props: any) => (
+    <svg
+      data-testid="qr-code"
+      data-value={props.value}
+      width={props.size}
+      height={props.size}
+    />
+  ),
+}));
+
+// Spy on activity log — critical for D-29 password leak verification (SECURITY).
+const activityLogSpy = vi.fn();
+vi.mock("../../shared/hooks/useActivityLog", () => ({
+  useActivityLog: () => ({ log: activityLogSpy }),
+}));
+
+// Mock Tauri.
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  save: vi.fn().mockResolvedValue(null),
 }));
 
 function makeState(overrides: Partial<ServerState> = {}): ServerState {
   return {
-    serverInfo: { installed: true, version: "1.4.0", serviceActive: true, users: ["alice", "bob"] },
+    serverInfo: {
+      installed: true,
+      version: "1.4.0",
+      serviceActive: true,
+      users: ["alice", "bob"],
+    },
     selectedUser: null,
     setSelectedUser: vi.fn(),
     newUsername: "",
@@ -40,19 +64,29 @@ function makeState(overrides: Partial<ServerState> = {}): ServerState {
   } as unknown as ServerState;
 }
 
-/** Open overflow menu for the Nth user (0-based index). */
-function openOverflowMenu(index: number) {
-  const menuTriggers = screen.getAllByRole("button", {
-    name: i18n.t("users.actions_menu"),
-  });
-  fireEvent.click(menuTriggers[index]);
-}
-
-describe("UsersSection", () => {
+describe("UsersSection (Phase 14 redesign)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    activityLogSpy.mockClear();
     i18n.changeLanguage("ru");
+
+    // Mock clipboard API — used by UserConfigModal when FileText opens the modal.
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    (globalThis as unknown as { ClipboardItem: unknown }).ClipboardItem = class {
+      constructor(_data: Record<string, Blob>) {
+        void _data;
+      }
+    };
   });
+
+  // ══════════════════════════════════════════════════════
+  // Rendering basics
+  // ══════════════════════════════════════════════════════
 
   it("renders nothing when serverInfo is null", () => {
     const state = makeState({ serverInfo: null });
@@ -60,374 +94,486 @@ describe("UsersSection", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders users title", () => {
+  it("renders users title (CardHeader with i18n)", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
     expect(screen.getByText(i18n.t("server.users.title"))).toBeInTheDocument();
   });
 
-  it("displays user names in the list", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    expect(screen.getByText("alice")).toBeInTheDocument();
-    expect(screen.getByText("bob")).toBeInTheDocument();
-  });
-
-  it("shows 'no users' message when users list is empty", () => {
+  it("renders user names as role=option in role=listbox (D-02 WAI-ARIA)", () => {
     const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: true, users: [] },
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice", "bob"],
+      },
     });
     render(<UsersSection state={state} />);
-    expect(screen.getByText(i18n.t("server.users.no_users"))).toBeInTheDocument();
+    const listbox = screen.getByRole("listbox");
+    expect(listbox).toBeInTheDocument();
+    const options = within(listbox).getAllByRole("option");
+    expect(options.length).toBe(2);
+    expect(options[0]).toHaveTextContent("alice");
+    expect(options[1]).toHaveTextContent("bob");
   });
 
-  it("clicking a user row calls setSelectedUser", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    fireEvent.click(screen.getByText("alice"));
-    expect(state.setSelectedUser).toHaveBeenCalledWith("alice");
-  });
-
-  it("shows 'select user' button when no user is selected", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.users.select_user")) })).toBeInTheDocument();
-  });
-
-  it("shows 'continue as' button when user is selected", () => {
-    const state = makeState({ selectedUser: "alice" });
-    render(<UsersSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.users.continue_as", { user: "alice" })) })).toBeInTheDocument();
-  });
-
-  it("shows add user button", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.users.add_user")) })).toBeInTheDocument();
-  });
-
-  it("add user button is disabled when username and password are empty", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.users.add_user")) });
-    expect(addBtn).toBeDisabled();
-  });
-
-  it("shows username and password input placeholders", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    expect(screen.getByPlaceholderText(i18n.t("server.users.username_placeholder"))).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(i18n.t("server.users.password_placeholder"))).toBeInTheDocument();
-  });
-
-  it("shows overflow menu trigger for each user", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    const triggers = screen.getAllByRole("button", { name: i18n.t("users.actions_menu") });
-    expect(triggers.length).toBe(2); // one per user
-  });
-
-  it("overflow menu trigger has aria-haspopup=menu", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    const triggers = screen.getAllByRole("button", { name: i18n.t("users.actions_menu") });
-    triggers.forEach((trigger) => {
-      expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+  it("renders EmptyState when users.length === 0", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: [],
+      },
     });
-  });
-
-  it("clicking overflow trigger opens menu with user actions", () => {
-    const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.link_tooltip") })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.export_tooltip") })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") })).toBeInTheDocument();
-  });
-
-  it("clicking delete menu item opens confirm dialog (via ConfirmDialogProvider)", async () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
-    fireEvent.click(deleteItem);
-    // Dialog rendered by ConfirmDialogProvider (from renderWithProviders wrapper)
     expect(
-      await screen.findByText(i18n.t("server.users.confirm_delete_title")),
+      screen.getByText(i18n.t("server.users.empty_heading")),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t("server.users.empty_body")),
+    ).toBeInTheDocument();
+    // listbox not rendered when empty
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("delete menu item is disabled when only one user exists", () => {
+  // ══════════════════════════════════════════════════════
+  // D-02: Row click selection
+  // ══════════════════════════════════════════════════════
+
+  it("D-02: clicking a row calls setSelectedUser with that user", () => {
+    const setSelectedUser = vi.fn();
+    const state = makeState({ setSelectedUser });
+    render(<UsersSection state={state} />);
+    const aliceRow = screen.getByRole("option", { name: /alice/i });
+    fireEvent.click(aliceRow);
+    expect(setSelectedUser).toHaveBeenCalledWith("alice");
+  });
+
+  it("D-02: selected row has aria-selected=true", () => {
+    const state = makeState({ selectedUser: "bob" });
+    render(<UsersSection state={state} />);
+    const bobRow = screen.getByRole("option", { name: /bob/i });
+    expect(bobRow).toHaveAttribute("aria-selected", "true");
+    const aliceRow = screen.getByRole("option", { name: /alice/i });
+    expect(aliceRow).toHaveAttribute("aria-selected", "false");
+  });
+
+  // ══════════════════════════════════════════════════════
+  // D-03: 2 inline icons (FileText + Trash), NO OverflowMenu
+  // ══════════════════════════════════════════════════════
+
+  it("D-03: OverflowMenu is NOT used (removed from UsersSection)", () => {
+    const state = makeState();
+    render(<UsersSection state={state} />);
+    // OverflowMenu trigger has aria-label users.actions_menu — should NOT exist
+    expect(
+      screen.queryByRole("button", { name: i18n.t("users.actions_menu") }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("D-03: each row has FileText + Trash inline icon buttons", () => {
     const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: true, users: ["alice"] },
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice", "bob"],
+      },
     });
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
-    expect(deleteItem).toBeDisabled();
+    const showConfigBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.show_config_tooltip"),
+    });
+    expect(showConfigBtns.length).toBe(2);
+    const deleteBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
+    });
+    expect(deleteBtns.length).toBe(2);
   });
 
-  it("delete menu item has destructive color", () => {
+  it("D-03: clicking FileText icon opens UserConfigModal for that user", async () => {
+    vi.mocked(invoke).mockResolvedValue("tt://example.com/config?user=alice");
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0);
-    const deleteItem = screen.getByRole("menuitem", { name: i18n.t("server.users.delete_tooltip") });
-    expect(deleteItem).toHaveStyle({ color: "var(--color-destructive)" });
+
+    const showConfigBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.show_config_tooltip"),
+    });
+    fireEvent.click(showConfigBtns[0]); // alice
+
+    // Modal opens — invoke called for deeplink
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_export_config_deeplink",
+        expect.objectContaining({ clientName: "alice" }),
+      );
+    });
   });
 
-  it("does not show continue button when users list is empty", () => {
+  it("D-03: FileText click uses stopPropagation — does NOT call setSelectedUser", () => {
+    vi.mocked(invoke).mockResolvedValue("tt://example.com/config?user=alice");
+    const setSelectedUser = vi.fn();
+    const state = makeState({ setSelectedUser });
+    render(<UsersSection state={state} />);
+
+    const showConfigBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.show_config_tooltip"),
+    });
+    fireEvent.click(showConfigBtns[0]);
+
+    // stopPropagation должна предотвратить клик по row
+    expect(setSelectedUser).not.toHaveBeenCalled();
+  });
+
+  // ══════════════════════════════════════════════════════
+  // D-21: Trash disabled when users.length === 1
+  // ══════════════════════════════════════════════════════
+
+  it("D-21: Trash button is disabled when users.length === 1", () => {
     const state = makeState({
-      serverInfo: { installed: true, version: "1.4.0", serviceActive: true, users: [] },
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice"],
+      },
     });
     render(<UsersSection state={state} />);
-    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("server.users.select_user")) })).not.toBeInTheDocument();
+    // Single user case — tooltip меняется на cant_delete_last
+    const trashBtn = screen.getByRole("button", {
+      name: i18n.t("server.users.cant_delete_last"),
+    });
+    expect(trashBtn).toBeDisabled();
+    expect(trashBtn).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("clicking QR menu item invokes server_export_config_deeplink", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
+  it("D-21: Trash button is enabled when users.length > 1", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice", "bob"],
+      },
+    });
+    render(<UsersSection state={state} />);
+    const trashBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
+    });
+    trashBtns.forEach((btn) => {
+      expect(btn).not.toBeDisabled();
+    });
+  });
+
+  it("D-21: Clicking disabled Trash does NOT initiate delete", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice"],
+      },
+    });
+    render(<UsersSection state={state} />);
+    const trashBtn = screen.getByRole("button", {
+      name: i18n.t("server.users.cant_delete_last"),
+    });
+    fireEvent.click(trashBtn);
+    // invoke не должен быть вызван для удаления
+    expect(invoke).not.toHaveBeenCalledWith(
+      "server_remove_user",
+      expect.anything(),
+    );
+  });
+
+  // ══════════════════════════════════════════════════════
+  // D-22 + D-26: Delete flow — ConfirmDialog → invoke → pushSuccess
+  // ══════════════════════════════════════════════════════
+
+  it("D-22: Trash click opens ConfirmDialog", async () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    const qrItem = screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") });
-    fireEvent.click(qrItem);
+    const trashBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
+    });
+    fireEvent.click(trashBtns[0]);
+
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("server_export_config_deeplink", {
-        host: "10.0.0.1", port: 22, user: "root", password: "pass",
-        clientName: "alice",
-      });
+      expect(
+        screen.getByText(i18n.t("server.users.confirm_delete_title")),
+      ).toBeInTheDocument();
     });
   });
 
-  it("shows QR code modal after successful deeplink generation", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
+  it("D-22 + D-26: Confirming delete invokes server_remove_user, removes from state, and calls pushSuccess with user_deleted text", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const pushSuccess = vi.fn();
+    const removeUserFromState = vi.fn();
+    const state = makeState({ pushSuccess, removeUserFromState });
+    render(<UsersSection state={state} />);
+
+    const trashBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
+    });
+    fireEvent.click(trashBtns[0]);
+
+    // Confirm button in ConfirmDialog
+    const confirmBtn = await screen.findByRole("button", {
+      name: i18n.t("buttons.confirm_delete"),
+    });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_remove_user",
+        expect.objectContaining({ vpnUsername: "alice" }),
+      );
+    });
+    await waitFor(() => {
+      expect(removeUserFromState).toHaveBeenCalledWith("alice");
+    });
+    // D-26: SnackBar должна содержать локализованный текст server.users.user_deleted
+    // с интерполированным username: "Пользователь «alice» удалён"
+    await waitFor(() => {
+      expect(pushSuccess).toHaveBeenCalledWith(
+        i18n.t("server.users.user_deleted", { user: "alice" }),
+      );
+    });
+  });
+
+  it("D-22: Cancel ConfirmDialog does NOT invoke server_remove_user", async () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
+
+    const trashBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
+    });
+    fireEvent.click(trashBtns[0]);
+
+    const cancelBtn = await screen.findByRole("button", {
+      name: i18n.t("buttons.cancel"),
+    });
+    fireEvent.click(cancelBtn);
+
     await waitFor(() => {
-      expect(screen.getByTestId("qr-code")).toBeInTheDocument();
+      expect(
+        screen.queryByText(i18n.t("server.users.confirm_delete_title")),
+      ).not.toBeInTheDocument();
     });
-    // Shows username in the modal (alice appears both in list and modal)
-    const aliceElements = screen.getAllByText("alice");
-    expect(aliceElements.length).toBeGreaterThanOrEqual(2);
+    expect(invoke).not.toHaveBeenCalledWith(
+      "server_remove_user",
+      expect.anything(),
+    );
   });
 
-  it("sets error and closes QR modal when deeplink generation fails", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("SSH failed"));
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
-    await waitFor(() => {
-      expect(state.setActionResult).toHaveBeenCalledWith({
-        type: "error",
-        message: expect.stringContaining("SSH failed"),
-      });
+  // ══════════════════════════════════════════════════════
+  // D-16: No min-length validation
+  // ══════════════════════════════════════════════════════
+
+  it("D-16: 1-char username + 1-char password does NOT disable Add button (no min-length validation)", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: [],
+      },
+      newUsername: "x",
+      newPassword: "y",
     });
-  });
-
-  it("clicking link menu item copies deeplink to clipboard", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    render(<UsersSection state={state} />);
+    const addBtn = screen.getByRole("button", {
+      name: new RegExp(i18n.t("server.users.add_user"), "i"),
     });
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.link_tooltip") }));
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("trusttunnel://config/abc123");
+    expect(addBtn).not.toBeDisabled();
+  });
+
+  it("D-16: empty inputs DO disable Add button", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: [],
+      },
+      newUsername: "",
+      newPassword: "",
     });
-    expect(state.pushSuccess).toHaveBeenCalled();
-  });
-
-  it("clicking download menu item triggers config export", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("/tmp/config.toml");
-    const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.export_tooltip") }));
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("fetch_server_config", {
-        host: "10.0.0.1", port: 22, user: "root", password: "pass",
-        clientName: "alice",
-      });
+    const addBtn = screen.getByRole("button", {
+      name: new RegExp(i18n.t("server.users.add_user"), "i"),
     });
-    expect(state.setExportingUser).toHaveBeenCalledWith("alice");
-  });
-
-  it("continue as user button calls fetch_server_config and onConfigExported", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("/tmp/config.toml");
-    const state = makeState({ selectedUser: "alice" });
-    render(<UsersSection state={state} />);
-    const continueBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.users.continue_as", { user: "alice" })) });
-    fireEvent.click(continueBtn);
-    expect(state.setContinueLoading).toHaveBeenCalledWith(true);
-    await waitFor(() => {
-      expect(state.onConfigExported).toHaveBeenCalledWith("/tmp/config.toml");
-    });
-  });
-
-  it("continue as user handles error", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("fetch failed"));
-    const state = makeState({ selectedUser: "alice" });
-    render(<UsersSection state={state} />);
-    const continueBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.users.continue_as", { user: "alice" })) });
-    fireEvent.click(continueBtn);
-    await waitFor(() => {
-      expect(state.setActionResult).toHaveBeenCalledWith({
-        type: "error",
-        message: expect.stringContaining("fetch failed"),
-      });
-    });
-  });
-
-  it("add user button triggers invoke when username and password are filled", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce(undefined);
-    const state = makeState({ newUsername: "charlie", newPassword: "pass123" });
-    render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.users.add_user")) });
-    fireEvent.click(addBtn);
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("add_server_user", {
-        host: "10.0.0.1", port: 22, user: "root", password: "pass",
-        vpnUsername: "charlie",
-        vpnPassword: "pass123",
-      });
-    });
-    expect(state.addUserToState).toHaveBeenCalledWith("charlie");
-  });
-
-  it("shows selected user with visual indicator", () => {
-    const state = makeState({ selectedUser: "alice" });
-    render(<UsersSection state={state} />);
-    // The selected user row has a specific background CSS class
-    const aliceRow = screen.getByText("alice").closest("div[class*='cursor-pointer']") as HTMLElement;
-    expect(aliceRow).toBeTruthy();
-    expect(aliceRow).toHaveClass("bg-[var(--color-accent-tint-08)]");
-  });
-
-  it("shows separator between users but not after last", () => {
-    const state = makeState();
-    const { container } = render(<UsersSection state={state} />);
-    // There should be 1 separator for 2 users (between alice and bob)
-    const separators = container.querySelectorAll("div[style*='border-bottom']");
-    expect(separators.length).toBe(1);
-  });
-
-  it("add user button disabled when usernameError is set", () => {
-    const state = makeState({ newUsername: "alice", newPassword: "pass", usernameError: "server.users.username_exists" });
-    render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.users.add_user")) });
     expect(addBtn).toBeDisabled();
   });
 
-  it("QR modal shows loading spinner while generating", async () => {
-    // Use a promise that never resolves during the test to keep loading state
-    let resolveInvoke: (value: unknown) => void;
-    vi.mocked(invoke).mockImplementationOnce(() => new Promise(r => { resolveInvoke = r; }));
+  // ══════════════════════════════════════════════════════
+  // D-28: Activity log coverage
+  // ══════════════════════════════════════════════════════
+
+  it("D-28: delete flow logs user.remove.initiated + user.remove.confirmed + user.remove.completed", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
-    // The modal should be open with loading spinner
-    await waitFor(() => {
-      const spinners = document.querySelectorAll("svg.animate-spin");
-      expect(spinners.length).toBeGreaterThan(0);
+
+    const trashBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
     });
-    // Clean up
-    resolveInvoke!("trusttunnel://config/abc123");
+    fireEvent.click(trashBtns[0]);
+    // user.remove.initiated logged БЕЗ confirm
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "USER",
+        expect.stringContaining("user.remove.initiated user=alice"),
+      );
+    });
+
+    const confirmBtn = await screen.findByRole("button", {
+      name: i18n.t("buttons.confirm_delete"),
+    });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "USER",
+        expect.stringContaining("user.remove.confirmed user=alice"),
+      );
+    });
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "STATE",
+        expect.stringContaining("user.remove.completed user=alice"),
+      );
+    });
   });
 
-  it("QR modal has a close button", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("trusttunnel://config/abc123");
+  it("D-28: show-config click logs user.config.modal_opened source=inline_icon", async () => {
+    vi.mocked(invoke).mockResolvedValue("tt://example.com");
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.qr_tooltip") }));
-    await waitFor(() => {
-      expect(screen.getByTestId("qr-code")).toBeInTheDocument();
+    const showBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.show_config_tooltip"),
     });
-    // The close button exists inside the modal content
-    const closeBtn = document.querySelector("button.absolute") as HTMLElement;
-    expect(closeBtn).toBeTruthy();
+    fireEvent.click(showBtns[0]);
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "USER",
+        expect.stringContaining(
+          "user.config.modal_opened user=alice source=inline_icon",
+        ),
+      );
+    });
   });
 
-  it("user row hover changes background on non-selected user", () => {
-    const state = makeState({ selectedUser: "alice" });
-    render(<UsersSection state={state} />);
-    // Bob is not selected — has hover:bg class but NOT the selected bg class
-    const bobRow = screen.getByText("bob").closest("div[class*='cursor-pointer']") as HTMLElement;
-    expect(bobRow).toHaveClass("hover:bg-[var(--color-bg-hover)]");
-    expect(bobRow).not.toHaveClass("bg-[var(--color-accent-tint-08)]");
-  });
+  // ══════════════════════════════════════════════════════
+  // D-29: Password and deeplink NEVER in activity log (SECURITY)
+  // ══════════════════════════════════════════════════════
 
-  it("user row hover does not change background on selected user", () => {
-    const state = makeState({ selectedUser: "alice" });
+  it("D-29 SECURITY: password value never appears in activity log calls", async () => {
+    const SECRET_PASSWORD = "DO-NOT-LEAK-THIS-789";
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: [],
+      },
+      newUsername: "testuser",
+      newPassword: SECRET_PASSWORD,
+    });
     render(<UsersSection state={state} />);
-    // Alice is selected — has the selected bg class and NOT the hover:bg class
-    const aliceRow = screen.getByText("alice").closest("div[class*='cursor-pointer']") as HTMLElement;
-    expect(aliceRow).toHaveClass("bg-[var(--color-accent-tint-08)]");
-    expect(aliceRow).not.toHaveClass("hover:bg-[var(--color-bg-hover)]");
-  });
-
-  it("add user handles error from invoke", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("user exists"));
-    const state = makeState({ newUsername: "charlie", newPassword: "pass123" });
-    render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.users.add_user")) });
+    const addBtn = screen.getByRole("button", {
+      name: new RegExp(i18n.t("server.users.add_user"), "i"),
+    });
     fireEvent.click(addBtn);
+
     await waitFor(() => {
-      expect(state.setActionResult).toHaveBeenCalledWith({
-        type: "error",
-        message: expect.stringContaining("user exists"),
-      });
+      expect(activityLogSpy).toHaveBeenCalled();
     });
+
+    // Проверить ВСЕ activity log calls — ни один не содержит пароль
+    const allCalls = activityLogSpy.mock.calls;
+    for (const call of allCalls) {
+      const [tag, message, details] = call;
+      expect(String(message ?? "")).not.toContain(SECRET_PASSWORD);
+      if (details !== undefined) {
+        expect(String(details)).not.toContain(SECRET_PASSWORD);
+      }
+      void tag;
+    }
   });
 
-  it("copy link handles error", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("ssh error"));
+  it("D-29 SECURITY: add_server_user invoke receives password as arg but log doesn't leak it", async () => {
+    const SECRET_PASSWORD = "ZZZ-SECRET-999";
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: [],
+      },
+      newUsername: "testuser",
+      newPassword: SECRET_PASSWORD,
+    });
+    render(<UsersSection state={state} />);
+    const addBtn = screen.getByRole("button", {
+      name: new RegExp(i18n.t("server.users.add_user"), "i"),
+    });
+    fireEvent.click(addBtn);
+
+    // invoke получает password — это нормально (SSH call)
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "add_server_user",
+        expect.objectContaining({ vpnPassword: SECRET_PASSWORD }),
+      );
+    });
+
+    // Но activityLog не должен содержать password
+    const addClickedLog = activityLogSpy.mock.calls.find((call) =>
+      String(call[1] ?? "").includes("user.add.clicked"),
+    );
+    expect(addClickedLog).toBeDefined();
+    expect(String(addClickedLog?.[1] ?? "")).not.toContain(SECRET_PASSWORD);
+  });
+
+  // ══════════════════════════════════════════════════════
+  // D-09: QR copy (integration through modal) — opening modal triggers deeplink fetch
+  // ══════════════════════════════════════════════════════
+
+  it("D-09 (integration): Opening config modal via inline icon triggers deeplink fetch", async () => {
+    vi.mocked(invoke).mockResolvedValue("tt://example.com/config?token=xyz");
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.link_tooltip") }));
+
+    const showBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.show_config_tooltip"),
+    });
+    fireEvent.click(showBtns[0]);
+
     await waitFor(() => {
-      expect(state.setActionResult).toHaveBeenCalledWith({
-        type: "error",
-        message: expect.stringContaining("ssh error"),
-      });
+      expect(invoke).toHaveBeenCalledWith(
+        "server_export_config_deeplink",
+        expect.objectContaining({ clientName: "alice" }),
+      );
     });
   });
 
-  it("download config handles export error", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("download failed"));
+  // ══════════════════════════════════════════════════════
+  // D-06: Row contains ONLY username + 2 icons (no avatars, no status)
+  // ══════════════════════════════════════════════════════
+
+  it("D-06: Row does not render avatar/status/metadata — only name + 2 icons", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    openOverflowMenu(0); // alice
-    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("server.users.export_tooltip") }));
-    await waitFor(() => {
-      expect(state.setActionResult).toHaveBeenCalledWith({
-        type: "error",
-        message: expect.stringContaining("download failed"),
-      });
-    });
-  });
-
-  it("shows loading state on add user button when actionLoading starts with add_user", () => {
-    const state = makeState({ actionLoading: "add_user", newUsername: "x", newPassword: "y" });
-    render(<UsersSection state={state} />);
-    // The input fields should be disabled during add
-    const inputs = screen.getAllByRole("textbox");
-    inputs.forEach(input => expect(input).toBeDisabled());
-  });
-
-  it("selected user shows inner dot indicator", () => {
-    const state = makeState({ selectedUser: "alice" });
-    const { container } = render(<UsersSection state={state} />);
-    // The selected user has an inner dot (w-2 h-2 rounded-full)
-    const dots = container.querySelectorAll("div.w-2.h-2.rounded-full");
-    expect(dots.length).toBe(1);
+    const aliceRow = screen.getByRole("option", { name: /alice/i });
+    // Внутри row должны быть 2 buttons (FileText + Trash) — никаких <img>
+    const buttonsInRow = within(aliceRow).getAllByRole("button");
+    expect(buttonsInRow.length).toBe(2);
+    // Нет <img> (avatars)
+    expect(within(aliceRow).queryByRole("img")).not.toBeInTheDocument();
   });
 });
