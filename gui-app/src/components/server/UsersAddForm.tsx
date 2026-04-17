@@ -107,6 +107,7 @@ export function UsersAddForm({
             disabled={isAdding}
             clearable
             onClear={handleClearName}
+            clearAriaLabel={t("common.clear_field")}
             actions={[
               <Tooltip key="gen" text={t("common.generate_username")}>
                 <button
@@ -140,6 +141,9 @@ export function UsersAddForm({
             clearable
             onClear={handleClearPassword}
             onVisibilityToggle={handleVisibilityToggle}
+            clearAriaLabel={t("common.clear_field")}
+            showPasswordAriaLabel={t("common.show_password")}
+            hidePasswordAriaLabel={t("common.hide_password")}
             actions={[
               <Tooltip key="gen" text={t("common.generate_password")}>
                 <button
