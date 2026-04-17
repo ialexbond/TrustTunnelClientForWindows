@@ -20,6 +20,21 @@ export interface ConfirmOptions {
   variant?: "danger" | "warning";
   confirmText?: string;
   cancelText?: string;
+  /**
+   * Optional async action invoked when the user clicks "Confirm".
+   * While the returned promise is pending, the modal stays open with
+   * a visible loading state (Cancel + backdrop disabled, Confirm shows
+   * a spinner). Only when the promise resolves does the modal close.
+   *
+   * - On resolve: outer `confirm()` promise resolves with `true`.
+   * - On reject: outer `confirm()` promise resolves with `false` and
+   *   the modal closes. Caller is responsible for surfacing the error
+   *   (SnackBar / actionResult).
+   *
+   * When omitted, the modal closes immediately on Confirm click
+   * (existing behavior — backward compatible).
+   */
+  action?: () => Promise<void>;
 }
 
 /** Internal queue item: options plus the promise resolver. */
@@ -49,6 +64,7 @@ export const ConfirmDialogContext = createContext<ConfirmFn | null>(null);
  */
 export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<PendingRequest | null>(null);
+  const [actionRunning, setActionRunning] = useState(false);
   const currentRef = useRef<PendingRequest | null>(null);
   const queueRef = useRef<PendingRequest[]>([]);
 
@@ -61,6 +77,7 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
     const next = queueRef.current.shift() ?? null;
     currentRef.current = next;
     setCurrent(next);
+    setActionRunning(false);
   }, []);
 
   // WR-01 fix: use currentRef for the "is a dialog open?" check instead of
@@ -86,21 +103,49 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   // rendered dialog would both see `current` via closure and call resolve
   // twice (Promise.resolve is idempotent, but the pattern was fragile and
   // blocked any future side-effect addition inside resolve).
-  const handleConfirm = useCallback(() => {
+  //
+  // Async action support: when req.action is provided, await it with
+  // visible loading state before resolving. Modal stays open for the
+  // whole duration; closes only when action settles (resolve or reject).
+  const handleConfirm = useCallback(async () => {
     const req = currentRef.current;
     if (!req) return;
+
+    if (req.action) {
+      // Guard against re-entry if the user somehow double-clicks — the
+      // Confirm button is disabled while actionRunning but belt & suspenders.
+      if (actionRunning) return;
+      setActionRunning(true);
+      try {
+        await req.action();
+        currentRef.current = null;
+        req.resolve(true);
+      } catch {
+        // Action failed — close modal with false, caller handles error UI.
+        currentRef.current = null;
+        req.resolve(false);
+      }
+      pump();
+      return;
+    }
+
+    // Legacy sync path — close immediately on confirm.
     currentRef.current = null;
     req.resolve(true);
     pump();
-  }, [pump]);
+  }, [pump, actionRunning]);
 
   const handleCancel = useCallback(() => {
+    // Cancel is ignored while the async action is in flight — the modal
+    // stays open until the action settles (same semantics as a destructive
+    // operation on a server: can't undo once SSH invocation fired).
+    if (actionRunning) return;
     const req = currentRef.current;
     if (!req) return;
     currentRef.current = null;
     req.resolve(false);
     pump();
-  }, [pump]);
+  }, [pump, actionRunning]);
 
   // Unmount cleanup: resolve everything pending so no await hangs.
   // We read through refs so we see the latest state/queue at unmount time.
@@ -125,6 +170,7 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
           variant={current.variant}
           confirmLabel={current.confirmText}
           cancelLabel={current.cancelText}
+          loading={actionRunning}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
         />
