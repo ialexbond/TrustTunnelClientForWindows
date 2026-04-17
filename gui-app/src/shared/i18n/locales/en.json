@@ -1005,6 +1005,11 @@
         "tls": "TLS",
         "tlsActive": "Active",
         "placeholder": "—"
+      },
+      "uptimeFormat": {
+        "daysHours": "{{days}}d {{hours}}h",
+        "hoursMins": "{{hours}}h {{mins}}m",
+        "mins": "{{mins}}m"
       }
     }
   },
@@ -1062,6 +1067,12 @@
     "networkUnreachable": "Network unreachable for {{host}}. Check your internet connection.",
     "connectionRefused": "Server {{host}}:{{port}} refused the connection. Service not running or port closed.",
     "tlsHandshakeFailed": "Could not establish secure connection with {{host}}. Check server SSH keys."
+  },
+  "geoipErrors": {
+    "timeout": "Country lookup timed out",
+    "noNetwork": "No internet connection for country lookup",
+    "rateLimited": "Country lookup service is temporarily unavailable",
+    "invalidResponse": "Failed to determine country: {{detail}}"
   },
   "vpnErrors": {
     "tunnelDown": "VPN connection lost. Check server connectivity and press Connect.",
