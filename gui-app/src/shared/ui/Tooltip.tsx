@@ -64,7 +64,20 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
         top: "bottom", bottom: "top", left: "right", right: "left",
       };
 
-      const pos = fits[position] ? position : fits[flip[position]] ? flip[position] : position;
+      // WR-08 fix: when neither the requested direction nor its flip fits (e.g.
+      // tiny webview height with button at top-right), pick whichever axis side
+      // has more available space instead of falling back to the requested pos
+      // (which would render off-screen, then get clamped awkwardly).
+      let pos: TooltipPosition;
+      if (fits[position]) {
+        pos = position;
+      } else if (fits[flip[position]]) {
+        pos = flip[position];
+      } else if (position === "top" || position === "bottom") {
+        pos = vh - trRect.bottom > trRect.top ? "bottom" : "top";
+      } else {
+        pos = vw - trRect.right > trRect.left ? "right" : "left";
+      }
 
       let left: number, top: number;
       switch (pos) {
