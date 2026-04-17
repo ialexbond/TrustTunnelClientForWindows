@@ -27,6 +27,7 @@ import { useServerStats } from "./useServerStats";
 import { useServerGeoIp } from "./useServerGeoIp";
 import { formatServerUptime } from "../../shared/utils/uptime";
 import { parseCertInfo, daysUntil } from "./certUtils";
+import { useActivityLog } from "../../shared/hooks/useActivityLog";
 
 type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
 
@@ -124,6 +125,7 @@ function ClickableCard({
 
 export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   const { t } = useTranslation();
+  const { log: activityLog } = useActivityLog();
   const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
 
   // ─── Live data hooks (Phase 13) ───
@@ -144,16 +146,19 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
 
   const runSpeedTest = useCallback(async () => {
     if (speedTesting) return;
+    activityLog("USER", "overview.speedtest.started", "OverviewSection.SpeedRefresh");
     setSpeedTesting(true);
     try {
       const r = await invoke<{ download_mbps: number; upload_mbps: number }>("speedtest_run");
       setSpeed(r);
-    } catch {
+      activityLog("STATE", `overview.speedtest.completed dl=${r.download_mbps.toFixed(1)} ul=${r.upload_mbps.toFixed(1)}`, "speedtest_run");
+    } catch (e) {
       setSpeed(null);
+      activityLog("ERROR", `overview.speedtest.failed err=${String(e)}`, "speedtest_run");
     } finally {
       setSpeedTesting(false);
     }
-  }, [speedTesting]);
+  }, [speedTesting, activityLog]);
 
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
@@ -166,10 +171,20 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       "security_get_status",
       sshParams,
     )
-      .then(setSecurity)
-      .catch(() => setSecurity(null))
+      .then((s) => {
+        setSecurity(s);
+        activityLog(
+          "STATE",
+          `overview.security.loaded firewall=${s.firewall.active ? "active" : s.firewall.installed ? "inactive" : "missing"} fail2ban=${s.fail2ban.active ? "active" : s.fail2ban.installed ? "inactive" : "missing"}`,
+          "security_get_status",
+        );
+      })
+      .catch((e) => {
+        setSecurity(null);
+        activityLog("ERROR", `overview.security.failed err=${String(e)}`, "security_get_status");
+      })
       .finally(() => setSecurityLoading(false));
-  }, [sshParams, serverInfo?.serviceActive, rebooting]);
+  }, [sshParams, serverInfo?.serviceActive, rebooting, activityLog]);
 
   // ── Initial ping ──
   useEffect(() => {
@@ -224,10 +239,17 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   }, [rebooting]);
 
   const refreshPing = useCallback(() => {
+    activityLog("USER", "overview.ping.manual_refresh", "OverviewSection.PingRefresh");
     invoke<number>("ping_endpoint", { host: state.host, port: 443 })
-      .then((ms) => setPing(ms))
-      .catch(() => setPing(-1));
-  }, [state.host]);
+      .then((ms) => {
+        setPing(ms);
+        activityLog("STATE", `overview.ping.result ms=${ms}`, "ping_endpoint");
+      })
+      .catch((e) => {
+        setPing(-1);
+        activityLog("ERROR", `overview.ping.failed err=${String(e)}`, "ping_endpoint");
+      });
+  }, [state.host, activityLog]);
 
   // ── Skeleton: пока нет данных ──
   const refreshAriaLabel = t("server.overview.refreshAria");
