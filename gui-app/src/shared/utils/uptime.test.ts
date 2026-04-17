@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { formatUptime, formatBytes } from "./uptime";
+import type { TFunction } from "i18next";
+import { formatUptime, formatBytes, formatServerUptime } from "./uptime";
+
+const mockT = ((key: string, params?: Record<string, unknown>) => {
+  if (params) return `${key}:${JSON.stringify(params)}`;
+  return key;
+}) as TFunction;
 
 describe("formatUptime", () => {
   beforeEach(() => {
@@ -69,5 +75,77 @@ describe("formatBytes", () => {
 
   it("returns '1.00 GB' for 1073741824 bytes", () => {
     expect(formatBytes(1073741824)).toBe("1.00 GB");
+  });
+});
+
+describe("formatServerUptime", () => {
+  it("returns em-dash for 0 seconds", () => {
+    expect(formatServerUptime(0, mockT)).toBe("—");
+  });
+
+  it("returns em-dash for negative values", () => {
+    expect(formatServerUptime(-1, mockT)).toBe("—");
+  });
+
+  it("returns em-dash for NaN", () => {
+    expect(formatServerUptime(Number.NaN, mockT)).toBe("—");
+  });
+
+  it("formats sub-minute uptime as mins=0", () => {
+    expect(formatServerUptime(30, mockT)).toBe(
+      'server.overview.uptimeFormat.mins:{"mins":0}',
+    );
+  });
+
+  it("formats 60 seconds as 1 minute", () => {
+    expect(formatServerUptime(60, mockT)).toBe(
+      'server.overview.uptimeFormat.mins:{"mins":1}',
+    );
+  });
+
+  it("formats 3599 seconds as 59 minutes", () => {
+    expect(formatServerUptime(3599, mockT)).toBe(
+      'server.overview.uptimeFormat.mins:{"mins":59}',
+    );
+  });
+
+  it("formats 3660 seconds as 1 hour 1 minute", () => {
+    // 3660 = 1*3600 + 1*60
+    expect(formatServerUptime(3660, mockT)).toBe(
+      'server.overview.uptimeFormat.hoursMins:{"hours":1,"mins":1}',
+    );
+  });
+
+  it("formats 86399 seconds as 23 hours 59 minutes (still <1 day)", () => {
+    // 86399 = 23*3600 + 59*60 + 59
+    expect(formatServerUptime(86399, mockT)).toBe(
+      'server.overview.uptimeFormat.hoursMins:{"hours":23,"mins":59}',
+    );
+  });
+
+  it("formats 86400 seconds as 1 day 0 hours", () => {
+    expect(formatServerUptime(86400, mockT)).toBe(
+      'server.overview.uptimeFormat.daysHours:{"days":1,"hours":0}',
+    );
+  });
+
+  it("formats 90061 seconds as 1 day 1 hour", () => {
+    // 90061 = 1*86400 + 1*3600 + 1*60 + 1
+    expect(formatServerUptime(90061, mockT)).toBe(
+      'server.overview.uptimeFormat.daysHours:{"days":1,"hours":1}',
+    );
+  });
+
+  it("formats 172800 seconds as 2 days 0 hours", () => {
+    expect(formatServerUptime(172800, mockT)).toBe(
+      'server.overview.uptimeFormat.daysHours:{"days":2,"hours":0}',
+    );
+  });
+
+  it("formats fractional seconds by flooring minutes", () => {
+    // 3719.9 → 1ч 1м (floor)
+    expect(formatServerUptime(3719.9, mockT)).toBe(
+      'server.overview.uptimeFormat.hoursMins:{"hours":1,"mins":1}',
+    );
   });
 });
