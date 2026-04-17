@@ -41,8 +41,51 @@ export const NoCredentials: Story = {
 /**
  * Loading state: ServerPanelSkeleton shown during first SSH connection.
  * Uses the actual ServerPanelSkeleton component — single source of truth.
+ *
+ * Adaptive: real Pro window is `minWidth: 800` (no maxWidth — bounded by
+ * desktop). Cards use the same flex/flex-wrap values as OverviewSection,
+ * so wrapping naturally matches the real layout at any width.
+ *
+ * Use Storybook viewport addon (or resize the browser) to verify wrapping
+ * at 800/900/1100/1400 px.
  */
 export const Loading: Story = {
   name: "Loading (Skeleton)",
   render: () => <ServerPanelSkeleton />,
+};
+
+/**
+ * Loading at min window width (800px) — Pro app's enforced minimum.
+ */
+export const LoadingMinWidth: Story = {
+  name: "Loading @ 800px (min)",
+  render: () => (
+    <div style={{ width: 800, margin: "0 auto", height: "100%", display: "flex", flexDirection: "column", border: "1px dashed var(--color-border)" }}>
+      <ServerPanelSkeleton />
+    </div>
+  ),
+};
+
+/**
+ * Loading at default window width (1000px).
+ */
+export const LoadingDefaultWidth: Story = {
+  name: "Loading @ 1000px (default)",
+  render: () => (
+    <div style={{ width: 1000, margin: "0 auto", height: "100%", display: "flex", flexDirection: "column", border: "1px dashed var(--color-border)" }}>
+      <ServerPanelSkeleton />
+    </div>
+  ),
+};
+
+/**
+ * Loading at max window width (1200px) — Pro app's enforced maximum.
+ */
+export const LoadingMaxWidth: Story = {
+  name: "Loading @ 1200px (max)",
+  render: () => (
+    <div style={{ width: 1200, margin: "0 auto", height: "100%", display: "flex", flexDirection: "column", border: "1px dashed var(--color-border)" }}>
+      <ServerPanelSkeleton />
+    </div>
+  ),
 };

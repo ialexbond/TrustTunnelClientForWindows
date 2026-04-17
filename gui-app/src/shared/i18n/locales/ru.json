@@ -1004,6 +1004,8 @@
         "sshKey": "SSH-ключ",
         "tls": "TLS",
         "tlsActive": "Активен",
+        "tlsDays": "{{days}} дн.",
+        "tlsExpired": "Истёк",
         "active": "Активен",
         "inactive": "Выключен",
         "notInstalled": "Не установлен",

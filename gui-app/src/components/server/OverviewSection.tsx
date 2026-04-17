@@ -24,6 +24,7 @@ import type { ServerState } from "./useServerState";
 import { useServerStats } from "./useServerStats";
 import { useServerGeoIp } from "./useServerGeoIp";
 import { formatServerUptime } from "../../shared/utils/uptime";
+import { parseCertInfo, daysUntil } from "./certUtils";
 
 type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
 
@@ -287,6 +288,25 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   })();
 
   const hasTls = !!state.certRaw;
+  // TLS expiry calculation (3 states: >14d green, 7-14d warning, ≤7d danger)
+  const certInfo = state.certRaw ? parseCertInfo(state.certRaw) : null;
+  const tlsDaysLeft = certInfo?.notAfter ? daysUntil(certInfo.notAfter) : null;
+  const tlsState: "ok" | "warning" | "danger" | null = !hasTls
+    ? null
+    : tlsDaysLeft === null
+      ? "ok"
+      : tlsDaysLeft <= 7
+        ? "danger"
+        : tlsDaysLeft <= 14
+          ? "warning"
+          : "ok";
+  const tlsLabel = !hasTls
+    ? t("server.overview.security.placeholder")
+    : tlsDaysLeft === null
+      ? t("server.overview.security.tlsActive")
+      : tlsDaysLeft <= 0
+        ? t("server.overview.security.tlsExpired")
+        : t("server.overview.security.tlsDays", { days: tlsDaysLeft });
 
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
@@ -294,7 +314,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       {/* ── Row 1: Status | Ping | Speed | Users ── */}
 
       {/* Status — ECG */}
-      <Card padding="md" style={{ flex: "1 1 220px", maxWidth: 260 }}>
+      <Card padding="md" style={{ flex: "1 1 220px" }}>
         <Title icon={<HeartPulse className="w-5 h-5" />} text={t("server.overview.cards.status")} refreshAriaLabel={refreshAriaLabel} />
         {rebooting ? (
           <div className="flex flex-col items-center justify-center gap-1.5 py-1">
@@ -318,7 +338,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       </Card>
 
       {/* Ping */}
-      <Card padding="md" style={{ flex: "1 1 140px", maxWidth: 180 }}>
+      <Card padding="md" style={{ flex: "1 1 140px" }}>
         <Title icon={<Activity className="w-5 h-5" />} text={t("server.overview.cards.ping")} onRefresh={refreshPing} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-baseline justify-center gap-1 py-2">
           {ping !== null && ping > 0 ? (
@@ -375,7 +395,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           {geoLoading ? (
             <Skeleton variant="line" width={120} height={28} />
           ) : geo ? (
-            <span style={bigNum}>{geo.flag_emoji} {geo.country}</span>
+            <span style={bigNum}>{geo.country}</span>
           ) : (
             <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
           )}
@@ -441,17 +461,26 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                     ? t("server.overview.security.inactive")
                     : t("server.overview.security.placeholder"),
             },
-            { name: t("server.overview.security.sshKey"), ok: null as boolean | null, label: t("server.overview.security.placeholder") },
-            { name: t("server.overview.security.tls"), ok: hasTls, label: hasTls ? t("server.overview.security.tlsActive") : t("server.overview.security.placeholder") },
+            { name: t("server.overview.security.sshKey"), ok: null as boolean | null, label: t("server.overview.security.placeholder"), tone: null as "ok" | "warning" | "danger" | null },
+            { name: t("server.overview.security.tls"), ok: hasTls, label: tlsLabel, tone: tlsState },
           ].map((item) => {
-            const bg = item.ok === null
+            // tone — explicit 3-state (ok/warning/danger) for TLS; ok — boolean for firewall/fail2ban.
+            const tone = (item as { tone?: "ok" | "warning" | "danger" | null }).tone
+              ?? (item.ok === null ? null : item.ok ? "ok" : "danger");
+            const bg = tone === null
               ? "var(--color-bg-elevated)"
-              : item.ok
+              : tone === "ok"
                 ? "rgba(var(--color-status-connected-rgb, 16 185 129) / 0.08)"
-                : "rgba(var(--color-status-error-rgb, 224 85 69) / 0.08)";
-            const color = item.ok === null
+                : tone === "warning"
+                  ? "rgba(var(--color-status-warning-rgb, 234 179 8) / 0.08)"
+                  : "rgba(var(--color-status-error-rgb, 224 85 69) / 0.08)";
+            const color = tone === null
               ? "var(--color-text-muted)"
-              : item.ok ? "var(--color-success-500)" : "var(--color-danger-500)";
+              : tone === "ok"
+                ? "var(--color-success-500)"
+                : tone === "warning"
+                  ? "var(--color-warning-500)"
+                  : "var(--color-danger-500)";
             return (
               <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: bg }}>
                 <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
