@@ -82,10 +82,17 @@ impl ClientConfig {
 }
 
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
+///
+/// The source MUST be inside the app data directory — prevents the frontend
+/// from tricking the backend into reading arbitrary files.
+///
+/// The destination is NOT validated against the app data dir, because the
+/// frontend only reaches this command via `tauri-plugin-dialog::save()` which
+/// is the OS file picker — the user explicitly chose the path. Validating
+/// destination here would break every Save-As flow (Desktop, Downloads, etc.).
 #[tauri::command]
 pub fn copy_file(source: String, destination: String) -> Result<(), String> {
     validate_app_path(&source)?;
-    validate_app_path(&destination)?;
     std::fs::copy(&source, &destination)
         .map_err(|e| format!("Failed to copy file: {e}"))?;
     Ok(())
