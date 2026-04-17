@@ -317,14 +317,9 @@ export function UsersSection({ state }: Props) {
                             "transition-colors",
                             "focus-visible:shadow-[var(--focus-ring)] outline-none",
                             isLast
-                              ? "opacity-[var(--opacity-disabled)] cursor-not-allowed"
-                              : "hover:text-[var(--color-destructive)]"
+                              ? "opacity-[var(--opacity-disabled)] cursor-not-allowed text-[var(--color-text-muted)]"
+                              : "text-[var(--color-text-secondary)] hover:text-[var(--color-destructive)]"
                           )}
-                          style={{
-                            color: isLast
-                              ? "var(--color-text-muted)"
-                              : "var(--color-text-secondary)",
-                          }}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
