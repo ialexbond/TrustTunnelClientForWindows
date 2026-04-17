@@ -44,7 +44,7 @@ interface EcgSvgProps {
 export function EcgSvg({ color, path, anim }: EcgSvgProps) {
   return (
     <svg width="160" height="36" viewBox="0 0 160 36" fill="none">
-      <style>{`@keyframes ${anim} { from { stroke-dashoffset: 20; } to { stroke-dashoffset: -100; } }`}</style>
+      <style>{`@keyframes ${anim} { from { stroke-dashoffset: -100; } to { stroke-dashoffset: 20; } }`}</style>
       <path
         d={path}
         stroke={color}
