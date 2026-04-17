@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- Storybook default export is meta, not a component */
 import type { Meta, StoryObj } from "@storybook/react";
 import { UsersSection } from "./UsersSection";
 import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
