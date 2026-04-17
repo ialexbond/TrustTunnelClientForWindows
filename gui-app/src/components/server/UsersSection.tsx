@@ -86,6 +86,9 @@ export function UsersSection({ state }: Props) {
   } = state;
 
   const isAdding = !!actionLoading?.startsWith("add_user");
+  // Disable ALL row-level actions when anything is in flight (add/delete/continue)
+  // — prevents stray clicks during the 1-3s SSH round-trip.
+  const isBusy = !!actionLoading || state.deleteLoading || continueLoading;
 
   // Modal state — single source of truth for the UserConfigModal.
   const [modalUsername, setModalUsername] = useState<string | null>(null);
@@ -242,9 +245,13 @@ export function UsersSection({ state }: Props) {
                   <div
                     role="option"
                     aria-selected={isSelected}
-                    tabIndex={isSelected ? 0 : -1}
-                    onClick={() => setSelectedUser(u)}
+                    aria-disabled={isBusy}
+                    tabIndex={isSelected && !isBusy ? 0 : -1}
+                    onClick={() => {
+                      if (!isBusy) setSelectedUser(u);
+                    }}
                     onKeyDown={(e) => {
+                      if (isBusy) return;
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         setSelectedUser(u);
@@ -252,11 +259,14 @@ export function UsersSection({ state }: Props) {
                     }}
                     className={cn(
                       "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)]",
-                      "transition-all duration-200 cursor-pointer",
+                      "transition-all duration-200",
                       "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                      isBusy
+                        ? "opacity-[var(--opacity-disabled)] cursor-not-allowed"
+                        : "cursor-pointer",
                       isSelected
                         ? "bg-[var(--color-accent-tint-08)]"
-                        : "hover:bg-[var(--color-bg-hover)]"
+                        : !isBusy && "hover:bg-[var(--color-bg-hover)]"
                     )}
                   >
                     {/* Username — left, truncates with ellipsis */}
@@ -275,24 +285,26 @@ export function UsersSection({ state }: Props) {
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => e.stopPropagation()}
                     >
-                      {/* FileText — show config (D-03) */}
+                      {/* FileText — show config (D-03). Disabled during any in-flight action. */}
                       <Tooltip text={t("server.users.show_config_tooltip")}>
                         <button
                           type="button"
                           aria-label={t("server.users.show_config_tooltip")}
+                          disabled={isBusy}
                           onClick={() => handleShowConfig(u)}
                           className={cn(
                             "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
                             "transition-colors",
                             "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                            "focus-visible:shadow-[var(--focus-ring)] outline-none"
+                            "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                            "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)]"
                           )}
                         >
                           <FileText className="w-3.5 h-3.5" />
                         </button>
                       </Tooltip>
 
-                      {/* Trash — delete (disabled if last user, D-21) */}
+                      {/* Trash — delete. Disabled if last user (D-21) OR any action in-flight. */}
                       <Tooltip
                         text={
                           isLast
@@ -307,16 +319,16 @@ export function UsersSection({ state }: Props) {
                               ? t("server.users.cant_delete_last")
                               : t("server.users.delete_tooltip")
                           }
-                          aria-disabled={isLast}
-                          disabled={isLast}
+                          aria-disabled={isLast || isBusy}
+                          disabled={isLast || isBusy}
                           onClick={() => {
-                            if (!isLast) void handleDeleteUser(u);
+                            if (!isLast && !isBusy) void handleDeleteUser(u);
                           }}
                           className={cn(
                             "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
                             "transition-colors",
                             "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                            isLast
+                            isLast || isBusy
                               ? "opacity-[var(--opacity-disabled)] cursor-not-allowed text-[var(--color-text-muted)]"
                               : "text-[var(--color-text-secondary)] hover:text-[var(--color-destructive)]"
                           )}

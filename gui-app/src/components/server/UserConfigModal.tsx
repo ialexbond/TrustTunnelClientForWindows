@@ -7,6 +7,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Skeleton } from "../../shared/ui/Skeleton";
+import { Tooltip } from "../../shared/ui/Tooltip";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
@@ -388,19 +389,23 @@ export function UserConfigModal({
                 "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               )}
             />
-            <button
-              type="button"
-              aria-label={t("server.users.copy_deeplink_tooltip")}
-              onClick={() => void handleCopyLink()}
-              className={cn(
-                "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded",
-                "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
-                "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                "transition-colors",
-              )}
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2">
+              <Tooltip text={t("server.users.copy_deeplink_tooltip")}>
+                <button
+                  type="button"
+                  aria-label={t("server.users.copy_deeplink_tooltip")}
+                  onClick={() => void handleCopyLink()}
+                  className={cn(
+                    "p-1 rounded",
+                    "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+                    "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                    "transition-colors",
+                  )}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
+            </div>
           </div>
 
           {/* Download button. Button primitive itself renders a Loader2 when loading=true. */}
