@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Server,
   RefreshCw,
   Download,
   XCircle,
@@ -90,13 +89,16 @@ export function ServerPanel(props: ServerPanelProps) {
             >
               {t("server.actions.retry")}
             </Button>
+            {/* Phase 13.UAT G-04: Disconnect → возврат на SshConnectForm login.
+                Раньше был только "Configure SSH" (→ wizard), но это не экран
+                логина, а полноценный мастер настройки. Disconnect = чистый exit. */}
             <Button
               variant="ghost"
               size="sm"
-              icon={<Server className="w-3.5 h-3.5" />}
-              onClick={state.onSwitchToSetup}
+              icon={<LogOut className="w-3.5 h-3.5" />}
+              onClick={state.onDisconnect}
             >
-              {t("server.actions.configure_ssh")}
+              {t("control.disconnect")}
             </Button>
           </div>
         </div>
