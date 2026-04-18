@@ -1,5 +1,5 @@
 use super::super::*;
-use super::super::sanitize::validate_client_name;
+use super::super::sanitize::{validate_client_name, validate_fqdn_sni, validate_dns_list};
 use russh::client;
 
 /// Connect to a server where TrustTunnel is already installed,
@@ -282,4 +282,84 @@ pub async fn update_config_feature(
     let _ = exec_command(handle, app, &format!("{sudo}systemctl --no-block restart trusttunnel")).await;
 
     Ok(())
+}
+
+/// Advanced deeplink export with all 7 optional TLV fields.
+///
+/// # Path branching (per memory/users-tab-upstream-audit-phase14.1.md — Path A chosen)
+///
+/// Path A (active): CLI produces base deeplink via supported CLI flags (0x03, 0x0B, 0x0C, 0x0D),
+/// then `tlv_encoder::append_missing_tlvs` post-appends the 4 gap TLVs:
+/// - 0x07 skip_verification
+/// - 0x08 certificate DER
+/// - 0x09 upstream_protocol
+/// - 0x0A anti_dpi
+///
+/// Path B (not active): Would return base deeplink only; 4 gap params discarded.
+/// Path C: Phase paused; this function would not ship.
+#[allow(clippy::too_many_arguments)]
+pub async fn export_config_deeplink_advanced(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    client_name: String,
+    custom_sni: Option<String>,
+    name: Option<String>,
+    upstream_protocol: Option<String>,
+    anti_dpi: bool,
+    skip_verification: bool,
+    pin_certificate_der: Option<Vec<u8>>,
+    dns_upstreams: Vec<String>,
+) -> Result<String, String> {
+    validate_client_name(&client_name)?;
+    if let Some(sni) = &custom_sni {
+        validate_fqdn_sni(sni)?;
+    }
+    validate_dns_list(&dns_upstreams)?;
+
+    let sudo = detect_sudo(handle, app).await;
+
+    // Build CLI args for fields supported by upstream CLI
+    let mut cli_args = format!("-c {client_name}");
+    if let Some(sni) = &custom_sni {
+        if !sni.is_empty() {
+            cli_args.push_str(&format!(" -s {sni}"));
+        }
+    }
+    if let Some(n) = &name {
+        if !n.is_empty() {
+            // Escape double-quotes in display name
+            let escaped_n = n.replace('"', "\\\"");
+            cli_args.push_str(&format!(" -n \"{escaped_n}\""));
+        }
+    }
+    for dns in &dns_upstreams {
+        let t = dns.trim();
+        if !t.is_empty() {
+            cli_args.push_str(&format!(" -d {t}"));
+        }
+    }
+
+    let dir = ENDPOINT_DIR;
+    let svc = ENDPOINT_SERVICE;
+    let export_cmd = format!(
+        "{sudo}cd {dir} && ./{svc} vpn.toml hosts.toml {cli_args} --format deeplink 2>&1 | grep -oE 'tt://[^ ]+' | head -1"
+    );
+
+    let (output, code) = exec_command(handle, app, &export_cmd).await?;
+    if code != 0 {
+        return Err(format!("SSH_EXPORT_FAILED|{code}"));
+    }
+    let base_deeplink = output.trim().to_string();
+    if base_deeplink.is_empty() || !base_deeplink.starts_with("tt://") {
+        return Err("empty or malformed deeplink returned by endpoint CLI".into());
+    }
+
+    // PATH A — post-encode the 4 gap TLVs via tlv_encoder
+    super::tlv_encoder::append_missing_tlvs(
+        &base_deeplink,
+        anti_dpi,
+        skip_verification,
+        upstream_protocol.as_deref(),
+        pin_certificate_der.as_deref(),
+    )
 }
