@@ -209,8 +209,12 @@ describe("ChangelogModal", () => {
         releaseNotes="Some content"
       />,
     );
-    const scrollContainer = document.querySelector(".overflow-y-auto");
-    expect(scrollContainer).toBeInTheDocument();
-    expect((scrollContainer as HTMLElement).style.maxHeight).toBe("320px");
+    // Modal primitive also has overflow-y-auto (added in Phase 14.1 post-review for tall modals).
+    // ChangelogModal's own scroll container is distinguished by an inline maxHeight of 320px.
+    const scrollContainers = document.querySelectorAll(".overflow-y-auto");
+    const contentScroll = Array.from(scrollContainers).find(
+      (el) => (el as HTMLElement).style.maxHeight === "320px",
+    );
+    expect(contentScroll).toBeTruthy();
   });
 });

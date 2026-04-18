@@ -121,6 +121,7 @@ export function Modal({
           "rounded-[var(--radius-lg)]",
           "shadow-[var(--shadow-lg)]",
           "p-[var(--space-6)]",
+          "max-h-[calc(100vh-var(--space-8))] overflow-y-auto scroll-visible",
           "transition-all duration-200 ease-out",
           animating ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-2",
           className,

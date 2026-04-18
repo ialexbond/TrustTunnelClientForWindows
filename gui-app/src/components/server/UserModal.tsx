@@ -459,8 +459,14 @@ export function UserModal({
         </p>
 
         <div className="flex flex-col gap-[var(--space-3)]">
-          {/* Username */}
+          {/* Username (required) */}
           <ActionInput
+            label={
+              <>
+                {t("server.users.username_label")}
+                <span aria-hidden="true" className="ml-1 text-[var(--color-status-error)]">*</span>
+              </>
+            }
             value={username}
             onChange={(e) => {
               setUsername(e.target.value);
@@ -468,6 +474,7 @@ export function UserModal({
             }}
             placeholder={t("server.users.username_placeholder")}
             aria-label={t("server.users.username_placeholder")}
+            aria-required="true"
             disabled={isEditMode || isDisabled}
             error={localUsernameError ? t(localUsernameError) : (usernameError ? t(usernameError) : undefined)}
             clearable={!isEditMode}
@@ -535,10 +542,17 @@ export function UserModal({
             </div>
           ) : (
             <ActionPasswordInput
+              label={
+                <>
+                  {t("server.users.password_label")}
+                  <span aria-hidden="true" className="ml-1 text-[var(--color-status-error)]">*</span>
+                </>
+              }
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("server.users.password_placeholder")}
               aria-label={t("server.users.password_placeholder")}
+              aria-required="true"
               disabled={isDisabled}
               error={localPasswordError ? t(localPasswordError) : undefined}
               showLockIcon={false}
@@ -584,7 +598,7 @@ export function UserModal({
             disabled={isDisabled || configLoading}
           />
 
-          {/* Display name */}
+          {/* Display name (with character counter) */}
           <Input
             label={t("server.users.field_display_name")}
             value={deeplink.displayName}
@@ -592,7 +606,7 @@ export function UserModal({
             placeholder={t("server.users.field_display_name_hint")}
             aria-label={t("server.users.field_display_name")}
             disabled={isDisabled}
-            helperText={t("server.users.field_display_name_hint")}
+            helperText={`${t("server.users.field_display_name_hint")} (${deeplink.displayName.length}/64)`}
           />
 
           {/* Custom SNI */}

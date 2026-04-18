@@ -86,9 +86,9 @@
 
   /* ── Z-index ───────────────────────────────────── */
   --z-base: 0;
-  --z-dropdown: 100;
   --z-sticky: 200;
   --z-modal: 300;
+  --z-dropdown: 420;   /* above modal (300) and snackbar (400) — dropdowns inside modals must render on top */
   --z-snackbar: 400;
   --z-tooltip: 450;    /* above modal — tooltip inside modal must be visible */
   --z-titlebar: 500;
