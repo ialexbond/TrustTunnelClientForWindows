@@ -625,6 +625,7 @@
       "username_exists": "Пользователь уже существует",
       "password_ascii_only": "Только латиница, цифры и символы",
       "password_no_edge_spaces": "Пробелы в начале и конце не допускаются",
+      "password_no_quotes_backslash": "Кавычки и обратный слэш не допускаются",
       "confirm_delete_title": "Удалить пользователя?",
       "confirm_delete_message": "Пользователь «{{user}}» будет удалён с сервера.\nЕго конфигурация перестанет работать.",
       "user_deleted": "Пользователь «{{user}}» удалён",

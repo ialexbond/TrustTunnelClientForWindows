@@ -38,6 +38,9 @@ function validatePassword(v: string): string {
   if (v !== v.trim()) return "server.users.password_no_edge_spaces";
   // eslint-disable-next-line no-control-regex
   if (/[^\x00-\x7F]/.test(v)) return "server.users.password_ascii_only";
+  // CR-03: backend validate_vpn_password rejects ' " \. Mirror it on the frontend so
+  // users see the error before hitting the SSH roundtrip.
+  if (/["'\\]/.test(v)) return "server.users.password_no_quotes_backslash";
   return "";
 }
 
