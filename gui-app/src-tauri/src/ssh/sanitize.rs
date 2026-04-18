@@ -17,14 +17,26 @@ pub fn validate_vpn_username(s: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// VPN password: any printable characters EXCEPT shell-dangerous single quotes
-/// (which break heredoc boundaries) and control characters.
+/// VPN password: any printable characters EXCEPT backslash, single quote, and
+/// control characters.
+///
+/// CR-03 mitigation: the password is embedded in both a TOML double-quoted string
+/// and a python single-quoted string literal inside a single-quoted heredoc body.
+/// Backslash is banned because it introduces escape sequences in both contexts
+/// (e.g. `\"` closes the TOML value, `\\'` would terminate the python literal and
+/// still open the door to injection through the regex replacement). Single quote
+/// is banned because it terminates the python literal directly.
+///
+/// Double quote (`"`), dollar (`$`), backtick (`` ` ``) remain permitted — they
+/// are safe inside the single-quoted heredoc body (no shell expansion), and the
+/// TOML value uses double quotes so `"` is escaped via the regex match boundary
+/// (rejected already by the regex `[^"]*` replacement pattern).
 pub fn validate_vpn_password(s: &str) -> Result<(), String> {
     if s.is_empty() || s.len() > 128 {
         return Err("Password must be 1-128 characters".into());
     }
-    if s.chars().any(|c| c.is_control()) {
-        return Err("Password contains control characters".into());
+    if s.chars().any(|c| c.is_control() || matches!(c, '\\' | '\'' | '"')) {
+        return Err("Password contains invalid characters".into());
     }
     Ok(())
 }
@@ -264,12 +276,28 @@ mod tests {
         assert!(validate_vpn_password("P@ssw0rd!#%^&*").is_ok());
         assert!(validate_vpn_password("simple").is_ok());
         assert!(validate_vpn_password("with spaces ok").is_ok());
+        // CR-03: dollar/backtick/double-quote stay allowed — safe inside
+        // single-quoted heredoc body and the TOML value uses "[^\"]*".
+        assert!(validate_vpn_password("dollar$sign").is_ok());
+        assert!(validate_vpn_password("back`tick").is_ok());
     }
 
     #[test]
     fn password_rejects_control_chars() {
         assert!(validate_vpn_password("pass\x00word").is_err());
         assert!(validate_vpn_password("pass\nword").is_err());
+    }
+
+    #[test]
+    fn password_rejects_shell_unsafe_chars() {
+        // CR-03: backslash breaks both TOML value and python literal escaping.
+        assert!(validate_vpn_password(r"pass\word").is_err());
+        // Single quote terminates the python string literal.
+        assert!(validate_vpn_password("pass'word").is_err());
+        // Double quote terminates the TOML value.
+        assert!(validate_vpn_password("pass\"word").is_err());
+        // Injection attempts from CR-03 proof-of-exploit
+        assert!(validate_vpn_password(r#"evil"; rm -rf /; #"#).is_err());
     }
 
     #[test]
