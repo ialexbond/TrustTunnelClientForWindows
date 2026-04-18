@@ -7,7 +7,7 @@ mod logging;
 mod processes;
 mod routing_rules;
 mod sidecar;
-mod ssh;
+pub mod ssh;
 mod tray;
 
 use std::sync::{Arc, Mutex};
