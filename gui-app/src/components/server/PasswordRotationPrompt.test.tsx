@@ -70,13 +70,16 @@ describe("PasswordRotationPrompt", () => {
     expect(onConfirm).toHaveBeenCalledWith("ValidPass123");
   });
 
-  it("trims whitespace from password before calling onConfirm", () => {
-    const onConfirm = vi.fn();
-    render(<PasswordRotationPrompt {...defaultProps} onConfirm={onConfirm} />);
+  it("disables confirm button when password has leading whitespace (no trim bypass)", () => {
+    // WR-05: previous test passed "ValidPass123" (no whitespace) and verified the
+    // identity result, which proved nothing about trimming. The validator rejects
+    // any password with edge whitespace, so the confirm button stays disabled
+    // and trim() is never reached on the click handler.
+    render(<PasswordRotationPrompt {...defaultProps} />);
     const input = screen.getByPlaceholderText(/новый пароль/i);
-    fireEvent.change(input, { target: { value: "ValidPass123" } });
-    fireEvent.click(screen.getByRole("button", { name: /подтвердить/i }));
-    expect(onConfirm).toHaveBeenCalledWith("ValidPass123");
+    fireEvent.change(input, { target: { value: " ValidPass123" } });
+    expect(screen.getByRole("button", { name: /подтвердить/i })).toBeDisabled();
+    expect(screen.getByText(/пробелы в начале/i)).toBeInTheDocument();
   });
 
   it("calls onCancel when cancel is clicked", () => {

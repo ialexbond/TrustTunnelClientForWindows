@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../shared/lib/cn";
 
@@ -62,17 +62,41 @@ export function DnsUpstreamsInput({
 }: DnsUpstreamsInputProps) {
   const { t } = useTranslation();
 
-  // Convert array to textarea value (join with newlines)
-  const textareaValue = useMemo(() => value.join("\n"), [value]);
+  // WR-06: keep a local `draft` so that empty lines (used for mid-text cursor support
+  // and "press Enter to start a new line") are not lost on the next render. The
+  // controlled `value` prop is filtered (no empty entries), so naively echoing
+  // `value.join("\n")` back into the textarea would erase the trailing "\n" the
+  // user just typed and snap the caret to the end of the previous line.
+  //
+  // Pattern: «Adjusting state when a prop changes» from React docs. We track the
+  // last `value` we received in state and compare against the current prop in the
+  // render body — when they differ we adopt the new array AND reset the draft.
+  // When the parent simply echoes back our filtered `entries` (most common path
+  // since we call onChange ourselves), the previous-value sentinel is updated to
+  // the same reference inside handleChange, so this branch does not fire.
+  const [draft, setDraft] = useState<string>(() => value.join("\n"));
+  const [lastValueSeen, setLastValueSeen] = useState<string[]>(value);
+
+  const externalChanged =
+    value !== lastValueSeen &&
+    (value.length !== lastValueSeen.length ||
+      value.some((entry, i) => entry !== lastValueSeen[i]));
+  if (externalChanged) {
+    setLastValueSeen(value);
+    setDraft(value.join("\n"));
+  }
 
   // Parse textarea value → array (split by newline)
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const raw = e.target.value;
-      // Split by newline, keep empty strings for mid-text cursor support
+      setDraft(raw); // preserve empty / trailing lines locally
+      // Split by newline; non-empty lines flow downstream (validators reject empty).
       const lines = raw.split("\n");
-      // Non-empty lines for downstream usage
       const entries = lines.filter((l) => l.trim().length > 0).map((l) => l.trim());
+      // Mark the value we are about to emit so the prop-sync branch above does
+      // not re-overwrite our draft when the parent echoes it back.
+      setLastValueSeen(entries);
       onChange(entries);
 
       // Validate non-empty lines
@@ -102,7 +126,7 @@ export function DnsUpstreamsInput({
         </label>
       )}
       <textarea
-        value={textareaValue}
+        value={draft}
         onChange={handleChange}
         disabled={disabled}
         rows={4}
