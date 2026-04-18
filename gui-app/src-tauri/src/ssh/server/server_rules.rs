@@ -52,6 +52,16 @@ pub fn add_user_rule(
     Ok(doc.to_string())
 }
 
+/// Returns true if `prefix_str` contains a line that exactly matches `# User: {username}`.
+///
+/// Substring match is unsafe — `"# User: alice"` is a substring of `"# User: alice_jr"` and
+/// `String::contains` would return false positives across users with prefix-overlapping names
+/// (CR-04 in 14.1-REVIEW.md).
+fn prefix_matches_user_marker(prefix_str: &str, username: &str) -> bool {
+    let marker = format!("# User: {}", username);
+    prefix_str.lines().any(|line| line.trim() == marker)
+}
+
 /// Remove `[[rule]]` entries whose preceding comment contains exactly `# User: {username}`.
 /// Returns new file content. If no match, returns input unchanged.
 pub fn remove_user_rule(content: &str, username: &str) -> Result<String, String> {
@@ -63,10 +73,9 @@ pub fn remove_user_rule(content: &str, username: &str) -> Result<String, String>
         return Ok(content.to_string());
     };
 
-    let marker = format!("# User: {}", username);
     rules.retain(|rule| {
         let prefix_str = rule.decor().prefix().and_then(|r| r.as_str()).unwrap_or("");
-        !prefix_str.contains(&marker)
+        !prefix_matches_user_marker(prefix_str, username)
     });
 
     Ok(doc.to_string())
@@ -82,10 +91,9 @@ pub fn find_user_rule(content: &str, username: &str) -> Result<Option<UserRule>,
         return Ok(None);
     };
 
-    let marker = format!("# User: {}", username);
     for rule in rules.iter() {
         let prefix_str = rule.decor().prefix().and_then(|r| r.as_str()).unwrap_or("");
-        if prefix_str.contains(&marker) {
+        if prefix_matches_user_marker(prefix_str, username) {
             let prefix = rule.get("client_random_prefix").and_then(|v| v.as_str()).map(String::from);
             let cidr = rule.get("cidr").and_then(|v| v.as_str()).map(String::from);
             return Ok(Some(UserRule { client_random_prefix: prefix, cidr }));
@@ -196,5 +204,35 @@ mod tests {
         // This test asserts we do not further process the string.
         let content = add_user_rule("", "alice\"; rm", Some("aa"), None).unwrap();
         assert!(content.contains("alice\"; rm"));
+    }
+
+    #[test]
+    fn find_user_does_not_match_prefix_substring() {
+        // CR-04: marker `# User: alice` must NOT match `# User: alice_jr` block.
+        let mut content = add_user_rule("", "alice", Some("aa"), None).unwrap();
+        content = add_user_rule(&content, "alice_jr", Some("bb"), None).unwrap();
+
+        let alice = find_user_rule(&content, "alice").unwrap().unwrap();
+        assert_eq!(alice.client_random_prefix.as_deref(), Some("aa"));
+
+        let alice_jr = find_user_rule(&content, "alice_jr").unwrap().unwrap();
+        assert_eq!(alice_jr.client_random_prefix.as_deref(), Some("bb"));
+    }
+
+    #[test]
+    fn remove_user_does_not_match_prefix_substring() {
+        // CR-04: removing `alice` must NOT remove `alice_jr` (data-loss bug).
+        let mut content = add_user_rule("", "alice", Some("aa"), None).unwrap();
+        content = add_user_rule(&content, "alice_jr", Some("bb"), None).unwrap();
+
+        let removed = remove_user_rule(&content, "alice").unwrap();
+        assert!(
+            find_user_rule(&removed, "alice_jr").unwrap().is_some(),
+            "alice_jr must survive removal of alice (substring overlap)"
+        );
+        assert!(
+            find_user_rule(&removed, "alice").unwrap().is_none(),
+            "alice must be removed"
+        );
     }
 }
