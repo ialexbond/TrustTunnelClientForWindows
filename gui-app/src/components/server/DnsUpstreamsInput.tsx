@@ -21,7 +21,6 @@ import { cn } from "../../shared/lib/cn";
 function isValidDnsEntry(entry: string): boolean {
   if (!entry) return true; // empty lines are skipped, not invalid
   // Reject shell metacharacters (mirrors server-side validate_dns_list)
-  // eslint-disable-next-line no-useless-escape
   if (/[;&|`$(){}[\]<>\\!#^~]/.test(entry)) return false;
   // Allow IPv4
   if (/^\d+\.\d+\.\d+\.\d+$/.test(entry)) {
@@ -138,4 +137,5 @@ export function DnsUpstreamsInput({
 }
 
 // Re-export validator for testing and parent components
+// eslint-disable-next-line react-refresh/only-export-components
 export { isValidDnsEntry };
