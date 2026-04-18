@@ -7,6 +7,9 @@ mod server_security;
 mod server_mtproto;
 mod server_bbr;
 mod server_uptime;
+pub mod server_rules;
+pub mod cert_probe;
+pub mod tlv_encoder;
 
 pub use server_lifecycle::*;
 pub use server_install::*;
@@ -17,3 +20,6 @@ pub use server_security::*;
 pub use server_mtproto::*;
 pub use server_bbr::*;
 pub use server_uptime::*;
+pub use server_rules::{add_user_rule, remove_user_rule, find_user_rule, UserRule};
+pub use cert_probe::{fetch_endpoint_cert, EndpointCertInfo};
+pub use tlv_encoder::append_missing_tlvs;
