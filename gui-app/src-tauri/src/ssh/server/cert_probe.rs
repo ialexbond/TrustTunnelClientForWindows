@@ -14,6 +14,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use tokio_rustls::rustls;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -24,15 +25,42 @@ use tokio_rustls::TlsConnector;
 
 /// Maximum accepted leaf certificate DER size (T-14.1-06 mitigation).
 /// Typical real certs are <2KB; 8KB is a 4x safety buffer.
-const MAX_CERT_DER_BYTES: usize = 8192;
+pub const MAX_CERT_DER_BYTES: usize = 8192;
 const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
 
-/// Result of a TLS certificate probe — contains raw DER bytes and SHA-256 fingerprint.
+/// Result of a TLS certificate probe.
+///
+/// # Wire format (CR-01)
+/// `leaf_der_b64` is the DER leaf certificate as a Base64-encoded string. Earlier revisions
+/// returned `leaf_der: Vec<u8>` but Tauri+serde_json serialize byte vectors as JSON arrays of
+/// numbers (`[1, 2, 3, ...]`), not Base64. The frontend expected a string and tried to round-trip
+/// the value back through `pin_certificate_der: Option<Vec<u8>>` which also does not accept
+/// Base64 — together that broke cert pinning end-to-end. Fix: canonical representation is a
+/// Base64 string across the boundary; backend encodes/decodes internally when it needs bytes.
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct EndpointCertInfo {
-    pub leaf_der: Vec<u8>,
+    /// Base64-encoded DER bytes of the leaf certificate.
+    pub leaf_der_b64: String,
+    /// Lowercase SHA-256 hex (no separators) of the leaf DER bytes.
     pub fingerprint_hex: String,
     pub chain_len: usize,
+}
+
+/// Decode a base64 DER string into raw bytes with the same size cap applied to live probes.
+///
+/// Callers use this to validate `pin_certificate_der` parameters coming from the frontend.
+pub fn decode_cert_der_b64(s: &str) -> Result<Vec<u8>, String> {
+    let bytes = B64
+        .decode(s.as_bytes())
+        .map_err(|e| format!("invalid cert base64: {e}"))?;
+    if bytes.len() > MAX_CERT_DER_BYTES {
+        return Err(format!(
+            "cert DER too large ({} bytes, max {})",
+            bytes.len(),
+            MAX_CERT_DER_BYTES
+        ));
+    }
+    Ok(bytes)
 }
 
 /// A TLS verifier that accepts any certificate chain.
@@ -151,8 +179,9 @@ pub async fn fetch_endpoint_cert(
         }
         let digest = Sha256::digest(&leaf_der);
         let fingerprint_hex = format_fingerprint_hex(&digest);
+        let leaf_der_b64 = B64.encode(&leaf_der);
         Ok(EndpointCertInfo {
-            leaf_der,
+            leaf_der_b64,
             fingerprint_hex,
             chain_len: chain.len(),
         })
@@ -195,14 +224,38 @@ mod tests {
 
     #[test]
     fn endpoint_cert_info_serializes() {
+        // CR-01: leaf_der_b64 must be a plain JSON string, not an array of numbers.
         let info = EndpointCertInfo {
-            leaf_der: vec![0x01, 0x02, 0x03],
+            leaf_der_b64: "AQID".to_string(), // base64("\x01\x02\x03")
             fingerprint_hex: "aabbcc".to_string(),
             chain_len: 2,
         };
         let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"leaf_der_b64\":\"AQID\""));
         assert!(json.contains("\"fingerprint_hex\":\"aabbcc\""));
         assert!(json.contains("\"chain_len\":2"));
+    }
+
+    #[test]
+    fn decode_cert_der_b64_roundtrips() {
+        let bytes = vec![0x01, 0x02, 0x03];
+        let encoded = B64.encode(&bytes);
+        assert_eq!(decode_cert_der_b64(&encoded).unwrap(), bytes);
+    }
+
+    #[test]
+    fn decode_cert_der_b64_rejects_invalid_base64() {
+        assert!(decode_cert_der_b64("!!!not-base64!!!").is_err());
+    }
+
+    #[test]
+    fn decode_cert_der_b64_enforces_size_cap() {
+        // Anything decoding to > 8192 bytes must be rejected.
+        let oversized = B64.encode(vec![0u8; MAX_CERT_DER_BYTES + 1]);
+        assert!(decode_cert_der_b64(&oversized).is_err());
+        // Exactly 8192 is accepted.
+        let max_ok = B64.encode(vec![0u8; MAX_CERT_DER_BYTES]);
+        assert!(decode_cert_der_b64(&max_ok).is_ok());
     }
 
     #[test]

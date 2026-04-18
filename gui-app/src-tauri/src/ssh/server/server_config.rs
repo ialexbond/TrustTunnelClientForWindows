@@ -307,7 +307,9 @@ pub async fn export_config_deeplink_advanced(
     upstream_protocol: Option<String>,
     anti_dpi: bool,
     skip_verification: bool,
-    pin_certificate_der: Option<Vec<u8>>,
+    // CR-01: Base64-encoded DER leaf cert. Decoded once via `decode_cert_der_b64`
+    // (which enforces MAX_CERT_DER_BYTES) before being handed to `tlv_encoder`.
+    pin_certificate_der: Option<String>,
     dns_upstreams: Vec<String>,
 ) -> Result<String, String> {
     validate_client_name(&client_name)?;
@@ -361,12 +363,18 @@ pub async fn export_config_deeplink_advanced(
         return Err("empty or malformed deeplink returned by endpoint CLI".into());
     }
 
+    // CR-01: decode the base64 DER cert here so the tlv_encoder sees raw bytes.
+    let pin_certificate_der_bytes: Option<Vec<u8>> = match pin_certificate_der {
+        Some(ref s) if !s.is_empty() => Some(super::decode_cert_der_b64(s)?),
+        _ => None,
+    };
+
     // PATH A — post-encode the 4 gap TLVs via tlv_encoder
     super::tlv_encoder::append_missing_tlvs(
         &base_deeplink,
         anti_dpi,
         skip_verification,
         upstream_protocol.as_deref(),
-        pin_certificate_der.as_deref(),
+        pin_certificate_der_bytes.as_deref(),
     )
 }
