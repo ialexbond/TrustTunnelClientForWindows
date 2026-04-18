@@ -32,6 +32,12 @@ pub use server::{
     mtproto_install, mtproto_get_status, mtproto_uninstall,
     // MtProtoStatus, MtProtoInstallStep are re-exported via commands
     detect_bbr_status, enable_bbr, disable_bbr,
+    // Phase 14.1 — advanced user config
+    server_rotate_user_password, server_add_user_advanced,
+    server_update_user_config, server_regenerate_client_prefix,
+    server_fetch_endpoint_cert, server_get_user_config,
+    export_config_deeplink_advanced,
+    UserRule, EndpointCertInfo,
 };
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};

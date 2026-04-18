@@ -347,3 +347,72 @@ pub fn check_process_conflict() -> Option<String> {
 pub fn kill_existing_process() -> Result<(), String> {
     ssh::kill_existing_process()
 }
+
+// ─── Phase 14.1 — advanced user config commands ──────────────────
+
+ssh_pool_command!(
+    server_rotate_user_password,
+    ssh::server_rotate_user_password,
+    vpn_username: String,
+    new_password: String
+);
+
+ssh_pool_command!(
+    server_add_user_advanced,
+    ssh::server_add_user_advanced,
+    vpn_username: String,
+    vpn_password: String,
+    anti_dpi: bool,
+    prefix_length: Option<u32>,
+    prefix_percent: Option<u32>,
+    cidr: Option<String>,
+    custom_sni: Option<String>,
+    name: Option<String>,
+    upstream_protocol: Option<String>,
+    skip_verification: bool,
+    pin_certificate_der: Option<Vec<u8>>,
+    dns_upstreams: Vec<String>
+);
+
+ssh_pool_command!(
+    server_update_user_config,
+    ssh::server_update_user_config,
+    username: String,
+    cidr: Option<String>,
+    anti_dpi: bool,
+    regenerate_prefix: bool
+);
+
+ssh_pool_command!(
+    server_regenerate_client_prefix,
+    ssh::server_regenerate_client_prefix,
+    vpn_username: String,
+    prefix_length: u32,
+    prefix_percent: u32
+);
+
+ssh_pool_command!(
+    server_fetch_endpoint_cert,
+    ssh::server_fetch_endpoint_cert,
+    hostname: String,
+    cert_port: u16
+);
+
+ssh_pool_command!(
+    server_export_config_deeplink_advanced,
+    ssh::export_config_deeplink_advanced,
+    client_name: String,
+    custom_sni: Option<String>,
+    name: Option<String>,
+    upstream_protocol: Option<String>,
+    anti_dpi: bool,
+    skip_verification: bool,
+    pin_certificate_der: Option<Vec<u8>>,
+    dns_upstreams: Vec<String>
+);
+
+ssh_pool_command!(
+    server_get_user_config,
+    ssh::server_get_user_config,
+    vpn_username: String
+);
