@@ -1,5 +1,5 @@
 use super::super::*;
-use super::super::sanitize::{validate_client_name, validate_fqdn_sni, validate_dns_list};
+use super::super::sanitize::{validate_client_name, validate_display_name, validate_fqdn_sni, validate_dns_list};
 use russh::client;
 
 /// Connect to a server where TrustTunnel is already installed,
@@ -314,11 +314,18 @@ pub async fn export_config_deeplink_advanced(
     if let Some(sni) = &custom_sni {
         validate_fqdn_sni(sni)?;
     }
+    if let Some(n) = &name {
+        // CR-02 mitigation — block shell metachars in display name before interpolating
+        // into the `-n "..."` arg of the endpoint CLI.
+        validate_display_name(n)?;
+    }
     validate_dns_list(&dns_upstreams)?;
 
     let sudo = detect_sudo(handle, app).await;
 
-    // Build CLI args for fields supported by upstream CLI
+    // Build CLI args for fields supported by upstream CLI.
+    // All interpolated values are pre-validated above (validate_*). No additional escaping
+    // is performed: validators reject every shell metachar so the unquoted form is safe.
     let mut cli_args = format!("-c {client_name}");
     if let Some(sni) = &custom_sni {
         if !sni.is_empty() {
@@ -327,9 +334,9 @@ pub async fn export_config_deeplink_advanced(
     }
     if let Some(n) = &name {
         if !n.is_empty() {
-            // Escape double-quotes in display name
-            let escaped_n = n.replace('"', "\\\"");
-            cli_args.push_str(&format!(" -n \"{escaped_n}\""));
+            // Quoted form preserves spaces in display names. Validator rejects ", `, $, \,
+            // newlines and shell metachars, so `n` cannot escape the double-quoted context.
+            cli_args.push_str(&format!(" -n \"{n}\""));
         }
     }
     for dns in &dns_upstreams {
