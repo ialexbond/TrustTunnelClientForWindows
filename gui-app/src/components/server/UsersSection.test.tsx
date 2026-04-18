@@ -94,10 +94,11 @@ describe("UsersSection (Phase 14 redesign)", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders users title (CardHeader with i18n)", () => {
+  it("does not render a duplicate card title (Phase 14.1 post-review: header removed)", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    expect(screen.getByText(i18n.t("server.users.title"))).toBeInTheDocument();
+    // Card title removed — the tab already shows «Пользователи», no duplicate heading
+    expect(screen.queryByText(i18n.t("server.users.title"))).not.toBeInTheDocument();
   });
 
   it("renders user names in a <ul> list (static, no selection)", () => {
@@ -355,24 +356,19 @@ describe("UsersSection (Phase 14 redesign)", () => {
   });
 
   // ══════════════════════════════════════════════════════
-  // D-2 (Phase 14.1): Plus-icon in CardHeader opens UserModal (replaces inline form)
+  // D-2 (Phase 14.1 post-review): Single bottom «Add user» button opens UserModal
+  // Header plus-icon removed per user feedback — avoids duplicate entry point.
   // D-16 inline-form tests moved to UserModal.test.tsx
   // ══════════════════════════════════════════════════════
 
-  it("D-2 (Phase 14.1): Plus-icon add button is present in header", () => {
-    const state = makeState();
-    render(<UsersSection state={state} />);
-    // Plus-icon button in CardHeader (not inline form)
-    const addBtn = screen.getByTestId("users-add-btn");
-    expect(addBtn).toBeInTheDocument();
-    expect(addBtn).not.toBeDisabled();
-  });
-
-  it("D-2 (Phase 14.1): Bottom add button also present as secondary entry point", () => {
+  it("D-2 (Phase 14.1 post-review): Bottom add button is the sole entry point to UserModal Add", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
     const addBtnBottom = screen.getByTestId("users-add-btn-bottom");
     expect(addBtnBottom).toBeInTheDocument();
+    expect(addBtnBottom).not.toBeDisabled();
+    // No header plus-icon — removed per post-review feedback
+    expect(screen.queryByTestId("users-add-btn")).not.toBeInTheDocument();
   });
 
   it("D-3 (Phase 14.1): Gear icon per row opens UserModal in Edit mode", () => {
@@ -481,11 +477,10 @@ describe("UsersSection (Phase 14 redesign)", () => {
     }
   });
 
-  it("D-29 SECURITY (Phase 14.1): plus-icon opens UserModal (Add moved out of UsersSection)", () => {
+  it("D-29 SECURITY (Phase 14.1 post-review): bottom add button opens UserModal (Add moved out of UsersSection)", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
-    // Plus-icon button triggers UserModal — no inline add form (D-2)
-    const addBtn = screen.getByTestId("users-add-btn");
+    const addBtn = screen.getByTestId("users-add-btn-bottom");
     expect(addBtn).toBeInTheDocument();
     fireEvent.click(addBtn);
     // activity log: user.modal.open_add logged (no password involved at this stage)

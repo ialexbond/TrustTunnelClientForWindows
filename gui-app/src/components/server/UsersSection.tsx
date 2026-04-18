@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../shared/lib/cn";
-import { Users, FileText, Trash2, Settings, Plus } from "lucide-react";
-import { Card, CardHeader } from "../../shared/ui/Card";
+import { Users, FileText, Trash2, Settings } from "lucide-react";
+import { Card } from "../../shared/ui/Card";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { Divider } from "../../shared/ui/Divider";
 import { Tooltip } from "../../shared/ui/Tooltip";
@@ -158,27 +158,6 @@ export function UsersSection({ state }: Props) {
   return (
     <>
       <Card>
-        {/* CardHeader: title + plus-icon add button (D-2) */}
-        <CardHeader
-          title={t("server.users.title")}
-          icon={<Users className="w-3.5 h-3.5" />}
-          action={
-            <Tooltip text={t("server.users.add_tooltip")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label={t("server.users.add_tooltip")}
-                onClick={handleOpenAdd}
-                disabled={isBusy}
-                data-testid="users-add-btn"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </Button>
-            </Tooltip>
-          }
-        />
-
         {/* Users list OR EmptyState */}
         {serverInfo.users.length === 0 ? (
           <EmptyState

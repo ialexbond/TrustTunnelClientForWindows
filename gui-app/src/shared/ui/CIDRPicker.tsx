@@ -91,66 +91,77 @@ export function CIDRPicker({
     </span>
   );
 
+  const octetBox = "w-12 shrink-0";
+
   return (
-    <div className={cn("w-full", className)} aria-label={ariaLabel}>
+    <div className={cn(className)} aria-label={ariaLabel}>
       {label && (
         <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
           {label}
         </label>
       )}
-      <div className="flex items-center gap-1">
-        <NumberInput
-          value={octets[0]}
-          onChange={(v) => handleOctetChange(0, v)}
-          min={0}
-          max={255}
-          disabled={disabled}
-          className="w-14 text-center"
-          aria-label={t("server.users.cidr_octet_1")}
-        />
+      <div className="inline-flex items-center gap-1">
+        <div className={octetBox}>
+          <NumberInput
+            value={octets[0]}
+            onChange={(v) => handleOctetChange(0, v)}
+            min={0}
+            max={255}
+            disabled={disabled}
+            className="text-center"
+            aria-label={t("server.users.cidr_octet_1")}
+          />
+        </div>
         {dotSpan}
-        <NumberInput
-          value={octets[1]}
-          onChange={(v) => handleOctetChange(1, v)}
-          min={0}
-          max={255}
-          disabled={disabled}
-          className="w-14 text-center"
-          aria-label={t("server.users.cidr_octet_2")}
-        />
+        <div className={octetBox}>
+          <NumberInput
+            value={octets[1]}
+            onChange={(v) => handleOctetChange(1, v)}
+            min={0}
+            max={255}
+            disabled={disabled}
+            className="text-center"
+            aria-label={t("server.users.cidr_octet_2")}
+          />
+        </div>
         {dotSpan}
-        <NumberInput
-          value={octets[2]}
-          onChange={(v) => handleOctetChange(2, v)}
-          min={0}
-          max={255}
-          disabled={disabled}
-          className="w-14 text-center"
-          aria-label={t("server.users.cidr_octet_3")}
-        />
+        <div className={octetBox}>
+          <NumberInput
+            value={octets[2]}
+            onChange={(v) => handleOctetChange(2, v)}
+            min={0}
+            max={255}
+            disabled={disabled}
+            className="text-center"
+            aria-label={t("server.users.cidr_octet_3")}
+          />
+        </div>
         {dotSpan}
-        <NumberInput
-          value={octets[3]}
-          onChange={(v) => handleOctetChange(3, v)}
-          min={0}
-          max={255}
-          disabled={disabled}
-          className="w-14 text-center"
-          aria-label={t("server.users.cidr_octet_4")}
-        />
+        <div className={octetBox}>
+          <NumberInput
+            value={octets[3]}
+            onChange={(v) => handleOctetChange(3, v)}
+            min={0}
+            max={255}
+            disabled={disabled}
+            className="text-center"
+            aria-label={t("server.users.cidr_octet_4")}
+          />
+        </div>
         <span aria-hidden="true" className="mx-1 text-[var(--color-text-muted)] select-none">
           /
         </span>
-        <Select
-          value={prefix}
-          onChange={(e) => handlePrefixChange(e.target.value)}
-          options={PREFIX_OPTIONS}
-          placeholder="—"
-          disabled={disabled}
-          fullWidth={false}
-          className="w-20"
-          aria-label={t("server.users.cidr_prefix")}
-        />
+        <div className="w-16 shrink-0">
+          <Select
+            value={prefix}
+            onChange={(e) => handlePrefixChange(e.target.value)}
+            options={PREFIX_OPTIONS}
+            placeholder="—"
+            disabled={disabled}
+            fullWidth
+            aria-label={t("server.users.cidr_prefix")}
+          />
+        </div>
       </div>
       {autoHelper && (
         <p className="text-xs mt-1.5 text-[var(--color-text-muted)]">{autoHelper}</p>

@@ -3,8 +3,8 @@ import { Eye, EyeOff, Lock, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Tooltip } from "./Tooltip";
 
-interface ActionPasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
-  label?: string;
+interface ActionPasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "label"> {
+  label?: ReactNode;
   error?: string;
   helperText?: string;
   showLockIcon?: boolean;

@@ -3,8 +3,8 @@ import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Tooltip } from "./Tooltip";
 
-interface ActionInputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string;
+interface ActionInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "label"> {
+  label?: ReactNode;
   description?: string;
   leftIcon?: ReactNode;
   actions?: ReactNode[];
