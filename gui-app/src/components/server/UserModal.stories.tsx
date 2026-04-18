@@ -61,7 +61,7 @@ export const AddMode: Story = {
     existingUsers: ["swift-fox", "bold-eagle"],
     sshParams: mockSshParams,
     onClose: () => {},
-    onUserAdded: (user) => console.log("User added:", user),
+    onUserAdded: (user) => console.warn("[story] user added", user),
     _storybook: true,
   },
 };
@@ -78,7 +78,7 @@ export const EditMode: Story = {
     existingUsers: ["alice", "bob"],
     sshParams: mockSshParams,
     onClose: () => {},
-    onUserUpdated: (user) => console.log("User updated:", user),
+    onUserUpdated: (user) => console.warn("[story] user updated", user),
     _storybook: true,
   },
 };
@@ -88,7 +88,6 @@ export const EditMode: Story = {
  */
 export const Interactive: Story = {
   render: () => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     const [isOpen, setIsOpen] = useState(false);
     return (
       <SnackBarProvider>
@@ -121,7 +120,7 @@ export const Interactive: Story = {
               sshParams={mockSshParams}
               onClose={() => setIsOpen(false)}
               onUserAdded={(user) => {
-                console.log("Added:", user);
+                console.warn("[story] added", user);
                 setIsOpen(false);
               }}
               _storybook
@@ -138,7 +137,6 @@ export const Interactive: Story = {
  */
 export const EditWithRotation: Story = {
   render: () => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     const [isOpen, setIsOpen] = useState(true);
     return (
       <SnackBarProvider>
