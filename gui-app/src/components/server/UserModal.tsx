@@ -12,6 +12,7 @@ import { CIDRPicker } from "../../shared/ui/CIDRPicker";
 import { Tooltip } from "../../shared/ui/Tooltip";
 import { ActionInput } from "../../shared/ui/ActionInput";
 import { ActionPasswordInput } from "../../shared/ui/ActionPasswordInput";
+import { CharCounter } from "../../shared/ui/CharCounter";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
@@ -598,16 +599,27 @@ export function UserModal({
             disabled={isDisabled || configLoading}
           />
 
-          {/* Display name (with character counter) */}
-          <Input
-            label={t("server.users.field_display_name")}
-            value={deeplink.displayName}
-            onChange={(e) => updateDeeplink("displayName", e.target.value.slice(0, 64))}
-            placeholder={t("server.users.field_display_name_hint")}
-            aria-label={t("server.users.field_display_name")}
-            disabled={isDisabled}
-            helperText={`${t("server.users.field_display_name_hint")} (${deeplink.displayName.length}/64)`}
-          />
+          {/* Display name with CharCounter aligned right above the field (matches Input label styling: text-sm semibold) */}
+          <div>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <label
+                htmlFor="user-modal-display-name"
+                className="block text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)]"
+              >
+                {t("server.users.field_display_name")}
+              </label>
+              <CharCounter value={deeplink.displayName.length} max={64} />
+            </div>
+            <Input
+              id="user-modal-display-name"
+              value={deeplink.displayName}
+              onChange={(e) => updateDeeplink("displayName", e.target.value.slice(0, 64))}
+              placeholder={t("server.users.field_display_name_hint")}
+              aria-label={t("server.users.field_display_name")}
+              disabled={isDisabled}
+              helperText={t("server.users.field_display_name_hint")}
+            />
+          </div>
 
           {/* Custom SNI */}
           <Input
