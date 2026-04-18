@@ -370,7 +370,8 @@ ssh_pool_command!(
     name: Option<String>,
     upstream_protocol: Option<String>,
     skip_verification: bool,
-    pin_certificate_der: Option<Vec<u8>>,
+    // CR-01: Base64-encoded DER bytes (string), not Vec<u8>. See cert_probe.rs.
+    pin_certificate_der: Option<String>,
     dns_upstreams: Vec<String>
 );
 
@@ -407,7 +408,8 @@ ssh_pool_command!(
     upstream_protocol: Option<String>,
     anti_dpi: bool,
     skip_verification: bool,
-    pin_certificate_der: Option<Vec<u8>>,
+    // CR-01: Base64-encoded DER bytes (string).
+    pin_certificate_der: Option<String>,
     dns_upstreams: Vec<String>
 );
 

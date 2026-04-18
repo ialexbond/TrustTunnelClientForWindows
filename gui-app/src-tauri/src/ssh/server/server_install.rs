@@ -355,9 +355,10 @@ PY_ROTATE_EOF"#,
 /// Add a user with credentials.toml entry AND optional rules.toml per-user rule (anti-DPI + CIDR).
 /// Returns generated deeplink URI string.
 ///
-/// B2 revision: `pin_certificate_der: Option<Vec<u8>>` — frontend (UserModal) fetches DER bytes
-/// via `server_fetch_endpoint_cert` first (displaying fingerprint for user confirmation), then
-/// passes the raw bytes here. Backend writes cert TLV only when `pin_certificate_der.is_some()`.
+/// CR-01 revision: `pin_certificate_der` is now `Option<String>` carrying a Base64-encoded
+/// DER leaf certificate. Tauri+serde serialize `Vec<u8>` as an array of numbers, which the
+/// frontend cannot produce from the `leaf_der_b64` string returned by
+/// `server_fetch_endpoint_cert`. Base64 is the canonical wire format; we decode locally.
 #[allow(clippy::too_many_arguments)]
 pub async fn server_add_user_advanced(
     app: &tauri::AppHandle,
@@ -372,7 +373,7 @@ pub async fn server_add_user_advanced(
     name: Option<String>,
     upstream_protocol: Option<String>,
     skip_verification: bool,
-    pin_certificate_der: Option<Vec<u8>>,
+    pin_certificate_der: Option<String>,
     dns_upstreams: Vec<String>,
 ) -> Result<String, String> {
     validate_vpn_username(&vpn_username)?;
@@ -383,12 +384,15 @@ pub async fn server_add_user_advanced(
     if let Some(sni) = &custom_sni {
         crate::ssh::sanitize::validate_fqdn_sni(sni)?;
     }
-    crate::ssh::sanitize::validate_dns_list(&dns_upstreams)?;
-    if let Some(der) = &pin_certificate_der {
-        if der.len() > 8192 {
-            return Err("cert DER too large (> 8192 bytes)".into());
-        }
+    if let Some(n) = &name {
+        crate::ssh::sanitize::validate_display_name(n)?;
     }
+    crate::ssh::sanitize::validate_dns_list(&dns_upstreams)?;
+    // CR-01: decode base64 DER (with size cap) once here, pass raw bytes downstream.
+    let pin_certificate_der_bytes: Option<Vec<u8>> = match pin_certificate_der {
+        Some(ref s) if !s.is_empty() => Some(super::decode_cert_der_b64(s)?),
+        _ => None,
+    };
 
     let prefix_length = prefix_length.unwrap_or(4).clamp(1, 16);
     let prefix_percent = prefix_percent.unwrap_or(70).clamp(1, 100);
@@ -431,7 +435,12 @@ pub async fn server_add_user_advanced(
         }
     }
 
-    // Step 3: generate deeplink with all TLV fields
+    // Step 3: generate deeplink with all TLV fields. Re-encode DER bytes back to Base64
+    // because export_config_deeplink_advanced shares the same wire format with the
+    // standalone Tauri command (server_export_config_deeplink_advanced).
+    let pin_certificate_der_b64 = pin_certificate_der_bytes
+        .as_ref()
+        .map(|b| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b));
     super::export_config_deeplink_advanced(
         app, handle,
         vpn_username.clone(),
@@ -440,7 +449,7 @@ pub async fn server_add_user_advanced(
         upstream_protocol,
         anti_dpi,
         skip_verification,
-        pin_certificate_der,
+        pin_certificate_der_b64,
         dns_upstreams,
     ).await
 }
