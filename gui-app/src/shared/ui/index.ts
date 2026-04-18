@@ -4,6 +4,7 @@ export { ActionPasswordInput } from "./ActionPasswordInput";
 export { Badge } from "./Badge";
 export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
+export { CIDRPicker, PREFIX_OPTIONS, type CIDRPickerProps } from "./CIDRPicker";
 export { ConfirmDialog } from "./ConfirmDialog";
 export {
   ConfirmDialogProvider,
