@@ -355,43 +355,40 @@ describe("UsersSection (Phase 14 redesign)", () => {
   });
 
   // ══════════════════════════════════════════════════════
-  // D-16: No min-length validation
+  // D-2 (Phase 14.1): Plus-icon in CardHeader opens UserModal (replaces inline form)
+  // D-16 inline-form tests moved to UserModal.test.tsx
   // ══════════════════════════════════════════════════════
 
-  it("D-16: 1-char username + 1-char password does NOT disable Add button (no min-length validation)", () => {
-    const state = makeState({
-      serverInfo: {
-        installed: true,
-        version: "1.4.0",
-        serviceActive: true,
-        users: [],
-      },
-      newUsername: "x",
-      newPassword: "y",
-    });
+  it("D-2 (Phase 14.1): Plus-icon add button is present in header", () => {
+    const state = makeState();
     render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", {
-      name: new RegExp(i18n.t("server.users.add_user"), "i"),
-    });
+    // Plus-icon button in CardHeader (not inline form)
+    const addBtn = screen.getByTestId("users-add-btn");
+    expect(addBtn).toBeInTheDocument();
     expect(addBtn).not.toBeDisabled();
   });
 
-  it("D-16: empty inputs DO disable Add button", () => {
-    const state = makeState({
-      serverInfo: {
-        installed: true,
-        version: "1.4.0",
-        serviceActive: true,
-        users: [],
-      },
-      newUsername: "",
-      newPassword: "",
-    });
+  it("D-2 (Phase 14.1): Bottom add button also present as secondary entry point", () => {
+    const state = makeState();
     render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", {
-      name: new RegExp(i18n.t("server.users.add_user"), "i"),
+    const addBtnBottom = screen.getByTestId("users-add-btn-bottom");
+    expect(addBtnBottom).toBeInTheDocument();
+  });
+
+  it("D-3 (Phase 14.1): Gear icon per row opens UserModal in Edit mode", () => {
+    const state = makeState();
+    render(<UsersSection state={state} />);
+    // Gear (Settings) buttons — one per user
+    const gearBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.edit_tooltip"),
     });
-    expect(addBtn).toBeDisabled();
+    expect(gearBtns.length).toBe(2); // alice + bob
+    fireEvent.click(gearBtns[0]);
+    // activity log: user.modal.open_edit logged
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "USER",
+      expect.stringContaining("user.modal.open_edit user=alice"),
+    );
   });
 
   // ══════════════════════════════════════════════════════
@@ -456,74 +453,46 @@ describe("UsersSection (Phase 14 redesign)", () => {
   // D-29: Password and deeplink NEVER in activity log (SECURITY)
   // ══════════════════════════════════════════════════════
 
-  it("D-29 SECURITY: password value never appears in activity log calls", async () => {
-    const SECRET_PASSWORD = "DO-NOT-LEAK-THIS-789";
+  // ══════════════════════════════════════════════════════
+  // D-29 SECURITY: Phase 14.1 — Add is now via UserModal (tested in UserModal.test.tsx).
+  // UsersSection D-29 tests verify that delete flow also never leaks credentials.
+  // ══════════════════════════════════════════════════════
+
+  it("D-29 SECURITY (Phase 14.1): delete flow activity log never contains password", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
-    const state = makeState({
-      serverInfo: {
-        installed: true,
-        version: "1.4.0",
-        serviceActive: true,
-        users: [],
-      },
-      newUsername: "testuser",
-      newPassword: SECRET_PASSWORD,
-    });
+    const state = makeState();
     render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", {
-      name: new RegExp(i18n.t("server.users.add_user"), "i"),
+
+    const trashBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.delete_tooltip"),
     });
-    fireEvent.click(addBtn);
+    fireEvent.click(trashBtns[0]);
 
     await waitFor(() => {
       expect(activityLogSpy).toHaveBeenCalled();
     });
 
-    // Проверить ВСЕ activity log calls — ни один не содержит пароль
+    // No activity log call should contain a password-like value
     const allCalls = activityLogSpy.mock.calls;
     for (const call of allCalls) {
-      const [tag, message, details] = call;
-      expect(String(message ?? "")).not.toContain(SECRET_PASSWORD);
-      if (details !== undefined) {
-        expect(String(details)).not.toContain(SECRET_PASSWORD);
-      }
-      void tag;
+      const [, message] = call;
+      // password= should never appear in remove flow logs
+      expect(String(message ?? "")).not.toContain("password=");
     }
   });
 
-  it("D-29 SECURITY: add_server_user invoke receives password as arg but log doesn't leak it", async () => {
-    const SECRET_PASSWORD = "ZZZ-SECRET-999";
-    vi.mocked(invoke).mockResolvedValue(undefined);
-    const state = makeState({
-      serverInfo: {
-        installed: true,
-        version: "1.4.0",
-        serviceActive: true,
-        users: [],
-      },
-      newUsername: "testuser",
-      newPassword: SECRET_PASSWORD,
-    });
+  it("D-29 SECURITY (Phase 14.1): plus-icon opens UserModal (Add moved out of UsersSection)", () => {
+    const state = makeState();
     render(<UsersSection state={state} />);
-    const addBtn = screen.getByRole("button", {
-      name: new RegExp(i18n.t("server.users.add_user"), "i"),
-    });
+    // Plus-icon button triggers UserModal — no inline add form (D-2)
+    const addBtn = screen.getByTestId("users-add-btn");
+    expect(addBtn).toBeInTheDocument();
     fireEvent.click(addBtn);
-
-    // invoke получает password — это нормально (SSH call)
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith(
-        "add_server_user",
-        expect.objectContaining({ vpnPassword: SECRET_PASSWORD }),
-      );
-    });
-
-    // Но activityLog не должен содержать password
-    const addClickedLog = activityLogSpy.mock.calls.find((call) =>
-      String(call[1] ?? "").includes("user.add.clicked"),
+    // activity log: user.modal.open_add logged (no password involved at this stage)
+    expect(activityLogSpy).toHaveBeenCalledWith(
+      "USER",
+      "user.modal.open_add",
     );
-    expect(addClickedLog).toBeDefined();
-    expect(String(addClickedLog?.[1] ?? "")).not.toContain(SECRET_PASSWORD);
   });
 
   // ══════════════════════════════════════════════════════
@@ -552,14 +521,14 @@ describe("UsersSection (Phase 14 redesign)", () => {
   // D-06: Row contains ONLY username + 2 icons (no avatars, no status)
   // ══════════════════════════════════════════════════════
 
-  it("D-06: Row does not render avatar/status/metadata — only name + 2 icons", () => {
+  it("D-06 (Phase 14.1): Row does not render avatar/status/metadata — only name + 3 icons", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
     const items = screen.getAllByRole("listitem");
     const aliceRow = items.find((el) => el.textContent?.includes("alice"))!;
-    // Row должен содержать 2 buttons (FileText + Trash) — никаких <img>/avatars
+    // Phase 14.1 D-3: 3 buttons per row (FileText + Gear + Trash) — никаких <img>/avatars
     const buttonsInRow = within(aliceRow).getAllByRole("button");
-    expect(buttonsInRow.length).toBe(2);
+    expect(buttonsInRow.length).toBe(3);
     expect(within(aliceRow).queryByRole("img")).not.toBeInTheDocument();
   });
 

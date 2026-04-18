@@ -2,20 +2,17 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../shared/lib/cn";
-import { Users, FileText, Trash2 } from "lucide-react";
+import { Users, FileText, Trash2, Settings, Plus } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { Divider } from "../../shared/ui/Divider";
 import { Tooltip } from "../../shared/ui/Tooltip";
+import { Button } from "../../shared/ui/Button";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
-import {
-  generateUsername,
-  generatePassword,
-} from "../../shared/utils/credentialGenerator";
 import { UserConfigModal } from "./UserConfigModal";
-import { UsersAddForm } from "./UsersAddForm";
+import { UserModal } from "./UserModal";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -23,35 +20,16 @@ interface Props {
 }
 
 /**
- * D-14: collision-check helper.
- * Generates a unique username against the `existing` list.
- * Retries up to `attempts` times (default 10). If still colliding after
- * attempts — returns the last generated candidate; backend will surface a
- * protocol-level duplicate and UI's `usernameError` will reflect it.
- */
-function generateUniqueUsername(existing: string[], attempts = 10): string {
-  const taken = new Set(existing);
-  let name = generateUsername();
-  let i = 0;
-  while (taken.has(name) && i < attempts) {
-    name = generateUsername();
-    i++;
-  }
-  return name;
-}
-
-/**
- * UsersSection — Phase 14 redesign per UI-SPEC §Surface 1.
+ * UsersSection — Phase 14.1 redesign.
  *
- * Changes from pre-Phase-14 implementation:
- * - Removed the legacy overflow trigger + radio-circle (D-03). Rows now show
- *   the user name left-aligned and a 2-icon action cluster right-aligned:
- *   FileText (open UserConfigModal) + Trash (delete with confirmation).
- * - Inline add-form extracted to UsersAddForm (D-20). Pre-filled on mount
- *   (D-13) via generateUniqueUsername (D-14 collision-check).
- * - Successful user_add auto-opens UserConfigModal for the new user (D-07).
- * - Trash is disabled when users.length === 1 (D-21 — protocol requires >=1).
- * - Full activity-log coverage (D-28); password never logged (D-29).
+ * Changes from Phase 14:
+ * - D-2: UsersAddForm removed. Plus-icon button added to CardHeader «Добавить пользователя».
+ * - D-3: 3 inline icons per row: FileText (config) + Settings/Gear (edit) + Trash (delete).
+ * - UserModal integration: Add mode (plus-icon) + Edit mode (gear-icon per row).
+ * - UserConfigModal remains for FileText (show QR deeplink — unchanged).
+ *
+ * D-21: Trash disabled when users.length === 1.
+ * D-29: Passwords never in activity log payloads.
  */
 export function UsersSection({ state }: Props) {
   const { t } = useTranslation();
@@ -59,148 +37,146 @@ export function UsersSection({ state }: Props) {
   const { log: activityLog } = useActivityLog();
   const {
     serverInfo,
-    newUsername,
-    setNewUsername,
-    newPassword,
-    setNewPassword,
     setDeleteLoading,
     actionLoading,
     sshParams,
-    usernameError,
     setActionResult,
     addUserToState,
     removeUserFromState,
-    setActionLoading,
   } = state;
 
-  const isAdding = !!actionLoading?.startsWith("add_user");
-  // Disable ALL row-level actions when anything mutates server state.
+  // Disable all row actions when any mutation is in-flight.
   const isBusy = !!actionLoading || state.deleteLoading;
 
-  // Modal state — single source of truth for the UserConfigModal.
-  const [modalUsername, setModalUsername] = useState<string | null>(null);
-  // After successful add — processed via useEffect to let setActionLoading(null)
-  // and the pre-fill state writes apply before the modal opens (Pitfall 4).
+  // ── UserConfigModal state (FileText icon — shows QR deeplink) ──────────
+  const [configModalUsername, setConfigModalUsername] = useState<string | null>(null);
   const [pendingExportUsername, setPendingExportUsername] = useState<string | null>(null);
 
-  // D-14: handler for UsersAddForm onRegenerateName — closure captures current serverInfo.users.
-  const handleRegenerateUniqueName = useCallback((): string => {
-    const existing = serverInfo?.users ?? [];
-    return generateUniqueUsername(existing, 10);
-  }, [serverInfo]);
+  // ── UserModal state (Plus icon = Add, Gear icon = Edit) ────────────────
+  const [userModalMode, setUserModalMode] = useState<"add" | "edit">("add");
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUsername, setEditingUsername] = useState<string | undefined>(undefined);
 
-  // Pre-fill credentials on first mount (D-13) with D-14 collision-check.
-  // We deliberately run only once; subsequent pre-fill happens after add.
-  useEffect(() => {
-    const existing = serverInfo?.users ?? [];
-    setNewUsername(generateUniqueUsername(existing, 10));
-    setNewPassword(generatePassword());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Auto-open modal after add (D-07). Drained via an effect so state writes
-  // from handleAddUser flush before modal mounts.
+  // Auto-open UserConfigModal after successful add (same pattern as Phase 14)
   useEffect(() => {
     if (pendingExportUsername) {
       activityLog("USER", `user.config.modal_opened user=${pendingExportUsername} source=add`);
-      setModalUsername(pendingExportUsername);
+      setConfigModalUsername(pendingExportUsername);
       setPendingExportUsername(null);
     }
   }, [pendingExportUsername, activityLog]);
 
-  if (!serverInfo) return null;
+  // ── All handlers defined before any conditional return (hooks rules) ────
 
-  // ── Show config modal for a user (inline FileText icon trigger) ──
-  const handleShowConfig = (user: string) => {
-    activityLog("USER", `user.config.modal_opened user=${user} source=inline_icon`);
-    setModalUsername(user);
-  };
+  const handleShowConfig = useCallback(
+    (user: string) => {
+      activityLog("USER", `user.config.modal_opened user=${user} source=inline_icon`);
+      setConfigModalUsername(user);
+    },
+    [activityLog],
+  );
 
-  // ── Delete user (destructive, confirm-guarded) ──
-  // The ConfirmDialog stays open for the whole SSH round-trip via the
-  // `action` prop (new ConfirmOptions API). Modal closes only when the
-  // user is actually removed from state — matches the user's mental
-  // model: «модалка закрывается в момент, когда пользователь исчезает».
-  const handleDeleteUser = async (user: string) => {
-    activityLog("USER", `user.remove.initiated user=${user}`);
-    let actionRan = false;
-    const ok = await confirm({
-      title: t("server.users.confirm_delete_title"),
-      message: t("server.users.confirm_delete_message", { user }),
-      variant: "danger",
-      confirmText: t("buttons.confirm_delete"),
-      cancelText: t("buttons.cancel"),
-      action: async () => {
-        actionRan = true;
-        activityLog("USER", `user.remove.confirmed user=${user}`);
-        setDeleteLoading(true);
-        try {
-          await invoke("server_remove_user", {
-            ...sshParams,
-            vpnUsername: user,
-          });
-          removeUserFromState(user);
-          activityLog("STATE", `user.remove.completed user=${user}`);
-          // D-26: SnackBar «Пользователь «{user}» удалён»
-          state.pushSuccess(t("server.users.user_deleted", { user }));
-        } catch (e) {
-          activityLog("ERROR", `user.remove.failed user=${user} err=${formatError(e)}`);
-          setActionResult({ type: "error", message: formatError(e) });
-          // Rethrow so ConfirmDialogProvider closes modal with false and the
-          // outer `await confirm()` resolves false (caller already handled error).
-          throw e;
-        } finally {
-          setDeleteLoading(false);
-        }
-      },
-    });
-    // Disambiguate the three outcomes:
-    //   ok=true  → success (user.remove.completed already logged)
-    //   ok=false + actionRan → action threw (user.remove.failed already logged)
-    //   ok=false + !actionRan → user dismissed dialog (cancel button / Escape / backdrop)
-    if (!ok && !actionRan) {
-      activityLog("USER", `user.remove.cancelled user=${user}`);
-    }
-  };
+  const handleOpenAdd = useCallback(() => {
+    activityLog("USER", "user.modal.open_add");
+    setUserModalMode("add");
+    setEditingUsername(undefined);
+    setUserModalOpen(true);
+  }, [activityLog]);
 
-  // ── Add user (Pitfall 4 ordering: unlock → pre-fill → pending modal) ──
-  const handleAddUser = async () => {
-    if (!newUsername.trim() || !newPassword.trim() || usernameError) return;
-    const username = newUsername.trim();
-    const password = newPassword.trim();
-    activityLog("USER", "user.add.clicked"); // D-29: no password in payload
-    setActionLoading("add_user");
-    try {
-      await invoke("add_server_user", {
-        ...sshParams,
-        vpnUsername: username,
-        vpnPassword: password,
-      });
+  const handleOpenEdit = useCallback(
+    (user: string) => {
+      activityLog("USER", `user.modal.open_edit user=${user}`);
+      setUserModalMode("edit");
+      setEditingUsername(user);
+      setUserModalOpen(true);
+    },
+    [activityLog],
+  );
+
+  const handleUserModalClose = useCallback(() => {
+    setUserModalOpen(false);
+  }, []);
+
+  const handleUserAdded = useCallback(
+    (username: string) => {
       addUserToState(username);
-      activityLog("STATE", `user.add.completed user=${username}`);
-      state.pushSuccess(t("server.users.user_added", { user: username }));
-      // CRITICAL ORDER (Pitfall 4):
-      // 1. Unlock form first
-      setActionLoading(null);
-      // 2. Pre-fill next pair with collision-check (D-14) — include just-added name
-      const nextExisting = [...(serverInfo?.users ?? []), username];
-      setNewUsername(generateUniqueUsername(nextExisting, 10));
-      setNewPassword(generatePassword());
-      // 3. Trigger modal via pending state (useEffect drains on next tick)
+      activityLog("STATE", `user.add_advanced.state_updated user=${username}`);
+      state.pushSuccess(t("server.users.user_added_advanced", { user: username }));
       setPendingExportUsername(username);
-    } catch (e) {
-      activityLog("ERROR", `user.add.failed err=${formatError(e)}`);
-      setActionResult({ type: "error", message: formatError(e) });
-      setActionLoading(null);
-    }
-  };
+    },
+    [addUserToState, activityLog, state, t],
+  );
+
+  const handleUserUpdated = useCallback(
+    (username: string) => {
+      activityLog("STATE", `user.update.state_updated user=${username}`);
+    },
+    [activityLog],
+  );
+
+  const handleDeleteUser = useCallback(
+    async (user: string) => {
+      activityLog("USER", `user.remove.initiated user=${user}`);
+      let actionRan = false;
+      const ok = await confirm({
+        title: t("server.users.confirm_delete_title"),
+        message: t("server.users.confirm_delete_message", { user }),
+        variant: "danger",
+        confirmText: t("buttons.confirm_delete"),
+        cancelText: t("buttons.cancel"),
+        action: async () => {
+          actionRan = true;
+          activityLog("USER", `user.remove.confirmed user=${user}`);
+          setDeleteLoading(true);
+          try {
+            await invoke("server_remove_user", {
+              ...sshParams,
+              vpnUsername: user,
+            });
+            removeUserFromState(user);
+            activityLog("STATE", `user.remove.completed user=${user}`);
+            state.pushSuccess(t("server.users.user_deleted", { user }));
+          } catch (e) {
+            activityLog("ERROR", `user.remove.failed user=${user} err=${formatError(e)}`);
+            setActionResult({ type: "error", message: formatError(e) });
+            throw e;
+          } finally {
+            setDeleteLoading(false);
+          }
+        },
+      });
+      if (!ok && !actionRan) {
+        activityLog("USER", `user.remove.cancelled user=${user}`);
+      }
+    },
+    [activityLog, confirm, t, sshParams, setDeleteLoading, removeUserFromState, setActionResult, state],
+  );
+
+  // ── Guard: nothing to render without server info ────────────────────────
+  if (!serverInfo) return null;
 
   return (
     <>
       <Card>
+        {/* CardHeader: title + plus-icon add button (D-2) */}
         <CardHeader
           title={t("server.users.title")}
           icon={<Users className="w-3.5 h-3.5" />}
+          action={
+            <Tooltip text={t("server.users.add_tooltip")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={t("server.users.add_tooltip")}
+                onClick={handleOpenAdd}
+                disabled={isBusy}
+                data-testid="users-add-btn"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </Button>
+            </Tooltip>
+          }
         />
 
         {/* Users list OR EmptyState */}
@@ -211,29 +187,23 @@ export function UsersSection({ state }: Props) {
             body={t("server.users.empty_body")}
           />
         ) : (
-          // Раньше это был role="listbox" с кликом по строке (selection для
-          // кнопки Continue-as). После удаления Continue-as выделение строки
-          // стало бессмысленным — ряд теперь static list, action'ы доступны
-          // только через inline FileText/Trash иконки справа.
           <ul className="mb-3" aria-label={t("tabs.users")}>
             {serverInfo.users.map((u, idx) => {
-              // D-21: Trash disabled when only one user remains.
               const isLast = serverInfo.users.length === 1;
               const isRowLast = idx === serverInfo.users.length - 1;
 
               return (
                 <li key={u}>
-                  {/* Row — static, no click handler, no aria-selected */}
                   <div
                     className={cn(
                       "flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)]",
                       "transition-colors duration-[var(--transition-fast)]",
                       isBusy
                         ? "opacity-[var(--opacity-disabled)]"
-                        : "hover:bg-[var(--color-bg-hover)]"
+                        : "hover:bg-[var(--color-bg-hover)]",
                     )}
                   >
-                    {/* Username — left, truncates with ellipsis */}
+                    {/* Username — left */}
                     <span
                       className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-[var(--color-text-primary)]"
                       title={u}
@@ -241,9 +211,9 @@ export function UsersSection({ state }: Props) {
                       {u}
                     </span>
 
-                    {/* Inline icon cluster — 2 icons (D-03). */}
-                    <div className="flex items-center gap-[var(--space-1)] shrink-0 ml-2">
-                      {/* FileText — show config (D-03). Disabled during any in-flight action. */}
+                    {/* 3-icon cluster: FileText + Gear + Trash (D-3) */}
+                    <div className="flex items-center gap-[var(--space-0\.5)] shrink-0 ml-2">
+                      {/* FileText — show config QR */}
                       <Tooltip text={t("server.users.show_config_tooltip")}>
                         <button
                           type="button"
@@ -255,14 +225,34 @@ export function UsersSection({ state }: Props) {
                             "transition-colors",
                             "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
                             "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                            "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)]"
+                            "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)]",
                           )}
                         >
                           <FileText className="w-3.5 h-3.5" />
                         </button>
                       </Tooltip>
 
-                      {/* Trash — delete. Disabled if last user (D-21) OR any action in-flight. */}
+                      {/* Settings/Gear — edit user (D-3) */}
+                      <Tooltip text={t("server.users.edit_tooltip")}>
+                        <button
+                          type="button"
+                          aria-label={t("server.users.edit_tooltip")}
+                          disabled={isBusy}
+                          onClick={() => handleOpenEdit(u)}
+                          className={cn(
+                            "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
+                            "transition-colors",
+                            "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                            "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                            "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)]",
+                          )}
+                          data-testid={`gear-btn-${u}`}
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
+
+                      {/* Trash — delete (D-21: disabled when last user) */}
                       <Tooltip
                         text={
                           isLast
@@ -281,7 +271,10 @@ export function UsersSection({ state }: Props) {
                           disabled={isLast || isBusy}
                           onClick={() => {
                             if (isLast) {
-                              activityLog("USER", `user.remove.blocked reason=last-user user=${u}`);
+                              activityLog(
+                                "USER",
+                                `user.remove.blocked reason=last-user user=${u}`,
+                              );
                               return;
                             }
                             if (isBusy) return;
@@ -293,7 +286,7 @@ export function UsersSection({ state }: Props) {
                             "focus-visible:shadow-[var(--focus-ring)] outline-none",
                             isLast || isBusy
                               ? "opacity-[var(--opacity-disabled)] cursor-not-allowed text-[var(--color-text-muted)]"
-                              : "text-[var(--color-text-secondary)] hover:text-[var(--color-destructive)]"
+                              : "text-[var(--color-text-secondary)] hover:text-[var(--color-destructive)]",
                           )}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -302,7 +295,6 @@ export function UsersSection({ state }: Props) {
                     </div>
                   </div>
 
-                  {/* Divider between rows (not after last) */}
                   {!isRowLast && (
                     <div
                       className="mx-3 my-1"
@@ -315,30 +307,40 @@ export function UsersSection({ state }: Props) {
           </ul>
         )}
 
-        {/* Divider before inline add form (D-20) */}
+        {/* Divider */}
         <Divider className="my-3" />
 
-        {/* Inline add-user form (D-20). Always visible so first add works.
-             D-14: onRegenerateName delegates collision-check to this component. */}
-        <UsersAddForm
-          newUsername={newUsername}
-          setNewUsername={setNewUsername}
-          newPassword={newPassword}
-          setNewPassword={setNewPassword}
-          isAdding={isAdding}
-          usernameError={usernameError}
-          onAdd={handleAddUser}
-          onRegenerateName={handleRegenerateUniqueName}
-        />
+        {/* Add button at bottom (secondary entry point) */}
+        <Button
+          type="button"
+          variant="secondary"
+          fullWidth
+          onClick={handleOpenAdd}
+          disabled={isBusy}
+          data-testid="users-add-btn-bottom"
+        >
+          {t("server.users.add_title")}
+        </Button>
       </Card>
 
-      {/* UserConfigModal — controlled by modalUsername state.
-           Opens on FileText click OR auto-after-add via pendingExportUsername. */}
+      {/* UserConfigModal — FileText icon → QR deeplink (unchanged from Phase 14) */}
       <UserConfigModal
-        isOpen={!!modalUsername}
-        username={modalUsername}
+        isOpen={!!configModalUsername}
+        username={configModalUsername}
         sshParams={sshParams}
-        onClose={() => setModalUsername(null)}
+        onClose={() => setConfigModalUsername(null)}
+      />
+
+      {/* UserModal — Add/Edit modal (D-1..D-9) */}
+      <UserModal
+        isOpen={userModalOpen}
+        mode={userModalMode}
+        editUsername={editingUsername}
+        existingUsers={serverInfo.users}
+        sshParams={sshParams}
+        onClose={handleUserModalClose}
+        onUserAdded={handleUserAdded}
+        onUserUpdated={handleUserUpdated}
       />
     </>
   );
