@@ -116,6 +116,91 @@ pub fn validate_version(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// CIDR notation: IPv4 `X.X.X.X/N` (N in 0..=32) — or empty string meaning "no restriction".
+///
+/// Defense-in-depth layer; frontend also validates octet bounds separately. This function:
+/// - Accepts empty string (no rule)
+/// - Requires total length <= 18 chars ("255.255.255.255/32" = 18)
+/// - Requires only `[0-9./]` ASCII chars
+/// - Splits on '/', requires exactly 2 parts
+/// - Splits IP part on '.', requires exactly 4 octets, each parseable as u8 and <= 255
+/// - Parses prefix as u32, requires 0..=32
+///
+/// Rejects malicious strings like `"0.0.0.0/0; rm -rf /"` via char whitelist.
+pub fn validate_cidr(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Ok(());
+    }
+    if s.len() > 18 {
+        return Err("CIDR too long (max 18 chars)".into());
+    }
+    if !s.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '/')) {
+        return Err("CIDR contains invalid characters (only 0-9, '.', '/' allowed)".into());
+    }
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 2 {
+        return Err("CIDR must be X.X.X.X/N".into());
+    }
+    let octets: Vec<&str> = parts[0].split('.').collect();
+    if octets.len() != 4 {
+        return Err("IP must have exactly 4 octets".into());
+    }
+    for oct in &octets {
+        if oct.is_empty() {
+            return Err("Empty octet".into());
+        }
+        let n: u32 = oct.parse().map_err(|_| "Invalid octet (must be number)".to_string())?;
+        if n > 255 {
+            return Err(format!("Octet {n} exceeds 255"));
+        }
+    }
+    if parts[1].is_empty() {
+        return Err("Prefix missing".into());
+    }
+    let prefix: u32 = parts[1].parse().map_err(|_| "Invalid prefix".to_string())?;
+    if prefix > 32 {
+        return Err(format!("Prefix {prefix} exceeds 32"));
+    }
+    Ok(())
+}
+
+/// DNS upstream list. Each non-empty line must not contain control chars or shell metacharacters.
+/// Empty lines are silently skipped (caller's responsibility to filter), not rejected.
+/// Length cap per entry: 253 chars (RFC 1035 FQDN limit).
+pub fn validate_dns_list(lines: &[String]) -> Result<(), String> {
+    for line in lines {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if t.len() > 253 {
+            return Err(format!("DNS entry too long (max 253 chars): {t}"));
+        }
+        if t.chars().any(|c| {
+            c.is_control() || matches!(c, ' ' | ';' | '|' | '$' | '`' | '&' | '\'' | '"' | '\\' | '\0')
+        }) {
+            return Err(format!("DNS entry contains invalid characters: {t}"));
+        }
+    }
+    Ok(())
+}
+
+/// FQDN for `custom_sni` TLV field — letters, digits, dots, hyphens only.
+/// Empty string accepted (field optional).
+/// Max length 253 chars (RFC 1035).
+pub fn validate_fqdn_sni(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Ok(());
+    }
+    if s.len() > 253 {
+        return Err("SNI too long (max 253 chars)".into());
+    }
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.')) {
+        return Err("SNI contains invalid characters (only a-z, A-Z, 0-9, '-', '.' allowed)".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +339,76 @@ mod tests {
         assert!(validate_version("1.0; rm -rf /").is_err());
         assert!(validate_version("$(whoami)").is_err());
         assert!(validate_version("").is_err());
+    }
+
+    // ─── CIDR ─────────────────────────────────────────
+
+    #[test]
+    fn validate_cidr_accepts_valid() {
+        assert!(validate_cidr("").is_ok());
+        assert!(validate_cidr("0.0.0.0/0").is_ok());
+        assert!(validate_cidr("10.0.0.0/24").is_ok());
+        assert!(validate_cidr("192.168.1.0/16").is_ok());
+        assert!(validate_cidr("255.255.255.255/32").is_ok());
+    }
+
+    #[test]
+    fn validate_cidr_rejects_malicious() {
+        assert!(validate_cidr("10.0.0.0/24; rm -rf /").is_err());
+        assert!(validate_cidr("10.0.0.0/24`$(whoami)`").is_err());
+        assert!(validate_cidr("not.an.ip/24").is_err());
+        assert!(validate_cidr("10.0.0.256/24").is_err());
+        assert!(validate_cidr("10.0.0.0/33").is_err());
+        assert!(validate_cidr("10.0.0.0").is_err());
+        assert!(validate_cidr("/24").is_err());
+        assert!(validate_cidr("10..0.0/24").is_err());
+        assert!(validate_cidr(" 10.0.0.0/24").is_err());
+    }
+
+    #[test]
+    fn validate_cidr_octet_boundaries() {
+        assert!(validate_cidr("0.0.0.0/0").is_ok());
+        assert!(validate_cidr("255.255.255.255/32").is_ok());
+        assert!(validate_cidr("256.0.0.0/0").is_err());
+        assert!(validate_cidr("0.0.0.0/33").is_err());
+    }
+
+    // ─── DNS list ─────────────────────────────────────
+
+    #[test]
+    fn validate_dns_list_accepts_valid() {
+        assert!(validate_dns_list(&[]).is_ok());
+        assert!(validate_dns_list(&["1.1.1.1".to_string()]).is_ok());
+        assert!(validate_dns_list(&["1.1.1.1".to_string(), "8.8.8.8".to_string()]).is_ok());
+        assert!(validate_dns_list(&["dns.example.com".to_string()]).is_ok());
+        assert!(validate_dns_list(&["2001:db8::1".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn validate_dns_list_skips_empty() {
+        assert!(validate_dns_list(&["".to_string(), "   ".to_string(), "1.1.1.1".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn validate_dns_list_rejects_injection() {
+        assert!(validate_dns_list(&["1.1.1.1; rm -rf /".to_string()]).is_err());
+        assert!(validate_dns_list(&["$(whoami)".to_string()]).is_err());
+        assert!(validate_dns_list(&["1.1.1.1 # comment".to_string()]).is_err());
+    }
+
+    // ─── FQDN SNI ─────────────────────────────────────
+
+    #[test]
+    fn validate_fqdn_sni_accepts_valid() {
+        assert!(validate_fqdn_sni("").is_ok());
+        assert!(validate_fqdn_sni("example.com").is_ok());
+        assert!(validate_fqdn_sni("a-b.c-d.example.org").is_ok());
+    }
+
+    #[test]
+    fn validate_fqdn_sni_rejects_injection() {
+        assert!(validate_fqdn_sni("example.com; ls").is_err());
+        assert!(validate_fqdn_sni("ex ample.com").is_err());
+        assert!(validate_fqdn_sni("example`com`").is_err());
     }
 }
