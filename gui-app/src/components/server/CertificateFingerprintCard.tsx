@@ -75,29 +75,48 @@ export function CertificateFingerprintCard({
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<{ leaf_der_b64: string; fingerprint_hex: string; chain_len: number }>(
-        "server_fetch_endpoint_cert",
-        {
-          host: sshParams.host,
-          port: sshParams.port,
-          user: sshParams.user,
-          password: sshParams.password,
-          keyPath: sshParams.keyPath,
-        }
-      );
+      const result = await invoke<{
+        leaf_der_b64?: string;
+        fingerprint_hex?: string;
+        chain_len?: number;
+      } | null>("server_fetch_endpoint_cert", {
+        host: sshParams.host,
+        port: sshParams.port,
+        user: sshParams.user,
+        password: sshParams.password,
+        keyPath: sshParams.keyPath,
+      });
+
+      // Defensive null check — backend may return null on transport-level failures
+      if (!result || !result.fingerprint_hex || !result.leaf_der_b64) {
+        setError(t("server.users.cert_fetch_error_invalid_response"));
+        return;
+      }
+
       const cert: FetchedCert = {
         fingerprint: result.fingerprint_hex,
         derB64: result.leaf_der_b64,
-        chainLen: result.chain_len,
+        chainLen: result.chain_len ?? 0,
       };
       setFetchedCert(cert);
       onFingerprintLoaded(cert.derB64, cert.fingerprint);
     } catch (e) {
-      setError(formatError(e));
+      const raw = formatError(e);
+      const lower = raw.toLowerCase();
+      // Map common error patterns → localized user-friendly messages
+      let key = "server.users.cert_fetch_error_generic";
+      if (lower.includes("timeout") || lower.includes("timed out")) {
+        key = "server.users.cert_fetch_error_timeout";
+      } else if (lower.includes("connection refused") || lower.includes("unreachable") || lower.includes("network")) {
+        key = "server.users.cert_fetch_error_unreachable";
+      } else if (lower.includes("handshake") || lower.includes("tls") || lower.includes("invalid certificate")) {
+        key = "server.users.cert_fetch_error_tls_handshake";
+      }
+      setError(key === "server.users.cert_fetch_error_generic" ? t(key, { error: raw }) : t(key));
     } finally {
       setLoading(false);
     }
-  }, [sshParams, onFingerprintLoaded, _forceLoading]);
+  }, [sshParams, onFingerprintLoaded, _forceLoading, t]);
 
   const handleClear = useCallback(() => {
     setFetchedCert(null);

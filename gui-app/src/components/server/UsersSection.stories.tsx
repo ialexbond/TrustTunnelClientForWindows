@@ -7,18 +7,16 @@ import type { ServerState } from "./useServerState";
 import type { ServerInfo } from "./useServerState";
 
 /**
- * Phase 14 mockup-first stories (D-30/D-31).
+ * UsersSection screen-level stories — Phase 14.1.
  *
- * These 10 screen-level stories capture the desired visual state of the
- * Users tab BEFORE the full rewrite lands in Plan 05. The stories work with
- * the current UsersSection implementation (OverflowMenu + radio-circle) and
- * will continue to work once Plan 05 rewrites internals — because the public
- * props surface (`<UsersSection state={state} />`) is not changing.
+ * Phase 14.1 заменил inline UsersAddForm на UserModal (Plus → Add, Gear → Edit).
+ * CardHeader удалён — раздел теперь содержит только список + bottom-кнопку Add.
  *
- * Stories are driven by `createMockServerState(overrides)` which returns a
- * synthetic ServerState with all handlers stubbed out. Tauri invoke is
- * mocked globally via `.storybook/tauri-mocks/` so SSH-bound actions
- * resolve to safe defaults.
+ * Stories тестируют публичную поверхность `<UsersSection state={state} />`
+ * с моком ServerState. Tauri invoke замокан глобально через `.storybook/tauri-mocks/`.
+ *
+ * Тёмная/светлая тема переключается через Storybook toolbar — не нужны отдельные
+ * LightTheme/DarkTheme stories.
  */
 
 const baseServerInfo: ServerInfo = {
@@ -38,7 +36,6 @@ async function asyncNoop(): Promise<void> {
 
 function createMockServerState(overrides: Partial<ServerState> = {}): ServerState {
   const base = {
-    // Core server info
     serverInfo: baseServerInfo,
     loading: false,
     error: "",
@@ -47,14 +44,12 @@ function createMockServerState(overrides: Partial<ServerState> = {}): ServerStat
     setActionResult: noop,
     pushSuccess: noop,
 
-    // Panel data (preloaded)
     configRaw: null,
     setConfigRaw: noop,
     certRaw: null,
     setCertRaw: noop,
     panelDataLoaded: true,
 
-    // Users domain slice
     selectedUser: null,
     setSelectedUser: noop,
     newUsername: "",
@@ -70,14 +65,12 @@ function createMockServerState(overrides: Partial<ServerState> = {}): ServerStat
     continueLoading: false,
     setContinueLoading: noop,
 
-    // Versions domain slice
     availableVersions: [],
     selectedVersion: "",
     setSelectedVersion: noop,
     showVersions: false,
     setShowVersions: noop,
 
-    // Logs domain slice
     serverLogs: "",
     setServerLogs: noop,
     showLogs: false,
@@ -85,7 +78,6 @@ function createMockServerState(overrides: Partial<ServerState> = {}): ServerStat
     logsLoading: false,
     setLogsLoading: noop,
 
-    // Diagnostics domain slice
     diagResult: null,
     setDiagResult: noop,
     showDiag: false,
@@ -93,13 +85,11 @@ function createMockServerState(overrides: Partial<ServerState> = {}): ServerStat
     diagLoading: false,
     setDiagLoading: noop,
 
-    // Danger zone domain slice
     rebooting: false,
     setRebooting: noop,
     uninstallLoading: false,
     setUninstallLoading: noop,
 
-    // Helpers
     sshParams: {
       host: "192.168.1.100",
       port: 22,
@@ -111,13 +101,11 @@ function createMockServerState(overrides: Partial<ServerState> = {}): ServerStat
     runAction: asyncNoop,
     usernameError: "",
 
-    // Optimistic updates
     addUserToState: noop,
     removeUserFromState: noop,
     setServerInfo: noop,
     setActionLoading: noop,
 
-    // Props pass-through
     host: "192.168.1.100",
     port: "22",
     onDisconnect: noop,
@@ -157,7 +145,7 @@ const meta: Meta<typeof UsersSection> = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Empty state: no users yet — EmptyState copy + add form always visible. */
+/** Empty state: no users yet — EmptyState placeholder + bottom Add button. */
 export const Empty: Story = {
   args: {
     state: createMockServerState({
@@ -167,8 +155,8 @@ export const Empty: Story = {
 };
 
 /**
- * Single user: Trash action must be disabled (D-21).
- * Protocol requires at least one VPN client — the last user cannot be deleted.
+ * Single user: Trash action disabled (D-21).
+ * Protocol requires at least one VPN client — last user cannot be deleted.
  */
 export const SingleUser: Story = {
   args: {
@@ -178,7 +166,7 @@ export const SingleUser: Story = {
   },
 };
 
-/** Multiple users, nothing selected — row hover visible on interaction. */
+/** Multiple users — 3 row icons each (FileText, Settings/Gear, Trash). */
 export const MultipleUsers: Story = {
   args: {
     state: createMockServerState({
@@ -186,22 +174,6 @@ export const MultipleUsers: Story = {
         ...baseServerInfo,
         users: ["swift-fox", "bold-eagle42", "calm-raven"],
       },
-    }),
-  },
-};
-
-/**
- * Multiple users, one selected — accent tint on row,
- * Continue-as-user CTA enabled with the selected name.
- */
-export const SelectedUser: Story = {
-  args: {
-    state: createMockServerState({
-      serverInfo: {
-        ...baseServerInfo,
-        users: ["swift-fox", "bold-eagle42", "calm-raven"],
-      },
-      selectedUser: "bold-eagle42",
     }),
   },
 };
@@ -218,96 +190,7 @@ export const LongUsername: Story = {
   },
 };
 
-/**
- * Add form pre-filled (D-13) — inputs hold generated credentials,
- * demonstrating regenerate/clear icon layout.
- */
-export const AddFormPrefilled: Story = {
-  args: {
-    state: createMockServerState({
-      serverInfo: { ...baseServerInfo, users: ["swift-fox"] },
-      newUsername: "bold-eagle42",
-      newPassword: "Xk8mN2pQrS9tVwYz",
-    }),
-  },
-};
-
-/** Add in progress — inputs disabled, Add button shows spinner. */
-export const AddInProgress: Story = {
-  args: {
-    state: createMockServerState({
-      serverInfo: { ...baseServerInfo, users: ["swift-fox"] },
-      newUsername: "calm-raven",
-      newPassword: "Xk8mN2pQrS9tVwYz",
-      actionLoading: "add_user",
-    }),
-  },
-};
-
-/**
- * Password pre-filled demonstration.
- *
- * The actual visibility toggle is owned by ActionPasswordInput internal
- * state; this story shows the form populated so the visibility-toggle
- * eye icon is reachable. Click the eye in the Storybook preview to flip
- * between hidden/visible.
- */
-export const PasswordVisible: Story = {
-  args: {
-    state: createMockServerState({
-      serverInfo: { ...baseServerInfo, users: [] },
-      newUsername: "swift-fox",
-      newPassword: "Xk8mN2pQrS9tVwYz",
-    }),
-  },
-};
-
-/**
- * Add error: username collides with existing user — inline validation
- * surfaces via `usernameError` i18n key below the name input.
- */
-export const AddError: Story = {
-  args: {
-    state: createMockServerState({
-      serverInfo: { ...baseServerInfo, users: ["swift-fox"] },
-      newUsername: "swift-fox",
-      newPassword: "ValidPass123",
-      usernameError: "server.users.username_exists",
-    }),
-  },
-};
-
-/** Same layout as MultipleUsers, rendered under light theme tokens. */
-export const LightTheme: Story = {
-  args: {
-    state: createMockServerState({
-      serverInfo: {
-        ...baseServerInfo,
-        users: ["swift-fox", "bold-eagle42"],
-      },
-    }),
-  },
-  decorators: [
-    (Story) => (
-      <SnackBarProvider>
-        <ConfirmDialogProvider>
-          <div
-            data-theme="light"
-            style={{
-              maxWidth: 560,
-              backgroundColor: "var(--color-bg-primary)",
-              padding: 16,
-            }}
-          >
-            <Story />
-          </div>
-        </ConfirmDialogProvider>
-      </SnackBarProvider>
-    ),
-  ],
-};
-
-/** Demonstrates UserConfigModal opening when FileText icon is clicked (D-03/D-07). */
+/** UserConfigModal opens when FileText icon clicked (D-03/D-07). */
 export const WithUserConfigModal: Story = {
   args: {
     state: createMockServerState({
@@ -329,7 +212,7 @@ export const WithUserConfigModal: Story = {
   },
 };
 
-/** Demonstrates ConfirmDialog opening when Trash icon is clicked (D-22). */
+/** ConfirmDialog opens when Trash icon clicked (D-22). */
 export const WithDeleteConfirm: Story = {
   args: {
     state: createMockServerState({

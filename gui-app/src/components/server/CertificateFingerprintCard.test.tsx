@@ -83,12 +83,23 @@ describe("CertificateFingerprintCard", () => {
     });
   });
 
-  it("shows error message when fetch fails", async () => {
+  it("shows localized timeout error when fetch fails with timeout", async () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("timeout"));
     render(<CertificateFingerprintCard {...defaultProps} />);
     fireEvent.click(screen.getByTestId("cert-fetch-btn"));
+    // Localized (RU): «Превышено время ожидания (10с) — endpoint не отвечает»
     await waitFor(() => {
-      expect(screen.getByText(/timeout/i)).toBeInTheDocument();
+      expect(screen.getByText(/превышено время ожидания|endpoint не отвечает/i)).toBeInTheDocument();
+    });
+  });
+
+  it("shows generic localized error with raw text for unmatched failures", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("unexpected failure"));
+    render(<CertificateFingerprintCard {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("cert-fetch-btn"));
+    await waitFor(() => {
+      // Generic key interpolates the raw error — "Ошибка при загрузке сертификата: unexpected failure"
+      expect(screen.getByText(/ошибка при загрузке сертификата/i)).toBeInTheDocument();
     });
   });
 

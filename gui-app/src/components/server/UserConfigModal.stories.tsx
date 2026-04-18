@@ -103,28 +103,3 @@ export const LongDeeplink: Story = {
   },
 };
 
-/** Same content as Default, rendered under data-theme="light" tokens. */
-export const LightTheme: Story = {
-  args: {
-    isOpen: true,
-    username: "swift-fox",
-    sshParams: mockSshParams,
-    onClose: () => {},
-    _deeplinkOverride: FAKE_DEEPLINK_SHORT,
-  },
-  decorators: [
-    (Story) => (
-      <SnackBarProvider>
-        <div
-          data-theme="light"
-          style={{
-            minHeight: "100vh",
-            backgroundColor: "var(--color-bg-primary)",
-          }}
-        >
-          <Story />
-        </div>
-      </SnackBarProvider>
-    ),
-  ],
-};

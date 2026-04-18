@@ -116,35 +116,3 @@ export const CustomHelperText: Story = {
   },
 };
 
-/**
- * Light theme — verifies tokens resolve correctly.
- * Wraps content in `data-theme="light"` to force light palette.
- */
-export const LightTheme: Story = {
-  render: () => {
-    const [value, setValue] = useState("10.0.0.0/24");
-    return (
-      <div
-        data-theme="light"
-        style={{ padding: "24px", backgroundColor: "var(--color-bg-primary)", width: 400 }}
-      >
-        <CIDRPicker value={value} onChange={setValue} label="CIDR restriction" />
-      </div>
-    );
-  },
-};
-
-/** Dark theme (explicit) — dark mode contrast verification. */
-export const DarkTheme: Story = {
-  render: () => {
-    const [value, setValue] = useState("10.0.0.0/24");
-    return (
-      <div
-        data-theme="dark"
-        style={{ padding: "24px", backgroundColor: "var(--color-bg-primary)", width: 400 }}
-      >
-        <CIDRPicker value={value} onChange={setValue} label="CIDR restriction" />
-      </div>
-    );
-  },
-};
