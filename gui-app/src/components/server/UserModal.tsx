@@ -61,10 +61,19 @@ interface DeeplinkFields {
   cidr: string;
 }
 
-/** Config loaded from server for Edit mode via server_get_user_config. */
-interface UserConfig {
-  cidr: string;
-  has_prefix: boolean;
+/**
+ * Config loaded from server for Edit mode via server_get_user_config.
+ *
+ * CR-05: backend returns `Result<Option<UserRule>, String>` where UserRule is
+ * `{ client_random_prefix: Option<String>, cidr: Option<String> }`. Earlier
+ * frontend declared `{ cidr: string; has_prefix: boolean }` which was always
+ * undefined → anti-DPI toggle stuck ON and a missing rule (`null`) crashed the
+ * `.cidr` read. Now we mirror the actual backend shape and derive `has_prefix`
+ * from the optional prefix string.
+ */
+interface UserRuleResponse {
+  client_random_prefix: string | null;
+  cidr: string | null;
 }
 
 export interface UserModalProps {
@@ -210,6 +219,11 @@ export function UserModal({
   useEffect(() => {
     if (!isOpen) return;
 
+    // WR-03: track cancellation for the in-flight server_get_user_config invoke
+    // so a quick close → re-open with a different user does not let stale data
+    // overwrite the freshly-loaded snapshot (false dirty banner).
+    let cancelled = false;
+
     if (mode === "add") {
       // Pre-fill credentials on Add open (D-13, D-14 collision-check)
       setUsername(generateUniqueUsername());
@@ -234,34 +248,41 @@ export function UserModal({
       if (!_storybook) {
         setConfigLoading(true);
         setConfigError(null);
-        void invoke<UserConfig>("server_get_user_config", {
+        // CR-05: backend returns UserRuleResponse | null. has_prefix is derived from
+        // the optional prefix string — earlier code keyed off `cfg.has_prefix`,
+        // which never existed and made anti-DPI toggle stuck ON.
+        void invoke<UserRuleResponse | null>("server_get_user_config", {
           ...sshParams,
           vpnUsername: editUsername,
         })
           .then((cfg) => {
-            setDeeplink((prev) => ({
-              ...prev,
-              cidr: cfg.cidr ?? "",
-              antiDpi: cfg.has_prefix ?? true,
-            }));
+            if (cancelled) return;
+            const cidr = cfg?.cidr ?? "";
+            const antiDpi = !!cfg?.client_random_prefix;
+            setDeeplink((prev) => ({ ...prev, cidr, antiDpi }));
             // Update initial snapshot after config loaded (so initial state = server state)
             initialDeeplinkRef.current = toSnapshot({
               ...DEFAULT_DEEPLINK,
-              cidr: cfg.cidr ?? "",
-              antiDpi: cfg.has_prefix ?? true,
+              cidr,
+              antiDpi,
             });
           })
           .catch((e) => {
+            if (cancelled) return;
             setConfigError(formatError(e));
           })
           .finally(() => {
+            if (cancelled) return;
             setConfigLoading(false);
           });
       }
     }
     // Auto-focus close button
     const t2 = setTimeout(() => closeButtonRef.current?.focus(), 250);
-    return () => clearTimeout(t2);
+    return () => {
+      cancelled = true;
+      clearTimeout(t2);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mode, editUsername]);
 
@@ -319,14 +340,23 @@ export function UserModal({
         vpnUsername: trimmedUsername,
         vpnPassword: trimmedPassword,
         antiDpi: deeplink.antiDpi,
+        // WR-02: anti-DPI prefix length / freq% are still backend defaults (4 bytes / 70%)
+        // until UI controls land. Pass null so the Rust side keeps using its defaults.
+        prefixLength: null,
+        prefixPercent: null,
         cidr: deeplink.cidr || null,
         // Deeplink TLV params
-        displayName: deeplink.displayName || null,
+        // WR-01: backend parameter is `name` (not `display_name`). Tauri rewrites the
+        // camelCase value to snake_case, but the snake_case key MUST match the Rust arg.
+        // Sending `displayName` produced `display_name`, which Rust ignored entirely.
+        name: deeplink.displayName || null,
         customSni: deeplink.customSni || null,
         upstreamProtocol: deeplink.upstreamProtocol !== "auto" ? deeplink.upstreamProtocol : null,
         skipVerification: deeplink.skipVerification,
-        certDerB64: deeplink.pinCert ? deeplink.certDerB64 : null,
-        dnsUpstreams: deeplink.dnsUpstreams.length > 0 ? deeplink.dnsUpstreams : null,
+        // CR-01: backend now expects pinCertificateDer (Base64 string), not certDerB64.
+        pinCertificateDer: deeplink.pinCert ? deeplink.certDerB64 : null,
+        // Backend signature is Vec<String> — empty array on no DNS, NOT null.
+        dnsUpstreams: deeplink.dnsUpstreams,
       });
       activityLog("STATE", `user.add_advanced.completed user=${trimmedUsername}`);
       pushSuccess(t("server.users.user_added_advanced", { user: trimmedUsername }));
@@ -349,9 +379,14 @@ export function UserModal({
     try {
       await invoke("server_update_user_config", {
         ...sshParams,
-        vpnUsername: editUsername,
-        antiDpi: deeplink.antiDpi,
+        // Backend signature uses `username` (not `vpn_username`) — Tauri rewrites
+        // camelCase to snake_case but the snake_case key MUST match the Rust arg.
+        username: editUsername,
         cidr: deeplink.cidr || null,
+        antiDpi: deeplink.antiDpi,
+        // Keep the existing prefix unless the user toggled anti_dpi off (rule below).
+        // Backend regenerates whenever the rule entry is missing.
+        regeneratePrefix: false,
       });
       activityLog("STATE", `user.update.completed user=${editUsername}`);
       pushSuccess(t("server.users.user_updated", { user: editUsername }));
