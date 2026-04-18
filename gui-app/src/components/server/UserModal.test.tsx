@@ -219,8 +219,9 @@ describe("UserModal — Edit mode", () => {
     render(<UserModal {...defaultEditProps} />);
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
+      // CR-05/WR-01: backend signature uses `username` (not vpn_username).
       expect(invoke).toHaveBeenCalledWith("server_update_user_config", expect.objectContaining({
-        vpnUsername: "alice",
+        username: "alice",
       }));
     });
   });
