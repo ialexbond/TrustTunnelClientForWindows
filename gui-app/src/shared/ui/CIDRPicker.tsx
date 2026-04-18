@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { NumberInput } from "./NumberInput";
@@ -44,35 +44,63 @@ export function CIDRPicker({
 }: CIDRPickerProps) {
   const { t } = useTranslation();
 
-  const parsed = useMemo(() => parseCidr(value), [value]);
-  const octets = useMemo<[string, string, string, string]>(
-    () => parsed?.octets ?? ["", "", "", ""],
-    [parsed]
+  // Hybrid controlled+local state: octet/prefix fields are tracked locally so
+  // partial entry (e.g. user typed only first octet) survives the empty-string
+  // round-trip through parent. formatCidr returns "" when any octet is empty,
+  // so a fully-controlled implementation would clear the input the moment the
+  // user starts typing — see Phase 14.1 post-review feedback.
+  const initial = useMemo(() => parseCidr(value), [value]);
+  const [octets, setOctets] = useState<[string, string, string, string]>(
+    () => initial?.octets ?? ["", "", "", ""],
   );
-  const prefix = parsed?.prefix ?? "";
+  const [prefix, setPrefix] = useState<string>(() => initial?.prefix ?? "");
+  const lastEmitted = useRef<string>(value);
+
+  // Sync from external `value` changes only when the parent value didn't come
+  // from our own onChange (e.g. parent reset CIDR to "" or loaded a new value).
+  /* eslint-disable react-hooks/set-state-in-effect -- external prop sync; local state must match parent when parent updates outside our onChange */
+  useEffect(() => {
+    if (value === lastEmitted.current) return;
+    const parsed = parseCidr(value);
+    if (parsed) {
+      setOctets(parsed.octets);
+      setPrefix(parsed.prefix);
+    } else if (value === "") {
+      setOctets(["", "", "", ""]);
+      setPrefix("");
+    }
+    lastEmitted.current = value;
+  }, [value]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const emit = useCallback(
+    (nextOctets: [string, string, string, string], nextPrefix: string) => {
+      const formatted = formatCidr(nextOctets, nextPrefix);
+      lastEmitted.current = formatted;
+      onChange(formatted);
+      if (onError) {
+        onError(formatted !== "" && !isValidCidr(formatted) ? "server.users.cidr_invalid" : "");
+      }
+    },
+    [onChange, onError],
+  );
 
   const handleOctetChange = useCallback(
     (index: 0 | 1 | 2 | 3, next: string) => {
       const copy: [string, string, string, string] = [octets[0], octets[1], octets[2], octets[3]];
       copy[index] = next;
-      const formatted = formatCidr(copy, prefix);
-      onChange(formatted);
-      if (onError) {
-        onError(formatted !== "" && !isValidCidr(formatted) ? "server.users.cidr_invalid" : "");
-      }
+      setOctets(copy);
+      emit(copy, prefix);
     },
-    [octets, prefix, onChange, onError]
+    [octets, prefix, emit],
   );
 
   const handlePrefixChange = useCallback(
     (next: string) => {
-      const formatted = formatCidr(octets, next);
-      onChange(formatted);
-      if (onError) {
-        onError(formatted !== "" && !isValidCidr(formatted) ? "server.users.cidr_invalid" : "");
-      }
+      setPrefix(next);
+      emit(octets, next);
     },
-    [octets, onChange, onError]
+    [octets, emit],
   );
 
   // Helper text resolution: prop > key from describeCidr (if it's a key) > describeCidr literal
