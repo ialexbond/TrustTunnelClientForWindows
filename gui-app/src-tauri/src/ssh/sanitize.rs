@@ -185,6 +185,33 @@ pub fn validate_dns_list(lines: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Display name for deeplink TLV 0x0C (`-n` flag of endpoint CLI). Printable ASCII,
+/// no shell metacharacters, no control chars. Empty string accepted (field optional).
+///
+/// CR-02 mitigation: backend interpolated this value into `... -n "{escaped_n}" ...`
+/// inside a double-quoted shell context, escaping only `"`. Without this validator a
+/// payload like `x"; rm -rf /; echo "y` would close the outer quotes and run arbitrary
+/// commands as sudo. We now reject every shell-metachar at the validation layer.
+pub fn validate_display_name(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Ok(()); // empty = field omitted
+    }
+    if s.len() > 64 {
+        return Err("Display name too long (max 64 chars)".into());
+    }
+    if s.chars().any(|c| {
+        c.is_control()
+            || matches!(
+                c,
+                '\'' | '"' | '`' | '$' | '\\' | ';' | '|' | '&'
+                    | '(' | ')' | '<' | '>' | '\n' | '\r' | '\0'
+            )
+    }) {
+        return Err("Display name contains invalid characters".into());
+    }
+    Ok(())
+}
+
 /// FQDN for `custom_sni` TLV field — letters, digits, dots, hyphens only.
 /// Empty string accepted (field optional).
 /// Max length 253 chars (RFC 1035).
@@ -410,5 +437,38 @@ mod tests {
         assert!(validate_fqdn_sni("example.com; ls").is_err());
         assert!(validate_fqdn_sni("ex ample.com").is_err());
         assert!(validate_fqdn_sni("example`com`").is_err());
+    }
+
+    // ─── Display name (CR-02) ─────────────────────────
+
+    #[test]
+    fn validate_display_name_accepts_normal() {
+        assert!(validate_display_name("").is_ok());
+        assert!(validate_display_name("My Phone").is_ok());
+        assert!(validate_display_name("iPhone-15 Pro").is_ok());
+        assert!(validate_display_name("Mac.Book/2026").is_ok());
+        assert!(validate_display_name("device_01").is_ok());
+    }
+
+    #[test]
+    fn validate_display_name_rejects_shell_injection() {
+        // Closing-quote attack from CR-02
+        assert!(validate_display_name(r#"x"; rm -rf /; echo "y"#).is_err());
+        assert!(validate_display_name("$(whoami)").is_err());
+        assert!(validate_display_name("`id`").is_err());
+        assert!(validate_display_name("name; ls").is_err());
+        assert!(validate_display_name("name|cat /etc/passwd").is_err());
+        assert!(validate_display_name("name&background").is_err());
+        assert!(validate_display_name("name'sq").is_err());
+        assert!(validate_display_name("name\\nl").is_err());
+        assert!(validate_display_name("name<input").is_err());
+        assert!(validate_display_name("name(group)").is_err());
+    }
+
+    #[test]
+    fn validate_display_name_rejects_control_chars_and_too_long() {
+        assert!(validate_display_name("with\nnewline").is_err());
+        assert!(validate_display_name("with\0null").is_err());
+        assert!(validate_display_name(&"a".repeat(65)).is_err());
     }
 }
