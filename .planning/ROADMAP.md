@@ -157,6 +157,24 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 14 to break down)
 
+### Phase 14.1: Advanced user config via gear icon — per-user anti-DPI, CIDR restriction, advanced deeplink params
+
+**Status:** Complete (2026-04-18)
+**Goal:** UserModal compound с 2 секциями (credentials + deeplink) заменяет inline UsersAddForm. Plus-icon (Add) + gear-icon per row (Edit), password rotation, certificate pinning, все 7 опциональных TLV deeplink-полей per D-4. Backend получает 7 новых Tauri-команд с rules.toml round-trip, atomic password rotation, TLS endpoint probe.
+**Requirements**: D-1, D-2, D-3, D-4, D-5, D-6, D-7, D-8, D-9
+**Depends on:** Phase 14
+**Plans:** 8/8 complete
+
+Plans:
+- [x] 14.1-00-PLAN.md — Upstream CLI gap decision (Path A — client-side TLV post-encoding)
+- [x] 14.1-01-PLAN.md — Backend Rust commands + rules.toml editing + cert_probe + 3 validators
+- [x] 14.1-02-PLAN.md — CIDRPicker primitive + cidr utility + 40 tests
+- [x] 14.1-03-PLAN.md — CIDRPicker Storybook stories (8 stories)
+- [x] 14.1-04-PLAN.md — UserModal + PasswordRotationPrompt + CertificateFingerprintCard + DnsUpstreamsInput + dirtyTracker
+- [x] 14.1-05-PLAN.md — UsersSection refactor (выполнено 14.1-04 агентом, action prop reused)
+- [x] 14.1-06-PLAN.md — i18n keys (ru.json + en.json parity)
+- [x] 14.1-07-PLAN.md — Memory docs + ROADMAP/STATE finalize (version bump + NSIS skipped per user)
+
 ### Phase 15: Таб Конфигурация — Quick Settings, TOML-парсер Advanced Accordion, двухуровневое сохранение
 
 **Goal:** [To be planned]
