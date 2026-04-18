@@ -5,6 +5,7 @@ export { Badge } from "./Badge";
 export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { CIDRPicker, PREFIX_OPTIONS, type CIDRPickerProps } from "./CIDRPicker";
+export { CharCounter, type CharCounterProps } from "./CharCounter";
 export { ConfirmDialog } from "./ConfirmDialog";
 export {
   ConfirmDialogProvider,
