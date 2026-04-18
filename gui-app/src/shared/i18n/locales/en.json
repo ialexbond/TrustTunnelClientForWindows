@@ -667,6 +667,7 @@
       "cidr_helper": "Empty = no restriction",
       "cidr_empty_any": "No restriction (all IPs)",
       "cidr_invalid": "Invalid CIDR (octets 0-255, prefix 0-32)",
+      "cidr_zero_all": "Explicit allow-all (0.0.0.0/0)",
       "cidr_octet_1": "First IP octet",
       "cidr_octet_2": "Second IP octet",
       "cidr_octet_3": "Third IP octet",
