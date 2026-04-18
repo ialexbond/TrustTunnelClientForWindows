@@ -190,15 +190,23 @@ pub async fn add_server_user(
     // Append new [[client]] block to credentials.toml using heredoc (safe from injection)
     emit_step(app, "configure", "progress", &format!("Adding user '{}'...", vpn_username));
 
+    // CR-03: validator now rejects \\, ', " in passwords. Username already passed
+    // validate_vpn_username (no shell metachars). The .replace below stays as a
+    // belt-and-braces no-op for usernames in case future validator relaxations
+    // re-allow backslash.
     let escaped_user = vpn_username.replace('\\', "\\\\");
     let escaped_pass = vpn_password.replace('\\', "\\\\");
+    // WR-04: randomize the heredoc delimiter so a hypothetical password / username
+    // equal to the literal sentinel cannot terminate the heredoc early. UUID v4
+    // collision probability is negligible.
+    let delim = format!("USER_EOF_{}", uuid::Uuid::new_v4().simple());
     let append_cmd = format!(
-        r#"{sudo}tee -a {dir}/credentials.toml > /dev/null << 'USER_EOF'
+        r#"{sudo}tee -a {dir}/credentials.toml > /dev/null << '{delim}'
 
 [[client]]
 username = "{escaped_user}"
 password = "{escaped_pass}"
-USER_EOF"#,
+{delim}"#,
         dir = ENDPOINT_DIR
     );
 
@@ -312,8 +320,11 @@ pub async fn server_rotate_user_password(
     // validate_vpn_password additionally rejects `'` and `\` (shell-unsafe in this context),
     // so we don't need to escape inside the python string literal anymore. Other chars
     // like `"`, `$`, `` ` `` are safe inside single-quoted heredoc.
+    // WR-04: randomized delimiter so the heredoc cannot be terminated early by a
+    // password / username equal to the literal sentinel.
+    let delim = format!("PY_ROTATE_EOF_{}", uuid::Uuid::new_v4().simple());
     let rotate_cmd = format!(
-        r#"{sudo}python3 << 'PY_ROTATE_EOF'
+        r#"{sudo}python3 << '{delim}'
 import re, os, tempfile
 path = '{dir}/credentials.toml'
 with open(path, 'r') as f:
@@ -326,7 +337,7 @@ fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
 with os.fdopen(fd, 'w') as f:
     f.write(new_content)
 os.replace(tmp, path)
-PY_ROTATE_EOF"#,
+{delim}"#,
         sudo = sudo,
         dir = dir,
         user = vpn_username,
@@ -426,8 +437,11 @@ pub async fn server_add_user_advanced(
             cidr.as_deref(),
         )?;
         let escaped = updated.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
+        // WR-04: randomized delimiter — rules.toml content includes user-controlled
+        // values (CIDR, username comments) that could collide with a fixed sentinel.
+        let delim = format!("RULES_EOF_{}", uuid::Uuid::new_v4().simple());
         let write_cmd = format!(
-            "{sudo}tee {dir}/rules.toml > /dev/null << 'RULES_EOF'\n{escaped}\nRULES_EOF"
+            "{sudo}tee {dir}/rules.toml > /dev/null << '{delim}'\n{escaped}\n{delim}"
         );
         let (_, code) = exec_command(handle, app, &write_cmd).await?;
         if code != 0 {
@@ -505,8 +519,10 @@ pub async fn server_update_user_config(
         cidr.as_deref(),
     )?;
     let escaped = updated.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
+    // WR-04: randomized delimiter (see notes above).
+    let delim = format!("RULES_EOF_{}", uuid::Uuid::new_v4().simple());
     let write_cmd = format!(
-        "{sudo}tee {dir}/rules.toml > /dev/null << 'RULES_EOF'\n{escaped}\nRULES_EOF"
+        "{sudo}tee {dir}/rules.toml > /dev/null << '{delim}'\n{escaped}\n{delim}"
     );
     let (_, code) = exec_command(handle, app, &write_cmd).await?;
     if code != 0 {
