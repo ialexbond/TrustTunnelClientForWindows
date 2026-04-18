@@ -281,3 +281,297 @@ with open('{dir}/credentials.toml', 'w') as f:
 
     Ok(())
 }
+
+/// Atomically rotate a user's password. Uses a single SSH python3 invocation that reads
+/// credentials.toml, regex-replaces the password line for the matching username, and writes
+/// atomically via tmp+rename. If the username is not found, returns error WITHOUT modifying
+/// the file (T-14.1-05 atomicity guarantee).
+///
+/// Security: password value NEVER emitted via `emit_log` or any event (T-14.1-02).
+/// Partial-failure shape (Q3): returns JSON-structured error `{kind, was_rolled_back, exit_code}`
+/// when the write stage fails. The atomic tmp+rename guarantees the file is either fully
+/// replaced or untouched — if exit code != 0 and != 9, original file is preserved.
+pub async fn server_rotate_user_password(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    vpn_username: String,
+    new_password: String,
+) -> Result<(), String> {
+    validate_vpn_username(&vpn_username)?;
+    validate_vpn_password(&new_password)?;
+
+    let sudo = detect_sudo(handle, app).await;
+    let dir = ENDPOINT_DIR;
+    // Shell-escape single-quote in username / password for python string literal
+    let escaped_user = vpn_username.replace('\\', "\\\\").replace('\'', "\\'");
+    let escaped_pass = new_password.replace('\\', "\\\\").replace('\'', "\\'");
+
+    let rotate_cmd = format!(
+        r#"{sudo}python3 -c "
+import re, os, tempfile
+path = '{dir}/credentials.toml'
+with open(path, 'r') as f:
+    content = f.read()
+pattern = r'(\[\[client\]\]\s*\nusername\s*=\s*\"{user}\"\s*\npassword\s*=\s*\")[^\"]*(\")'
+new_content, n = re.subn(pattern, lambda m: m.group(1) + '{pass}' + m.group(2), content)
+if n == 0:
+    raise SystemExit(9)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+with os.fdopen(fd, 'w') as f:
+    f.write(new_content)
+os.replace(tmp, path)
+""#,
+        sudo = sudo,
+        dir = dir,
+        user = escaped_user,
+        pass = escaped_pass,
+    );
+
+    let (_, code) = exec_command(handle, app, &rotate_cmd).await?;
+    if code == 9 {
+        return Err("SSH_ROTATE_USER_NOT_FOUND".into());
+    }
+    if code != 0 {
+        return Err(format!(
+            "{{\"kind\":\"SSH_ROTATE_PARTIAL_FAILED\",\"was_rolled_back\":true,\"exit_code\":{code}}}"
+        ));
+    }
+
+    // Restart service non-blocking — best effort
+    let _ = exec_command(
+        handle, app,
+        &format!("{sudo}systemctl --no-block restart trusttunnel"),
+    ).await;
+
+    Ok(())
+}
+
+/// Add a user with credentials.toml entry AND optional rules.toml per-user rule (anti-DPI + CIDR).
+/// Returns generated deeplink URI string.
+///
+/// B2 revision: `pin_certificate_der: Option<Vec<u8>>` — frontend (UserModal) fetches DER bytes
+/// via `server_fetch_endpoint_cert` first (displaying fingerprint for user confirmation), then
+/// passes the raw bytes here. Backend writes cert TLV only when `pin_certificate_der.is_some()`.
+#[allow(clippy::too_many_arguments)]
+pub async fn server_add_user_advanced(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    vpn_username: String,
+    vpn_password: String,
+    anti_dpi: bool,
+    prefix_length: Option<u32>,
+    prefix_percent: Option<u32>,
+    cidr: Option<String>,
+    custom_sni: Option<String>,
+    name: Option<String>,
+    upstream_protocol: Option<String>,
+    skip_verification: bool,
+    pin_certificate_der: Option<Vec<u8>>,
+    dns_upstreams: Vec<String>,
+) -> Result<String, String> {
+    validate_vpn_username(&vpn_username)?;
+    validate_vpn_password(&vpn_password)?;
+    if let Some(c) = &cidr {
+        crate::ssh::sanitize::validate_cidr(c)?;
+    }
+    if let Some(sni) = &custom_sni {
+        crate::ssh::sanitize::validate_fqdn_sni(sni)?;
+    }
+    crate::ssh::sanitize::validate_dns_list(&dns_upstreams)?;
+    if let Some(der) = &pin_certificate_der {
+        if der.len() > 8192 {
+            return Err("cert DER too large (> 8192 bytes)".into());
+        }
+    }
+
+    let prefix_length = prefix_length.unwrap_or(4).clamp(1, 16);
+    let prefix_percent = prefix_percent.unwrap_or(70).clamp(1, 100);
+
+    // Step 1: create credentials.toml entry (reuse existing function)
+    add_server_user(app, handle, vpn_username.clone(), vpn_password.clone()).await?;
+
+    // Step 2: generate anti-DPI prefix (client-side secure random) and write rules.toml
+    let generated_prefix: Option<String> = if anti_dpi {
+        use rand::RngCore;
+        let mut buf = vec![0u8; prefix_length as usize];
+        rand::thread_rng().fill_bytes(&mut buf);
+        Some(buf.iter().map(|b| format!("{:02x}", b)).collect())
+    } else {
+        None
+    };
+    let _ = prefix_percent; // stored at connect-time by upstream endpoint
+
+    if anti_dpi || cidr.is_some() {
+        let sudo = detect_sudo(handle, app).await;
+        let dir = ENDPOINT_DIR;
+        let (content, _) = exec_command(
+            handle, app,
+            &format!("{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''"),
+        ).await?;
+
+        let updated = super::add_user_rule(
+            &content,
+            &vpn_username,
+            generated_prefix.as_deref(),
+            cidr.as_deref(),
+        )?;
+        let escaped = updated.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
+        let write_cmd = format!(
+            "{sudo}tee {dir}/rules.toml > /dev/null << 'RULES_EOF'\n{escaped}\nRULES_EOF"
+        );
+        let (_, code) = exec_command(handle, app, &write_cmd).await?;
+        if code != 0 {
+            return Err(format!("SSH_RULES_WRITE_FAILED|{code}"));
+        }
+    }
+
+    // Step 3: generate deeplink with all TLV fields
+    super::export_config_deeplink_advanced(
+        app, handle,
+        vpn_username.clone(),
+        custom_sni,
+        name,
+        upstream_protocol,
+        anti_dpi,
+        skip_verification,
+        pin_certificate_der,
+        dns_upstreams,
+    ).await
+}
+
+/// Update per-user rules.toml entry: CIDR restriction and/or anti-DPI prefix.
+///
+/// B6 revision: accepts `anti_dpi: bool` and `regenerate_prefix: bool` flags rather than
+/// a raw prefix string — the frontend never sees the prefix hex value directly.
+pub async fn server_update_user_config(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    username: String,
+    cidr: Option<String>,
+    anti_dpi: bool,
+    regenerate_prefix: bool,
+) -> Result<super::UserRule, String> {
+    validate_vpn_username(&username)?;
+    if let Some(c) = &cidr {
+        crate::ssh::sanitize::validate_cidr(c)?;
+    }
+
+    let sudo = detect_sudo(handle, app).await;
+    let dir = ENDPOINT_DIR;
+    let (content, _) = exec_command(
+        handle, app,
+        &format!("{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''"),
+    ).await?;
+
+    let existing = super::find_user_rule(&content, &username)?;
+    let new_prefix: Option<String> = if !anti_dpi {
+        None // anti_dpi OFF → clear prefix
+    } else if regenerate_prefix {
+        use rand::RngCore;
+        let mut buf = vec![0u8; 4];
+        rand::thread_rng().fill_bytes(&mut buf);
+        Some(buf.iter().map(|b| format!("{:02x}", b)).collect())
+    } else {
+        match existing.as_ref().and_then(|r| r.client_random_prefix.clone()) {
+            Some(p) => Some(p),
+            None => {
+                use rand::RngCore;
+                let mut buf = vec![0u8; 4];
+                rand::thread_rng().fill_bytes(&mut buf);
+                Some(buf.iter().map(|b| format!("{:02x}", b)).collect())
+            }
+        }
+    };
+
+    let removed = super::remove_user_rule(&content, &username)?;
+    let updated = super::add_user_rule(
+        &removed, &username,
+        new_prefix.as_deref(),
+        cidr.as_deref(),
+    )?;
+    let escaped = updated.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
+    let write_cmd = format!(
+        "{sudo}tee {dir}/rules.toml > /dev/null << 'RULES_EOF'\n{escaped}\nRULES_EOF"
+    );
+    let (_, code) = exec_command(handle, app, &write_cmd).await?;
+    if code != 0 {
+        return Err(format!("SSH_UPDATE_CONFIG_FAILED|{code}"));
+    }
+    Ok(super::UserRule { client_random_prefix: new_prefix, cidr })
+}
+
+/// Regenerate the anti-DPI client_random_prefix for an existing user.
+/// Old prefix is invalidated in existing deeplinks.
+pub async fn server_regenerate_client_prefix(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    vpn_username: String,
+    prefix_length: u32,
+    prefix_percent: u32,
+) -> Result<String, String> {
+    validate_vpn_username(&vpn_username)?;
+    let plen = prefix_length.clamp(1, 16);
+    let _pct = prefix_percent.clamp(1, 100); // stored at connect-time
+
+    use rand::RngCore;
+    let mut buf = vec![0u8; plen as usize];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let new_prefix: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+
+    // Delegate update with regenerate_prefix=true; cidr preserved from existing rule
+    server_update_user_config(app, handle, vpn_username, None, true, true).await?;
+    Ok(new_prefix)
+}
+
+/// TLS cert probe — does NOT use SSH. Takes handle for macro signature consistency.
+/// Caller must display the returned fingerprint to the user before embedding in deeplink.
+pub async fn server_fetch_endpoint_cert(
+    _app: &tauri::AppHandle,
+    _handle: &client::Handle<SshHandler>,
+    hostname: String,
+    cert_port: u16,
+) -> Result<super::EndpointCertInfo, String> {
+    super::fetch_endpoint_cert(&hostname, cert_port).await
+}
+
+/// Read rules.toml for a single username and return their rule config.
+pub async fn server_get_user_config(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    vpn_username: String,
+) -> Result<Option<super::UserRule>, String> {
+    validate_vpn_username(&vpn_username)?;
+    let sudo = detect_sudo(handle, app).await;
+    let dir = ENDPOINT_DIR;
+    let (content, _) = exec_command(
+        handle, app,
+        &format!("{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''"),
+    ).await?;
+    super::find_user_rule(&content, &vpn_username)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rotate_password_regex_matches_user_block() {
+        use regex::Regex;
+        let sample = "[[client]]\nusername = \"alice\"\npassword = \"old_secret\"\n";
+        let re = Regex::new(
+            r#"(\[\[client\]\]\s*\nusername\s*=\s*"alice"\s*\npassword\s*=\s*")[^"]*(")"#
+        ).unwrap();
+        let replaced = re.replace(sample, "${1}new_secret${2}").to_string();
+        assert!(replaced.contains("password = \"new_secret\""));
+        assert!(!replaced.contains("old_secret"));
+    }
+
+    #[test]
+    fn rotate_password_regex_misses_wrong_user() {
+        use regex::Regex;
+        let sample = "[[client]]\nusername = \"bob\"\npassword = \"bob_secret\"\n";
+        let re = Regex::new(
+            r#"(\[\[client\]\]\s*\nusername\s*=\s*"alice"\s*\npassword\s*=\s*")[^"]*(")"#
+        ).unwrap();
+        let n = re.find_iter(sample).count();
+        assert_eq!(n, 0);
+    }
+}

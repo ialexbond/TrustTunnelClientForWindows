@@ -7,7 +7,7 @@ mod logging;
 mod processes;
 mod routing_rules;
 mod sidecar;
-mod ssh;
+pub mod ssh;
 mod tray;
 
 use std::sync::{Arc, Mutex};
@@ -347,6 +347,14 @@ pub fn run() {
             commands::protocol::poll_pending_deeplink,
             commands::activity_log::write_activity_log,
             commands::activity_log::export_activity_log,
+            // Phase 14.1 — advanced user config
+            commands::ssh_commands::server_add_user_advanced,
+            commands::ssh_commands::server_update_user_config,
+            commands::ssh_commands::server_rotate_user_password,
+            commands::ssh_commands::server_regenerate_client_prefix,
+            commands::ssh_commands::server_fetch_endpoint_cert,
+            commands::ssh_commands::server_export_config_deeplink_advanced,
+            commands::ssh_commands::server_get_user_config,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
