@@ -1,0 +1,212 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Language
+
+Always communicate in Russian. The developer is Russian-speaking.
+
+## Project Overview
+
+TrustTunnel Client for Windows — desktop VPN client built with **Tauri 2 + React 19 + Rust**. Two editions share one monorepo:
+
+- **gui-app/** (Pro) — full server management via SSH + VPN connection
+- **gui-light/** (Light) — simplified client, connection only
+
+> **Companion docs at root** (auto-generated 2026-04-17): [README.md](README.md), [ARCHITECTURE.md](ARCHITECTURE.md), [GETTING-STARTED.md](GETTING-STARTED.md), [DEVELOPMENT.md](DEVELOPMENT.md), [TESTING.md](TESTING.md), [CONFIGURATION.md](CONFIGURATION.md), [CONTRIBUTING.md](CONTRIBUTING.md). Эти файлы — для git-юзеров и контрибьюторов; CLAUDE.md остаётся источником правды для AI/dev guidance и ссылается на них чтобы не дублировать.
+
+## Build Commands
+
+```bash
+# Frontend (from gui-app/)
+npm run build              # Vite production build
+npm run dev                # Vite dev server on :1420
+npm run tauri:dev          # Tauri dev with hot reload
+
+# Tests
+npm run test               # Vitest run (all tests)
+npx vitest run src/shared/ui/Button.test.tsx  # Single test file
+
+# Quality
+npm run typecheck          # tsc --noEmit (strict mode)
+npm run lint               # ESLint (max-warnings 0)
+npm run rust:check         # cargo clippy -D warnings
+
+# Full prerelease check
+npm run prerelease         # typecheck + lint + test + clippy + build
+
+# NSIS installer (from gui-app/)
+npm run tauri build -- --bundles nsis
+
+# Storybook
+npm run storybook          # Dev server on :6006
+npm run build-storybook    # Static build
+```
+
+## Architecture
+
+### Frontend (React 19 + TypeScript)
+
+```
+gui-app/src/
+├── App.tsx                    # Root: shell layout, VPN state, tab routing
+├── components/
+│   ├── layout/                # TitleBar, TabNavigation, WindowControls
+│   ├── server/                # SshConnectForm, ServerStatusSection, UsersSection, etc.
+│   ├── routing/               # Routing rules UI (GeoIP, domain, process filters)
+│   ├── wizard/                # Setup wizard steps
+│   ├── dashboard/             # Stats, ping, speed test
+│   ├── settings/              # App settings sections
+│   ├── ControlPanelPage.tsx   # Main panel: SshConnectForm ↔ ServerPanel
+│   ├── ServerPanel.tsx        # Server management orchestrator
+│   └── ServerTabs.tsx         # 5-tab server navigation (Обзор/Пользователи/Конфигурация/Безопасность/Утилиты) — Phase 11 layout
+├── shared/
+│   ├── ui/                    # 33 shared components (Button, Input, Modal, Badge, Skeleton, StatusIndicator, StatCard, Accordion, OverflowMenu, ActionInput, ActionPasswordInput, etc.)
+│   ├── hooks/                 # useVpnEvents, useTheme, useKeyboardShortcuts, useCollapse, etc.
+│   ├── styles/tokens.css      # Design tokens (262 lines, two-tier: primitives + semantics)
+│   ├── lib/cn.ts              # clsx + tailwind-merge with custom font-size group
+│   ├── i18n/locales/          # ru.json, en.json
+│   ├── types.ts               # AppTab, VpnStatus, VpnConfig, LogEntry, ThemeMode
+│   └── context/VpnContext.tsx  # VPN state context
+└── index.css                  # Global styles, animations, scrollbars
+```
+
+### Backend (Rust / Tauri 2)
+
+```
+gui-app/src-tauri/src/
+├── lib.rs                 # Tauri app setup, plugin registration, tray, window
+├── commands/              # ~73 Tauri IPC commands (`#[tauri::command]`)
+│   ├── vpn.rs             # VPN connect/disconnect, sidecar management
+│   ├── ssh_commands.rs    # Server management via SSH (users, config, certs, firewall)
+│   ├── config.rs          # Client config read/write
+│   ├── network.rs         # Ping, DNS, adapter detection
+│   └── updater.rs         # GitHub release checker
+├── ssh/                   # SSH connection pool, russh client
+├── sidecar.rs             # C++ sidecar binary (trusttunnel_client) lifecycle
+├── routing_rules.rs       # GeoIP/GeoSite rule application
+├── connectivity.rs        # Internet connectivity monitor with auto-reconnect
+└── tray.rs                # System tray menu builder
+```
+
+### IPC Pattern
+
+Frontend calls Rust via `invoke("command_name", { params })`. Rust emits events to frontend via `app.emit("event-name", payload)`. Key events: `vpn-status`, `vpn-log`, `internet-status`, `geodata-progress`, `geodata-files-changed`, `config-file-changed`, `ssh-host-key-verify`, `deep-link-url`.
+
+## Current State (v3.1, Pro v3.0.0 / Light v2.7.0)
+
+v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, двухуровневые токены, 33 CVA-компонента, Geist Sans/Mono, slate-teal палитра. v3.1 в работе (Phases 8-14 shipped, Phases 15-18 запланированы):
+
+- **Phase 8:** Stabilization — CI зелёный, i18n cleanup, screen specs
+- **Phase 9:** +4 компонента — Skeleton, StatusIndicator, StatCard, Accordion (useCollapse hook)
+- **Phase 10:** Pill-индикатор (translateX + getBoundingClientRect), cross-fade табов (visibility+opacity), Skeleton loading при SSH, credentials persist (localStorage)
+- **Phase 11:** Серверная панель 5 табов (Обзор/Пользователи/Конфигурация/Безопасность/Утилиты), accent color fix, focus rings, OverflowMenu, OverviewSection/ServerSettingsSection/ServiceSection
+- **Phase 12-12.5:** ConfirmDialogProvider+useConfirm imperative API, Skeleton+Activity Log foundation, useServerState hook splitting
+- **Phase 13:** OverviewSection 10 live-карточек, drill-down, ServerPanelSkeleton, IP/TLS/ping (G-01..G-08 post-UAT fixes shipped)
+- **Phase 14:** Users tab редизайн — 2 inline icons (FileText+Trash2) вместо OverflowMenu+radio, UserConfigModal compound (QR+deeplink+download), ActionInput/PasswordInput.clearable, OverflowMenu auto-flip
+- **Phase 15-18 (planned):** TOML-парсер, SSH-ключ, Fail2Ban, каскадная индикация обновлений, welcome+rollback
+
+**Layout:** bottom tab bar (5 pill-кнопок, 64px), кастомный TitleBar 32px, окно 900×1000, minWidth 800, **maxWidth 1000** (per `tauri.conf.json`)
+
+## Planning Documentation
+
+- **CONTROL-PANEL-SPEC.md** — спецификация редизайна панели управления (v1.1, 770 строк). Описывает целевое состояние: 5 серверных табов, УТП, онбординг, TOML-парсер, бесшовное обновление, Activity Log, SSH-ключ, Fail2Ban. Используется как методичка для Phase 12-18.
+  - Путь: `.planning/phases/11-screen-ux-redesign/CONTROL-PANEL-SPEC.md`
+
+## Memory Documentation
+
+`memory/` (gitignored) — граф знаний дизайн-системы и архитектуры. Структура: `memory/v3/{design-system,screens,decisions,use-cases,test-cases}/`. Корневые файлы: `design-system.md`, `shell-architecture.md`, `tab-navigation-logic.md`, `components-catalog.md` (33 shared UI + ~100 screen). Точный реестр и кросс-ссылки — в `memory/v3/components-catalog.md` и `memory/MEMORY.md`.
+
+**Правило:** при изменении UI / токенов / поведения табов — обновить соответствующий файл в `memory/v3/`. Поддерживать перекрёстные ссылки (архитектура ↔ экраны, компоненты ↔ анимации, решения ↔ реализация).
+
+## Design System Rules
+
+1. **All colors via CSS tokens** from `tokens.css` — never hardcode hex in components
+2. **Font weight:** only `font-[var(--font-weight-semibold)]` (600) and normal (400) — never use Tailwind's `font-semibold` directly
+3. **Font size in Tailwind:** use `text-xs/sm/base/lg` (mapped in tailwind.config.js) — never `text-[var(--font-size-*)]` (Tailwind generates `color:` instead of `font-size:`)
+4. **Buttons with colored backgrounds:** use `text-white`, not `text-[var(--color-text-inverse)]`
+5. **Accent color:** only for interactive elements (10% rule)
+6. **Class merging:** always use `cn()` from `shared/lib/cn.ts`
+7. **Components use CVA** (class-variance-authority) for variants: Button (primary/secondary/danger/danger-outline/ghost/icon), Badge (success/warning/danger/neutral/dot/default × sm/md), StatusBadge
+
+## Key Patterns
+
+- **Tab switching:** cross-fade via `visibility: hidden` + `opacity: 0` (NOT `display: none`) — preserves React state, enables smooth transitions. Pill indicator in bottom tab bar animates via `transform: translateX` with `getBoundingClientRect`
+- **i18n:** all user-facing text via `useTranslation()` with keys in `ru.json`/`en.json`
+- **Seamless design:** body has `bg-primary`, all components transparent — no layered backgrounds
+- **Window:** custom decorations (`decorations: false`), `data-tauri-drag-region` on TitleBar
+- **Sidecar:** C++ binary `trusttunnel_client-x86_64-pc-windows-msvc.exe` (declared в `tauri.conf.json` как `externalBin: ["trusttunnel_client"]`) + DLLs (`wintun.dll`, `vcruntime140*.dll`) — лежат в `gui-app/src-tauri/`, не в `sidecar/`. В worktree их нужно скопировать перед `cargo check` / build
+
+## Critical Rules
+
+- **master branch is READ-ONLY** — never commit/merge without explicit request
+- **No Claude/AI artifacts in git** — only application code
+- **Version bumps:** update version in: `gui-app/package.json`, `gui-app/src-tauri/Cargo.toml`, `gui-app/src-tauri/tauri.conf.json`, `gui-light/package.json`, `gui-light/src-tauri/Cargo.toml`, `gui-light/src-tauri/tauri.conf.json`
+- **NSIS installers:** after changes, build and copy to Desktop
+- **Memory docs:** `memory/` directory contains design documentation (gitignored) — keep up to date after UI changes
+
+## Security Rules
+
+Полная политика и threat model — [SECURITY.md](SECURITY.md) + [memory/security-posture.md](memory/security-posture.md).
+
+- **Char-whitelist ВСЕГДА** — все user-input validators в `gui-app/src-tauri/src/ssh/sanitize.rs` используют whitelist `[a-zA-Z0-9...]`, не blacklist. Добавляешь новое поле deeplink/credentials — добавь validator.
+- **D-29 invariant** — пароли НИКОГДА не попадают в `activity.log`. Любой компонент с password handling обязан иметь spy-тест `expect(log).not.toHaveBeenCalledWith(expect.stringContaining(password))`.
+- **SSH heredoc** — для multi-line commands используй UUID-based delimiters (`EOF_<uuid>`), НЕ статичные `USER_EOF`. См. `server_install.rs` post-14.1 pattern — иначе username/password может содержать маркер и сломать shell parsing (или сделать injection).
+- **Base64 wire format для binary** — Vec<u8> через serde сериализуется как массив чисел, TypeScript получит `number[]`. Используй `leaf_der_b64: String` на обеих сторонах.
+- **Accepted risk — RUSTSEC-2023-0071** (rsa Marvin attack, russh dep) — документирован в SECURITY.md. Для production рекомендуем Ed25519 SSH-ключи, НЕ RSA.
+- **Prerelease audit** — `cd gui-app/src-tauri && cargo audit` обязателен перед релизом. Ожидаемо: 1 vuln (rsa), 23 warnings (gtk-rs Linux-path).
+
+## Worktree Setup
+
+In git worktrees, sidecar binary + DLLs are not present (они gitignored). Before `cargo check`:
+```bash
+# From worktree root — копируем sidecar бинарник + DLL из main checkout в текущий worktree
+cp ../../../gui-app/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe gui-app/src-tauri/
+cp ../../../gui-app/src-tauri/{wintun.dll,vcruntime140.dll,vcruntime140_1.dll} gui-app/src-tauri/
+
+# Frontend зависимости + сборка
+cd gui-app && npm install && npm run build
+```
+Frontend-only фазы (i18n / stories / React-компоненты без Rust-проверки) могут пропустить копирование sidecar.
+
+## Testing Patterns
+
+- **Visibility, not DOM:** collapsed/hidden elements → `not.toBeVisible()`, NOT `not.toBeInTheDocument()` (элемент остаётся в DOM при visibility:hidden)
+- **RAF mock:** `gui-app/src/test/setup.ts` содержит синхронный `requestAnimationFrame` mock — анимации выполняются мгновенно в тестах
+- **i18n в тестах:** `i18n.changeLanguage('ru')` в `beforeEach` обязателен для компонентов с `t()`
+- **Тестировать поведение и aria** — `toBeVisible()`, `aria-expanded`, `aria-hidden`, `role` — НЕ CSS-классы
+- **Storybook stories обязательны** при создании/изменении компонентов. Интерактивные stories используют `useState` внутри `render()` либо `play()` из `storybook/test` (`userEvent`+`within`+`waitFor`). 42 story файла.
+
+## localStorage Keys
+
+Все ключи имеют префикс `tt_*` (НЕ `trusttunnel_*`).
+
+| Key | Purpose | Set | Cleared |
+|-----|---------|-----|---------|
+| `tt_ssh_last_host` | Last SSH host | At connect | Never (persist) |
+| `tt_ssh_last_user` | Last SSH username | At connect | Never (persist) |
+| `tt_ssh_last_port` | Last SSH port | At connect | Never (persist) |
+| `tt_active_page` | Active app tab | On tab change | Never |
+| `tt_active_tab` | Active server-panel tab | On server tab change | Never |
+| `tt_theme` | Theme mode (light/dark/system) | On theme change | Never |
+| `tt_language` | UI language (ru/en) | On language change | Never |
+| `tt_config_path` | Last loaded config file path | On import | On clear/disconnect |
+| `tt_log_level` | Log level (info/debug) | On settings change | Never |
+| `tt_connected_since` | VPN connect timestamp (ISO) | On connect | On disconnect |
+| `tt_auto_connect` | Auto-connect on startup flag | On settings change | Never |
+| `tt_feature_toggles` | Optional feature flags (JSON) | On settings change | Never |
+| `tt_navigate_after_setup` | Navigate target after wizard | On wizard complete | After navigation |
+| `tt_vpn_status` | Cached VPN status | On status change | On disconnect |
+| `tt_server_stats` | Server stats cache (sessionStorage) | On panel load | On panel unmount |
+| `tt_geoip_<host>` | Cached GeoIP per server | On geoip resolve | TTL-based |
+
+## Gotchas
+
+- `text-[var(--font-size-*)]` generates `color:` not `font-size:` in Tailwind — use `text-xs/sm/base/lg` instead
+- `cn()` needs custom `extendTailwindMerge` for font-size class group (already configured in `cn.ts`)
+- Storybook requires Tauri API mocks in `.storybook/tauri-mocks/` — 6 mock files (api-app/api-core/api-event/api-window/plugin-dialog/plugin-shell)
+- `colors.ts` was deleted in v3.0 — all colors via CSS tokens only
+- Button `text-white` on colored backgrounds — `--color-text-inverse` is black in dark theme
+- **Inline `style={{ color: "var(--token)" }}` побеждает Tailwind hover utilities** (Phase 14 finding) — `hover:text-*` / `focus:text-*` НЕ применяются. Базовый цвет → в className-токен (`text-[var(--color-x)]`); inline-style оставлять только для динамических вычислений (paddingRight, getBoundingClientRect-position). См. [memory/v3/design-system/known-issues.md#9](memory/v3/design-system/known-issues.md)
+- **`transition-colors` не транзитит opacity** (Phase 14 finding) — `hover:opacity-70` снапит мгновенно. Использовать `transition-opacity` или `transition-all`
+- **НЕ делать `if (!isOpen) return null` до `<Modal>`** (Phase 14 post-install finding) — Modal primitive управляет своим lifecycle через `mounted`+`animating` state + 200ms exit transition. Early return null в parent'е убивает exit-анимацию (React unmount'ит всё до того как Modal fade'нет). Парент передаёт `isOpen` как есть. Для cleanup state на close — `setTimeout(200)` в useEffect. Эталон — `UserConfigModal.tsx`. Подробно: [memory/v3/design-system/known-issues.md#10](memory/v3/design-system/known-issues.md) + JSDoc в `Modal.tsx`
