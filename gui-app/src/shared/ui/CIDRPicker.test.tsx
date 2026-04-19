@@ -44,15 +44,16 @@ describe("CIDRPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("");
   });
 
-  // W12 revision: assert 33 prefix options via exported constant
-  it("PREFIX_OPTIONS has exactly 33 entries (0..=32)", () => {
-    expect(PREFIX_OPTIONS).toHaveLength(33);
-    expect(PREFIX_OPTIONS[0]).toEqual({ value: "0", label: "0" });
-    expect(PREFIX_OPTIONS[32]).toEqual({ value: "32", label: "32" });
-    // Verify no gaps 0..32
+  // FIX-I: leading "—" (value="") clearable option + 33 numeric prefixes (0..=32).
+  it("PREFIX_OPTIONS starts with clearable '—' and covers 0..=32", () => {
+    expect(PREFIX_OPTIONS).toHaveLength(34);
+    expect(PREFIX_OPTIONS[0]).toEqual({ value: "", label: "—" });
+    expect(PREFIX_OPTIONS[1]).toEqual({ value: "0", label: "0" });
+    expect(PREFIX_OPTIONS[33]).toEqual({ value: "32", label: "32" });
+    // Verify no gaps 0..32 in the numeric tail
     for (let i = 0; i <= 32; i++) {
-      expect(PREFIX_OPTIONS[i].value).toBe(String(i));
-      expect(PREFIX_OPTIONS[i].label).toBe(String(i));
+      expect(PREFIX_OPTIONS[i + 1].value).toBe(String(i));
+      expect(PREFIX_OPTIONS[i + 1].label).toBe(String(i));
     }
   });
 
@@ -118,5 +119,72 @@ describe("CIDRPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("10.5.0.0/24");
     // onError should have been called with "" (valid CIDR)
     expect(onError).toHaveBeenLastCalledWith("");
+  });
+
+  // Paste fan-out handler: вставка целого IP в любой octet распределяет
+  // значения по всем четырём полям + подтягивает /prefix если был.
+  it("paste: IP string fans out across all 4 octets when pasted into octet 0", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    // clipboardData mock. React synthetic paste event получает data через
+    // getData("text"); jsdom не реализует clipboardData полностью, поэтому
+    // stub вручную.
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "109.194.163.8" },
+    });
+    expect(inputs[0]).toHaveValue("109");
+    expect(inputs[1]).toHaveValue("194");
+    expect(inputs[2]).toHaveValue("163");
+    expect(inputs[3]).toHaveValue("8");
+  });
+
+  it("paste: CIDR string fills octets and prefix", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    fireEvent.paste(inputs[2], {
+      clipboardData: { getData: () => "10.0.0.0/24" },
+    });
+    expect(inputs[0]).toHaveValue("10");
+    expect(inputs[3]).toHaveValue("0");
+    // onChange must include the parsed prefix
+    expect(onChange).toHaveBeenLastCalledWith("10.0.0.0/24");
+  });
+
+  it("paste: tolerates surrounding noise, extracts first 4 numbers", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "  IP: 109.194.163.8 (home) " },
+    });
+    expect(inputs[0]).toHaveValue("109");
+    expect(inputs[3]).toHaveValue("8");
+  });
+
+  it("paste: rejects malformed input (< 4 octets) — falls back to default", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    // Only 3 numbers → tryFanOutPaste returns false, e.preventDefault
+    // NOT called. Default paste runs in the single input, но мы мокаем
+    // без set value — проверяем что остальные поля пустые.
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "10.0.0" },
+    });
+    expect(inputs[1]).toHaveValue("");
+    expect(inputs[2]).toHaveValue("");
+    expect(inputs[3]).toHaveValue("");
+  });
+
+  it("paste: rejects octet > 255", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "300.0.0.0" },
+    });
+    expect(inputs[0]).toHaveValue("");
   });
 });
