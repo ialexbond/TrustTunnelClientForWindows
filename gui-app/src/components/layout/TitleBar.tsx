@@ -60,7 +60,11 @@ export function TitleBar({ children }: TitleBarProps) {
           TrustTunnel
         </span>
         <span
-          className="text-[9px] font-[var(--font-weight-semibold)] px-1.5 py-[1px] rounded-[var(--radius-sm)]"
+          // uppercase-only «PRO» не имеет descender'а, с default
+          // line-height глиф визуально сидит выше центра box'а.
+          // `leading-none` + немного больше top-padding чем bottom
+          // опускает глиф к оптическому центру.
+          className="text-[9px] font-[var(--font-weight-semibold)] px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
           style={{
             backgroundColor: "var(--color-bg-elevated)",
             color: "var(--color-accent-interactive)",
