@@ -60,13 +60,15 @@ export function TitleBar({ children }: TitleBarProps) {
           <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
         </span>
         <span
-          // uppercase-only «PRO» не имеет descender'а, с default
-          // line-height глиф визуально сидит выше центра box'а.
-          // `leading-none` + немного больше top-padding чем bottom
-          // опускает глиф к оптическому центру.
-          className="text-[9px] font-[var(--font-weight-semibold)] px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
+          // PRO badge — тот же stylistic pattern что и AboutPanel:
+          // accent-tint-10 фон + accent-interactive текст + rounded-sm +
+          // font-bold. Масштаб подогнан под 32px TitleBar height:
+          // text-[9px] вместо [11px], padding pt-[3px]/pb-[2px] вместо
+          // pt-[4px]/pb-[3px]. Optical-center (leading-none + asymmetric
+          // padding) идентичен.
+          className="text-[9px] font-bold px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
           style={{
-            backgroundColor: "var(--color-bg-elevated)",
+            backgroundColor: "var(--color-accent-tint-10)",
             color: "var(--color-accent-interactive)",
           }}
         >
