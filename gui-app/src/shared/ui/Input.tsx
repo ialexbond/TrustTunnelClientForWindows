@@ -80,7 +80,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               "transition-all duration-[var(--transition-fast)]",
               "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
-              error && "border-[var(--color-danger-500)] bg-[var(--color-status-error-bg)]",
+              // FIX-II: error state = red border only, no tinted background.
+              // Red fill felt alarming for routine validation — border speaks
+              // just as clearly and keeps the input visually calm.
+              error && "border-[var(--color-danger-500)]",
               icon && "pl-9",
               showClear && "pr-8",
               className

@@ -13,6 +13,7 @@ import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
 import { cn } from "../../shared/lib/cn";
+import { fromServerResponse as advancedFromServer } from "../../shared/utils/userAdvanced";
 
 /**
  * UserConfigModal — Phase 14 Plan 04 production implementation.
@@ -51,6 +52,14 @@ export interface UserConfigModalProps {
     keyPath?: string;
   };
   onClose: () => void;
+  /**
+   * FIX-W: skip the backend fetch and show this deeplink directly. Used when
+   * the caller already produced a deeplink (e.g. UserModal handleSave
+   * regenerated it with edited TLV params) and we need to surface THAT exact
+   * one — fetching again via `server_export_config_deeplink` would return
+   * the basic deeplink without the session-scoped TLV additions.
+   */
+  preloadedDeeplink?: string;
   /** Storybook-only: bypass backend deeplink fetch. */
   _deeplinkOverride?: string;
   /** Storybook-only: force the loading state (spinner). */
@@ -64,6 +73,7 @@ export function UserConfigModal({
   username,
   sshParams,
   onClose,
+  preloadedDeeplink,
   _deeplinkOverride,
   _forceLoading,
   _forceError,
@@ -93,14 +103,53 @@ export function UserConfigModal({
       setDeeplinkLoading(true);
       setDeeplinkError(null);
       try {
-        const link = await invoke<string>("server_export_config_deeplink", {
+        const sshArgs = {
           host: sshHost,
           port: sshPort,
           user: sshUser,
           password: sshPassword,
           keyPath: sshKeyPath,
-          clientName: username,
-        });
+        };
+        // FIX-NN: close+reopen FileText used to re-fetch via basic export,
+        // stripping every TLV the user saved on Add/Edit. Probe our sidecar
+        // file first — if advanced params are persisted we regenerate the
+        // deeplink with them baked in; otherwise fall back to the basic
+        // path so pre-FIX-NN servers keep working.
+        const advancedRaw = await invoke<unknown>("server_get_user_advanced", {
+          ...sshArgs,
+          username,
+        }).catch(() => null);
+        const advanced = advancedFromServer(advancedRaw);
+        const link = advanced
+          ? await invoke<string>("server_export_config_deeplink_advanced", {
+              ...sshArgs,
+              clientName: username,
+              customSni: advanced.customSni || null,
+              name: advanced.displayName || null,
+              upstreamProtocol:
+                advanced.upstreamProtocol !== "auto"
+                  ? advanced.upstreamProtocol
+                  : null,
+              antiDpi: advanced.antiDpi,
+              skipVerification: advanced.skipVerification,
+              // FIX-OO-7: we don't have the is_system_verifiable flag
+              // after a reopen (users-advanced.toml only stores the cert
+              // bytes). Size-gate as a defensive proxy — anything above
+              // ~2 KB base64 (≈ 1.5 KB decoded) cannot fit in a QR code
+              // binary-mode payload + the other TLVs, so skip embedding
+              // and let the sidecar use its platform verifier. Self-signed
+              // single-leaf certs are typically well under this threshold.
+              pinCertificateDer: advanced.pinCert &&
+                advanced.certDerB64 &&
+                advanced.certDerB64.length < 2048
+                ? advanced.certDerB64
+                : null,
+              dnsUpstreams: advanced.dnsUpstreams,
+            })
+          : await invoke<string>("server_export_config_deeplink", {
+              ...sshArgs,
+              clientName: username,
+            });
         if (!isCancelled?.()) setDeeplink(link);
       } catch (e) {
         if (!isCancelled?.()) setDeeplinkError(formatError(e));
@@ -128,12 +177,30 @@ export function UserConfigModal({
       setDeeplinkLoading(false);
       return;
     }
+    // FIX-W: caller already handed us a deeplink (e.g. post-Edit regenerate).
+    // Skip the backend roundtrip — fetching would return the BASIC deeplink
+    // without the edited TLV params and overwrite what the user actually
+    // came here to see.
+    if (preloadedDeeplink) {
+      setDeeplink(preloadedDeeplink);
+      setDeeplinkError(null);
+      setDeeplinkLoading(false);
+      return;
+    }
     let cancelled = false;
     void fetchDeeplink(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [isOpen, username, _deeplinkOverride, _forceLoading, _forceError, fetchDeeplink]);
+  }, [
+    isOpen,
+    username,
+    preloadedDeeplink,
+    _deeplinkOverride,
+    _forceLoading,
+    _forceError,
+    fetchDeeplink,
+  ]);
 
   // ── Delayed cleanup after close ──
   // Runs 200ms after isOpen flips to false — matches Modal exit animation.

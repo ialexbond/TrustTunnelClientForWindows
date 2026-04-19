@@ -46,7 +46,7 @@ describe("Modal", () => {
     expect(screen.getByText("My Title")).toBeInTheDocument();
   });
 
-  it("calls onClose when overlay is clicked", () => {
+  it("calls onClose when overlay is clicked (full mousedown+mouseup gesture)", () => {
     render(
       <Modal isOpen onClose={onClose}>
         <p>Inside</p>
@@ -55,8 +55,26 @@ describe("Modal", () => {
     // Overlay is the parent of the panel
     const panel = screen.getByText("Inside").closest("div[class*='max-w']")!;
     const overlay = panel.parentElement!;
-    fireEvent.click(overlay);
+    // FIX-J: close fires only when both mousedown AND mouseup land on backdrop.
+    fireEvent.mouseDown(overlay);
+    fireEvent.mouseUp(overlay);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT call onClose when mousedown starts inside panel then releases on overlay (drag-select)", () => {
+    // FIX-J regression test — the original bug: user starts text-drag inside
+    // the modal, releases outside → modal was closing mid-edit and lost data.
+    render(
+      <Modal isOpen onClose={onClose}>
+        <p>Inside</p>
+      </Modal>
+    );
+    const inside = screen.getByText("Inside");
+    const panel = inside.closest("div[class*='max-w']")!;
+    const overlay = panel.parentElement!;
+    fireEvent.mouseDown(inside);
+    fireEvent.mouseUp(overlay);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not call onClose when panel content is clicked", () => {
@@ -77,7 +95,8 @@ describe("Modal", () => {
     );
     const panel = screen.getByText("Inside").closest("div[class*='max-w']")!;
     const overlay = panel.parentElement!;
-    fireEvent.click(overlay);
+    fireEvent.mouseDown(overlay);
+    fireEvent.mouseUp(overlay);
     expect(onClose).not.toHaveBeenCalled();
   });
 

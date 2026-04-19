@@ -98,6 +98,10 @@ describe("UserConfigModal", () => {
   });
 
   it("renders QR code with fetched deeplink (240px)", async () => {
+    // FIX-NN: fetchDeeplink now probes `server_get_user_advanced` first.
+    // Returning null falls through to the basic `server_export_config_deeplink`
+    // path, which the second Once-mock answers.
+    vi.mocked(invoke).mockResolvedValueOnce(null);
     vi.mocked(invoke).mockResolvedValueOnce(
       "tt://example.com/config?token=abc",
     );
@@ -330,6 +334,9 @@ describe("UserConfigModal", () => {
   });
 
   it("shows error state with retry button when deeplink fetch fails", async () => {
+    // FIX-NN: first probe `server_get_user_advanced` (returns null → fall
+    // through to basic path), then the basic export rejects.
+    vi.mocked(invoke).mockResolvedValueOnce(null);
     vi.mocked(invoke).mockRejectedValueOnce(new Error("SSH connection failed"));
     render(
       <UserConfigModal
@@ -349,6 +356,10 @@ describe("UserConfigModal", () => {
   });
 
   it("retries deeplink fetch when retry button clicked", async () => {
+    // FIX-NN: two invokes per fetchDeeplink pass (advanced probe + basic
+    // export). First pass: advanced=null, then basic rejects. Second pass
+    // on Retry: advanced=null, then basic succeeds.
+    vi.mocked(invoke).mockResolvedValueOnce(null);
     vi.mocked(invoke).mockRejectedValueOnce(new Error("first fail"));
     render(
       <UserConfigModal
@@ -361,10 +372,12 @@ describe("UserConfigModal", () => {
     const retryBtn = await screen.findByRole("button", {
       name: new RegExp(i18n.t("buttons.retry"), "i"),
     });
+    vi.mocked(invoke).mockResolvedValueOnce(null);
     vi.mocked(invoke).mockResolvedValueOnce("tt://retry-success");
     fireEvent.click(retryBtn);
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledTimes(2);
+      // 4 total invokes: 2 for initial failed fetch, 2 for successful retry.
+      expect(invoke).toHaveBeenCalledTimes(4);
     });
   });
 

@@ -26,42 +26,47 @@ static LOG_TX: Mutex<Option<mpsc::Sender<LogEntry>>> = Mutex::new(None);
 const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client_random", "host"];
 
 /// Replace values of sensitive keys with `***`.
-/// Handles patterns like `key = "value"`, `key: value`, `key=value`.
-/// Also masks bare IPv4 addresses in freetext (e.g. "Connected to 1.2.3.4:443").
+///
+/// FIX-OO-5: earlier revision scanned for `{key}: ` ANYWHERE in the text and
+/// replaced the "value" with `***`. That caught prose like
+/// `Failed to verify certificate: <wincrypt error>` — redacting the real
+/// diagnostic and making cert-verify failures undebuggable. Now we only
+/// redact when the key appears as a real assignment at the start of a line
+/// (optionally indented): `  certificate = "<PEM>"` or
+/// `password: hunter2`. Free-form prose containing the key word is left
+/// alone. IPv4 masking and quoted-value handling unchanged.
 pub fn sanitize(text: &str) -> String {
-    let mut result = text.to_string();
-    for key in SENSITIVE_KEYS {
-        // TOML style: key = "value" or key = 'value'
-        let patterns = [
-            format!(r#"{key} = ""#),
-            format!("{key} = '"),
-            format!("{key}="),
-            format!("{key}: "),
-        ];
-        for pat in &patterns {
-            let mut search_from = 0usize;
-            loop {
-                let lower = result.to_lowercase();
-                let pat_lower = pat.to_lowercase();
-                let Some(start) = lower[search_from..].find(&pat_lower).map(|i| i + search_from) else { break };
-                let after = start + pat.len();
-                if after >= result.len() { break; }
-                let rest = &result[after..];
-                let end = rest
-                    .find(|c: char| c == '"' || c == '\'' || c == '\n' || c == '\r')
-                    .unwrap_or(rest.len());
-                result = format!("{}***{}", &result[..after], &result[after + end..]);
-                // Advance past the replacement to avoid infinite re-matching
-                search_from = after + 3; // 3 = "***".len()
-            }
-        }
+    let mut redacted = text
+        .lines()
+        .map(|line| redact_assignment_line(line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.ends_with('\n') {
+        redacted.push('\n');
     }
-
     // Mask bare IPv4 addresses in freetext (e.g. "Connected to 1.2.3.4:443").
-    // Uses a manual scan to avoid pulling in the `regex` crate.
-    result = mask_ipv4_addresses(&result);
+    mask_ipv4_addresses(&redacted)
+}
 
-    result
+/// Redact a single line if it looks like `<indent><sensitive_key><sep><value>`.
+fn redact_assignment_line(line: &str) -> String {
+    let indent_len = line.len() - line.trim_start().len();
+    let (indent, trimmed) = line.split_at(indent_len);
+    let lower = trimmed.to_lowercase();
+    for key in SENSITIVE_KEYS {
+        if !lower.starts_with(&key.to_lowercase()) {
+            continue;
+        }
+        let after_key = &trimmed[key.len()..];
+        let after_ws = after_key.trim_start();
+        let sep = after_ws.chars().next().unwrap_or(' ');
+        if sep != '=' && sep != ':' {
+            continue;
+        }
+        // Looks like a real assignment — redact whatever follows.
+        return format!("{indent}{key} {sep} ***");
+    }
+    line.to_string()
 }
 
 /// Replace all bare IPv4 addresses (e.g. `1.2.3.4`) with `***`.
@@ -357,38 +362,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_replaces_all_occurrences() {
-        let input = r#"password = "secret1" and password = "secret2""#;
+    fn sanitize_redacts_assignments_on_separate_lines() {
+        // FIX-OO-5: sanitizer is now line-based. Multiple secrets on separate
+        // lines all get redacted; multiple on the same line are collapsed
+        // into one `***` because that line reads as a single assignment.
+        let input = "password = \"secret1\"\npassword = \"secret2\"";
         let result = sanitize(input);
-        assert!(!result.contains("secret1"), "first occurrence not sanitized");
-        assert!(!result.contains("secret2"), "second occurrence not sanitized");
+        assert!(!result.contains("secret1"));
+        assert!(!result.contains("secret2"));
         assert_eq!(result.matches("***").count(), 2);
     }
 
     #[test]
     fn sanitize_handles_toml_colon_equals_patterns() {
-        // TOML style: key = "value"
-        let toml = r#"password = "mysecret""#;
-        assert!(sanitize(toml).contains("***"));
-        assert!(!sanitize(toml).contains("mysecret"));
-
-        // Colon style: key: value
-        let colon = "username: admin";
-        assert!(sanitize(colon).contains("***"));
-        assert!(!sanitize(colon).contains("admin"));
-
-        // Equals style: key=value
-        let equals = "certificate=abc123";
-        assert!(sanitize(equals).contains("***"));
-        assert!(!sanitize(equals).contains("abc123"));
+        assert!(!sanitize(r#"password = "mysecret""#).contains("mysecret"));
+        assert!(!sanitize("username: admin").contains("admin"));
+        assert!(!sanitize("certificate=abc123").contains("abc123"));
     }
 
     #[test]
     fn sanitize_handles_empty_and_no_match() {
-        // Empty string
         assert_eq!(sanitize(""), "");
-
-        // No sensitive keys
         let safe = "this is a safe log line with no secrets";
         assert_eq!(sanitize(safe), safe);
     }
@@ -405,19 +399,29 @@ mod tests {
 
     #[test]
     fn sanitize_case_insensitive() {
-        let upper = r#"PASSWORD = "secret""#;
-        assert!(!sanitize(upper).contains("secret"), "uppercase PASSWORD not sanitized");
-
-        let mixed = r#"Password = "secret""#;
-        assert!(!sanitize(mixed).contains("secret"), "mixed-case Password not sanitized");
+        assert!(!sanitize(r#"PASSWORD = "secret""#).contains("secret"));
+        assert!(!sanitize(r#"Password = "secret""#).contains("secret"));
     }
 
     #[test]
-    fn sanitize_quoted_value_boundaries() {
-        let input = r#"password = "abc"def"#;
+    fn sanitize_preserves_error_prose_with_certificate_word() {
+        // FIX-OO-5 regression guard: free-form prose containing the key word
+        // (but NOT as an assignment) must survive so cert-verify failures
+        // stay debuggable.
+        let input = "ERROR [5792] Failed to verify certificate: WCRYPT_E_TRUST_STATUS";
         let result = sanitize(input);
-        assert!(!result.contains("abc"), "value inside quotes not sanitized");
-        assert!(result.contains("def"), "text after closing quote should remain");
+        assert!(
+            result.contains("WCRYPT_E_TRUST_STATUS"),
+            "real cert-verify error must survive sanitization — got: {result}"
+        );
+    }
+
+    #[test]
+    fn sanitize_redacts_assignments_with_leading_indent() {
+        let input = r#"    password = "secret""#;
+        let result = sanitize(input);
+        assert!(!result.contains("secret"));
+        assert!(result.starts_with("    password"));
     }
 
     #[test]

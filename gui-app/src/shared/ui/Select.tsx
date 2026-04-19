@@ -59,6 +59,32 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     }
   }, [open, selectedIndex]);
 
+  // FIX-D: scroll selected option into view when the dropdown opens.
+  // Default browser behavior of a custom listbox is to stay scrolled to the
+  // top, which is jarring when the picker has many options (e.g. CIDR
+  // prefix 0..32 — selecting "32" then reopening would hide it below scroll).
+  // We wait one frame so the portal has mounted and layout is finalized,
+  // then scroll the matching `data-selected` item into the listbox viewport.
+  useEffect(() => {
+    if (!open || selectedIndex < 0) return;
+    const raf = requestAnimationFrame(() => {
+      const portal = portalRef.current;
+      if (!portal) return;
+      const item = portal.querySelector<HTMLElement>(
+        `[role="option"][data-selected="true"]`,
+      );
+      // jsdom doesn't implement scrollIntoView — guard so tests don't throw.
+      // FIX-G: "center" instead of "nearest" — when selected option is at the
+      // edge of the list (e.g. last choice "32") the nearest-block heuristic
+      // keeps it at the viewport edge and it reads as "the last item" rather
+      // than "my selection". Centering makes it feel like it IS the focus.
+      if (item && typeof item.scrollIntoView === "function") {
+        item.scrollIntoView({ block: "center", inline: "nearest" });
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, selectedIndex, portalRef]);
+
   const handleSelect = useCallback(
     (optValue: string) => {
       onChange?.({ target: { value: optValue } });
@@ -191,13 +217,17 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
               aria-label={label}
               className="animate-[fadeInScale_150ms_ease-out]"
               style={{
+                // dropdownStyle sets width=triggerRect.width so the listbox
+                // always matches the trigger. WR-14.1-UAT-05: removed the
+                // 120px minWidth floor that made the dropdown wider than
+                // narrow triggers (CIDR prefix picker) — now strictly
+                // consistent with the trigger width in all cases.
                 ...dropdownStyle,
                 zIndex: "var(--z-dropdown)",
                 backgroundColor: "var(--color-bg-elevated)",
                 border: "1px solid var(--color-border)",
                 borderRadius: "var(--radius-md)",
                 boxShadow: "var(--shadow-md)",
-                minWidth: 120,
                 overflow: "hidden",
               }}
             >
@@ -212,6 +242,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
                       type="button"
                       role="option"
                       aria-selected={isSelected}
+                      data-selected={isSelected || undefined}
                       onClick={() => handleSelect(opt.value)}
                       onMouseEnter={() => setHighlightedIndex(index)}
                       className={cn(
