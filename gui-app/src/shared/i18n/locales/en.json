@@ -671,7 +671,7 @@
       "toggle_anti_dpi": "Anti-DPI protection",
       "toggle_anti_dpi_help": "Unique prefix to bypass DPI (recommended)",
       "toggle_skip_verify": "Skip certificate verification",
-      "toggle_skip_verify_warning": "⚠ Dev only — unsafe in production",
+      "toggle_skip_verify_warning": "For self-signed certificates. Use Let's Encrypt or Pin Certificate in production.",
       "toggle_pin_cert": "Pin endpoint certificate",
       "toggle_pin_cert_needs_sni": "Enter the endpoint domain into Custom SNI first",
       "cert_fetch_btn": "Load from endpoint",

@@ -17,25 +17,58 @@ import { cn } from "../../shared/lib/cn";
  *   - onError: (hasError: boolean) — called when any entry is invalid
  */
 
-/** Validates a single DNS entry (IP or hostname, no shell metachar). */
-function isValidDnsEntry(entry: string): boolean {
-  if (!entry) return true; // empty lines are skipped, not invalid
+/**
+ * Validates a single DNS entry. Returns "" if valid or an i18n key describing
+ * WHY it is invalid. Kept alongside the legacy boolean helper so existing
+ * callers / tests don't break.
+ *
+ * WR-14.1-UAT-04: users complained that invalid entries were only flagged in
+ * red with no explanation. Specific messages cover the common failure modes:
+ * whitespace, Cyrillic/non-ASCII, shell metacharacters, and generic "not a
+ * valid hostname or IP" fallback.
+ */
+function getDnsEntryError(entry: string): string {
+  if (!entry) return ""; // empty lines are skipped
+  // eslint-disable-next-line no-control-regex
+  if (/[^\x00-\x7F]/.test(entry)) return "server.users.dns_err_non_ascii";
+  if (/\s/.test(entry)) return "server.users.dns_err_whitespace";
   // Reject shell metacharacters (mirrors server-side validate_dns_list)
-  if (/[;&|`$(){}[\]<>\\!#^~]/.test(entry)) return false;
+  if (/[;&|`$(){}[\]<>\\!#^~]/.test(entry)) return "server.users.dns_err_shell_chars";
+
+  // Protocol-prefixed encrypted DNS (DoT / DoH / DoQ), stripped into host(+port) for the shape check.
+  const protoMatch = entry.match(/^(tls|https|h3|quic):\/\/(.+)$/i);
+  if (protoMatch) {
+    const rest = protoMatch[2]; // host[:port][/path]
+    // For https:// allow /path suffix, for tls:// / quic:// / h3:// expect host[:port] only
+    const isHttps = protoMatch[1].toLowerCase() === "https";
+    const hostPart = isHttps ? rest.split("/")[0] : rest;
+    if (!hostPart) return "server.users.dns_err_invalid_format";
+    // host or host:port
+    if (/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(?::\d{1,5})?$/.test(hostPart)) return "";
+    if (/^\d+\.\d+\.\d+\.\d+(?::\d{1,5})?$/.test(hostPart)) return "";
+    return "server.users.dns_err_invalid_format";
+  }
+
   // Allow IPv4
   if (/^\d+\.\d+\.\d+\.\d+$/.test(entry)) {
-    return entry.split(".").every((o) => {
+    const ok = entry.split(".").every((o) => {
       const n = Number(o);
       return Number.isInteger(n) && n >= 0 && n <= 255;
     });
+    return ok ? "" : "server.users.dns_err_ipv4_octet_range";
   }
-  // Allow hostname (RFC 1035 subset: letters, digits, dots, hyphens)
-  if (/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(entry)) return true;
   // Allow IPv4 with port: ip:port
-  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(entry)) return true;
+  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(entry)) return "";
+  // Allow hostname (RFC 1035 subset: letters, digits, dots, hyphens)
+  if (/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(entry)) return "";
   // Allow hostname:port
-  if (/^[a-zA-Z0-9][a-zA-Z0-9.-]*:\d+$/.test(entry)) return true;
-  return false;
+  if (/^[a-zA-Z0-9][a-zA-Z0-9.-]*:\d+$/.test(entry)) return "";
+  return "server.users.dns_err_invalid_format";
+}
+
+/** Legacy boolean helper retained for backward-compat callers / tests. */
+function isValidDnsEntry(entry: string): boolean {
+  return getDnsEntryError(entry) === "";
 }
 
 export interface DnsUpstreamsInputProps {
@@ -89,7 +122,17 @@ export function DnsUpstreamsInput({
   // Parse textarea value → array (split by newline)
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const raw = e.target.value;
+      // UX-dns-filter: whitelist at the *input* layer. Only characters
+      // that legitimately appear in a DNS entry pass through:
+      //   - letters / digits (hostnames, IPs)
+      //   - dot . dash - colon : slash /  (IP octets, IP:port, DoH path,
+      //     tls:// / https:// / h3:// / quic:// prefixes)
+      //   - newline \n as the between-entry separator
+      // Everything else — spaces, tabs, Cyrillic, symbols, emojis — is
+      // silently dropped. This matches what the server-side validator
+      // would reject anyway but fixes it on keystroke/paste instead of
+      // after submit, so the list never contains invisible garbage.
+      const raw = e.target.value.replace(/[^a-zA-Z0-9.\-:/\n]/g, "");
       setDraft(raw); // preserve empty / trailing lines locally
       // Split by newline; non-empty lines flow downstream (validators reject empty).
       const lines = raw.split("\n");
@@ -108,15 +151,25 @@ export function DnsUpstreamsInput({
     [onChange, onError]
   );
 
-  // Per-line validation for visual highlighting in helper text
-  const invalidLines = useMemo(
-    () =>
-      value.filter((l) => l.trim().length > 0 && !isValidDnsEntry(l.trim())),
-    [value]
-  );
+  // Per-line validation with specific error reasons (WR-14.1-UAT-04).
+  // Collect {entry, errorKey} pairs so users see WHY each line is invalid, not
+  // just that it's red.
+  const invalidDetails = useMemo(() => {
+    const details: Array<{ entry: string; errorKey: string }> = [];
+    for (const l of value) {
+      const trimmed = l.trim();
+      if (!trimmed) continue;
+      const errKey = getDnsEntryError(trimmed);
+      if (errKey) details.push({ entry: trimmed, errorKey: errKey });
+    }
+    return details;
+  }, [value]);
 
-  const hasError = invalidLines.length > 0;
-  const resolvedHelper = helperText ?? t("server.users.dns_upstreams_hint");
+  const hasError = invalidDetails.length > 0;
+  // UX-dns-hint: drop the verbose default helper — it duplicated the
+  // placeholder (8.8.8.8 / dns.example.com / tls://…). Caller can still
+  // pass a custom helperText for special cases.
+  const resolvedHelper = helperText ?? null;
 
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
@@ -130,11 +183,21 @@ export function DnsUpstreamsInput({
         onChange={handleChange}
         disabled={disabled}
         rows={4}
-        placeholder="8.8.8.8&#10;1.1.1.1"
+        // WR-14.1-UAT-02 (rev. 2): 3 distinct format families so user sees the
+        // full surface at a glance — plain IP, hostname, and protocol-prefixed
+        // encrypted DNS (DoT via tls://, DoH via https://). Backend accepts
+        // all three shapes; validator and placeholder stay in sync.
+        placeholder={
+          "8.8.8.8\ndns.example.com\ntls://dns.example.com:853"
+        }
         aria-label={label ?? t("server.users.field_dns_upstreams")}
         aria-invalid={hasError}
         spellCheck={false}
         data-testid="dns-upstreams-textarea"
+        // WR-14.1-UAT-03: floor = standard Input height (h-8, 32px). Resize
+        // down never goes below an ordinary text input; expanding down is
+        // unlimited via resize-y.
+        style={{ minHeight: "2rem" }}
         className={cn(
           "w-full resize-y font-mono text-sm",
           "px-[var(--space-3)] py-[var(--space-2)]",
@@ -150,9 +213,16 @@ export function DnsUpstreamsInput({
         )}
       />
       {hasError ? (
-        <p className="text-xs text-[var(--color-status-error)]" data-testid="dns-error">
-          {t("server.users.dns_upstreams_hint")} — {invalidLines.join(", ")}
-        </p>
+        <ul
+          className="text-xs text-[var(--color-status-error)] list-none m-0 p-0 space-y-0.5"
+          data-testid="dns-error"
+        >
+          {invalidDetails.map(({ entry, errorKey }, i) => (
+            <li key={`${entry}-${i}`}>
+              <span className="font-mono">«{entry}»</span> — {t(errorKey)}
+            </li>
+          ))}
+        </ul>
       ) : resolvedHelper ? (
         <p className="text-xs text-[var(--color-text-muted)]">{resolvedHelper}</p>
       ) : null}
