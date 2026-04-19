@@ -187,4 +187,76 @@ describe("CIDRPicker", () => {
     });
     expect(inputs[0]).toHaveValue("");
   });
+
+  // WR-05 (14.1-REVIEW deep pass): ambiguous pastes should fall through to
+  // default single-field paste instead of silently truncating. Covers the
+  // edge cases added after the deep review:
+  //   - >4 numeric groups → reject (could be 5-octet typo, not a valid IPv4)
+  //   - malformed prefix (/3a4, /99 etc.) → prefix NOT applied
+  it("paste: rejects >4 numeric groups (ambiguous) — falls back to default", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    // 5 octets — maybe user meant «10.0.0.0/24» and typo'd an extra group.
+    // Silent truncation to first 4 would hide the error; default paste
+    // into single field makes it visible.
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "10.20.30.40.50" },
+    });
+    // Other octets NOT populated — handler fell through to default paste.
+    expect(inputs[1]).toHaveValue("");
+    expect(inputs[2]).toHaveValue("");
+    expect(inputs[3]).toHaveValue("");
+  });
+
+  it("paste: rejects malformed prefix '/3a4' — prefix unchanged", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="10.0.0.0/16" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    // Paste with malformed prefix. Body parses (10.0.0.0), but prefix part
+    // '3a4' contains non-digits → prefix stays at existing /16.
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "10.0.0.0/3a4" },
+    });
+    // Octets applied
+    expect(inputs[0]).toHaveValue("10");
+    // Prefix stayed at /16 — onChange was called with that preserved prefix
+    expect(onChange).toHaveBeenLastCalledWith("10.0.0.0/16");
+  });
+
+  it("paste: rejects out-of-range prefix '/99' — prefix unchanged", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="10.0.0.0/8" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "192.168.1.1/99" },
+    });
+    expect(inputs[0]).toHaveValue("192");
+    // /99 is 2 digits so passes the \d{1,2} check but fails the 0..32 range
+    // guard → prefix stays at /8
+    expect(onChange).toHaveBeenLastCalledWith("192.168.1.1/8");
+  });
+
+  it("paste: accepts 2-digit valid prefix (boundary)", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "172.16.0.0/32" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith("172.16.0.0/32");
+  });
+
+  it("paste: accepts prefix with surrounding whitespace", () => {
+    const onChange = vi.fn();
+    render(<CIDRPicker value="" onChange={onChange} />);
+    const inputs = screen.getAllByRole("textbox");
+    fireEvent.paste(inputs[0], {
+      clipboardData: { getData: () => "10.0.0.0 / 24 " },
+    });
+    // The whole input is trimmed before split('/'), prefix part is " 24 "
+    // which after trim() is "24" and passes \d{1,2} + range guard.
+    expect(inputs[0]).toHaveValue("10");
+    expect(onChange).toHaveBeenLastCalledWith("10.0.0.0/24");
+  });
 });
