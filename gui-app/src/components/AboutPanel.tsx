@@ -89,11 +89,13 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
     <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">
 
       <div className="w-full max-w-sm space-y-5">
-        {/* Logo + Name */}
-        <div className="flex flex-col items-center gap-2">
-          {/* Wordmark logo — theme-swapped SVG. Gradient wrapper removed,
-              логотип уже готовый. Width фиксирован 72px в соответствии с
-              прежним визуальным footprint'ом (p-3.5 + w-10 иконка). */}
+        {/* Logo + wordmark — горизонтальный layout:
+              [SVG logo 72px]  [H1 TrustTunnel крупно    PRO superscript в
+                                верхнем правом углу текста]
+            Theme-swapped SVG (dark/light).  Wordmark — Outfit крупнее для
+            читаемости. PRO бейдж держится в верхнем правом углу h1 через
+            flex items-start (не vertical-center как было). */}
+        <div className="flex items-center justify-center gap-4">
           <img
             src={logoSrc}
             alt="TrustTunnel"
@@ -102,9 +104,9 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             className="shrink-0"
             draggable={false}
           />
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-start gap-1.5">
             <h1
-              className="text-xl font-bold tracking-wide"
+              className="text-3xl font-bold tracking-wide leading-none"
               style={{
                 color: "var(--color-text-primary)",
                 // Outfit — display-face для wordmark TrustTunnel. См.
@@ -116,7 +118,9 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
               TrustTunnel
             </h1>
             <span
-              className="text-[10px] font-bold px-2 py-0.5 rounded"
+              // leading-none + inline-flex items-center → глиф по центру box'а,
+              // иначе на text-[10px] ascender сдвигал текст вниз.
+              className="text-[10px] font-bold px-2 py-0.5 rounded leading-none inline-flex items-center"
               style={{ backgroundColor: "var(--color-accent-tint-10)", color: "var(--color-accent-500)" }}
             >
               PRO
