@@ -656,7 +656,7 @@
       "display_name_control_chars": "Control characters are not allowed",
       "display_name_bad_chars": "Quotes (' \") and shell metacharacters (; | & $ ` \\ ( ) < >) are not allowed",
       "field_custom_sni": "Custom SNI",
-      "field_custom_sni_hint": "FQDN for SNI substitution (e.g. cdn.example.com)",
+      "field_custom_sni_hint": "e.g. google.com",
       "custom_sni_spaces": "Whitespace is not allowed",
       "custom_sni_ascii_only": "Only ASCII letters, digits, dots, and hyphens (no Cyrillic)",
       "custom_sni_too_long": "Hostname too long (max 253 characters)",
