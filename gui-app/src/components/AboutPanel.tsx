@@ -129,12 +129,16 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
               </h1>
               <span
-                // Тот же fix что и у TitleBar-badge: uppercase глиф без
-                // descender'а сидит выше центра box'а с default
-                // line-height. leading-none + pt-[4px]/pb-[3px]
-                // компенсирует смещение пропорционально text-[11px].
-                className="text-[11px] font-bold px-2 pt-[4px] pb-[3px] rounded leading-none"
-                style={{ backgroundColor: "var(--color-accent-tint-10)", color: "var(--color-accent-500)" }}
+                // Единый badge-style с TitleBar'овским PRO: accent-tint-10
+                // фон + accent-interactive текст + --radius-sm + font-bold
+                // + leading-none с asymmetric padding для optical-center.
+                // Разница только в scale: text-[11px]/pt-[4px]/pb-[3px]
+                // здесь vs text-[9px]/pt-[3px]/pb-[2px] в TitleBar.
+                className="text-[11px] font-bold px-2 pt-[4px] pb-[3px] rounded-[var(--radius-sm)] leading-none"
+                style={{
+                  backgroundColor: "var(--color-accent-tint-10)",
+                  color: "var(--color-accent-interactive)",
+                }}
               >
                 PRO
               </span>
