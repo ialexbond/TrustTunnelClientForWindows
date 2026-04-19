@@ -713,6 +713,7 @@
       "rotate_password": "Сменить пароль",
       "rotate_password_title": "Смена пароля",
       "rotate_password_warning": "Старые deeplink'и этого пользователя перестанут работать после смены пароля.",
+      "rotate_password_required": "Введите новый пароль или нажмите «Отмена»",
       "rotate_password_confirm": "Подтвердить",
       "rotate_new_password_placeholder": "Новый пароль",
       "rotate_password_success": "Пароль пользователя «{{user}}» изменён",

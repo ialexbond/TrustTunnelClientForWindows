@@ -713,6 +713,7 @@
       "rotate_password": "Change password",
       "rotate_password_title": "Change password",
       "rotate_password_warning": "Old deeplinks for this user will stop working after the password change.",
+      "rotate_password_required": "Enter a new password or press «Cancel»",
       "rotate_password_confirm": "Confirm",
       "rotate_new_password_placeholder": "New password",
       "rotate_password_success": "Password changed for user \"{{user}}\"",
