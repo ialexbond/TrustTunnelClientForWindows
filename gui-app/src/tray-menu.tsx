@@ -1,9 +1,11 @@
+/* eslint-disable react-refresh/only-export-components --
+   entry file: mounts its own React root via ReactDOM.createRoot below.
+   Fast-refresh doesn't apply to entry-point files. */
 import React, { useEffect, useState, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Power, PowerOff, Eye, LogOut, RefreshCcw } from "lucide-react";
 import "./shared/styles/tokens.css";
 import "./index.css";
 
@@ -34,7 +36,6 @@ type VpnStatus =
 interface MenuItem {
   id: string;
   label: string;
-  icon: React.ReactNode;
   action: () => void;
   variant?: "default" | "danger";
   disabled?: boolean;
@@ -105,29 +106,21 @@ function TrayMenu() {
       ? {
           id: "disconnect",
           label: isBusy ? t("Отмена", "Cancel") : t("Отключиться", "Disconnect"),
-          icon: isBusy ? (
-            <RefreshCcw className="w-4 h-4" />
-          ) : (
-            <PowerOff className="w-4 h-4" />
-          ),
           action: () => void tray("disconnect"),
         }
       : {
           id: "connect",
           label: t("Подключиться", "Connect"),
-          icon: <Power className="w-4 h-4" />,
           action: () => void tray("connect"),
         },
     {
       id: "show",
       label: t("Показать окно", "Show window"),
-      icon: <Eye className="w-4 h-4" />,
       action: () => void tray("show"),
     },
     {
       id: "quit",
       label: t("Выход", "Quit"),
-      icon: <LogOut className="w-4 h-4" />,
       action: () => void tray("quit"),
       variant: "danger",
     },
@@ -203,7 +196,6 @@ function TrayMenuButton({ item }: { item: MenuItem }) {
         opacity: item.disabled ? 0.4 : 1,
       }}
     >
-      <span style={{ display: "flex", alignItems: "center" }}>{item.icon}</span>
       <span>{item.label}</span>
     </button>
   );
