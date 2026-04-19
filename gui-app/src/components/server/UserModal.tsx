@@ -1165,62 +1165,49 @@ export function UserModal({
           {/* Password — editable in Add, read-only in Edit until user opens
               the inline editor by clicking «Сменить пароль» (FIX-OO-11c). */}
           {isEditMode ? (
-            passwordEditing ? (
-              /* Inline editor — same widget as Add mode so the user gets
-                 generator / clear / show-password controls. Activating this
-                 doesn't immediately rotate anything; rotation is committed
-                 by the main «Сохранить изменения» button via handleSave. */
-              <ActionPasswordInput
-                label={t("server.users.rotate_password_title")}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder={t("server.users.rotate_new_password_placeholder")}
-                aria-label={t("server.users.rotate_new_password_placeholder")}
-                disabled={isDisabled}
-                error={localNewPasswordError ? t(localNewPasswordError) : undefined}
-                helperText={
-                  localNewPasswordError
-                    ? undefined
-                    : t("server.users.rotate_password_warning")
-                }
-                showLockIcon={false}
-                clearable
-                onClear={() => setNewPassword("")}
-                clearAriaLabel={t("common.clear_field")}
-                showPasswordAriaLabel={t("common.show_password")}
-                hidePasswordAriaLabel={t("common.hide_password")}
-                actions={[
-                  <Tooltip key="gen" text={t("common.generate_password")}>
-                    <button
-                      type="button"
-                      onClick={() => setNewPassword(generatePassword())}
-                      disabled={isDisabled}
-                      aria-label={t("common.generate_password")}
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      <Shuffle className="w-3.5 h-3.5" />
-                    </button>
-                  </Tooltip>,
-                  <Tooltip key="cancel" text={t("buttons.cancel")}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPasswordEditing(false);
-                        setNewPassword("");
-                      }}
-                      disabled={isDisabled}
-                      aria-label={t("buttons.cancel")}
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                      data-testid="cancel-rotate-password-btn"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </Tooltip>,
-                ]}
-              />
-            ) : (
-              <div className="flex items-center justify-between gap-[var(--space-3)]">
-                <div className="relative flex-1">
+            /* UX: row-level flex hosts EITHER the readonly preview (when
+               rotator is closed) OR the inline editor (when open). The
+               trailing Button toggles label between «Сменить пароль» and
+               «Отмена» — this replaces the previous pattern where the
+               rotator had TWO X icons inside the input (clear-field + a
+               separate cancel) which confused users. */
+            <div className="flex items-end gap-[var(--space-3)]">
+              <div className="flex-1 min-w-0">
+                {passwordEditing ? (
+                  <ActionPasswordInput
+                    label={t("server.users.rotate_password_title")}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={t("server.users.rotate_new_password_placeholder")}
+                    aria-label={t("server.users.rotate_new_password_placeholder")}
+                    disabled={isDisabled}
+                    error={localNewPasswordError ? t(localNewPasswordError) : undefined}
+                    helperText={
+                      localNewPasswordError
+                        ? undefined
+                        : t("server.users.rotate_password_warning")
+                    }
+                    showLockIcon={false}
+                    clearable
+                    onClear={() => setNewPassword("")}
+                    clearAriaLabel={t("common.clear_field")}
+                    showPasswordAriaLabel={t("common.show_password")}
+                    hidePasswordAriaLabel={t("common.hide_password")}
+                    actions={[
+                      <Tooltip key="gen" text={t("common.generate_password")}>
+                        <button
+                          type="button"
+                          onClick={() => setNewPassword(generatePassword())}
+                          disabled={isDisabled}
+                          aria-label={t("common.generate_password")}
+                          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Shuffle className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>,
+                    ]}
+                  />
+                ) : (
                   <input
                     type="password"
                     value="••••••••••••••••"
@@ -1234,20 +1221,29 @@ export function UserModal({
                     )}
                     data-testid="password-readonly"
                   />
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPasswordEditing(true)}
-                  disabled={isDisabled}
-                  className="shrink-0"
-                  data-testid="rotate-password-btn"
-                >
-                  {t("server.users.rotate_password")}
-                </Button>
+                )}
               </div>
-            )
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  if (passwordEditing) {
+                    setPasswordEditing(false);
+                    setNewPassword("");
+                  } else {
+                    setPasswordEditing(true);
+                  }
+                }}
+                disabled={isDisabled}
+                className="shrink-0"
+                data-testid={passwordEditing ? "cancel-rotate-password-btn" : "rotate-password-btn"}
+              >
+                {passwordEditing
+                  ? t("buttons.cancel")
+                  : t("server.users.rotate_password")}
+              </Button>
+            </div>
           ) : (
             <ActionPasswordInput
               label={
