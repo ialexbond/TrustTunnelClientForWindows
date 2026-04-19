@@ -162,3 +162,43 @@ export const EditWithRotation: Story = {
     );
   },
 };
+
+/**
+ * Add mode с активным fetch'ем `server_get_allowed_sni_list`. Mock в
+ * `.storybook/tauri-mocks/api-core.ts` возвращает 2 хоста + 2 allowed_sni
+ * — чип rail с 4 кнопками появляется под Custom SNI.
+ *
+ * Demonstrates M-01 (Custom SNI autocomplete) end-to-end.
+ */
+export const AddWithSniSuggestions: Story = {
+  args: {
+    isOpen: true,
+    mode: "add",
+    existingUsers: [],
+    sshParams: mockSshParams,
+    onClose: () => {},
+    onUserAdded: (user) => console.warn("[story] user added", user),
+    // FALSE on purpose — we want the real allowed_sni fetch to go through
+    // the Storybook invoke mock. Every other backend call is also mocked
+    // there (returns undefined/null), so the modal is safe to exercise.
+    _storybook: false,
+  },
+};
+
+/**
+ * Edit mode — нажми «Сменить пароль» чтобы увидеть inline-редактор
+ * (UX-E/F): label с `*`, error «Введите новый пароль» под row, внешняя
+ * кнопка становится «Отмена».
+ */
+export const EditWithInlinePasswordRotation: Story = {
+  args: {
+    isOpen: true,
+    mode: "edit",
+    editUsername: "alice",
+    existingUsers: ["alice"],
+    sshParams: mockSshParams,
+    onClose: () => {},
+    onUserUpdated: (user) => console.warn("[story] user updated", user),
+    _storybook: true,
+  },
+};
