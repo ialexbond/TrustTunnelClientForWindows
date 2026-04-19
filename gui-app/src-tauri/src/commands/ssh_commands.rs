@@ -396,7 +396,11 @@ ssh_pool_command!(
     server_fetch_endpoint_cert,
     ssh::server_fetch_endpoint_cert,
     hostname: String,
-    cert_port: u16
+    cert_port: u16,
+    // FIX-OO-13: optional TLS SNI distinct from the TCP destination.
+    // Frontend passes `customSni` here when the user opted into an
+    // anti-DPI setup; omitted/empty means "use hostname for both".
+    sni_host: Option<String>
 );
 
 ssh_pool_command!(
@@ -417,4 +421,35 @@ ssh_pool_command!(
     server_get_user_config,
     ssh::server_get_user_config,
     vpn_username: String
+);
+
+// M-01 — Custom SNI autocomplete: feed the Add/Edit modal with the server's
+// actual allowed_sni whitelist so the user doesn't have to guess what
+// hosts.toml accepts before the FIX-OO-14 rollback trips.
+ssh_pool_command!(
+    server_get_allowed_sni_list,
+    ssh::get_allowed_sni_list
+);
+
+// FIX-NN — server-side TLV persistence (/opt/trusttunnel/users-advanced.toml)
+// The upstream protocol doesn't store display_name / SNI / skip_verify /
+// upstream_protocol / pin_cert / dns_upstreams, so we keep them in our own
+// sidecar file. Edit / FileText reopen / Download .toml all read back from it.
+
+ssh_pool_command!(
+    server_get_user_advanced,
+    ssh::users_advanced::get_user_advanced,
+    username: String
+);
+
+ssh_pool_command!(
+    server_set_user_advanced,
+    ssh::users_advanced::upsert_user_advanced,
+    params: ssh::UserAdvanced
+);
+
+ssh_pool_command!(
+    server_delete_user_advanced,
+    ssh::users_advanced::delete_user_advanced,
+    username: String
 );
