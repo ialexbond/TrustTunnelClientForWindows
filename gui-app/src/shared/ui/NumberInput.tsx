@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type FocusEvent,
+  type KeyboardEvent,
 } from "react";
 import { cn } from "../lib/cn";
 
@@ -31,6 +32,9 @@ interface NumberInputProps {
       four octet inputs + the prefix Select. Call preventDefault in your
       handler to stop the default single-field paste. */
   onPaste?: (e: ClipboardEvent<HTMLInputElement>) => void;
+  /** Passthrough: custom key handler. CIDRPicker использует для
+      backspace-переключения между октетами. */
+  onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
   /**
    * How to render the inline error/helper text beneath the input.
    * - "block" (default): renders <p> under the input (parent container grows).
@@ -59,6 +63,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       errorDisplay = "block",
       onErrorChange,
       onPaste,
+      onKeyDown,
       "aria-label": ariaLabel,
     },
     ref
@@ -126,6 +131,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           onChange={handleChange}
           onBlur={handleBlur}
           onPaste={onPaste}
+          onKeyDown={onKeyDown}
           disabled={disabled}
           placeholder={placeholder}
           aria-label={ariaLabel}
