@@ -327,6 +327,12 @@ export function UserModal({
   const [deeplink, setDeeplink] = useState<DeeplinkFields>(DEFAULT_DEEPLINK);
   // Snapshot of deeplink fields at modal open (for dirty tracking, D-9)
   const initialDeeplinkRef = useRef<DirtySnapshot>(toSnapshot(DEFAULT_DEEPLINK));
+  // M-05: flat snapshot of the loaded DeeplinkFields — needed for the
+  // «Отменить изменения» button which must restore the original values
+  // (the DirtySnapshot above is a string for comparison, not usable for
+  // restoration). Kept as a separate ref so setDeeplink never accidentally
+  // mutates it.
+  const initialDeeplinkFieldsRef = useRef<DeeplinkFields>(DEFAULT_DEEPLINK);
 
   // ── Server config load (Edit mode) ────────────────────────────────────
   const [configLoading, setConfigLoading] = useState(false);
@@ -423,6 +429,7 @@ export function UserModal({
         setDeeplink(DEFAULT_DEEPLINK);
       }
       initialDeeplinkRef.current = toSnapshot(DEFAULT_DEEPLINK);
+      initialDeeplinkFieldsRef.current = DEFAULT_DEEPLINK;
       setUsernameError("");
       setSubmitError(null);
       setPasswordEditing(false);
@@ -500,6 +507,9 @@ export function UserModal({
             // compares against the full server state — not against hardcoded
             // defaults that would flash the dirty banner for a moment.
             initialDeeplinkRef.current = toSnapshot(next);
+            // M-05: mirror the flat DeeplinkFields so the Revert button can
+            // restore values. Snapshot string above is for dirty-compare only.
+            initialDeeplinkFieldsRef.current = next;
           })
           .catch((e) => {
             if (cancelled) return;
@@ -803,6 +813,21 @@ export function UserModal({
       setIsSubmitting(false);
     }
   }, [canSubmit, isSubmitting, username, password, deeplink, sshParams, activityLog, t, onUserAdded, onClose]);
+
+  // M-05: Edit-mode «Отменить изменения». Restores the flat DeeplinkFields
+  // snapshot taken right after the server-config Promise.all resolved, and
+  // drops any in-progress password rotation. Not gated on `canSubmit` — user
+  // should be able to walk away from a malformed dirty state too.
+  const handleRevert = useCallback(() => {
+    if (isSubmitting) return;
+    activityLog("USER", "user.edit.reverted");
+    setDeeplink(initialDeeplinkFieldsRef.current);
+    setPasswordEditing(false);
+    setNewPassword("");
+    setSubmitError(null);
+    setDnsError(false);
+    setCidrError(false);
+  }, [isSubmitting, activityLog]);
 
   // FIX-K: manual reset — clear any in-progress draft, regenerate credentials,
   // reset all deeplink fields back to defaults. Used by the «Очистить» button.
@@ -1510,6 +1535,22 @@ export function UserModal({
                 data-testid="user-modal-clear"
               >
                 {t("buttons.clear")}
+              </Button>
+            )}
+            {/* M-05: Edit-mode «Отменить изменения». Disabled until the form
+                is actually dirty — same gate as Save. Wiped the inline
+                password editor too so a user can abandon a half-started
+                rotation without having to hit Cancel on the sub-input. */}
+            {isEditMode && (
+              <Button
+                type="button"
+                variant="ghost"
+                fullWidth
+                disabled={isDisabled || (!isDeeplinkDirty && !isPasswordDirty)}
+                onClick={handleRevert}
+                data-testid="user-modal-revert"
+              >
+                {t("server.users.revert_changes")}
               </Button>
             )}
           </>

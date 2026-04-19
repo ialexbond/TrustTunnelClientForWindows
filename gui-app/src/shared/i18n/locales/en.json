@@ -722,6 +722,7 @@
       "prefix_regenerated": "Anti-DPI prefix regenerated for \"{{user}}\"",
       "add_user_advanced": "Add",
       "save_changes": "Save changes",
+      "revert_changes": "Revert changes",
       "add_error_already_exists": "User \"{{user}}\" already exists on the server. A previous add attempt may have partially succeeded — refresh the users list and check.",
       "add_error_deeplink_empty": "The user WAS created on the server (credentials.toml updated), but the endpoint CLI returned no deeplink — no deeplink was generated. Close this dialog, refresh the user list: your new user is already there. To get a deeplink, open «Configure user» and Save again.",
       "add_error_ssh_export_failed": "The user may be PARTIALLY created: credentials.toml was updated but the endpoint CLI crashed generating the deeplink. Close this dialog, refresh the list. If the user appeared — delete and retry, or open Edit to regenerate the deeplink.",
