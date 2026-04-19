@@ -90,9 +90,10 @@ describe("CertificateFingerprintCard", () => {
     );
     expect(screen.getByTestId("cert-fingerprint-value")).toHaveTextContent(fp);
     // Idle «Загрузить» gone, success-state actions visible.
+    // UX-cert-refresh-removed: только «Отвязать» осталась.
     expect(screen.queryByTestId("cert-fetch-btn")).toBeNull();
     expect(screen.getByTestId("cert-unpin-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("cert-refresh-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("cert-refresh-btn")).toBeNull();
   });
 
   it("calls server_fetch_endpoint_cert with correct params on fetch click", async () => {
@@ -201,29 +202,9 @@ describe("CertificateFingerprintCard", () => {
     expect(onClear).toHaveBeenCalled();
   });
 
-  it("calls fetch again when Refresh button clicked after fingerprint loaded", async () => {
-    mockInvokeByCommand({
-      server_fetch_endpoint_cert: {
-        leaf_der_b64: "ZnJlc2g=",
-        fingerprint_hex: "FR:ES:H",
-        chain_len: 1,
-      },
-    });
-    const fp = "STALE:FP";
-    render(
-      <CertificateFingerprintCard
-        {...defaultProps}
-        _forceFingerprint={fp}
-      />
-    );
-    fireEvent.click(screen.getByTestId("cert-refresh-btn"));
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith(
-        "server_fetch_endpoint_cert",
-        expect.any(Object),
-      );
-    });
-  });
+  // UX-cert-refresh-removed: «Обновить» убрана — её re-probe дублировал
+  // toggle Pin OFF → ON flow без Save, что вносило confusion'ы с одним и
+  // тем же SHA-256 после нажатия.
 
   it("disables fetch button when disabled=true", () => {
     render(<CertificateFingerprintCard {...defaultProps} disabled />);
