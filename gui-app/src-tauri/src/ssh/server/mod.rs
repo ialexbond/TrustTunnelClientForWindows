@@ -10,6 +10,7 @@ mod server_uptime;
 pub mod server_rules;
 pub mod cert_probe;
 pub mod tlv_encoder;
+pub mod users_advanced;
 
 pub use server_lifecycle::*;
 pub use server_install::*;
@@ -23,3 +24,6 @@ pub use server_uptime::*;
 pub use server_rules::{add_user_rule, remove_user_rule, find_user_rule, UserRule};
 pub use cert_probe::{decode_cert_der_b64, fetch_endpoint_cert, EndpointCertInfo};
 pub use tlv_encoder::append_missing_tlvs;
+pub use users_advanced::{
+    get_user_advanced, list_user_advanced, upsert_user_advanced, delete_user_advanced, UserAdvanced,
+};

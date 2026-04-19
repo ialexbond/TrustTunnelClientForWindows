@@ -173,7 +173,28 @@ export async function deriveFingerprintFromDerB64(
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const hex = Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0").toUpperCase());
-  return hex.join(":");
+  // C-cert-format: match backend `format_fingerprint_hex` (cert_probe.rs:326)
+  // — lowercase hex, no separators. A display helper inserts `:` only at
+  // render time, so the internal representation stays single-source.
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Normalize a SHA-256 fingerprint for display regardless of what format the
+ * source gave us. Accepts:
+ *   - `"aabbcc..."`       (backend server_fetch_endpoint_cert output)
+ *   - `"AA:BB:CC:..."`    (pre-C legacy derivation)
+ *   - `"aa:bb:cc:..."`    (any other colon-separated variant)
+ *
+ * Returns `"AA:BB:CC:..."` uppercase, byte-grouped — reads well in the UI.
+ * Non-hex chars (spaces, dashes, colons) are stripped before grouping so a
+ * paste from a command-line tool with random whitespace still displays ok.
+ */
+export function formatFingerprintForDisplay(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const hex = raw.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+  if (!hex) return "";
+  return hex.match(/.{1,2}/g)?.join(":") ?? "";
 }
