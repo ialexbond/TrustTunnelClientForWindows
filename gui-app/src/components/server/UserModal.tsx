@@ -789,39 +789,43 @@ export function UserModal({
       // extra SSH roundtrip, we catch-and-log rather than blocking the
       // success path. Deeplink is already generated and in the user's hand.
       //
-      // `Promise.resolve(...)` wraps the invoke return so `.catch` is
-      // always safe to chain — in Vitest mocks `invoke` can return a plain
-      // non-Promise value and bare `.catch` would throw synchronously,
-      // breaking the rest of handleAdd.
-      Promise.resolve(
-        invoke("server_set_user_advanced", {
-          ...sshParams,
-          params: advancedToPayload(
-            {
-              displayName: deeplink.displayName,
-              customSni: deeplink.customSni,
-              upstreamProtocol: deeplink.upstreamProtocol,
-              skipVerification: deeplink.skipVerification,
-              pinCert: deeplink.pinCert,
-              certDerB64: deeplink.certDerB64,
-              certFingerprint: deeplink.certFingerprint,
-              dnsUpstreams: deeplink.dnsUpstreams,
-              antiDpi: deeplink.antiDpi,
-            },
-            trimmedUsername,
-            // FIX-OO-12: persist the cert bytes unconditionally. The
-            // deeplink-encoder gate above and the overlay's multi-block
-            // heuristic in Rust both decide whether to EMBED the chain at
-            // export time — storage should just retain the user's choice
-            // so the Edit toggle stays ON when reopened.
-          ),
-        }),
-      ).catch((err) => {
-        activityLog(
-          "ERROR",
-          `user.advanced.persist_failed user=${trimmedUsername} err=${formatError(err)}`,
-        );
-      });
+      // WR-01 (14.1-REVIEW deep pass): previously wrapped in
+      // `Promise.resolve(invoke(...)).catch(...)` to defend against Vitest
+      // mocks that return undefined (bare `.catch` would throw sync).
+      // Swapped to an async IIFE — `await invoke(...)` works for both real
+      // Promises and mock-undefined, and the try/catch surfaces SSH write
+      // failures via activity log instead of silently dropping them.
+      void (async () => {
+        try {
+          await invoke("server_set_user_advanced", {
+            ...sshParams,
+            params: advancedToPayload(
+              {
+                displayName: deeplink.displayName,
+                customSni: deeplink.customSni,
+                upstreamProtocol: deeplink.upstreamProtocol,
+                skipVerification: deeplink.skipVerification,
+                pinCert: deeplink.pinCert,
+                certDerB64: deeplink.certDerB64,
+                certFingerprint: deeplink.certFingerprint,
+                dnsUpstreams: deeplink.dnsUpstreams,
+                antiDpi: deeplink.antiDpi,
+              },
+              trimmedUsername,
+              // FIX-OO-12: persist the cert bytes unconditionally. The
+              // deeplink-encoder gate above and the overlay's multi-block
+              // heuristic in Rust both decide whether to EMBED the chain at
+              // export time — storage should just retain the user's choice
+              // so the Edit toggle stays ON when reopened.
+            ),
+          });
+        } catch (err) {
+          activityLog(
+            "ERROR",
+            `user.advanced.persist_failed user=${trimmedUsername} err=${formatError(err)}`,
+          );
+        }
+      })();
       // FIX-R: parent (UsersSection.handleUserAdded) already fires the success
       // snack-bar via state.pushSuccess with the same i18n key. Firing it
       // again here produced two identical toasts back-to-back — drop the
