@@ -10,6 +10,10 @@ export default {
       lg: "var(--font-size-lg)",
       xl: "var(--font-size-xl)",
       "2xl": "var(--font-size-2xl)",
+      // Display sizes — wordmark / splash / hero-секции. Не для UI-text.
+      "3xl": "var(--font-size-3xl)",
+      "4xl": "var(--font-size-4xl)",
+      "5xl": "var(--font-size-5xl)",
     },
   },
   plugins: [],
