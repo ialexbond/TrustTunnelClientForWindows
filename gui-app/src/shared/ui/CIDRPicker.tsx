@@ -77,7 +77,6 @@ export function CIDRPicker({
 
   // Sync from external `value` changes only when the parent value didn't come
   // from our own onChange (e.g. parent reset CIDR to "" or loaded a new value).
-  /* eslint-disable react-hooks/set-state-in-effect -- external prop sync; local state must match parent when parent updates outside our onChange */
   useEffect(() => {
     if (value === lastEmitted.current) return;
     const parsed = parseCidr(value);
@@ -90,7 +89,6 @@ export function CIDRPicker({
     }
     lastEmitted.current = value;
   }, [value]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const emit = useCallback(
     (nextOctets: [string, string, string, string], nextPrefix: string) => {
@@ -192,6 +190,52 @@ export function CIDRPicker({
     [tryFanOutPaste],
   );
 
+  /**
+   * Backspace при пустом octet прыгает на предыдущее поле. Зажимая
+   * Backspace юзер очищает всю строку подряд, без ручного перехода
+   * Shift+Tab между полями. Работает только для индексов 1..3 — в
+   * первом octet'е некуда прыгать, поведение default.
+   *
+   * Реализовано через refs на `<input>` элементы. Focus + selection
+   * ставится в конец значения, чтобы следующий Backspace сразу удалял
+   * последнюю цифру — не выделенное поле.
+   */
+  const octetRefs: [
+    React.RefObject<HTMLInputElement | null>,
+    React.RefObject<HTMLInputElement | null>,
+    React.RefObject<HTMLInputElement | null>,
+    React.RefObject<HTMLInputElement | null>,
+  ] = [useRef(null), useRef(null), useRef(null), useRef(null)];
+
+  const handleOctetKeyDown = useCallback(
+    (index: 0 | 1 | 2 | 3) =>
+      (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key !== "Backspace") return;
+        if (index === 0) return;
+        const target = e.currentTarget;
+        // Backspace в пустом поле → прыгаем на предыдущий octet. Пустое
+        // выделение (selectionStart === selectionEnd === 0) в непустом
+        // поле тоже летим: юзер уже очистил цифры вручную и дожимает
+        // delete дальше.
+        if (
+          target.value === "" ||
+          (target.selectionStart === 0 && target.selectionEnd === 0)
+        ) {
+          e.preventDefault();
+          const prev = octetRefs[(index - 1) as 0 | 1 | 2]?.current;
+          if (prev) {
+            prev.focus();
+            // Cursor в конец значения — следующий Backspace удалит
+            // последний символ, не выделит всё поле.
+            const len = prev.value.length;
+            prev.setSelectionRange(len, len);
+          }
+        }
+      },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Helper text resolution: prop > key from describeCidr (if it's a key) > describeCidr literal
   const autoHelper = useMemo(() => {
     if (helperText !== undefined) return helperText;
@@ -238,6 +282,7 @@ export function CIDRPicker({
       >
         <div className={octetBox}>
           <NumberInput
+            ref={octetRefs[0]}
             value={octets[0]}
             onChange={(v) => handleOctetChange(0, v)}
             onErrorChange={(hasErr) => setOctetError(0, hasErr)}
@@ -246,6 +291,7 @@ export function CIDRPicker({
             maxLength={3}
             disabled={disabled}
             onPaste={handleOctetPaste}
+            onKeyDown={handleOctetKeyDown(0)}
             className="text-center"
             aria-label={t("server.users.cidr_octet_1")}
           />
@@ -253,6 +299,7 @@ export function CIDRPicker({
         {dotSpan}
         <div className={octetBox}>
           <NumberInput
+            ref={octetRefs[1]}
             value={octets[1]}
             onChange={(v) => handleOctetChange(1, v)}
             onErrorChange={(hasErr) => setOctetError(1, hasErr)}
@@ -261,6 +308,7 @@ export function CIDRPicker({
             maxLength={3}
             disabled={disabled}
             onPaste={handleOctetPaste}
+            onKeyDown={handleOctetKeyDown(1)}
             className="text-center"
             aria-label={t("server.users.cidr_octet_2")}
           />
@@ -268,6 +316,7 @@ export function CIDRPicker({
         {dotSpan}
         <div className={octetBox}>
           <NumberInput
+            ref={octetRefs[2]}
             value={octets[2]}
             onChange={(v) => handleOctetChange(2, v)}
             onErrorChange={(hasErr) => setOctetError(2, hasErr)}
@@ -276,6 +325,7 @@ export function CIDRPicker({
             maxLength={3}
             disabled={disabled}
             onPaste={handleOctetPaste}
+            onKeyDown={handleOctetKeyDown(2)}
             className="text-center"
             aria-label={t("server.users.cidr_octet_3")}
           />
@@ -283,6 +333,7 @@ export function CIDRPicker({
         {dotSpan}
         <div className={octetBox}>
           <NumberInput
+            ref={octetRefs[3]}
             value={octets[3]}
             onChange={(v) => handleOctetChange(3, v)}
             onErrorChange={(hasErr) => setOctetError(3, hasErr)}
@@ -291,6 +342,7 @@ export function CIDRPicker({
             maxLength={3}
             disabled={disabled}
             onPaste={handleOctetPaste}
+            onKeyDown={handleOctetKeyDown(3)}
             className="text-center"
             aria-label={t("server.users.cidr_octet_4")}
           />
