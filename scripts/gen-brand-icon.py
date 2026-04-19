@@ -72,15 +72,21 @@ def main() -> int:
         img.save(out, format="PNG", optimize=True)
         print(f"  PNG  {size:>4}x{size}  -> {name}")
 
-    # Multi-res ICO: PIL supports sizes list in save()
+    # Multi-res ICO. Pillow reads `sizes` kwarg to downsample from the
+    # primary image (base 256) when flat — that blurs small variants
+    # because the radius scales with size. `append_images` is what
+    # actually packs per-size frames into the ICO, each rendered
+    # independently by make_icon() above.
     ico_sizes = [16, 32, 48, 64, 128, 256]
     ico_imgs = [make_icon(s, shield) for s in ico_sizes]
-    # First image is the primary; pass list via .save with sizes option
     ico_out = os.path.join(OUT_DIR, "icon.ico")
+    # Put largest first (Windows Explorer picks the best-matching size;
+    # largest-first gives higher-quality downsampling if OS ignores the
+    # smaller frames).
+    ico_imgs.reverse()
     ico_imgs[0].save(
         ico_out,
         format="ICO",
-        sizes=[(s, s) for s in ico_sizes],
         append_images=ico_imgs[1:],
     )
     print(f"  ICO  multi-res  -> icon.ico  ({', '.join(f'{s}x{s}' for s in ico_sizes)})")

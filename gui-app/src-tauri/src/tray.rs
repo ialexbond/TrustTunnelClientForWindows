@@ -9,26 +9,15 @@ use tauri::image::Image;
 use crate::commands::{AppState, kill_stale_sidecar};
 use crate::{routing_rules, geodata_v2ray, sidecar};
 
-/// Detect Windows system theme via registry.
+/// Tray icon theme — hardcoded `"dark"` (контрастный шилд).
 ///
-/// `SystemUsesLightTheme` under
-/// `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`:
-/// 1 = light, 0 = dark. Fallback → "dark" при любой ошибке. Apps-тема
-/// отдельная (`AppsUseLightTheme`) — нам нужна system-wide (панель
-/// задач), потому что tray-иконка рисуется именно там.
+/// Ранее читали Windows registry SystemUsesLightTheme для auto-swap,
+/// но пользователь решил что dark-variant читается одинаково хорошо
+/// на любой системной теме, а живая смена (requires WM_SETTINGCHANGE
+/// watcher) — overkill для маленького tray glyph. Сохраняем функцию
+/// как константу, чтобы `load_tray_icon(..., "dark")` не менять
+/// везде, где зовётся.
 pub fn detect_windows_system_theme() -> &'static str {
-    #[cfg(windows)]
-    {
-        use winreg::enums::HKEY_CURRENT_USER;
-        use winreg::RegKey;
-        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
-        if let Ok(key) = hkcu.open_subkey(path) {
-            if let Ok(val) = key.get_value::<u32, _>("SystemUsesLightTheme") {
-                return if val == 1 { "light" } else { "dark" };
-            }
-        }
-    }
     "dark"
 }
 
