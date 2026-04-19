@@ -1623,13 +1623,23 @@ export function UserModal({
             disabled={isDisabled}
           />
 
-          {/* CIDR restriction (D-8). WR-14.1-UAT-08: propagate error → canSubmit. */}
+          {/* CIDR restriction (D-8). WR-14.1-UAT-08: propagate error → canSubmit.
+              CIDR-requires-antiDpi: upstream rules.toml работает по
+              «first-match wins, fall-through = allow». Чтобы CIDR
+              реально блокировал — нужен prefix (client_random_prefix)
+              как selector, иначе catch-all deny невозможно написать.
+              Disable CIDR UI когда Anti-DPI OFF + показать hint. */}
           <CIDRPicker
             label={t("server.users.cidr_label")}
             value={deeplink.cidr}
             onChange={(v) => updateDeeplink("cidr", v)}
             onError={(errKey) => setCidrError(errKey.length > 0)}
-            disabled={isDisabled || configLoading}
+            disabled={isDisabled || configLoading || !deeplink.antiDpi}
+            helperText={
+              !deeplink.antiDpi
+                ? t("server.users.cidr_requires_anti_dpi")
+                : undefined
+            }
           />
         </div>
       </section>

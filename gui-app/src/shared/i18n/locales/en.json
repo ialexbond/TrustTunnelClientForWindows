@@ -707,6 +707,7 @@
       "cidr_label": "CIDR access restriction",
       "cidr_helper": "Leave empty for no IP restriction",
       "cidr_empty_any": "Leave empty for no IP restriction",
+      "cidr_requires_anti_dpi": "Enable «Anti-DPI protection» — without a unique prefix the server cannot distinguish this user from others to apply the restriction.",
       "cidr_invalid": "Invalid CIDR (octets 0-255, prefix 0-32)",
       "cidr_zero_all": "Explicit allow-all (0.0.0.0/0)",
       "cidr_octet_1": "First IP octet",

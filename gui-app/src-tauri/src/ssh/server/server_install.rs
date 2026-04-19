@@ -287,6 +287,13 @@ with open('{dir}/credentials.toml', 'w') as f:
         return Err("User removed, but failed to restart service".into());
     }
 
+    // FIX-NN: best-effort cleanup of users-advanced.toml. credentials.toml
+    // is already updated above — a write failure here only leaves a dangling
+    // entry in our sidecar, which is harmless (next Edit with the same name
+    // just overwrites it). Do NOT propagate errors — user-facing action
+    // already succeeded.
+    let _ = super::users_advanced::delete_user_advanced(app, handle, vpn_username).await;
+
     Ok(())
 }
 
@@ -411,61 +418,142 @@ pub async fn server_add_user_advanced(
     // Step 1: create credentials.toml entry (reuse existing function)
     add_server_user(app, handle, vpn_username.clone(), vpn_password.clone()).await?;
 
-    // Step 2: generate anti-DPI prefix (client-side secure random) and write rules.toml
-    let generated_prefix: Option<String> = if anti_dpi {
-        use rand::RngCore;
-        let mut buf = vec![0u8; prefix_length as usize];
-        rand::thread_rng().fill_bytes(&mut buf);
-        Some(buf.iter().map(|b| format!("{:02x}", b)).collect())
-    } else {
-        None
-    };
-    let _ = prefix_percent; // stored at connect-time by upstream endpoint
-
-    if anti_dpi || cidr.is_some() {
-        let sudo = detect_sudo(handle, app).await;
-        let dir = ENDPOINT_DIR;
-        let (content, _) = exec_command(
-            handle, app,
-            &format!("{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''"),
-        ).await?;
-
-        let updated = super::add_user_rule(
-            &content,
-            &vpn_username,
-            generated_prefix.as_deref(),
-            cidr.as_deref(),
-        )?;
-        let escaped = updated.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
-        // WR-04: randomized delimiter — rules.toml content includes user-controlled
-        // values (CIDR, username comments) that could collide with a fixed sentinel.
-        let delim = format!("RULES_EOF_{}", uuid::Uuid::new_v4().simple());
-        let write_cmd = format!(
-            "{sudo}tee {dir}/rules.toml > /dev/null << '{delim}'\n{escaped}\n{delim}"
-        );
-        let (_, code) = exec_command(handle, app, &write_cmd).await?;
-        if code != 0 {
-            return Err(format!("SSH_RULES_WRITE_FAILED|{code}"));
-        }
-    }
-
-    // Step 3: generate deeplink with all TLV fields. Re-encode DER bytes back to Base64
-    // because export_config_deeplink_advanced shares the same wire format with the
-    // standalone Tauri command (server_export_config_deeplink_advanced).
+    // FIX-OO-14: auto-rollback when steps 2–3 fail. Without this, hitting
+    // an error like "custom SNI not in allowed_sni" after credentials.toml
+    // is written leaves an orphan user the operator has to hand-clean.
+    // Wrap the rest in an async block and, on Err, run server_remove_user
+    // before propagating the error so the modal shows a clean retry path
+    // instead of the scary "пользователь МОГ быть создан частично" message.
     let pin_certificate_der_b64 = pin_certificate_der_bytes
         .as_ref()
         .map(|b| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b));
-    super::export_config_deeplink_advanced(
-        app, handle,
-        vpn_username.clone(),
+    let vpn_username_for_body = vpn_username.clone();
+    let custom_sni_for_body = custom_sni.clone();
+    let name_for_body = name.clone();
+    let upstream_protocol_for_body = upstream_protocol.clone();
+    let pin_b64_for_body = pin_certificate_der_b64.clone();
+    let dns_upstreams_for_body = dns_upstreams.clone();
+
+    let body: Result<String, String> = async {
+        // Step 2: generate anti-DPI prefix (client-side secure random) and write rules.toml
+        let generated_prefix: Option<String> = if anti_dpi {
+            use rand::RngCore;
+            let mut buf = vec![0u8; prefix_length as usize];
+            rand::thread_rng().fill_bytes(&mut buf);
+            Some(buf.iter().map(|b| format!("{:02x}", b)).collect())
+        } else {
+            None
+        };
+        let _ = prefix_percent; // stored at connect-time by upstream endpoint
+
+        if anti_dpi || cidr.is_some() {
+            let sudo = detect_sudo(handle, app).await;
+            let dir = ENDPOINT_DIR;
+            let (content, _) = exec_command(
+                handle, app,
+                &format!("{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''"),
+            ).await?;
+
+            let updated = super::add_user_rule(
+                &content,
+                &vpn_username_for_body,
+                generated_prefix.as_deref(),
+                cidr.as_deref(),
+            )?;
+            let escaped = updated.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
+            // WR-04: randomized delimiter — rules.toml content includes user-controlled
+            // values (CIDR, username comments) that could collide with a fixed sentinel.
+            let delim = format!("RULES_EOF_{}", uuid::Uuid::new_v4().simple());
+            let write_cmd = format!(
+                "{sudo}tee {dir}/rules.toml > /dev/null << '{delim}'\n{escaped}\n{delim}"
+            );
+            let (_, code) = exec_command(handle, app, &write_cmd).await?;
+            if code != 0 {
+                return Err(format!("SSH_RULES_WRITE_FAILED|{code}"));
+            }
+        }
+
+        // Step 3: generate deeplink with all TLV fields. This is the step that
+        // can reject a bad `custom_sni` (endpoint CLI checks allowed_sni in
+        // hosts.toml) — rollback kicks in when this returns Err.
+        let deeplink = super::export_config_deeplink_advanced(
+            app, handle,
+            vpn_username_for_body.clone(),
+            custom_sni_for_body,
+            name_for_body,
+            upstream_protocol_for_body,
+            anti_dpi,
+            skip_verification,
+            pin_b64_for_body,
+            dns_upstreams_for_body,
+        ).await?;
+
+        Ok(deeplink)
+    }.await;
+
+    let deeplink = match body {
+        Ok(dl) => dl,
+        Err(e) => {
+            // Rollback: remove the user from credentials.toml + rules.toml +
+            // users-advanced.toml so the operator retries from a clean slate
+            // rather than hunting for an orphan. Failures here are
+            // best-effort logged — the outer error is what matters.
+            emit_log(
+                app,
+                "warn",
+                &format!(
+                    "Add-user pipeline failed after credentials write, rolling back: {e}"
+                ),
+            );
+            let _ = server_remove_user(app, handle, vpn_username.clone()).await;
+            // server_remove_user doesn't touch rules.toml — wipe the
+            // freshly-written allow rule too, so retrying with the same
+            // username doesn't collide on the comment marker.
+            let sudo = detect_sudo(handle, app).await;
+            let dir = ENDPOINT_DIR;
+            if let Ok((content, _)) = exec_command(
+                handle, app,
+                &format!("{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''"),
+            ).await {
+                if let Ok(cleaned) = super::remove_user_rule(&content, &vpn_username) {
+                    let escaped =
+                        cleaned.replace('\\', "\\\\").replace('$', "\\$").replace('`', "\\`");
+                    let delim = format!("RULES_EOF_{}", uuid::Uuid::new_v4().simple());
+                    let _ = exec_command(
+                        handle, app,
+                        &format!(
+                            "{sudo}tee {dir}/rules.toml > /dev/null << '{delim}'\n{escaped}\n{delim}"
+                        ),
+                    ).await;
+                }
+            }
+            return Err(format!("ADD_USER_ROLLED_BACK|{e}"));
+        }
+    };
+
+    // Step 4 (FIX-NN): persist TLV params in our sidecar file so Edit /
+    // FileText reopen / Download .toml can read them back later. Server
+    // protocol doesn't store these — without this step the user's choices
+    // evaporate the moment the modal closes (see 14.1-HANDOFF FIX-NN).
+    //
+    // Best-effort — the deeplink is already in the user's hand at this
+    // point, so a write failure here must NOT undo Steps 1..3. Surface
+    // via emit_log so the failure shows up in Activity Log without
+    // poisoning the success path.
+    let advanced = super::users_advanced::UserAdvanced {
+        username: vpn_username,
+        display_name: name,
         custom_sni,
-        name,
         upstream_protocol,
-        anti_dpi,
         skip_verification,
-        pin_certificate_der_b64,
+        pin_cert_der_b64: pin_certificate_der_b64,
         dns_upstreams,
-    ).await
+        anti_dpi,
+    };
+    if let Err(e) = super::users_advanced::upsert_user_advanced(app, handle, advanced).await {
+        emit_log(app, "warn", &format!("users-advanced.toml write failed: {e}"));
+    }
+    Ok(deeplink)
 }
 
 /// Update per-user rules.toml entry: CIDR restriction and/or anti-DPI prefix.
@@ -528,6 +616,15 @@ pub async fn server_update_user_config(
     if code != 0 {
         return Err(format!("SSH_UPDATE_CONFIG_FAILED|{code}"));
     }
+    // CIDR / anti-DPI правила читаются upstream'ом только при старте
+    // (`RulesEngine::from_config` в lib/src/settings.rs — не hot-reload).
+    // Без рестарта изменённые rules.toml никогда не применяются — юзер
+    // продолжает подключаться со старым allow-list. --no-block чтобы SSH
+    // канал не висел пока systemd делает stop/start.
+    let _ = exec_command(
+        handle, app,
+        &format!("{sudo}systemctl --no-block restart trusttunnel"),
+    ).await;
     Ok(super::UserRule { client_random_prefix: new_prefix, cidr })
 }
 
@@ -555,14 +652,26 @@ pub async fn server_regenerate_client_prefix(
 }
 
 /// TLS cert probe — does NOT use SSH. Takes handle for macro signature consistency.
-/// Caller must display the returned fingerprint to the user before embedding in deeplink.
+///
+/// FIX-OO-13: `hostname` is where to TCP-connect (the real endpoint —
+/// usually sshParams.host). `sni_host` is the TLS SNI value; for the
+/// anti-DPI use-case these differ, and the probe must connect to the
+/// real endpoint's IP while sending a decoy SNI that the server whitelists
+/// via its `allowed_sni` config. If `sni_host` is empty the probe uses
+/// `hostname` for both — matching pre-FIX-OO-13 behavior.
 pub async fn server_fetch_endpoint_cert(
     _app: &tauri::AppHandle,
     _handle: &client::Handle<SshHandler>,
     hostname: String,
     cert_port: u16,
+    sni_host: Option<String>,
 ) -> Result<super::EndpointCertInfo, String> {
-    super::fetch_endpoint_cert(&hostname, cert_port).await
+    let sni = sni_host
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&hostname);
+    super::fetch_endpoint_cert(&hostname, cert_port, sni).await
 }
 
 /// Read rules.toml for a single username and return their rule config.
