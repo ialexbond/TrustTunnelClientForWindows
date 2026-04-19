@@ -334,17 +334,13 @@ export function CertificateFingerprintCard({
               )}
             </div>
           </div>
-          {/* FIX-P: success state used to re-render «Загрузить с endpoint» as
-              the only action, but that button was wired to `handleClear` —
-              a confusing mismatch (label said "load", click unpinned).
-              Replace with two purpose-built actions: [Отвязать] clears the
-              pin, [Обновить] re-fetches the cert on the same host+port. */}
+          {/* UX-cert-refresh-removed: «Обновить» убрана. Её единственный
+              осмысленный use case — re-probe после ротации cert'а — уже
+              покрыт toggle Pin Cert OFF → ON в UserModal, а без
+              сопровождающего Save refresh only обновляет локальное
+              state и confusion'ит юзера (SHA-256 визуально тот же).
+              Остаётся только destructive-кнопка «Отвязать». */}
           <div className="flex items-center gap-[var(--space-2)]">
-            {/* FIX-BB: danger-outline reads clearly as "destructive action"
-                (red border + red text), unlike the old ghost variant that
-                looked disabled. Title explains exactly what happens: clears
-                the pinned bytes AND drops the pin toggle, returning the
-                deeplink to its un-pinned state. */}
             <Button
               type="button"
               variant="danger-outline"
@@ -355,17 +351,6 @@ export function CertificateFingerprintCard({
               data-testid="cert-unpin-btn"
             >
               {t("server.users.cert_unpin_btn")}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => void handleFetch()}
-              disabled={disabled || !portValid}
-              title={t("server.users.cert_refresh_tooltip")}
-              data-testid="cert-refresh-btn"
-            >
-              {t("server.users.cert_refresh_btn")}
             </Button>
           </div>
         </>
