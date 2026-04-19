@@ -9,6 +9,14 @@ export default defineConfig(async () => ({
   build: {
     // Desktop app — bundle size is not a concern, suppress warning
     chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      // Two HTML entries: main app + custom tray context menu (separate
+      // small window with own React root rendered at cursor on right click).
+      input: {
+        main: "index.html",
+        trayMenu: "tray-menu.html",
+      },
+    },
   },
   clearScreen: false,
   server: {

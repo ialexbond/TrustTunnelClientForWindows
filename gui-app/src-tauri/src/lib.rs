@@ -117,6 +117,11 @@ pub fn run() {
                 .icon(initial_icon)
                 .tooltip("TrustTunnel Pro — Отключен")
                 .menu(&tray_menu)
+                // Left click → show window, right click → menu. Default в
+                // Tauri 2 = true → menu всплывала и на left, на долю
+                // секунды, а потом её забивал наш own show-window handler.
+                // false разделяет семантику: left=main action, right=menu.
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
                         "show" => {
@@ -142,15 +147,30 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: tauri::tray::MouseButton::Left,
-                        button_state: tauri::tray::MouseButtonState::Up,
-                        ..
-                    } = event {
-                        if let Some(w) = tray.app_handle().get_webview_window("main") {
-                            w.show().ok();
-                            w.set_focus().ok();
+                    match event {
+                        // Left click Up → main window (restore from tray).
+                        TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } => {
+                            if let Some(w) = tray.app_handle().get_webview_window("main") {
+                                w.show().ok();
+                                w.set_focus().ok();
+                            }
                         }
+                        // Right click Up → показать кастомное меню (отдельное
+                        // transparent окно tray-menu). Позиция: прямо у курсора,
+                        // корректируем чтобы не выходило за границы экрана.
+                        TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Right,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            position,
+                            ..
+                        } => {
+                            tray::show_custom_tray_menu(tray.app_handle(), position);
+                        }
+                        _ => {}
                     }
                 })
                 .build(app)?;
@@ -251,6 +271,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            // Custom tray context menu (otdel'noe tray-menu window)
+            tray::tray_menu_action,
+            tray::tray_menu_current_status,
+            tray::tray_menu_current_locale,
             set_start_minimized,
             get_start_minimized,
             logging::set_logging_enabled,
