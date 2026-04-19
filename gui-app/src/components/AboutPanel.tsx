@@ -106,7 +106,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
           />
           <div className="flex items-start gap-1.5">
             <h1
-              className="text-3xl font-bold tracking-wide leading-none"
+              className="text-5xl font-bold tracking-wide leading-none"
               style={{
                 color: "var(--color-text-primary)",
                 // Outfit — display-face для wordmark TrustTunnel. См.
@@ -130,7 +130,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
             style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
           >
-            v{version} · Windows
+            v{version}
           </span>
         </div>
 
