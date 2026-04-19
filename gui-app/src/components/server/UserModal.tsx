@@ -1243,7 +1243,11 @@ export function UserModal({
                       readOnly
                       aria-label={t("server.users.password_placeholder")}
                       className={cn(
-                        "h-9 w-full px-3 text-sm rounded-[var(--radius-md)] border",
+                        // Unified with ActionPasswordInput's h-8 — previously
+                        // `h-9` here made the readonly preview 4px taller
+                        // than the active rotator input, shifting the
+                        // Cancel/Rotate button on mode switch.
+                        "h-8 w-full px-3 text-sm rounded-[var(--radius-md)] border",
                         "border-[var(--color-input-border)] bg-[var(--color-input-bg)]",
                         "text-[var(--color-text-muted)] outline-none",
                         "opacity-[var(--opacity-disabled)]",
@@ -1362,6 +1366,15 @@ export function UserModal({
               placeholder={t("server.users.field_display_name_placeholder")}
               aria-label={t("server.users.field_display_name")}
               disabled={isDisabled}
+              // Chrome autofill heuristics залапали поле как «имя» —
+              // всплывало «Сохранённые сведения». autoComplete="off" +
+              // отсутствие name-атрибута даёт браузеру сигнал что
+              // tracking/предложения не нужны. Для password-менеджеров
+              // (1Password/LastPass) — спец data-атрибуты.
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               helperText={
                 localDisplayNameError ? undefined : t("server.users.field_display_name_hint")
               }
@@ -1381,6 +1394,12 @@ export function UserModal({
               placeholder="cdn.example.com"
               aria-label={t("server.users.field_custom_sni")}
               disabled={isDisabled}
+              // Та же причина что и у displayName — блокировать Chrome
+              // autofill и password-менеджеры от предложения значений.
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               helperText={
                 localCustomSniError ? undefined : t("server.users.field_custom_sni_hint")
               }
