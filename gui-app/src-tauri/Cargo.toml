@@ -44,6 +44,12 @@ keyring = { version = "3.6", features = ["windows-native"] }
 # Phase 14.1 — endpoint TLS cert probe for certificate pinning UI
 tokio-rustls = "0.26"
 rustls-pki-types = "1"
+# FIX-OO-7: check whether the probed cert is already trusted by the OS root
+# store. System-trusted certs (Let's Encrypt etc.) are omitted from the
+# deeplink to keep the TLV payload small enough for a QR code — the sidecar
+# falls through to the platform verifier at connect time and trusts them
+# anyway.
+rustls-platform-verifier = "0.6"
 rand = "0.8"
 
 [dev-dependencies]

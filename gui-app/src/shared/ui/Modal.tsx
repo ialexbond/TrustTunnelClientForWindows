@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, type ReactNode } from "react";
+import { useEffect, useCallback, useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
 
@@ -104,14 +104,18 @@ export function Modal({
 
   if (!mounted) return null;
 
-  return createPortal(
-    <div
-      className={cn(
-        "fixed inset-0 flex items-center justify-center z-[var(--z-modal)] backdrop-blur-sm",
-        "transition-opacity duration-200 ease-out",
-        animating ? "opacity-100 bg-[var(--color-glass-bg)]" : "opacity-0 bg-transparent",
-      )}
-      onClick={closeOnBackdrop && onClose ? onClose : undefined}
+  // FIX-J: a naïve `onClick` backdrop-close fires when the mouseup happens on
+  // the backdrop — including the case where the user started a text-drag
+  // INSIDE the modal, moved the mouse outside, and released the button.
+  // Result: a drag-select near a field edge accidentally closes the modal
+  // and erases whatever the user was typing. Modern desktop apps close
+  // only when the WHOLE mouse gesture happens on the backdrop, so we track
+  // the mousedown target and compare against the mouseup target.
+  return (
+    <ModalBackdrop
+      animating={animating}
+      closeOnBackdrop={closeOnBackdrop}
+      onClose={onClose}
     >
       <div
         className={cn(
@@ -126,6 +130,8 @@ export function Modal({
           animating ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-2",
           className,
         )}
+        // stopPropagation on click inside the modal so clicks inside never
+        // bubble to the backdrop even when the gesture is clean.
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
@@ -138,6 +144,61 @@ export function Modal({
         )}
         {children}
       </div>
+    </ModalBackdrop>
+  );
+}
+
+interface ModalBackdropProps {
+  animating: boolean;
+  closeOnBackdrop: boolean;
+  onClose?: () => void;
+  children: ReactNode;
+}
+
+function ModalBackdrop({
+  animating,
+  closeOnBackdrop,
+  onClose,
+  children,
+}: ModalBackdropProps) {
+  // Tracks where a mouse gesture started. Close fires only when BOTH the
+  // mousedown AND mouseup land on this backdrop element (see FIX-J above).
+  const mouseDownOnBackdropRef = useRef(false);
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    mouseDownOnBackdropRef.current = e.target === e.currentTarget;
+  };
+
+  const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
+    const started = mouseDownOnBackdropRef.current;
+    mouseDownOnBackdropRef.current = false;
+    if (!started) return;
+    if (e.target !== e.currentTarget) return;
+    if (!closeOnBackdrop || !onClose) return;
+    onClose();
+  };
+
+  // Backdrop SPEC (DO NOT REMOVE):
+  //   • `backdrop-blur-sm` is part of the design system's Modal contract —
+  //     it gives the user a clear visual "something modal is active" cue
+  //     without needing to dim the entire window. See memory/v3/design-system
+  //     / known-issues.md for the Modal backdrop invariant.
+  //   • `bg-[var(--color-glass-bg)]` is the tinted layer sampled by the blur
+  //     so content behind stays legible but softly de-emphasized.
+  //   • Previously (FIX-S) I removed both. That was wrong: the blur is
+  //     load-bearing UX — user's mental model of "dialog is foreground" breaks
+  //     without it. It has been restored.
+  return createPortal(
+    <div
+      className={cn(
+        "fixed inset-0 flex items-center justify-center z-[var(--z-modal)] backdrop-blur-sm",
+        "transition-opacity duration-200 ease-out",
+        animating ? "opacity-100 bg-[var(--color-glass-bg)]" : "opacity-0 bg-transparent",
+      )}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+    >
+      {children}
     </div>,
     document.body
   );

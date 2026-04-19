@@ -106,7 +106,8 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
               "transition-[border-color,box-shadow,background-color] duration-[var(--transition-fast)]",
               "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
-              error && "border-[var(--color-danger-500)] bg-[var(--color-status-error-bg)]",
+              // FIX-II: error state = red border only, no tinted background.
+              error && "border-[var(--color-danger-500)]",
               leftIcon && "pl-9",
               className
             )}
