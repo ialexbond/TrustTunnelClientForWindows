@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme-swapped visibility helpers.
+   useTheme() хранит local state per-component, так что theme-switch в Settings
+   не доходит до TitleBar / AboutPanel пока те не re-mount'ятся. CSS-only
+   подход через `data-theme` на <html> (который useTheme обновляет globally)
+   работает атомарно для любого DOM-узла. */
+[data-theme="dark"] .only-light { display: none !important; }
+[data-theme="light"] .only-dark { display: none !important; }
+
 @layer base {
   body {
     background-color: var(--color-bg-primary);
