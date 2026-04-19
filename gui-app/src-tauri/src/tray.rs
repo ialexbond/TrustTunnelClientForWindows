@@ -44,20 +44,22 @@ fn status_bucket(status: &str) -> &'static str {
     }
 }
 
-/// Load a tray icon .ico embedded at compile time. Picks the right asset
+/// Load a tray icon PNG embedded at compile time. Picks the right asset
 /// based on VPN-status bucket × Windows system theme (не app theme).
+///
+/// Tauri `Image::from_bytes` ожидает PNG (не .ico контейнер). Берём
+/// 32×32 версии из `logo/tray/png/` — standard size для Windows taskbar
+/// при 100% DPI. Файлы встраиваются в бинарь через include_bytes!.
 pub fn load_tray_icon(status: &str, theme: &str) -> Image<'static> {
-    // 6 icons total: 3 buckets × 2 themes. include_bytes! вшивает файлы в
-    // бинарь, runtime не читает диск.
     let bytes: &[u8] = match (status_bucket(status), theme) {
-        ("connected", "light") => include_bytes!("../icons/tray/tray-light-connected.ico"),
-        ("connected", _)       => include_bytes!("../icons/tray/tray-dark-connected.ico"),
-        ("reconnect", "light") => include_bytes!("../icons/tray/tray-light-reconnect.ico"),
-        ("reconnect", _)       => include_bytes!("../icons/tray/tray-dark-reconnect.ico"),
-        (_, "light")           => include_bytes!("../icons/tray/tray-light-off.ico"),
-        (_, _)                 => include_bytes!("../icons/tray/tray-dark-off.ico"),
+        ("connected", "light") => include_bytes!("../icons/tray/tray-light-connected-32.png"),
+        ("connected", _)       => include_bytes!("../icons/tray/tray-dark-connected-32.png"),
+        ("reconnect", "light") => include_bytes!("../icons/tray/tray-light-reconnect-32.png"),
+        ("reconnect", _)       => include_bytes!("../icons/tray/tray-dark-reconnect-32.png"),
+        (_, "light")           => include_bytes!("../icons/tray/tray-light-off-32.png"),
+        (_, _)                 => include_bytes!("../icons/tray/tray-dark-off-32.png"),
     };
-    Image::from_bytes(bytes).expect("Failed to load tray icon .ico")
+    Image::from_bytes(bytes).expect("Failed to load tray icon PNG")
 }
 
 /// Pulse task coordinator — для статуса `reconnect` tray иконка
