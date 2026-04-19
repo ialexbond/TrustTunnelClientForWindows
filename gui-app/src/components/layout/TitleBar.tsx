@@ -25,11 +25,12 @@ function startWindowDrag(e: React.MouseEvent) {
 
 export function TitleBar({ children }: TitleBarProps) {
   return (
-    <div
-      className="flex items-center shrink-0"
-      onMouseDown={startWindowDrag}
-      style={{ height: 32 }}
-    >
+    // Root div БЕЗ onMouseDown — иначе click'и на WindowControls (children:
+    // кнопки minimize / close) начинали Windows drag через bubbling и
+    // native mousedown не доходил до onClick. Теперь drag handler висит
+    // только на конкретных «пустых» областях (brand block + spacer), а
+    // WindowControls остаются полноценными кнопками.
+    <div className="flex items-center shrink-0" style={{ height: 32 }}>
       {/* Brand — compact. Outfit для wordmark + theme-swapped SVG логотип.
           CSS-only swap через .only-dark / .only-light (см. index.css). */}
       <div
@@ -58,7 +59,6 @@ export function TitleBar({ children }: TitleBarProps) {
             letterSpacing: "-0.01em",
             fontFamily: "var(--font-family-display)",
           }}
-          onMouseDown={startWindowDrag}
         >
           <span style={{ color: "var(--color-text-primary)" }}>Trust</span>
           <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
@@ -68,8 +68,7 @@ export function TitleBar({ children }: TitleBarProps) {
           // accent-tint-10 фон + accent-interactive текст + rounded-sm +
           // font-bold. Масштаб подогнан под 32px TitleBar height:
           // text-[9px] вместо [11px], padding pt-[3px]/pb-[2px] вместо
-          // pt-[4px]/pb-[3px]. Optical-center (leading-none + asymmetric
-          // padding) идентичен.
+          // pt-[4px]/pb-[3px].
           className="text-[9px] font-bold px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
           style={{
             backgroundColor: "var(--color-accent-tint-10)",
@@ -80,10 +79,10 @@ export function TitleBar({ children }: TitleBarProps) {
         </span>
       </div>
 
-      {/* Spacer — draggable */}
+      {/* Spacer — draggable, между brand'ом и WindowControls */}
       <div className="flex-1" onMouseDown={startWindowDrag} />
 
-      {/* Window controls slot */}
+      {/* Window controls slot — HAS own click handlers, drag НЕ навешиваем */}
       {children}
     </div>
   );
