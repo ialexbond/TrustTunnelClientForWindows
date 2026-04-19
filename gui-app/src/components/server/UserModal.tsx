@@ -593,10 +593,16 @@ export function UserModal({
   }, [trimmedCustomSni, localCustomSniError, sniSuggestions]);
   // FIX-V: display name (TLV 0x0C) mirrors backend `validate_display_name`.
   const localDisplayNameError = validateDisplayName(deeplink.displayName);
-  // FIX-OO-11c: validate the in-place password rotation input. Empty
-  // password = "user hasn't typed anything yet" — not an error, just
-  // means this field doesn't contribute to the dirty state.
-  const localNewPasswordError = passwordEditing ? validatePassword(newPassword) : "";
+  // FIX-OO-11c: validate the in-place password rotation input.
+  // UX-rotate-required: when the editor is open, an empty value must
+  // surface as an explicit error under the field — without it the user
+  // sees a disabled Save button and has no idea why. Format errors
+  // (validatePassword) take precedence so the user sees the more
+  // specific message first.
+  const localNewPasswordError = passwordEditing
+    ? validatePassword(newPassword) ||
+      (!newPassword.trim() ? "server.users.rotate_password_required" : "")
+    : "";
   const isPasswordDirty = passwordEditing && newPassword.trim().length > 0;
 
   // WR-14.1-UAT-08: aggregate ALL form errors, not just
