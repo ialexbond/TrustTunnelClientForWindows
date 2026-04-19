@@ -130,6 +130,17 @@ export function CIDRPicker({
    *   - `10.0.0` (< 4 octets)         → игнорируется, default paste
    *   - `abc.def.ghi.jkl`             → все октеты non-numeric → default paste
    *
+   * WR-05 (14.1-REVIEW deep pass): дополнительные guard-ы для ambiguous
+   * pastes:
+   *   - >4 цифровых групп в body → rejected (`10.20.30.40.50` мог быть
+   *     5-octet опечаткой; silent truncation до «10.20.30.40» скрывает
+   *     ошибку от пользователя; лучше fall-through к default paste,
+   *     чтобы юзер увидел странное значение в одном поле).
+   *   - malformed prefix (`/3a4`, `/99`) → игнорируется полностью, текущий
+   *     prefix сохраняется. До фикса `/3a4` давал prefix=3 без обратной
+   *     связи — теперь юзер видит, что его ввод не сработал, и может
+   *     исправить руками.
+   *
    * Возвращает true если мы взяли paste на себя (caller должен вызвать
    * preventDefault); false — пусть браузер вставит значение в одно поле.
    */
@@ -139,10 +150,14 @@ export function CIDRPicker({
       if (!trimmed) return false;
       // Разделяем на body + optional /prefix.
       const [body, prefixPart] = trimmed.split("/", 2);
-      // Внутри body достаём 4 подряд идущие числа через любые non-digit
+      // Внутри body достаём подряд идущие числа через любые non-digit
       // разделители — покрывает копипаст типа «IP: 109.194.163.8 (ru)».
       const nums = body.match(/\d{1,3}/g);
       if (!nums || nums.length < 4) return false;
+      // WR-05: >4 цифровых групп → ambiguous, не уверены, что вычленили
+      // именно правильные. Falling through к default paste в одиночное
+      // поле делает ошибку видимой для юзера.
+      if (nums.length > 4) return false;
       const first4 = nums.slice(0, 4);
       // Validate each octet ∈ [0..255].
       const validOctets = first4.every((o) => {
@@ -150,12 +165,16 @@ export function CIDRPicker({
         return Number.isInteger(n) && n >= 0 && n <= 255;
       });
       if (!validOctets) return false;
-      // Prefix — optional. Принимаем 0..32; иначе не трогаем текущий.
+      // Prefix — optional. Принимаем только чистый `\d{1,2}` в диапазоне
+      // 0..32. Если prefixPart содержит не-цифровые символы кроме leading/
+      // trailing whitespace (например `/3a4`) — prefix НЕ трогается и юзер
+      // видит, что ввёл нечто странное (свой старый / пустой prefix в
+      // Select'е). До WR-05 мы silent-обрезали до первых цифр.
       let nextPrefix = prefix;
       if (prefixPart !== undefined) {
-        const pMatch = prefixPart.match(/\d{1,2}/);
-        if (pMatch) {
-          const p = Number.parseInt(pMatch[0], 10);
+        const trimmedPrefix = prefixPart.trim();
+        if (/^\d{1,2}$/.test(trimmedPrefix)) {
+          const p = Number.parseInt(trimmedPrefix, 10);
           if (Number.isInteger(p) && p >= 0 && p <= 32) {
             nextPrefix = String(p);
           }
