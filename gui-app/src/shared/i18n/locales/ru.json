@@ -693,6 +693,7 @@
       "cert_fetch_error_tls_handshake": "TLS-handshake failed — endpoint не использует HTTPS на этом порту",
       "cert_fetch_error_invalid_response": "Сервер вернул некорректный ответ",
       "cert_fetch_error_generic": "Ошибка при загрузке сертификата: {{error}}",
+      "cert_system_verifiable_hint": "Сертификат публично доверен (Let's Encrypt или коммерческий CA). Закрепление не обязательно — система сама проверит цепочку. При ротации сертификата pin потребует перевыпуска deeplink'а.",
       "field_dns_upstreams": "DNS-серверы",
       "dns_upstreams_hint": "Один DNS-сервер на строку (Enter — разделитель).",
       "dns_err_whitespace": "Пробелы внутри строки не допускаются",

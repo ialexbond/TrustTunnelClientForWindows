@@ -291,6 +291,7 @@ export function CertificateFingerprintCard({
   const effectiveError = _forceError ?? error;
   const effectiveFingerprint = _forceFingerprint ?? fetchedCert?.fingerprint ?? null;
   const effectiveChainLen = fetchedCert?.chainLen ?? null;
+  const effectiveSystemVerifiable = fetchedCert?.isSystemVerifiable ?? false;
 
   return (
     <div
@@ -308,6 +309,22 @@ export function CertificateFingerprintCard({
         </div>
       ) : effectiveFingerprint ? (
         <>
+          {/* M-02 / spec-alignment: Let's Encrypt advisory. DEEP_LINK.md
+              §Security Considerations + tag 0x08 both say to «omit
+              certificate if the chain is verified by system CAs». Pin
+              для publicly-trusted cert противоречит spec (ломается при
+              ротации, без выигрыша безопасности — OS trust store и так
+              проверит). Показываем, только когда probe подтвердил
+              system-verifiability. */}
+          {effectiveSystemVerifiable && (
+            <p
+              className="text-xs text-[var(--color-text-muted)] leading-relaxed"
+              data-testid="cert-system-verifiable-hint"
+            >
+              {t("server.users.cert_system_verifiable_hint")}
+            </p>
+          )}
+
           {/* Success state: fingerprint displayed */}
           <div className="flex items-start gap-2">
             <ShieldCheck
