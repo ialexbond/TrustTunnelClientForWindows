@@ -348,6 +348,23 @@ describe("UserModal — Edit mode", () => {
     expect(screen.queryByTestId("user-modal-revert")).toBeNull();
   });
 
+  it("CRIT-1: Save is blocked while the inline password editor is open but empty", () => {
+    // Without this gate: user opens rotator, leaves the field blank, toggles
+    // anti-DPI, Save becomes active, click → password rotation silently
+    // skipped (isPasswordDirty=false) but editor stays open — confusing.
+    render(<UserModal {...defaultEditProps} />);
+    fireEvent.click(screen.getByTestId("rotate-password-btn"));
+    // Dirty the deeplink section so the form has an unrelated change.
+    fireEvent.click(screen.getAllByRole("switch")[0]);
+    // Save must be blocked because the rotator is open with nothing typed.
+    expect(screen.getByTestId("user-modal-submit")).toBeDisabled();
+    // Type a password → Save unlocks.
+    fireEvent.change(screen.getByPlaceholderText(/новый пароль/i), {
+      target: { value: "RealPass123" },
+    });
+    expect(screen.getByTestId("user-modal-submit")).not.toBeDisabled();
+  });
+
   it("X button calls onClose", () => {
     const onClose = vi.fn();
     render(<UserModal {...defaultEditProps} onClose={onClose} />);
