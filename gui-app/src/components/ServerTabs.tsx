@@ -24,6 +24,48 @@ import { UtilitiesTabSection } from "./server/UtilitiesTabSection";
 
 type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
 
+/**
+ * localStorage key для persist активного таба (CLAUDE.md — `tt_active_tab`).
+ *
+ * Регрессия: ServerPanel имеет early returns (loading / error / not-installed),
+ * и когда state.loading становится true (например, после `loadServerInfo()`),
+ * ServerTabs unmount'ится. После resolve state.loading=false тейк re-mount
+ * терял `activeTab` в пользу default "overview".
+ *
+ * M-04 refresh при активации таба Users ускорил это — клик по Users
+ * отправлял loadServerInfo и юзера «выкидывало» обратно на Overview.
+ *
+ * Persist решает сразу и регрессию, и общий UX: при reload app юзер
+ * возвращается на тот же таб. Значение validируется против whitelist
+ * чтобы malformed storage не сломал tabs.
+ */
+const ACTIVE_TAB_STORAGE_KEY = "tt_active_tab";
+const VALID_TAB_IDS: readonly TabId[] = [
+  "overview",
+  "users",
+  "configuration",
+  "security",
+  "utilities",
+];
+function loadActiveTab(): TabId {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+    if (raw && (VALID_TAB_IDS as readonly string[]).includes(raw)) {
+      return raw as TabId;
+    }
+  } catch {
+    /* privacy / quota — fall back to default */
+  }
+  return "overview";
+}
+function saveActiveTab(id: TabId): void {
+  try {
+    localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
 interface Tab {
   id: TabId;
   labelKey: string;
@@ -47,7 +89,11 @@ export function ServerTabs({ state }: ServerTabsProps) {
   const { t } = useTranslation();
   const { log: activityLog } = useActivityLog();
   const confirm = useConfirm();
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [activeTab, setActiveTabState] = useState<TabId>(() => loadActiveTab());
+  const setActiveTab = (id: TabId) => {
+    setActiveTabState(id);
+    saveActiveTab(id);
+  };
 
   const handleDisconnect = async () => {
     activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
