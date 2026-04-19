@@ -695,6 +695,8 @@
       "cert_fetch_error_invalid_response": "Сервер вернул некорректный ответ",
       "cert_fetch_error_generic": "Ошибка при загрузке сертификата: {{error}}",
       "cert_system_verifiable_hint": "Сертификат публично доверен (Let's Encrypt или коммерческий CA). Закрепление не обязательно — система сама проверит цепочку. При ротации сертификата pin потребует перевыпуска deeplink'а.",
+      "cert_fp_copy_aria": "Скопировать отпечаток",
+      "cert_fp_copied": "Скопировано",
       "field_dns_upstreams": "DNS-серверы",
       "dns_upstreams_hint": "Один DNS-сервер на строку (Enter — разделитель).",
       "dns_err_whitespace": "Пробелы внутри строки не допускаются",
@@ -731,7 +733,8 @@
       "add_error_ssh_export_failed": "Пользователь МОГ быть создан частично: credentials.toml обновлён, но endpoint CLI упал при генерации deeplink. Закройте окно, обновите список. Если user появился — удалите и попробуйте снова, либо откройте Edit и пересоздайте deeplink.",
       "add_error_hostname_invalid": "Некорректный hostname endpoint'а. Проверьте настройки сервера.",
       "add_error_sni_not_allowed": "Custom SNI «{{sni}}» не разрешён на сервере. Либо укажи домен из списка `allowed_sni` в hosts.toml на сервере, либо оставь поле пустым — частичных изменений не осталось, можно попробовать снова.",
-      "add_error_rolled_back": "Добавление отменено — частичных изменений не осталось. Поправь поля и попробуй снова. Детали: {{detail}}"
+      "add_error_rolled_back": "Добавление отменено — частичных изменений не осталось. Поправь поля и попробуй снова. Детали: {{detail}}",
+      "user_removed_externally": "Пользователь «{{user}}» был удалён на сервере пока открыто окно редактирования. Закройте окно и обновите список пользователей."
     },
     "logs": {
       "title": "Логи сервера",
@@ -1102,6 +1105,7 @@
       "rebootingCountdown": "Перезагрузка",
       "speedNotMeasured": "Не измерялась",
       "speedRequiresProtocol": "Запустите протокол",
+      "dataUnavailable": "Не удалось получить данные",
       "speedUnit": "Мбит/с",
       "ramUnit": "МБ",
       "refreshAria": "Обновить",

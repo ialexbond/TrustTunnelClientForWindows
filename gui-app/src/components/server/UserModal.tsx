@@ -909,6 +909,26 @@ export function UserModal({
     setIsSubmitting(true);
     setSubmitError(null);
     try {
+      // M-04 pre-Save check: подтверждаем что юзер всё ещё существует на
+      // сервере перед тем как писать в rules.toml / users-advanced.toml.
+      // Если админ удалил его через SSH напрямую пока modal был открыт,
+      // server_get_user_config вернёт null — показываем actionable
+      // banner вместо cryptic ошибки от backend'а, куда бы запись
+      // упала дальше по цепочке.
+      const preSave = await invoke<UserRuleResponse | null>("server_get_user_config", {
+        ...sshParams,
+        vpnUsername: editUsername,
+      });
+      if (preSave === null) {
+        activityLog(
+          "ERROR",
+          `user.update.precheck_missing user=${editUsername}`,
+        );
+        setSubmitError(t("server.users.user_removed_externally", { user: editUsername }));
+        setIsSubmitting(false);
+        return;
+      }
+
       // FIX-OO-11c Step 0: password rotation (if the user opened the
       // inline editor and typed a valid new password). Must run FIRST so
       // that if it fails we surface the error before touching rules.toml

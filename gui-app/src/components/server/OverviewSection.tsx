@@ -455,14 +455,25 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           refreshing={pingLoading}
           refreshAriaLabel={refreshAriaLabel}
         />
-        <div className="flex items-baseline justify-center gap-1 py-2">
+        {/* M-07: если ping упал (setPing(-1)) — прочерк + приписка
+            «Не удалось получить данные». В pending state (null) тоже
+            прочерк, но без приписки. Refresh button в Title (выше)
+            перезапускает measurement. */}
+        <div className="flex flex-col items-center justify-center gap-0.5 py-2">
           {ping !== null && ping > 0 ? (
-            <>
+            <div className="flex items-baseline justify-center gap-1">
               <span style={{ ...bigNum, color: pingColor }}>{ping}</span>
               <span className="text-sm" style={muted}>ms</span>
-            </>
+            </div>
           ) : (
-            <span style={{ ...bigNum, ...muted }}>—</span>
+            <>
+              <span style={{ ...bigNum, ...muted }}>—</span>
+              {ping === -1 && (
+                <span className="text-xs" style={muted}>
+                  {t("server.overview.dataUnavailable")}
+                </span>
+              )}
+            </>
           )}
         </div>
       </Card>
@@ -514,8 +525,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
             </div>
           </div>
         ) : speedFailed ? (
-          <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
+          /* M-08: прочерк + приписка «Не удалось получить данные».
+             Refresh в Title перезапустит speedtest_run. */
+          <div className="flex flex-col items-center justify-center gap-0.5 py-2" style={{ minHeight: 48 }}>
             <span style={{ ...bigNum, ...muted }}>—</span>
+            <span className="text-xs" style={muted}>
+              {t("server.overview.dataUnavailable")}
+            </span>
           </div>
         ) : (
           <div className="flex items-center justify-center py-2" style={{ minHeight: 48 }}>
