@@ -671,7 +671,7 @@
       "toggle_anti_dpi": "Защита от DPI",
       "toggle_anti_dpi_help": "Уникальный префикс для обхода DPI (рекомендуется)",
       "toggle_skip_verify": "Отключить проверку сертификата",
-      "toggle_skip_verify_warning": "⚠ Только для тестов — небезопасно в продакшне",
+      "toggle_skip_verify_warning": "Для самоподписанных сертификатов. В продакшне используйте Let's Encrypt или Pin Certificate.",
       "toggle_pin_cert": "Закрепить сертификат endpoint",
       "toggle_pin_cert_needs_sni": "Сначала укажите домен endpoint'а в поле Custom SNI",
       "cert_fetch_btn": "Загрузить с endpoint",
