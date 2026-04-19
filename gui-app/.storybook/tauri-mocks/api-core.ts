@@ -63,6 +63,9 @@ export const invoke = async (
     // A — batch. Empty array fits "no per-user advanced data" fallback.
     case "server_list_user_advanced":
       return [];
+    // M-11 — reconcile returns count of orphans removed. 0 = clean, no-op.
+    case "server_reconcile_users_advanced":
+      return 0;
     case "server_set_user_advanced":
     case "server_delete_user_advanced":
       return null;

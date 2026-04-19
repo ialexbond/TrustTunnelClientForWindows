@@ -202,7 +202,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
                     }}
                   />
                 )}
-                {tab.id === "users" && <UsersSection state={state} />}
+                {tab.id === "users" && <UsersSection state={state} activeServerTab={activeTab} />}
                 {tab.id === "configuration" && <ServerSettingsSection state={state} />}
                 {tab.id === "security" && <SecurityTabSection state={state} />}
                 {tab.id === "utilities" && <UtilitiesTabSection state={state} />}

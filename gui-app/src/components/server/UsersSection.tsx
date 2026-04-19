@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../shared/lib/cn";
@@ -18,6 +18,15 @@ import type { ServerState } from "./useServerState";
 
 interface Props {
   state: ServerState;
+  /**
+   * M-04: активная вкладка серверной панели. UsersSection перерисовывает
+   * список пользователей (loadServerInfo + refreshDisplayNames) когда таб
+   * становится `"users"` — это даёт оператору свежий список без отдельной
+   * кнопки Refresh. Cross-fade между табами не unmount'ит секцию, поэтому
+   * без этого сигнала юзер видит кэшированное состояние пока не передёрнет
+   * коннект.
+   */
+  activeServerTab?: "overview" | "users" | "configuration" | "security" | "utilities";
 }
 
 /**
@@ -32,7 +41,7 @@ interface Props {
  * D-21: Trash disabled when users.length === 1.
  * D-29: Passwords never in activity log payloads.
  */
-export function UsersSection({ state }: Props) {
+export function UsersSection({ state, activeServerTab }: Props) {
   const { t } = useTranslation();
   const confirm = useConfirm();
   const { log: activityLog } = useActivityLog();
@@ -103,6 +112,44 @@ export function UsersSection({ state }: Props) {
   useEffect(() => {
     void refreshDisplayNames();
   }, [refreshDisplayNames, userCount]);
+
+  // M-04: когда пользователь переключается на таб «Пользователи», делаем
+  // full reload — и credentials.toml через loadServerInfo, и
+  // users-advanced.toml через refreshDisplayNames. Это единственный
+  // discoverable «обновить» на этом экране (отдельной кнопки в дизайне
+  // нет). Пропускаем первый рендер c undefined, первый mount и так уже
+  // загружен через panel bootstrap.
+  const firstTabActivationRef = useRef(true);
+  useEffect(() => {
+    if (activeServerTab !== "users") return;
+    if (firstTabActivationRef.current) {
+      firstTabActivationRef.current = false;
+      return;
+    }
+    activityLog("USER", "users.tab.activated refresh=triggered");
+    state.loadServerInfo().catch(() => {
+      /* loadServerInfo sets state.error — UI показывает baner */
+    });
+    void refreshDisplayNames();
+    // M-11: fire-and-forget reconcile users-advanced.toml — best-effort
+    // hygiene, результат логируется в activity.log но не влияет на UI.
+    void invoke<number>("server_reconcile_users_advanced", sshParams)
+      .then((removed) => {
+        if (typeof removed === "number" && removed > 0) {
+          activityLog(
+            "STATE",
+            `users.advanced.reconciled removed=${removed}`,
+          );
+        }
+      })
+      .catch((err) => {
+        activityLog(
+          "ERROR",
+          `users.advanced.reconcile_failed err=${formatError(err).slice(0, 80)}`,
+        );
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeServerTab]);
 
   // Auto-open UserConfigModal after successful add (same pattern as Phase 14)
   useEffect(() => {
