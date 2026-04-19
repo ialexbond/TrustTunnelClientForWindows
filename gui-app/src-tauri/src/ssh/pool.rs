@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 use russh::client;
-use super::{SshHandler, SshParams, ssh_connect};
+use super::{SshHandler, SshParams, ssh_connect, open_session_with_retry};
 
 struct CachedSsh {
     key: String,
@@ -81,8 +81,11 @@ impl SshPool {
                 if handle.is_closed() {
                     break;
                 }
-                // Open a session channel as keepalive probe, then drop it
-                match handle.channel_open_session().await {
+                // Open a session channel as keepalive probe, then drop it.
+                // Use the retry helper so a single transient ChannelOpenFailure
+                // (e.g. from a concurrent panel-mount storm) does not kill the
+                // keepalive loop and force a full reconnect on the next command.
+                match open_session_with_retry(&handle).await {
                     Ok(channel) => { channel.close().await.ok(); }
                     Err(_) => break,
                 }

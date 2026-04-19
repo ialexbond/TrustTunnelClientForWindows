@@ -207,7 +207,7 @@ pub fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
         };
         tray.set_tooltip(Some(tooltip)).ok();
 
-        // Rebuild menu to reflect new status
+        // Rebuild native menu to reflect new status (Connect ↔ Disconnect).
         if let Ok(menu) = build_tray_menu(app, status) {
             tray.set_menu(Some(menu)).ok();
         }
@@ -288,32 +288,140 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
     });
 }
 
-/// Show custom tray context menu window at the given tray-click
-/// position. Корректируем чтобы окно не выходило за правый/нижний край
-/// экрана (tray в разных локациях: bottom-right, top, left panel).
-pub fn show_custom_tray_menu(app: &tauri::AppHandle, position: tauri::PhysicalPosition<f64>) {
-    let Some(win) = app.get_webview_window("tray-menu") else { return; };
-    // Смещаем от курсора на пару пикселей, чтобы не перекрывал иконку.
-    let mut x = position.x as i32;
-    let mut y = position.y as i32;
-    // Clamp внутрь primary monitor (~smart offset: menu 220×200 window).
+/// Cached tray icon rect — saved при right click, читается из
+/// `tray_menu_reposition` когда frontend домерял content и просит
+/// пересчитать позицию под новый size.
+static TRAY_ICON_RECT: Mutex<Option<(f64, f64, f64, f64)>> = Mutex::new(None);
+
+/// Compute anchored position для меню размера (mw×mh physical px) с
+/// учётом icon rect (ix, iy, iw, ih — physical).
+///
+/// Anchor:
+///   - horizontal: меню **справа от иконки** (left edge menu = right edge icon + gap),
+///     fallback — слева от иконки если не помещается справа
+///   - vertical: над иконкой (taskbar обычно снизу), fallback снизу
+fn compute_menu_position(
+    win: &tauri::WebviewWindow,
+    ix: f64, iy: f64, iw: f64, ih: f64,
+    mw: i32, mh: i32,
+) -> (i32, i32) {
+    let gap = 2_i32;
+    let icon_left = ix as i32;
+    let icon_right = (ix + iw) as i32;
+    let icon_top = iy as i32;
+    let icon_bottom = (iy + ih) as i32;
+
+    let mut x = icon_right + gap;
+    let mut y = icon_top - mh - gap;
+
     if let Ok(Some(monitor)) = win.primary_monitor() {
         let ms = monitor.size();
-        let mw = 220_i32;
-        let mh = 200_i32;
-        if x + mw > ms.width as i32 {
-            x = x - mw;
+        let sw = ms.width as i32;
+        let sh = ms.height as i32;
+
+        if x + mw > sw - 4 {
+            x = icon_left - mw - gap;
         }
-        if y + mh > ms.height as i32 {
-            y = y - mh;
-        }
-        if x < 0 { x = 0; }
-        if y < 0 { y = 0; }
+        if x < 4 { x = 4; }
+        if y < 4 { y = icon_bottom + gap; }
+        if y + mh > sh - 4 { y = sh - mh - 4; }
     }
+    (x, y)
+}
+
+/// Show custom tray context menu. Caches icon rect для последующего
+/// `tray_menu_reposition` после auto-size измерения на фронте.
+pub fn show_custom_tray_menu(
+    app: &tauri::AppHandle,
+    icon_x: f64,
+    icon_y: f64,
+    icon_w: f64,
+    icon_h: f64,
+) {
+    let Some(win) = app.get_webview_window("tray-menu") else { return; };
+
+    if let Ok(mut guard) = TRAY_ICON_RECT.lock() {
+        *guard = Some((icon_x, icon_y, icon_w, icon_h));
+    }
+
+    // Fallback size до того как frontend измерит content и позовёт
+    // tray_menu_reposition. Matches tauri.conf.json initial values.
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let mw = (180.0 * scale) as i32;
+    let mh = (130.0 * scale) as i32;
+
+    let (x, y) = compute_menu_position(&win, icon_x, icon_y, icon_w, icon_h, mw, mh);
     let _ = win.set_position(tauri::PhysicalPosition::<i32> { x, y });
     let _ = win.show();
     let _ = win.set_focus();
 }
+
+/// Repositioner: frontend после useLayoutEffect замеряет content и
+/// вызывает этот command с logical width/height. Пересчитываем position
+/// под новый размер + applies setSize + setPosition.
+#[tauri::command]
+pub fn tray_menu_reposition(app: tauri::AppHandle, width: u32, height: u32) {
+    let Some(win) = app.get_webview_window("tray-menu") else { return; };
+    let rect = {
+        let Ok(guard) = TRAY_ICON_RECT.lock() else { return; };
+        *guard
+    };
+    let Some((ix, iy, iw, ih)) = rect else { return; };
+
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let mw_phys = (width as f64 * scale).ceil() as i32;
+    let mh_phys = (height as f64 * scale).ceil() as i32;
+
+    let _ = win.set_size(tauri::LogicalSize::<u32> { width, height });
+    let (x, y) = compute_menu_position(&win, ix, iy, iw, ih, mw_phys, mh_phys);
+    let _ = win.set_position(tauri::PhysicalPosition::<i32> { x, y });
+}
+
+/// Apply native Windows 11 rounded corners через DwmSetWindowAttribute.
+///
+/// Работает без transparent (который сломан в dark theme Win11 — see
+/// Tauri issue #13859). DWM рендерит rounded corners на самом окне,
+/// независимо от CSS content внутри WebView. На Win10 и ниже — no-op
+/// (атрибут unsupported, вызов просто вернёт HRESULT error).
+///
+/// Raw FFI (вместо `windows` crate) — чтобы HWND type не конфликтовал
+/// с версией, которую использует Tauri 2 internally: Tauri пригвождён
+/// к конкретной windows-crate версии, а cross-version HWND types в
+/// Rust считаются разными нарошно даже если ABI identical.
+#[cfg(target_os = "windows")]
+pub fn apply_win11_rounded_corners(win: &tauri::WebviewWindow) {
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: isize,
+            attribute: u32,
+            pv_attribute: *const core::ffi::c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
+
+    if let Ok(hwnd) = win.hwnd() {
+        // hwnd — это `windows::Win32::Foundation::HWND` от Tauri-bundled
+        // crate. Унифицируем через raw isize — FFI signature выше
+        // принимает именно isize, совместимо с любой HWND newtype
+        // обёрткой (tuple struct HWND(isize)).
+        let raw: isize = hwnd.0 as isize;
+        unsafe {
+            let pref: u32 = DWMWCP_ROUND;
+            let _ = DwmSetWindowAttribute(
+                raw,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &pref as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn apply_win11_rounded_corners(_win: &tauri::WebviewWindow) {}
 
 /// Tauri command: menu item clicked — dispatches the action and hides
 /// the menu window. Called from src/tray-menu.tsx React code.
@@ -362,6 +470,21 @@ pub fn tray_menu_current_status(app: tauri::AppHandle) -> String {
 #[tauri::command]
 pub fn tray_menu_current_locale(app: tauri::AppHandle) -> String {
     get_locale(&app)
+}
+
+/// Can the user trigger VPN connect from tray? True если сохранён
+/// config path (из AppState.config_path) или auto-detect найдёт файл.
+/// False — «Подключиться» должен быть disabled: нечего подключать.
+#[tauri::command]
+pub fn tray_menu_has_config(app: tauri::AppHandle) -> bool {
+    // Same resolution как в tray_vpn_connect — если здесь true,
+    // значит clicked "Подключиться" реально подключит VPN.
+    let stored = app.try_state::<AppState>()
+        .and_then(|s| s.config_path.lock().ok().and_then(|g| g.clone()));
+    if stored.is_some() {
+        return true;
+    }
+    crate::commands::config::auto_detect_config().is_some()
 }
 
 /// Disconnect VPN from tray menu.

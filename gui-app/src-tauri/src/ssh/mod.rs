@@ -6,11 +6,12 @@ pub mod process;
 
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::LazyLock;
 use russh::client;
 use russh::ChannelMsg;
 use serde::Deserialize;
 use tauri::Emitter;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
 
 // Re-export everything that lib.rs uses
 pub use deploy::{deploy_server, diagnose_server};
@@ -421,13 +422,79 @@ pub async fn ssh_connect(
 
 // ─── Command Execution ─────────────────────────────
 
+/// Global limiter на одновременные channel_open. sshd default MaxSessions=10 —
+/// без ограничения ~10 параллельных panel-mount команд упирались в этот
+/// лимит и получали `Error::ChannelOpenFailure(ConnectFailed)`, даже при
+/// успешной установленной SSH-сессии (например — `users.displayname_fetch_failed`
+/// + `overview.security.failed` через 400ms после panel.load.completed при
+/// первой авторизации в новый сервер, см. D-bug-ssh-pool-stampede).
+///
+/// Permit=5 оставляет 5 слотов в запас для keepalive heartbeats + ad-hoc
+/// команд (kill-sidecar, cancel operations). Semaphore гарантирует что
+/// стампиду 10+ команд physically не перегружают sshd — retry остаётся
+/// как mitigation для реальных transient failures (network hiccup, forking
+/// latency при cold sshd).
+static CHANNEL_OPEN_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(5));
+
+/// Open a session channel with a global concurrency gate + transient-failure retries.
+///
+/// Panel mount fires ~10 parallel pooled SSH commands on the shared handle
+/// (OverviewSection: stats + uptime + security, UsersSection: displayname,
+/// ServerSettings + SecurityTab each re-load security via useSecurityState,
+/// Utilities: BBR + MTProto). When sshd can't keep up (small VPS, default
+/// MaxSessions=10, fork latency) it replies SSH_MSG_CHANNEL_OPEN_FAILURE
+/// with reason=ConnectFailed or ResourceShortage — russh surfaces these as
+/// `Error::ChannelOpenFailure(_)`.
+///
+/// Two-layer defence:
+///   1. **Gate (Semaphore):** физически ограничивает parallel channel_open до
+///      5. Остальные команды ждут permit. Никогда не перегружаем sshd.
+///   2. **Retry with jittered backoff:** для случаев когда sshd всё-равно
+///      вернул transient failure (gate не защищает от sshd-side race).
+///      6 attempts × (50/100/200/400/800 ms + 0-99ms jitter) = up to ~1.8s
+///      total retry window — достаточно для cold fork latency recovery.
+pub(super) async fn open_session_with_retry(
+    handle: &client::Handle<SshHandler>,
+) -> Result<russh::Channel<russh::client::Msg>, russh::Error> {
+    const MAX_ATTEMPTS: u32 = 6; // 1 initial try + 5 retries
+
+    // Acquire permit ДО попытки. Если gate закрыт — ждём пока освободится
+    // слот. Permit дропается при return (через RAII) => следующая команда
+    // сможет войти.
+    let _permit = CHANNEL_OPEN_GATE.acquire().await
+        .expect("CHANNEL_OPEN_GATE never closed");
+
+    let mut attempt: u32 = 0;
+    loop {
+        match handle.channel_open_session().await {
+            Ok(ch) => return Ok(ch),
+            Err(e) => {
+                let transient = matches!(&e, russh::Error::ChannelOpenFailure(_));
+                attempt += 1;
+                if !transient || attempt >= MAX_ATTEMPTS {
+                    return Err(e);
+                }
+                // Exponential backoff 50/100/200/400/800 ms + 0-99ms jitter
+                // so parallel retries fan out instead of thundering together.
+                let base_ms: u64 = 50u64 * (1u64 << (attempt - 1));
+                let jitter_ms: u64 = rand::random::<u64>() % 100;
+                let delay_ms = base_ms + jitter_ms;
+                eprintln!(
+                    "[SSH] channel_open_session transient fail ({e}); retry {attempt}/{} in {delay_ms}ms",
+                    MAX_ATTEMPTS - 1
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
+        }
+    }
+}
+
 pub(crate) async fn exec_command(
     handle: &client::Handle<SshHandler>,
     app: &tauri::AppHandle,
     command: &str,
 ) -> Result<(String, i32), String> {
-    let mut channel = handle
-        .channel_open_session()
+    let mut channel = open_session_with_retry(handle)
         .await
         .map_err(|e| format!("SSH_CHANNEL_FAILED|{e}"))?;
 
