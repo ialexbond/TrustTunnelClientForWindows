@@ -51,13 +51,13 @@ export function TitleBar({ children }: TitleBarProps) {
           className="text-[13px] font-[var(--font-weight-semibold)]"
           style={{
             letterSpacing: "-0.01em",
-            color: "var(--color-text-primary)",
             fontFamily: "var(--font-family-display)",
           }}
           data-tauri-drag-region
           onDoubleClick={(e) => e.preventDefault()}
         >
-          TrustTunnel
+          <span style={{ color: "var(--color-text-primary)" }}>Trust</span>
+          <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
         </span>
         <span
           // uppercase-only «PRO» не имеет descender'а, с default

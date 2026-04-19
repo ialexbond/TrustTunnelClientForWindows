@@ -119,19 +119,14 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             />
             <div className="flex items-start gap-1.5">
               <h1
-                // text-5xl через расширенный token (tailwind.config.js +
-                // tokens.css `--font-size-5xl: 48px`). Display-size,
-                // только для wordmark, не для UI-текста (design-system rule).
+                // Wordmark «Trust» (primary) + «Tunnel» (accent) — две
+                // части через span'ы. text-5xl через расширенный token
+                // (tailwind.config.js + tokens.css). Outfit display face.
                 className="text-5xl font-bold tracking-wide leading-none"
-                style={{
-                  color: "var(--color-text-primary)",
-                  // Outfit — display-face для wordmark TrustTunnel. См.
-                  // tokens.css → --font-family-display. Применять ТОЛЬКО
-                  // здесь, не в UI-text.
-                  fontFamily: "var(--font-family-display)",
-                }}
+                style={{ fontFamily: "var(--font-family-display)" }}
               >
-                TrustTunnel
+                <span style={{ color: "var(--color-text-primary)" }}>Trust</span>
+                <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
               </h1>
               <span
                 // Тот же fix что и у TitleBar-badge: uppercase глиф без
