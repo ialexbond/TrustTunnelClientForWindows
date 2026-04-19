@@ -37,7 +37,12 @@ pub use server::{
     server_update_user_config, server_regenerate_client_prefix,
     server_fetch_endpoint_cert, server_get_user_config,
     export_config_deeplink_advanced,
+    // M-01 — Custom SNI autocomplete
+    get_allowed_sni_list, AllowedSniHost,
     UserRule, EndpointCertInfo,
+    // FIX-NN — server-side TLV persistence
+    users_advanced,
+    UserAdvanced,
 };
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
