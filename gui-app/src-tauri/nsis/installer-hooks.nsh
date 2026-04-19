@@ -1,6 +1,23 @@
 ; TrustTunnel NSIS Installer Hooks
 ; Complete cleanup on uninstall — remove ALL traces of the application
 
+!macro NSIS_HOOK_POSTINSTALL
+
+  ; ── Icon cache refresh ────────────────────────────────────────
+  ; При upgrade поверх существующей установки Windows кэширует
+  ; старый .ico в iconcache.db и показывает прежний ярлык в
+  ; Explorer/Start menu/Taskbar, пока shell не перезапустится.
+  ; `ie4uinit.exe -show` — штатная Windows-утилита, форсирует
+  ; обновление кэша без reboot'а или ручного Kill explorer.exe.
+  ; nsExec::ExecToLog не ждёт окончания процесса — installer
+  ; завершается сразу, пользователю видна новая иконка в течение
+  ; нескольких секунд.
+  DetailPrint "Refreshing icon cache..."
+  nsExec::ExecToLog 'ie4uinit.exe -show'
+
+!macroend
+
+
 !macro NSIS_HOOK_PREUNINSTALL
 
   ; ── 1. Kill only THIS edition's sidecar VPN process ────────────
