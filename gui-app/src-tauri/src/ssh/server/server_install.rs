@@ -630,6 +630,13 @@ pub async fn server_update_user_config(
 
 /// Regenerate the anti-DPI client_random_prefix for an existing user.
 /// Old prefix is invalidated in existing deeplinks.
+///
+/// WR-03 (14.1-REVIEW deep pass): before this fix, the call delegated to
+/// `server_update_user_config(..., cidr=None, ...)`, which made
+/// `add_user_rule` emit a brand-new rule WITHOUT the existing cidr — silently
+/// dropping the subnet restriction when the operator intended a rotation.
+/// Fix: read rules.toml first, recover the existing cidr for this user, and
+/// pass it through so the cidr invariant survives the rotation.
 pub async fn server_regenerate_client_prefix(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
@@ -646,8 +653,29 @@ pub async fn server_regenerate_client_prefix(
     rand::thread_rng().fill_bytes(&mut buf);
     let new_prefix: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
 
+    // WR-03: preserve existing cidr from rules.toml. If this read fails we
+    // fall back to None (same as pre-fix behaviour) — the operator will see
+    // the error but the delegate call still runs so the rotation can retry.
+    let sudo = detect_sudo(handle, app).await;
+    let existing_cidr = match exec_command(
+        handle,
+        app,
+        &format!(
+            "{sudo}cat {dir}/rules.toml 2>/dev/null || echo ''",
+            dir = ENDPOINT_DIR,
+        ),
+    )
+    .await
+    {
+        Ok((content, _)) => super::find_user_rule(&content, &vpn_username)
+            .ok()
+            .flatten()
+            .and_then(|r| r.cidr),
+        Err(_) => None,
+    };
+
     // Delegate update with regenerate_prefix=true; cidr preserved from existing rule
-    server_update_user_config(app, handle, vpn_username, None, true, true).await?;
+    server_update_user_config(app, handle, vpn_username, existing_cidr, true, true).await?;
     Ok(new_prefix)
 }
 
