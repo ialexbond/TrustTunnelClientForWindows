@@ -215,6 +215,20 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Блок dblclick-to-maximize / fullscreen на титлбаре.
+            // maximizable:false в config блокирует системную кнопку
+            // maximize, но не double-click на data-tauri-drag-region —
+            // тот попадает в WebView-обработчик до того как OS сверится
+            // с флагом. Ловим событие Resized → если окно стало
+            // maximized/fullscreen — немедленно откатываем.
+            if let tauri::WindowEvent::Resized(_) = event {
+                if let Ok(true) = window.is_maximized() {
+                    let _ = window.unmaximize();
+                }
+                if let Ok(true) = window.is_fullscreen() {
+                    let _ = window.set_fullscreen(false);
+                }
+            }
             // Minimize to tray on close instead of quitting
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 window.hide().ok();
