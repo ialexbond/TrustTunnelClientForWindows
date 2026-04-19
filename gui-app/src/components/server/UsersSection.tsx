@@ -45,17 +45,63 @@ export function UsersSection({ state }: Props) {
     removeUserFromState,
   } = state;
 
-  // Disable all row actions when any mutation is in-flight.
-  const isBusy = !!actionLoading || state.deleteLoading;
+  // Disable all row actions when a mutation is in-flight.
+  //
+  // FIX-JJ: deliberately NOT including `state.deleteLoading`. The delete flow
+  // goes through a ConfirmDialog whose backdrop already blocks every click
+  // until the async action finishes, so adding `deleteLoading` here just made
+  // the background icons look disabled while the dialog was up — exactly
+  // what the user said shouldn't happen («кнопки на фоне не должны переходить
+  // в состояние disable»). The ConfirmDialog owns its own loading state
+  // (variant/danger + its own buttons disabled + backdrop). Nothing else
+  // needs to know.
+  const isBusy = !!actionLoading;
 
   // ── UserConfigModal state (FileText icon — shows QR deeplink) ──────────
   const [configModalUsername, setConfigModalUsername] = useState<string | null>(null);
   const [pendingExportUsername, setPendingExportUsername] = useState<string | null>(null);
+  // FIX-W: regenerated deeplink from the most recent Edit save. Preloaded
+  // into UserConfigModal so the user sees the fresh deeplink with the edited
+  // TLV params (server doesn't persist these, so they exist only here).
+  const [preloadedDeeplink, setPreloadedDeeplink] = useState<string | null>(null);
 
   // ── UserModal state (Plus icon = Add, Gear icon = Edit) ────────────────
   const [userModalMode, setUserModalMode] = useState<"add" | "edit">("add");
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [editingUsername, setEditingUsername] = useState<string | undefined>(undefined);
+
+  // A: map username → display_name from users-advanced.toml. One SSH roundtrip
+  // when the list renders; refetched after Add / Edit / Delete (callbacks
+  // below call `refreshDisplayNames`). Empty display_name / missing entry →
+  // fall back to username so the list is never blank.
+  const [displayNames, setDisplayNames] = useState<Map<string, string>>(new Map());
+  const refreshDisplayNames = useCallback(async () => {
+    try {
+      const list = await invoke<Array<{ username: string; display_name?: string | null }>>(
+        "server_list_user_advanced",
+        sshParams,
+      );
+      const next = new Map<string, string>();
+      for (const u of list ?? []) {
+        if (u.display_name && u.display_name.trim()) {
+          next.set(u.username, u.display_name.trim());
+        }
+      }
+      setDisplayNames(next);
+    } catch (err) {
+      // Non-fatal — list continues to render usernames alone.
+      activityLog(
+        "ERROR",
+        `users.displayname_fetch_failed err=${formatError(err).slice(0, 80)}`,
+      );
+    }
+  }, [sshParams, activityLog]);
+  // `serverInfo` is nullable until the first check_server_installation
+  // roundtrip resolves; derive a stable count so the dep array stays simple.
+  const userCount = serverInfo?.users.length ?? 0;
+  useEffect(() => {
+    void refreshDisplayNames();
+  }, [refreshDisplayNames, userCount]);
 
   // Auto-open UserConfigModal after successful add (same pattern as Phase 14)
   useEffect(() => {
@@ -98,20 +144,42 @@ export function UsersSection({ state }: Props) {
   }, []);
 
   const handleUserAdded = useCallback(
-    (username: string) => {
+    (username: string, generatedDeeplink: string) => {
       addUserToState(username);
-      activityLog("STATE", `user.add_advanced.state_updated user=${username}`);
+      activityLog(
+        "STATE",
+        `user.add_advanced.state_updated user=${username} deeplink_len=${generatedDeeplink.length}`,
+      );
       state.pushSuccess(t("server.users.user_added_advanced", { user: username }));
+      // FIX-KK: preload the freshly-generated deeplink so UserConfigModal
+      // shows it verbatim instead of re-fetching a stripped basic deeplink.
+      setPreloadedDeeplink(generatedDeeplink);
       setPendingExportUsername(username);
     },
     [addUserToState, activityLog, state, t],
   );
 
   const handleUserUpdated = useCallback(
-    (username: string) => {
+    (username: string, regeneratedDeeplink: string | null) => {
       activityLog("STATE", `user.update.state_updated user=${username}`);
+      // A: display_name may have been changed in Edit → list must reflect it
+      // without waiting for a user count change (refreshDisplayNames in the
+      // useEffect above is keyed on users.length, which Edit doesn't bump).
+      void refreshDisplayNames();
+      // FIX-W: when the Edit modal regenerated the deeplink (deeplink section
+      // was dirty), preload it into UserConfigModal and auto-open — otherwise
+      // the user's edits to display_name / custom_sni / DNS / etc. would be
+      // baked into a deeplink nobody ever sees.
+      if (regeneratedDeeplink) {
+        setPreloadedDeeplink(regeneratedDeeplink);
+        setConfigModalUsername(username);
+        activityLog(
+          "USER",
+          `user.config.modal_opened user=${username} source=edit_regenerated`,
+        );
+      }
     },
-    [activityLog],
+    [activityLog, refreshDisplayNames],
   );
 
   const handleDeleteUser = useCallback(
@@ -132,6 +200,27 @@ export function UsersSection({ state }: Props) {
             await invoke("server_remove_user", {
               ...sshParams,
               vpnUsername: user,
+            });
+            // FIX-NN: backend `server_remove_user` already runs the
+            // advanced-file cleanup internally. This second invoke is
+            // belt-and-braces for the case where that best-effort write
+            // errored silently. Swallowed — credentials.toml is the
+            // source of truth for "user exists", so a dangling entry in
+            // users-advanced.toml is harmless (next Add overwrites it).
+            //
+            // Promise.resolve wrap: `invoke` may be a plain non-Promise
+            // value in unit tests (vi.fn default); bare `.catch` on it
+            // throws synchronously and breaks the surrounding try/catch.
+            Promise.resolve(
+              invoke("server_delete_user_advanced", {
+                ...sshParams,
+                username: user,
+              }),
+            ).catch((err) => {
+              activityLog(
+                "ERROR",
+                `user.advanced.cleanup_failed user=${user} err=${formatError(err)}`,
+              );
             });
             removeUserFromState(user);
             activityLog("STATE", `user.remove.completed user=${user}`);
@@ -182,13 +271,27 @@ export function UsersSection({ state }: Props) {
                         : "hover:bg-[var(--color-bg-hover)]",
                     )}
                   >
-                    {/* Username — left */}
-                    <span
-                      className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-[var(--color-text-primary)]"
-                      title={u}
-                    >
-                      {u}
-                    </span>
+                    {/* Username — left. A: показываем display_name из
+                        users-advanced.toml если задан. Username виден в
+                        title-атрибуте при наведении — чтобы оператор мог
+                        сопоставить метку с реальным клиентским именем. */}
+                    {(() => {
+                      const label = displayNames.get(u) || u;
+                      const hasAlias = label !== u;
+                      return (
+                        <span
+                          className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-[var(--color-text-primary)]"
+                          title={hasAlias ? `${label} · ${u}` : u}
+                        >
+                          {label}
+                          {hasAlias && (
+                            <span className="ml-1.5 text-xs text-[var(--color-text-muted)]">
+                              {u}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
 
                     {/* 3-icon cluster: FileText + Gear + Trash (D-3) */}
                     <div className="flex items-center gap-[var(--space-0\.5)] shrink-0 ml-2">
@@ -302,12 +405,18 @@ export function UsersSection({ state }: Props) {
         </Button>
       </Card>
 
-      {/* UserConfigModal — FileText icon → QR deeplink (unchanged from Phase 14) */}
+      {/* UserConfigModal — FileText icon → QR deeplink. FIX-W: also opens
+          with `preloadedDeeplink` after an Edit that regenerated the deeplink,
+          so the user sees the edited TLV params in the QR before they vanish. */}
       <UserConfigModal
         isOpen={!!configModalUsername}
         username={configModalUsername}
         sshParams={sshParams}
-        onClose={() => setConfigModalUsername(null)}
+        preloadedDeeplink={preloadedDeeplink ?? undefined}
+        onClose={() => {
+          setConfigModalUsername(null);
+          setPreloadedDeeplink(null);
+        }}
       />
 
       {/* UserModal — Add/Edit modal (D-1..D-9) */}

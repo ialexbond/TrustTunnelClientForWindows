@@ -166,10 +166,10 @@ export function DnsUpstreamsInput({
   }, [value]);
 
   const hasError = invalidDetails.length > 0;
-  // UX-dns-hint: drop the verbose default helper — it duplicated the
-  // placeholder (8.8.8.8 / dns.example.com / tls://…). Caller can still
-  // pass a custom helperText for special cases.
-  const resolvedHelper = helperText ?? null;
+  // UX-dns-hint (B): short hint — just explain that ENTER is the separator
+  // and each server goes on its own line. Format examples already live in
+  // the placeholder, no need to repeat them.
+  const resolvedHelper = helperText ?? t("server.users.dns_upstreams_hint");
 
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
