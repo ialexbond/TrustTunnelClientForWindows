@@ -1,29 +1,25 @@
 import { Card } from "../../shared/ui/Card";
+import { Divider } from "../../shared/ui/Divider";
 import { Skeleton } from "../../shared/ui/Skeleton";
 
 /**
- * UsersSectionSkeleton — shown while loadServerInfo is in-flight on the
- * Users tab (M-04 refresh flow). Mirrors the real UsersSection structure:
- * a Card header with title + plus-icon, and 3 user rows with
- * username + 3 inline icons (FileText, Settings, Trash). The skeleton
- * gives the operator a predictable silhouette — exactly the widgets they
- * expect, just lagging instead of rearranging.
+ * UsersSectionSkeleton — placeholder для таба «Пользователи» пока
+ * идёт refresh (M-04 flow). Mirror'ит реальный UsersSection:
+ *   1. 3 row × (username line + 3 inline action icons).
+ *   2. Divider.
+ *   3. Full-width «Добавить пользователя» button (secondary entry).
  *
- * Kept intentionally static (no `pulse` variance) so the rendered DOM is
- * deterministic for snapshot tests and Storybook.
+ * Header-card и title-skeleton опущены — в UsersSection их нет,
+ * секция начинается сразу со списка. Skeleton rendered in-place
+ * (Card wrapper), без pulse — DOM детерминистичен для снапшот
+ * тестов и Storybook preview.
  */
 export function UsersSectionSkeleton() {
   return (
     <Card>
-      {/* Header — "Пользователи" title + plus-icon (matches UsersSection
-          CardHeader action button). */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <Skeleton variant="line" width={120} height={16} />
-        <Skeleton variant="card" width={32} height={32} />
-      </div>
-
-      {/* 3 user rows — 16px vertical each (matches py-2) with a 56px row
-          height. Each row: username placeholder (flex-1) + 3 inline icons. */}
+      {/* 3 user rows — совпадают с реальным UsersSection layout:
+          username занимает остаток ширины, справа — 3 action icons
+          (FileText / Settings / Trash). */}
       <ul className="mb-3" aria-hidden="true">
         {[0, 1, 2].map((i) => (
           <li key={i}>
@@ -38,6 +34,12 @@ export function UsersSectionSkeleton() {
           </li>
         ))}
       </ul>
+
+      <Divider className="my-3" />
+
+      {/* «Добавить пользователя» — kbd full-width button silhouette.
+          Высота 36px совпадает с Button size="md" + fullWidth. */}
+      <Skeleton variant="card" height={36} />
     </Card>
   );
 }
