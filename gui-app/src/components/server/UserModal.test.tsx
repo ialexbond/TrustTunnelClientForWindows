@@ -124,9 +124,11 @@ describe("UserModal — Add mode", () => {
     });
   });
 
-  it("calls onUserAdded after successful add", async () => {
+  it("calls onUserAdded with (username, deeplink) after successful add", async () => {
     const onUserAdded = vi.fn();
-    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    // FIX-KK: backend now returns the full deeplink from server_add_user_advanced
+    // so the client can preload UserConfigModal without re-fetching a stripped one.
+    vi.mocked(invoke).mockResolvedValueOnce("tt://?fake-generated-deeplink");
     render(<UserModal {...defaultAddProps} onUserAdded={onUserAdded} />);
     fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
       target: { value: "newuser" },
@@ -136,7 +138,7 @@ describe("UserModal — Add mode", () => {
     });
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
-      expect(onUserAdded).toHaveBeenCalledWith("newuser");
+      expect(onUserAdded).toHaveBeenCalledWith("newuser", "tt://?fake-generated-deeplink");
     });
   });
 
@@ -167,7 +169,10 @@ describe("UserModal — Add mode", () => {
 
   it("cert card renders when pin cert toggle is ON", () => {
     render(<UserModal {...defaultAddProps} />);
-    // Toggle pin cert (last toggle)
+    // FIX-AA: pin_cert toggle is disabled until Custom SNI is filled with
+    // a valid FQDN — fill it first, then click the toggle.
+    const sniInput = screen.getByLabelText(/custom sni/i) as HTMLInputElement;
+    fireEvent.change(sniInput, { target: { value: "endpoint.example.com" } });
     const toggles = screen.getAllByRole("switch");
     // pinCert is the 3rd toggle (antiDpi, skipVerify, pinCert)
     const pinCertToggle = toggles[2];
@@ -208,15 +213,23 @@ describe("UserModal — Edit mode", () => {
     expect(screen.getByTestId("rotate-password-btn")).toBeInTheDocument();
   });
 
-  it("opens rotation prompt when 'Сменить пароль' is clicked", () => {
+  it("activates inline password field when 'Сменить пароль' is clicked (FIX-OO-11c)", () => {
+    // Before: click opened a separate PasswordRotationPrompt sub-modal.
+    // After: the readonly "••••••" field is swapped for an editable one;
+    // the rotation is then committed by the main Save Changes button.
     render(<UserModal {...defaultEditProps} />);
     fireEvent.click(screen.getByTestId("rotate-password-btn"));
-    expect(screen.getByTestId("password-rotation-prompt")).toBeInTheDocument();
+    // Readonly dots disappear, cancel-button appears.
+    expect(screen.queryByTestId("password-readonly")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cancel-rotate-password-btn")).toBeInTheDocument();
   });
 
-  it("calls server_update_user_config on save", async () => {
+  it("calls server_update_user_config on save once form is dirty (FIX-OO-11b)", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(undefined);
     render(<UserModal {...defaultEditProps} />);
+    // FIX-OO-11b: Save is disabled until something actually changed.
+    // Toggle anti-DPI to dirty the form.
+    fireEvent.click(screen.getAllByRole("switch")[0]);
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
       // CR-05/WR-01: backend signature uses `username` (not vpn_username).
@@ -228,11 +241,47 @@ describe("UserModal — Edit mode", () => {
 
   it("calls onUserUpdated after successful save", async () => {
     const onUserUpdated = vi.fn();
-    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    // Mock ALL invokes so the entire handleSave pipeline resolves —
+    // server_update_user_config → server_export_config_deeplink_advanced
+    // (only triggered because deeplink is dirty) → server_set_user_advanced.
+    vi.mocked(invoke).mockResolvedValue("tt://fake");
     render(<UserModal {...defaultEditProps} onUserUpdated={onUserUpdated} />);
+    // FIX-OO-11b: dirty the form before hitting Save.
+    fireEvent.click(screen.getAllByRole("switch")[0]);
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
-      expect(onUserUpdated).toHaveBeenCalledWith("alice");
+      expect(onUserUpdated).toHaveBeenCalled();
+    });
+    expect(onUserUpdated.mock.calls[0][0]).toBe("alice");
+  });
+
+  it("disables Save button in Edit mode until user changes something (FIX-OO-11b)", () => {
+    render(<UserModal {...defaultEditProps} />);
+    expect(screen.getByTestId("user-modal-submit")).toBeDisabled();
+    // Dirty the form — Save becomes enabled.
+    fireEvent.click(screen.getAllByRole("switch")[0]);
+    expect(screen.getByTestId("user-modal-submit")).not.toBeDisabled();
+  });
+
+  it("Save rotates password when the inline editor has a new value (FIX-OO-11c)", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    render(<UserModal {...defaultEditProps} />);
+    // Open inline password editor.
+    fireEvent.click(screen.getByTestId("rotate-password-btn"));
+    // Type a new password.
+    const pwInput = screen.getByPlaceholderText(/новый пароль/i);
+    fireEvent.change(pwInput, { target: { value: "NewPass123!" } });
+    // Save Changes should now be enabled (password is dirty).
+    expect(screen.getByTestId("user-modal-submit")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_rotate_user_password",
+        expect.objectContaining({
+          vpnUsername: "alice",
+          newPassword: "NewPass123!",
+        }),
+      );
     });
   });
 
@@ -262,6 +311,136 @@ describe("UserModal — Edit mode", () => {
     render(<UserModal {...defaultEditProps} onClose={onClose} />);
     fireEvent.click(screen.getByTestId("user-modal-close"));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("UserModal — M-01 Custom SNI autocomplete", () => {
+  beforeEach(() => {
+    i18n.changeLanguage("ru");
+    vi.clearAllMocks();
+    // FIX-K persists the Add form to sessionStorage — clear so previous
+    // test runs don't bleed Custom SNI values into this group's fixtures.
+    sessionStorage.clear();
+  });
+
+  // _storybook=false forces the allowed_sni fetch path. For unrelated invokes
+  // (server_add_user_advanced etc.) we return undefined so the rest of the
+  // flow doesn't crash if a test happens to submit.
+  const mockAllowedSniFetch = (hosts: unknown) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "server_get_allowed_sni_list") return hosts;
+      return undefined;
+    });
+  };
+
+  it("renders suggestion chips from hosts.toml (hostname + allowed_sni)", async () => {
+    mockAllowedSniFetch([
+      { hostname: "vpn.example.com", allowedSni: ["cdn.example.com"] },
+    ]);
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    await waitFor(() => {
+      expect(screen.getByTestId("sni-suggestions")).toBeInTheDocument();
+    });
+    // Hostname itself is implicitly allowed — endpoint CLI accepts SNI == hostname.
+    expect(screen.getByTestId("sni-chip-vpn.example.com")).toBeInTheDocument();
+    expect(screen.getByTestId("sni-chip-cdn.example.com")).toBeInTheDocument();
+  });
+
+  it("clicking a suggestion chip fills Custom SNI", async () => {
+    mockAllowedSniFetch([
+      { hostname: "vpn.example.com", allowedSni: ["cdn.example.com"] },
+    ]);
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("sni-chip-cdn.example.com")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("sni-chip-cdn.example.com"));
+    const sniInput = screen.getByLabelText(/custom sni/i) as HTMLInputElement;
+    expect(sniInput.value).toBe("cdn.example.com");
+  });
+
+  it("shows green allowed-ok marker when SNI matches the whitelist", async () => {
+    mockAllowedSniFetch([
+      { hostname: "vpn.example.com", allowedSni: ["cdn.example.com"] },
+    ]);
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("sni-chip-cdn.example.com")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText(/custom sni/i), {
+      target: { value: "cdn.example.com" },
+    });
+    expect(screen.getByTestId("sni-allowlist-ok")).toBeInTheDocument();
+    expect(screen.queryByTestId("sni-allowlist-warn")).toBeNull();
+  });
+
+  it("shows warning marker when SNI is a valid FQDN but not whitelisted", async () => {
+    // A value with a valid FQDN format that is NOT on the server's list —
+    // this is the exact scenario FIX-OO-14 rolls back, so the user needs
+    // an actionable hint BEFORE they click Save.
+    mockAllowedSniFetch([
+      { hostname: "vpn.example.com", allowedSni: ["cdn.example.com"] },
+    ]);
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("sni-chip-vpn.example.com")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText(/custom sni/i), {
+      target: { value: "notonlist.example.com" },
+    });
+    expect(screen.getByTestId("sni-allowlist-warn")).toBeInTheDocument();
+    expect(screen.queryByTestId("sni-allowlist-ok")).toBeNull();
+  });
+
+  it("no warning when Custom SNI is empty (optional field)", async () => {
+    mockAllowedSniFetch([
+      { hostname: "vpn.example.com", allowedSni: ["cdn.example.com"] },
+    ]);
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("sni-chip-vpn.example.com")).toBeInTheDocument(),
+    );
+    // Custom SNI untouched — stays empty — no marker should render.
+    expect(screen.queryByTestId("sni-allowlist-ok")).toBeNull();
+    expect(screen.queryByTestId("sni-allowlist-warn")).toBeNull();
+  });
+
+  it("silent fallback when server_get_allowed_sni_list fails", async () => {
+    // Backend unreachable / hosts.toml missing — the modal must still work,
+    // the validator just skips the whitelist check and no chips render.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "server_get_allowed_sni_list") throw new Error("SSH timeout");
+      return undefined;
+    });
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    // Let the failing promise settle.
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("server_get_allowed_sni_list", expect.anything());
+    });
+    expect(screen.queryByTestId("sni-suggestions")).toBeNull();
+    // User can still type — validator only complains about format.
+    fireEvent.change(screen.getByLabelText(/custom sni/i), {
+      target: { value: "cdn.example.com" },
+    });
+    expect(screen.queryByTestId("sni-allowlist-warn")).toBeNull();
+    expect(screen.queryByTestId("sni-allowlist-ok")).toBeNull();
+  });
+
+  it("does not show whitelist marker when FQDN format is invalid", async () => {
+    // The value fails format validation first — showing "not on the list"
+    // would be noise on top of the format error.
+    mockAllowedSniFetch([
+      { hostname: "vpn.example.com", allowedSni: [] },
+    ]);
+    render(<UserModal {...defaultAddProps} _storybook={false} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("sni-chip-vpn.example.com")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText(/custom sni/i), {
+      target: { value: "not a valid hostname" },
+    });
+    expect(screen.queryByTestId("sni-allowlist-warn")).toBeNull();
+    expect(screen.queryByTestId("sni-allowlist-ok")).toBeNull();
   });
 });
 

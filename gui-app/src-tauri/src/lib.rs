@@ -355,6 +355,12 @@ pub fn run() {
             commands::ssh_commands::server_fetch_endpoint_cert,
             commands::ssh_commands::server_export_config_deeplink_advanced,
             commands::ssh_commands::server_get_user_config,
+            // M-01 — Custom SNI autocomplete
+            commands::ssh_commands::server_get_allowed_sni_list,
+            // FIX-NN — server-side TLV persistence
+            commands::ssh_commands::server_get_user_advanced,
+            commands::ssh_commands::server_set_user_advanced,
+            commands::ssh_commands::server_delete_user_advanced,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
