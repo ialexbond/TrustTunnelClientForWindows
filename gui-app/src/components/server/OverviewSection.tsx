@@ -553,7 +553,16 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           {geoLoading ? (
             <Skeleton variant="line" width={120} height={28} />
           ) : geo ? (
-            <span style={bigNum}>{getLocalizedCountry(geo.country_code, geo.country, i18n.language)}</span>
+            <span style={bigNum} className="flex items-center gap-2" data-testid="country-card-value">
+              {/* M-06: ipwho.is возвращает готовый emoji флаг (U+1F1XX regional
+                  indicators). Показываем его слева от страны — проще, чем
+                  тянуть SVG-флаги из flag-icons или подобного пакета. Emoji
+                  рендерится через system font на Windows 11 (Segoe UI Emoji). */}
+              {geo.flag_emoji && (
+                <span aria-hidden="true" className="text-xl leading-none">{geo.flag_emoji}</span>
+              )}
+              <span>{getLocalizedCountry(geo.country_code, geo.country, i18n.language)}</span>
+            </span>
           ) : (
             <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
           )}
