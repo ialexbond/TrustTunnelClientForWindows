@@ -288,6 +288,82 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
     });
 }
 
+/// Show custom tray context menu window at the given tray-click
+/// position. Корректируем чтобы окно не выходило за правый/нижний край
+/// экрана (tray в разных локациях: bottom-right, top, left panel).
+pub fn show_custom_tray_menu(app: &tauri::AppHandle, position: tauri::PhysicalPosition<f64>) {
+    let Some(win) = app.get_webview_window("tray-menu") else { return; };
+    // Смещаем от курсора на пару пикселей, чтобы не перекрывал иконку.
+    let mut x = position.x as i32;
+    let mut y = position.y as i32;
+    // Clamp внутрь primary monitor (~smart offset: menu 220×200 window).
+    if let Ok(Some(monitor)) = win.primary_monitor() {
+        let ms = monitor.size();
+        let mw = 220_i32;
+        let mh = 200_i32;
+        if x + mw > ms.width as i32 {
+            x = x - mw;
+        }
+        if y + mh > ms.height as i32 {
+            y = y - mh;
+        }
+        if x < 0 { x = 0; }
+        if y < 0 { y = 0; }
+    }
+    let _ = win.set_position(tauri::PhysicalPosition::<i32> { x, y });
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+/// Tauri command: menu item clicked — dispatches the action and hides
+/// the menu window. Called from src/tray-menu.tsx React code.
+#[tauri::command]
+pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
+    match action.as_str() {
+        "connect" => tray_vpn_connect(app.clone()),
+        "disconnect" => tray_vpn_disconnect(app.clone()),
+        "show" => {
+            if let Some(w) = app.get_webview_window("main") {
+                w.show().ok();
+                w.set_focus().ok();
+            }
+        }
+        "quit" => {
+            if let Some(state) = app.try_state::<AppState>() {
+                crate::commands::kill_sidecar_from_state(&state);
+            }
+            app.exit(0);
+        }
+        _ => {}
+    }
+}
+
+/// Current VPN status for tray-menu initial render (before listener
+/// catches any vpn-status event). Derived from AppState.is_connected —
+/// enough to pick Connect vs Disconnect button label.
+#[tauri::command]
+pub fn tray_menu_current_status(app: tauri::AppHandle) -> String {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(c) = state.is_connected.lock() {
+            if *c {
+                return "connected".into();
+            }
+        }
+        if let Ok(d) = state.disconnecting.lock() {
+            if *d {
+                return "disconnecting".into();
+            }
+        }
+    }
+    "disconnected".into()
+}
+
+/// Current UI locale for tray-menu text.
+#[tauri::command]
+pub fn tray_menu_current_locale(app: tauri::AppHandle) -> String {
+    get_locale(&app)
+}
+
 /// Disconnect VPN from tray menu.
 pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return; };
