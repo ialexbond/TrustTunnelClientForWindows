@@ -1,10 +1,18 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { polyfillCountryFlagEmojis } from "country-flag-emoji-polyfill";
 import App from "./App";
 import { SnackBarProvider } from "./shared/ui/SnackBarContext";
 import "./shared/styles/tokens.css";
 import "./index.css";
 import "./shared/i18n";
+
+// M-06 follow-up: Windows 11's Segoe UI Emoji renders regional indicator
+// pairs (🇷🇺 = U+1F1F7 + U+1F1FA) as ASCII letters ("RU") instead of a
+// flag glyph. The polyfill swaps in Twemoji's country-flag subset via
+// @font-face so the Country card on the Overview tab renders correctly.
+// No-op on platforms where flags already render natively (Mac/Linux/mobile).
+polyfillCountryFlagEmojis();
 
 // Block F5, Ctrl+R reload shortcuts
 document.addEventListener("keydown", (e) => {

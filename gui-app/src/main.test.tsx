@@ -23,6 +23,13 @@ vi.mock("./App", () => ({
 vi.mock("./shared/styles/tokens.css", () => ({}));
 vi.mock("./index.css", () => ({}));
 
+// M-06 follow-up: polyfill injects a @font-face at import time. In jsdom
+// that touches styleSheets and fails — stub it so main.tsx's side-effect
+// phase doesn't explode the test harness.
+vi.mock("country-flag-emoji-polyfill", () => ({
+  polyfillCountryFlagEmojis: vi.fn(),
+}));
+
 // Mock recharts
 vi.mock("recharts", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
