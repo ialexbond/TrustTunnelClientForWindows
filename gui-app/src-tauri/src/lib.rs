@@ -360,6 +360,7 @@ pub fn run() {
             // FIX-NN — server-side TLV persistence
             commands::ssh_commands::server_get_user_advanced,
             commands::ssh_commands::server_list_user_advanced,
+            commands::ssh_commands::server_reconcile_users_advanced,
             commands::ssh_commands::server_set_user_advanced,
             commands::ssh_commands::server_delete_user_advanced,
         ])

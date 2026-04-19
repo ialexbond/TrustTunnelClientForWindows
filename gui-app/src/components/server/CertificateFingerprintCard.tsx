@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { Loader2, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Loader2, ShieldCheck, AlertTriangle, Check, Copy } from "lucide-react";
 import { Button } from "../../shared/ui/Button";
 import { NumberInput } from "../../shared/ui/NumberInput";
 import { cn } from "../../shared/lib/cn";
@@ -114,6 +114,13 @@ export function CertificateFingerprintCard({
   // later at render time. The seed runs only on initial mount — subsequent
   // prop changes go through onFingerprintLoaded/onClear (otherwise revert
   // would fight the live fetch state).
+  // M-03: copy-to-clipboard для SHA-256. `copied` сбрасывается через
+  // 2 секунды — даёт юзеру визуальный feedback без banner'а.
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+  }, []);
   const [fetchedCert, setFetchedCert] = useState<FetchedCert | null>(() => {
     if (initialFingerprint && initialDerB64) {
       return {
@@ -286,6 +293,28 @@ export function CertificateFingerprintCard({
     onClear();
   }, [onClear]);
 
+  // M-03: copy SHA-256 в clipboard с 2-секундным success indicator.
+  // Логируем только prefix (первые 8 символов) — полный хэш чувствительный
+  // для некоторых сценариев и не должен попадать в activity.log.
+  const handleCopyFingerprint = useCallback(
+    async (raw: string) => {
+      const formatted = formatFingerprintForDisplay(raw);
+      try {
+        await navigator.clipboard.writeText(formatted);
+        setCopied(true);
+        activityLog("USER", `user.cert.fingerprint_copied fp_prefix=${raw.slice(0, 8)}`);
+        if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+        copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        activityLog(
+          "ERROR",
+          `user.cert.fingerprint_copy_failed err=${formatError(err).slice(0, 80)}`,
+        );
+      }
+    },
+    [activityLog],
+  );
+
   // Storybook overrides
   const effectiveLoading = _forceLoading ?? loading;
   const effectiveError = _forceError ?? error;
@@ -332,9 +361,30 @@ export function CertificateFingerprintCard({
               aria-hidden="true"
             />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)] mb-1">
-                {t("server.users.cert_fingerprint")}
-              </p>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <p className="text-xs font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)]">
+                  {t("server.users.cert_fingerprint")}
+                </p>
+                {/* M-03: inline copy-to-clipboard. 2-секундный success state
+                    через Check иконку — без snack/banner'а, минимум шума. */}
+                <button
+                  type="button"
+                  onClick={() => void handleCopyFingerprint(effectiveFingerprint)}
+                  disabled={disabled}
+                  aria-label={t(copied ? "server.users.cert_fp_copied" : "server.users.cert_fp_copy_aria")}
+                  title={t(copied ? "server.users.cert_fp_copied" : "server.users.cert_fp_copy_aria")}
+                  className={cn(
+                    "shrink-0 p-1 rounded-[var(--radius-sm)]",
+                    "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+                    "transition-colors focus-visible:shadow-[var(--focus-ring)] outline-none",
+                    "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
+                    copied && "text-[var(--color-status-connected)] hover:text-[var(--color-status-connected)]",
+                  )}
+                  data-testid="cert-fp-copy-btn"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
               <p
                 className="text-xs font-mono break-all text-[var(--color-text-primary)]"
                 data-testid="cert-fingerprint-value"

@@ -208,6 +208,54 @@ pub async fn list_user_advanced(
     Ok(parse_all(&content))
 }
 
+/// M-11: сверяет users-advanced.toml с credentials.toml и удаляет orphan
+/// записи (те, для которых нет соответствующего пользователя в credentials).
+///
+/// Вызывается UsersSection'ом при активации таба, безопасен к запуску
+/// многократно. credentials.toml — source of truth для «юзер существует»;
+/// orphan'ы в users-advanced.toml появляются если админ удалил юзера
+/// напрямую через SSH в обход Pro UI. Кол-во удалённых возвращается
+/// фронту для observability, в activity.log Pro пишет результат.
+pub async fn reconcile_users_advanced(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<usize, String> {
+    // Cheap grep на credentials.toml — избегаем полноценного TOML parse,
+    // тут достаточно списка usernames. Same pattern как в server_install.rs.
+    let sudo = detect_sudo(handle, app).await;
+    let (creds_raw, _) = exec_command(
+        handle, app,
+        &format!(
+            "{sudo}grep -oP 'username\\s*=\\s*\"\\K[^\"]+' {dir}/credentials.toml 2>/dev/null || echo ''",
+            dir = ENDPOINT_DIR,
+        ),
+    ).await?;
+    let active_users: std::collections::HashSet<String> = creds_raw
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    let adv_content = read_remote_file(handle, app).await?;
+    let mut users = parse_all(&adv_content);
+    let before = users.len();
+    users.retain(|u| active_users.contains(&u.username));
+    let removed = before - users.len();
+
+    if removed == 0 {
+        return Ok(0);
+    }
+
+    let serialized = serialize_all(&users)?;
+    write_remote_file(handle, app, &serialized).await?;
+    emit_log(
+        app,
+        "info",
+        &format!("users-advanced.toml reconciled: removed {removed} orphan entries"),
+    );
+    Ok(removed)
+}
+
 pub async fn upsert_user_advanced(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,

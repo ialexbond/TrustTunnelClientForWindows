@@ -695,6 +695,8 @@
       "cert_fetch_error_invalid_response": "Server returned an invalid response",
       "cert_fetch_error_generic": "Certificate fetch error: {{error}}",
       "cert_system_verifiable_hint": "Certificate is publicly trusted (Let's Encrypt or a commercial CA). Pinning is not required — the system trust store verifies the chain. Pinning forces a new deeplink every time the certificate rotates.",
+      "cert_fp_copy_aria": "Copy fingerprint",
+      "cert_fp_copied": "Copied",
       "field_dns_upstreams": "DNS servers",
       "dns_upstreams_hint": "One DNS server per line (Enter separates entries).",
       "dns_err_whitespace": "No whitespace inside an entry",
@@ -731,7 +733,8 @@
       "add_error_ssh_export_failed": "The user may be PARTIALLY created: credentials.toml was updated but the endpoint CLI crashed generating the deeplink. Close this dialog, refresh the list. If the user appeared — delete and retry, or open Edit to regenerate the deeplink.",
       "add_error_hostname_invalid": "Invalid endpoint hostname. Check the server configuration.",
       "add_error_sni_not_allowed": "Custom SNI \"{{sni}}\" is not on the server's allowed list. Either pick a domain from `allowed_sni` in hosts.toml, or leave the field empty — no partial changes remain, you can retry.",
-      "add_error_rolled_back": "Add was rolled back — no partial changes remain. Fix the form and try again. Details: {{detail}}"
+      "add_error_rolled_back": "Add was rolled back — no partial changes remain. Fix the form and try again. Details: {{detail}}",
+      "user_removed_externally": "User «{{user}}» was removed on the server while the edit window was open. Close this dialog and refresh the users list."
     },
     "logs": {
       "title": "Server Logs",
@@ -1102,6 +1105,7 @@
       "rebootingCountdown": "Rebooting",
       "speedNotMeasured": "Not measured",
       "speedRequiresProtocol": "Start protocol",
+      "dataUnavailable": "Data unavailable",
       "speedUnit": "Mbps",
       "ramUnit": "MB",
       "refreshAria": "Refresh",

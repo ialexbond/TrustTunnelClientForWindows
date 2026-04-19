@@ -449,6 +449,13 @@ ssh_pool_command!(
     ssh::users_advanced::list_user_advanced
 );
 
+// M-11: sweep orphan entries from users-advanced.toml. Pro calls this from
+// UsersSection when the tab is activated — hygiene, no functional effect.
+ssh_pool_command!(
+    server_reconcile_users_advanced,
+    ssh::users_advanced::reconcile_users_advanced
+);
+
 ssh_pool_command!(
     server_set_user_advanced,
     ssh::users_advanced::upsert_user_advanced,
