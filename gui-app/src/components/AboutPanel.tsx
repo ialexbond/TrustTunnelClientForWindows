@@ -134,9 +134,11 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
                 TrustTunnel
               </h1>
               <span
-                // leading-none + inline-flex items-center → глиф по центру box'а,
-                // иначе на text-[10px] ascender сдвигал текст вниз.
-                className="text-[10px] font-bold px-2 py-0.5 rounded leading-none inline-flex items-center"
+                // Тот же fix что и у TitleBar-badge: uppercase глиф без
+                // descender'а сидит выше центра box'а с default
+                // line-height. leading-none + pt-[4px]/pb-[3px]
+                // компенсирует смещение пропорционально text-[11px].
+                className="text-[11px] font-bold px-2 pt-[4px] pb-[3px] rounded leading-none"
                 style={{ backgroundColor: "var(--color-accent-tint-10)", color: "var(--color-accent-500)" }}
               >
                 PRO
