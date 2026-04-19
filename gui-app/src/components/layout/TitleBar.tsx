@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useTheme } from "../../shared/hooks/useTheme";
 
 interface TitleBarProps {
   children?: ReactNode;
@@ -14,9 +13,6 @@ interface TitleBarProps {
  * preventDefault на onDoubleClick блокирует это поведение на JS-слое.
  */
 export function TitleBar({ children }: TitleBarProps) {
-  const { theme } = useTheme();
-  const logoSrc =
-    theme === "dark" ? "/logo/shield-dark.svg" : "/logo/shield-light.svg";
   return (
     <div
       className="flex items-center shrink-0"
@@ -24,19 +20,32 @@ export function TitleBar({ children }: TitleBarProps) {
       onDoubleClick={(e) => e.preventDefault()}
       style={{ height: 32 }}
     >
-      {/* Brand — compact. Outfit для wordmark + theme-swapped SVG логотип. */}
+      {/* Brand — compact. Outfit для wordmark + theme-swapped SVG логотип.
+          CSS-only swap через .only-dark / .only-light (см. index.css).
+          useTheme() хранил local state per-component, так что при
+          переключении темы в Settings — TitleBar не re-rendered и логотип
+          оставался чёрным на светлой теме. CSS решает это атомарно через
+          `data-theme` на <html>. */}
       <div
         className="flex items-center gap-1.5 pl-3"
         data-tauri-drag-region
         onDoubleClick={(e) => e.preventDefault()}
       >
         <img
-          src={logoSrc}
+          src="/logo/shield-dark.svg"
           alt=""
           width={18}
           height={18}
           draggable={false}
-          className="shrink-0 pointer-events-none"
+          className="only-dark shrink-0 pointer-events-none"
+        />
+        <img
+          src="/logo/shield-light.svg"
+          alt=""
+          width={18}
+          height={18}
+          draggable={false}
+          className="only-light shrink-0 pointer-events-none"
         />
         <span
           className="text-[13px] font-[var(--font-weight-semibold)]"
@@ -51,11 +60,7 @@ export function TitleBar({ children }: TitleBarProps) {
           TrustTunnel
         </span>
         <span
-          // PRO badge. line-height калибрется `leading-none` + `pb-[1px]`
-          // чтобы текст не сидел ниже визуального центра (h-8 бейджа при
-          // text-[9px] давал оптическое смещение вниз — FIX выравнивает
-          // глиф ровно по центру box'а).
-          className="text-[9px] font-[var(--font-weight-semibold)] px-1.5 py-[1px] rounded-[var(--radius-sm)] leading-none inline-flex items-center"
+          className="text-[9px] font-[var(--font-weight-semibold)] px-1.5 py-[1px] rounded-[var(--radius-sm)]"
           style={{
             backgroundColor: "var(--color-bg-elevated)",
             color: "var(--color-accent-interactive)",
