@@ -623,6 +623,14 @@ export function UserModal({
     }
     // Edit mode: password editor must have no validation error.
     if (passwordEditing && localNewPasswordError) return false;
+    // CRIT-1: if the inline password editor is OPEN, the user intends to
+    // rotate the password — empty input is not a valid commit state, even
+    // if the deeplink section is dirty. Otherwise user could open the
+    // rotator, toggle anti-DPI, and hit Save — password rotation would
+    // silently skip (isPasswordDirty=false) but the editor stays open and
+    // it's confusing. Force them to either type a password or close the
+    // editor via the inline Cancel button first.
+    if (passwordEditing && !newPassword.trim()) return false;
     // Something must actually have changed. Either the deeplink params, or
     // the inline password editor was opened and a new password typed.
     if (!isDeeplinkDirty && !isPasswordDirty) return false;
@@ -640,6 +648,7 @@ export function UserModal({
     isEditMode,
     passwordEditing,
     localNewPasswordError,
+    newPassword,
     isDeeplinkDirty,
     isPasswordDirty,
   ]);
@@ -1345,7 +1354,11 @@ export function UserModal({
                 "not on the list" when the string isn't even a valid FQDN). */}
             {customSniAllowlistState === "ok" && (
               <p
-                className="mt-1.5 text-xs flex items-center gap-1 text-[var(--color-status-success)]"
+                // CRIT-3: --color-status-success / --color-status-warning
+                // don't exist in tokens.css — the colour fell through to
+                // inherited text (white in dark theme, broken in light).
+                // Use the canonical status tokens that auto-swap with theme.
+                className="mt-1.5 text-xs flex items-center gap-1 text-[var(--color-status-connected)]"
                 data-testid="sni-allowlist-ok"
               >
                 <Check className="w-3 h-3" aria-hidden="true" />
@@ -1354,7 +1367,9 @@ export function UserModal({
             )}
             {customSniAllowlistState === "warn" && (
               <p
-                className="mt-1.5 text-xs flex items-start gap-1 text-[var(--color-status-warning)]"
+                // CRIT-4: same token-miss story — warning fell back to
+                // inherited colour so the triangle and copy were invisible.
+                className="mt-1.5 text-xs flex items-start gap-1 text-[var(--color-status-connecting)]"
                 data-testid="sni-allowlist-warn"
               >
                 <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
@@ -1385,9 +1400,14 @@ export function UserModal({
                           "px-2 py-0.5 text-xs rounded-full border transition-colors",
                           "focus-visible:shadow-[var(--focus-ring)] outline-none",
                           "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
+                          // CRIT-5: `--color-accent` and `--color-surface`
+                          // don't exist in tokens.css — the active chip lost
+                          // its background in both themes, and the inactive
+                          // chip had no surface colour in light mode. Switch
+                          // to the canonical token names that actually resolve.
                           isActive
-                            ? "bg-[var(--color-accent)] text-white border-[var(--color-accent)]"
-                            : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] border-[var(--color-input-border)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]",
+                            ? "bg-[var(--color-accent-interactive)] text-white border-[var(--color-accent-interactive)]"
+                            : "bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] border-[var(--color-input-border)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]",
                         )}
                         data-testid={`sni-chip-${sni}`}
                       >
@@ -1453,6 +1473,13 @@ export function UserModal({
                 <CertificateFingerprintCard
                   sshParams={sshParams}
                   customSni={deeplink.customSni}
+                  // CRIT-2: hydrate the card's success-state from the saved
+                  // pin so Edit reopen shows the SHA-256 + Отвязать/Обновить
+                  // straight away, instead of «Загрузить endpoint» that made
+                  // the user re-probe every time.
+                  initialFingerprint={deeplink.certFingerprint}
+                  initialDerB64={deeplink.certDerB64}
+                  initialIsSystemVerifiable={deeplink.certIsSystemVerifiable}
                   onFingerprintLoaded={(derB64, fingerprint, isSystemVerifiable) => {
                     updateDeeplink("certDerB64", derB64);
                     updateDeeplink("certFingerprint", fingerprint);
