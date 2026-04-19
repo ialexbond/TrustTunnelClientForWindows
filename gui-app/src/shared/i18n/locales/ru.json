@@ -674,6 +674,7 @@
       "toggle_skip_verify_warning": "Для самоподписанных сертификатов. В продакшне используйте Let's Encrypt или Pin Certificate.",
       "toggle_pin_cert": "Закрепить сертификат endpoint",
       "toggle_pin_cert_needs_sni": "Сначала укажите домен endpoint'а в поле Custom SNI",
+      "toggle_le_not_needed": "Доступно только для самоподписанных или вручную добавленных сертификатов. У вас Let's Encrypt — цепочку проверит системный trust store.",
       "cert_fetch_btn": "Загрузить с endpoint",
       "cert_unpin_btn": "Отвязать",
       "cert_refresh_btn": "Обновить",
