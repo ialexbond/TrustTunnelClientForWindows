@@ -6046,6 +6046,7 @@ dependencies = [
  "russh",
  "russh-keys",
  "rustls-pki-types",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2",

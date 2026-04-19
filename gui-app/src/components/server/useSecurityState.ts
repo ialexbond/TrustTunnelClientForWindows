@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../../shared/utils/formatError";
+import { translateSshError } from "../../shared/utils/translateSshError";
 import { useConfirm } from "../../shared/ui/useConfirm";
 
 // ═══════════════════════════════════════════════════════
@@ -152,7 +153,20 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
       const s = await invoke<SecurityStatus>("security_get_status", { host, port, user, password, keyPath });
       setStatus(s);
     } catch (e) {
-      pushSuccess(t("server.security.errors.backend_generic", { msg: formatError(e) }), "error");
+      // FIX-MM: run raw error through translateSshError first — otherwise
+      // codes like SSH_CHANNEL_FAILED leak into the UI as "Операция не
+      // выполнена: SSH_CHANNEL_FAILED|Failed to open channel (ConnectFailed)",
+      // which is unhelpful. translateSshError maps known codes to i18n; if
+      // nothing matches it returns raw — so backend_generic wraps either
+      // the localized message or the raw fallback uniformly.
+      const raw = formatError(e);
+      const translated = translateSshError(raw, t);
+      pushSuccess(
+        translated !== raw
+          ? translated
+          : t("server.security.errors.backend_generic", { msg: raw }),
+        "error",
+      );
     } finally {
       setLoading(false);
     }
@@ -177,6 +191,12 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     if (raw.includes("SSH_UNSUPPORTED_OS")) {
       return t("server.security.errors.unsupported_os");
     }
+    // FIX-MM: defer to the generic SSH error translator for codes we didn't
+    // special-case above (SSH_CHANNEL_FAILED, SSH_CONNECT_FAILED, etc.).
+    // That table already covers the common connection-layer failures — no
+    // point duplicating it here.
+    const translated = translateSshError(raw, t);
+    if (translated !== raw) return translated;
     return t("server.security.errors.backend_generic", { msg: raw });
   }, [t]);
 

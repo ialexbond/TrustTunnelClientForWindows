@@ -121,3 +121,34 @@ export const WithIcon: Story = {
     );
   },
 };
+
+/**
+ * FIX-D: when a dropdown with many options has a value preselected far from
+ * the top (here: "30" out of 0..32), opening it must scroll the picked option
+ * into view. Previously the list always stayed scrolled to the top and the
+ * user had to hunt for their previous choice — breaks "the app remembers what
+ * I picked" expectation. Open this story and verify `30` is visible on first
+ * click without scrolling.
+ */
+export const ScrollsToSelected: Story = {
+  args: {
+    options: Array.from({ length: 33 }, (_, i) => ({
+      value: String(i),
+      label: String(i),
+    })),
+  },
+  render: (args) => {
+    const [value, setValue] = useState("30");
+    return (
+      <div style={{ width: 140 }}>
+        <Select
+          {...args}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          label="CIDR-like prefix"
+          placeholder="—"
+        />
+      </div>
+    );
+  },
+};

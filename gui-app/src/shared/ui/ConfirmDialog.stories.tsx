@@ -69,3 +69,38 @@ export const WithLongMessage: Story = {
     />
   ),
 };
+
+/**
+ * FIX-JJ (2026-04-18): Loading state spec.
+ *
+ * When the user clicks "Confirm" and the async action is in flight:
+ *   ✓ Confirm + Cancel buttons are `disabled` with the primary showing a spinner
+ *   ✓ Backdrop click does NOT close the dialog (`closeOnBackdrop={!loading}`)
+ *   ✓ Escape does NOT close the dialog
+ *   ✗ The page/tab behind the dialog MUST NOT appear disabled or dimmed
+ *     — that was the recurring complaint. The blurred backdrop already
+ *     provides isolation; the BUSY signal lives inside the dialog only.
+ *
+ * Consumers of `useConfirm` should NOT propagate their own "busy" flag to
+ * the tab underneath while this dialog is open — the dialog owns the UX.
+ * See memory/v3/design-system/known-issues.md for the full invariant.
+ */
+export const Loading: Story = {
+  render: () => (
+    <ConfirmDialog
+      isOpen
+      title="Удалить пользователя?"
+      message="Пользователь «swift-fox» будет удалён с сервера. Это действие нельзя отменить."
+      confirmText="Да, удалить"
+      cancelText="Отмена"
+      variant="danger"
+      loading
+      onConfirm={() => {
+        /* noop in story */
+      }}
+      onCancel={() => {
+        /* noop in story */
+      }}
+    />
+  ),
+};

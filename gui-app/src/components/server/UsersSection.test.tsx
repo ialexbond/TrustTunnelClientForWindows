@@ -544,14 +544,20 @@ describe("UsersSection (Phase 14 redesign)", () => {
     }
   });
 
-  it("isBusy (deleteLoading=true): FileText + Trash icons disabled", () => {
+  // FIX-JJ (2026-04-18): `deleteLoading` intentionally NO LONGER dims the
+  // row icons. The delete flow goes through a ConfirmDialog whose backdrop
+  // already captures every click until the async action returns. Adding a
+  // second layer of disable made background icons look faded while the
+  // dialog was up — user feedback explicitly asked for that to stop.
+  // See memory/v3/design-system/known-issues.md.
+  it("deleteLoading=true does NOT disable row icons (ConfirmDialog blocks clicks)", () => {
     const state = makeState({ deleteLoading: true });
     render(<UsersSection state={state} />);
     const items = screen.getAllByRole("listitem");
     for (const row of items) {
       const buttons = within(row).getAllByRole("button");
       for (const btn of buttons) {
-        expect(btn).toBeDisabled();
+        expect(btn).not.toBeDisabled();
       }
     }
   });

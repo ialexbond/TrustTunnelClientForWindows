@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use chrono::Utc;
+use chrono::Local;
 
 use crate::ssh::portable_data_dir;
 use crate::logging::sanitize;
@@ -74,14 +74,19 @@ pub fn init_activity_log() {
 
 /// Write a structured entry to the activity log.
 ///
-/// Format (with details):    `[2024-01-01T12:00:00.000Z] [TAG] message (details)\n`
-/// Format (without details): `[2024-01-01T12:00:00.000Z] [TAG] message\n`
+/// Format (with details):    `[2024-01-01T15:00:00.000+03:00] [TAG] message (details)\n`
+/// Format (without details): `[2024-01-01T15:00:00.000+03:00] [TAG] message\n`
+///
+/// FIX-LL: timestamps are in LOCAL TIME with a numeric offset instead of the
+/// old Z (UTC). Users open activity.log to correlate with things they just
+/// did on their PC clock — UTC forced them to do timezone math every time.
+/// The `%z` offset keeps entries unambiguous across timezones.
 ///
 /// Log injection is prevented by replacing embedded newlines in message/details.
 /// IP addresses and sensitive values are masked via `sanitize()` per D-13.
 #[tauri::command]
 pub fn write_activity_log(tag: String, message: String, details: Option<String>) -> Result<(), String> {
-    let ts = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+    let ts = Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%z");
 
     // L-03: strip characters that break the structured log format from tag
     let safe_tag = tag.replace(['[', ']', '\n', '\r'], "");
