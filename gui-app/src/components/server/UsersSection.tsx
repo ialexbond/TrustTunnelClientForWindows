@@ -119,6 +119,28 @@ export function UsersSection({ state, activeServerTab }: Props) {
   // discoverable «обновить» на этом экране (отдельной кнопки в дизайне
   // нет). Пропускаем первый рендер c undefined, первый mount и так уже
   // загружен через panel bootstrap.
+  //
+  // WR-02 (14.1-REVIEW deep pass): эффект зависит ТОЛЬКО от activeServerTab,
+  // но внутри читает sshParams / state.loadServerInfo / refreshDisplayNames /
+  // activityLog. Без ref-based stable handle callback'и ссылаются на stale
+  // closures: если SSH-port меняется через security tab (pool invalidates,
+  // sshParams перезаписывается) пока activeServerTab==='users', эффект не
+  // перезапускается и продолжает дёргать старый port до следующего деактива/
+  // реактива. Паттерн скопирован с OverviewSection.rebootRefs (lines 262-312):
+  // ref обновляется на каждом рендере, эффект читает refs.current — всегда
+  // актуальные значения без лишних перезапусков.
+  const tabRefs = useRef({
+    sshParams,
+    loadServerInfo: state.loadServerInfo,
+    refreshDisplayNames,
+    activityLog,
+  });
+  tabRefs.current = {
+    sshParams,
+    loadServerInfo: state.loadServerInfo,
+    refreshDisplayNames,
+    activityLog,
+  };
   const firstTabActivationRef = useRef(true);
   useEffect(() => {
     if (activeServerTab !== "users") return;
@@ -126,33 +148,33 @@ export function UsersSection({ state, activeServerTab }: Props) {
       firstTabActivationRef.current = false;
       return;
     }
-    activityLog("USER", "users.tab.activated refresh=triggered");
+    const refs = tabRefs.current;
+    refs.activityLog("USER", "users.tab.activated refresh=triggered");
     // M-04 fix: silent=true — НЕ триггерим state.loading, иначе
     // ServerPanel раскрывает «Checking server...» loader и весь экран
     // блокируется при каждом клике на таб. Silent refresh меняет
     // serverInfo в background, кэшированные user-rows остаются видимы.
-    state.loadServerInfo(true).catch(() => {
+    refs.loadServerInfo(true).catch(() => {
       /* loadServerInfo sets state.error — UI показывает baner */
     });
-    void refreshDisplayNames();
+    void refs.refreshDisplayNames();
     // M-11: fire-and-forget reconcile users-advanced.toml — best-effort
     // hygiene, результат логируется в activity.log но не влияет на UI.
-    void invoke<number>("server_reconcile_users_advanced", sshParams)
+    void invoke<number>("server_reconcile_users_advanced", refs.sshParams)
       .then((removed) => {
         if (typeof removed === "number" && removed > 0) {
-          activityLog(
+          refs.activityLog(
             "STATE",
             `users.advanced.reconciled removed=${removed}`,
           );
         }
       })
       .catch((err) => {
-        activityLog(
+        refs.activityLog(
           "ERROR",
           `users.advanced.reconcile_failed err=${formatError(err).slice(0, 80)}`,
         );
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeServerTab]);
 
   // Auto-open UserConfigModal after successful add (same pattern as Phase 14)
