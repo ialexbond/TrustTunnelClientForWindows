@@ -60,6 +60,9 @@ export const invoke = async (
     // or similar story-level escape hatches.
     case "server_get_user_advanced":
       return null;
+    // A — batch. Empty array fits "no per-user advanced data" fallback.
+    case "server_list_user_advanced":
+      return [];
     case "server_set_user_advanced":
     case "server_delete_user_advanced":
       return null;

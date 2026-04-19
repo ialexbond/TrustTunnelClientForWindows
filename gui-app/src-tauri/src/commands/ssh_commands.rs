@@ -442,6 +442,13 @@ ssh_pool_command!(
     username: String
 );
 
+// A: batch read of users-advanced.toml for the Users tab list view
+// (renders display_name next to the username, one SSH roundtrip for all).
+ssh_pool_command!(
+    server_list_user_advanced,
+    ssh::users_advanced::list_user_advanced
+);
+
 ssh_pool_command!(
     server_set_user_advanced,
     ssh::users_advanced::upsert_user_advanced,

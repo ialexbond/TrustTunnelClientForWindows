@@ -359,6 +359,7 @@ pub fn run() {
             commands::ssh_commands::server_get_allowed_sni_list,
             // FIX-NN — server-side TLV persistence
             commands::ssh_commands::server_get_user_advanced,
+            commands::ssh_commands::server_list_user_advanced,
             commands::ssh_commands::server_set_user_advanced,
             commands::ssh_commands::server_delete_user_advanced,
         ])

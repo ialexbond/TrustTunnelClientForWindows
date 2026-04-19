@@ -6,6 +6,7 @@ import { Button } from "../../shared/ui/Button";
 import { NumberInput } from "../../shared/ui/NumberInput";
 import { cn } from "../../shared/lib/cn";
 import { formatError } from "../../shared/utils/formatError";
+import { formatFingerprintForDisplay } from "../../shared/utils/userAdvanced";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 
 /** Default TLS port for TrustTunnel endpoints per PROTOCOL.md §2 (443). */
@@ -321,7 +322,10 @@ export function CertificateFingerprintCard({
                 className="text-xs font-mono break-all text-[var(--color-text-primary)]"
                 data-testid="cert-fingerprint-value"
               >
-                {effectiveFingerprint}
+                {/* C: backend emits lowercase hex без separators, а derive
+                    раньше клал uppercase-with-colons — помощник нормализует
+                    оба варианта в AA:BB:CC группировку для отображения. */}
+                {formatFingerprintForDisplay(effectiveFingerprint)}
               </p>
               {effectiveChainLen !== null && effectiveChainLen > 0 && (
                 <p className="text-xs mt-1 text-[var(--color-text-muted)]">
