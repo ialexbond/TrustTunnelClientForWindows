@@ -20,7 +20,25 @@ pub struct UserRule {
     pub cidr: Option<String>,
 }
 
-/// Add a `[[rule]]` entry for `username` with optional `prefix` + `cidr`. Returns new file content.
+/// Add `[[rule]]` entries for `username` with optional `prefix` + `cidr`.
+///
+/// Upstream rule engine (`lib/src/settings.rs::RulesEngine::from_config`)
+/// evaluates rules in file order, first match wins; **fall-through =
+/// allow**. Значит один `allow` rule с cidr НЕ блокирует IP вне диапазона —
+/// эта rule не матчится, дальше нет ничего → default allow.
+///
+/// Для реального allow-list нужна пара:
+///   1. `allow` rule: `prefix + cidr` — пропускает если IP в диапазоне.
+///   2. `deny` rule: `prefix` (без cidr) — ловит всё остальное с этим
+///      prefix'ом и блокирует.
+///
+/// Оба rule получают одинаковый `# User: {name}` comment маркер, так что
+/// `remove_user_rule` retain'ит их пачкой.
+///
+/// Edge case: `cidr` без `prefix` — невозможно отделить этого юзера от
+/// остальных по wire параметрам (у юзера нет anti_dpi). Пишем только
+/// одну allow rule; CIDR ЭФФЕКТИВНО игнорируется. Frontend должен
+/// заставлять anti_dpi=ON когда cidr задан (иначе UX обман).
 pub fn add_user_rule(
     content: &str,
     username: &str,
@@ -37,17 +55,31 @@ pub fn add_user_rule(
         .as_array_of_tables_mut()
         .ok_or("rule is not array-of-tables")?;
 
-    let mut rule = Table::new();
-    rule.insert("action", value("allow"));
+    // 1. Primary allow rule (с cidr если задан)
+    let mut allow_rule = Table::new();
+    allow_rule.insert("action", value("allow"));
     if let Some(p) = prefix {
-        rule.insert("client_random_prefix", value(p));
+        allow_rule.insert("client_random_prefix", value(p));
     }
     if let Some(c) = cidr {
-        rule.insert("cidr", value(c));
+        allow_rule.insert("cidr", value(c));
     }
-    // Stash username in comment prefix — preserved by toml_edit
-    rule.decor_mut().set_prefix(format!("\n# User: {}\n", username));
-    rules.push(rule);
+    allow_rule
+        .decor_mut()
+        .set_prefix(format!("\n# User: {}\n", username));
+    rules.push(allow_rule);
+
+    // 2. Catch-all deny rule (только когда есть и prefix, и cidr — иначе
+    //    нечего отличать «этого юзера» от общего потока).
+    if let (Some(p), Some(_)) = (prefix, cidr) {
+        let mut deny_rule = Table::new();
+        deny_rule.insert("action", value("deny"));
+        deny_rule.insert("client_random_prefix", value(p));
+        deny_rule
+            .decor_mut()
+            .set_prefix(format!("\n# User: {}\n", username));
+        rules.push(deny_rule);
+    }
 
     Ok(doc.to_string())
 }
@@ -196,6 +228,68 @@ mod tests {
         let removed = remove_user_rule(&added, "alice").unwrap();
         // Removed should be equivalent (trimmed trailing newlines) to input
         assert_eq!(removed.trim_end(), input.trim_end());
+    }
+
+    #[test]
+    fn cidr_with_prefix_adds_allow_and_deny_pair() {
+        // Без deny-rule upstream `first-match + fall-through=allow` делает
+        // CIDR бесполезным — юзер-баг, который пользователь прислал в
+        // rules.toml дампе.
+        let out = add_user_rule("", "alice", Some("aabb"), Some("10.0.0.0/24")).unwrap();
+        assert_eq!(out.matches("[[rule]]").count(), 2, "expected allow + deny pair");
+        assert!(out.contains("action = \"allow\""));
+        assert!(out.contains("action = \"deny\""));
+        assert!(out.contains("cidr = \"10.0.0.0/24\""));
+        // Deny rule должна иметь prefix (для match'а) и НЕ иметь cidr.
+        // Проверяем это через структурный parse.
+        let doc: DocumentMut = out.parse().unwrap();
+        let rules = doc.get("rule").unwrap().as_array_of_tables().unwrap();
+        assert_eq!(rules.len(), 2);
+        let allow = rules.get(0).unwrap();
+        let deny = rules.get(1).unwrap();
+        assert_eq!(allow.get("action").unwrap().as_str(), Some("allow"));
+        assert_eq!(allow.get("cidr").unwrap().as_str(), Some("10.0.0.0/24"));
+        assert_eq!(deny.get("action").unwrap().as_str(), Some("deny"));
+        assert!(deny.get("cidr").is_none());
+        assert_eq!(deny.get("client_random_prefix").unwrap().as_str(), Some("aabb"));
+    }
+
+    #[test]
+    fn cidr_without_prefix_only_allow_rule() {
+        // Edge case: anti_dpi OFF + cidr — catch-all deny невозможен без
+        // selector'а. Пишем только allow rule; CIDR по факту
+        // игнорируется (frontend должен заставить anti_dpi=ON).
+        let out = add_user_rule("", "bob", None, Some("10.0.0.0/24")).unwrap();
+        assert_eq!(out.matches("[[rule]]").count(), 1);
+        assert!(!out.contains("action = \"deny\""));
+    }
+
+    #[test]
+    fn prefix_only_still_single_allow_rule() {
+        // anti_dpi ON + cidr не задан — deny-rule не нужен, prefix
+        // работает как selector без IP-ограничения.
+        let out = add_user_rule("", "carol", Some("aabb"), None).unwrap();
+        assert_eq!(out.matches("[[rule]]").count(), 1);
+        assert!(!out.contains("action = \"deny\""));
+    }
+
+    #[test]
+    fn remove_wipes_both_allow_and_deny_rules() {
+        // Один `# User: alice` marker на обеих rules → retain удалит обе.
+        let content = add_user_rule("", "alice", Some("aabb"), Some("10.0.0.0/24")).unwrap();
+        let result = remove_user_rule(&content, "alice").unwrap();
+        assert!(!result.contains("alice"));
+        assert!(!result.contains("aabb"));
+        assert!(!result.contains("10.0.0.0/24"));
+    }
+
+    #[test]
+    fn find_returns_allow_rule_when_cidr_pair_exists() {
+        let content = add_user_rule("", "alice", Some("aabb"), Some("10.0.0.0/24")).unwrap();
+        let found = find_user_rule(&content, "alice").unwrap().unwrap();
+        // Первая rule — allow, содержит и prefix, и cidr.
+        assert_eq!(found.client_random_prefix, Some("aabb".to_string()));
+        assert_eq!(found.cidr, Some("10.0.0.0/24".to_string()));
     }
 
     #[test]
