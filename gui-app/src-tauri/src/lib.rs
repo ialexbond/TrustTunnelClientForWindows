@@ -66,6 +66,12 @@ pub fn run() {
                 | tauri_plugin_window_state::StateFlags::MAXIMIZED
                 | tauri_plugin_window_state::StateFlags::FULLSCREEN
             )
+            // tray-menu — auto-sized popup, сохранять его size/position
+            // нельзя: persisted state переопределяет tauri.conf.json
+            // при следующем запуске (объясняет «работает только после
+            // полного uninstall» — window-state.json хранит stale
+            // размеры от предыдущей установки).
+            .with_denylist(&["tray-menu"])
             .build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
@@ -106,21 +112,23 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 window.open_devtools();
             }
-            // Build tray context menu
+
+            // Build native tray context menu (OS-standard popup).
             let tray_menu = tray::build_tray_menu(app.handle(), "disconnected")?;
 
             // Load disconnected tray icon (red) as initial state
             let initial_icon = tray::load_tray_icon("disconnected", tray::detect_windows_system_theme());
 
-            // Create tray icon with ID so we can update it later
+            // Create tray icon with ID so we can update it later.
+            //
+            // Native Windows context menu через `.menu(&tray_menu)` —
+            // рендерится OS, выглядит как standard system popup. Left
+            // click оставляем для toggle main window (custom); right
+            // click показывает native menu автоматически.
             TrayIconBuilder::with_id("main-tray")
                 .icon(initial_icon)
                 .tooltip("TrustTunnel Pro — Отключен")
                 .menu(&tray_menu)
-                // Left click → show window, right click → menu. Default в
-                // Tauri 2 = true → menu всплывала и на left, на долю
-                // секунды, а потом её забивал наш own show-window handler.
-                // false разделяет семантику: left=main action, right=menu.
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
@@ -137,7 +145,6 @@ pub fn run() {
                             tray::tray_vpn_disconnect(app.clone());
                         }
                         "quit" => {
-                            // Kill only our own sidecar, not other app's processes
                             if let Some(state) = app.try_state::<AppState>() {
                                 kill_sidecar_from_state(&state);
                             }
@@ -148,28 +155,29 @@ pub fn run() {
                 })
                 .on_tray_icon_event(|tray, event| {
                     match event {
-                        // Left click Up → main window (restore from tray).
+                        // Left click Up → toggle main window visibility
+                        // (Telegram-style). Проверяем только visible,
+                        // игнорируем focus — клик по tray иконке сам по
+                        // себе забирает focus у main window, и проверка
+                        // focused ломала toggle-логику (всегда false →
+                        // всегда show, никогда hide).
                         TrayIconEvent::Click {
                             button: tauri::tray::MouseButton::Left,
                             button_state: tauri::tray::MouseButtonState::Up,
                             ..
                         } => {
                             if let Some(w) = tray.app_handle().get_webview_window("main") {
-                                w.show().ok();
-                                w.set_focus().ok();
+                                if w.is_visible().unwrap_or(false) {
+                                    let _ = w.hide();
+                                } else {
+                                    let _ = w.show();
+                                    let _ = w.set_focus();
+                                }
                             }
                         }
-                        // Right click Up → показать кастомное меню (отдельное
-                        // transparent окно tray-menu). Позиция: прямо у курсора,
-                        // корректируем чтобы не выходило за границы экрана.
-                        TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Right,
-                            button_state: tauri::tray::MouseButtonState::Up,
-                            position,
-                            ..
-                        } => {
-                            tray::show_custom_tray_menu(tray.app_handle(), position);
-                        }
+                        // Right click — native menu показывается OS автоматом
+                        // (потому что `.menu(&tray_menu)` задано выше).
+                        // Никакого custom handler не нужен.
                         _ => {}
                     }
                 })
@@ -235,6 +243,19 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Auto-hide кастомного tray-menu окна при потере фокуса —
+            // эмулируем обычное поведение OS context menu (клик вне →
+            // закрыть). JS-side listener tauri://blur не всегда
+            // срабатывает на Windows, поэтому ловим здесь.
+            if window.label() == "tray-menu" {
+                if let tauri::WindowEvent::Focused(false) = event {
+                    let _ = window.hide();
+                }
+                // tray-menu не должен проходить через блоки ниже
+                // (dblclick, CloseRequested-to-tray) — они для main window.
+                return;
+            }
+
             // Блок dblclick-to-maximize / fullscreen на титлбаре.
             // maximizable:false в config блокирует системную кнопку
             // maximize, но не double-click на data-tauri-drag-region —
@@ -275,6 +296,8 @@ pub fn run() {
             tray::tray_menu_action,
             tray::tray_menu_current_status,
             tray::tray_menu_current_locale,
+            tray::tray_menu_has_config,
+            tray::tray_menu_reposition,
             set_start_minimized,
             get_start_minimized,
             logging::set_logging_enabled,

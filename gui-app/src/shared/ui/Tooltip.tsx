@@ -41,6 +41,38 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
     };
   }, []);
 
+  // Hide tooltip при blur окна (tray-click скрывает window через hide()).
+  // Без этого фикса: пользователь hover над кнопкой → tooltip показан →
+  // tray-click скрывает окно → при show tooltip остаётся "висеть" поверх
+  // контента (потому что mouseLeave не стреляет когда окно просто hide).
+  // Парный symptom к WindowControls hover-state stuck (bug-window-controls-hover).
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      const unlisten = await win.listen("tauri://blur", () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        setShow(false);
+      });
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenFn = unlisten;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unlistenFn) unlistenFn();
+    };
+  }, []);
+
   const positionTip = useCallback(
     (tip: HTMLDivElement | null) => {
       const tr = triggerRef.current;

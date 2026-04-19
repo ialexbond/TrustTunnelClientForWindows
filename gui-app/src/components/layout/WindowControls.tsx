@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Tooltip } from "../../shared/ui/Tooltip";
@@ -25,6 +25,20 @@ export function WindowControls() {
 
   const handleMinimize = useCallback(() => appWindow.minimize(), []);
   const handleClose = useCallback(() => appWindow.close(), []);
+
+  // Сбрасываем hover-state когда окно теряет фокус (например, tray-click
+  // спрятал окно через `window.hide()`). React компонент не unmount'ится
+  // при hide, поэтому `onMouseLeave` никогда не стреляет — кнопка остаётся
+  // визуально подсвеченной до следующего mouseEnter. Слушаем Tauri blur,
+  // resetим state → при следующем show-е кнопка в нейтральном состоянии.
+  useEffect(() => {
+    const unlisten = appWindow.listen("tauri://blur", () => {
+      setHovered(null);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
 
   return (
     <div className="flex items-center h-full" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
