@@ -51,6 +51,9 @@ rustls-pki-types = "1"
 # anyway.
 rustls-platform-verifier = "0.6"
 rand = "0.8"
+# DwmSetWindowAttribute вызывается через raw FFI в tray.rs (см.
+# `apply_win11_rounded_corners`) — не тянем windows crate, чтобы
+# избежать HWND type-mismatch с версией, встроенной в Tauri.
 
 [dev-dependencies]
 regex = "1"

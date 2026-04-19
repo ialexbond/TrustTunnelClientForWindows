@@ -1,5 +1,5 @@
 """
-Generate bundle icons (PNG 32/128/256 + multi-res ICO) as composite:
+Generate ALL bundle icons (PNG full set + multi-res ICO) as composite:
 rounded-square background #0b2221 + shield-dark logo at 80% size.
 
 Reads high-res source PNG from logo/png/shield-dark-1024.png, downsamples
@@ -9,10 +9,12 @@ Usage:
     python scripts/gen-brand-icon.py
 
 Outputs to gui-app/src-tauri/icons/:
-    32x32.png          — Taskbar / small Explorer
-    128x128.png        — large Explorer thumbnail
-    128x128@2x.png     — retina 256px
-    icon.ico           — Windows installer (multi-res 16/32/48/64/128/256)
+    32x32.png, 64x64.png, 128x128.png, 128x128@2x.png  — таскбар + Explorer
+    icon.png              — runtime window icon (512, loaded via include_bytes!)
+    app-icon.png          — source (1024)
+    Square*Logo.png       — Windows Store (30/44/71/89/107/142/150/284/310)
+    StoreLogo.png         — Windows Store (50)
+    icon.ico              — NSIS installer (multi-res 16/32/48/64/128/256)
 """
 import os
 import sys
@@ -60,11 +62,26 @@ def main() -> int:
 
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    # PNG outputs
+    # Standard PNG outputs (Tauri bundle + runtime window icon)
     targets = [
         (32, "32x32.png"),
+        (64, "64x64.png"),
         (128, "128x128.png"),
         (256, "128x128@2x.png"),
+        (512, "icon.png"),          # <- runtime window icon (include_bytes! в lib.rs)
+        (1024, "app-icon.png"),     # <- source-quality master
+        # Windows Store tiles (используются MSIX; оставляем синхронизированными
+        # чтобы не было смешения старая/новая айконка в разных местах)
+        (30,  "Square30x30Logo.png"),
+        (44,  "Square44x44Logo.png"),
+        (71,  "Square71x71Logo.png"),
+        (89,  "Square89x89Logo.png"),
+        (107, "Square107x107Logo.png"),
+        (142, "Square142x142Logo.png"),
+        (150, "Square150x150Logo.png"),
+        (284, "Square284x284Logo.png"),
+        (310, "Square310x310Logo.png"),
+        (50,  "StoreLogo.png"),
     ]
     for size, name in targets:
         img = make_icon(size, shield)

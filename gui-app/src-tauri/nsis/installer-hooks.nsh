@@ -3,20 +3,20 @@
 
 !macro NSIS_HOOK_POSTINSTALL
 
-  ; ── Force icon cache rebuild ─────────────────────────────────
-  ; ie4uinit.exe -show мягко просит shell обновиться, но не всегда
-  ; помогает на upgrade поверх существующей установки — Windows
-  ; держит handle на старую иконку пока explorer.exe не перезапустится.
+  ; ── Soft icon cache refresh ──────────────────────────────────
+  ; Не убиваем explorer — это мигало бы taskbar у пользователя при
+  ; каждой установке (intrusive UX).
   ;
-  ; Последовательность:
-  ;   1. `ie4uinit.exe -ClearIconCache` + `-show` — штатные утилиты,
-  ;      форсируют rebuild без killing explorer.
-  ;   2. Удалить iconcache.db + thumbnail cache files вручную —
-  ;      Windows создаст заново при next shell action.
-  ;   3. НЕ убиваем explorer.exe — это закрывает все открытые папки
-  ;      у пользователя, too intrusive для installer'а. Шаги 1-2
-  ;      достаточны в 95% случаев; оставшимся 5% достаточно logout/login.
-  DetailPrint "Forcing icon cache rebuild..."
+  ; Вместо этого:
+  ;   1. ie4uinit.exe -ClearIconCache + -show — штатные shell утилиты,
+  ;      форсируют rebuild без killing процессов.
+  ;   2. Удалить iconcache.db (если explorer его не держит — удалится,
+  ;      если держит — Delete тихо проваливается, невыполненное
+  ;      cleanup доделает Windows в фоне за несколько часов).
+  ;
+  ; Если после установки иконка всё ещё старая в taskbar: это связано
+  ; с pinned shortcut. Открепить → прикрепить снова, либо перезагрузка.
+  DetailPrint "Refreshing icon cache..."
   nsExec::ExecToLog 'ie4uinit.exe -ClearIconCache'
   nsExec::ExecToLog 'ie4uinit.exe -show'
   Delete "$LOCALAPPDATA\IconCache.db"

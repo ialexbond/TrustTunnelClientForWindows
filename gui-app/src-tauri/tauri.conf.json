@@ -27,21 +27,6 @@
         "dragDropEnabled": false,
         "visible": false,
         "skipTaskbar": false
-      },
-      {
-        "label": "tray-menu",
-        "url": "tray-menu.html",
-        "title": "TrayMenu",
-        "width": 220,
-        "height": 200,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "visible": false,
-        "focus": false,
-        "shadow": false
       }
     ],
     "security": {

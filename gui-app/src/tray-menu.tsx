@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components --
    entry file: mounts its own React root via ReactDOM.createRoot below.
    Fast-refresh doesn't apply to entry-point files. */
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -56,6 +56,8 @@ async function tray(action: string) {
 function TrayMenu() {
   const [status, setStatus] = useState<VpnStatus>("unknown");
   const [locale, setLocale] = useState<"ru" | "en">("ru");
+  const [hasConfig, setHasConfig] = useState<boolean>(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Subscribe to vpn-status events + fetch initial state.
   useEffect(() => {
@@ -65,6 +67,9 @@ function TrayMenu() {
     void invoke<string>("tray_menu_current_locale").then((l) => {
       if (l === "ru" || l === "en") setLocale(l);
     });
+    void invoke<boolean>("tray_menu_has_config").then((b) => {
+      setHasConfig(Boolean(b));
+    });
     const unlistenStatus = listen<{ status: VpnStatus }>("vpn-status", (e) => {
       if (e.payload?.status) setStatus(e.payload.status);
     });
@@ -72,6 +77,37 @@ function TrayMenu() {
       void unlistenStatus.then((fn) => fn());
     };
   }, []);
+
+  // Re-check config каждый раз когда окно получает focus (пользователь
+  // мог импортировать config пока tray menu было hidden).
+  useEffect(() => {
+    const w = getCurrentWindow();
+    const unlisten = w.listen("tauri://focus", () => {
+      void invoke<boolean>("tray_menu_has_config").then((b) => {
+        setHasConfig(Boolean(b));
+      });
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Auto-size: замеряем card и просим Rust пересчитать position под
+  // новый размер (anchor к правому или левому edge иконки). Re-measure
+  // при изменении locale/status/hasConfig — labels меняют ширину,
+  // items — count (меняется высота).
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const rafId = requestAnimationFrame(() => {
+      const w = Math.ceil(el.offsetWidth);
+      const h = Math.ceil(el.offsetHeight);
+      if (w > 0 && h > 0) {
+        void invoke("tray_menu_reposition", { width: w, height: h });
+      }
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [locale, status, hasConfig]);
 
   // Auto-hide on blur или Escape.
   useEffect(() => {
@@ -112,6 +148,10 @@ function TrayMenu() {
           id: "connect",
           label: t("Подключиться", "Connect"),
           action: () => void tray("connect"),
+          // Disable если нет config — нечего подключать. Показываем
+          // пункт (не скрываем), чтобы пользователю было понятно что
+          // tray-меню в принципе умеет подключать, но сейчас не может.
+          disabled: !hasConfig,
         },
     {
       id: "show",
@@ -128,31 +168,32 @@ function TrayMenu() {
 
   return (
     <div
+      ref={rootRef}
       data-theme="dark"
-      // Root контейнер — прозрачный margin 8px (чтобы shadow не
-      // обрезался windowом). Реальный визуал — card внутри.
+      // inline-flex column → natural size (max child width + padding ×
+      // sum children heights + gaps). Окно подстраивается через
+      // useLayoutEffect → invoke tray_menu_reposition.
+      //
+      // Native Win11 rounded corners применяются к самому окну через
+      // DwmSetWindowAttribute (см. tray::apply_win11_rounded_corners),
+      // работают без transparent (который сломан в dark Win11 —
+      // Tauri #13859). Card заполняет окно полностью — никакого gap'а
+      // между card bg и rounded edge окна быть не может.
       style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        gap: 2,
+        minWidth: 160,
         padding: 6,
-        height: "100vh",
         boxSizing: "border-box",
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 8,
       }}
     >
-      <div
-        style={{
-          background: "var(--color-bg-elevated)",
-          border: "1px solid var(--color-border)",
-          borderRadius: 12,
-          padding: 4,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
-        }}
-      >
-        {items.map((item) => (
-          <TrayMenuButton key={item.id} item={item} />
-        ))}
-      </div>
+      {items.map((item) => (
+        <TrayMenuButton key={item.id} item={item} />
+      ))}
     </div>
   );
 }
