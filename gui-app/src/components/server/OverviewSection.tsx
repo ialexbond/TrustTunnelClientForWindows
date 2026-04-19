@@ -559,7 +559,20 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                   тянуть SVG-флаги из flag-icons или подобного пакета. Emoji
                   рендерится через system font на Windows 11 (Segoe UI Emoji). */}
               {geo.flag_emoji && (
-                <span aria-hidden="true" className="text-xl leading-none">{geo.flag_emoji}</span>
+                <span
+                  aria-hidden="true"
+                  className="text-xl leading-none"
+                  // M-06 follow-up: force Twemoji Country Flags as the primary
+                  // family for this span. Windows native Segoe UI Emoji does
+                  // NOT render regional indicator pairs as flags — it shows
+                  // "RU"/"NL" letter glyphs. The @font-face injected by
+                  // `polyfillCountryFlagEmojis()` in main.tsx provides the
+                  // missing flag glyphs; system-ui is the fallback for
+                  // platforms that already handle flags natively.
+                  style={{ fontFamily: '"Twemoji Country Flags", system-ui, sans-serif' }}
+                >
+                  {geo.flag_emoji}
+                </span>
               )}
               <span>{getLocalizedCountry(geo.country_code, geo.country, i18n.language)}</span>
             </span>
