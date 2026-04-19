@@ -13,6 +13,7 @@ import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
 import { UserConfigModal } from "./UserConfigModal";
 import { UserModal } from "./UserModal";
+import { parseCertInfo } from "./certUtils";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -272,17 +273,14 @@ export function UsersSection({ state }: Props) {
                     )}
                   >
                     {/* Username — left. A: показываем display_name из
-                        users-advanced.toml если задан. Username виден в
-                        title-атрибуте при наведении — чтобы оператор мог
-                        сопоставить метку с реальным клиентским именем. */}
+                        users-advanced.toml если задан; username рядом
+                        muted. Native `title` атрибут убран — пользователь
+                        не хотел hover-tooltip'а на строке. */}
                     {(() => {
                       const label = displayNames.get(u) || u;
                       const hasAlias = label !== u;
                       return (
-                        <span
-                          className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-[var(--color-text-primary)]"
-                          title={hasAlias ? `${label} · ${u}` : u}
-                        >
+                        <span className="text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-[var(--color-text-primary)]">
                           {label}
                           {hasAlias && (
                             <span className="ml-1.5 text-xs text-[var(--color-text-muted)]">
@@ -419,13 +417,18 @@ export function UsersSection({ state }: Props) {
         }}
       />
 
-      {/* UserModal — Add/Edit modal (D-1..D-9) */}
+      {/* UserModal — Add/Edit modal (D-1..D-9).
+          `serverCertType` поступает из useServerState.certRaw (уже загружен
+          при panel load). UserModal использует его чтобы disable'ить
+          Pin Certificate + Skip Verification toggles когда сервер на
+          Let's Encrypt — для него pin/skip противоречат spec. */}
       <UserModal
         isOpen={userModalOpen}
         mode={userModalMode}
         editUsername={editingUsername}
         existingUsers={serverInfo.users}
         sshParams={sshParams}
+        serverCertType={parseCertInfo(state.certRaw).certType}
         onClose={handleUserModalClose}
         onUserAdded={handleUserAdded}
         onUserUpdated={handleUserUpdated}
