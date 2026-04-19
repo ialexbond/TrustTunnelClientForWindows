@@ -6,7 +6,6 @@ import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Input } from "../../shared/ui/Input";
 import { Toggle } from "../../shared/ui/Toggle";
-import { Select } from "../../shared/ui/Select";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { CIDRPicker } from "../../shared/ui/CIDRPicker";
 import { Tooltip } from "../../shared/ui/Tooltip";
@@ -22,6 +21,7 @@ import {
   fromServerResponse as advancedFromServer,
   toServerPayload as advancedToPayload,
   isLikelyCaChain,
+  deriveFingerprintFromDerB64,
 } from "../../shared/utils/userAdvanced";
 import { CertificateFingerprintCard } from "./CertificateFingerprintCard";
 import { DnsUpstreamsInput } from "./DnsUpstreamsInput";
@@ -263,12 +263,19 @@ function clearAddDraft(): void {
   }
 }
 
-/** Default deeplink fields for a new user (D-5: anti_dpi ON by default). */
+/**
+ * UX-upstream-remove-auto: default switched from "auto" → "h2". Upstream
+ * TrustTunnel CLI defaulted `auto` to http/2 anyway, and exposing the
+ * indirection made the final client config match the UI less obviously.
+ * "auto" stays in the UserAdvancedParams TS union for back-compat — old
+ * users-advanced.toml entries with `upstream_protocol="auto"` still load,
+ * they just normalize to `"h2"` in state (see Edit-load path below).
+ */
 const DEFAULT_DEEPLINK: DeeplinkFields = {
   antiDpi: true,
   displayName: "",
   customSni: "",
-  upstreamProtocol: "auto",
+  upstreamProtocol: "h2",
   skipVerification: false,
   pinCert: false,
   certDerB64: null,
@@ -278,10 +285,9 @@ const DEFAULT_DEEPLINK: DeeplinkFields = {
   cidr: "",
 };
 
-const UPSTREAM_OPTIONS = [
-  { value: "auto", labelKey: "server.users.upstream_auto" },
-  { value: "h2", labelKey: "server.users.upstream_h2" },
-  { value: "h3", labelKey: "server.users.upstream_h3" },
+const UPSTREAM_SEGMENTS: { value: "h2" | "h3"; label: string }[] = [
+  { value: "h2", label: "HTTP/2" },
+  { value: "h3", label: "HTTP/3" },
 ];
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -487,7 +493,11 @@ export function UserModal({
                   antiDpi,
                   displayName: advanced.displayName,
                   customSni: advanced.customSni,
-                  upstreamProtocol: advanced.upstreamProtocol,
+                  // UX-upstream-remove-auto: legacy entries stored "auto"
+                  // which the CLI used to remap to h2. Now UI only offers
+                  // h2/h3, so we normalize old "auto" → "h2" on load.
+                  upstreamProtocol:
+                    advanced.upstreamProtocol === "auto" ? "h2" : advanced.upstreamProtocol,
                   skipVerification: advanced.skipVerification,
                   pinCert: advanced.pinCert,
                   certDerB64: advanced.certDerB64,
@@ -510,6 +520,37 @@ export function UserModal({
             // M-05: mirror the flat DeeplinkFields so the Revert button can
             // restore values. Snapshot string above is for dirty-compare only.
             initialDeeplinkFieldsRef.current = next;
+            // CRIT-2 follow-up: server doesn't persist SHA-256 — recompute
+            // from DER locally so CertificateFingerprintCard can hydrate.
+            // Without this the card boots into the idle «Загрузить» state
+            // even though the pin is already saved. Log event for
+            // traceability but NEVER leak the full fingerprint into the
+            // activity log (first 8 hex chars are enough to correlate).
+            if (next.certDerB64) {
+              deriveFingerprintFromDerB64(next.certDerB64)
+                .then((fp) => {
+                  if (cancelled) return;
+                  setDeeplink((prev) =>
+                    prev.certDerB64 === next.certDerB64
+                      ? { ...prev, certFingerprint: fp }
+                      : prev,
+                  );
+                  const snapshotWithFp = { ...next, certFingerprint: fp };
+                  initialDeeplinkRef.current = toSnapshot(snapshotWithFp);
+                  initialDeeplinkFieldsRef.current = snapshotWithFp;
+                  activityLog(
+                    "STATE",
+                    `user.edit.cert_fp_derived user=${editUsername} fp_prefix=${fp.slice(0, 8)}`,
+                  );
+                })
+                .catch((err) => {
+                  if (cancelled) return;
+                  activityLog(
+                    "ERROR",
+                    `user.edit.cert_fp_derive_failed user=${editUsername} err=${formatError(err).slice(0, 80)}`,
+                  );
+                });
+            }
           })
           .catch((e) => {
             if (cancelled) return;
@@ -829,20 +870,8 @@ export function UserModal({
     }
   }, [canSubmit, isSubmitting, username, password, deeplink, sshParams, activityLog, t, onUserAdded, onClose]);
 
-  // M-05: Edit-mode «Отменить изменения». Restores the flat DeeplinkFields
-  // snapshot taken right after the server-config Promise.all resolved, and
-  // drops any in-progress password rotation. Not gated on `canSubmit` — user
-  // should be able to walk away from a malformed dirty state too.
-  const handleRevert = useCallback(() => {
-    if (isSubmitting) return;
-    activityLog("USER", "user.edit.reverted");
-    setDeeplink(initialDeeplinkFieldsRef.current);
-    setPasswordEditing(false);
-    setNewPassword("");
-    setSubmitError(null);
-    setDnsError(false);
-    setCidrError(false);
-  }, [isSubmitting, activityLog]);
+  // UX-revert-removed: handleRevert удалён вместе с кнопкой — Cancel
+  // закрывает modal целиком, отдельный Revert без закрытия был избыточен.
 
   // FIX-K: manual reset — clear any in-progress draft, regenerate credentials,
   // reset all deeplink fields back to defaults. Used by the «Очистить» button.
@@ -1024,12 +1053,6 @@ export function UserModal({
   // `localNewPasswordError` + `isPasswordDirty` are declared above near
   // the other validation helpers so `canSubmit` can reference them.
 
-  // ── Upstream protocol options with translated labels ───────────────────
-  const upstreamOptions = useMemo(
-    () => UPSTREAM_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) })),
-    [t],
-  );
-
   const isDisabled = isSubmitting;
 
   // ── No early return null (Modal lifecycle contract) ───────────────────
@@ -1095,19 +1118,10 @@ export function UserModal({
         </div>
       ) : (
         <>
-      {/* D-9 dirty-state warning banner (Edit mode only).
-          FIX-Z: previous dedup (hide when rotation open) just made banners
-          flip between each other — reverted. Both warnings coexist since
-          they refer to different scopes: dirty → deeplink params edited;
-          rotation → password change will invalidate existing deeplinks. */}
-      {isEditMode && isDeeplinkDirty && (
-        <ErrorBanner
-          severity="warning"
-          message={t("server.users.regenerate_deeplink_warning")}
-          className="mb-[var(--space-4)]"
-          data-testid="deeplink-dirty-banner"
-        />
-      )}
+      {/* UX-dirty-banner-bottom: dirty warning moved to sit right above
+          the Save button (was at the top of the modal, invisible when the
+          user scrolled down to change a field). Kept in the conditional
+          section so it disappears the moment the form is no longer dirty. */}
 
       {/* Config load error (Edit mode only) */}
       {configError && (
@@ -1422,15 +1436,40 @@ export function UserModal({
             )}
           </div>
 
-          {/* Upstream protocol */}
-          <Select
-            label={t("server.users.field_upstream_protocol")}
-            options={upstreamOptions}
-            value={deeplink.upstreamProtocol}
-            onChange={(e) => updateDeeplink("upstreamProtocol", e.target.value as UpstreamProtocol)}
-            disabled={isDisabled}
-            aria-label={t("server.users.field_upstream_protocol")}
-          />
+          {/* UX-upstream-segmented: 2-way toggle (HTTP/2 / HTTP/3) instead
+              of a dropdown with «Авто» that mapped to the same h2 anyway.
+              Pattern copied from SshConnectForm's auth-method picker. */}
+          <div>
+            <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+              {t("server.users.field_upstream_protocol")}
+            </label>
+            <div className="flex rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden">
+              {UPSTREAM_SEGMENTS.map((seg) => {
+                const active = deeplink.upstreamProtocol === seg.value;
+                return (
+                  <button
+                    key={seg.value}
+                    type="button"
+                    onClick={() => updateDeeplink("upstreamProtocol", seg.value)}
+                    disabled={isDisabled}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex-1 flex items-center justify-center py-1.5 text-xs font-[var(--font-weight-semibold)] transition-colors",
+                      "border-r border-[var(--color-border)] last:border-r-0",
+                      "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                      "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
+                      active
+                        ? "bg-[var(--color-accent-interactive)] text-white"
+                        : "bg-[var(--color-input-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
+                    )}
+                    data-testid={`upstream-${seg.value}`}
+                  >
+                    {seg.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Skip verification toggle */}
           <Toggle
@@ -1534,26 +1573,32 @@ export function UserModal({
         </>
       )}
 
+      {/* UX-dirty-banner-bottom: dirty banner rendered right above the
+          action row so it's always visible when the user is about to hit
+          Save. At the top of the modal it was off-screen during scroll. */}
+      {isEditMode && isDeeplinkDirty && !(configLoading || _forceConfigLoading) && (
+        <ErrorBanner
+          severity="warning"
+          message={t("server.users.regenerate_deeplink_warning")}
+          className="mt-[var(--space-4)]"
+          data-testid="deeplink-dirty-banner"
+        />
+      )}
+
       {/* ── Actions ─────────────────────────────────────────────────────
           FIX-Y: while the Edit-mode Loader is showing, Save/Clear are
           meaningless — user hasn't seen the real data yet. Show only
-          Cancel so the user can still back out, hide the rest. */}
+          Cancel so the user can still back out, hide the rest.
+          UX-clear-layout: Clear FIRST (leftmost) so users associate it
+          with "start over". Order Add-mode:   [Очистить] [Добавить] [Отмена]
+          Order Edit-mode: [Сохранить изменения] [Отмена]
+      */}
       <div className="flex gap-[var(--space-3)] mt-[var(--space-5)]">
         {!(isEditMode && (configLoading || _forceConfigLoading)) && (
           <>
-            <Button
-              type="button"
-              variant="primary"
-              fullWidth
-              disabled={!canSubmit}
-              loading={isSubmitting}
-              icon={isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
-              onClick={() => void (isEditMode ? handleSave() : handleAdd())}
-              data-testid="user-modal-submit"
-            >
-              {isEditMode ? t("server.users.save_changes") : t("server.users.add_user_advanced")}
-            </Button>
-            {/* FIX-K: Clear button — only in Add mode (Edit doesn't persist a draft). */}
+            {/* FIX-K + UX-clear-layout: Clear button — only in Add mode,
+                rendered LEFT of Submit so the visual scan goes
+                "reset → commit → cancel" left-to-right. */}
             {!isEditMode && (
               <Button
                 type="button"
@@ -1566,22 +1611,18 @@ export function UserModal({
                 {t("buttons.clear")}
               </Button>
             )}
-            {/* M-05: Edit-mode «Отменить изменения». Disabled until the form
-                is actually dirty — same gate as Save. Wiped the inline
-                password editor too so a user can abandon a half-started
-                rotation without having to hit Cancel on the sub-input. */}
-            {isEditMode && (
-              <Button
-                type="button"
-                variant="ghost"
-                fullWidth
-                disabled={isDisabled || (!isDeeplinkDirty && !isPasswordDirty)}
-                onClick={handleRevert}
-                data-testid="user-modal-revert"
-              >
-                {t("server.users.revert_changes")}
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="primary"
+              fullWidth
+              disabled={!canSubmit}
+              loading={isSubmitting}
+              icon={isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
+              onClick={() => void (isEditMode ? handleSave() : handleAdd())}
+              data-testid="user-modal-submit"
+            >
+              {isEditMode ? t("server.users.save_changes") : t("server.users.add_user_advanced")}
+            </Button>
           </>
         )}
         <Button

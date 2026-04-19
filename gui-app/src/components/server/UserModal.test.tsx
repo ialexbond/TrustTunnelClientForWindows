@@ -306,45 +306,10 @@ describe("UserModal — Edit mode", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("M-05: Revert button is disabled until the form is dirty", () => {
+  it("UX-revert-removed: Revert button is no longer rendered", () => {
+    // «Отменить изменения» was dropped — Cancel already closes the modal,
+    // a revert-without-close variant was redundant.
     render(<UserModal {...defaultEditProps} />);
-    expect(screen.getByTestId("user-modal-revert")).toBeDisabled();
-    // Dirty the form — Revert becomes enabled (same gate as Save).
-    fireEvent.click(screen.getAllByRole("switch")[0]);
-    expect(screen.getByTestId("user-modal-revert")).not.toBeDisabled();
-  });
-
-  it("M-05: Revert rolls deeplink fields back to the initial snapshot", () => {
-    render(<UserModal {...defaultEditProps} />);
-    // Toggle anti-DPI off (was ON by default → dirty).
-    const antiDpi = screen.getAllByRole("switch")[0];
-    fireEvent.click(antiDpi);
-    expect(antiDpi).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByTestId("deeplink-dirty-banner")).toBeInTheDocument();
-    // Click revert → anti-DPI returns to its initial state, dirty banner gone.
-    fireEvent.click(screen.getByTestId("user-modal-revert"));
-    expect(antiDpi).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByTestId("deeplink-dirty-banner")).toBeNull();
-  });
-
-  it("M-05: Revert also closes the inline password editor and drops the draft", () => {
-    render(<UserModal {...defaultEditProps} />);
-    // Open password editor and type a value — this dirties the form.
-    fireEvent.click(screen.getByTestId("rotate-password-btn"));
-    fireEvent.change(screen.getByPlaceholderText(/новый пароль/i), {
-      target: { value: "NewPass123!" },
-    });
-    expect(screen.getByTestId("user-modal-submit")).not.toBeDisabled();
-    // Revert rolls BOTH the deeplink state AND the password editor.
-    fireEvent.click(screen.getByTestId("user-modal-revert"));
-    // Readonly dots visible again → password editor collapsed.
-    expect(screen.getByTestId("password-readonly")).toBeInTheDocument();
-    // Save is disabled again (form no longer dirty).
-    expect(screen.getByTestId("user-modal-submit")).toBeDisabled();
-  });
-
-  it("M-05: Revert button not rendered in Add mode", () => {
-    render(<UserModal {...defaultAddProps} />);
     expect(screen.queryByTestId("user-modal-revert")).toBeNull();
   });
 

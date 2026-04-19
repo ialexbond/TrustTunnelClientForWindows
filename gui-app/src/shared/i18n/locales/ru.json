@@ -656,7 +656,7 @@
       "display_name_control_chars": "Нельзя использовать управляющие символы",
       "display_name_bad_chars": "Нельзя использовать кавычки (' \") и спецсимволы (; | & $ ` \\ ( ) < >)",
       "field_custom_sni": "Custom SNI",
-      "field_custom_sni_hint": "FQDN для подмены SNI (например, cdn.example.com)",
+      "field_custom_sni_hint": "Например, google.com",
       "custom_sni_spaces": "Пробелы не допускаются",
       "custom_sni_ascii_only": "Только латинские буквы, цифры, точки и дефисы (без кириллицы)",
       "custom_sni_too_long": "Слишком длинное имя (максимум 253 символа)",
