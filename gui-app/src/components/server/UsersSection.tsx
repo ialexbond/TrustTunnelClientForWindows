@@ -127,7 +127,11 @@ export function UsersSection({ state, activeServerTab }: Props) {
       return;
     }
     activityLog("USER", "users.tab.activated refresh=triggered");
-    state.loadServerInfo().catch(() => {
+    // M-04 fix: silent=true — НЕ триггерим state.loading, иначе
+    // ServerPanel раскрывает «Checking server...» loader и весь экран
+    // блокируется при каждом клике на таб. Silent refresh меняет
+    // serverInfo в background, кэшированные user-rows остаются видимы.
+    state.loadServerInfo(true).catch(() => {
       /* loadServerInfo sets state.error — UI показывает baner */
     });
     void refreshDisplayNames();
