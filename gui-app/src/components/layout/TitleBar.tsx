@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitleBarProps {
   children?: ReactNode;
@@ -8,28 +9,32 @@ interface TitleBarProps {
  * Compact title bar — brand on the left, spacer (draggable), window controls on the right.
  * 32px height, seamless design.
  *
- * Double-click на drag-region нативно Tauri 2 вызывает maximize/fullscreen
- * window. Даже при `maximizable: false` в config эта шорткат срабатывает.
- * preventDefault на onDoubleClick блокирует это поведение на JS-слое.
+ * Drag через `getCurrentWindow().startDragging()` на mousedown вместо
+ * `data-tauri-drag-region` атрибута. Атрибут автоматом включал нативный
+ * Windows dblclick-to-maximize на рамке, даже при `maximizable: false`
+ * в config. JS-handler drag совместим с `maximizable: false` —
+ * дабликлик ничего не делает, окно не раскрывается во full-screen.
  */
+function startWindowDrag(e: React.MouseEvent) {
+  // Только primary button без Ctrl/Shift — иначе это ожидаемое
+  // поведение (resize/select). Promise void — React MouseEvent sync.
+  if (e.button !== 0) return;
+  if (e.ctrlKey || e.shiftKey || e.altKey) return;
+  void getCurrentWindow().startDragging();
+}
+
 export function TitleBar({ children }: TitleBarProps) {
   return (
     <div
       className="flex items-center shrink-0"
-      data-tauri-drag-region
-      onDoubleClick={(e) => e.preventDefault()}
+      onMouseDown={startWindowDrag}
       style={{ height: 32 }}
     >
       {/* Brand — compact. Outfit для wordmark + theme-swapped SVG логотип.
-          CSS-only swap через .only-dark / .only-light (см. index.css).
-          useTheme() хранил local state per-component, так что при
-          переключении темы в Settings — TitleBar не re-rendered и логотип
-          оставался чёрным на светлой теме. CSS решает это атомарно через
-          `data-theme` на <html>. */}
+          CSS-only swap через .only-dark / .only-light (см. index.css). */}
       <div
         className="flex items-center gap-1.5 pl-3"
-        data-tauri-drag-region
-        onDoubleClick={(e) => e.preventDefault()}
+        onMouseDown={startWindowDrag}
       >
         <img
           src="/logo/shield-dark.svg"
@@ -53,8 +58,7 @@ export function TitleBar({ children }: TitleBarProps) {
             letterSpacing: "-0.01em",
             fontFamily: "var(--font-family-display)",
           }}
-          data-tauri-drag-region
-          onDoubleClick={(e) => e.preventDefault()}
+          onMouseDown={startWindowDrag}
         >
           <span style={{ color: "var(--color-text-primary)" }}>Trust</span>
           <span style={{ color: "var(--color-accent-interactive)" }}>Tunnel</span>
@@ -77,11 +81,7 @@ export function TitleBar({ children }: TitleBarProps) {
       </div>
 
       {/* Spacer — draggable */}
-      <div
-        className="flex-1"
-        data-tauri-drag-region
-        onDoubleClick={(e) => e.preventDefault()}
-      />
+      <div className="flex-1" onMouseDown={startWindowDrag} />
 
       {/* Window controls slot */}
       {children}

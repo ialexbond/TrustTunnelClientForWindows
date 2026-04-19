@@ -110,7 +110,7 @@ pub fn run() {
             let tray_menu = tray::build_tray_menu(app.handle(), "disconnected")?;
 
             // Load disconnected tray icon (red) as initial state
-            let initial_icon = tray::load_tray_icon("disconnected");
+            let initial_icon = tray::load_tray_icon("disconnected", tray::detect_windows_system_theme());
 
             // Create tray icon with ID so we can update it later
             TrayIconBuilder::with_id("main-tray")

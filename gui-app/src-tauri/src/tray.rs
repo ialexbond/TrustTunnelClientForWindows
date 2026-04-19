@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::Manager;
 use tauri::Emitter;
@@ -8,14 +9,96 @@ use tauri::image::Image;
 use crate::commands::{AppState, kill_stale_sidecar};
 use crate::{routing_rules, geodata_v2ray, sidecar};
 
-/// Load a tray icon PNG from the icons directory embedded at compile time.
-/// Red shield = disconnected/connecting, Green shield = connected.
-pub fn load_tray_icon(status: &str) -> Image<'static> {
-    let png_bytes: &[u8] = match status {
-        "connected" => include_bytes!("../icons/tray_connected.png"),
-        _ => include_bytes!("../icons/tray_disconnected.png"),
+/// Detect Windows system theme via registry.
+///
+/// `SystemUsesLightTheme` under
+/// `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`:
+/// 1 = light, 0 = dark. Fallback → "dark" при любой ошибке. Apps-тема
+/// отдельная (`AppsUseLightTheme`) — нам нужна system-wide (панель
+/// задач), потому что tray-иконка рисуется именно там.
+pub fn detect_windows_system_theme() -> &'static str {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+        if let Ok(key) = hkcu.open_subkey(path) {
+            if let Ok(val) = key.get_value::<u32, _>("SystemUsesLightTheme") {
+                return if val == 1 { "light" } else { "dark" };
+            }
+        }
+    }
+    "dark"
+}
+
+/// Normalize a VPN status to the 3 tray-icon buckets:
+/// - `connected` → zelyonyy indicator
+/// - `reconnect` → oranzhevyy indicator (connecting / recovering / disconnecting)
+/// - `off` → seryy indicator (disconnected / error / unknown)
+fn status_bucket(status: &str) -> &'static str {
+    match status {
+        "connected" => "connected",
+        "connecting" | "recovering" | "disconnecting" => "reconnect",
+        _ => "off",
+    }
+}
+
+/// Load a tray icon .ico embedded at compile time. Picks the right asset
+/// based on VPN-status bucket × Windows system theme (не app theme).
+pub fn load_tray_icon(status: &str, theme: &str) -> Image<'static> {
+    // 6 icons total: 3 buckets × 2 themes. include_bytes! вшивает файлы в
+    // бинарь, runtime не читает диск.
+    let bytes: &[u8] = match (status_bucket(status), theme) {
+        ("connected", "light") => include_bytes!("../icons/tray/tray-light-connected.ico"),
+        ("connected", _)       => include_bytes!("../icons/tray/tray-dark-connected.ico"),
+        ("reconnect", "light") => include_bytes!("../icons/tray/tray-light-reconnect.ico"),
+        ("reconnect", _)       => include_bytes!("../icons/tray/tray-dark-reconnect.ico"),
+        (_, "light")           => include_bytes!("../icons/tray/tray-light-off.ico"),
+        (_, _)                 => include_bytes!("../icons/tray/tray-dark-off.ico"),
     };
-    Image::from_bytes(png_bytes).expect("Failed to load tray icon PNG")
+    Image::from_bytes(bytes).expect("Failed to load tray icon .ico")
+}
+
+/// Pulse task coordinator — для статуса `reconnect` tray иконка
+/// мерцает между полным-цветом и dimmed (тусклый off-icon). Даёт
+/// пользователю визуальный сигнал «что-то происходит» даже когда
+/// окно свёрнуто в трей.
+///
+/// Cancel flag общий per-process — start_pulse ставит false в старый
+/// флаг чтобы task чисто вышел, создаёт новый флаг для своего цикла.
+static PULSE_CANCEL: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
+
+fn stop_pulse() {
+    if let Ok(mut guard) = PULSE_CANCEL.lock() {
+        if let Some(flag) = guard.take() {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+fn start_pulse(app: tauri::AppHandle, theme: String) {
+    stop_pulse();
+    let cancel = Arc::new(AtomicBool::new(false));
+    if let Ok(mut guard) = PULSE_CANCEL.lock() {
+        *guard = Some(Arc::clone(&cancel));
+    }
+    tauri::async_runtime::spawn(async move {
+        // Чередуем reconnect-icon и off-icon каждые 550ms — это
+        // subtle-пульсация, не раздражающая, но заметная краем глаза.
+        let mut tick: u32 = 0;
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let icon_status = if tick % 2 == 0 { "reconnect" } else { "off" };
+            if let Some(tray) = app.tray_by_id("main-tray") {
+                tray.set_icon(Some(load_tray_icon(icon_status, &theme))).ok();
+            }
+            tick = tick.wrapping_add(1);
+            tokio::time::sleep(std::time::Duration::from_millis(550)).await;
+        }
+    });
 }
 
 /// Get current locale from AppState, defaulting to "ru".
@@ -96,12 +179,31 @@ pub fn build_tray_menu(app: &tauri::AppHandle, status: &str) -> tauri::Result<ta
 }
 
 /// Update tray icon, tooltip, and menu based on VPN status.
+///
+/// System theme (Windows Personalize) detects at each update —
+/// user может переключить тему Windows, и в следующий update мы
+/// подхватим. Live theme-change event (WM_SETTINGCHANGE) потребует
+/// хука на Rust-side, отложен — обычный VPN-status update тоже
+/// прилетает часто (коннект/реконнект/disconnect), так что иконка
+/// refresh'ится в течение нескольких секунд после смены темы.
+///
+/// Reconnect bucket запускает pulse_task (мерцание 550ms) —
+/// визуальный сигнал что VPN не в стабильном состоянии. Любой
+/// другой status отменяет pulse и ставит статичную иконку.
 pub fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
     if let Some(tray) = app.tray_by_id("main-tray") {
-        let icon_status = match status {
-            "connected" => "connected",
-            _ => "disconnected",
-        };
+        let system_theme = detect_windows_system_theme().to_string();
+        let bucket = status_bucket(status);
+
+        if bucket == "reconnect" {
+            // Pulsing icon для connecting/recovering/disconnecting
+            start_pulse(app.clone(), system_theme.clone());
+        } else {
+            // Static icon для connected / off
+            stop_pulse();
+            tray.set_icon(Some(load_tray_icon(bucket, &system_theme))).ok();
+        }
+
         let locale = get_locale(app);
         let is_ru = locale == "ru";
         let tooltip = match status {
@@ -112,7 +214,6 @@ pub fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
             "error" => if is_ru { "TrustTunnel Pro — Ошибка" } else { "TrustTunnel Pro — Error" },
             _ => if is_ru { "TrustTunnel Pro — Отключен" } else { "TrustTunnel Pro — Disconnected" },
         };
-        tray.set_icon(Some(load_tray_icon(icon_status))).ok();
         tray.set_tooltip(Some(tooltip)).ok();
 
         // Rebuild menu to reflect new status
