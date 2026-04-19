@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitleBarProps {
   children?: ReactNode;
@@ -9,33 +8,23 @@ interface TitleBarProps {
  * Compact title bar — brand on the left, spacer (draggable), window controls on the right.
  * 32px height, seamless design.
  *
- * Drag через `getCurrentWindow().startDragging()` на mousedown вместо
- * `data-tauri-drag-region` атрибута. Атрибут автоматом включал нативный
- * Windows dblclick-to-maximize на рамке, даже при `maximizable: false`
- * в config. JS-handler drag совместим с `maximizable: false` —
- * дабликлик ничего не делает, окно не раскрывается во full-screen.
+ * Drag восстановлен через нативный `data-tauri-drag-region` — он
+ * хорошо работает со snap'ами Windows и не конфликтует с click'ами на
+ * WindowControls. Dblclick-to-maximize блокируется на Rust-слое
+ * (см. lib.rs on_window_event → Maximized → set_maximized(false)).
  */
-function startWindowDrag(e: React.MouseEvent) {
-  // Только primary button без Ctrl/Shift — иначе это ожидаемое
-  // поведение (resize/select). Promise void — React MouseEvent sync.
-  if (e.button !== 0) return;
-  if (e.ctrlKey || e.shiftKey || e.altKey) return;
-  void getCurrentWindow().startDragging();
-}
-
 export function TitleBar({ children }: TitleBarProps) {
   return (
-    // Root div БЕЗ onMouseDown — иначе click'и на WindowControls (children:
-    // кнопки minimize / close) начинали Windows drag через bubbling и
-    // native mousedown не доходил до onClick. Теперь drag handler висит
-    // только на конкретных «пустых» областях (brand block + spacer), а
-    // WindowControls остаются полноценными кнопками.
-    <div className="flex items-center shrink-0" style={{ height: 32 }}>
+    <div
+      className="flex items-center shrink-0"
+      data-tauri-drag-region
+      style={{ height: 32 }}
+    >
       {/* Brand — compact. Outfit для wordmark + theme-swapped SVG логотип.
           CSS-only swap через .only-dark / .only-light (см. index.css). */}
       <div
         className="flex items-center gap-1.5 pl-3"
-        onMouseDown={startWindowDrag}
+        data-tauri-drag-region
       >
         <img
           src="/logo/shield-dark.svg"

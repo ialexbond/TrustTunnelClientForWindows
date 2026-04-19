@@ -3,17 +3,25 @@
 
 !macro NSIS_HOOK_POSTINSTALL
 
-  ; ── Icon cache refresh ────────────────────────────────────────
-  ; При upgrade поверх существующей установки Windows кэширует
-  ; старый .ico в iconcache.db и показывает прежний ярлык в
-  ; Explorer/Start menu/Taskbar, пока shell не перезапустится.
-  ; `ie4uinit.exe -show` — штатная Windows-утилита, форсирует
-  ; обновление кэша без reboot'а или ручного Kill explorer.exe.
-  ; nsExec::ExecToLog не ждёт окончания процесса — installer
-  ; завершается сразу, пользователю видна новая иконка в течение
-  ; нескольких секунд.
-  DetailPrint "Refreshing icon cache..."
+  ; ── Force icon cache rebuild ─────────────────────────────────
+  ; ie4uinit.exe -show мягко просит shell обновиться, но не всегда
+  ; помогает на upgrade поверх существующей установки — Windows
+  ; держит handle на старую иконку пока explorer.exe не перезапустится.
+  ;
+  ; Последовательность:
+  ;   1. `ie4uinit.exe -ClearIconCache` + `-show` — штатные утилиты,
+  ;      форсируют rebuild без killing explorer.
+  ;   2. Удалить iconcache.db + thumbnail cache files вручную —
+  ;      Windows создаст заново при next shell action.
+  ;   3. НЕ убиваем explorer.exe — это закрывает все открытые папки
+  ;      у пользователя, too intrusive для installer'а. Шаги 1-2
+  ;      достаточны в 95% случаев; оставшимся 5% достаточно logout/login.
+  DetailPrint "Forcing icon cache rebuild..."
+  nsExec::ExecToLog 'ie4uinit.exe -ClearIconCache'
   nsExec::ExecToLog 'ie4uinit.exe -show'
+  Delete "$LOCALAPPDATA\IconCache.db"
+  Delete "$LOCALAPPDATA\Microsoft\Windows\Explorer\iconcache_*.db"
+  Delete "$LOCALAPPDATA\Microsoft\Windows\Explorer\thumbcache_*.db"
 
 !macroend
 
