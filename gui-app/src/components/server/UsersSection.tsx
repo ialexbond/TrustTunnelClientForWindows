@@ -260,20 +260,26 @@ export function UsersSection({ state, activeServerTab }: Props) {
             // source of truth for "user exists", so a dangling entry in
             // users-advanced.toml is harmless (next Add overwrites it).
             //
-            // Promise.resolve wrap: `invoke` may be a plain non-Promise
-            // value in unit tests (vi.fn default); bare `.catch` on it
-            // throws synchronously and breaks the surrounding try/catch.
-            Promise.resolve(
-              invoke("server_delete_user_advanced", {
-                ...sshParams,
-                username: user,
-              }),
-            ).catch((err) => {
-              activityLog(
-                "ERROR",
-                `user.advanced.cleanup_failed user=${user} err=${formatError(err)}`,
-              );
-            });
+            // WR-01 (14.1-REVIEW deep pass): the fire-and-forget was wrapped
+            // in `Promise.resolve(invoke(...)).catch(...)` to defend against
+            // unit-test mocks returning undefined (bare `.catch` would throw
+            // synchronously). Swapped to an async IIFE — `await invoke(...)`
+            // safely handles both real Promises and mock-undefined values,
+            // and the try/catch surfaces SSH write failures via activity log
+            // so the operator sees them instead of silent fire-and-forget.
+            void (async () => {
+              try {
+                await invoke("server_delete_user_advanced", {
+                  ...sshParams,
+                  username: user,
+                });
+              } catch (err) {
+                activityLog(
+                  "ERROR",
+                  `user.advanced.cleanup_failed user=${user} err=${formatError(err)}`,
+                );
+              }
+            })();
             removeUserFromState(user);
             activityLog("STATE", `user.remove.completed user=${user}`);
             state.pushSuccess(t("server.users.user_deleted", { user }));
