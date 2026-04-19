@@ -69,7 +69,7 @@ export function TitleBar({ children }: TitleBarProps) {
       </div>
 
       {/* Spacer — draggable, между brand'ом и WindowControls */}
-      <div className="flex-1" onMouseDown={startWindowDrag} />
+      <div className="flex-1" data-tauri-drag-region />
 
       {/* Window controls slot — HAS own click handlers, drag НЕ навешиваем */}
       {children}
