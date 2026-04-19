@@ -86,6 +86,11 @@
   --font-size-lg: 16px;
   --font-size-xl: 20px;
   --font-size-2xl: 24px;
+  /* Display sizes — только для wordmark / splash / hero-секций.
+     Не использовать для UI-текста. */
+  --font-size-3xl: 32px;
+  --font-size-4xl: 40px;
+  --font-size-5xl: 48px;
   --font-weight-normal: 400;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;

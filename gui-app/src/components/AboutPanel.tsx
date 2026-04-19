@@ -93,45 +93,58 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             Theme-swapped SVG (dark/light).  Wordmark — Outfit крупнее для
             читаемости. PRO бейдж держится в верхнем правом углу h1 через
             flex items-start (не vertical-center как было). */}
-        <div className="flex items-center justify-center gap-4">
-          <img
-            src="/logo/shield-dark.svg"
-            alt="TrustTunnel"
-            width={72}
-            height={72}
-            className="only-dark shrink-0"
-            draggable={false}
-          />
-          <img
-            src="/logo/shield-light.svg"
-            alt="TrustTunnel"
-            width={72}
-            height={72}
-            className="only-light shrink-0"
-            draggable={false}
-          />
-          <div className="flex items-start gap-1.5">
-            <h1
-              className="text-5xl font-bold tracking-wide leading-none"
-              style={{
-                color: "var(--color-text-primary)",
-                // Outfit — display-face для wordmark TrustTunnel. См.
-                // tokens.css → --font-family-display. Применять ТОЛЬКО
-                // здесь, не в UI-text.
-                fontFamily: "var(--font-family-display)",
-              }}
-            >
-              TrustTunnel
-            </h1>
-            <span
-              // leading-none + inline-flex items-center → глиф по центру box'а,
-              // иначе на text-[10px] ascender сдвигал текст вниз.
-              className="text-[10px] font-bold px-2 py-0.5 rounded leading-none inline-flex items-center"
-              style={{ backgroundColor: "var(--color-accent-tint-10)", color: "var(--color-accent-500)" }}
-            >
-              PRO
-            </span>
+        {/* Главный блок: logo + wordmark в row, v{version} ярлык под
+            ним (центрированно).
+            FIX-FS: tailwind.config.js override'нул весь fontSize до xs..2xl
+            (нет 3xl/5xl). Поэтому `text-5xl` класс НЕ генерировался — текст
+            оставался базового размера. Вместо text-5xl используем inline
+            fontSize в px. */}
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center justify-center gap-4">
+            <img
+              src="/logo/shield-dark.svg"
+              alt="TrustTunnel"
+              width={72}
+              height={72}
+              className="only-dark shrink-0"
+              draggable={false}
+            />
+            <img
+              src="/logo/shield-light.svg"
+              alt="TrustTunnel"
+              width={72}
+              height={72}
+              className="only-light shrink-0"
+              draggable={false}
+            />
+            <div className="flex items-start gap-1.5">
+              <h1
+                // text-5xl через расширенный token (tailwind.config.js +
+                // tokens.css `--font-size-5xl: 48px`). Display-size,
+                // только для wordmark, не для UI-текста (design-system rule).
+                className="text-5xl font-bold tracking-wide leading-none"
+                style={{
+                  color: "var(--color-text-primary)",
+                  // Outfit — display-face для wordmark TrustTunnel. См.
+                  // tokens.css → --font-family-display. Применять ТОЛЬКО
+                  // здесь, не в UI-text.
+                  fontFamily: "var(--font-family-display)",
+                }}
+              >
+                TrustTunnel
+              </h1>
+              <span
+                // leading-none + inline-flex items-center → глиф по центру box'а,
+                // иначе на text-[10px] ascender сдвигал текст вниз.
+                className="text-[10px] font-bold px-2 py-0.5 rounded leading-none inline-flex items-center"
+                style={{ backgroundColor: "var(--color-accent-tint-10)", color: "var(--color-accent-500)" }}
+              >
+                PRO
+              </span>
+            </div>
           </div>
+          {/* Version ярлык — под logo+wordmark blockом (был справа от
+              wordmark, расхолащивал горизонтальный ряд). */}
           <span
             className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
             style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
