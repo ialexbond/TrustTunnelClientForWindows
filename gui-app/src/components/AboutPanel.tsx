@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  Shield,
   Github,
   Download,
   RefreshCw,
@@ -14,6 +13,7 @@ import {
   ExternalLink,
   FileText,
 } from "lucide-react";
+import { useTheme } from "../shared/hooks/useTheme";
 import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
@@ -34,6 +34,12 @@ interface UpdateProgressPayload {
 
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
   const { t } = useTranslation();
+  const { theme } = useTheme();
+  // Shield logo from /public/logo/. Light/Dark swap by resolved theme —
+  // `theme` is already "dark" | "light" (system preference resolved in
+  // useTheme). SVG paths served as static URLs via Vite public dir.
+  const logoSrc =
+    theme === "dark" ? "/logo/shield-dark.svg" : "/logo/shield-light.svg";
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
   const pushSuccess = useSnackBar();
@@ -85,14 +91,28 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
       <div className="w-full max-w-sm space-y-5">
         {/* Logo + Name */}
         <div className="flex flex-col items-center gap-2">
-          <div
-            className="p-3.5 rounded-2xl shadow-lg"
-            style={{ background: "linear-gradient(135deg, var(--color-accent-500), var(--color-accent-400))" }}
-          >
-            <Shield className="w-10 h-10 text-white" />
-          </div>
+          {/* Wordmark logo — theme-swapped SVG. Gradient wrapper removed,
+              логотип уже готовый. Width фиксирован 72px в соответствии с
+              прежним визуальным footprint'ом (p-3.5 + w-10 иконка). */}
+          <img
+            src={logoSrc}
+            alt="TrustTunnel"
+            width={72}
+            height={72}
+            className="shrink-0"
+            draggable={false}
+          />
           <div className="flex items-center gap-2 mt-1">
-            <h1 className="text-xl font-bold tracking-wide" style={{ color: "var(--color-text-primary)" }}>
+            <h1
+              className="text-xl font-bold tracking-wide"
+              style={{
+                color: "var(--color-text-primary)",
+                // Outfit — display-face для wordmark TrustTunnel. См.
+                // tokens.css → --font-family-display. Применять ТОЛЬКО
+                // здесь, не в UI-text.
+                fontFamily: "var(--font-family-display)",
+              }}
+            >
               TrustTunnel
             </h1>
             <span

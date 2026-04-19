@@ -3,6 +3,14 @@
  * CSS Variables for consistent theming across Pro & Light versions
  */
 
+/* Outfit — display-face for the "TrustTunnel" wordmark (AboutPanel only).
+   Подключается через Google Fonts CDN — на desktop с интернетом грузится
+   сразу. Для offline fallback CSS-переменная `--font-family-display`
+   деградирует на `'Geist Sans', system-ui` (ниже в tokens).
+   NOTE: для production offline-safe режима следует переключиться на
+   self-host (woff2 в src/shared/styles/fonts/), аналогично Geist. */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+
 /* ── Geist Font ──────────────────────────────────── */
 @font-face {
   font-family: 'Geist Sans';
@@ -80,9 +88,16 @@
   --font-size-2xl: 24px;
   --font-weight-normal: 400;
   --font-weight-semibold: 600;
+  --font-weight-bold: 700;
   --tracking-tight: -0.01em;
   --tracking-normal: 0;
   --tracking-wide: 0.02em;
+
+  /* Display font — ЭКСКЛЮЗИВНО для wordmark «TrustTunnel» в AboutPanel.
+     Не использовать в body/кнопках/любом другом месте — Outfit это
+     display face, не подходит для UI-text. Для всего остального
+     продолжаем использовать Geist Sans. */
+  --font-family-display: 'Outfit', 'Geist Sans', system-ui, -apple-system, sans-serif;
 
   /* ── Z-index ───────────────────────────────────── */
   --z-base: 0;
