@@ -140,11 +140,37 @@ fi
 
 /// SSH to the server, append a new [[client]] entry to credentials.toml,
 /// restart the service, export the client config, and save it locally.
+///
+/// Thin wrapper over `add_server_user_internal` that restarts the service
+/// (standalone add path: frontend calls us directly). Callers that plan to
+/// write additional config files (e.g. rules.toml) and want to coalesce
+/// restarts should call `add_server_user_internal` with `skip_restart=true`.
 pub async fn add_server_user(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
     vpn_username: String,
     vpn_password: String,
+) -> Result<String, String> {
+    add_server_user_internal(app, handle, vpn_username, vpn_password, false).await
+}
+
+/// Internal add-user implementation. See `add_server_user` for the public
+/// wrapper used by the Tauri command surface.
+///
+/// WR-04 (14.1-REVIEW deep pass): `skip_restart=true` suppresses the
+/// systemctl restart at the end of this function so that callers which
+/// perform additional config writes (e.g. rules.toml in
+/// `server_add_user_advanced`) can coalesce into a single restart — every
+/// restart briefly disconnects ALL active VPN sessions on the server, so
+/// doing it twice for one logical admin action is twice the blast radius.
+/// The caller is responsible for running `systemctl restart trusttunnel`
+/// once all writes are done; otherwise the new credentials stay dormant.
+async fn add_server_user_internal(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    vpn_username: String,
+    vpn_password: String,
+    skip_restart: bool,
 ) -> Result<String, String> {
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");
@@ -220,22 +246,27 @@ password = "{escaped_pass}"
 
     emit_step(app, "configure", "ok", "User added");
 
-    // Restart service to pick up new credentials
-    emit_step(app, "service", "progress", "Restarting service...");
+    // WR-04: coalesce restarts when the caller plans further config writes.
+    // The caller MUST run systemctl restart trusttunnel once done, otherwise
+    // the new credentials stay dormant.
+    if !skip_restart {
+        // Restart service to pick up new credentials
+        emit_step(app, "service", "progress", "Restarting service...");
 
-    let (_, restart_code) = exec_command(
-        handle, app,
-        &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1")
-    ).await?;
+        let (_, restart_code) = exec_command(
+            handle, app,
+            &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1")
+        ).await?;
 
-    if restart_code != 0 {
-        emit_log(app, "warn", "Failed to restart service. Manual restart may be needed.");
+        if restart_code != 0 {
+            emit_log(app, "warn", "Failed to restart service. Manual restart may be needed.");
+        }
+
+        // Wait for service to start
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        emit_step(app, "service", "ok", "Service restarted");
     }
-
-    // Wait for service to start
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    emit_step(app, "service", "ok", "Service restarted");
 
     // User added — config download is done separately via UI
     emit_step(app, "done", "ok", &format!("User '{}' added!", vpn_username));
@@ -415,8 +446,19 @@ pub async fn server_add_user_advanced(
     let prefix_length = prefix_length.unwrap_or(4).clamp(1, 16);
     let prefix_percent = prefix_percent.unwrap_or(70).clamp(1, 100);
 
-    // Step 1: create credentials.toml entry (reuse existing function)
-    add_server_user(app, handle, vpn_username.clone(), vpn_password.clone()).await?;
+    // Step 1: create credentials.toml entry (reuse existing function).
+    // WR-04: skip_restart=true here — the coalesced restart below after
+    // Step 2 covers both credentials.toml and optional rules.toml writes,
+    // so we avoid the double disconnect cycle every other client on the
+    // server would otherwise see during a single admin action.
+    add_server_user_internal(
+        app,
+        handle,
+        vpn_username.clone(),
+        vpn_password.clone(),
+        true,
+    )
+    .await?;
 
     // FIX-OO-14: auto-rollback when steps 2–3 fail. Without this, hitting
     // an error like "custom SNI not in allowed_sni" after credentials.toml
@@ -471,6 +513,25 @@ pub async fn server_add_user_advanced(
             if code != 0 {
                 return Err(format!("SSH_RULES_WRITE_FAILED|{code}"));
             }
+        }
+
+        // WR-04 (14.1-REVIEW deep pass): single restart for the whole add-user
+        // pipeline. Step 1 was run with skip_restart=true so that this restart
+        // covers BOTH credentials.toml (needs restart to activate the new user)
+        // AND rules.toml (RulesEngine::from_config is start-time only). Before
+        // this coalescing, operators saw two restart cycles (→ two disconnect/
+        // reconnect flashes for every OTHER client on the server) per admin
+        // action. --no-block keeps the SSH channel free while systemd does the
+        // stop/start. Exit code swallowed — the deeplink is the primary output
+        // and a failed restart is a soft warning surfaced via activity log.
+        {
+            let sudo = detect_sudo(handle, app).await;
+            let _ = exec_command(
+                handle,
+                app,
+                &format!("{sudo}systemctl --no-block restart trusttunnel 2>&1"),
+            )
+            .await;
         }
 
         // Step 3: generate deeplink with all TLV fields. This is the step that
