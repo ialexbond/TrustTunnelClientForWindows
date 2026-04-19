@@ -13,7 +13,6 @@ import {
   ExternalLink,
   FileText,
 } from "lucide-react";
-import { useTheme } from "../shared/hooks/useTheme";
 import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
@@ -34,12 +33,11 @@ interface UpdateProgressPayload {
 
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
   const { t } = useTranslation();
-  const { theme } = useTheme();
-  // Shield logo from /public/logo/. Light/Dark swap by resolved theme —
-  // `theme` is already "dark" | "light" (system preference resolved in
-  // useTheme). SVG paths served as static URLs via Vite public dir.
-  const logoSrc =
-    theme === "dark" ? "/logo/shield-dark.svg" : "/logo/shield-light.svg";
+  // Theme-swapped logo через CSS-classes (.only-dark / .only-light)
+  // вместо per-component useTheme. useTheme хранил local state на каждый
+  // компонент — переключение темы в Settings не re-render'ило AboutPanel
+  // и логотип оставался чёрным на светлой теме. CSS selectors на
+  // `data-theme` attribute работают атомарно. См. index.css.
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
   const pushSuccess = useSnackBar();
@@ -97,11 +95,19 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             flex items-start (не vertical-center как было). */}
         <div className="flex items-center justify-center gap-4">
           <img
-            src={logoSrc}
+            src="/logo/shield-dark.svg"
             alt="TrustTunnel"
             width={72}
             height={72}
-            className="shrink-0"
+            className="only-dark shrink-0"
+            draggable={false}
+          />
+          <img
+            src="/logo/shield-light.svg"
+            alt="TrustTunnel"
+            width={72}
+            height={72}
+            className="only-light shrink-0"
             draggable={false}
           />
           <div className="flex items-start gap-1.5">
