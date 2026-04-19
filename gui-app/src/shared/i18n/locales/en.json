@@ -674,6 +674,7 @@
       "toggle_skip_verify_warning": "For self-signed certificates. Use Let's Encrypt or Pin Certificate in production.",
       "toggle_pin_cert": "Pin endpoint certificate",
       "toggle_pin_cert_needs_sni": "Enter the endpoint domain into Custom SNI first",
+      "toggle_le_not_needed": "Available only for self-signed or manually provided certificates. Your endpoint uses Let's Encrypt — the system trust store validates the chain.",
       "cert_fetch_btn": "Load from endpoint",
       "cert_unpin_btn": "Unpin",
       "cert_refresh_btn": "Refresh",

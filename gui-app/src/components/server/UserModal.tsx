@@ -165,6 +165,14 @@ export interface UserModalProps {
     password: string;
     keyPath?: string;
   };
+  /**
+   * Cert type detected for the endpoint (from server_get_cert_info). Used to
+   * disable Pin Certificate / Skip Verification toggles when the server runs
+   * Let's Encrypt — DEEP_LINK.md says both fields should be omitted when the
+   * chain verifies via system CAs. `undefined` / `"unknown"` keep the toggles
+   * active so users on custom setups retain control.
+   */
+  serverCertType?: "self_signed" | "lets_encrypt" | "unknown";
   onClose: () => void;
   /**
    * Called after successful add. `generatedDeeplink` is the deeplink returned
@@ -314,6 +322,7 @@ export function UserModal({
   editUsername,
   existingUsers,
   sshParams,
+  serverCertType,
   onClose,
   onUserAdded,
   onUserUpdated,
@@ -873,20 +882,10 @@ export function UserModal({
   // UX-revert-removed: handleRevert удалён вместе с кнопкой — Cancel
   // закрывает modal целиком, отдельный Revert без закрытия был избыточен.
 
-  // FIX-K: manual reset — clear any in-progress draft, regenerate credentials,
-  // reset all deeplink fields back to defaults. Used by the «Очистить» button.
-  const handleClear = useCallback(() => {
-    if (isSubmitting) return;
-    activityLog("USER", "user.modal.cleared");
-    clearAddDraft();
-    setUsername(generateUniqueUsername());
-    setPassword(generatePassword());
-    setDeeplink(DEFAULT_DEEPLINK);
-    setUsernameError("");
-    setSubmitError(null);
-    setDnsError(false);
-    setCidrError(false);
-  }, [isSubmitting, activityLog, generateUniqueUsername]);
+  // UX-clear-removed: handleClear + Очистить кнопка удалены по фидбеку.
+  // clearAddDraft() всё ещё вызывается внутри handleAdd после успешного
+  // submit (sessionStorage cleanup) — это часть FIX-K flow и НЕ связана с
+  // кнопкой.
 
   // ── Edit/save handler ─────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
@@ -1199,11 +1198,12 @@ export function UserModal({
                 {passwordEditing
                   ? t("server.users.rotate_password_title")
                   : t("server.users.password_label")}
-                {passwordEditing && (
-                  <span aria-hidden="true" className="ml-1 text-[var(--color-status-error)]">
-                    *
-                  </span>
-                )}
+                {/* `*` всегда — чтобы не мигало при переключении
+                    readonly ↔ rotator. Username тоже всегда с `*`,
+                    визуальная симметрия сохранилась. */}
+                <span aria-hidden="true" className="ml-1 text-[var(--color-status-error)]">
+                  *
+                </span>
               </label>
               <div className="flex items-center gap-[var(--space-3)]">
                 <div className="flex-1 min-w-0">
@@ -1512,13 +1512,21 @@ export function UserModal({
             </div>
           </div>
 
-          {/* Skip verification toggle */}
+          {/* Skip verification toggle.
+              UX-le-disable: если сервер на Let's Encrypt — disable вместе с
+              Pin Certificate, т.к. system trust store и так валидирует chain
+              (DEEP_LINK.md §Security Considerations). Для self-signed /
+              provided / unknown — toggle остаётся активным. */}
           <Toggle
             checked={deeplink.skipVerification}
             onChange={(v) => updateDeeplink("skipVerification", v)}
             label={t("server.users.toggle_skip_verify")}
-            description={t("server.users.toggle_skip_verify_warning")}
-            disabled={isDisabled}
+            description={
+              serverCertType === "lets_encrypt"
+                ? t("server.users.toggle_le_not_needed")
+                : t("server.users.toggle_skip_verify_warning")
+            }
+            disabled={isDisabled || serverCertType === "lets_encrypt"}
           />
 
           {/* Certificate pinning (D-6).
@@ -1540,12 +1548,15 @@ export function UserModal({
               }}
               label={t("server.users.toggle_pin_cert")}
               description={
-                !deeplink.customSni.trim() || localCustomSniError
+                serverCertType === "lets_encrypt"
+                  ? t("server.users.toggle_le_not_needed")
+                  : !deeplink.customSni.trim() || localCustomSniError
                   ? t("server.users.toggle_pin_cert_needs_sni")
                   : undefined
               }
               disabled={
                 isDisabled ||
+                serverCertType === "lets_encrypt" ||
                 !deeplink.customSni.trim() ||
                 Boolean(localCustomSniError)
               }
@@ -1637,21 +1648,10 @@ export function UserModal({
       <div className="flex gap-[var(--space-3)] mt-[var(--space-5)]">
         {!(isEditMode && (configLoading || _forceConfigLoading)) && (
           <>
-            {/* FIX-K + UX-clear-layout: Clear button — only in Add mode,
-                rendered LEFT of Submit so the visual scan goes
-                "reset → commit → cancel" left-to-right. */}
-            {!isEditMode && (
-              <Button
-                type="button"
-                variant="ghost"
-                fullWidth
-                disabled={isDisabled}
-                onClick={handleClear}
-                data-testid="user-modal-clear"
-              >
-                {t("buttons.clear")}
-              </Button>
-            )}
+            {/* UX-clear-removed: «Очистить» убрана по фидбеку. Отмена
+                закрывает modal целиком, перегенерация креденшалов не
+                стоит отдельной кнопки. handleClear остался неиспользуемым
+                на случай будущей accordion-Advanced. */}
             <Button
               type="button"
               variant="primary"
