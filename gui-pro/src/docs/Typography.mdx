@@ -364,6 +364,7 @@ import { Meta, Typeset } from '@storybook/addon-docs/blocks';
 - ❌ **`style={{ fontSize: "var(--font-size-*)" }}`** — inline style. Используй Tailwind class.
 - ❌ **Ручная комбинация `text-lg font-semibold leading-snug`** — есть semantic class (`text-subtitle`, `text-title`).
 - ❌ **Bold (700) для обычного текста** — bold only для display/hero.
+- ❌ **`text-[Npx]` arbitrary values** — bypass scale. Используй canonical `text-xs/sm/base/lg/...` или semantic composites. В v1 codebase было 9/10/11/13px (violated min 12px или even-number). Все удалены в Plan 14.2-post-ship strict audit.
 
 ---
 

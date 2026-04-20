@@ -47,7 +47,7 @@ export function MtProtoSection({ state }: MtProtoSectionProps) {
             {t("server.utilities.mtproto.title")}
           </span>
         </div>
-        <span className="text-[10px] font-mono" style={{
+        <span className="text-xs font-mono" style={{
           color: state.installing
             ? "var(--color-text-muted)"
             : state.error
@@ -100,7 +100,7 @@ export function MtProtoSection({ state }: MtProtoSectionProps) {
             </div>
           )}
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono" style={{ color: "var(--color-text-muted)" }}>
+            <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
               {t("server.utilities.mtproto.port_display", { port: state.status?.port })}
             </span>
             <div className="flex items-center gap-1.5">

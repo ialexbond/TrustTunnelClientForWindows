@@ -26,7 +26,7 @@ export function UserQRModal({ qrUser, qrLink, qrLoading, onClose }: UserQRModalP
               <QRCodeSVG value={qrLink} size={200} bgColor="transparent" fgColor="currentColor" level="M" style={{ color: "var(--color-text-primary)", opacity: 0.85 }} />
             </div>
             <p className="text-xs font-medium mb-1" style={{ color: "var(--color-text-primary)" }}>{qrUser}</p>
-            <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t("server.export.scan_qr")}</p>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.export.scan_qr")}</p>
           </>
         ) : null}
         <button onClick={onClose} className="absolute top-3 right-3 p-1 rounded-full transition-opacity hover:opacity-70" style={{ color: "var(--color-text-muted)" }}>

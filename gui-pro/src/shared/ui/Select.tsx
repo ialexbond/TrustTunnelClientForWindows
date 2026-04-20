@@ -156,7 +156,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         </label>
       )}
       {description && (
-        <p className="text-[10px] mb-1.5" style={{ color: "var(--color-text-muted)" }}>
+        <p className="text-xs mb-1.5" style={{ color: "var(--color-text-muted)" }}>
           {description}
         </p>
       )}

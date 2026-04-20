@@ -47,12 +47,12 @@ export function ErrorStep(w: WizardState) {
 
         {hints.length > 0 && (
           <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "var(--color-warning-tint-05)", border: "1px solid var(--color-status-connecting-border)" }}>
-            <p className="text-[11px] font-medium flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
+            <p className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               {t('wizard.error.possible_cause')}
             </p>
             {hints.map((hint, i) => (
-              <p key={i} className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>{hint}</p>
+              <p key={i} className="text-xs leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>{hint}</p>
             ))}
           </div>
         )}
@@ -61,13 +61,13 @@ export function ErrorStep(w: WizardState) {
           <div>
             <button
               onClick={() => w.setShowLogs(!w.showLogs)}
-              className="flex items-center gap-1.5 text-[11px] transition-colors mx-auto" style={{ color: "var(--color-text-muted)" }}
+              className="flex items-center gap-1.5 text-xs transition-colors mx-auto" style={{ color: "var(--color-text-muted)" }}
             >
               {w.showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               {w.showLogs ? t('wizard.error.hide_logs') : t('wizard.error.show_logs')}
             </button>
             {w.showLogs && (
-              <div className="mt-1.5 glass-card p-2.5 max-h-36 overflow-y-auto font-mono text-[10px] space-y-0.5 text-left select-text cursor-text relative group">
+              <div className="mt-1.5 glass-card p-2.5 max-h-36 overflow-y-auto font-mono text-xs space-y-0.5 text-left select-text cursor-text relative group">
                 <button
                   onClick={w.copyLogsToClipboard}
                   className="absolute top-1.5 right-1.5 p-1 rounded-lg hover:opacity-80 transition-colors opacity-0 group-hover:opacity-100" style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}

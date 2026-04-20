@@ -151,11 +151,11 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
                   : "var(--color-danger-500)",
               }}
             />
-            <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
               GeoIP
             </span>
             {status.geoip_categories_count > 0 && (
-              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+              <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 ({status.geoip_categories_count})
               </span>
             )}
@@ -169,11 +169,11 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
                   : "var(--color-danger-500)",
               }}
             />
-            <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
               GeoSite
             </span>
             {status.geosite_categories_count > 0 && (
-              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+              <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 ({status.geosite_categories_count})
               </span>
             )}
@@ -181,7 +181,7 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
 
           {/* Current version tag */}
           {status.release_tag && (
-            <span className="text-[10px] ml-auto" style={{ color: "var(--color-text-muted)" }}>
+            <span className="text-xs ml-auto" style={{ color: "var(--color-text-muted)" }}>
               v{formatTag(status.release_tag)}
             </span>
           )}
@@ -203,7 +203,7 @@ export function GeoDataStatusCard({ status, downloading, onDownload }: GeoDataSt
               }}
             />
           </div>
-          <p className="text-[10px] mt-1" style={{ color: "var(--color-text-muted)" }}>
+          <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
             {translateStep(progress.step)}
           </p>
         </div>

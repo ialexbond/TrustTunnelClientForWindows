@@ -47,7 +47,7 @@ export const badgeVariants = cva(
         ].join(" "),
       },
       size: {
-        sm: "text-[10px] px-1.5 py-0",
+        sm: "text-xs px-1.5 py-0",
         md: "text-xs px-2 py-0.5",
       },
     },

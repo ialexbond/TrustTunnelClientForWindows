@@ -22,7 +22,7 @@ export function ConnectionSection({ state }: Props) {
 
       {/* Config file path */}
       <div className="mb-2">
-        <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+        <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
           {t("labels.config_file")}
         </label>
         <div className="flex items-center gap-1.5">
@@ -65,7 +65,7 @@ export function ConnectionSection({ state }: Props) {
       {config && (
         <div className="grid grid-cols-3 gap-1.5">
           <div>
-            <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
               {t("labels.host")}
             </label>
             <Input
@@ -76,7 +76,7 @@ export function ConnectionSection({ state }: Props) {
             />
           </div>
           <div>
-            <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
               {t("labels.username")}
             </label>
             <Input
@@ -87,7 +87,7 @@ export function ConnectionSection({ state }: Props) {
             />
           </div>
           <div>
-            <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
               {t("labels.password")}
             </label>
             <PasswordInput

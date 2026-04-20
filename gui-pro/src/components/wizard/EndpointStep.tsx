@@ -26,13 +26,13 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── VPN Credentials ── */}
           <div className="glass-card p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <User className="w-3 h-3" />
               {t('wizard.endpoint.vpn_credentials')}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.login_label')}</label>
+                <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.login_label')}</label>
                 <input
                   type="text"
                   value={w.vpnUsername}
@@ -43,7 +43,7 @@ export function EndpointStep(w: WizardState) {
                 />
               </div>
               <div>
-                <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.password_label')}</label>
+                <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.password_label')}</label>
                 <div className="relative">
                   <input
                     type={w.showVpnPassword ? "text" : "password"}
@@ -66,7 +66,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── TLS Certificate ── */}
           <div className="glass-card p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <Lock className="w-3 h-3" />
               {t('wizard.endpoint.tls_certificate')}
             </div>
@@ -85,7 +85,7 @@ export function EndpointStep(w: WizardState) {
                   <CheckCircle2 className="w-3 h-3" style={{ color: "var(--color-success-500)" }} />
                   Let's Encrypt
                 </div>
-                <div className="text-[9px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>{t('labels.recommended')}</div>
+                <div className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>{t('labels.recommended')}</div>
               </button>
 
               {/* Self-signed */}
@@ -99,7 +99,7 @@ export function EndpointStep(w: WizardState) {
                 }
               >
                 <div className="font-medium">{t('wizard.endpoint.self_signed')}</div>
-                <div className="text-[9px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.self_signed_quick')}</div>
+                <div className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.self_signed_quick')}</div>
               </button>
 
               {/* Provided / Custom */}
@@ -116,7 +116,7 @@ export function EndpointStep(w: WizardState) {
                   <FileKey className="w-3 h-3" />
                   {t('wizard.endpoint.provided_cert')}
                 </div>
-                <div className="text-[9px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.provided_cert_hint')}</div>
+                <div className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.provided_cert_hint')}</div>
               </button>
             </div>
 
@@ -124,7 +124,7 @@ export function EndpointStep(w: WizardState) {
             {w.certType === "selfsigned" && (
               <div className="flex items-start gap-2 p-2 rounded-lg" style={{ backgroundColor: "var(--color-status-connecting-bg)", border: "1px solid var(--color-status-connecting-border)" }}>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
-                <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-warning-500)" }}>
+                <p className="text-xs leading-relaxed" style={{ color: "var(--color-warning-500)" }}>
                   {t('wizard.endpoint.self_signed_warning')}
                 </p>
               </div>
@@ -134,7 +134,7 @@ export function EndpointStep(w: WizardState) {
             {w.certType === "letsencrypt" && (
               <div className="space-y-2">
                 <div>
-                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('labels.domain_name')}</label>
+                  <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('labels.domain_name')}</label>
                   <div className="relative">
                     <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                     <input
@@ -145,14 +145,14 @@ export function EndpointStep(w: WizardState) {
                       className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
-                  <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                     {w.host
                       ? t('wizard.endpoint.dns_record_help', { host: w.host })
                       : t('wizard.endpoint.dns_record_help_no_host')}
                   </p>
                 </div>
                 <div>
-                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.email_label')}</label>
+                  <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.email_label')}</label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                     <input
@@ -163,7 +163,7 @@ export function EndpointStep(w: WizardState) {
                       className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
-                  <p className="text-[10px] mt-0.5" style={{ color: w.email.trim() && !w.isValidEmail(w.email) ? "var(--color-danger-500)" : "var(--color-text-muted)" }}>
+                  <p className="text-xs mt-0.5" style={{ color: w.email.trim() && !w.isValidEmail(w.email) ? "var(--color-danger-500)" : "var(--color-text-muted)" }}>
                     {w.email.trim() && !w.isValidEmail(w.email) ? t('wizard.endpoint.email_invalid') : t('wizard.endpoint.certificate_email_help')}
                   </p>
                 </div>
@@ -174,7 +174,7 @@ export function EndpointStep(w: WizardState) {
             {w.certType === "provided" && (
               <div className="space-y-2">
                 <div>
-                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.cert_chain_path')}</label>
+                  <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.cert_chain_path')}</label>
                   <div className="relative">
                     <Upload className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                     <input
@@ -185,12 +185,12 @@ export function EndpointStep(w: WizardState) {
                       className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
-                  <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                     {t('wizard.endpoint.cert_chain_path_help')}
                   </p>
                 </div>
                 <div>
-                  <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.cert_key_path')}</label>
+                  <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.cert_key_path')}</label>
                   <div className="relative">
                     <FileKey className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                     <input
@@ -201,7 +201,7 @@ export function EndpointStep(w: WizardState) {
                       className="wizard-input wizard-input-sm pl-9"
                     />
                   </div>
-                  <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                     {t('wizard.endpoint.cert_key_path_help')}
                   </p>
                 </div>
@@ -211,7 +211,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── Server Features ── */}
           <div className="glass-card p-3 space-y-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <Activity className="w-3 h-3" />
               {t('wizard.endpoint.server_features')}
             </div>
@@ -221,7 +221,7 @@ export function EndpointStep(w: WizardState) {
                   <Activity className="w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                   <div>
                     <p className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{t('wizard.endpoint.feature_ping')}</p>
-                    <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_ping_desc')}</p>
+                    <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_ping_desc')}</p>
                   </div>
                 </div>
                 <Toggle checked={w.pingEnable} onChange={w.setPingEnable} label="" />
@@ -231,7 +231,7 @@ export function EndpointStep(w: WizardState) {
                   <Gauge className="w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                   <div>
                     <p className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{t('wizard.endpoint.feature_speedtest')}</p>
-                    <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_speedtest_desc')}</p>
+                    <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_speedtest_desc')}</p>
                   </div>
                 </div>
                 <Toggle checked={w.speedtestEnable} onChange={w.setSpeedtestEnable} label="" />
@@ -241,7 +241,7 @@ export function EndpointStep(w: WizardState) {
                   <Wifi className="w-3.5 h-3.5" style={{ color: "var(--color-text-muted)" }} />
                   <div>
                     <p className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{t('wizard.endpoint.feature_ipv6')}</p>
-                    <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_ipv6_desc')}</p>
+                    <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.feature_ipv6_desc')}</p>
                   </div>
                 </div>
                 <Toggle checked={w.ipv6Available} onChange={w.setIpv6Available} label="" />
@@ -252,14 +252,14 @@ export function EndpointStep(w: WizardState) {
           {/* ── Advanced settings ── */}
           <button
             onClick={() => w.setShowAdvanced(!w.showAdvanced)}
-            className="flex items-center gap-1.5 text-[11px] transition-colors" style={{ color: "var(--color-text-muted)" }}
+            className="flex items-center gap-1.5 text-xs transition-colors" style={{ color: "var(--color-text-muted)" }}
           >
             {w.showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             {t('wizard.endpoint.advanced_settings')}
           </button>
           {w.showAdvanced && (
             <div className="glass-card p-3">
-              <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.listen_address_label')}</label>
+              <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>{t('wizard.endpoint.listen_address_label')}</label>
               <input
                 type="text"
                 value={w.listenAddress}
@@ -267,7 +267,7 @@ export function EndpointStep(w: WizardState) {
                 placeholder="0.0.0.0:443"
                 className="wizard-input wizard-input-sm"
               />
-              <p className="text-[10px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+              <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>
                 {t('wizard.endpoint.listen_address_help')}
               </p>
             </div>
@@ -277,7 +277,7 @@ export function EndpointStep(w: WizardState) {
           {w.certType === "letsencrypt" && w.domain.trim() && (
             <div className="flex items-start gap-2.5 p-3 rounded-xl" style={{ backgroundColor: "var(--color-warning-tint-08)", border: "1px solid var(--color-warning-tint-20)" }}>
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
-              <div className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
+              <div className="text-xs leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
                 <span className="font-semibold" style={{ color: "var(--color-warning-500)" }}>{t('wizard.endpoint.dns_warning_important')}</span>{' '}
                 {w.host
                   ? t('wizard.endpoint.dns_warning_text', { domain: w.domain, host: w.host })

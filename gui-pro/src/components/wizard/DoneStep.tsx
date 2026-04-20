@@ -25,7 +25,7 @@ export function DoneStep(w: WizardState) {
 
         {w.configPath && (
           <div className="glass-card p-3 text-left">
-            <p className="text-[11px] mb-0.5" style={{ color: "var(--color-text-muted)" }}>{t('wizard.done.config_file_label')}</p>
+            <p className="text-xs mb-0.5" style={{ color: "var(--color-text-muted)" }}>{t('wizard.done.config_file_label')}</p>
             <p className="text-xs font-mono break-all" style={{ color: "var(--color-text-primary)" }}>{w.configPath}</p>
           </div>
         )}

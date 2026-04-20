@@ -115,7 +115,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
         </p>
         {w.checkError && (
           <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-            <p className="text-[10px] leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
+            <p className="text-xs leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
               {translateSshError(w.checkError, t)}
             </p>
           </div>
@@ -237,7 +237,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
         {/* ── Users (same layout as UsersSection in dashboard) ── */}
         {users.length > 0 && (
           <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-            <p className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
+            <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
               <User className="w-3.5 h-3.5" />
               {t('wizard.found.added_users')}
             </p>
@@ -358,7 +358,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
             {t('wizard.found.connection_error_help')}
           </p>
           <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-            <p className="text-[10px] leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
+            <p className="text-xs leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
               {translateSshError(w.checkError, t)}
             </p>
           </div>

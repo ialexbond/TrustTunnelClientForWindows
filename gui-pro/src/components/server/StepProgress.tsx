@@ -50,7 +50,7 @@ export function StepProgress({ steps, currentStep, status }: StepProgressProps) 
               <div className="flex items-center justify-center w-5 h-5">
                 {icon}
               </div>
-              <span className="text-[10px] text-center leading-tight" style={{ color: labelColor }}>
+              <span className="text-xs text-center leading-tight" style={{ color: labelColor }}>
                 {step.label}
               </span>
             </div>

@@ -152,7 +152,7 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
               </button>
             )}
             <span
-              className="text-[10px] px-1.5 py-0.5 rounded-full"
+              className="text-xs px-1.5 py-0.5 rounded-full"
               style={{
                 backgroundColor: "var(--color-bg-hover)",
                 color: "var(--color-text-muted)",
