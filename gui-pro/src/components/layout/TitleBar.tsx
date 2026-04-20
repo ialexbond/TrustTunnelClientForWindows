@@ -43,7 +43,7 @@ export function TitleBar({ children }: TitleBarProps) {
           className="only-light shrink-0 pointer-events-none"
         />
         <span
-          className="text-[13px] font-semibold"
+          className="text-sm font-semibold"
           style={{
             letterSpacing: "-0.01em",
             fontFamily: "var(--font-family-display)",
@@ -56,9 +56,8 @@ export function TitleBar({ children }: TitleBarProps) {
           // PRO badge — тот же stylistic pattern что и AboutPanel:
           // accent-tint-10 фон + accent-interactive текст + rounded-sm +
           // font-bold. Масштаб подогнан под 32px TitleBar height:
-          // text-[9px] вместо [11px], padding pt-[3px]/pb-[2px] вместо
-          // pt-[4px]/pb-[3px].
-          className="text-[9px] font-bold px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
+          // text-xs (12px, strict compliance) + padding pt-[3px]/pb-[2px].
+          className="text-xs font-bold px-1.5 pt-[3px] pb-[2px] rounded-[var(--radius-sm)] leading-none"
           style={{
             backgroundColor: "var(--color-accent-tint-10)",
             color: "var(--color-accent-interactive)",

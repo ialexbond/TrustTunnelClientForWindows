@@ -133,16 +133,16 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
         >
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: "var(--color-text-muted)" }} />
           <div className="space-y-0.5">
-            <p className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+            <p className="text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
               {t('wizard.welcome.requirements_header')}
             </p>
-            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
               {t('wizard.welcome.requirement_linux')}
             </p>
-            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
               {t('wizard.welcome.requirement_resources')}
             </p>
-            <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
               {t('wizard.welcome.requirement_root_domain')}
             </p>
           </div>

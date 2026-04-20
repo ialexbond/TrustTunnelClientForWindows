@@ -64,7 +64,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
       >
         <GitBranch className="w-8 h-8" />
         <p className="text-xs">{t("routing.no_config_selected")}</p>
-        <p className="text-[10px]">{t("routing.configure_in_settings")}</p>
+        <p className="text-xs">{t("routing.configure_in_settings")}</p>
       </div>
     );
   }
@@ -124,7 +124,7 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
               {t("vpn_modes.selective")}
             </Button>
           </div>
-          <p className="text-[9px] mt-1" style={{ color: "var(--color-text-muted)" }}>
+          <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
             {vpnMode === "general" ? t("help_text.vpn_mode_general") : t("help_text.vpn_mode_selective")}
           </p>
 

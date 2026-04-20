@@ -62,12 +62,12 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
           </div>
         )}
       </div>
-      <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+      <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
         {t("server.security.firewall.desc")}
       </p>
 
       {!status.installed && (
-        <div className="rounded-[var(--radius-md)] p-2 text-[10px]" style={{ backgroundColor: "var(--color-bg-hover)" }}>
+        <div className="rounded-[var(--radius-md)] p-2 text-xs" style={{ backgroundColor: "var(--color-bg-hover)" }}>
           <div className="flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
             <AlertTriangle className="w-3 h-3" />
             <span>{t("server.security.firewall.warn_lockout", { port: status.current_ssh_port })}</span>
@@ -79,7 +79,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
         const port80Open = status.rules.some(r => r.to === "80/tcp" || r.to === "80");
         return (
         <>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
             <Stat label={t("server.security.firewall.default_in")} value={status.default_in} />
             <Stat label={t("server.security.firewall.default_out")} value={status.default_out} />
             <Stat label={t("server.security.firewall.current_ssh")} value={String(status.current_ssh_port)} />
@@ -92,7 +92,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
               <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>
                 {t("server.security.firewall.http_mode_title")}
               </span>
-              <span className="text-[10px] block" style={{ color: "var(--color-text-muted)", marginTop: "1px" }}>
+              <span className="text-xs block" style={{ color: "var(--color-text-muted)", marginTop: "1px" }}>
                 {port80Open ? t("server.security.firewall.http_mode_always") : t("server.security.firewall.http_mode_renewal")}
               </span>
             </div>
@@ -136,7 +136,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
           {/* Rules table */}
           <div className="mt-2">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] font-medium" style={{ color: "var(--color-text-secondary)" }}>
+              <span className="text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
                 {t("server.security.firewall.rules")} ({status.rules.length})
               </span>
               <Button variant="ghost" size="sm" icon={<Plus className="w-3 h-3" />} onClick={() => state.setShowAddRule(true)}>
@@ -144,13 +144,13 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
               </Button>
             </div>
             {status.rules.length === 0 ? (
-              <div className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t("server.security.firewall.no_rules")}</div>
+              <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.security.firewall.no_rules")}</div>
             ) : (
               <div className="space-y-0.5">
                 {status.rules.map(r => (
                   <div
                     key={r.number}
-                    className="grid items-center gap-1.5 px-2 py-1 text-[10px] rounded-[var(--radius-sm)]"
+                    className="grid items-center gap-1.5 px-2 py-1 text-xs rounded-[var(--radius-sm)]"
                     style={{
                       backgroundColor: "var(--color-bg-hover)",
                       gridTemplateColumns: "16px 72px 72px 80px minmax(0,1fr) 20px",
@@ -227,7 +227,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
             />
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <div className="text-[10px] mb-0.5" style={{ color: "var(--color-text-muted)" }}>{t("server.security.firewall.proto_label")}</div>
+                <div className="text-xs mb-0.5" style={{ color: "var(--color-text-muted)" }}>{t("server.security.firewall.proto_label")}</div>
                 <Select
                   value={state.newRule.proto}
                   onChange={(e) => state.setNewRule({ ...state.newRule, proto: e.target.value })}
@@ -239,7 +239,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                 />
               </div>
               <div>
-                <div className="text-[10px] mb-0.5" style={{ color: "var(--color-text-muted)" }}>{t("server.security.firewall.action_label")}</div>
+                <div className="text-xs mb-0.5" style={{ color: "var(--color-text-muted)" }}>{t("server.security.firewall.action_label")}</div>
                 <Select
                   value={state.newRule.action}
                   onChange={(e) => state.setNewRule({ ...state.newRule, action: e.target.value })}

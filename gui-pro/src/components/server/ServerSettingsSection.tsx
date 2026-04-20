@@ -202,7 +202,7 @@ export function ServerSettingsSection({ state }: Props) {
                       vpn.toml
                     </span>
                     <pre
-                      className="p-3 rounded-[var(--radius-md)] text-[10px] leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono"
+                      className="p-3 rounded-[var(--radius-md)] text-xs leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono"
                       style={{
                         backgroundColor: "var(--color-bg-primary)",
                         border: "1px solid var(--color-border)",

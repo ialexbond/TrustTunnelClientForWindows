@@ -212,7 +212,7 @@ export function ServerStatsCard({ onNavigateToControl }: ServerStatsCardProps) {
         action={
           <div className="flex items-center gap-2">
             {stats.uptime_seconds > 0 && (
-              <span className="text-[10px] flex items-center gap-1 font-mono" style={{ color: "var(--color-text-muted)" }}>
+              <span className="text-xs flex items-center gap-1 font-mono" style={{ color: "var(--color-text-muted)" }}>
                 <Clock className="w-3 h-3" />
                 {formatServerUptime(stats.uptime_seconds)}
               </span>

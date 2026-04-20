@@ -49,7 +49,7 @@ export function StepBar({ step, isFetchMode }: StepBarProps) {
       {stepNumbers.map((s, i) => (
         <div key={s.key} className="flex items-center gap-2">
           <div
-            className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors"
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors"
             style={
               i < currentIdx
                 ? { backgroundColor: "var(--color-status-connected-bg)", color: "var(--color-success-500)" }
@@ -61,7 +61,7 @@ export function StepBar({ step, isFetchMode }: StepBarProps) {
             {i < currentIdx ? "\u2713" : i + 1}
           </div>
           <span
-            className="text-[11px]"
+            className="text-xs"
             style={{ color: i === currentIdx ? "var(--color-text-primary)" : "var(--color-text-muted)" }}
           >
             {s.label}

@@ -179,7 +179,7 @@ export function ProcessPickerModal({
                       </span>
                       {proc.path && (
                         <span
-                          className="text-[10px] block truncate"
+                          className="text-xs block truncate"
                           style={{ color: "var(--color-text-muted)" }}
                         >
                           {proc.path}
@@ -189,7 +189,7 @@ export function ProcessPickerModal({
 
                     {isAdded && (
                       <span
-                        className="text-[10px] shrink-0 px-1.5 py-0.5 rounded"
+                        className="text-xs shrink-0 px-1.5 py-0.5 rounded"
                         style={{
                           color: "var(--color-text-muted)",
                           backgroundColor: "var(--color-bg-hover)",

@@ -221,7 +221,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
                   </Button>
                 </div>
                 {keyPath && (
-                  <p className="text-[10px] mt-1 truncate text-[var(--color-text-muted)]">
+                  <p className="text-xs mt-1 truncate text-[var(--color-text-muted)]">
                     {keyPath}
                   </p>
                 )}

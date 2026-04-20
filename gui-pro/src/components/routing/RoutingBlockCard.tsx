@@ -107,7 +107,7 @@ export function RoutingBlockCard({
         <div className="px-3 pb-3">
           {/* Description */}
           <p
-            className="text-[10px] px-1 mb-2"
+            className="text-xs px-1 mb-2"
             style={{ color: "var(--color-text-muted)" }}
           >
             {t(config.descriptionKey)}
@@ -116,7 +116,7 @@ export function RoutingBlockCard({
           {/* Redundant mode hint */}
           {isRedundant && (
             <div
-              className="flex items-center gap-1.5 px-2 py-1.5 mb-2 rounded text-[10px]"
+              className="flex items-center gap-1.5 px-2 py-1.5 mb-2 rounded text-xs"
               style={{
                 backgroundColor: "var(--color-bg-hover)",
                 color: "var(--color-text-muted)",
@@ -141,7 +141,7 @@ export function RoutingBlockCard({
             </div>
           ) : (
             <div className="flex items-center justify-center py-4">
-              <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
+              <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 {t("routing.noEntries")}
               </span>
             </div>

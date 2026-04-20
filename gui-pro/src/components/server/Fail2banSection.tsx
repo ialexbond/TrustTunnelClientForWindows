@@ -53,7 +53,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
           </div>
         )}
       </div>
-      <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+      <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
         {t("server.security.fail2ban.desc")}
       </p>
 
@@ -69,8 +69,8 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
                   className="w-full flex items-center justify-between px-3 py-1.5 text-left"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono font-medium" style={{ color: "var(--color-text-primary)" }}>{jail.name}</span>
-                    <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+                    <span className="text-xs font-mono font-medium" style={{ color: "var(--color-text-primary)" }}>{jail.name}</span>
+                    <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                       {t("server.security.fail2ban.currently_banned")}: <b style={{ color: jail.currently_banned > 0 ? "var(--color-warning-500)" : "var(--color-text-primary)" }}>{jail.currently_banned}</b>
                       {" · "}
                       {t("server.security.fail2ban.total_banned")}: {jail.total_banned}
@@ -82,15 +82,15 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
                   <div className="px-3 pb-3 space-y-2 border-t" style={{ borderColor: "var(--color-border)" }}>
                     {/* Banned IPs */}
                     <div>
-                      <div className="text-[10px] font-medium mt-2 mb-1" style={{ color: "var(--color-text-secondary)" }}>
+                      <div className="text-xs font-medium mt-2 mb-1" style={{ color: "var(--color-text-secondary)" }}>
                         {t("server.security.fail2ban.banned_ips")}
                       </div>
                       {jail.banned_ips.length === 0 ? (
-                        <div className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{t("server.security.fail2ban.no_banned")}</div>
+                        <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("server.security.fail2ban.no_banned")}</div>
                       ) : (
                         <div className="space-y-1">
                           {jail.banned_ips.map(ip => (
-                            <div key={ip} className="flex items-center justify-between text-[11px]">
+                            <div key={ip} className="flex items-center justify-between text-xs">
                               <code className="font-mono" style={{ color: "var(--color-text-primary)" }}>{ip}</code>
                               <Button variant="ghost" size="sm" onClick={() => state.unbanIp(jail.name, ip)} loading={state.isBusy(`unban-${ip}`)} disabled={state.isBusy(`unban-${ip}`)}>
                                 {t("server.security.fail2ban.unban")}
@@ -104,7 +104,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
                           value={state.manualBanIp}
                           onChange={(e) => state.setManualBanIp(e.target.value)}
                           placeholder={t("server.security.fail2ban.ban_ip_placeholder")}
-                          className="text-[11px]"
+                          className="text-xs"
                         />
                         <Button
                           variant="ghost" size="sm"

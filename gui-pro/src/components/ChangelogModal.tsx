@@ -126,7 +126,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
                 if (isBlock) {
                   return (
                     <pre
-                      className="text-[11px] font-mono p-3 rounded-lg overflow-x-auto mb-2"
+                      className="text-xs font-mono p-3 rounded-lg overflow-x-auto mb-2"
                       style={{
                         backgroundColor: "var(--color-bg-elevated)",
                         color: "var(--color-text-primary)",
@@ -138,7 +138,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
                 }
                 return (
                   <code
-                    className="text-[11px] font-mono px-1 py-0.5 rounded"
+                    className="text-xs font-mono px-1 py-0.5 rounded"
                     style={{
                       backgroundColor: "var(--color-bg-hover)",
                       color: "var(--color-text-primary)",

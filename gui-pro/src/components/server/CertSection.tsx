@@ -142,13 +142,13 @@ export function CertSection({ state }: Props) {
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.type")}</span>
+          <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.type")}</span>
           {certTypeBadge(certInfo.certType)}
         </div>
 
         {certInfo.domain && (
           <div className="flex items-center justify-between">
-            <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.domain")}</span>
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.domain")}</span>
             <Badge
               variant={certInfo.certType === "lets_encrypt" ? "success" : certInfo.certType === "self_signed" ? "warning" : "neutral"}
               size="sm"
@@ -160,7 +160,7 @@ export function CertSection({ state }: Props) {
 
         {certInfo.notAfter && (
           <div className="flex items-center justify-between">
-            <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.expires")}</span>
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.expires")}</span>
             <div className="flex items-center gap-2">
               {daysLeft !== null && (
                 <Badge
@@ -175,7 +175,7 @@ export function CertSection({ state }: Props) {
         )}
 
         <div className="flex items-center justify-between">
-          <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.auto_renew")}</span>
+          <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.auto_renew")}</span>
           <Badge variant={certInfo.autoRenew ? "success" : "neutral"} size="sm">
             {certInfo.autoRenew ? t("server.cert.configured") : t("server.cert.not_configured")}
           </Badge>

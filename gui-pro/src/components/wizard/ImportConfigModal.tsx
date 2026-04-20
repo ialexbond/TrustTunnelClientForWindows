@@ -148,7 +148,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
             </div>
             <div>
               <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{t("wizard.import.from_file")}</p>
-              <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>{t("wizard.import.from_file_desc")}</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("wizard.import.from_file_desc")}</p>
             </div>
           </button>
 
@@ -166,7 +166,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
               </div>
               <div>
                 <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{t("wizard.import.from_link")}</p>
-                <p className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>{t("wizard.import.from_link_desc")}</p>
+                <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("wizard.import.from_link_desc")}</p>
               </div>
             </button>
 

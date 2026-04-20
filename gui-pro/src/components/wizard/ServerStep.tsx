@@ -129,7 +129,7 @@ export function ServerStep(w: WizardState) {
                 {/* File / Paste toggle */}
                 <div className="flex gap-1">
                   <button
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors"
                     style={{
                       backgroundColor: keyInputMode === "file" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
                       color: keyInputMode === "file" ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
@@ -140,7 +140,7 @@ export function ServerStep(w: WizardState) {
                     {t("control.key_from_file", "File")}
                   </button>
                   <button
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors"
                     style={{
                       backgroundColor: keyInputMode === "paste" ? "var(--color-accent-500)" : "var(--color-bg-elevated)",
                       color: keyInputMode === "paste" ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
@@ -174,7 +174,7 @@ export function ServerStep(w: WizardState) {
                       </Button>
                     </div>
                     {w.sshKeyPath && (
-                      <p className="text-[10px] mt-1 truncate" style={{ color: "var(--color-text-muted)" }}>
+                      <p className="text-xs mt-1 truncate" style={{ color: "var(--color-text-muted)" }}>
                         {w.sshKeyPath}
                       </p>
                     )}
@@ -219,7 +219,7 @@ export function ServerStep(w: WizardState) {
             {/* Security note */}
             <div className="flex items-center justify-center gap-1.5">
               <Lock className="w-3 h-3" style={{ color: "var(--color-text-muted)" }} />
-              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+              <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 {t("control.remember")}
               </span>
             </div>

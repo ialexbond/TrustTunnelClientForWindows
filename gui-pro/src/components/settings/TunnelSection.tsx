@@ -29,7 +29,7 @@ export function TunnelSection({ state }: Props) {
 
       {/* Listener Mode: TUN vs SOCKS5 */}
       <div className="mb-3">
-        <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+        <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
           {t("settings.tunnel.listenerMode")}
         </label>
         <div className="grid grid-cols-2 gap-1.5">
@@ -71,7 +71,7 @@ export function TunnelSection({ state }: Props) {
       {listenerMode === "socks" && (
         <div className="mb-3 space-y-2">
           <div>
-            <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
               {t("settings.tunnel.socksAddress")}
             </label>
             <Input
@@ -97,7 +97,7 @@ export function TunnelSection({ state }: Props) {
               placeholder={t("settings.tunnel.socks_password_placeholder")}
             />
           </div>
-          <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
             {t("settings.tunnel.socks_auth_hint")}
           </p>
         </div>
@@ -107,7 +107,7 @@ export function TunnelSection({ state }: Props) {
       <div className="grid grid-cols-2 gap-3">
         {/* Protocol */}
         <div>
-          <label className="block text-[10px] font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+          <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
             {t("labels.protocol")}
           </label>
           <div className="grid grid-cols-2 gap-1.5">
@@ -127,7 +127,7 @@ export function TunnelSection({ state }: Props) {
         {/* MTU — buttons embedded inside input */}
         <div>
           <div className="flex items-center gap-1 mb-1">
-            <label className="text-[10px] font-medium" style={{ color: "var(--color-text-secondary)" }}>
+            <label className="text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
               {t("labels.mtu")}
             </label>
             <Tooltip text={t("tooltips.mtu")}>

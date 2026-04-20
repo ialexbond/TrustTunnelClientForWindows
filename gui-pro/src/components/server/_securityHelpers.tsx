@@ -18,7 +18,7 @@ export function StatusBadge({ state, label }: { state: "on" | "off" | "warn"; la
     off: { color: "var(--color-text-muted)", bg: "var(--color-bg-hover)", icon: <XCircle className="w-3 h-3" /> },
   }[state];
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-medium" style={{ color: map.color, backgroundColor: map.bg }}>
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-sm)] text-xs font-medium" style={{ color: map.color, backgroundColor: map.bg }}>
       {map.icon}{label}
     </span>
   );
@@ -72,7 +72,7 @@ export function LogArea({ content, loading: isLoading, pushSuccess }: {
             </button>
           )}
           <pre
-            className="p-2 pr-7 text-[10px] font-mono max-h-48 whitespace-pre-wrap scroll-overlay"
+            className="p-2 pr-7 text-xs font-mono max-h-48 whitespace-pre-wrap scroll-overlay"
             style={{ color: "var(--color-text-muted)", overflowY: "auto" }}
           >
             {content || "\u2014"}
@@ -95,10 +95,10 @@ export function LabeledInput({ label, value, onChange, placeholder, inputMode, m
   return (
     <div>
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{label}</span>
+        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{label}</span>
         {maxLength != null && (
           <span
-            className="text-[9px] tabular-nums"
+            className="text-xs tabular-nums"
             style={{ color: charCount! > maxLength ? "var(--color-danger-500)" : "var(--color-text-muted)" }}
           >
             {charCount}/{maxLength}
@@ -110,7 +110,7 @@ export function LabeledInput({ label, value, onChange, placeholder, inputMode, m
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         inputMode={inputMode}
-        className="text-[11px]"
+        className="text-xs"
       />
     </div>
   );
