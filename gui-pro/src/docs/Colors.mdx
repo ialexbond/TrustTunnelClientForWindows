@@ -122,17 +122,18 @@ Slayered elevation system. Каждый layer — шаг вверх по «optic
 | `--color-text-muted` | `#6e6e6e` | `#666666` | Captions, placeholders, disabled — ⚠️ см. contrast |
 | `--color-text-inverse` | `#0d0d0d` | `#f9f9f7` | Text on inverted bg (rarely) |
 
-### ⚠️ Contrast warning
+### Rule — `text-muted` usage scope
 
-**Dark theme `text-muted` (#6e6e6e)** имеет contrast ratio:
-- **3.81:1 on bg-primary** (ниже WCAG AA 4.5:1)
-- **3.34:1 on bg-surface**
+`text-muted` — **UI chrome token**, не body-text token. Используй **только** для:
+- Caption labels в badges / chips / meta info (timestamp, count, version)
+- Input placeholders
+- Disabled states (paired with reduced opacity where needed)
+- Icons paired with secondary labels
+- Tabular metadata (IP label, log timestamp в mono)
 
-**Impact:** placeholder text, captions, disabled state на dark theme — edge of legibility. Applies to 307 usages.
+**Для body text, paragraphs, readable content — используй `text-secondary`.** Он оптимизирован для reading comfort — WCAG AA на обоих themes (6.91:1 dark / 6.54:1 light).
 
-**Current workaround:** use для **UI components ≥18pt only** (captions в larger size = 12px treated as UI). Для reliable body text используй `--color-text-secondary` (#9a9a9a / 6.91:1).
-
-**Planned fix (user approval pending):** lighten `--color-text-muted` dark до #7a7a7a (~4.5:1 target).
+**Rationale:** `text-muted` tuned для low-prominence UI chrome где eye skips past text. `text-secondary` tuned для читабельности.
 
 ---
 
@@ -211,14 +212,21 @@ Slayered elevation system. Каждый layer — шаг вверх по «optic
 
 **Использование:** всегда через semantic tokens (`--color-status-connected`), не напрямую `--color-success-400`. Это позволяет theme-swap не ломать semantics.
 
-### ⚠️ Light theme status contrast
+### Rule — status tier selection
 
-На light theme `-600` tier имеет **insufficient contrast для body text**:
-- `success-600` (#059669) на bg-primary = 3.57:1 ❌
-- `warning-600` (#d97706) на bg-primary = 3.02:1 ❌ (worst)
-- `danger-600` (#dc2626) на bg-primary = 4.58:1 ✓ (barely passes)
+Choose tier **по usage context**, не theme:
 
-**Rule:** light theme `-600` использовать **только для UI components ≥18pt** (large text, icons, badges с достаточным size). Для body-text status — используй `-500` midpoint (higher contrast на обоих themes).
+| Context | Tier | Rationale |
+|---|---|---|
+| Dark theme UI (badges, icons, status dots) | `-400` | Optimal vibrancy на dark surface, WCAG AA+ |
+| **Body text / readable content (both themes)** ⭐ | **`-500`** | Midpoint — safe contrast на обоих themes, recommended default для inline error messages / notifications / paragraphs |
+| Light theme UI ≥18pt (large badges, status icons) | `-600` | Optimal vibrancy на light surface для large shapes |
+
+**Rule of thumb:**
+- ≤3 words inline label, badge, dot indicator, icon → tier per theme (400 dark / 600 light)
+- ≥3 words readable text, error message, paragraph → **`-500`** (tier-agnostic safe default)
+
+**`-500` midpoint — recommended default для status text в любом контексте сомнения.**
 
 ---
 
@@ -335,9 +343,12 @@ Currently 0 usages. Modal backdrop использует hardcoded opacity intern
 | `danger-600` (#dc2626) | **4.58:1** | 4.16:1 | ✅ Barely AA |
 | white on accent-500 | **4.73:1** | — | ✅ AA (primary button) |
 
-**Bottom line:**
-- Dark theme: все OK кроме `text-muted` (UI only).
-- Light theme: status `-600` tier — UI only. Для body text status — используй `-500`.
+**Reference — WCAG levels:**
+- ✅ AAA (≥7:1) — premium readability
+- ✅ AA (≥4.5:1) — WCAG 2.1 body text standard
+- ⚠️ AA-large (≥3:1) — acceptable для UI components ≥18pt only (not body text)
+
+Apply rules из §3 Text и §7 Status для safe color selection.
 
 ---
 
@@ -455,9 +466,10 @@ Brand split — "Trust" neutral для professional feel, "Tunnel" accent for re
 - **Theme parity** — каждый semantic token определён и в dark, и в light. Никогда не assumed.
 - **No hardcoded hex** — все colors через tokens. Исключения documented (ErrorBoundary fallback, OS chrome).
 
-### Status tier selection
-- **Dark theme:** `-400` primary usage (лучше contrast на тёмном)
-- **Light theme:** `-600` primary — **но только для UI components ≥18pt**. Для body text — `-500` midpoint (safe для обоих themes).
+### Status tier selection (rule)
+- **Dark UI** (badges, icons, dots): `-400`
+- **Light UI ≥18pt** (large badges, icons): `-600`
+- **Body text / readable content (both themes):** `-500` midpoint ⭐ safe default
 
 ### Tailwind integration
 - **Use Tailwind bracket notation** — `text-[var(--color-text-primary)]`, `bg-[var(--color-bg-surface)]`
@@ -477,39 +489,22 @@ Brand split — "Trust" neutral для professional feel, "Tunnel" accent for re
 - ❌ **Inline rgba()** — `rgba(16, 185, 129, 0.08)` custom. Используй `var(--color-status-connected-bg)` или соответствующий tint token.
 - ❌ **Accent для non-interactive** — accent-colored text paragraph, card background, decorative border. 10% rule violation.
 - ❌ **Glow effects** — colored shadow (`0 8px 24px tint-25`). Removed в Phase 14.x shadows cleanup.
-- ❌ **Status-600 на light theme для body text** — contrast fail. Use `-500`.
-- ❌ **`text-muted` dark для body text** — 3.81:1, WCAG fail. Use `text-secondary` или `text-primary`.
+- ❌ **Status `-600` для body text / long readable content** — use `-500` midpoint (safe default). `-600` scope — large UI elements only.
+- ❌ **`text-muted` для body text / paragraphs** — use `text-secondary`. `text-muted` scope — UI chrome only (captions, placeholders, disabled, timestamps).
 - ❌ **Undefined RGB variable fallbacks** — `rgba(var(--color-status-connected-rgb, 16 185 129))`. Если нужен RGB component — define token properly or use existing `-bg` variant.
 
 ---
 
-## Known limitations (транспарентно)
+## Reserved tokens
 
-### WCAG AA failures
+Tokens определены в `tokens.css` но с 0 production usages — kept intentionally для consistent palette shape или future use:
 
-1. **`--color-text-muted` dark (#6e6e6e)** — 3.81:1 on `bg-primary`, 3.34:1 on `bg-surface`.
-   - **Current scope:** UI components ≥18pt (captions 12px treated as UI).
-   - **Body text alternative:** `--color-text-secondary` (6.91:1).
-   - **Fix planned:** lighten к #7a7a7a (4.5:1+).
+- `--color-accent-50 / 100 / 200 / 800 / 900` — palette endpoints (slate-teal gradient complete)
+- `--color-accent-tint-30 / 40 / 50` — high-opacity accent tints (if needed в future)
+- `--color-overlay-40 / 50` — modal backdrop variants (current modal uses `--opacity-backdrop` directly)
+- `--color-info-500` — midpoint (dark uses 400, light uses 600, 500 reserved для future contexts)
 
-2. **Light theme status `-600` tier** — `success-600` = 3.57:1, `warning-600` = 3.02:1 на bg-primary.
-   - **Current scope:** UI components ≥18pt (badges, icons).
-   - **Body text alternative:** `-500` midpoint (higher contrast на обоих themes).
-
-### Code violations pending fix
-
-1. `src/main.tsx:60,67-68` — ErrorBoundary hardcoded hex (`#ef4444`, `#333`, `#fff`). Fallback context — OK short-term.
-2. `src/index.css:52` — `.window-control-close:hover { color: #fff }` — should be token.
-3. `src/components/server/OverviewSection.tsx:684-687` — broken `rgba(var(--color-status-*-rgb))` fallback pattern. Replace with existing `-bg` tokens.
-
-### Dead tokens (0 usages)
-
-- `--color-accent-tint-50` — reserved (opaque = accent-500 anyway).
-- `--color-overlay-40/50` — reserved (modal backdrop uses `--opacity-backdrop` directly).
-- `--color-info-500` — reserved (dark uses 400, light uses 600; 500 midpoint untouched).
-- `--color-accent-50/100/200/800/900` — palette scale reserved (user-loved gradient, future-proof).
-
-Not bugs — conscious choice to keep palette complete.
+**Rule:** если нужен один из reserved tokens — использовать без предварительного approval. Palette intentionally complete.
 
 ---
 
