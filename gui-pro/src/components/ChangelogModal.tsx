@@ -24,7 +24,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
         style={{
           backgroundColor: "var(--color-bg-surface)",
           border: "1px solid var(--color-border)",
-          boxShadow: "0 8px 24px var(--color-overlay-50)",
+          boxShadow: "var(--shadow-lg)",
           width: "448px",
         }}
       >

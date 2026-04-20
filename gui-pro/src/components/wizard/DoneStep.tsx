@@ -10,7 +10,7 @@ export function DoneStep(w: WizardState) {
   return (
     <div className="flex-1 flex items-center justify-center p-6">
       <div className="max-w-sm w-full text-center space-y-5">
-        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-success-500)", boxShadow: "0 8px 24px var(--color-success-tint-25)" }}>
+        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-success-500)", boxShadow: "var(--shadow-lg)" }}>
           <CheckCircle2 className="w-8 h-8 text-white" />
         </div>
 
