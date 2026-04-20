@@ -39,6 +39,21 @@ installer/output/
 .claude/
 CLAUDE.md
 
+# AI tool workspace directories
+.agents/
+.junie/
+.kiro/
+.windsurf/
+
+# Skills system
+skills/
+skills-lock.json
+gui-pro/skills-lock.json
+gui-light/skills-lock.json
+
+# Node artifacts
+node_modules/
+
 # Obsidian working notes
 memory/
 
