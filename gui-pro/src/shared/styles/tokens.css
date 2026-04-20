@@ -79,30 +79,102 @@
   --space-7: 32px;
   --space-8: 40px;
 
-  /* ── Typography ────────────────────────────────── */
-  --font-size-xs: 10px;
-  --font-size-sm: 12px;
-  --font-size-md: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 20px;
-  --font-size-2xl: 24px;
-  /* Display sizes — только для wordmark / splash / hero-секций.
-     Не использовать для UI-текста. */
-  --font-size-3xl: 32px;
-  --font-size-4xl: 40px;
-  --font-size-5xl: 48px;
-  --font-weight-normal: 400;
-  --font-weight-semibold: 600;
-  --font-weight-bold: 700;
-  --tracking-tight: -0.01em;
-  --tracking-normal: 0;
-  --tracking-wide: 0.02em;
+  /* ── Typography ──────────────────────────────────
+     v2 scale (Phase 14.2 Typography Foundation, 2026-04-20).
+     Industry refs: Material Design 3, Apple HIG, Radix Themes, Vercel Geist.
+     Философия: минимум 12px (кириллица на Win11 high-DPI), чётная шкала с шагом 2
+     для UI (12–24), шагом 8 для display (32/40/48). Semantic composite --text-*
+     tokens для vibe-coding clarity — см. memory/v3/design-system/typography.md (Phase 5).
 
-  /* Display font — ЭКСКЛЮЗИВНО для wordmark «TrustTunnel» в AboutPanel.
-     Не использовать в body/кнопках/любом другом месте — Outfit это
-     display face, не подходит для UI-text. Для всего остального
-     продолжаем использовать Geist Sans. */
+     Canonical plan: .planning/typography-refactor.md
+     GSD phase: .planning/phases/14.2-typography-foundation/14.2-CONTEXT.md */
+
+  /* Font families — 3 семантические роли */
+  --font-family-sans: 'Geist Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-family-mono: 'Geist Mono', 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+  /* Display — ЭКСКЛЮЗИВНО для wordmark «TrustTunnel» (AboutPanel, TitleBar).
+     НЕ использовать в body/кнопках — Outfit это display face, не UI-text. */
   --font-family-display: 'Outfit', 'Geist Sans', system-ui, -apple-system, sans-serif;
+
+  /* Font sizes — v2 scale (10 sizes, все чётные, минимум 12px) */
+  --font-size-caption:    12px;  /* meta, version, timestamp, mini-labels */
+  --font-size-body-sm:    14px;  /* helper, form hints, secondary body */
+  --font-size-body:       16px;  /* ⭐ DEFAULT — paragraph, inputs, descriptions */
+  --font-size-body-lg:    18px;  /* emphasis body, subtitle */
+  --font-size-title-sm:   20px;  /* card titles */
+  --font-size-title:      22px;  /* section titles, modal headers */
+  --font-size-title-lg:   24px;  /* page/tab headings */
+  --font-size-display-sm: 32px;  /* wizard hero */
+  --font-size-display:    40px;  /* splash, critical states */
+  --font-size-display-lg: 48px;  /* AboutPanel wordmark (Outfit) */
+
+  /* Legacy aliases (kept until Phase 2 Tailwind remap — удалим там).
+     Старый код использует --font-size-xs/sm/md/lg/xl/2xl/3xl/4xl/5xl напрямую
+     ИЛИ через Tailwind text-xs/sm/base/lg/xl/2xl/3xl/4xl/5xl которые мапятся на них.
+     После Phase 2 remap — Tailwind будет использовать new semantic names напрямую,
+     и этот legacy-блок уйдёт. */
+  --font-size-xs:  var(--font-size-caption);     /* 12px (was 10 — floor raised) */
+  --font-size-sm:  var(--font-size-body-sm);     /* 14px (was 12) */
+  --font-size-md:  var(--font-size-body);        /* 16px (was 14) */
+  --font-size-lg:  var(--font-size-body-lg);     /* 18px (was 16) */
+  --font-size-xl:  var(--font-size-title-sm);    /* 20px — unchanged */
+  --font-size-2xl: var(--font-size-title-lg);    /* 24px — unchanged */
+  --font-size-3xl: var(--font-size-display-sm);  /* 32px — unchanged */
+  --font-size-4xl: var(--font-size-display);     /* 40px — unchanged */
+  --font-size-5xl: var(--font-size-display-lg);  /* 48px — unchanged */
+
+  /* Font weights — 4 веса (v1 было 3: regular/semibold/bold; + medium для кнопок) */
+  --font-weight-regular:  400;  /* body, paragraph, description */
+  --font-weight-medium:   500;  /* buttons, active tab, subtitle, chip labels */
+  --font-weight-semibold: 600;  /* headings, section titles, card titles */
+  --font-weight-bold:     700;  /* display-only (wordmark, hero, critical) */
+  /* Legacy alias — существующий код использует --font-weight-normal (синоним 400). */
+  --font-weight-normal: var(--font-weight-regular);
+
+  /* Line heights — новые токены (в v1 отсутствовали как tokens — был только Tailwind leading-*) */
+  --line-height-tight:   1.2;    /* display 32px+ */
+  --line-height-snug:    1.35;   /* titles 18–24px */
+  --line-height-normal:  1.5;    /* body 14–16px (default) */
+  --line-height-relaxed: 1.625;  /* long-form, changelog, release notes */
+
+  /* Letter spacing (retained from v1 — применялись 0 раз, активируем в Phase 3) */
+  --tracking-tight:  -0.01em;  /* display 32px+ — уплотняет large text */
+  --tracking-normal: 0;        /* default body */
+  --tracking-wide:   0.02em;   /* buttons, UPPERCASE badges, keyboard shortcuts */
+
+  /* ── Composite semantic tokens (text-*) ──────────
+     Готовые typographic «рецепты» для vibe-coding. Каждый токен имеет одну конкретную
+     role — используй их напрямую в inline font-shorthand или через Tailwind semantic
+     classes (Phase 2 plugin: .text-caption, .text-body, .text-title, etc.).
+
+     Format: `<weight> <size>/<line-height> <family>` (CSS font shorthand).
+     Usage example: element.style.font = "var(--text-body)". */
+
+  /* Caption / meta */
+  --text-caption:    500 12px/1.35 var(--font-family-sans);
+
+  /* Body */
+  --text-body-sm:    400 14px/1.5  var(--font-family-sans);
+  --text-body:       400 16px/1.5  var(--font-family-sans);
+  --text-body-lg:    400 18px/1.5  var(--font-family-sans);
+
+  /* Emphasis */
+  --text-subtitle:   500 18px/1.35 var(--font-family-sans);
+  --text-button:     500 14px/1    var(--font-family-sans);
+
+  /* Titles */
+  --text-title-sm:   600 20px/1.3  var(--font-family-sans);
+  --text-title:      600 22px/1.3  var(--font-family-sans);
+  --text-title-lg:   600 24px/1.25 var(--font-family-sans);
+
+  /* Display */
+  --text-display-sm: 700 32px/1.2  var(--font-family-sans);
+  --text-display:    700 40px/1.2  var(--font-family-sans);
+  --text-wordmark:   700 48px/1.1  var(--font-family-display);
+
+  /* Mono (tabular data: logs, fingerprint, IP:port, numeric stats) */
+  --text-mono:       400 14px/1.5  var(--font-family-mono);
+  --text-mono-sm:    400 12px/1.5  var(--font-family-mono);
 
   /* ── Z-index ───────────────────────────────────── */
   --z-base: 0;

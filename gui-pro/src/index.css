@@ -14,7 +14,11 @@
   body {
     background-color: var(--color-bg-primary);
     color: var(--color-text-primary);
-    font-family: "Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+    /* Canonical font-family token (Phase 14.2). Legacy literal "Geist Sans" stack
+       replaced with --font-family-sans → fallback chain управляется в tokens.css. */
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-normal);
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
