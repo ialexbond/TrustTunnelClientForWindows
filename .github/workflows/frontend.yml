@@ -5,12 +5,12 @@ on:
     branches:
       - "*"
     paths:
-      - "gui-app/src/**"
-      - "gui-app/package.json"
-      - "gui-app/package-lock.json"
-      - "gui-app/tsconfig.json"
-      - "gui-app/vite.config.ts"
-      - "gui-app/eslint.config.js"
+      - "gui-pro/src/**"
+      - "gui-pro/package.json"
+      - "gui-pro/package-lock.json"
+      - "gui-pro/tsconfig.json"
+      - "gui-pro/vite.config.ts"
+      - "gui-pro/eslint.config.js"
       - "gui-light/src/**"
       - "gui-light/package.json"
       - "gui-light/package-lock.json"
@@ -22,12 +22,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  gui-app:
+  gui-pro:
     runs-on: ubuntu-latest
     if: "!startsWith(github.event.head_commit.message, 'skipci:')"
     defaults:
       run:
-        working-directory: gui-app
+        working-directory: gui-pro
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: gui-app/package-lock.json
+          cache-dependency-path: gui-pro/package-lock.json
 
       - run: npm ci --legacy-peer-deps
 

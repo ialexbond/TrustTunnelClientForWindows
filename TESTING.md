@@ -10,22 +10,22 @@ Client. Базовые команды запуска — в `GETTING-STARTED.md`
 - **Vitest 4** (`vitest run`) — основной тест-раннер для фронтенда.
 - **React Testing Library** (`@testing-library/react`, `user-event`,
   `jest-dom`) — рендер и взаимодействие.
-- **jsdom 29** — окружение DOM (`gui-app/vite.config.ts` →
+- **jsdom 29** — окружение DOM (`gui-pro/vite.config.ts` →
   `test.environment: "jsdom"`).
 - **Storybook 10** (`storybook/test`) — interactive-stories с `play()`.
 - **Cargo test** — юнит-тесты бэкенда (Rust / Tauri commands).
 
-Конфигурация — в `gui-app/vite.config.ts` (секция `test:`): `globals: true`,
+Конфигурация — в `gui-pro/vite.config.ts` (секция `test:`): `globals: true`,
 `setupFiles: ["./src/test/setup.ts"]`, `include: ["src/**/*.test.{ts,tsx}"]`.
-Объём: **1393+ тестов** в **105 файлах** под `gui-app/src/**`.
+Объём: **1393+ тестов** в **105 файлах** под `gui-pro/src/**`.
 
-Глобальный setup `gui-app/src/test/setup.ts` импортирует
+Глобальный setup `gui-pro/src/test/setup.ts` импортирует
 `@testing-library/jest-dom`, `./tauri-mock`, `../shared/i18n` и подменяет
 `requestAnimationFrame` на синхронный колбэк (см. «Паттерны»).
 
 ## Команды запуска
 
-Все команды — из `gui-app/` (если не указано иное).
+Все команды — из `gui-pro/` (если не указано иное).
 
 ```bash
 # Все тесты (единичный прогон, CI-режим)
@@ -44,7 +44,7 @@ npx vitest run -t "renders primary variant"
 npm run prerelease
 ```
 
-Бэкенд на Rust (из `gui-app/src-tauri/`):
+Бэкенд на Rust (из `gui-pro/src-tauri/`):
 
 ```bash
 cargo test
@@ -131,7 +131,7 @@ describe("Button", () => {
 
 ## Tauri-моки
 
-Глобальные моки Tauri API — `gui-app/src/test/tauri-mock.ts` (подгружается
+Глобальные моки Tauri API — `gui-pro/src/test/tauri-mock.ts` (подгружается
 через `setup.ts`). Замоканы: `@tauri-apps/api/core` (`invoke`), `/event`,
 `/app`, `/window`, `plugin-dialog`, `plugin-shell`. По умолчанию `invoke`
 возвращает `null`. В тестах, где нужен конкретный ответ — переопределяйте
@@ -152,17 +152,17 @@ Activity log мокается так же (`../../shared/hooks/useActivityLog`) 
 отсутствие утечек паролей в логи).
 
 Storybook использует отдельный набор заглушек в
-`gui-app/.storybook/tauri-mocks/` (6 файлов: `api-app.ts`, `api-core.ts`,
+`gui-pro/.storybook/tauri-mocks/` (6 файлов: `api-app.ts`, `api-core.ts`,
 `api-event.ts`, `api-window.ts`, `plugin-dialog.ts`, `plugin-shell.ts`).
 
 Если компонент использует `SnackBarProvider` / `ConfirmDialogProvider` —
-рендерьте через `renderWithProviders` из `gui-app/src/test/test-utils.tsx`.
+рендерьте через `renderWithProviders` из `gui-pro/src/test/test-utils.tsx`.
 
 ## Storybook-тесты
 
 Интерактивные сценарии пишутся в `play:`-функции story через `userEvent`
 и `within` из `storybook/test`. Пример — `WithUserConfigModal` в
-`gui-app/src/components/server/UsersSection.stories.tsx`:
+`gui-pro/src/components/server/UsersSection.stories.tsx`:
 
 ```tsx
 import { userEvent, within, waitFor } from "storybook/test";

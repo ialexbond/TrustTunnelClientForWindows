@@ -32,7 +32,7 @@
 
 ```bash
 git clone https://github.com/ialexbond/TrustTunnelClientForWindows.git
-cd TrustTunnelClientForWindows/gui-app
+cd TrustTunnelClientForWindows/gui-pro
 
 npm install
 npm run tauri:dev
@@ -58,7 +58,7 @@ Rust-код ожидает, что рядом с ним лежит C++ sidecar `
 Без них `cargo check` и `npm run tauri:dev` **не сработают** — Tauri проверяет
 `externalBin` и `resources` из `tauri.conf.json`.
 
-Требуемые файлы в `gui-app/src-tauri/`:
+Требуемые файлы в `gui-pro/src-tauri/`:
 
 ```text
 trusttunnel_client-x86_64-pc-windows-msvc.exe
@@ -79,7 +79,7 @@ cmake --build build --target trusttunnel_client
 
 # скопировать бинарник под имя, которое ждёт Tauri
 cp build/trusttunnel/trusttunnel_client.exe \
-   gui-app/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe
+   gui-pro/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe
 ```
 
 DLL (`wintun.dll`, `vcruntime140*.dll`) берутся из апстрима —
@@ -91,18 +91,18 @@ DLL (`wintun.dll`, `vcruntime140*.dll`) берутся из апстрима —
 Если вы работаете в worktree и бинарники уже собраны в основном клоне:
 
 ```bash
-# из worktree gui-app/
-cp ../../../gui-app/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe src-tauri/
-cp ../../../gui-app/src-tauri/wintun.dll src-tauri/
-cp ../../../gui-app/src-tauri/vcruntime140.dll src-tauri/
-cp ../../../gui-app/src-tauri/vcruntime140_1.dll src-tauri/
+# из worktree gui-pro/
+cp ../../../gui-pro/src-tauri/trusttunnel_client-x86_64-pc-windows-msvc.exe src-tauri/
+cp ../../../gui-pro/src-tauri/wintun.dll src-tauri/
+cp ../../../gui-pro/src-tauri/vcruntime140.dll src-tauri/
+cp ../../../gui-pro/src-tauri/vcruntime140_1.dll src-tauri/
 ```
 
 ---
 
 ## 4. Две редакции
 
-Pro (`gui-app/`) и Light (`gui-light/`) — это два отдельных Tauri-приложения в одном репо.
+Pro (`gui-pro/`) и Light (`gui-light/`) — это два отдельных Tauri-приложения в одном репо.
 Инструкции идентичны, просто заходите в нужную папку:
 
 ```bash
@@ -118,7 +118,7 @@ Light-версия не включает SSH-управление серверо
 
 ## 5. Полезные скрипты
 
-Из `gui-app/` (Pro) доступен полный набор:
+Из `gui-pro/` (Pro) доступен полный набор:
 
 ```bash
 npm run dev          # только Vite-фронт на :1420 (без Tauri-окна)
@@ -142,7 +142,7 @@ npm run tauri build -- --bundles nsis   # NSIS-инсталлятор
 
 - **`cargo check` падает с "could not find `trusttunnel_client`"** — отсутствует sidecar.
   См. §3, положите `trusttunnel_client-x86_64-pc-windows-msvc.exe` и DLL в
-  `gui-app/src-tauri/`.
+  `gui-pro/src-tauri/`.
 - **`error: linker link.exe not found` / ошибки `LINK : fatal error`** — не установлен
   MSVC. Запустите Visual Studio Installer → «Build Tools for Visual Studio 2022» →
   компонент *Desktop development with C++* (включая Windows 10/11 SDK).
@@ -155,7 +155,7 @@ npm run tauri build -- --bundles nsis   # NSIS-инсталлятор
 - **`npm install` валится с EACCES / EPERM на Windows** — запустите терминал от имени
   администратора либо почистите `%APPDATA%\npm-cache`.
 - **Порт 1420 занят** — остановите зависший процесс Vite (`taskkill /F /IM node.exe`)
-  или поменяйте `server.port` в `gui-app/vite.config.ts`.
+  или поменяйте `server.port` в `gui-pro/vite.config.ts`.
 
 ---
 
@@ -163,4 +163,4 @@ npm run tauri build -- --bundles nsis   # NSIS-инсталлятор
 
 - Как устроен проект внутри — `ARCHITECTURE.md` <!-- VERIFY: ARCHITECTURE.md exists at repo root -->
 - Ежедневный dev-workflow, линтеры, PR-процесс — `DEVELOPMENT.md` <!-- VERIFY: DEVELOPMENT.md exists at repo root -->
-- Каталог UI-компонентов — `npm run storybook` в `gui-app/`
+- Каталог UI-компонентов — `npm run storybook` в `gui-pro/`
