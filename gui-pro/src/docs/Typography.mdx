@@ -1,6 +1,9 @@
 import { Meta, Typeset } from '@storybook/addon-docs/blocks';
+import * as TypographyStories from '../shared/ui/Typography.stories';
 
-<Meta title="Foundations/Typography" />
+{/* Link this MDX to Typography.stories meta — both share "Foundations/Typography" title.
+    Docs tab = this MDX (canonical reference), sibling entries = interactive stories. */}
+<Meta of={TypographyStories} />
 
 # Typography
 
