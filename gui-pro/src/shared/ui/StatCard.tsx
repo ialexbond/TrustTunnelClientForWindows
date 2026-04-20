@@ -9,6 +9,12 @@ export interface StatCardProps {
   trend?: number;
   icon?: ReactNode;
   loading?: boolean;
+  /**
+   * Apply `font-mono` to numeric value per Typography spec (tech data → mono).
+   * Use when value is a tabular number (ping ms, count, bytes). Default false
+   * for backwards compatibility — callers opt in.
+   */
+  mono?: boolean;
   className?: string;
 }
 
@@ -24,7 +30,7 @@ function formatTrend(trend: number): string {
   return `${trend}%`;
 }
 
-export function StatCard({ label, value, trend, icon, loading, className }: StatCardProps) {
+export function StatCard({ label, value, trend, icon, loading, mono, className }: StatCardProps) {
   if (loading) {
     return (
       <Card padding="md" className={cn("min-w-[140px]", className)}>
@@ -48,7 +54,7 @@ export function StatCard({ label, value, trend, icon, loading, className }: Stat
           )}
           {trend !== undefined && trend !== 0 && (
             <span
-              className="text-xs font-semibold ml-auto"
+              className="text-xs font-semibold font-mono ml-auto"
               style={{ color: getTrendColor(trend) }}
             >
               {formatTrend(trend)}
@@ -56,7 +62,7 @@ export function StatCard({ label, value, trend, icon, loading, className }: Stat
           )}
         </div>
         <div
-          className="text-xl font-semibold"
+          className={cn("text-xl font-semibold", mono && "font-mono")}
           style={{ color: "var(--color-text-primary)" }}
         >
           {value}

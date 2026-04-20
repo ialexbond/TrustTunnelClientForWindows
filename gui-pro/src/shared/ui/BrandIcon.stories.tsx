@@ -121,12 +121,12 @@ export const RadiusComparison: Story = {
         const shield = edition === "Pro" ? "/logo/shield-dark.svg" : "/logo/shield-light.svg";
         return (
           <div key={edition}>
-            <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 600 }}>{edition} edition</div>
+            <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 600 }}>{edition} edition</div>
             <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
               {[0.15, 0.20, 0.25].map((r) => (
                 <div key={r} style={{ textAlign: "center" }}>
                   <BrandIcon size={128} bg={bg} shieldSrc={shield} radiusRatio={r} />
-                  <div style={{ marginTop: 8, fontSize: 11, fontFamily: "monospace" }}>radius {r}</div>
+                  <div style={{ marginTop: 8, fontSize: 12, fontFamily: "monospace" }}>radius {r}</div>
                 </div>
               ))}
             </div>
@@ -146,15 +146,15 @@ export const ProVsLight: Story = {
     <div style={{ display: "flex", gap: 32, alignItems: "center" }}>
       <div style={{ textAlign: "center" }}>
         <BrandIcon size={256} bg={BG_PRO} shieldSrc="/logo/shield-dark.svg" />
-        <div style={{ marginTop: 12, fontSize: 13, fontWeight: 600 }}>Pro edition</div>
-        <div style={{ marginTop: 2, fontSize: 11, color: "#666", fontFamily: "monospace" }}>bg: {BG_PRO}</div>
-        <div style={{ marginTop: 2, fontSize: 11, color: "#666" }}>shield-dark</div>
+        <div style={{ marginTop: 12, fontSize: 14, fontWeight: 600 }}>Pro edition</div>
+        <div style={{ marginTop: 2, fontSize: 12, color: "#666", fontFamily: "monospace" }}>bg: {BG_PRO}</div>
+        <div style={{ marginTop: 2, fontSize: 12, color: "#666" }}>shield-dark</div>
       </div>
       <div style={{ textAlign: "center" }}>
         <BrandIcon size={256} bg={BG_LIGHT} shieldSrc="/logo/shield-light.svg" />
-        <div style={{ marginTop: 12, fontSize: 13, fontWeight: 600 }}>Light edition</div>
-        <div style={{ marginTop: 2, fontSize: 11, color: "#666", fontFamily: "monospace" }}>bg: {BG_LIGHT}</div>
-        <div style={{ marginTop: 2, fontSize: 11, color: "#666" }}>shield-light</div>
+        <div style={{ marginTop: 12, fontSize: 14, fontWeight: 600 }}>Light edition</div>
+        <div style={{ marginTop: 2, fontSize: 12, color: "#666", fontFamily: "monospace" }}>bg: {BG_LIGHT}</div>
+        <div style={{ marginTop: 2, fontSize: 12, color: "#666" }}>shield-light</div>
       </div>
     </div>
   ),
@@ -169,10 +169,10 @@ export const AllSizes: Story = {
   render: () => (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
       <div>
-        <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 600 }}>Pro edition</div>
+        <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 600 }}>Pro edition</div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
           {[16, 24, 32, 48, 64, 128, 256].map((s) => (
-            <div key={s} style={{ textAlign: "center", fontSize: 11 }}>
+            <div key={s} style={{ textAlign: "center", fontSize: 12 }}>
               <BrandIcon size={s} bg={BG_PRO} />
               <div style={{ marginTop: 4, color: "#888" }}>{s}px</div>
             </div>
@@ -180,10 +180,10 @@ export const AllSizes: Story = {
         </div>
       </div>
       <div>
-        <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 600 }}>Light edition (shield-light)</div>
+        <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 600 }}>Light edition (shield-light)</div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
           {[16, 24, 32, 48, 64, 128, 256].map((s) => (
-            <div key={s} style={{ textAlign: "center", fontSize: 11 }}>
+            <div key={s} style={{ textAlign: "center", fontSize: 12 }}>
               <BrandIcon size={s} bg={BG_LIGHT} shieldSrc="/logo/shield-light.svg" />
               <div style={{ marginTop: 4, color: "#888" }}>{s}px</div>
             </div>
@@ -212,7 +212,7 @@ export const DesktopContext: Story = {
         {combos.map(({ label, bgDesktop, bgIcon, shield }) => (
           <div key={label} style={{ background: bgDesktop, padding: 24, borderRadius: 8, textAlign: "center" }}>
             <BrandIcon size={128} bg={bgIcon} shieldSrc={shield} />
-            <div style={{ marginTop: 12, fontSize: 11, color: bgDesktop === "#202020" ? "#aaa" : "#666" }}>{label}</div>
+            <div style={{ marginTop: 12, fontSize: 12, color: bgDesktop === "#202020" ? "#aaa" : "#666" }}>{label}</div>
           </div>
         ))}
       </div>
