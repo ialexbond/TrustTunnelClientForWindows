@@ -181,7 +181,7 @@ export const PingGood: Story = {
     <Card padding="md">
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-baseline justify-center gap-1 py-2">
-        <span style={{ ...bigNum, color: "var(--color-success-500)" }}>42</span>
+        <span className="font-mono" style={{ ...bigNum, color: "var(--color-success-500)" }}>42</span>
         <span className="text-sm" style={muted}>ms</span>
       </div>
     </Card>
@@ -196,7 +196,7 @@ export const PingHigh: Story = {
     <Card padding="md">
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-baseline justify-center gap-1 py-2">
-        <span style={{ ...bigNum, color: "var(--color-warning-500)" }}>350</span>
+        <span className="font-mono" style={{ ...bigNum, color: "var(--color-warning-500)" }}>350</span>
         <span className="text-sm" style={muted}>ms</span>
       </div>
     </Card>
@@ -211,7 +211,7 @@ export const PingCritical: Story = {
     <Card padding="md">
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-baseline justify-center gap-1 py-2">
-        <span style={{ ...bigNum, color: "var(--color-danger-500)" }}>1247</span>
+        <span className="font-mono" style={{ ...bigNum, color: "var(--color-danger-500)" }}>1247</span>
         <span className="text-sm" style={muted}>ms</span>
       </div>
     </Card>
@@ -226,7 +226,7 @@ export const PingUnavailable: Story = {
     <Card padding="md">
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-center justify-center py-2">
-        <span style={{ ...bigNum, ...muted }}>—</span>
+        <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
       </div>
     </Card>
   ),
@@ -261,7 +261,7 @@ export const SpeedMeasured: Story = {
         <div className="flex items-center gap-2">
           <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
           <div className="flex items-baseline gap-1">
-            <span style={bigNum}>124</span>
+            <span className="font-mono" style={bigNum}>124</span>
             <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
           </div>
         </div>
@@ -269,7 +269,7 @@ export const SpeedMeasured: Story = {
         <div className="flex items-center gap-2">
           <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
           <div className="flex items-baseline gap-1">
-            <span style={bigNum}>98</span>
+            <span className="font-mono" style={bigNum}>98</span>
             <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
           </div>
         </div>
@@ -340,7 +340,7 @@ export const UsersActive: Story = {
     <Card padding="md">
       <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
       <div className="flex items-center justify-center py-2">
-        <span style={bigNum}>2</span>
+        <span className="font-mono" style={bigNum}>2</span>
       </div>
     </Card>
   ),
@@ -354,7 +354,7 @@ export const UsersEmpty: Story = {
     <Card padding="md">
       <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
       <div className="flex items-center justify-center py-2">
-        <span style={{ ...bigNum, ...muted }}>0</span>
+        <span className="font-mono" style={{ ...bigNum, ...muted }}>0</span>
       </div>
     </Card>
   ),
@@ -386,7 +386,7 @@ export const IpKnown: Story = {
     <Card padding="md">
       <Title icon={<Network className="w-5 h-5" />} text="IP-адрес" />
       <div className="flex items-center justify-center py-2">
-        <span style={bigNum}>185.22.153.xx</span>
+        <span className="font-mono" style={bigNum}>185.22.153.xx</span>
       </div>
     </Card>
   ),
@@ -400,7 +400,7 @@ export const IpUnknown: Story = {
     <Card padding="md">
       <Title icon={<Network className="w-5 h-5" />} text="IP-адрес" />
       <div className="flex items-center justify-center py-2">
-        <span style={{ ...bigNum, ...muted }}>—</span>
+        <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
       </div>
     </Card>
   ),
@@ -478,7 +478,7 @@ export const UptimeActive: Story = {
     <Card padding="md">
       <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
       <div className="flex items-center justify-center py-2">
-        <span style={bigNum}>14д 7ч</span>
+        <span className="font-mono" style={bigNum}>14д 7ч</span>
       </div>
     </Card>
   ),
@@ -492,7 +492,7 @@ export const UptimeLong: Story = {
     <Card padding="md">
       <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
       <div className="flex items-center justify-center py-2">
-        <span style={bigNum}>1м 14д 7ч</span>
+        <span className="font-mono" style={bigNum}>1м 14д 7ч</span>
       </div>
     </Card>
   ),
@@ -506,7 +506,7 @@ export const UptimeUnknown: Story = {
     <Card padding="md">
       <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
       <div className="flex items-center justify-center py-2">
-        <span style={{ ...bigNum, ...muted }}>—</span>
+        <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
       </div>
     </Card>
   ),
@@ -538,7 +538,7 @@ export const VersionCurrent: Story = {
     <Card padding="md">
       <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
       <div className="flex items-center justify-center py-2">
-        <span style={bigNum}>1.0.49</span>
+        <span className="font-mono" style={bigNum}>1.0.49</span>
       </div>
     </Card>
   ),
@@ -552,7 +552,7 @@ export const VersionUpdate: Story = {
     <Card padding="md">
       <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
       <div className="flex items-center justify-center gap-3 py-2">
-        <span style={bigNum}>1.0.47</span>
+        <span className="font-mono" style={bigNum}>1.0.47</span>
         <ArrowUpCircle className="w-6 h-6 shrink-0" style={{ color: "var(--color-warning-500)" }} />
       </div>
     </Card>
@@ -732,11 +732,11 @@ export const LoadNormal: Story = {
       <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
       <div className="space-y-2.5 mt-1">
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold" style={primary}>12%</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold font-mono tabular-nums" style={primary}>12%</span></div>
           <ProgressBar value={12} size="sm" color="success" />
         </div>
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold" style={primary}>340 / 1024 МБ</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold font-mono tabular-nums" style={primary}>340 / 1024 МБ</span></div>
           <ProgressBar value={33} size="sm" color="accent" />
         </div>
       </div>
@@ -753,11 +753,11 @@ export const LoadCritical: Story = {
       <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
       <div className="space-y-2.5 mt-1">
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold" style={danger}>95%</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold font-mono tabular-nums" style={danger}>95%</span></div>
           <ProgressBar value={95} size="sm" color="danger" />
         </div>
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold" style={danger}>920 / 1024 МБ</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold font-mono tabular-nums" style={danger}>920 / 1024 МБ</span></div>
           <ProgressBar value={90} size="sm" color="danger" />
         </div>
       </div>
@@ -811,7 +811,7 @@ export const AllCards: Story = {
       <Card padding="md" style={{ flex: "1 1 140px", maxWidth: 180 }}>
         <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
         <div className="flex items-baseline justify-center gap-1 py-2">
-          <span style={{ ...bigNum, color: "var(--color-success-500)" }}>42</span>
+          <span className="font-mono" style={{ ...bigNum, color: "var(--color-success-500)" }}>42</span>
           <span className="text-sm" style={muted}>ms</span>
         </div>
       </Card>
@@ -822,7 +822,7 @@ export const AllCards: Story = {
           <div className="flex items-center gap-2">
             <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
             <div className="flex items-baseline gap-1">
-              <span style={bigNum}>124</span>
+              <span className="font-mono" style={bigNum}>124</span>
               <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
             </div>
           </div>
@@ -830,7 +830,7 @@ export const AllCards: Story = {
           <div className="flex items-center gap-2">
             <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
             <div className="flex items-baseline gap-1">
-              <span style={bigNum}>98</span>
+              <span className="font-mono" style={bigNum}>98</span>
               <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
             </div>
           </div>
@@ -840,7 +840,7 @@ export const AllCards: Story = {
       <Card padding="md" style={{ flex: "1 1 180px" }}>
         <Title icon={<Users className="w-5 h-5" />} text="Пользователей" clickable />
         <div className="flex items-center justify-center py-2">
-          <span style={bigNum}>2</span>
+          <span className="font-mono" style={bigNum}>2</span>
         </div>
       </Card>
 
@@ -849,7 +849,7 @@ export const AllCards: Story = {
       <Card padding="md" style={{ flex: "1 1 240px" }}>
         <Title icon={<Network className="w-5 h-5" />} text="IP-адрес" />
         <div className="flex items-center justify-center py-2">
-          <span style={bigNum}>185.22.153.xx</span>
+          <span className="font-mono" style={bigNum}>185.22.153.xx</span>
         </div>
       </Card>
 
@@ -863,14 +863,14 @@ export const AllCards: Story = {
       <Card padding="md" style={{ flex: "1 1 160px" }}>
         <Title icon={<Clock className="w-5 h-5" />} text="Uptime" />
         <div className="flex items-center justify-center py-2">
-          <span style={bigNum}>14д 7ч</span>
+          <span className="font-mono" style={bigNum}>14д 7ч</span>
         </div>
       </Card>
 
       <Card padding="md" style={{ flex: "1 1 220px" }}>
         <Title icon={<Package className="w-5 h-5" />} text="Версия протокола" clickable />
         <div className="flex items-center justify-center py-2">
-          <span style={bigNum}>1.0.49</span>
+          <span className="font-mono" style={bigNum}>1.0.49</span>
         </div>
       </Card>
 
@@ -890,11 +890,11 @@ export const AllCards: Story = {
         <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
         <div className="space-y-2.5 mt-1">
           <div>
-            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold" style={primary}>12%</span></div>
+            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold font-mono tabular-nums" style={primary}>12%</span></div>
             <ProgressBar value={12} size="sm" color="success" />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold" style={primary}>340 / 1024 МБ</span></div>
+            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold font-mono tabular-nums" style={primary}>340 / 1024 МБ</span></div>
             <ProgressBar value={33} size="sm" color="accent" />
           </div>
         </div>

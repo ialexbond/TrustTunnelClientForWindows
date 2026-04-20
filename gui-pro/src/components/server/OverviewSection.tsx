@@ -462,12 +462,12 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         <div className="flex flex-col items-center justify-center gap-0.5 py-2">
           {ping !== null && ping > 0 ? (
             <div className="flex items-baseline justify-center gap-1">
-              <span style={{ ...bigNum, color: pingColor }}>{ping}</span>
+              <span className="font-mono" style={{ ...bigNum, color: pingColor }}>{ping}</span>
               <span className="text-sm" style={muted}>ms</span>
             </div>
           ) : (
             <>
-              <span style={{ ...bigNum, ...muted }}>—</span>
+              <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
               {ping === -1 && (
                 <span className="text-xs" style={muted}>
                   {t("server.overview.dataUnavailable")}
@@ -511,7 +511,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
             <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
               <ArrowDown className="w-6 h-6 shrink-0" style={{ color: "var(--color-success-400)" }} />
               <div className="flex items-baseline gap-1">
-                <span style={bigNum}>{Math.round(speed.download_mbps)}</span>
+                <span className="font-mono" style={bigNum}>{Math.round(speed.download_mbps)}</span>
                 <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
               </div>
             </div>
@@ -519,7 +519,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
             <div className="flex items-center gap-1.5" style={{ minWidth: 100 }}>
               <ArrowUp className="w-6 h-6 shrink-0" style={{ color: "var(--color-warning-500)" }} />
               <div className="flex items-baseline gap-1">
-                <span style={bigNum}>{Math.round(speed.upload_mbps)}</span>
+                <span className="font-mono" style={bigNum}>{Math.round(speed.upload_mbps)}</span>
                 <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
               </div>
             </div>
@@ -528,7 +528,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           /* M-08: прочерк + приписка «Не удалось получить данные».
              Refresh в Title перезапустит speedtest_run. */
           <div className="flex flex-col items-center justify-center gap-0.5 py-2" style={{ minHeight: 48 }}>
-            <span style={{ ...bigNum, ...muted }}>—</span>
+            <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
             <span className="text-xs" style={muted}>
               {t("server.overview.dataUnavailable")}
             </span>
@@ -548,7 +548,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       >
         <Title icon={<Users className="w-5 h-5" />} text={t("server.overview.cards.userCount")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          <span style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
+          <span className="font-mono" style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
         </div>
       </ClickableCard>
 
@@ -558,7 +558,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       <Card padding="md" style={{ flex: "1 1 240px" }}>
         <Title icon={<Network className="w-5 h-5" />} text={t("server.overview.cards.ip")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          <span style={bigNum}>{state.host || "—"}</span>
+          <span className="font-mono" style={bigNum}>{state.host || "—"}</span>
         </div>
       </Card>
 
@@ -604,13 +604,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         <Title icon={<Clock className="w-5 h-5" />} text={t("server.overview.cards.uptime")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           {fastUptime !== null ? (
-            <span style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
+            <span className="font-mono" style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
           ) : stats ? (
-            <span style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
+            <span className="font-mono" style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
           ) : statsLoading ? (
             <Skeleton variant="line" width={80} height={28} />
           ) : (
-            <span style={{ ...bigNum, ...muted }}>—</span>
+            <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
           )}
         </div>
       </Card>
@@ -623,7 +623,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
       >
         <Title icon={<Package className="w-5 h-5" />} text={t("server.overview.cards.protocolVersion")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          <span style={bigNum}>{version}</span>
+          <span className="font-mono" style={bigNum}>{version}</span>
         </div>
       </ClickableCard>
 
@@ -726,9 +726,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm" style={muted}>CPU</span>
                   {stats ? (
-                    <span className="text-sm font-semibold" style={primary}>{Math.round(stats.cpu_percent)}%</span>
+                    <span className="text-sm font-semibold font-mono tabular-nums" style={primary}>{Math.round(stats.cpu_percent)}%</span>
                   ) : (
-                    <span className="text-sm" style={muted}>—</span>
+                    <span className="text-sm font-mono" style={muted}>—</span>
                   )}
                 </div>
                 <ProgressBar value={stats ? Math.min(100, Math.max(0, stats.cpu_percent)) : 0} size="sm" color="success" />
@@ -737,11 +737,11 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm" style={muted}>RAM</span>
                   {stats && stats.mem_total > 0 ? (
-                    <span className="text-sm font-semibold" style={primary}>
+                    <span className="text-sm font-semibold font-mono tabular-nums" style={primary}>
                       {Math.round(stats.mem_used / 1024 / 1024)} / {Math.round(stats.mem_total / 1024 / 1024)} {t("server.overview.ramUnit")}
                     </span>
                   ) : (
-                    <span className="text-sm" style={muted}>—</span>
+                    <span className="text-sm font-mono" style={muted}>—</span>
                   )}
                 </div>
                 <ProgressBar
