@@ -76,8 +76,8 @@ function AccordionItemComponent({ item, open, onToggle, isLast }: AccordionItemC
         style={{ background: "none", border: "none", cursor: "pointer" }}
       >
         <span
-          className="font-[var(--font-weight-semibold)]"
-          style={{ fontSize: "var(--font-size-md)", color: "var(--color-text-primary)" }}
+          className="font-semibold text-base"
+          style={{ color: "var(--color-text-primary)" }}
         >
           {item.title}
         </span>

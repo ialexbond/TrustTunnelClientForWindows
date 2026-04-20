@@ -149,7 +149,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     <div className={cn(fullWidth ? "w-full" : "")}>
       {label && (
         <label
-          className="block text-xs font-[var(--font-weight-semibold)] mb-1.5"
+          className="block text-xs font-medium mb-1.5"
           style={{ color: "var(--color-text-secondary)" }}
         >
           {label}

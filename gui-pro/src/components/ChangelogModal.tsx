@@ -37,7 +37,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
           }}
         >
           <span
-            className="text-sm font-[var(--font-weight-semibold)]"
+            className="text-sm font-semibold"
             style={{ color: "var(--color-text-primary)" }}
           >
             {t("modal.changelog_title", { version })}
@@ -61,7 +61,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
             components={{
               h1: ({ children }: CP) => (
                 <h1
-                  className="text-sm font-[var(--font-weight-semibold)] mt-0 mb-2"
+                  className="text-sm font-semibold mt-0 mb-2"
                   style={{ color: "var(--color-text-primary)" }}
                 >
                   {children}
@@ -69,7 +69,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
               ),
               h2: ({ children }: CP) => (
                 <h2
-                  className="text-sm font-[var(--font-weight-semibold)] mt-3 mb-1.5"
+                  className="text-sm font-semibold mt-3 mb-1.5"
                   style={{ color: "var(--color-text-primary)" }}
                 >
                   {children}
@@ -77,7 +77,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
               ),
               h3: ({ children }: CP) => (
                 <h3
-                  className="text-xs font-[var(--font-weight-semibold)] mt-2 mb-1"
+                  className="text-xs font-semibold mt-2 mb-1"
                   style={{ color: "var(--color-text-secondary)" }}
                 >
                   {children}
@@ -93,7 +93,7 @@ export function ChangelogModal({ isOpen, onClose, version, releaseNotes }: Chang
               ),
               strong: ({ children }: CP) => (
                 <strong
-                  className="font-[var(--font-weight-semibold)]"
+                  className="font-semibold"
                   style={{ color: "var(--color-text-primary)" }}
                 >
                   {children}

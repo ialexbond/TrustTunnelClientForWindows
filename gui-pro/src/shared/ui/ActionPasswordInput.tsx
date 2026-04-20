@@ -87,7 +87,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+          <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
             {label}
           </label>
         )}

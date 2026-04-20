@@ -174,7 +174,7 @@ export function DnsUpstreamsInput({
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
-        <label className="block text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)]">
+        <label className="block text-sm font-medium text-[var(--color-text-secondary)]">
           {label}
         </label>
       )}

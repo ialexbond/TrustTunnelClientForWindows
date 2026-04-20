@@ -125,7 +125,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
 
           {/* Заголовок */}
           <div className="text-center pb-1">
-            <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
               {t("control.ssh_title")}
             </h2>
             <p className="text-sm mt-1" style={{ color: "var(--color-text-secondary)" }}>
@@ -164,7 +164,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
 
           {/* Способ авторизации — 2 сегмента */}
           <div>
-            <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
               {t("control.auth_method")}
             </label>
             <div className="flex rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden">
@@ -203,7 +203,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
             <div className="space-y-3">
               {/* Файл ключа */}
               <div>
-                <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+                <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
                   {t("control.key_file_label", "Файл ключа")}
                 </label>
                 <div className="flex gap-1.5">
@@ -232,7 +232,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
 
               {/* Вставить ключ */}
               <div>
-                <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+                <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
                   {t("control.key_paste_label", "Вставить ключ")}
                 </label>
                 <textarea

@@ -50,7 +50,7 @@ export function CardHeader({ title, description, icon, action }: CardHeaderProps
         )}
         <div>
           <h3
-            className="text-lg font-[var(--font-weight-semibold)]"
+            className="text-lg font-semibold"
             style={{ color: "var(--color-text-primary)" }}
           >
             {title}

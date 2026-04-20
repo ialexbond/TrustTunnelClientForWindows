@@ -38,7 +38,7 @@ export function SshPortSection({ state }: SshPortSectionProps) {
   return (
     <div className="pt-3 border-t space-y-2" style={{ borderColor: "var(--color-border)" }}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+        <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
           {t("server.security.ssh_port.title")}
         </span>
         <span className="text-[10px] font-mono" style={{ color: "var(--color-text-muted)" }}>

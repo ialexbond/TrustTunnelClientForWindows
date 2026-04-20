@@ -60,7 +60,7 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
         style={{ color: "var(--color-text-muted)" }}
       />
       <span
-        className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[9px] font-[var(--font-weight-semibold)] uppercase tracking-wide px-1 py-0.5"
+        className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-md)] text-[9px] font-semibold uppercase tracking-wide px-1 py-0.5"
         style={{
           width: "58px",
           textAlign: "center",

@@ -47,7 +47,7 @@ export function ErrorStep(w: WizardState) {
 
         {hints.length > 0 && (
           <div className="text-left space-y-1.5 p-3 rounded-xl" style={{ backgroundColor: "var(--color-warning-tint-05)", border: "1px solid var(--color-status-connecting-border)" }}>
-            <p className="text-[11px] font-[var(--font-weight-semibold)] flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
+            <p className="text-[11px] font-medium flex items-center gap-1.5" style={{ color: "var(--color-warning-500)" }}>
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               {t('wizard.error.possible_cause')}
             </p>

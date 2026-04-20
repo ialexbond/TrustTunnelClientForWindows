@@ -136,7 +136,7 @@ export function Modal({
       >
         {title && (
           <h2
-            className="text-lg font-[var(--font-weight-semibold)] mb-[var(--space-4)]"
+            className="text-lg font-semibold mb-[var(--space-4)]"
             style={{ color: "var(--color-text-primary)" }}
           >
             {title}

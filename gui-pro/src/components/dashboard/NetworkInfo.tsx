@@ -77,7 +77,7 @@ export function NetworkInfo({ clientConfig }: NetworkInfoProps) {
                 {item.badge ? "ON" : "OFF"}
               </Badge>
             ) : (
-              <span className="font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+              <span className="font-semibold" style={{ color: "var(--color-text-primary)" }}>
                 {item.value}
               </span>
             )}
@@ -86,7 +86,7 @@ export function NetworkInfo({ clientConfig }: NetworkInfoProps) {
         {hasDns && (
           <div className="flex items-center gap-1.5 text-xs">
             <span style={{ color: "var(--color-text-muted)" }}>DNS:</span>
-            <span className="font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+            <span className="font-semibold" style={{ color: "var(--color-text-primary)" }}>
               {dns!.length} {dns!.length === 1 ? "server" : "servers"}
             </span>
           </div>

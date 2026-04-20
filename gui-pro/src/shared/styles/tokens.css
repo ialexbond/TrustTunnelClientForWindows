@@ -108,28 +108,12 @@
   --font-size-display:    40px;  /* splash, critical states */
   --font-size-display-lg: 48px;  /* AboutPanel wordmark (Outfit) */
 
-  /* Legacy aliases (kept until Phase 2 Tailwind remap — удалим там).
-     Старый код использует --font-size-xs/sm/md/lg/xl/2xl/3xl/4xl/5xl напрямую
-     ИЛИ через Tailwind text-xs/sm/base/lg/xl/2xl/3xl/4xl/5xl которые мапятся на них.
-     После Phase 2 remap — Tailwind будет использовать new semantic names напрямую,
-     и этот legacy-блок уйдёт. */
-  --font-size-xs:  var(--font-size-caption);     /* 12px (was 10 — floor raised) */
-  --font-size-sm:  var(--font-size-body-sm);     /* 14px (was 12) */
-  --font-size-md:  var(--font-size-body);        /* 16px (was 14) */
-  --font-size-lg:  var(--font-size-body-lg);     /* 18px (was 16) */
-  --font-size-xl:  var(--font-size-title-sm);    /* 20px — unchanged */
-  --font-size-2xl: var(--font-size-title-lg);    /* 24px — unchanged */
-  --font-size-3xl: var(--font-size-display-sm);  /* 32px — unchanged */
-  --font-size-4xl: var(--font-size-display);     /* 40px — unchanged */
-  --font-size-5xl: var(--font-size-display-lg);  /* 48px — unchanged */
-
-  /* Font weights — 4 веса (v1 было 3: regular/semibold/bold; + medium для кнопок) */
+  /* Font weights — 4 веса (regular для body, medium для кнопок/subtitle,
+     semibold для заголовков, bold для display). */
   --font-weight-regular:  400;  /* body, paragraph, description */
   --font-weight-medium:   500;  /* buttons, active tab, subtitle, chip labels */
   --font-weight-semibold: 600;  /* headings, section titles, card titles */
   --font-weight-bold:     700;  /* display-only (wordmark, hero, critical) */
-  /* Legacy alias — существующий код использует --font-weight-normal (синоним 400). */
-  --font-weight-normal: var(--font-weight-regular);
 
   /* Line heights — новые токены (в v1 отсутствовали как tokens — был только Tailwind leading-*) */
   --line-height-tight:   1.2;    /* display 32px+ */

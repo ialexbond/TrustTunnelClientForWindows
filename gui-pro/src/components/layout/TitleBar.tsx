@@ -43,7 +43,7 @@ export function TitleBar({ children }: TitleBarProps) {
           className="only-light shrink-0 pointer-events-none"
         />
         <span
-          className="text-[13px] font-[var(--font-weight-semibold)]"
+          className="text-[13px] font-semibold"
           style={{
             letterSpacing: "-0.01em",
             fontFamily: "var(--font-family-display)",
