@@ -152,10 +152,10 @@ cmake --build build --target trusttunnel_client
 
 # 3. Скопировать sidecar для Tauri
 copy build\trusttunnel\trusttunnel_client.exe ^
-     gui-app\src-tauri\trusttunnel_client-x86_64-pc-windows-msvc.exe
+     gui-pro\src-tauri\trusttunnel_client-x86_64-pc-windows-msvc.exe
 
 # 4. Собрать Pro
-cd gui-app && npm install && npx tauri build
+cd gui-pro && npm install && npx tauri build
 
 # 5. Собрать Light
 cd ..\gui-light && npm install && npx tauri build

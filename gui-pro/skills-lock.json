@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "lint-and-validate": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "40912280ff6416fb3f8d96197998566aa8e6dfced073e948e637d22a5247819b"
+    }
+  }
+}
