@@ -182,7 +182,7 @@ export const PingGood: Story = {
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-baseline justify-center gap-1 py-2">
         <span className="font-mono" style={{ ...bigNum, color: "var(--color-success-500)" }}>42</span>
-        <span className="text-sm" style={muted}>ms</span>
+        <span className="text-sm font-mono" style={muted}>ms</span>
       </div>
     </Card>
   ),
@@ -197,7 +197,7 @@ export const PingHigh: Story = {
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-baseline justify-center gap-1 py-2">
         <span className="font-mono" style={{ ...bigNum, color: "var(--color-warning-500)" }}>350</span>
-        <span className="text-sm" style={muted}>ms</span>
+        <span className="text-sm font-mono" style={muted}>ms</span>
       </div>
     </Card>
   ),
@@ -212,7 +212,7 @@ export const PingCritical: Story = {
       <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
       <div className="flex items-baseline justify-center gap-1 py-2">
         <span className="font-mono" style={{ ...bigNum, color: "var(--color-danger-500)" }}>1247</span>
-        <span className="text-sm" style={muted}>ms</span>
+        <span className="text-sm font-mono" style={muted}>ms</span>
       </div>
     </Card>
   ),
@@ -262,7 +262,7 @@ export const SpeedMeasured: Story = {
           <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
           <div className="flex items-baseline gap-1">
             <span className="font-mono" style={bigNum}>124</span>
-            <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
+            <span className="text-sm whitespace-nowrap font-mono" style={muted}>Мбит/с</span>
           </div>
         </div>
         <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
@@ -270,7 +270,7 @@ export const SpeedMeasured: Story = {
           <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
           <div className="flex items-baseline gap-1">
             <span className="font-mono" style={bigNum}>98</span>
-            <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
+            <span className="text-sm whitespace-nowrap font-mono" style={muted}>Мбит/с</span>
           </div>
         </div>
       </div>
@@ -812,7 +812,7 @@ export const AllCards: Story = {
         <Title icon={<Activity className="w-5 h-5" />} text="Ping" onRefresh />
         <div className="flex items-baseline justify-center gap-1 py-2">
           <span className="font-mono" style={{ ...bigNum, color: "var(--color-success-500)" }}>42</span>
-          <span className="text-sm" style={muted}>ms</span>
+          <span className="text-sm font-mono" style={muted}>ms</span>
         </div>
       </Card>
 
@@ -823,7 +823,7 @@ export const AllCards: Story = {
             <ArrowDown className="w-7 h-7 shrink-0" style={{ color: "var(--color-success-400)" }} />
             <div className="flex items-baseline gap-1">
               <span className="font-mono" style={bigNum}>124</span>
-              <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
+              <span className="text-sm whitespace-nowrap font-mono" style={muted}>Мбит/с</span>
             </div>
           </div>
           <div className="h-8 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
@@ -831,7 +831,7 @@ export const AllCards: Story = {
             <ArrowUp className="w-7 h-7 shrink-0" style={{ color: "var(--color-warning-500)" }} />
             <div className="flex items-baseline gap-1">
               <span className="font-mono" style={bigNum}>98</span>
-              <span className="text-sm whitespace-nowrap" style={muted}>Мбит/с</span>
+              <span className="text-sm whitespace-nowrap font-mono" style={muted}>Мбит/с</span>
             </div>
           </div>
         </div>
