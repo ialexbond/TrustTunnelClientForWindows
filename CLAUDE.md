@@ -134,6 +134,8 @@ v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, д�
 
 **Spacing reference:** [`memory/v3/design-system/spacing.md`](memory/v3/design-system/spacing.md) — 4px base grid, 8 tokens (`--space-1..8` = 4/8/12/16/20/24/32/40). Rules: Tailwind `p-1..6/m-1..6/gap-1..6` матчат `--space-1..6` directly; для 32/40 использовать **bracket notation** `p-[var(--space-7)]` / `p-[var(--space-8)]` (НЕ `p-7`/`p-8`/`p-10` Tailwind native — naming collision: они = 28/32/40, наши = 32/40). Anti-patterns: `p-[13px]` non-multiples of 4, inline `style={{ padding }}`, magic numbers в CSS. Exceptions задокументированы (TitleBar PRO badge, sidebar widths, OS chrome).
 
+**Shadows reference:** [`memory/v3/design-system/shadows.md`](memory/v3/design-system/shadows.md) — 5-level elevation (`--shadow-xs..xl` = flat-plus/flat/raised/floating/deep) + `--focus-ring` (double-ring keyboard focus). Rules: **No glow, no color tint** (tint в shadow = visual noise). Use `shadow-[var(--shadow-N)]` bracket или inline `style={{ boxShadow: "var(--shadow-N)" }}` — НЕ Tailwind native `shadow-sm/md/lg/xl` (разные rgba). Component mapping: Card=sm, Modal=lg, Dropdown/Tooltip=md, Deep modal=xl, focus states=--focus-ring. Anti-patterns: colored tint glow (`0 Xpx ... accent-tint-*`), 2-layer shadows, arbitrary rgba, tint-based focus accent (`0 0 0 2px tint-50` → use solid `accent-500` или `--focus-ring`).
+
 ## Key Patterns
 
 - **Tab switching:** cross-fade via `visibility: hidden` + `opacity: 0` (NOT `display: none`) — preserves React state, enables smooth transitions. Pill indicator in bottom tab bar animates via `transform: translateX` with `getBoundingClientRect`

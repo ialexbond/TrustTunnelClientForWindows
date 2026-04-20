@@ -1,58 +1,169 @@
 import { Meta } from '@storybook/addon-docs/blocks';
+import * as ShadowStories from '../shared/ui/Shadows.stories';
 
-<Meta title="Foundations/Shadows" />
+{/* Link MDX to Shadows.stories meta — both share "Foundations/Shadows".
+    Docs tab = this MDX (canonical reference), sibling entries = interactive stories. */}
+<Meta of={ShadowStories} />
 
 # Shadows
 
-Shadows only. No glow. Restrained elegance.
+Shadow-система TrustTunnel — **5 токенов для elevation + focus ring**. No glow, no color-tint aura. Restrained elegance.
 
-## Shadow Scale
+**Философия:** тень обозначает **высоту** элемента над surface (elevation). Чем выше — тем шире размытие, тем больше смещение. Никаких colored glow effects (accent-tint / success-tint / danger-tint) — они визуально шумят и противоречат минимализму.
 
-<div style={{ display: 'flex', flexDirection: 'column', gap: '32px', padding: '32px' }}>
+**Two tiers per theme:** dark theme использует более сильную alpha (0.20–0.64) чтобы shadow читался на тёмном фоне; light theme — нежнее (0.04–0.16).
+
+---
+
+## Shadow scale (5 tokens)
+
+<div className="flex flex-col gap-8 my-6">
   {[
-    { name: '--shadow-sm', dark: '0 1px 2px rgba(0,0,0,0.32)', light: '0 1px 2px rgba(0,0,0,0.06)' },
-    { name: '--shadow-md', dark: '0 4px 12px rgba(0,0,0,0.44)', light: '0 4px 12px rgba(0,0,0,0.09)' },
-    { name: '--shadow-lg', dark: '0 8px 24px rgba(0,0,0,0.56)', light: '0 8px 24px rgba(0,0,0,0.13)' },
-    { name: '--shadow-xl', dark: '0 16px 40px rgba(0,0,0,0.64)', light: '0 16px 40px rgba(0,0,0,0.16)' },
-  ].map(({ name, dark, light }) => (
-    <div key={name} style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
-      <div style={{
-        width: '120px',
-        height: '80px',
-        backgroundColor: 'var(--color-bg-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: '8px',
-        boxShadow: `var(${name})`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '12px',
-        color: 'var(--color-text-secondary)',
-      }}>
-        {name.replace('--', '')}
+    { name: '--shadow-xs', value: '0 1px 2px', darkAlpha: '0.20', lightAlpha: '0.04', role: 'Pill indicator (active tab)' },
+    { name: '--shadow-sm', value: '0 1px 2px', darkAlpha: '0.32', lightAlpha: '0.06', role: 'Card primitive, StatusPanel' },
+    { name: '--shadow-md', value: '0 4px 12px', darkAlpha: '0.44', lightAlpha: '0.09', role: 'Dropdowns, tooltips (OverflowMenu, Select, Tooltip)' },
+    { name: '--shadow-lg', value: '0 8px 24px', darkAlpha: '0.56', lightAlpha: '0.13', role: 'Modals, snackbars, wizard icons' },
+    { name: '--shadow-xl', value: '0 16px 40px', darkAlpha: '0.64', lightAlpha: '0.16', role: 'Deep modals (ImportConfigModal)' },
+  ].map(({ name, value, darkAlpha, lightAlpha, role }) => (
+    <div key={name} className="flex items-center gap-6">
+      <div
+        style={{
+          width: 140,
+          height: 80,
+          backgroundColor: 'var(--color-bg-surface)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 8,
+          boxShadow: `var(${name})`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>{name.replace('--', '')}</span>
       </div>
-      <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-        <div style={{ color: 'var(--color-text-primary)' }}>{name}</div>
-        <div style={{ color: 'var(--color-text-muted)', marginTop: '4px' }}>Dark: {dark}</div>
-        <div style={{ color: 'var(--color-text-muted)' }}>Light: {light}</div>
+      <div className="flex-1">
+        <code className="text-sm font-mono" style={{ color: 'var(--color-text-primary)' }}>{name}</code>
+        <div className="text-xs font-mono mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          value: <span style={{ color: 'var(--color-text-secondary)' }}>{value} rgba(0,0,0,α)</span>
+        </div>
+        <div className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+          α: dark = {darkAlpha} · light = {lightAlpha}
+        </div>
+        <div className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>{role}</div>
       </div>
     </div>
   ))}
 </div>
 
-## Removed in v3.0
+---
 
-The following glow effects are deprecated and set to `none`:
-- `successGlow` -- was `0 0 12px rgba(16, 185, 129, 0.6)`
-- `dangerGlow` -- was `0 0 12px rgba(239, 68, 68, 0.4)`
-- `accentLogoGlow` -- was `rgba(99, 102, 241, 0.15)`
+## Focus ring
 
-Replaced by opacity pulse animation for status dots (`--pulse-duration: 2s`).
+Отдельная система. Используется на ВСЕХ interactive elements через `:focus-visible`.
 
-## Focus Ring
+```css
+--focus-ring: 0 0 0 2px var(--color-bg-primary), 0 0 0 4px var(--color-accent-interactive);
+```
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--focus-ring` | `0 0 0 2px var(--color-bg-primary), 0 0 0 4px var(--color-accent-interactive)` | All interactive elements via :focus-visible |
+Double-ring pattern — внутреннее 2px в цвет фона (создаёт зазор), внешнее 4px accent (видно на любой surface).
 
-Double-ring pattern: inner ring matches background, outer ring is accent. Works on all surfaces.
+**Usage:** `focus-visible:shadow-[var(--focus-ring)]` в Tailwind class. Применён в Button, IconButton, ActionInput, CIDRPicker, Toggle, Accordion, и т.д.
+
+**Не путать с `--shadow-*`** — focus-ring это outline/ring effect, не elevation.
+
+---
+
+## Component → token mapping
+
+**Актуальный реестр** из production кода.
+
+### Elevation tiers
+
+| Elevation level | Token | Components |
+|---|---|---|
+| **Flat-plus** (almost flush) | `--shadow-xs` | ServerTabs active pill indicator |
+| **Flat** (card level) | `--shadow-sm` | Card primitive, StatusPanel |
+| **Raised** (popover) | `--shadow-md` | OverflowMenu, Select dropdown, Tooltip |
+| **Floating** (dialog) | `--shadow-lg` | Modal, SnackBar, VersionSection dropdown, wizard icons |
+| **Deep** (heavy modal) | `--shadow-xl` | ImportConfigModal |
+
+### Non-elevation shadows (rings)
+
+| Element | Value | Purpose |
+|---|---|---|
+| Active StepBar indicator | `0 0 0 2px var(--color-accent-500)` | Step current-state ring (solid accent, no glow) |
+| Wizard input focus | `0 0 0 2px var(--color-accent-tint-15)` | Focus state for `.wizard-input` (subtle tinted ring) |
+| All interactive :focus-visible | `var(--focus-ring)` | Standard focus indicator |
+
+### Icon background shadows (wizard hero)
+
+| Component | Icon | Shadow |
+|---|---|---|
+| WelcomeStep | accent-500 shield | `var(--shadow-lg)` |
+| DoneStep | success-500 checkmark | `var(--shadow-lg)` |
+| ErrorStep | danger-500 X-circle | `var(--shadow-lg)` |
+
+---
+
+## Rules
+
+### Elevation system
+- **5 levels only** — `xs` / `sm` / `md` / `lg` / `xl`. Не ad-hoc shadow values.
+- **Elevation = tier, not blur.** `--shadow-md` не "medium blur", а "raised above flat surface".
+- **Theme-aware opacity** — dark theme 4x stronger alpha чем light. Управляется tokens, не overridden.
+
+### Tailwind usage
+- **Bracket notation required** — `shadow-[var(--shadow-sm)]` (НЕ `shadow-sm` Tailwind native — default values не совпадают с токенами).
+- **Inline style OK** для single-use contexts — `style={{ boxShadow: "var(--shadow-lg)" }}`.
+
+### Focus / ring
+- **Focus states** — always `--focus-ring` через `focus-visible:shadow-[var(--focus-ring)]`.
+- **Non-focus ring accents** (active step, selection) — solid color `0 0 0 2px var(--color-accent-500)`, НЕ tint colors.
+
+---
+
+## Don'ts
+
+- ❌ **Glow effects** — `boxShadow: "0 8px 32px var(--color-accent-tint-30)"` или подобное. Tint-based shadow = glow. **Запрещено в production UI.** Используй `--shadow-*` (elevation) или none.
+- ❌ **Arbitrary pixel values** — `boxShadow: "0 10px 30px rgba(0,0,0,0.2)"` inline. Используй token.
+- ❌ **2-layer glow** — `boxShadow: "0 8px 32px tint1, 0 0 64px tint2"` (WelcomeStep old). Всегда один `--shadow-*` token.
+- ❌ **Tailwind native** `shadow-sm/md/lg/xl/2xl` без bracket — они используют Tailwind defaults, не наши токены.
+- ❌ **Inline `box-shadow: 0 ...` в CSS** — используй `var(--shadow-N)`.
+- ❌ **Color-tinted focus ring accent glow** — `0 0 0 2px var(--color-accent-tint-50)` создаёт soft-glow edge. Используй solid `var(--color-accent-500)` или `--focus-ring`.
+
+---
+
+## Exceptions (задокументированные отклонения)
+
+Эти места legitimate используют custom shadow — **НЕ тиражировать**, но есть rationale.
+
+| Element | Value | File | Rationale |
+|---|---|---|---|
+| `.wizard-input:focus` | `0 0 0 2px var(--color-accent-tint-15)` | index.css | Subtle tinted focus для form inputs — между default (none) и full focus-ring. Pre-existing pattern. |
+| StepBar active indicator | `0 0 0 2px var(--color-accent-500)` | StepBar.tsx | Solid-accent ring для active step — НЕ glow (нет blur, solid color), visually отличается от focus-ring (simpler). |
+| `boxShadow: "none"` explicit | — | ServerStatusSection.tsx | Intentional reset (parent's shadow shouldn't cascade). |
+
+---
+
+## What was removed (Phase 14.x cleanup)
+
+Ранее codebase содержал colored **glow effects** которые противоречили минималистичной философии:
+
+| Location | Old value | Replacement |
+|---|---|---|
+| WelcomeStep icon | `0 8px 32px accent-tint-30, 0 0 64px accent-tint-15` (2-layer glow) | `var(--shadow-lg)` |
+| DoneStep icon | `0 8px 24px success-tint-25` (green glow) | `var(--shadow-lg)` |
+| ErrorStep icon | `0 8px 24px danger-tint-25` (red glow) | `var(--shadow-lg)` |
+| StepBar active step | `0 0 0 2px accent-tint-50` (soft ring) | `0 0 0 2px accent-500` (solid ring) |
+| ChangelogModal | `0 8px 24px overlay-50` (custom) | `var(--shadow-lg)` |
+| ImportConfigModal | `0 16px 48px overlay-40` (custom) | `var(--shadow-xl)` |
+
+---
+
+## Canonical sources
+
+- **Tokens:** [`gui-pro/src/shared/styles/tokens.css`](../../../gui-pro/src/shared/styles/tokens.css) §Shadows (lines 296–301 dark, 406–411 light)
+- **Memory deep-dive:** [`memory/v3/design-system/shadows.md`](../../../memory/v3/design-system/shadows.md)
+- **Visual scale + component examples:** sibling stories (Scale, Elevation tiers, Focus ring, Anti-patterns)
+- **Related:** [typography.md](../../memory/v3/design-system/typography.md) · [spacing.md](../../memory/v3/design-system/spacing.md)

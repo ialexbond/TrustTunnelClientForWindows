@@ -18,7 +18,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
             className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center relative"
             style={{
               backgroundColor: "var(--color-accent-500)",
-              boxShadow: "0 8px 32px var(--color-accent-tint-30), 0 0 64px var(--color-accent-tint-15)",
+              boxShadow: "var(--shadow-lg)",
             }}
           >
             <Shield className="w-8 h-8 text-white" />

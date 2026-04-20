@@ -32,7 +32,7 @@ export function ErrorStep(w: WizardState) {
   return (
     <div className="flex-1 flex flex-col items-center overflow-y-auto p-6">
       <div className="max-w-sm w-full text-center space-y-4 my-auto">
-        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-danger-500)", boxShadow: "0 8px 24px var(--color-danger-tint-25)" }}>
+        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-danger-500)", boxShadow: "var(--shadow-lg)" }}>
           <XCircle className="w-8 h-8 text-white" />
         </div>
 

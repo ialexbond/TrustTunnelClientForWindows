@@ -122,7 +122,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
         style={{
           backgroundColor: "var(--color-bg-surface)",
           border: "1px solid var(--color-border)",
-          boxShadow: "0 16px 48px var(--color-overlay-40)",
+          boxShadow: "var(--shadow-xl)",
         }}
       >
         {/* Header */}
