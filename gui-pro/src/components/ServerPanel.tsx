@@ -74,7 +74,7 @@ export function ServerPanel(props: ServerPanelProps) {
           >
             <XCircle className="w-6 h-6" style={{ color: "var(--color-danger-500)" }} />
           </div>
-          <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
             {t("server.status.connection_failed")}
           </h2>
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -117,7 +117,7 @@ export function ServerPanel(props: ServerPanelProps) {
           >
             <AlertTriangle className="w-6 h-6" style={{ color: "var(--color-warning-500)" }} />
           </div>
-          <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
             {t("server.status.not_installed")}
           </h2>
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -181,7 +181,7 @@ export function ServerPanel(props: ServerPanelProps) {
           <div className="text-center space-y-4">
             <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: "var(--color-warning-500)" }} />
             <div>
-              <h2 className="text-lg font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+              <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
                 {t("server.status.rebooting")}
               </h2>
               <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>

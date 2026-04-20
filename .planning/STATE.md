@@ -26,19 +26,19 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Phase: 14.2 — Typography Foundation
-Plan: Executing directly from `.planning/typography-refactor.md` (Path A — vibe-friendly, no formal PLAN.md files)
-Status: In progress — Plan 14.2-01 shipped (commit `485bc008`), ready for Plan 14.2-02
+Plan: Executing directly from `.planning/typography-refactor.md` (Path A — vibe-friendly)
+Status: In progress — Plans 14.2-01/02/03 shipped, ready for 14.2-04 (Geist Mono)
 Last activity: 2026-04-20
 
-Progress: [▰▱▱▱▱▱▱] plans 1/7
+Progress: [▰▰▰▱▱▱▱] plans 3/7
 
 **Plan status:**
 - ✅ 14.2-01 Canonical tokens — `485bc008`
-- ⏳ 14.2-02 Tailwind config remap — next
-- ⏳ 14.2-03 Code migration
-- ⏳ 14.2-04 Geist Mono application
-- ⏳ 14.2-05 Documentation rewrite
-- ⏳ 14.2-06 Storybook stories + MDX
+- ✅ 14.2-02 Tailwind config remap + docs — `85947053` + `c7904b02` + `d8f8ed12`
+- ✅ 14.2-03 Code migration (weights + inline fontSize + legacy aliases removed) — pending commit
+- ⏳ 14.2-04 Geist Mono application — next
+- ⏳ 14.2-05 Documentation rewrite — partially done (typography.md / tokens.md / known-issues.md updated as part of 14.2-02/03)
+- ⏳ 14.2-06 Storybook stories + MDX — partially done (Typography.mdx done; Typography.stories.tsx pending)
 - ⏳ 14.2-07 Final verification
 
 **Prior phase (14.1):** Plans 8/8 shipped. UAT closed as deferred-stale per user 2026-04-20 (20+ post-ship revision commits not in SUMMARY.md made test list outdated; Phase 14.1 work is de-facto complete in production).

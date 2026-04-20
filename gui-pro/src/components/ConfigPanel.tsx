@@ -17,7 +17,7 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
     <div className="glass-card p-4 flex flex-col gap-3 lg:col-span-1">
       <div className="flex items-center gap-2">
         <Settings className="w-3.5 h-3.5" style={{ color: "var(--color-accent-interactive)" }} />
-        <h2 className="text-xs font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+        <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
           {t('configPanel.title')}
         </h2>
       </div>

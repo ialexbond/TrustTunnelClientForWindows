@@ -181,7 +181,7 @@ export function ServerSettingsSection({ state }: Props) {
             id: "advanced",
             title: (
               <span
-                className="text-sm font-[var(--font-weight-semibold)]"
+                className="text-sm font-semibold"
                 style={{ color: "var(--color-text-primary)" }}
               >
                 {t("server.config.advanced")}
@@ -196,7 +196,7 @@ export function ServerSettingsSection({ state }: Props) {
                 {configRaw && (
                   <div>
                     <span
-                      className="text-xs font-[var(--font-weight-semibold)] block mb-2"
+                      className="text-xs font-semibold block mb-2"
                       style={{ color: "var(--color-text-secondary)" }}
                     >
                       vpn.toml

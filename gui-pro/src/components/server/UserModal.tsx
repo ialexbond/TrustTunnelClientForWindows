@@ -1116,7 +1116,7 @@ export function UserModal({
       </button>
 
       {/* Title */}
-      <h2 className="text-lg font-[var(--font-weight-semibold)] text-[var(--color-text-primary)] mb-[var(--space-5)] pr-8">
+      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-[var(--space-5)] pr-8">
         {isEditMode
           ? t("server.users.edit_title", { user: editUsername })
           : t("server.users.add_title")}
@@ -1159,7 +1159,7 @@ export function UserModal({
       <section aria-labelledby="section-credentials" className="mb-[var(--space-5)]">
         <p
           id="section-credentials"
-          className="text-xs font-[var(--font-weight-semibold)] text-[var(--color-text-muted)] uppercase tracking-wide mb-[var(--space-3)]"
+          className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-[var(--space-3)]"
         >
           {t("server.users.section_credentials")}
         </p>
@@ -1217,7 +1217,7 @@ export function UserModal({
             <div className="flex flex-col gap-1.5">
               <label
                 htmlFor="user-modal-rotate-password-input"
-                className="block text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)]"
+                className="block text-sm font-medium text-[var(--color-text-secondary)]"
               >
                 {passwordEditing
                   ? t("server.users.rotate_password_title")
@@ -1357,7 +1357,7 @@ export function UserModal({
       <section aria-labelledby="section-deeplink">
         <p
           id="section-deeplink"
-          className="text-xs font-[var(--font-weight-semibold)] text-[var(--color-text-muted)] uppercase tracking-wide mb-[var(--space-3)]"
+          className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-[var(--space-3)]"
         >
           {t("server.users.section_deeplink")}
         </p>
@@ -1377,7 +1377,7 @@ export function UserModal({
             <div className="flex items-baseline justify-between mb-1.5">
               <label
                 htmlFor="user-modal-display-name"
-                className="block text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)]"
+                className="block text-sm font-medium text-[var(--color-text-secondary)]"
               >
                 {t("server.users.field_display_name")}
               </label>
@@ -1505,7 +1505,7 @@ export function UserModal({
               of a dropdown with «Авто» that mapped to the same h2 anyway.
               Pattern copied from SshConnectForm's auth-method picker. */}
           <div>
-            <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
               {t("server.users.field_upstream_protocol")}
             </label>
             <div className="flex rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden">
@@ -1519,7 +1519,7 @@ export function UserModal({
                     disabled={isDisabled}
                     aria-pressed={active}
                     className={cn(
-                      "flex-1 flex items-center justify-center py-1.5 text-xs font-[var(--font-weight-semibold)] transition-colors",
+                      "flex-1 flex items-center justify-center py-1.5 text-xs font-medium transition-colors",
                       "border-r border-[var(--color-border)] last:border-r-0",
                       "focus-visible:shadow-[var(--focus-ring)] outline-none",
                       "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",

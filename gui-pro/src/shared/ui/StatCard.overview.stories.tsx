@@ -67,7 +67,7 @@ function Title({ icon, text, onRefresh, clickable }: { icon: React.ReactNode; te
     <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
       <div className="flex items-center gap-2 h-full whitespace-nowrap">
         <span className="flex items-center justify-center w-5 h-5 shrink-0" style={accent}>{icon}</span>
-        <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{text}</span>
+        <span className="text-lg font-semibold" style={primary}>{text}</span>
       </div>
       <div className="flex items-center h-full shrink-0 ml-2">
         {onRefresh && (
@@ -432,7 +432,7 @@ export const CountryKnown: Story = {
     <Card padding="md">
       <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
       <div className="flex items-center justify-center py-2">
-        <span className="text-xl font-[var(--font-weight-semibold)]" style={primary}>Германия</span>
+        <span className="text-xl font-semibold" style={primary}>Германия</span>
       </div>
     </Card>
   ),
@@ -446,7 +446,7 @@ export const CountryUnknown: Story = {
     <Card padding="md">
       <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
       <div className="flex items-center justify-center py-2">
-        <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
+        <span className="text-xl font-semibold" style={muted}>—</span>
       </div>
     </Card>
   ),
@@ -582,7 +582,7 @@ const securityItems = (items: { name: string; ok: boolean; label: string }[]) =>
     {items.map((item) => (
       <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2"
         style={{ backgroundColor: item.ok ? "var(--color-status-connected-bg)" : "var(--color-status-error-bg)" }}>
-        <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
+        <div className="text-sm font-semibold" style={primary}>{item.name}</div>
         <div className="text-sm" style={{ color: item.ok ? "var(--color-success-500)" : "var(--color-danger-500)" }}>{item.label}</div>
       </div>
     ))}
@@ -654,13 +654,13 @@ export const SecurityTlsWarning: Story = {
           { name: "SSH-ключ", label: "Ed25519", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
         ].map((item) => (
           <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: item.bg }}>
-            <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
+            <div className="text-sm font-semibold" style={primary}>{item.name}</div>
             <div className="text-sm" style={{ color: item.color }}>{item.label}</div>
           </div>
         ))}
         <div className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-status-connecting-bg)" }}>
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>TLS</span>
+            <span className="text-sm font-semibold" style={primary}>TLS</span>
             <AlertTriangle className="w-3.5 h-3.5" style={{ color: "var(--color-warning-500)" }} />
           </div>
           <div className="text-sm" style={{ color: "var(--color-warning-500)" }}>12 дн.</div>
@@ -684,13 +684,13 @@ export const SecurityTlsDanger: Story = {
           { name: "SSH-ключ", label: "Ed25519", color: "var(--color-success-500)", bg: "var(--color-status-connected-bg)" },
         ].map((item) => (
           <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: item.bg }}>
-            <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
+            <div className="text-sm font-semibold" style={primary}>{item.name}</div>
             <div className="text-sm" style={{ color: item.color }}>{item.label}</div>
           </div>
         ))}
         <div className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-status-error-bg)" }}>
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>TLS</span>
+            <span className="text-sm font-semibold" style={primary}>TLS</span>
             <AlertTriangle className="w-3.5 h-3.5" style={{ color: "var(--color-danger-500)" }} />
           </div>
           <div className="text-sm" style={{ color: "var(--color-danger-500)" }}>3 дн.</div>
@@ -732,11 +732,11 @@ export const LoadNormal: Story = {
       <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
       <div className="space-y-2.5 mt-1">
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>12%</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold" style={primary}>12%</span></div>
           <ProgressBar value={12} size="sm" color="success" />
         </div>
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>340 / 1024 МБ</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold" style={primary}>340 / 1024 МБ</span></div>
           <ProgressBar value={33} size="sm" color="accent" />
         </div>
       </div>
@@ -753,11 +753,11 @@ export const LoadCritical: Story = {
       <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
       <div className="space-y-2.5 mt-1">
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-[var(--font-weight-semibold)]" style={danger}>95%</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold" style={danger}>95%</span></div>
           <ProgressBar value={95} size="sm" color="danger" />
         </div>
         <div>
-          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-[var(--font-weight-semibold)]" style={danger}>920 / 1024 МБ</span></div>
+          <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold" style={danger}>920 / 1024 МБ</span></div>
           <ProgressBar value={90} size="sm" color="danger" />
         </div>
       </div>
@@ -856,7 +856,7 @@ export const AllCards: Story = {
       <Card padding="md" style={{ flex: "1 1 180px" }}>
         <Title icon={<Globe className="w-5 h-5" />} text="Страна" />
         <div className="flex items-center justify-center py-2">
-          <span className="text-xl font-[var(--font-weight-semibold)]" style={primary}>Германия</span>
+          <span className="text-xl font-semibold" style={primary}>Германия</span>
         </div>
       </Card>
 
@@ -890,11 +890,11 @@ export const AllCards: Story = {
         <Title icon={<Gauge className="w-5 h-5" />} text="Нагрузка" onRefresh />
         <div className="space-y-2.5 mt-1">
           <div>
-            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>12%</span></div>
+            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>CPU</span><span className="text-sm font-semibold" style={primary}>12%</span></div>
             <ProgressBar value={12} size="sm" color="success" />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>340 / 1024 МБ</span></div>
+            <div className="flex items-center justify-between mb-1"><span className="text-sm" style={muted}>RAM</span><span className="text-sm font-semibold" style={primary}>340 / 1024 МБ</span></div>
             <ProgressBar value={33} size="sm" color="accent" />
           </div>
         </div>

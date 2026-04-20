@@ -88,7 +88,7 @@ export const Success: Story = {
 
     return (
       <div style={{ padding: 24 }}>
-        <p style={{ color: "var(--color-text-secondary)", fontSize: "var(--font-size-sm)" }}>
+        <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
           Success snackbar with auto-dismiss (3s)
         </p>
         <SnackBar messages={messages} onShown={onShown} />

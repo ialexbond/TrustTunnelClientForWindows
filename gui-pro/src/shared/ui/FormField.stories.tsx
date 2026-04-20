@@ -19,10 +19,10 @@ export const Default: Story = {
       <input
         type="text"
         placeholder="Введите имя"
+        className="text-base"
         style={{
           width: "100%",
           padding: "6px var(--space-3)",
-          fontSize: "var(--font-size-md)",
           color: "var(--color-text-primary)",
           background: "var(--color-input-bg)",
           border: "1px solid var(--color-input-border)",
@@ -40,10 +40,10 @@ export const Required: Story = {
       <input
         type="email"
         placeholder="user@example.com"
+        className="text-base"
         style={{
           width: "100%",
           padding: "6px var(--space-3)",
-          fontSize: "var(--font-size-md)",
           color: "var(--color-text-primary)",
           background: "var(--color-input-bg)",
           border: "1px solid var(--color-input-border)",
@@ -61,10 +61,10 @@ export const WithHint: Story = {
       <input
         type="number"
         defaultValue={22}
+        className="text-base"
         style={{
           width: "100%",
           padding: "6px var(--space-3)",
-          fontSize: "var(--font-size-md)",
           color: "var(--color-text-primary)",
           background: "var(--color-input-bg)",
           border: "1px solid var(--color-input-border)",
@@ -82,10 +82,10 @@ export const WithError: Story = {
       <input
         type="password"
         defaultValue="123"
+        className="text-base"
         style={{
           width: "100%",
           padding: "6px var(--space-3)",
-          fontSize: "var(--font-size-md)",
           color: "var(--color-text-primary)",
           background: "var(--color-status-error-bg)",
           border: "1px solid var(--color-status-error-border, var(--color-status-error))",
@@ -104,10 +104,10 @@ export const WithInputAndError: Story = {
         <input
           type="text"
           defaultValue="invalid@@server"
+          className="text-base"
           style={{
             width: "100%",
             padding: "6px var(--space-3)",
-            fontSize: "var(--font-size-md)",
             color: "var(--color-text-primary)",
             background: "var(--color-status-error-bg)",
             border: "1px solid var(--color-status-error)",
@@ -127,10 +127,10 @@ export const MultipleFields: Story = {
         <input
           type="text"
           placeholder="192.168.1.100"
+          className="text-base"
           style={{
             width: "100%",
             padding: "6px var(--space-3)",
-            fontSize: "var(--font-size-md)",
             color: "var(--color-text-primary)",
             background: "var(--color-input-bg)",
             border: "1px solid var(--color-input-border)",
@@ -143,10 +143,10 @@ export const MultipleFields: Story = {
         <input
           type="number"
           defaultValue={22}
+          className="text-base"
           style={{
             width: "100%",
             padding: "6px var(--space-3)",
-            fontSize: "var(--font-size-md)",
             color: "var(--color-text-primary)",
             background: "var(--color-input-bg)",
             border: "1px solid var(--color-input-border)",
@@ -159,10 +159,10 @@ export const MultipleFields: Story = {
         <input
           type="text"
           placeholder="root"
+          className="text-base"
           style={{
             width: "100%",
             padding: "6px var(--space-3)",
-            fontSize: "var(--font-size-md)",
             color: "var(--color-text-primary)",
             background: "var(--color-input-bg)",
             border: "1px solid var(--color-input-border)",

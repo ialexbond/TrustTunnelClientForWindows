@@ -9,7 +9,7 @@ export const badgeVariants = cva(
     "px-2 py-0.5",
     "rounded-[var(--radius-full)]",
     "text-xs",
-    "font-[var(--font-weight-semibold)]",
+    "font-medium",
     "uppercase tracking-[var(--tracking-wide)]",
   ].join(" "),
   {

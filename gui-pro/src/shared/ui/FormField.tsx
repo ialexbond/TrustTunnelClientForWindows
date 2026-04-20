@@ -21,9 +21,8 @@ export function FormField({
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <label
+        className="text-sm font-normal"
         style={{
-          fontSize: "var(--font-size-sm)",
-          fontWeight: "var(--font-weight-normal)",
           color: "var(--color-text-secondary)",
         }}
       >
@@ -42,8 +41,8 @@ export function FormField({
       {error ? (
         <p
           role="alert"
+          className="text-xs"
           style={{
-            fontSize: "var(--font-size-xs)",
             color: "var(--color-status-error)",
           }}
         >
@@ -51,8 +50,8 @@ export function FormField({
         </p>
       ) : hint ? (
         <p
+          className="text-xs"
           style={{
-            fontSize: "var(--font-size-xs)",
             color: "var(--color-text-muted)",
           }}
         >

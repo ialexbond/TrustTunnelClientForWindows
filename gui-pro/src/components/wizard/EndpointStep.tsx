@@ -26,7 +26,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── VPN Credentials ── */}
           <div className="glass-card p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <User className="w-3 h-3" />
               {t('wizard.endpoint.vpn_credentials')}
             </div>
@@ -66,7 +66,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── TLS Certificate ── */}
           <div className="glass-card p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <Lock className="w-3 h-3" />
               {t('wizard.endpoint.tls_certificate')}
             </div>
@@ -211,7 +211,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* ── Server Features ── */}
           <div className="glass-card p-3 space-y-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-[var(--font-weight-semibold)] uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-text-secondary)" }}>
               <Activity className="w-3 h-3" />
               {t('wizard.endpoint.server_features')}
             </div>
@@ -278,7 +278,7 @@ export function EndpointStep(w: WizardState) {
             <div className="flex items-start gap-2.5 p-3 rounded-xl" style={{ backgroundColor: "var(--color-warning-tint-08)", border: "1px solid var(--color-warning-tint-20)" }}>
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "var(--color-warning-500)" }} />
               <div className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
-                <span className="font-[var(--font-weight-semibold)]" style={{ color: "var(--color-warning-500)" }}>{t('wizard.endpoint.dns_warning_important')}</span>{' '}
+                <span className="font-semibold" style={{ color: "var(--color-warning-500)" }}>{t('wizard.endpoint.dns_warning_important')}</span>{' '}
                 {w.host
                   ? t('wizard.endpoint.dns_warning_text', { domain: w.domain, host: w.host })
                   : t('wizard.endpoint.dns_warning_text_no_host', { domain: w.domain })}

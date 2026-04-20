@@ -34,9 +34,8 @@ export function SectionHeader({
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
           >
             <span
-              className="font-[var(--font-weight-semibold)] tracking-[var(--tracking-tight)]"
+              className="font-semibold tracking-[var(--tracking-tight)] text-lg"
               style={{
-                fontSize: "var(--font-size-lg)",
                 color: "var(--color-text-primary)",
               }}
             >
@@ -55,9 +54,8 @@ export function SectionHeader({
           </button>
         ) : (
           <span
-            className="font-[var(--font-weight-semibold)] tracking-[var(--tracking-tight)]"
+            className="font-semibold tracking-[var(--tracking-tight)] text-lg"
             style={{
-              fontSize: "var(--font-size-lg)",
               color: "var(--color-text-primary)",
             }}
           >
@@ -68,9 +66,8 @@ export function SectionHeader({
       </div>
       {description && (
         <p
-          className="mt-1"
+          className="mt-1 text-sm"
           style={{
-            fontSize: "var(--font-size-sm)",
             color: "var(--color-text-muted)",
           }}
         >

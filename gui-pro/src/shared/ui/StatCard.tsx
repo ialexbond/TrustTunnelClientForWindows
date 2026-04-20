@@ -48,7 +48,7 @@ export function StatCard({ label, value, trend, icon, loading, className }: Stat
           )}
           {trend !== undefined && trend !== 0 && (
             <span
-              className="text-xs font-[var(--font-weight-semibold)] ml-auto"
+              className="text-xs font-semibold ml-auto"
               style={{ color: getTrendColor(trend) }}
             >
               {formatTrend(trend)}
@@ -56,7 +56,7 @@ export function StatCard({ label, value, trend, icon, loading, className }: Stat
           )}
         </div>
         <div
-          className="text-xl font-[var(--font-weight-semibold)]"
+          className="text-xl font-semibold"
           style={{ color: "var(--color-text-primary)" }}
         >
           {value}

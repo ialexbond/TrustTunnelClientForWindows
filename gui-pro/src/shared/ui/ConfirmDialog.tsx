@@ -49,7 +49,7 @@ export function ConfirmDialog({
     >
       <div className="space-y-[var(--space-4)]">
         <h3
-          className="text-base font-[var(--font-weight-semibold)] text-center"
+          className="text-base font-semibold text-center"
           style={{
             color:
               variant === "danger"

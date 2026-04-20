@@ -17,7 +17,7 @@ export function Fail2banSection({ status, state }: Fail2banSectionProps) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+          <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
             {t("server.security.fail2ban.title")}
           </span>
           <StatusBadge

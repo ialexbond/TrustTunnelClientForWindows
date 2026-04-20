@@ -81,7 +81,7 @@
   }
   .wizard-input-sm {
     padding: 0.5rem 1rem;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-caption);
   }
 
   /* Hide native password reveal button (Edge/Chrome) to avoid double eye icon */

@@ -153,7 +153,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
             }}
             onKeyDown={(e) => handleTabKeyDown(e, idx)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-[var(--font-weight-semibold)] transition-colors rounded-[var(--radius-md)]",
+              "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors rounded-[var(--radius-md)]",
               "focus-visible:shadow-[var(--focus-ring)] outline-none",
               activeTab === tab.id
                 ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-[var(--shadow-xs)]"
@@ -221,7 +221,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
                     type="button"
                     onClick={() => state.loadServerInfo()}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-[var(--font-weight-semibold)] rounded-[var(--radius-md)]",
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)]",
                       "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]",
                       "hover:bg-[var(--color-bg-hover)] transition-colors",
                       "focus-visible:shadow-[var(--focus-ring)] outline-none"
