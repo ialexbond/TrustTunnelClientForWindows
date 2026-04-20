@@ -239,7 +239,7 @@ export function AddRuleInput({ action, geodataStatus, geodataCategories, onAdd }
       </div>
 
       {errorMsg && (
-        <p className="text-[10px] mt-1" style={{ color: "var(--color-danger-400)" }}>
+        <p className="text-xs mt-1" style={{ color: "var(--color-danger-400)" }}>
           {errorMsg}
         </p>
       )}

@@ -29,10 +29,7 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
     >
       {/* Header */}
       <div className="h-[40px] flex items-center px-3">
-        <span
-          className="text-[var(--color-text-muted)]"
-          style={{ fontSize: "11px", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}
-        >
+        <span className="text-xs font-medium tracking-wide uppercase text-[var(--color-text-muted)]">
           {t("sidebar.servers", "Серверы")}
         </span>
       </div>
@@ -68,7 +65,7 @@ export function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onDi
                 {srv.label || srv.host}
               </div>
               {srv.label && (
-                <div className="text-[10px] text-[var(--color-text-muted)] truncate">
+                <div className="text-xs font-mono text-[var(--color-text-muted)] truncate">
                   {srv.host}:{srv.port}
                 </div>
               )}

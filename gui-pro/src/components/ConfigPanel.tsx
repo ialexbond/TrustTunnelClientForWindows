@@ -24,7 +24,7 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
 
       <div className="space-y-3">
         <div>
-          <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>
+          <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>
             {t('configPanel.configFile')}
           </label>
           <div className="flex gap-1.5">
@@ -70,7 +70,7 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
         </div>
 
         <div>
-          <label className="block text-[11px] mb-1" style={{ color: "var(--color-text-muted)" }}>
+          <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>
             {t('configPanel.logLevel')}
           </label>
           <select
@@ -97,7 +97,7 @@ function ConfigPanel({ config, onConfigChange }: ConfigPanelProps) {
       </div>
 
       <div className="mt-auto pt-3" style={{ borderTop: "1px solid var(--color-border)" }}>
-        <div className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+        <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
           <p>Sidecar: trusttunnel_client &bull; TOML</p>
         </div>
       </div>

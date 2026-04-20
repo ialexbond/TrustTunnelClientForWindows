@@ -121,7 +121,7 @@ export function LogsSection({ state }: Props) {
             )}
             <pre
               ref={logsEndRef}
-              className="p-3 pr-7 text-[10px] leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono scroll-overlay"
+              className="p-3 pr-7 text-xs leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono scroll-overlay"
               style={{
                 backgroundColor: "var(--color-bg-primary)",
               }}

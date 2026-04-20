@@ -17,11 +17,11 @@ export function AddUserForm({ w, onUserAdded }: AddUserFormProps) {
 
   return (
     <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-      <p className="text-[11px] font-medium flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
+      <p className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
         <UserPlus className="w-3.5 h-3.5" />
         {t('wizard.found.add_user')}
       </p>
-      <p className="text-[10px] leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
+      <p className="text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
         {t('wizard.found.add_user_description')}
       </p>
       <div className="space-y-1.5">
