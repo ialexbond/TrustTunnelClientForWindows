@@ -206,55 +206,131 @@ export const StatusColors: Story = {
   parameters: {
     docs: {
       description: {
-        story: "4 semantic categories × 3 tiers. Dark theme default = 400, light = 600. Contrast ratios show WCAG compliance.",
+        story:
+          "4 категории × 3 tiers. Каждый tier имеет свой scope — где безопасно использовать. Contrast measured только на предназначенном background (cross-theme ratios не показаны — они не применяются в production).",
       },
     },
   },
   render: () => {
-    const bgPrimaryDark = "#0d0d0d";
-    const bgPrimaryLight = "#f9f9f7";
+    const bgDark = "#0d0d0d";
+    const bgLight = "#f9f9f7";
+
+    // Per-tier scope rules — какой bg и какое использование
+    const tierScope = {
+      400: { bg: bgDark, bgLabel: "Dark bg", scope: "Dark UI — badges, icons, dots" },
+      500: { bg: bgLight, bgLabel: "Light bg", scope: "Body text (safe both themes)" }, // show on light для conservative WCAG check
+      600: { bg: bgLight, bgLabel: "Light bg", scope: "Light UI ≥18pt — large badges, icons" },
+    };
+
     return (
       <div style={{ color: primary }}>
-        <div className="text-xs mb-4" style={{ color: muted }}>
-          Contrast measured against theme bg-primary. ✅ AA = ≥ 4.5:1 (body text). ⚠️ AA-large = ≥ 3:1 (UI ≥18pt only).
+        {/* ── WCAG legend ── */}
+        <div
+          className="rounded-lg p-4 mb-6"
+          style={{ background: "var(--color-status-info-bg)", border: `1px solid var(--color-status-info-border)` }}
+        >
+          <div className="text-sm font-semibold mb-2" style={{ color: "var(--color-status-info)" }}>
+            📖 WCAG contrast levels — как читать badges ниже
+          </div>
+          <ul className="text-sm space-y-1" style={{ color: primary }}>
+            <li>
+              <strong style={{ color: "var(--color-success-500)" }}>✅ AAA (≥7:1)</strong> — premium readability, любой текст
+            </li>
+            <li>
+              <strong style={{ color: "var(--color-success-500)" }}>✅ AA (≥4.5:1)</strong> — WCAG 2.1 <strong>body text standard</strong>. Long content, paragraphs, readable labels.
+            </li>
+            <li>
+              <strong style={{ color: "var(--color-warning-500)" }}>⚠️ AA-large (≥3:1)</strong> — acceptable <strong>только для UI ≥18pt</strong> (large badges, status icons). <strong>НЕ body text.</strong>
+            </li>
+            <li>
+              <strong style={{ color: "var(--color-danger-500)" }}>❌ FAIL (&lt;3:1)</strong> — недостаточный contrast, не использовать visibly.
+            </li>
+          </ul>
+          <div className="text-xs mt-3" style={{ color: muted }}>
+            <strong>Rule of thumb:</strong> если сомневаешься — используй <code className="font-mono">-500</code> midpoint. Safe AA на обоих themes.
+          </div>
         </div>
+
+        {/* ── Status categories ── */}
         {(Object.entries(status) as [keyof typeof status, Record<number, string>][]).map(([cat, tiers]) => (
           <div key={cat} className="mb-6">
-            <div className="text-sm font-semibold mb-2 capitalize" style={{ color: primary }}>{cat}</div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="text-base font-semibold mb-3 capitalize" style={{ color: primary }}>{cat}</div>
+            <div className="grid grid-cols-3 gap-3">
               {[400, 500, 600].map((tier) => {
                 const hex = tiers[tier];
-                const darkRatio = contrast(hex, bgPrimaryDark);
-                const lightRatio = contrast(hex, bgPrimaryLight);
-                const darkBadge = ratioBadge(darkRatio);
-                const lightBadge = ratioBadge(lightRatio);
-                const tierNote = tier === 400 ? "⭐ dark default" : tier === 600 ? "⭐ light default" : "midpoint";
+                const scope = tierScope[tier as 400 | 500 | 600];
+                const ratio = contrast(hex, scope.bg);
+                const badge = ratioBadge(ratio);
+                // Second ratio — для tier 500 also show dark bg (body text is valid on both themes)
+                const secondRatio = tier === 500 ? contrast(hex, bgDark) : null;
+                const secondBadge = secondRatio !== null ? ratioBadge(secondRatio) : null;
                 return (
                   <div
                     key={tier}
                     className="rounded-lg p-3"
                     style={{ background: surface, border: `1px solid ${border}` }}
                   >
+                    {/* Color preview */}
                     <div
-                      className="w-full h-12 rounded mb-2 flex items-center justify-center font-mono text-sm font-semibold"
+                      className="w-full h-14 rounded-md mb-3 flex items-center justify-center font-mono text-sm font-semibold"
                       style={{ background: hex, color: tier >= 500 ? "#fff" : "#0d0d0d" }}
                     >
-                      {tier}
+                      -{tier}
                     </div>
-                    <code className="font-mono text-xs" style={{ color: secondary }}>{hex}</code>
-                    <div className="text-xs mt-1" style={{ color: muted }}>{tierNote}</div>
-                    <div className="text-xs mt-2 font-mono" style={{ color: muted }}>
-                      Dark bg: <span style={{ color: darkBadge.color }}>{darkRatio.toFixed(2)}:1 {darkBadge.label}</span>
+                    {/* Hex */}
+                    <code className="font-mono text-xs block" style={{ color: secondary }}>{hex}</code>
+                    {/* Scope rule */}
+                    <div className="text-xs mt-2 font-medium" style={{ color: primary }}>
+                      {scope.scope}
                     </div>
-                    <div className="text-xs font-mono" style={{ color: muted }}>
-                      Light bg: <span style={{ color: lightBadge.color }}>{lightRatio.toFixed(2)}:1 {lightBadge.label}</span>
+                    {/* Primary ratio */}
+                    <div className="text-xs mt-2 font-mono pt-2" style={{ color: muted, borderTop: `1px solid ${border}` }}>
+                      on {scope.bgLabel}:{" "}
+                      <span style={{ color: badge.color, fontWeight: 600 }}>
+                        {ratio.toFixed(2)}:1
+                      </span>{" "}
+                      <span className="text-[10px]" style={{ color: badge.color }}>{badge.label}</span>
                     </div>
+                    {/* Second ratio for 500 (midpoint — both themes) */}
+                    {secondRatio !== null && secondBadge && (
+                      <div className="text-xs font-mono" style={{ color: muted }}>
+                        on Dark bg:{" "}
+                        <span style={{ color: secondBadge.color, fontWeight: 600 }}>
+                          {secondRatio.toFixed(2)}:1
+                        </span>{" "}
+                        <span className="text-[10px]" style={{ color: secondBadge.color }}>{secondBadge.label}</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
         ))}
+
+        {/* ── Footer — декларативное правило ── */}
+        <div
+          className="rounded-lg p-4 mt-8"
+          style={{ background: "var(--color-bg-elevated)", border: `1px solid ${border}` }}
+        >
+          <div className="text-sm font-semibold mb-2" style={{ color: primary }}>
+            💡 Tier selection — rule
+          </div>
+          <ul className="text-sm space-y-1" style={{ color: secondary }}>
+            <li>
+              <strong style={{ color: primary }}>-400</strong> → Dark theme UI: badges, icons, dots, chip labels
+            </li>
+            <li>
+              <strong style={{ color: primary }}>-500</strong> ⭐ → <strong>Body text / readable content</strong> (safe default на обоих themes)
+            </li>
+            <li>
+              <strong style={{ color: primary }}>-600</strong> → Light theme UI ≥18pt: large badges, status icons
+            </li>
+          </ul>
+          <div className="text-xs mt-3" style={{ color: muted }}>
+            Semantic tokens <code className="font-mono">--color-status-connected</code> / <code className="font-mono">-error</code> / <code className="font-mono">-connecting</code> / <code className="font-mono">-info</code> автоматически resolve к правильному tier per theme. Использовать их напрямую — не tier вручную.
+          </div>
+        </div>
       </div>
     );
   },
