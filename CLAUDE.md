@@ -132,6 +132,8 @@ v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, д�
 
 **Typography reference** (Phase 14.2 canonical): [`memory/v3/design-system/typography.md`](memory/v3/design-system/typography.md) — decision tree + component → class mapping + rules + anti-patterns. Visual: Storybook → Foundations → Typography.
 
+**Spacing reference:** [`memory/v3/design-system/spacing.md`](memory/v3/design-system/spacing.md) — 4px base grid, 8 tokens (`--space-1..8` = 4/8/12/16/20/24/32/40). Rules: Tailwind `p-1..6/m-1..6/gap-1..6` матчат `--space-1..6` directly; для 32/40 использовать **bracket notation** `p-[var(--space-7)]` / `p-[var(--space-8)]` (НЕ `p-7`/`p-8`/`p-10` Tailwind native — naming collision: они = 28/32/40, наши = 32/40). Anti-patterns: `p-[13px]` non-multiples of 4, inline `style={{ padding }}`, magic numbers в CSS. Exceptions задокументированы (TitleBar PRO badge, sidebar widths, OS chrome).
+
 ## Key Patterns
 
 - **Tab switching:** cross-fade via `visibility: hidden` + `opacity: 0` (NOT `display: none`) — preserves React state, enables smooth transitions. Pill indicator in bottom tab bar animates via `transform: translateX` with `getBoundingClientRect`

@@ -1,44 +1,213 @@
 import { Meta } from '@storybook/addon-docs/blocks';
+import * as SpacingStories from '../shared/ui/Spacing.stories';
 
-<Meta title="Foundations/Spacing" />
+{/* Link MDX to Spacing.stories meta — both share "Foundations/Spacing".
+    Docs tab = this MDX (canonical reference), sibling entries = interactive stories. */}
+<Meta of={SpacingStories} />
 
 # Spacing
 
-4px base unit. Sequential scale (--space-1 through --space-8). All multiples of 4.
+Spacing-система TrustTunnel (Pro & Light). **8 токенов на 4px сетке.**
 
-## Scale
+**Философия:** все margin / padding / gap — кратны 4 пикселям. Меньший шаг размывает, больший — ломает ритм. 4px — industry standard (Material Design, Apple HIG, Tailwind).
 
-<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontFamily: 'monospace', fontSize: '13px' }}>
+---
+
+## Scale (8 токенов)
+
+<div className="flex flex-col gap-3 my-4">
   {[
-    { token: '--space-1', value: '4px', usage: 'Icon gaps, tight inline padding' },
-    { token: '--space-2', value: '8px', usage: 'Compact element spacing, icon-to-label gap' },
-    { token: '--space-3', value: '12px', usage: 'Input internal padding (vertical)' },
-    { token: '--space-4', value: '16px', usage: 'Default element spacing, form field gaps' },
-    { token: '--space-5', value: '20px', usage: 'Card padding (compact)' },
-    { token: '--space-6', value: '24px', usage: 'Section padding, modal padding' },
-    { token: '--space-7', value: '32px', usage: 'Layout gaps, section breaks' },
-    { token: '--space-8', value: '40px', usage: 'Major section breaks' },
-  ].map(({ token, value, usage }) => (
-    <div key={token} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-      <div style={{
-        width: value,
-        height: '24px',
-        backgroundColor: 'var(--color-accent-interactive)',
-        borderRadius: '2px',
-        flexShrink: 0,
-      }} />
-      <div style={{ width: '100px', flexShrink: 0, color: 'var(--color-text-primary)' }}>{token}</div>
-      <div style={{ width: '50px', flexShrink: 0, color: 'var(--color-text-secondary)' }}>{value}</div>
-      <div style={{ color: 'var(--color-text-muted)' }}>{usage}</div>
+    { token: '--space-1', value: '4px', tailwind: 'p-1/m-1/gap-1', role: 'Icon gaps, tight inline padding' },
+    { token: '--space-2', value: '8px', tailwind: 'p-2/m-2/gap-2', role: 'Compact spacing, icon-to-label' },
+    { token: '--space-3', value: '12px', tailwind: 'p-3/m-3/gap-3', role: 'Input internal padding (vertical) ⭐' },
+    { token: '--space-4', value: '16px', tailwind: 'p-4/m-4/gap-4', role: 'Default spacing, form field gaps' },
+    { token: '--space-5', value: '20px', tailwind: 'p-5/m-5/gap-5', role: 'Card padding (compact)' },
+    { token: '--space-6', value: '24px', tailwind: 'p-6/m-6/gap-6', role: 'Section padding, modal padding' },
+    { token: '--space-7', value: '32px', tailwind: 'p-[var(--space-7)]', role: 'Layout gaps, major breaks' },
+    { token: '--space-8', value: '40px', tailwind: 'p-[var(--space-8)]', role: 'Modal max-height offset, layout' },
+  ].map(({ token, value, tailwind, role }) => (
+    <div key={token} className="flex items-center gap-4 py-1 border-b" style={{ borderColor: "var(--color-border)" }}>
+      <div
+        style={{
+          width: value,
+          height: '24px',
+          backgroundColor: 'var(--color-accent-interactive)',
+          borderRadius: '2px',
+          flexShrink: 0,
+        }}
+      />
+      <code className="text-xs font-mono" style={{ minWidth: '120px', color: 'var(--color-text-primary)' }}>{token}</code>
+      <span className="text-sm font-mono" style={{ minWidth: '56px', color: 'var(--color-text-secondary)' }}>{value}</span>
+      <code className="text-xs font-mono" style={{ minWidth: '200px', color: 'var(--color-text-muted)' }}>{tailwind}</code>
+      <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{role}</span>
     </div>
   ))}
 </div>
 
-## Exceptions
+**Usage distribution в production коде** (direct `var(--space-*)` refs, не считая Tailwind aliases):
 
-| Element | Value | Token | Rationale |
-|---------|-------|-------|-----------|
-| Sidebar collapsed | 56px | `--sidebar-width-collapsed` | Existing, preserved |
-| Sidebar expanded | 220px | `--sidebar-width-expanded` | Existing, preserved |
-| Window control button | 40x32px | (no token) | OS chrome, non-4-point width acceptable |
-| Touch/click target min | 32px | `--space-7` | Minimum clickable area |
+| Token | Value | Usages | Where |
+|---|---|---|---|
+| `--space-1` | 4px | 1 | StatusPanel |
+| `--space-2` | 8px | 18 | Card, Input, Select, Tooltip, Accordion, User/Config modals |
+| `--space-3` | 12px | 42 ⭐ | **Dominant** — Inputs, FormField, StatusBadge stories, User modals |
+| `--space-4` | 16px | 27 | Modal, Card, UserModal, ConfirmDialog, StatusPanel |
+| `--space-5` | 20px | 4 | Card, UserModal (section breaks) |
+| `--space-6` | 24px | 1 | Modal (inner padding) |
+| `--space-7` | 32px | 2 | EmptyState, PanelErrorBoundary (hero padding) |
+| `--space-8` | 40px | 2 | Modal (max-height offset), UserModal |
+
+Plus ~44+ Tailwind `p-1..6` / `gap-1..6` / `m-1..6` usages — они **interchangeable с tokens** 1..6.
+
+---
+
+## Decision tree
+
+### «Gap между иконкой и текстом в строке?»
+→ `gap-2` (8px / `--space-2`) — industry-standard compact inline spacing.
+
+### «Input internal padding (vertical)?»
+→ `py-[var(--space-3)]` (12px) — ⭐ dominant pattern в codebase.
+
+### «Gap между form fields?»
+→ `gap-4` (16px / `--space-4`) — default, applied в FormField / ConfirmDialog / UserModal.
+
+### «Card padding?»
+→ `p-4` (16px) compact · `p-[var(--space-5)]` (20px) default · `p-6` (24px) generous.
+
+### «Modal padding?»
+→ `p-[var(--space-6)]` (24px) — heavier than card, gives breathing room to dialogs.
+
+### «Section break (major break между logical зонами)?»
+→ `mt-[var(--space-7)]` (32px) или больше.
+
+### «Centered empty/error state height?»
+→ `py-[var(--space-7)]` (32px, EmptyState pattern) или больше.
+
+### «Icon gap в tight контексте (badge с dot-индикатором)?»
+→ `gap-1.5` (6px, Badge base) — sub-token, only для compact pill UI.
+
+---
+
+## Component → token mapping
+
+**Актуальный реестр** из production кода. Используй при vibe-coding.
+
+### Inputs / Forms
+
+| Component | Property | Value | Token |
+|---|---|---|---|
+| Input | horizontal padding | 12px | `--space-3` (px-3) |
+| Input | vertical padding | 12px | `--space-3` (py-3) |
+| Input | icon slot right | 32px (clear button) | `pr-8` (Tailwind native — see note below) |
+| PasswordInput | eye button slot | 40px | `pr-10` (Tailwind native) |
+| FormField | label-to-input gap | 6px | `gap-1.5` (sub-token) |
+| FormField | field-to-field gap | 16px | `gap-4` / `--space-4` |
+
+### Buttons / Controls
+
+| Component | Property | Value | Token |
+|---|---|---|---|
+| Button | horizontal padding | 12–16px | `px-3/px-4` (size variants) |
+| Button | gap (icon+text) | 6–8px | `gap-1.5/gap-2` |
+| IconButton | all-sides padding | 8px | `p-2` |
+| Tab | horizontal padding | 12px | `px-3` / `--space-3` |
+
+### Cards / Sections
+
+| Component | Property | Value | Token |
+|---|---|---|---|
+| Card | padding sm | 8px | `p-2` / `--space-2` |
+| Card | padding md | 16px | `p-4` / `--space-4` |
+| Card | padding lg | 20px | `--space-5` |
+| Section | header bottom margin | 12px | `--space-3` |
+| Section | content-to-content gap | 16px | `gap-4` |
+
+### Modals / Dialogs
+
+| Component | Property | Value | Token |
+|---|---|---|---|
+| Modal | padding | 24px | `p-[var(--space-6)]` |
+| Modal | title bottom margin | 16px | `mb-4` |
+| Modal | max-height offset from viewport | 40px | `calc(100vh - var(--space-8))` |
+| ConfirmDialog | body gap | 16px | `gap-4` |
+| SnackBar | internal padding | 8–12px | `px-2 py-3` |
+
+### Layout / Empty states
+
+| Component | Property | Value | Token |
+|---|---|---|---|
+| EmptyState | vertical hero padding | 32px | `py-[var(--space-7)]` |
+| PanelErrorBoundary | padding | 32px | `p-[var(--space-7)]` |
+| OverviewSection | stat card gaps | 12px | `gap-3` |
+| UserModal | section inner padding | 20–40px | `--space-5..8` |
+
+### Badges / Chips / Indicators
+
+| Component | Property | Value | Token |
+|---|---|---|---|
+| Badge | horizontal padding | 6–8px | `px-1.5/px-2` |
+| Badge | vertical padding | 0–2px | `py-0/py-0.5` |
+| StatusBadge | same as Badge | same | same |
+| StatusIndicator | dot + padding | 6px | `w-1.5 h-1.5` |
+
+---
+
+## Rules
+
+### Base grid
+- **4px unit** — весь spacing кратен 4 пикселям.
+- **Min:** `--space-1` (4px) — меньше нет смысла.
+- **Max:** `--space-8` (40px) — больше требует дизайн-решения, не ad-hoc.
+
+### Tailwind ↔ tokens mapping
+
+- **`p-1..p-6`, `m-1..m-6`, `gap-1..gap-6`** — матчат `--space-1..6` напрямую (4/8/12/16/20/24px). **Используй Tailwind classes — проще и читаемее.**
+- **`p-7..p-10`** — Tailwind default values (28/32/36/40) **НЕ совпадают** с нашими `--space-7..8`. **Не используй.**
+- **Для 32/40** — всегда `p-[var(--space-7)]` / `p-[var(--space-8)]` (bracket notation с токеном).
+
+### Bracket notation
+
+- **`p-[var(--space-N)]`** — всегда безопасно, читается как "token-based spacing".
+- **`p-[Npx]`** с произвольным N — **только если N = multiple of 4**. Иначе anti-pattern.
+
+---
+
+## Don'ts
+
+- ❌ **`padding: '13px'` / `padding: '15px'`** (inline или через `p-[13px]`) — не multiple of 4, ломает ритм.
+- ❌ **`p-7` / `p-8` / `p-10`** (Tailwind native high indices) — 28/32/40px, **не совпадают** с `--space-7..8` (32/40px). Naming-collision guaranteed. Используй bracket.
+- ❌ **Inline `style={{ padding: '16px' }}`** — используй Tailwind class `p-4` или `p-[var(--space-4)]`.
+- ❌ **Magic numbers в CSS** — если в `.css` / `.module.css` пишешь padding/margin, всегда `var(--space-N)`, не сырые px.
+- ❌ **Смешение конвенций** — в одном файле или `p-4` (Tailwind), или `p-[var(--space-4)]` (bracket). Не миксуй в одной строке.
+- ❌ **`space-1/2/3...` как Tailwind class без префикса** — `space-x-*`/`space-y-*` в Tailwind это child-item spacing (margin-between), не «наш spacing token». Не путать.
+
+---
+
+## Exceptions (non-4-grid, задокументировано)
+
+Эти места осознанно отклоняются от 4px grid — не anti-pattern, но **не тиражировать**.
+
+| Element | Value | File | Rationale |
+|---|---|---|---|
+| Sidebar collapsed width | 56px | `--sidebar-width-collapsed` | Icon-only nav column, fits 32px icon + padding |
+| Sidebar expanded width | 220px | `--sidebar-width-expanded` | Standard sidebar width, not spacing token |
+| Window control button | 30×26px | `index.css:.window-control-btn` | OS chrome, Windows 11 DWM conventions |
+| TitleBar PRO badge padding | `pt-[3px]/pb-[2px]` | `TitleBar.tsx` | Optical vertical alignment в 32px bar (true center + offset for cap-height) |
+| AboutPanel PRO badge | `pt-[4px]/pb-[3px]` | `AboutPanel.tsx` | Same pattern; pending redesign |
+| Touch / click target min | 32px | `--space-7` | Accessibility minimum (32px matches `h-8`) |
+
+---
+
+## Cyrillic / i18n
+
+Spacing независим от языка. Но **длинные слова** в узких контейнерах (cards 140px wide) могут требовать больше horizontal padding для читаемости. Если RU-label «Переподключиться» не влезает — увеличь `px-*` на одну ступень, не уменьшай `text-*`.
+
+---
+
+## Canonical sources
+
+- **Tokens:** `gui-pro/src/shared/styles/tokens.css` §Spacing (lines 73–80)
+- **Tailwind:** default scale (no override) — [Tailwind Spacing docs](https://tailwindcss.com/docs/padding)
+- **Memory deep-dive:** [`memory/v3/design-system/spacing.md`](../../../memory/v3/design-system/spacing.md)
+- **Visual scale:** sibling stories (Size scale, Component layouts, Nesting, Edge cases)
