@@ -4,22 +4,24 @@ import { extendTailwindMerge } from "tailwind-merge";
 /**
  * Custom tailwind-merge instance — aware of Phase 14.2 typography semantics.
  *
- * Why we extend:
- *   1. Semantic composite classes (.text-caption/body/title/display/mono — added via
- *      Tailwind plugin) set font-size + weight + line-height + family atomically.
- *      Without extending "font-size" group, merge won't resolve conflict between
- *      e.g. `text-caption text-title` — it would keep both.
- *   2. Legacy pattern `text-[var(--font-size-*)]` (anti-pattern — to be removed in
- *      Phase 3 migration) is kept in the group so existing code doesn't break.
+ * Semantic composite classes (.text-caption/body/title/display/mono — added via
+ * Tailwind plugin in tailwind.config.js) set font-size + weight + line-height +
+ * family atomically. Without extending "font-size" group, merge wouldn't resolve
+ * conflicts like `text-caption text-title` — it would keep both.
  *
- * Canonical plan: .planning/typography-refactor.md
- * Phase 14.2 CONTEXT: .planning/phases/14.2-typography-foundation/14.2-CONTEXT.md
+ * The `text-[var(...)]` arbitrary-value pattern guard is kept as a safety net —
+ * it's an anti-pattern (Tailwind generates `color:` instead of `font-size:`) and
+ * Plan 14.2-03 removed all usages, but leaving the class-group entry means any
+ * future regression is still correctly resolved by tailwind-merge.
+ *
+ * Canonical docs: memory/v3/design-system/typography.md
+ * Anti-patterns: src/docs/Typography.mdx §Don'ts
  */
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
       "font-size": [
-        // Semantic composites (Phase 14.2 — via Tailwind plugin)
+        // Semantic composites (Phase 14.2 plugin)
         "text-caption",
         "text-body-sm",
         "text-body",
@@ -34,7 +36,7 @@ const twMerge = extendTailwindMerge({
         "text-wordmark",
         "text-mono",
         "text-mono-sm",
-        // Legacy arbitrary var(--font-size-*) pattern — Phase 3 will remove usages
+        // Safety net for `text-[var(--font-size-*)]` anti-pattern (not used in code)
         { text: [(v: string) => /^\[var\(--font-size-/.test(v)] },
       ],
     },
