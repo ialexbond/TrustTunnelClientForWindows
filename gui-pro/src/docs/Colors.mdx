@@ -1,25 +1,58 @@
 import { Meta, ColorPalette, ColorItem } from '@storybook/addon-docs/blocks';
+import * as ColorStories from '../shared/ui/Colors.stories';
 
-<Meta title="Foundations/Colors" />
+{/* Link MDX to Colors.stories meta — both share "Foundations/Colors".
+    Docs tab = this MDX (canonical reference), sibling entries = interactive stories. */}
+<Meta of={ColorStories} />
 
 # Colors
 
-Near-monochrome system. Restrained elegance. Two themes that feel like one cohesive family.
+Цветовая система TrustTunnel (Pro & Light). **Minimalism + restraint.** Один brand identity, два theme'а (dark default, light optional) — same feel, one cohesive family.
 
-## Accent -- Slate-Teal
+**Вдохновение:** [Radix Colors](https://www.radix-ui.com/colors) (12-step semantic scales), [Shadcn/ui](https://ui.shadcn.com/docs/theming) (CSS variable tokens), [Vercel Geist](https://vercel.com/geist) (restraint + high contrast), [Material Design 3](https://m3.material.io/styles/color) (tonal palettes), [GitHub Primer](https://primer.style/design/foundations/color) (functional color roles).
 
-Not indigo. Professional and pleasant. Reserved for interactive elements only (10% rule).
+**Целевой feel:** professional VPN для desktop. Slate-teal accent как maritime/tech signature, near-monochrome everywhere else. Color speaks only когда speaks — 10% rule: акцент применяется только к interactive elements.
+
+---
+
+## Философия
+
+### Три кита цветовой системы
+
+**1. Semantic hierarchy** — каждый цвет имеет **роль**, не "оттенок".
+- `--color-bg-primary` — фон body, не "тёмно-серый"
+- `--color-text-muted` — отключённый / disabled text, не "серый 50%"
+- `--color-accent-interactive` — кнопки / tabs / active state, не "teal"
+
+Код оперирует ролями. Дизайнер меняет значение — весь UI обновляется.
+
+**2. Two themes, one identity** — dark и light theme — **тот же TrustTunnel**. Same accent gradient, same visual rhythm, разная light-absorption. Dark defaults к `accent-400` (ярче на тёмном), light — к `accent-600` (contrast на светлом).
+
+**3. 10% rule** — accent color занимает максимум 10% visible surface. Кнопки, active tabs, key indicators. Всё остальное — neutral (bg + text + border). Accent остаётся signaling, не decoration.
+
+### Color roles — 7 функциональных слоёв
+
+```
+1. Accent ───── brand identity, interactive
+2. Background ─ layered elevation (primary → elevated)
+3. Text ─────── hierarchy (primary → muted)
+4. Border ───── subdivision (default → active)
+5. Input ────── form field surfaces
+6. Status ───── feedback (success / warning / danger / info)
+7. Tint ─────── semi-transparent surfaces (status backgrounds, accent fills)
+```
+
+---
+
+## 1. Accent — Slate-teal
+
+**Brand signature.** Slate-teal — desaturated teal/sage, not indigo, not emerald. Professional, maritime, tech. 10-step scale (50-900) для полного spectrum.
 
 <ColorPalette>
   <ColorItem
-    title="Accent Scale"
-    subtitle="Slate-teal -- desaturated teal/sage"
+    title="Accent scale (slate-teal)"
+    subtitle="Brand palette — 10 steps. Non-integer keys per gradient-order bug (see known-issues.md)."
     colors={{
-      /* IMPORTANT: Все keys должны быть non-integer-like, иначе JS
-       * сортирует integer keys numerically в начале, ломая градиент
-       * (see memory/v3/design-system/storybook.md §Integer key bug).
-       * Простое '50' / '100' / '900' ломают order — добавляем суффикс.
-       */
       '50 · lightest': '#f0f4f4',
       '100 · pale': '#d9e8e7',
       '200 · sage': '#b3d1cf',
@@ -34,86 +67,467 @@ Not indigo. Professional and pleasant. Reserved for interactive elements only (1
   />
 </ColorPalette>
 
-## Status Colors
+### Semantic mapping
+
+| Token | Dark theme | Light theme |
+|---|---|---|
+| `--color-accent-interactive` | `accent-400` (#4d9490) | `accent-600` (#236260) |
+| `--color-accent-hover` | `accent-300` (#80b3b0) | `accent-700` (#1a4a48) |
+| `--color-accent-active` | `accent-500` (#2d7a76) | `accent-800` (#123533) |
+
+**Hover = more lightness, Active = more darkness.** Symmetric per theme — dark lightens на hover, light darkens.
+
+### When to use accent
+
+✅ **Do:**
+- Primary buttons background
+- Active tab indicator
+- Selected state (radio, checkbox checked)
+- Links inline
+- Focus ring outer layer
+- Brand elements (wordmark in TitleBar)
+- Key interactive icons
+
+❌ **Don't:**
+- Body text (use `--color-text-primary`)
+- Card backgrounds (use `--color-bg-surface`)
+- Borders as decoration (use `--color-border`)
+- Status feedback (use semantic status colors)
+
+---
+
+## 2. Backgrounds — 6-layer elevation
+
+Slayered elevation system. Каждый layer — шаг вверх по «optical depth».
+
+| Token | Dark | Light | Role |
+|---|---|---|---|
+| `--color-bg-primary` | `#0d0d0d` | `#f9f9f7` | Body, shell, base canvas |
+| `--color-bg-secondary` | `#161616` | `#ffffff` | Secondary panels (rarely used) |
+| `--color-bg-surface` | `#1c1c1c` | `#f0f0ed` | Cards, glass-cards |
+| `--color-bg-elevated` | `#222222` | `#e8e8e5` | Elevated elements (active tab pill, PRO badge) |
+| `--color-bg-hover` | `#2a2a2a` | `#e2e2de` | Hover states на neutral buttons |
+| `--color-bg-active` | `#323232` | `#d8d8d4` | Pressed / selected states |
+
+**Rule:** progressive lightness (dark) / darkness (light). Никогда не skip levels — next level = +1 shade, not arbitrary.
+
+---
+
+## 3. Text — 4-level hierarchy
+
+| Token | Dark | Light | Usage |
+|---|---|---|---|
+| `--color-text-primary` | `#f2f2f2` | `#161616` | Body, headings, primary content |
+| `--color-text-secondary` | `#9a9a9a` | `#5a5a5a` | Labels, icons, supporting text |
+| `--color-text-muted` | `#6e6e6e` | `#666666` | Captions, placeholders, disabled — ⚠️ см. contrast |
+| `--color-text-inverse` | `#0d0d0d` | `#f9f9f7` | Text on inverted bg (rarely) |
+
+### ⚠️ Contrast warning
+
+**Dark theme `text-muted` (#6e6e6e)** имеет contrast ratio:
+- **3.81:1 on bg-primary** (ниже WCAG AA 4.5:1)
+- **3.34:1 on bg-surface**
+
+**Impact:** placeholder text, captions, disabled state на dark theme — edge of legibility. Applies to 307 usages.
+
+**Current workaround:** use для **UI components ≥18pt only** (captions в larger size = 12px treated as UI). Для reliable body text используй `--color-text-secondary` (#9a9a9a / 6.91:1).
+
+**Planned fix (user approval pending):** lighten `--color-text-muted` dark до #7a7a7a (~4.5:1 target).
+
+---
+
+## 4. Borders — 3 intensity levels
+
+| Token | Dark | Light | Usage |
+|---|---|---|---|
+| `--color-border` | `rgba(255,255,255,0.08)` | `rgba(0,0,0,0.09)` | Default card/input/section borders |
+| `--color-border-hover` | `rgba(255,255,255,0.14)` | `rgba(0,0,0,0.15)` | Hover states |
+| `--color-border-active` | `rgba(255,255,255,0.22)` | `rgba(0,0,0,0.24)` | Focused / selected (rare) |
+
+**Pattern:** alpha-based для theme-agnostic appearance. Одна формула — на тёмном subtle lighter edge, на светлом subtle darker edge.
+
+---
+
+## 5. Inputs — form surfaces
+
+| Token | Dark | Light |
+|---|---|---|
+| `--color-input-bg` | `rgba(255,255,255,0.06)` | `#f4f4f1` |
+| `--color-input-border` | `rgba(255,255,255,0.22)` | `#c8c8c4` |
+| `--color-input-focus` | `accent-400` | `accent-500` |
+
+**Note:** `--color-input-border` dark = `--color-border-active` dark (same rgba 0.22). Semantic split intentional — input может independently evolve от border system.
+
+---
+
+## 6. Toggle
+
+| Token | Dark | Light |
+|---|---|---|
+| `--color-toggle-off` | `rgba(255,255,255,0.12)` | `rgba(0,0,0,0.14)` |
+| `--color-toggle-on` | `accent-400` | `accent-500` |
+| `--color-toggle-thumb` | `#ffffff` | `#ffffff` |
+
+**Pattern:** off state = neutral alpha; on = accent; thumb always white (contrast на любом background).
+
+---
+
+## 7. Status colors
+
+**4 semantic categories × 3 tiers each.** Dark theme uses 400, light uses 600 by default.
 
 <ColorPalette>
-  <ColorItem
-    title="Success"
-    subtitle="VPN connected, positive actions"
-    colors={{
-      '400 · dark theme': '#34d399',
-      '500 · midpoint': '#10b981',
-      '600 · light theme': '#059669',
-    }}
-  />
-  <ColorItem
-    title="Warning"
-    subtitle="VPN connecting, caution states"
-    colors={{
-      '400 · dark theme': '#fbbf24',
-      '500 · midpoint': '#f59e0b',
-      '600 · light theme': '#d97706',
-    }}
-  />
-  <ColorItem
-    title="Danger"
-    subtitle="VPN error, destructive actions"
-    colors={{
-      '400 · dark theme': '#f87171',
-      '500 · midpoint': '#ef4444',
-      '600 · light theme': '#dc2626',
-    }}
-  />
-  <ColorItem
-    title="Info"
-    subtitle="Informational messages"
-    colors={{
-      '400 · dark theme': '#60a5fa',
-      '500 · midpoint': '#3b82f6',
-      '600 · light theme': '#2563eb',
-    }}
-  />
+  <ColorItem title="Success" subtitle="VPN connected, positive actions" colors={{
+    '400 · dark theme': '#34d399',
+    '500 · midpoint': '#10b981',
+    '600 · light theme': '#059669',
+  }} />
+  <ColorItem title="Warning" subtitle="VPN connecting, caution states" colors={{
+    '400 · dark theme': '#fbbf24',
+    '500 · midpoint': '#f59e0b',
+    '600 · light theme': '#d97706',
+  }} />
+  <ColorItem title="Danger" subtitle="VPN error, critical actions" colors={{
+    '400 · dark theme': '#f87171',
+    '500 · midpoint': '#ef4444',
+    '600 · light theme': '#dc2626',
+  }} />
+  <ColorItem title="Info" subtitle="Informational messages" colors={{
+    '400 · dark theme': '#60a5fa',
+    '500 · midpoint': '#3b82f6',
+    '600 · light theme': '#2563eb',
+  }} />
 </ColorPalette>
 
-## Dark Theme Surfaces
+### Semantic tokens (theme-aware)
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--color-bg-primary` | `#0d0d0d` | Window background |
-| `--color-bg-secondary` | `#161616` | Sidebar, secondary panels |
-| `--color-bg-surface` | `#1c1c1c` | Cards (always + border) |
-| `--color-bg-elevated` | `#222222` | Modals, dropdowns |
-| `--color-bg-hover` | `#2a2a2a` | Hover state |
-| `--color-bg-active` | `#323232` | Active/pressed state |
+| Token | Dark | Light |
+|---|---|---|
+| `--color-status-connected` | `success-400` | `success-600` |
+| `--color-status-connecting` | `warning-400` | `warning-600` |
+| `--color-status-error` | `danger-400` | `danger-600` |
+| `--color-status-info` | `info-400` | `info-600` |
+| `--color-status-disconnected` | `text-muted` | `text-muted` |
 
-## Light Theme Surfaces
+**Использование:** всегда через semantic tokens (`--color-status-connected`), не напрямую `--color-success-400`. Это позволяет theme-swap не ломать semantics.
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--color-bg-primary` | `#f9f9f7` | Window background (warm cream) |
-| `--color-bg-secondary` | `#ffffff` | Sidebar |
-| `--color-bg-surface` | `#f0f0ed` | Cards |
-| `--color-bg-elevated` | `#e8e8e5` | Modals |
-| `--color-bg-hover` | `#e2e2de` | Hover state |
-| `--color-bg-active` | `#d8d8d4` | Active/pressed state |
+### ⚠️ Light theme status contrast
 
-## Text Colors
+На light theme `-600` tier имеет **insufficient contrast для body text**:
+- `success-600` (#059669) на bg-primary = 3.57:1 ❌
+- `warning-600` (#d97706) на bg-primary = 3.02:1 ❌ (worst)
+- `danger-600` (#dc2626) на bg-primary = 4.58:1 ✓ (barely passes)
 
-| Token | Dark | Light | Contrast (dark) | Contrast (light) |
-|-------|------|-------|-----------------|------------------|
-| `--color-text-primary` | `#f2f2f2` | `#161616` | 18.3:1 | 18.3:1 |
-| `--color-text-secondary` | `#9a9a9a` | `#5a5a5a` | 7.4:1 | 6.6:1 |
-| `--color-text-muted` | `#6e6e6e` | `#767676` | 4.6:1 | 4.5:1 |
+**Rule:** light theme `-600` использовать **только для UI components ≥18pt** (large text, icons, badges с достаточным size). Для body-text status — используй `-500` midpoint (higher contrast на обоих themes).
 
-All pairs meet WCAG 2.1 AA (4.5:1 minimum for normal text).
+---
 
-## Accent Reserved For
+## 8. Destructive vs Danger — разные концепции
 
-1. Primary action buttons (connect/apply/save)
-2. Toggle control "on" state
-3. Input :focus-visible ring
-4. Active sidebar navigation indicator
-5. Inline links within body text
-6. Storybook accent swatches (this page)
+| Token | Purpose | Dark | Light |
+|---|---|---|---|
+| `--color-destructive` | **High-stakes actions** — delete user / reset config / wipe server | `#e05545` | `#b03020` |
+| `--color-danger-*` | **Status feedback** — VPN error, form validation, badge | scale 400/500/600 | scale 400/500/600 |
 
-Accent is **not** used for: headings, card borders, icons at rest, badges, status indicators, secondary buttons, background fills.
+**Rule:**
+- **Destructive** — single muted tone. Signals «irreversible action requires confirmation». Background для ConfirmDialog danger buttons, `<Button variant="danger-outline">`.
+- **Danger** — gradated scale. Signals «error state» (not action). Badge text, error icon, form validation messages.
+
+**Examples:**
+- ❌ «Удалить пользователя» button → `--color-destructive`
+- ❌ «Connection error: host unreachable» text → `--color-danger-500`
+
+Оба коэ-where, но разные visual intent.
+
+---
+
+## 9. Tint tokens — semi-transparent surfaces
+
+**Tint** = color + opacity. Используется для **status surfaces** (error banner backgrounds), **accent fills** (active tab hover), **subtle highlights**.
+
+### Accent tints
+
+| Token | Opacity | Typical use |
+|---|---|---|
+| `--color-accent-tint-06` | 6% | Very subtle hover |
+| `--color-accent-tint-08` | 8% | Subtle hover |
+| `--color-accent-tint-10` | 10% | PRO badge bg, link hover |
+| `--color-accent-tint-15` | 15% | Input focus ring (subtle) |
+| `--color-accent-tint-20` | 20% | Stronger hover |
+| `--color-accent-tint-30` | 30% | *(reserved)* |
+| `--color-accent-tint-40` | 40% | *(reserved)* |
+| `--color-accent-tint-50` | 50% | *(reserved)* |
+
+### Status surface tints (bg + border pairs)
+
+| Token | Use |
+|---|---|
+| `--color-status-connected-bg` / `-border` | Success banner bg + border (rgba 0.08 / 0.15) |
+| `--color-status-error-bg` / `-border` | Error banner |
+| `--color-status-connecting-bg` / `-border` | Connecting / warning banner |
+| `--color-status-info-bg` / `-border` | Info banner |
+
+**Rule:** для status surfaces всегда используй semantic pairs (`bg` + `border`), не individual tints.
+
+### Glass
+
+| Token | Dark | Light |
+|---|---|---|
+| `--color-glass-bg` | `rgba(17,17,24,0.45)` | `rgba(255,255,255,0.45)` |
+
+Для glass-morphism effect. Currently minimal use (cards используют solid `bg-surface`).
+
+### Overlay (modals backdrop)
+
+| Token | Value |
+|---|---|
+| `--color-overlay-40` | `rgba(0,0,0,0.40)` — *(reserved)* |
+| `--color-overlay-50` | `rgba(0,0,0,0.50)` — *(reserved)* |
+
+Currently 0 usages. Modal backdrop использует hardcoded opacity internally (`--opacity-backdrop: 0.6`).
+
+---
+
+## 10. Focus ring
+
+**Standard keyboard focus indicator.** Applied via `:focus-visible` pseudo-class (не `:focus` — чтобы mouse clicks не активировали ring).
+
+```css
+--focus-ring: 0 0 0 2px var(--color-bg-primary), 0 0 0 4px var(--color-accent-interactive);
+```
+
+**Double-ring pattern:**
+- Inner ring 2px в цвет **bg-primary** — создаёт gap между element и outer ring
+- Outer ring 4px — accent color, визуально pops на любом surface
+
+**Usage:** `focus-visible:shadow-[var(--focus-ring)]` в Tailwind class.
+
+Применён в Button, IconButton, ActionInput, CIDRPicker, Toggle, Accordion, и других interactive primitives.
+
+---
+
+## Contrast Matrix (WCAG 2.1 AA)
+
+Проверенные combinations (ratio ≥ 4.5:1 — body text, ≥ 3:1 — UI components ≥18pt).
+
+### Dark theme
+
+| Text | on bg-primary | on bg-surface | Status |
+|---|---|---|---|
+| `text-primary` (#f2f2f2) | **17.36:1** | 16.00:1 | ✅ AAA |
+| `text-secondary` (#9a9a9a) | **6.91:1** | 6.38:1 | ✅ AA |
+| `text-muted` (#6e6e6e) | **3.81:1** | 3.34:1 | ❌ FAIL body · ✅ UI ≥18pt |
+| `success-400` (#34d399) | **10.11:1** | 9.33:1 | ✅ AAA |
+| `warning-400` (#fbbf24) | **11.64:1** | 10.74:1 | ✅ AAA |
+| `danger-400` (#f87171) | **7.03:1** | 6.48:1 | ✅ AA |
+| `accent-400` (#4d9490) | **5.09:1** | 4.70:1 | ✅ AA |
+| white | **17.99:1** | 16.60:1 | ✅ AAA (on colored buttons) |
+
+### Light theme
+
+| Text | on bg-primary | on bg-surface | Status |
+|---|---|---|---|
+| `text-primary` (#161616) | **17.17:1** | 15.59:1 | ✅ AAA |
+| `text-secondary` (#5a5a5a) | **6.54:1** | 5.94:1 | ✅ AA |
+| `text-muted` (#666666) | **5.45:1** | 5.03:1 | ✅ AA |
+| `success-600` (#059669) | **3.57:1** | 3.24:1 | ❌ FAIL body · ✅ UI ≥18pt |
+| `warning-600` (#d97706) | **3.02:1** | 2.74:1 | ❌ FAIL body · ⚠️ Barely UI |
+| `danger-600` (#dc2626) | **4.58:1** | 4.16:1 | ✅ Barely AA |
+| white on accent-500 | **4.73:1** | — | ✅ AA (primary button) |
+
+**Bottom line:**
+- Dark theme: все OK кроме `text-muted` (UI only).
+- Light theme: status `-600` tier — UI only. Для body text status — используй `-500`.
+
+---
+
+## Component → color mapping
+
+**Актуальный реестр** из production кода.
+
+### Buttons
+
+| Variant | Background | Text | Border |
+|---|---|---|---|
+| `primary` | `accent-interactive` → hover `accent-hover` → active `accent-active` | `text-white` | transparent |
+| `secondary` | `bg-elevated` → hover `bg-hover` → active `bg-active` | `text-primary` | `border` |
+| `danger` | `destructive` → hover opacity-90 | `text-white` | transparent |
+| `danger-outline` | transparent → hover `destructive` | `destructive` → hover `text-white` | `destructive` |
+| `ghost` | transparent → hover `bg-hover` | `text-secondary` | transparent |
+| `icon` | transparent → hover `bg-hover` | `text-muted` | transparent |
+
+### Inputs
+
+| Element | Color |
+|---|---|
+| Input bg | `--color-input-bg` |
+| Input border | `--color-input-border` |
+| Input border focus | `--color-input-focus` (accent) |
+| Placeholder text | `--color-text-muted` |
+| Label text | `--color-text-secondary` |
+| Helper text | `--color-text-muted` (или `--color-danger-500` for error) |
+| Focus ring | `--focus-ring` |
+
+### Status indicators
+
+| Variant | Text/icon | Background | Border |
+|---|---|---|---|
+| Connected (success) | `status-connected` | `status-connected-bg` | `status-connected-border` |
+| Connecting (warning) | `status-connecting` | `status-connecting-bg` | `status-connecting-border` |
+| Error (danger) | `status-error` | `status-error-bg` | `status-error-border` |
+| Disconnected | `status-disconnected` (muted) | `bg-elevated` | `border` |
+
+### Modals / cards
+
+| Element | Color |
+|---|---|
+| Modal backdrop | `rgba(0,0,0,0.6)` (via `--opacity-backdrop`) |
+| Modal bg | `bg-surface` |
+| Modal border | `border` |
+| Card bg | `bg-surface` |
+| Card title | `text-primary` |
+| Card body | `text-primary` или `text-secondary` |
+| Card meta (caption) | `text-muted` |
+
+### Tabs / navigation
+
+| Element | Color |
+|---|---|
+| Tab inactive text | `text-muted` → hover `text-secondary` |
+| Tab active text | `accent-interactive` or `text-primary` (TabNavigation pill pattern) |
+| Tab active pill bg | `bg-elevated` + `--shadow-xs` |
+| Tab indicator | `accent-interactive` |
+
+### Wordmark (TitleBar / AboutPanel)
+
+| Part | Color |
+|---|---|
+| «Trust» | `text-primary` |
+| «Tunnel» | `accent-interactive` |
+
+Brand split — "Trust" neutral для professional feel, "Tunnel" accent for recognition.
+
+---
+
+## Decision tree
+
+### «Цвет для interactive (button/link/selected)?»
+→ `--color-accent-interactive` (+ `hover` / `active` variants)
+
+### «Текст для body content?»
+→ `--color-text-primary`
+
+### «Текст для labels/meta/helper?»
+→ `--color-text-secondary` (body) или `--color-text-muted` (caption/disabled)
+
+### «Background card'a / section'a?»
+→ `--color-bg-surface`
+
+### «Background page body?»
+→ `--color-bg-primary`
+
+### «Error / validation text?»
+→ `--color-danger-500` (safe для обоих themes body)
+→ или `--color-danger-400` (dark specifically) / `--color-danger-600` (light badges ≥18pt)
+
+### «Success indicator (large, badge)?»
+→ `--color-status-connected` (theme-aware semantic)
+
+### «Destructive action button (delete / reset)?»
+→ `--color-destructive` (Button variant="danger")
+
+### «Border for card / section?»
+→ `--color-border`
+
+### «Focus state?»
+→ `focus-visible:shadow-[var(--focus-ring)]`
+
+### «Status surface (error banner / success toast)?»
+→ `--color-status-{connected|error|connecting|info}-bg` + `-border` pair
+
+---
+
+## Rules
+
+### Core
+- **10% accent rule** — accent только для interactive elements. Max 10% visible surface.
+- **Semantic tokens only** — use `--color-status-connected`, not `--color-success-400` directly.
+- **Theme parity** — каждый semantic token определён и в dark, и в light. Никогда не assumed.
+- **No hardcoded hex** — все colors через tokens. Исключения documented (ErrorBoundary fallback, OS chrome).
+
+### Status tier selection
+- **Dark theme:** `-400` primary usage (лучше contrast на тёмном)
+- **Light theme:** `-600` primary — **но только для UI components ≥18pt**. Для body text — `-500` midpoint (safe для обоих themes).
+
+### Tailwind integration
+- **Use Tailwind bracket notation** — `text-[var(--color-text-primary)]`, `bg-[var(--color-bg-surface)]`
+- **NEVER** Tailwind native color classes (`text-red-500`, `bg-blue-400`) — они не связаны с tokens.
+- **inline `style={{ color: "var(--color-*)" }}`** — OK для dynamic/conditional colors.
+
+### Focus
+- **Keyboard focus:** `focus-visible:shadow-[var(--focus-ring)]`
+- **Active selection (not focus):** `0 0 0 2px var(--color-accent-500)` solid (StepBar pattern)
+
+---
+
+## Don'ts
+
+- ❌ **Hardcoded hex** — `color: "#ef4444"` в style. Используй `var(--color-danger-500)`.
+- ❌ **Tailwind native** — `text-red-500`, `bg-green-400`. Используй bracket notation.
+- ❌ **Inline rgba()** — `rgba(16, 185, 129, 0.08)` custom. Используй `var(--color-status-connected-bg)` или соответствующий tint token.
+- ❌ **Accent для non-interactive** — accent-colored text paragraph, card background, decorative border. 10% rule violation.
+- ❌ **Glow effects** — colored shadow (`0 8px 24px tint-25`). Removed в Phase 14.x shadows cleanup.
+- ❌ **Status-600 на light theme для body text** — contrast fail. Use `-500`.
+- ❌ **`text-muted` dark для body text** — 3.81:1, WCAG fail. Use `text-secondary` или `text-primary`.
+- ❌ **Undefined RGB variable fallbacks** — `rgba(var(--color-status-connected-rgb, 16 185 129))`. Если нужен RGB component — define token properly or use existing `-bg` variant.
+
+---
+
+## Known limitations (транспарентно)
+
+### WCAG AA failures
+
+1. **`--color-text-muted` dark (#6e6e6e)** — 3.81:1 on `bg-primary`, 3.34:1 on `bg-surface`.
+   - **Current scope:** UI components ≥18pt (captions 12px treated as UI).
+   - **Body text alternative:** `--color-text-secondary` (6.91:1).
+   - **Fix planned:** lighten к #7a7a7a (4.5:1+).
+
+2. **Light theme status `-600` tier** — `success-600` = 3.57:1, `warning-600` = 3.02:1 на bg-primary.
+   - **Current scope:** UI components ≥18pt (badges, icons).
+   - **Body text alternative:** `-500` midpoint (higher contrast на обоих themes).
+
+### Code violations pending fix
+
+1. `src/main.tsx:60,67-68` — ErrorBoundary hardcoded hex (`#ef4444`, `#333`, `#fff`). Fallback context — OK short-term.
+2. `src/index.css:52` — `.window-control-close:hover { color: #fff }` — should be token.
+3. `src/components/server/OverviewSection.tsx:684-687` — broken `rgba(var(--color-status-*-rgb))` fallback pattern. Replace with existing `-bg` tokens.
+
+### Dead tokens (0 usages)
+
+- `--color-accent-tint-50` — reserved (opaque = accent-500 anyway).
+- `--color-overlay-40/50` — reserved (modal backdrop uses `--opacity-backdrop` directly).
+- `--color-info-500` — reserved (dark uses 400, light uses 600; 500 midpoint untouched).
+- `--color-accent-50/100/200/800/900` — palette scale reserved (user-loved gradient, future-proof).
+
+Not bugs — conscious choice to keep palette complete.
+
+---
+
+## Inspiration sources
+
+- **[Radix Colors](https://www.radix-ui.com/colors)** — 12-step scale architecture, semantic aliases, dark/light parity thinking.
+- **[Shadcn/ui](https://ui.shadcn.com/docs/theming)** — CSS variable tokens pattern, theme override mechanism.
+- **[Vercel Geist](https://vercel.com/geist/introduction)** — restraint, high contrast, minimal color surface area.
+- **[Material Design 3](https://m3.material.io/styles/color)** — tonal palettes, semantic roles, accessibility baseline.
+- **[Apple HIG](https://developer.apple.com/design/human-interface-guidelines/color)** — system colors concept, adaptive theming.
+- **[GitHub Primer](https://primer.style/design/foundations/color)** — functional vs decorative separation, status + semantic split.
+- **[Linear](https://linear.app)** — professional desktop app aesthetic, subtle elegance, pro feel.
+
+---
+
+## Canonical sources
+
+- **Tokens:** [`gui-pro/src/shared/styles/tokens.css`](../../../gui-pro/src/shared/styles/tokens.css) — `:root` primitives (accent, status) + `[data-theme]` semantics.
+- **Memory deep-dive:** [`memory/v3/design-system/colors.md`](../../../memory/v3/design-system/colors.md) — vibe-coding reference.
+- **Storybook visual:** sibling stories (AccentScale, SemanticLayers, StatusColors, TintSystem, ContrastMatrix, ComponentPalette, Don'ts).
+- **Related:** [typography.md](../../memory/v3/design-system/typography.md) · [spacing.md](../../memory/v3/design-system/spacing.md) · [shadows.md](../../memory/v3/design-system/shadows.md) · [tokens.md](../../memory/v3/design-system/tokens.md)
