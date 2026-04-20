@@ -1,15 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
 /**
- * Typography Explorer — interactive showcase of v2 typography system (Phase 14.2).
+ * Typography — interactive showcase of v2 typography system (Phase 14.2).
  *
- * Canonical docs: `src/docs/Typography.mdx` · `memory/v3/design-system/typography.md`
+ * Co-located with `src/docs/Typography.mdx` (canonical docs reference).
+ * Both share title "Foundations/Typography" — MDX renders as Docs tab,
+ * these stories render as sibling entries in the same Storybook section.
  *
- * This file has no component — only `render` stories demonstrating the system.
+ * See also: `memory/v3/design-system/typography.md`.
  */
 
 const meta = {
-  title: "Foundations/Typography Explorer",
+  title: "Foundations/Typography",
   tags: ["autodocs"],
   parameters: {
     layout: "padded",
@@ -17,7 +19,7 @@ const meta = {
       description: {
         component:
           "Interactive showcase: sizes, weights, line-heights, letter-spacing, font families, semantic classes, Cyrillic readability. " +
-          "Canonical reference — Foundations → Typography (MDX docs page).",
+          "For canonical reference — see the Docs tab (Typography.mdx).",
       },
     },
   },
