@@ -294,9 +294,7 @@ import * as TypographyStories from '../shared/ui/Typography.stories';
 | Wizard error step heading | `text-title-lg` | danger color |
 | Wizard success indicator | `text-display-sm` | |
 
-### AboutPanel (редизайн в отдельной сессии)
-
-*Storybook story пока не создана (AboutPanel deferred). Будет добавлена после редизайна.*
+### AboutPanel
 
 | Element | Class | Notes |
 |---|---|---|
@@ -367,7 +365,7 @@ import * as TypographyStories from '../shared/ui/Typography.stories';
 - ❌ **`style={{ fontSize: "var(--font-size-*)" }}`** — inline style. Используй Tailwind class.
 - ❌ **Ручная комбинация `text-lg font-semibold leading-snug`** — есть semantic class (`text-subtitle`, `text-title`).
 - ❌ **Bold (700) для обычного текста** — bold only для display/hero.
-- ❌ **`text-[Npx]` arbitrary values** — bypass scale. Используй canonical `text-xs/sm/base/lg/...` или semantic composites. В v1 codebase было 9/10/11/13px (violated min 12px или even-number). Все удалены в Plan 14.2-post-ship strict audit.
+- ❌ **`text-[Npx]` arbitrary values** — bypass scale. Минимум 12px, все размеры чётные (12/14/16/18/20/22/24 для UI + 32/40/48 для display). Используй canonical `text-xs/sm/base/lg/...` или semantic composites (`text-caption/body/title/...`).
 
 ---
 

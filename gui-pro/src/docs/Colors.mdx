@@ -119,7 +119,7 @@ Slayered elevation system. Каждый layer — шаг вверх по «optic
 |---|---|---|---|
 | `--color-text-primary` | `#f2f2f2` | `#161616` | Body, headings, primary content |
 | `--color-text-secondary` | `#9a9a9a` | `#5a5a5a` | Labels, icons, supporting text |
-| `--color-text-muted` | `#6e6e6e` | `#666666` | Captions, placeholders, disabled — ⚠️ см. contrast |
+| `--color-text-muted` | `#8a8a8a` | `#666666` | UI chrome only: captions, placeholders, disabled states, timestamps в badges (scope rule ниже) |
 | `--color-text-inverse` | `#0d0d0d` | `#f9f9f7` | Text on inverted bg (rarely) |
 
 ### Rule — `text-muted` usage scope
@@ -324,7 +324,7 @@ Currently 0 usages. Modal backdrop использует hardcoded opacity intern
 |---|---|---|---|
 | `text-primary` (#f2f2f2) | **17.36:1** | 16.00:1 | ✅ AAA |
 | `text-secondary` (#9a9a9a) | **6.91:1** | 6.38:1 | ✅ AA |
-| `text-muted` (#6e6e6e) | **3.81:1** | 3.34:1 | ❌ FAIL body · ✅ UI ≥18pt |
+| `text-muted` (#8a8a8a) | **5.64:1** | 4.80:1 | ✅ AA |
 | `success-400` (#34d399) | **10.11:1** | 9.33:1 | ✅ AAA |
 | `warning-400` (#fbbf24) | **11.64:1** | 10.74:1 | ✅ AAA |
 | `danger-400` (#f87171) | **7.03:1** | 6.48:1 | ✅ AA |
@@ -488,7 +488,7 @@ Brand split — "Trust" neutral для professional feel, "Tunnel" accent for re
 - ❌ **Tailwind native** — `text-red-500`, `bg-green-400`. Используй bracket notation.
 - ❌ **Inline rgba()** — `rgba(16, 185, 129, 0.08)` custom. Используй `var(--color-status-connected-bg)` или соответствующий tint token.
 - ❌ **Accent для non-interactive** — accent-colored text paragraph, card background, decorative border. 10% rule violation.
-- ❌ **Glow effects** — colored shadow (`0 8px 24px tint-25`). Removed в Phase 14.x shadows cleanup.
+- ❌ **Glow effects** — colored shadow (`0 8px 24px tint-25` и подобные). Shadow = elevation tier, не color aura. Для elevation используй `--shadow-*` tokens.
 - ❌ **Status `-600` для body text / long readable content** — use `-500` midpoint (safe default). `-600` scope — large UI elements only.
 - ❌ **`text-muted` для body text / paragraphs** — use `text-secondary`. `text-muted` scope — UI chrome only (captions, placeholders, disabled, timestamps).
 - ❌ **Undefined RGB variable fallbacks** — `rgba(var(--color-status-connected-rgb, 16 185 129))`. Если нужен RGB component — define token properly or use existing `-bg` variant.
