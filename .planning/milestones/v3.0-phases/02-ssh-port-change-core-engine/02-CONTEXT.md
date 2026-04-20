@@ -63,11 +63,11 @@ Phase 2 полностью переделывает все UI примитивы
 **Downstream agents MUST read these before planning or implementing.**
 
 ### Design System Foundation (Phase 1 output)
-- `gui-app/src/shared/styles/tokens.css` — Полная двухуровневая токен-система (262 строки): primitives + dark/light semantics
-- `gui-app/src/shared/styles/fonts/` — Geist Sans + Geist Mono (variable woff2)
-- `gui-app/src/index.css` — Глобальные стили, анимации, скроллбары
-- `gui-app/.storybook/main.ts` — Storybook конфигурация с Tauri mocks и addon-docs
-- `gui-app/.storybook/preview.ts` — Theme toggle, CSS загрузка
+- `gui-pro/src/shared/styles/tokens.css` — Полная двухуровневая токен-система (262 строки): primitives + dark/light semantics
+- `gui-pro/src/shared/styles/fonts/` — Geist Sans + Geist Mono (variable woff2)
+- `gui-pro/src/index.css` — Глобальные стили, анимации, скроллбары
+- `gui-pro/.storybook/main.ts` — Storybook конфигурация с Tauri mocks и addon-docs
+- `gui-pro/.storybook/preview.ts` — Theme toggle, CSS загрузка
 
 ### Design Philosophy
 - `memory/decisions/v3-philosophy.md` — Contract-first development process
@@ -76,8 +76,8 @@ Phase 2 полностью переделывает все UI примитивы
 - `memory/v3/decisions/phase-1-decisions.md` — 9 решений Phase 1 (palette, font, weights)
 
 ### Existing Components (current state to transform FROM)
-- `gui-app/src/shared/ui/` — 19 существующих компонентов (полный список в index.ts)
-- `gui-app/src/shared/ui/colors.ts` — Deprecated glow values (to be removed in Phase 2+)
+- `gui-pro/src/shared/ui/` — 19 существующих компонентов (полный список в index.ts)
+- `gui-pro/src/shared/ui/colors.ts` — Deprecated glow values (to be removed in Phase 2+)
 
 ### Phase 1 Context (locked decisions that carry forward)
 - `.planning/phases/01-infrastructure-release-setup/01-CONTEXT.md` — D-01 to D-13 visual direction decisions

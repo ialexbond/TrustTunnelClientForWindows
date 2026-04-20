@@ -13,27 +13,27 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/styles/tokens.css
-    - gui-app/src/components/AboutPanel.tsx
-    - gui-app/src/components/ChangelogModal.tsx
-    - gui-app/src/components/wizard/DoneStep.tsx
-    - gui-app/src/components/wizard/ErrorStep.tsx
-    - gui-app/src/components/wizard/EndpointStep.tsx
-    - gui-app/src/components/wizard/ImportConfigModal.tsx
-    - gui-app/src/components/wizard/FoundStep.tsx
-    - gui-app/src/components/wizard/StepBar.tsx
-    - gui-app/src/components/wizard/WelcomeStep.tsx
-    - gui-app/src/components/routing/ProcessPickerModal.tsx
-    - gui-app/src/components/routing/RuleEntryRow.tsx
-    - gui-app/src/components/settings/ConnectionSection.tsx
-    - gui-app/src/components/server/FirewallSection.tsx
-    - gui-app/src/components/server/ExportSection.tsx
-    - gui-app/src/components/server/DangerZoneSection.tsx
-    - gui-app/src/components/server/_securityHelpers.tsx
-    - gui-app/src/components/server/UsersSection.tsx
-    - gui-app/src/components/server/UsersSection.test.tsx
-    - gui-app/src/components/server/VersionSection.tsx
-    - gui-app/src/index.css
+    - gui-pro/src/shared/styles/tokens.css
+    - gui-pro/src/components/AboutPanel.tsx
+    - gui-pro/src/components/ChangelogModal.tsx
+    - gui-pro/src/components/wizard/DoneStep.tsx
+    - gui-pro/src/components/wizard/ErrorStep.tsx
+    - gui-pro/src/components/wizard/EndpointStep.tsx
+    - gui-pro/src/components/wizard/ImportConfigModal.tsx
+    - gui-pro/src/components/wizard/FoundStep.tsx
+    - gui-pro/src/components/wizard/StepBar.tsx
+    - gui-pro/src/components/wizard/WelcomeStep.tsx
+    - gui-pro/src/components/routing/ProcessPickerModal.tsx
+    - gui-pro/src/components/routing/RuleEntryRow.tsx
+    - gui-pro/src/components/settings/ConnectionSection.tsx
+    - gui-pro/src/components/server/FirewallSection.tsx
+    - gui-pro/src/components/server/ExportSection.tsx
+    - gui-pro/src/components/server/DangerZoneSection.tsx
+    - gui-pro/src/components/server/_securityHelpers.tsx
+    - gui-pro/src/components/server/UsersSection.tsx
+    - gui-pro/src/components/server/UsersSection.test.tsx
+    - gui-pro/src/components/server/VersionSection.tsx
+    - gui-pro/src/index.css
 decisions:
   - "Added --color-accent-tint-40 token (not in original plan) to support rgba(99,102,241,0.4) in EndpointStep.tsx"
 metrics:
@@ -67,7 +67,7 @@ metrics:
 
 ## Verification Results
 
-1. `grep -rn "rgba(" gui-app/src/components/ --include="*.tsx"` -- **0 matches** (zero rgba remain)
+1. `grep -rn "rgba(" gui-pro/src/components/ --include="*.tsx"` -- **0 matches** (zero rgba remain)
 2. `npx vitest run` -- 87 passed, 7 failed (all pre-existing, unrelated to this plan)
 3. `npm run typecheck` -- pre-existing errors only (IconButton, PanelErrorBoundary, etc.), none from this plan
 4. tokens.css contains tint tokens in both `[data-theme="dark"]` and `[data-theme="light"]` sections
@@ -80,7 +80,7 @@ metrics:
 - **Found during:** Task 1 analysis
 - **Issue:** Plan specified accent tint tokens 06/08/10/15/20/30/50 but EndpointStep.tsx uses `rgba(99, 102, 241, 0.4)` requiring an accent-tint-40 token
 - **Fix:** Added `--color-accent-tint-40` to both dark and light theme sections
-- **Files modified:** gui-app/src/shared/styles/tokens.css
+- **Files modified:** gui-pro/src/shared/styles/tokens.css
 - **Commit:** 7f243815
 
 ## Pre-existing Issues (Out of Scope)

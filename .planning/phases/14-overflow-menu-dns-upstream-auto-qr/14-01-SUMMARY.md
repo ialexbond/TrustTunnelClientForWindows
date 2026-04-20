@@ -22,12 +22,12 @@ tech_stack:
     - "data-theme=\"light\" on wrapper div to opt a single story into the light palette"
 key_files:
   created:
-    - gui-app/src/components/server/UsersSection.stories.tsx
-    - gui-app/src/components/server/UserConfigModal.tsx
-    - gui-app/src/components/server/UserConfigModal.stories.tsx
+    - gui-pro/src/components/server/UsersSection.stories.tsx
+    - gui-pro/src/components/server/UserConfigModal.tsx
+    - gui-pro/src/components/server/UserConfigModal.stories.tsx
   modified:
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 decisions:
   - "Добавлены 9 i18n ключей дословно из §Copywriting Contract — без перефразировки."
   - "UserConfigModal реализован как минимальный визуальный stub: статический QR + deeplink input + Download кнопка + X close. Логика invoke/clipboard/save откладывается на Plan 04."
@@ -78,7 +78,7 @@ Storybook-first макет для Users-таба Phase 14: 15 screen-level stori
 
 ### Task 2: `UsersSection.stories.tsx` — 10 screen-level stories
 
-Путь: `gui-app/src/components/server/UsersSection.stories.tsx`
+Путь: `gui-pro/src/components/server/UsersSection.stories.tsx`
 Title: `Screens/UsersSection`
 
 Работает с текущей реализацией `UsersSection` (через props `state={state}`), Plan 05 переработает внутренности — stories защищены API, не внутренностью.
@@ -108,7 +108,7 @@ Title: `Screens/UsersSection`
 
 #### Stub компонент
 
-Путь: `gui-app/src/components/server/UserConfigModal.tsx`
+Путь: `gui-pro/src/components/server/UserConfigModal.tsx`
 
 **Назначение:** Предоставить стабильную props-сигнатуру и статический визуальный шелл для Storybook mockup 14-01. Plan 04 заменит внутренности реальным invoke()/clipboard/save() flow, не меняя публичную сигнатуру.
 
@@ -137,7 +137,7 @@ Production code всегда передаёт только первые 4 пол
 
 #### Stories файл
 
-Путь: `gui-app/src/components/server/UserConfigModal.stories.tsx`
+Путь: `gui-pro/src/components/server/UserConfigModal.stories.tsx`
 Title: `Screens/UserConfigModal`
 Decorator: `SnackBarProvider` + `div{minHeight:100vh,bg:primary}` (layout `fullscreen` чтобы backdrop Modal-а занял всю виртуальную область).
 
@@ -156,11 +156,11 @@ Decorator: `SnackBarProvider` + `div{minHeight:100vh,bg:primary}` (layout `fulls
 ## Пути артефактов
 
 - `.planning/phases/14-overflow-menu-dns-upstream-auto-qr/14-01-SUMMARY.md` — этот файл
-- `gui-app/src/components/server/UsersSection.stories.tsx` (+308 строк, новый)
-- `gui-app/src/components/server/UserConfigModal.tsx` (+158 строк, новый stub)
-- `gui-app/src/components/server/UserConfigModal.stories.tsx` (+115 строк, новый)
-- `gui-app/src/shared/i18n/locales/ru.json` (+9 строк)
-- `gui-app/src/shared/i18n/locales/en.json` (+9 строк)
+- `gui-pro/src/components/server/UsersSection.stories.tsx` (+308 строк, новый)
+- `gui-pro/src/components/server/UserConfigModal.tsx` (+158 строк, новый stub)
+- `gui-pro/src/components/server/UserConfigModal.stories.tsx` (+115 строк, новый)
+- `gui-pro/src/shared/i18n/locales/ru.json` (+9 строк)
+- `gui-pro/src/shared/i18n/locales/en.json` (+9 строк)
 
 ## Verification
 
@@ -180,14 +180,14 @@ Decorator: `SnackBarProvider` + `div{minHeight:100vh,bg:primary}` (layout `fulls
 - **Found during:** Task 2 mock setup
 - **Issue:** Импорт `import { vi } from "vitest"` в Storybook-файлах создаёт ненужную зависимость от test runner в bundle и лишний import.
 - **Fix:** Заменил `vi.fn()` на локальные `noop` / `asyncNoop` функции — точно тот же эффект (stub handlers), без зависимости от vitest.
-- **Files modified:** `gui-app/src/components/server/UsersSection.stories.tsx`
+- **Files modified:** `gui-pro/src/components/server/UsersSection.stories.tsx`
 - **Commit:** `fb1b811a`
 
 **2. [Rule 2 — Lint cleanup] Убраны избыточные eslint-disable директивы**
 - **Found during:** Task 3 `npx eslint --max-warnings 0` проверка
 - **Issue:** `/* eslint-disable react-refresh/only-export-components */` в начале stories-файлов помечен ESLint как «unused directive» (правило не срабатывает на default-export meta).
 - **Fix:** Удалены директивы из обоих stories файлов.
-- **Files modified:** `gui-app/src/components/server/UsersSection.stories.tsx`, `gui-app/src/components/server/UserConfigModal.stories.tsx`
+- **Files modified:** `gui-pro/src/components/server/UsersSection.stories.tsx`, `gui-pro/src/components/server/UserConfigModal.stories.tsx`
 - **Commit:** `6a5e79ca`
 
 ### Interpretation of ambiguous guidance
@@ -229,11 +229,11 @@ Plan explicitly требовал manual Storybook review checkpoint в success_c
 ## Self-Check: PASSED
 
 **Files:**
-- FOUND: gui-app/src/components/server/UsersSection.stories.tsx
-- FOUND: gui-app/src/components/server/UserConfigModal.tsx
-- FOUND: gui-app/src/components/server/UserConfigModal.stories.tsx
-- FOUND: gui-app/src/shared/i18n/locales/ru.json (modified)
-- FOUND: gui-app/src/shared/i18n/locales/en.json (modified)
+- FOUND: gui-pro/src/components/server/UsersSection.stories.tsx
+- FOUND: gui-pro/src/components/server/UserConfigModal.tsx
+- FOUND: gui-pro/src/components/server/UserConfigModal.stories.tsx
+- FOUND: gui-pro/src/shared/i18n/locales/ru.json (modified)
+- FOUND: gui-pro/src/shared/i18n/locales/en.json (modified)
 
 **Commits (verified via `git log`):**
 - FOUND: f52633ad feat(14-01): add 9 i18n keys for Users tab redesign and UserConfigModal

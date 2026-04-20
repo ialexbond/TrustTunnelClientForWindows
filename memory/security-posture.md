@@ -116,21 +116,21 @@ Phase 14.1 добавил 7 Tauri-команд и расширил attack surfac
 
 ```bash
 # Backend
-cd gui-app/src-tauri
+cd gui-pro/src-tauri
 cargo audit                              # 1 vuln expected (rsa Marvin)
 cargo clippy --all-targets -- -D warnings  # 83 pre-existing warnings (tech debt)
 cargo test --lib --tests                 # 108+ lib tests, 2+ integration
 
 # Frontend
-cd gui-app
+cd gui-pro
 npm audit --production
 npm run typecheck                        # strict
 npm run lint                             # max-warnings 0
 npm run test                             # 1531+ tests
 
 # Injection regression
-grep -rn "validate_display_name\|validate_vpn_password" gui-app/src-tauri/src/ssh/server/
-grep -rn "activity.log\|activityLog" gui-app/src/components/server/PasswordRotationPrompt*
+grep -rn "validate_display_name\|validate_vpn_password" gui-pro/src-tauri/src/ssh/server/
+grep -rn "activity.log\|activityLog" gui-pro/src/components/server/PasswordRotationPrompt*
 ```
 
 ## Cross-links

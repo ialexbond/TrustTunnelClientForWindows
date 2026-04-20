@@ -17,7 +17,7 @@ Rewrite `UsersSection.test.tsx` under the new 2-icon inline surface introduced b
 
 ## Files modified
 
-- `gui-app/src/components/server/UsersSection.test.tsx` — full rewrite (+413 / −267 lines net): 24 test cases in a single `describe("UsersSection (Phase 14 redesign)")` block.
+- `gui-pro/src/components/server/UsersSection.test.tsx` — full rewrite (+413 / −267 lines net): 24 test cases in a single `describe("UsersSection (Phase 14 redesign)")` block.
 
 ## What the new test suite covers
 

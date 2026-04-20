@@ -28,10 +28,10 @@ tech-stack:
 
 key-files:
   created:
-    - gui-app/src/shared/ui/Separator.tsx
-    - gui-app/src/shared/ui/Separator.stories.tsx
-    - gui-app/src/shared/ui/ProgressBar.tsx
-    - gui-app/src/shared/ui/ProgressBar.stories.tsx
+    - gui-pro/src/shared/ui/Separator.tsx
+    - gui-pro/src/shared/ui/Separator.stories.tsx
+    - gui-pro/src/shared/ui/ProgressBar.tsx
+    - gui-pro/src/shared/ui/ProgressBar.stories.tsx
   modified: []
 
 key-decisions:
@@ -77,10 +77,10 @@ completed: 2026-04-14
 
 ## Files Created/Modified
 
-- `gui-app/src/shared/ui/Separator.tsx` — компонент разделителя, ориентации horizontal/vertical, опциональная метка
-- `gui-app/src/shared/ui/Separator.stories.tsx` — Default, WithLabel, Vertical, InFormLayout
-- `gui-app/src/shared/ui/ProgressBar.tsx` — прогресс-бар с зажимом 0-100, label, showValue, ARIA
-- `gui-app/src/shared/ui/ProgressBar.stories.tsx` — Default, Empty, Full, WithLabel, WithValue, WithLabelAndValue, AnimatedProgress
+- `gui-pro/src/shared/ui/Separator.tsx` — компонент разделителя, ориентации horizontal/vertical, опциональная метка
+- `gui-pro/src/shared/ui/Separator.stories.tsx` — Default, WithLabel, Vertical, InFormLayout
+- `gui-pro/src/shared/ui/ProgressBar.tsx` — прогресс-бар с зажимом 0-100, label, showValue, ARIA
+- `gui-pro/src/shared/ui/ProgressBar.stories.tsx` — Default, Empty, Full, WithLabel, WithValue, WithLabelAndValue, AnimatedProgress
 
 ## Decisions Made
 

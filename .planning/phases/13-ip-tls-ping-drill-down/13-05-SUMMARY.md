@@ -23,9 +23,9 @@ tech-stack:
 key-files:
   created: []
   modified:
-    - gui-app/package.json
-    - gui-app/src-tauri/Cargo.toml
-    - gui-app/src-tauri/tauri.conf.json
+    - gui-pro/package.json
+    - gui-pro/src-tauri/Cargo.toml
+    - gui-pro/src-tauri/tauri.conf.json
     - gui-light/package.json
     - gui-light/src-tauri/Cargo.toml
     - gui-light/src-tauri/tauri.conf.json
@@ -60,7 +60,7 @@ completed: 2026-04-17
 ## Accomplishments
 - Pro edition: версия 3.0.0 → 3.1.0 во всех 3 файлах (package.json, Cargo.toml, tauri.conf.json) + window title "TrustTunnel Client for Windows Pro v3.1.0"
 - Light edition: версия 2.7.0 → 2.8.0 во всех 3 файлах Light + window title "TrustTunnel Client for Windows Light v2.8.0"
-- TypeScript typecheck в gui-app проходит чисто, новая версия `trusttunnel-gui@3.1.0` подтверждена в выводе npm
+- TypeScript typecheck в gui-pro проходит чисто, новая версия `trusttunnel-gui@3.1.0` подтверждена в выводе npm
 - Все 4 JSON-файла парсятся через `require()` без ошибок (валидность структуры сохранена)
 
 ## Task Commits
@@ -68,7 +68,7 @@ completed: 2026-04-17
 Each task was committed atomically with `--no-verify` (parallel executor convention):
 
 1. **Task 13-05-TASK-01: Bump Pro edition 3.0.0 → 3.1.0** — `aaadff8e` (chore)
-   - 3 files: gui-app/package.json, gui-app/src-tauri/Cargo.toml, gui-app/src-tauri/tauri.conf.json
+   - 3 files: gui-pro/package.json, gui-pro/src-tauri/Cargo.toml, gui-pro/src-tauri/tauri.conf.json
    - 4 string replacements (3 `version` + 1 window `title`)
 2. **Task 13-05-TASK-02: Bump Light edition 2.7.0 → 2.8.0** — `21063bbd` (chore)
    - 3 files: gui-light/package.json, gui-light/src-tauri/Cargo.toml, gui-light/src-tauri/tauri.conf.json
@@ -80,9 +80,9 @@ _Note: STATE.md/ROADMAP.md updates skipped per parallel executor protocol — wi
 
 ## Files Created/Modified
 
-- `gui-app/package.json` — version: 3.0.0 → 3.1.0 (line 4)
-- `gui-app/src-tauri/Cargo.toml` — version: 3.0.0 → 3.1.0 (line 3)
-- `gui-app/src-tauri/tauri.conf.json` — version + window title updated (lines 4 and 15)
+- `gui-pro/package.json` — version: 3.0.0 → 3.1.0 (line 4)
+- `gui-pro/src-tauri/Cargo.toml` — version: 3.0.0 → 3.1.0 (line 3)
+- `gui-pro/src-tauri/tauri.conf.json` — version + window title updated (lines 4 and 15)
 - `gui-light/package.json` — version: 2.7.0 → 2.8.0 (line 4)
 - `gui-light/src-tauri/Cargo.toml` — version: 2.7.0 → 2.8.0 (line 3)
 - `gui-light/src-tauri/tauri.conf.json` — version + window title updated (lines 4 and 15)
@@ -119,9 +119,9 @@ None — no external service configuration required. Version bump — чисто
 ## Self-Check: PASSED
 
 Verified files exist and match expected versions:
-- `gui-app/package.json` — FOUND, version 3.1.0
-- `gui-app/src-tauri/Cargo.toml` — FOUND, version 3.1.0
-- `gui-app/src-tauri/tauri.conf.json` — FOUND, version 3.1.0 + title "Pro v3.1.0"
+- `gui-pro/package.json` — FOUND, version 3.1.0
+- `gui-pro/src-tauri/Cargo.toml` — FOUND, version 3.1.0
+- `gui-pro/src-tauri/tauri.conf.json` — FOUND, version 3.1.0 + title "Pro v3.1.0"
 - `gui-light/package.json` — FOUND, version 2.8.0
 - `gui-light/src-tauri/Cargo.toml` — FOUND, version 2.8.0
 - `gui-light/src-tauri/tauri.conf.json` — FOUND, version 2.8.0 + title "Light v2.8.0"

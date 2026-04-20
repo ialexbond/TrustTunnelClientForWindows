@@ -12,11 +12,11 @@ tech_stack:
   patterns: [cross-fade-visibility-opacity, confirm-dialog-pattern, aria-live-polite]
 key_files:
   created:
-    - gui-app/src/components/server/SecurityTabSection.tsx
-    - gui-app/src/components/server/UtilitiesTabSection.tsx
+    - gui-pro/src/components/server/SecurityTabSection.tsx
+    - gui-pro/src/components/server/UtilitiesTabSection.tsx
   modified:
-    - gui-app/src/components/server/ServerSettingsSection.tsx
-    - gui-app/src/components/ServerTabs.tsx
+    - gui-pro/src/components/server/ServerSettingsSection.tsx
+    - gui-pro/src/components/ServerTabs.tsx
 decisions:
   - SecurityTabSection is a thin wrapper (no own state) — SecuritySection manages its own useSecurityState internally
   - UtilitiesTabSection owns useBbrState + useMtProtoState hooks (data consumers, not ServerState props)
@@ -93,8 +93,8 @@ No new security-relevant surface introduced. Threat mitigations from plan:
 
 ## Self-Check: PASSED
 
-- [x] SecurityTabSection.tsx exists: `gui-app/src/components/server/SecurityTabSection.tsx`
-- [x] UtilitiesTabSection.tsx exists: `gui-app/src/components/server/UtilitiesTabSection.tsx`
+- [x] SecurityTabSection.tsx exists: `gui-pro/src/components/server/SecurityTabSection.tsx`
+- [x] UtilitiesTabSection.tsx exists: `gui-pro/src/components/server/UtilitiesTabSection.tsx`
 - [x] ServerSettingsSection.tsx does NOT contain useBbrState/useMtProtoState/MtProtoSection
 - [x] ServerSettingsSection.tsx contains server.config.port_title
 - [x] ServerSettingsSection.tsx contains useSecurityState

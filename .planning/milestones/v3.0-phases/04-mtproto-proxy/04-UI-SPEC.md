@@ -177,14 +177,14 @@ Current sidebar has logo. With sidebar removed, logo moves to title bar left:
 
 ## Component Inventory
 
-All primitives from Phase 2 (`gui-app/src/shared/ui/`). New layout components created in Phase 4.
+All primitives from Phase 2 (`gui-pro/src/shared/ui/`). New layout components created in Phase 4.
 
 ### New components in Phase 4
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| `TitleBar` | `gui-app/src/components/layout/TitleBar.tsx` | Title bar wrapper: logo + drag region + WindowControls |
-| `TabNavigation` | `gui-app/src/components/layout/TabNavigation.tsx` | 5-tab horizontal nav, replaces Sidebar |
+| `TitleBar` | `gui-pro/src/components/layout/TitleBar.tsx` | Title bar wrapper: logo + drag region + WindowControls |
+| `TabNavigation` | `gui-pro/src/components/layout/TabNavigation.tsx` | 5-tab horizontal nav, replaces Sidebar |
 | `TabNavigation.Tab` | (inline subcomponent) | Single tab: icon + label + active indicator |
 
 ### WindowControls redesign

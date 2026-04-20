@@ -15,10 +15,10 @@ dependency_graph:
     - server.utilities.mtproto i18n keys (ru + en)
     - Wave 0 test stubs for MtProtoSection, useMtProtoState, StepProgress
   affects:
-    - gui-app/src-tauri/src/ssh/server/mod.rs
-    - gui-app/src-tauri/src/ssh/mod.rs
-    - gui-app/src-tauri/src/commands/ssh_commands.rs
-    - gui-app/src-tauri/src/lib.rs
+    - gui-pro/src-tauri/src/ssh/server/mod.rs
+    - gui-pro/src-tauri/src/ssh/mod.rs
+    - gui-pro/src-tauri/src/commands/ssh_commands.rs
+    - gui-pro/src-tauri/src/lib.rs
 tech_stack:
   added: []
   patterns:
@@ -27,18 +27,18 @@ tech_stack:
     - emit_mtproto_step for Tauri event-based progress
 key_files:
   created:
-    - gui-app/src-tauri/src/ssh/server/server_mtproto.rs
-    - gui-app/src/components/server/StepProgress.tsx
-    - gui-app/src/components/server/StepProgress.test.tsx
-    - gui-app/src/components/server/MtProtoSection.test.tsx
-    - gui-app/src/components/server/useMtProtoState.test.ts
+    - gui-pro/src-tauri/src/ssh/server/server_mtproto.rs
+    - gui-pro/src/components/server/StepProgress.tsx
+    - gui-pro/src/components/server/StepProgress.test.tsx
+    - gui-pro/src/components/server/MtProtoSection.test.tsx
+    - gui-pro/src/components/server/useMtProtoState.test.ts
   modified:
-    - gui-app/src-tauri/src/ssh/server/mod.rs
-    - gui-app/src-tauri/src/ssh/mod.rs
-    - gui-app/src-tauri/src/commands/ssh_commands.rs
-    - gui-app/src-tauri/src/lib.rs
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src-tauri/src/ssh/server/mod.rs
+    - gui-pro/src-tauri/src/ssh/mod.rs
+    - gui-pro/src-tauri/src/commands/ssh_commands.rs
+    - gui-pro/src-tauri/src/lib.rs
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 decisions:
   - Used mtproto_port parameter name (not port) to avoid collision with SSH port in ssh_command! macro
   - Placed test stubs co-located with source (not in __tests__/) matching project convention

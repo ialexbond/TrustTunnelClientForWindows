@@ -62,11 +62,11 @@ Phase 1 delivers the design system token architecture and Storybook infrastructu
 - `memory/decisions/v3-documentation-structure.md` — memory/v3/ structure and cross-references
 
 ### Existing Code (current state to transform FROM)
-- `gui-app/src/shared/styles/tokens.css` — Current v2 tokens (to be replaced/expanded)
-- `gui-app/src/shared/ui/colors.ts` — Hardcoded RGBA values (glow/shadow) to migrate to tokens
-- `gui-app/src/index.css` — 38 !important overrides + [data-theme] blocks (Phase 6 removes, but tokens must be ready)
-- `gui-app/tailwind.config.js` — surface.* palette (Phase 6 removes)
-- `gui-app/index.html` — Needs inline theme script (QA-01)
+- `gui-pro/src/shared/styles/tokens.css` — Current v2 tokens (to be replaced/expanded)
+- `gui-pro/src/shared/ui/colors.ts` — Hardcoded RGBA values (glow/shadow) to migrate to tokens
+- `gui-pro/src/index.css` — 38 !important overrides + [data-theme] blocks (Phase 6 removes, but tokens must be ready)
+- `gui-pro/tailwind.config.js` — surface.* palette (Phase 6 removes)
+- `gui-pro/index.html` — Needs inline theme script (QA-01)
 
 </canonical_refs>
 
@@ -84,9 +84,9 @@ Phase 1 delivers the design system token architecture and Storybook infrastructu
 
 ### Integration Points
 - `index.html` — needs inline script for theme flash prevention before React mount
-- `gui-app/package.json` — needs Storybook dependencies
-- `gui-app/.storybook/` — needs to be created from scratch (currently no Storybook setup)
-- `gui-app/vite.config.ts` — Storybook viteFinal must override HMR:false and add Tauri API mock aliases
+- `gui-pro/package.json` — needs Storybook dependencies
+- `gui-pro/.storybook/` — needs to be created from scratch (currently no Storybook setup)
+- `gui-pro/vite.config.ts` — Storybook viteFinal must override HMR:false and add Tauri API mock aliases
 
 </code_context>
 

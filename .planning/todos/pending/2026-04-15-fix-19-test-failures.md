@@ -3,7 +3,7 @@ created: 2026-04-15T08:35:00Z
 title: "Исправить 19 падающих тестов (97% pass rate → 100%)"
 area: testing
 files:
-  - gui-app/src/**/*.test.tsx
+  - gui-pro/src/**/*.test.tsx
 ---
 
 ## Problem

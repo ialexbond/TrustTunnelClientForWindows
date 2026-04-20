@@ -18,17 +18,17 @@ created: 2026-04-14
 | Property | Value |
 |----------|-------|
 | **Framework** | vitest 3.1 |
-| **Config file** | gui-app/vitest.config.ts |
-| **Quick run command** | `cd gui-app && npx vitest run --reporter=verbose` |
-| **Full suite command** | `cd gui-app && npx vitest run` |
+| **Config file** | gui-pro/vitest.config.ts |
+| **Quick run command** | `cd gui-pro && npx vitest run --reporter=verbose` |
+| **Full suite command** | `cd gui-pro && npx vitest run` |
 | **Estimated runtime** | ~15 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `cd gui-app && npx vitest run --reporter=verbose`
-- **After every plan wave:** Run `cd gui-app && npx vitest run`
+- **After every task commit:** Run `cd gui-pro && npx vitest run --reporter=verbose`
+- **After every plan wave:** Run `cd gui-pro && npx vitest run`
 - **Before `/gsd-verify-work`:** Full suite must be green
 - **Max feedback latency:** 15 seconds
 

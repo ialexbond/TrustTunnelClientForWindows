@@ -7,11 +7,11 @@ dependency_graph:
   requires: ["11-04"]
   provides: ["test coverage for all 4 new server panel sections", "updated memory documentation"]
   affects:
-    - gui-app/src/components/server/OverviewSection.test.tsx
-    - gui-app/src/components/server/ServerSettingsSection.test.tsx
-    - gui-app/src/components/server/ServiceSection.test.tsx
-    - gui-app/src/shared/ui/OverflowMenu.test.tsx
-    - gui-app/src/components/server/ServerStatusSection.test.tsx
+    - gui-pro/src/components/server/OverviewSection.test.tsx
+    - gui-pro/src/components/server/ServerSettingsSection.test.tsx
+    - gui-pro/src/components/server/ServiceSection.test.tsx
+    - gui-pro/src/shared/ui/OverflowMenu.test.tsx
+    - gui-pro/src/components/server/ServerStatusSection.test.tsx
     - memory/v3/screens/control-panel.md
     - memory/v3/design-system/components.md
 tech_stack:
@@ -19,14 +19,14 @@ tech_stack:
   patterns: ["vitest render/screen/fireEvent", "vi.mock for sub-components and hooks", "ARIA role queries"]
 key_files:
   created:
-    - gui-app/src/components/server/OverviewSection.test.tsx
-    - gui-app/src/components/server/ServerSettingsSection.test.tsx
-    - gui-app/src/components/server/ServiceSection.test.tsx
-    - gui-app/src/shared/ui/OverflowMenu.test.tsx
+    - gui-pro/src/components/server/OverviewSection.test.tsx
+    - gui-pro/src/components/server/ServerSettingsSection.test.tsx
+    - gui-pro/src/components/server/ServiceSection.test.tsx
+    - gui-pro/src/shared/ui/OverflowMenu.test.tsx
     - memory/v3/screens/control-panel.md
     - memory/v3/design-system/components.md
   modified:
-    - gui-app/src/components/server/ServerStatusSection.test.tsx
+    - gui-pro/src/components/server/ServerStatusSection.test.tsx
 decisions:
   - "ServerStatusSection.test.tsx: removed tests for stop/restart/reboot buttons (moved to ServiceSection per Phase 11 redesign)"
   - "UsersSection.test.tsx: already updated in 11-04 with OverflowMenu ARIA queries — not modified in 11-05"
@@ -128,7 +128,7 @@ metrics:
 
 Task 3 is a `checkpoint:human-verify` — requires manual visual approval. The redesign is complete and tests pass. User should verify:
 
-1. `cd gui-app && npm run dev` to start dev server
+1. `cd gui-pro && npm run dev` to start dev server
 2. Connect to SSH server in the app
 3. Verify 4 tabs: Обзор, Пользователи, Настройки, Сервис
 4. **Обзор:** StatusIndicator dot, 4 StatCards 2×2 grid, TLS cert. No danger buttons.

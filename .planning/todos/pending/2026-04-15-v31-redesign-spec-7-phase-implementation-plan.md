@@ -3,19 +3,19 @@ created: 2026-04-15T08:20:58.756Z
 title: "v3.1 детальная спецификация редизайна — 7-фазный план реализации"
 area: ux
 files:
-  - gui-app/src/components/layout/TabNavigation.tsx
-  - gui-app/src/components/ServerTabs.tsx
-  - gui-app/src/components/ServerPanel.tsx
-  - gui-app/src/components/ControlPanelPage.tsx
-  - gui-app/src/components/server/ServerStatusSection.tsx
-  - gui-app/src/components/server/UsersSection.tsx
-  - gui-app/src/components/server/ConfigSection.tsx
-  - gui-app/src/components/server/SecuritySection.tsx
-  - gui-app/src/components/server/UtilitiesSection.tsx
-  - gui-app/src/components/server/DangerZoneSection.tsx
-  - gui-app/src/components/server/SshConnectForm.tsx
-  - gui-app/src/shared/styles/tokens.css
-  - gui-app/src/shared/ui/index.ts
+  - gui-pro/src/components/layout/TabNavigation.tsx
+  - gui-pro/src/components/ServerTabs.tsx
+  - gui-pro/src/components/ServerPanel.tsx
+  - gui-pro/src/components/ControlPanelPage.tsx
+  - gui-pro/src/components/server/ServerStatusSection.tsx
+  - gui-pro/src/components/server/UsersSection.tsx
+  - gui-pro/src/components/server/ConfigSection.tsx
+  - gui-pro/src/components/server/SecuritySection.tsx
+  - gui-pro/src/components/server/UtilitiesSection.tsx
+  - gui-pro/src/components/server/DangerZoneSection.tsx
+  - gui-pro/src/components/server/SshConnectForm.tsx
+  - gui-pro/src/shared/styles/tokens.css
+  - gui-pro/src/shared/ui/index.ts
 ---
 
 ## Problem

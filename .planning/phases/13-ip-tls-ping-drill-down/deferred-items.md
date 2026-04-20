@@ -11,7 +11,7 @@ current plan; should be triaged separately.
 
 `cargo clippy --all-targets -- -D warnings` reports **81 errors**, all
 in files unrelated to Plan 13-01. None of them mention
-`gui-app/src-tauri/src/commands/geoip.rs`.
+`gui-pro/src-tauri/src/commands/geoip.rs`.
 
 Examples (truncated, full list via `cargo clippy --all-targets`):
 - `src/ssh/server/server_security.rs:526` — `needless_borrow`

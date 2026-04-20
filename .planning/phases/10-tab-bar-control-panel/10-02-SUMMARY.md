@@ -17,8 +17,8 @@ dependency_graph:
     - StatusPanel box-shadow visual separation
     - ServerStatsCard StatCard-based loading skeleton
   affects:
-    - gui-app/src/components/ServerPanel.tsx (renders ServerTabs)
-    - gui-app/src/components/dashboard/DashboardPage.tsx (renders ServerStatsCard)
+    - gui-pro/src/components/ServerPanel.tsx (renders ServerTabs)
+    - gui-pro/src/components/dashboard/DashboardPage.tsx (renders ServerStatsCard)
 
 tech_stack:
   added: []
@@ -30,10 +30,10 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/ui/Accordion.tsx
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/StatusPanel.tsx
-    - gui-app/src/components/dashboard/ServerStatsCard.tsx
+    - gui-pro/src/shared/ui/Accordion.tsx
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/StatusPanel.tsx
+    - gui-pro/src/components/dashboard/ServerStatsCard.tsx
 
 decisions:
   - Accordion.title: string→ReactNode — backward-compatible, enables JSX icon in DangerZone header
@@ -68,13 +68,13 @@ All 27 tests pass:
 - **Found during:** Task 1, running Accordion.test.tsx
 - **Issue:** Two tests failed — `aria-hidden toggles on content region` and `content has role=region with aria-labelledby` — because the content `<div>` lacked `role="region"` and `aria-labelledby={headerId}`. These attributes were already expected by the test file (pre-existing gap).
 - **Fix:** Added `role="region"` and `aria-labelledby={headerId}` to the content div in `AccordionItemComponent`.
-- **Files modified:** `gui-app/src/shared/ui/Accordion.tsx`
+- **Files modified:** `gui-pro/src/shared/ui/Accordion.tsx`
 - **Commit:** 6b581790 (included in Task 1 commit)
 
 **2. [Rule 3 - Blocking] Installed npm dependencies in worktree**
 - **Found during:** Task 1, running first vitest
-- **Issue:** `gui-app/node_modules` in worktree contained only `.vite-temp` — full packages absent. Tests could not start.
-- **Fix:** Ran `npm install --legacy-peer-deps` in worktree `gui-app/`. 526 packages installed.
+- **Issue:** `gui-pro/node_modules` in worktree contained only `.vite-temp` — full packages absent. Tests could not start.
+- **Fix:** Ran `npm install --legacy-peer-deps` in worktree `gui-pro/`. 526 packages installed.
 - **Impact:** No code changes, only worktree setup.
 
 ## Known Stubs
@@ -87,10 +87,10 @@ None — no new network endpoints, auth paths, or trust boundary crossings.
 
 ## Self-Check: PASSED
 
-- [x] `gui-app/src/shared/ui/Accordion.tsx` — exists, title: ReactNode, role=region added
-- [x] `gui-app/src/components/ServerTabs.tsx` — exists, 5 tabs, Accordion imported, cross-fade
-- [x] `gui-app/src/components/StatusPanel.tsx` — exists, shadow-sm applied
-- [x] `gui-app/src/components/dashboard/ServerStatsCard.tsx` — exists, StatCard loading state
+- [x] `gui-pro/src/shared/ui/Accordion.tsx` — exists, title: ReactNode, role=region added
+- [x] `gui-pro/src/components/ServerTabs.tsx` — exists, 5 tabs, Accordion imported, cross-fade
+- [x] `gui-pro/src/components/StatusPanel.tsx` — exists, shadow-sm applied
+- [x] `gui-pro/src/components/dashboard/ServerStatsCard.tsx` — exists, StatCard loading state
 - [x] Commit 6b581790 exists
 - [x] Commit 6b457371 exists
 - [x] 27 tests pass

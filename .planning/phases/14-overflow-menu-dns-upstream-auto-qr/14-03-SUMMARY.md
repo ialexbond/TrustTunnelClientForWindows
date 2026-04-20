@@ -14,8 +14,8 @@ dependency_graph:
     - "ActionInput primitive with clearable prop"
     - "ActionPasswordInput primitive with clearable + onVisibilityToggle"
   affects:
-    - gui-app/src/components/server/UsersSection.tsx (will adopt clearable in Plan 05)
-    - gui-app/src/components/wizard/AddUserForm.tsx (backward compat only — not changed)
+    - gui-pro/src/components/server/UsersSection.tsx (will adopt clearable in Plan 05)
+    - gui-pro/src/components/wizard/AddUserForm.tsx (backward compat only — not changed)
 tech_stack:
   added: []
   patterns:
@@ -26,10 +26,10 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/ui/ActionInput.tsx
-    - gui-app/src/shared/ui/ActionPasswordInput.tsx
-    - gui-app/src/shared/ui/ActionInput.stories.tsx
-    - gui-app/src/shared/ui/ActionPasswordInput.stories.tsx
+    - gui-pro/src/shared/ui/ActionInput.tsx
+    - gui-pro/src/shared/ui/ActionPasswordInput.tsx
+    - gui-pro/src/shared/ui/ActionInput.stories.tsx
+    - gui-pro/src/shared/ui/ActionPasswordInput.stories.tsx
 decisions:
   - "Extend primitives (not wrapper): mirror Input.tsx clearable API for consistency. Planner Q1 recommendation implemented."
   - "aria-label='Clear field' hardcoded English: primitives don't do i18n — matches Input.tsx convention. Consumers wrap with Tooltip for localized UX."
@@ -48,9 +48,9 @@ Extended `ActionInput` and `ActionPasswordInput` primitives with a `clearable` p
 
 | # | Task | Commit | Files |
 |---|------|--------|-------|
-| 1 | ActionInput — add `clearable` + `onClear` props | `e6ee11a6` | `gui-app/src/shared/ui/ActionInput.tsx` |
-| 2 | ActionPasswordInput — add `clearable` + `onClear` + `onVisibilityToggle` | `bb2461a0` | `gui-app/src/shared/ui/ActionPasswordInput.tsx` |
-| 3 | Storybook stories — `WithClearable` for both primitives | `a877ab41` | `gui-app/src/shared/ui/ActionInput.stories.tsx`, `gui-app/src/shared/ui/ActionPasswordInput.stories.tsx` |
+| 1 | ActionInput — add `clearable` + `onClear` props | `e6ee11a6` | `gui-pro/src/shared/ui/ActionInput.tsx` |
+| 2 | ActionPasswordInput — add `clearable` + `onClear` + `onVisibilityToggle` | `bb2461a0` | `gui-pro/src/shared/ui/ActionPasswordInput.tsx` |
+| 3 | Storybook stories — `WithClearable` for both primitives | `a877ab41` | `gui-pro/src/shared/ui/ActionInput.stories.tsx`, `gui-pro/src/shared/ui/ActionPasswordInput.stories.tsx` |
 
 ---
 
@@ -71,7 +71,7 @@ Extended `ActionInput` and `ActionPasswordInput` primitives with a `clearable` p
 - `aria-label="Clear field"` hardcoded in English following project convention (primitives are locale-agnostic; consumers wrap with `<Tooltip>` for localised discoverability).
 
 **Verification:**
-- `cd gui-app && npx tsc --noEmit` — no errors (full project).
+- `cd gui-pro && npx tsc --noEmit` — no errors (full project).
 - ESLint `--max-warnings 0` — clean on modified file.
 
 ---
@@ -95,7 +95,7 @@ Extended `ActionInput` and `ActionPasswordInput` primitives with a `clearable` p
 - Preserved existing public props: `label`, `error`, `helperText`, `showLockIcon`, `actions`, all `InputHTMLAttributes` except `type`.
 
 **Verification:**
-- `cd gui-app && npx tsc --noEmit` — clean.
+- `cd gui-pro && npx tsc --noEmit` — clean.
 - ESLint `--max-warnings 0` — clean.
 - `PasswordInput.test.tsx` — 9/9 green (sanity check on sibling primitive).
 
@@ -115,7 +115,7 @@ Extended `ActionInput` and `ActionPasswordInput` primitives with a `clearable` p
 - `WithClearableAndRegenerate` — interactive story combining all three: Regenerate action (random 16-char password), Clear, Eye-toggle. `showLockIcon={false}` to match Plan 05 inline form styling.
 
 **Verification:**
-- `cd gui-app && npx tsc --noEmit` — clean (no TS errors on `.stories.tsx`).
+- `cd gui-pro && npx tsc --noEmit` — clean (no TS errors on `.stories.tsx`).
 - `grep -c WithClearable` → 2 occurrences each file (one import-like reference in autodoc + one `export const`).
 
 ---
@@ -126,10 +126,10 @@ All existing callers compile without source changes:
 
 | Consumer | File | Uses | Impact |
 |----------|------|------|--------|
-| UsersSection | `gui-app/src/components/server/UsersSection.tsx` | `ActionInput`, `ActionPasswordInput` via existing `actions` API | none — new props are optional |
-| Wizard AddUserForm | `gui-app/src/components/wizard/AddUserForm.tsx` | `ActionPasswordInput` | none |
-| Wizard test | `gui-app/src/components/wizard/FoundStep.test.tsx` | references primitives | none |
-| Primitives barrel | `gui-app/src/shared/ui/index.ts` | re-exports | none |
+| UsersSection | `gui-pro/src/components/server/UsersSection.tsx` | `ActionInput`, `ActionPasswordInput` via existing `actions` API | none — new props are optional |
+| Wizard AddUserForm | `gui-pro/src/components/wizard/AddUserForm.tsx` | `ActionPasswordInput` | none |
+| Wizard test | `gui-pro/src/components/wizard/FoundStep.test.tsx` | references primitives | none |
+| Primitives barrel | `gui-pro/src/shared/ui/index.ts` | re-exports | none |
 | Existing stories | `ActionInput.stories.tsx` / `ActionPasswordInput.stories.tsx` | `Default`, `WithAction`, `WithError`, `Disabled`, etc. | none — preserved verbatim |
 
 Test regression suite:
@@ -193,10 +193,10 @@ Existing threat-model dispositions (STRIDE §T-14-I1/I2/I3 from PLAN.md) are uph
 ## Self-Check: PASSED
 
 **Files verified:**
-- `gui-app/src/shared/ui/ActionInput.tsx` — FOUND (clearable/showClear/handleClear/effectiveActionCount present)
-- `gui-app/src/shared/ui/ActionPasswordInput.tsx` — FOUND (clearable/onVisibilityToggle/showClear/handleClear/handleVisibilityClick/totalIconCount present)
-- `gui-app/src/shared/ui/ActionInput.stories.tsx` — FOUND (WithClearable / WithClearableAndActions / ClearableEmpty exports)
-- `gui-app/src/shared/ui/ActionPasswordInput.stories.tsx` — FOUND (WithClearable / WithClearableAndRegenerate exports)
+- `gui-pro/src/shared/ui/ActionInput.tsx` — FOUND (clearable/showClear/handleClear/effectiveActionCount present)
+- `gui-pro/src/shared/ui/ActionPasswordInput.tsx` — FOUND (clearable/onVisibilityToggle/showClear/handleClear/handleVisibilityClick/totalIconCount present)
+- `gui-pro/src/shared/ui/ActionInput.stories.tsx` — FOUND (WithClearable / WithClearableAndActions / ClearableEmpty exports)
+- `gui-pro/src/shared/ui/ActionPasswordInput.stories.tsx` — FOUND (WithClearable / WithClearableAndRegenerate exports)
 
 **Commits verified:**
 - `e6ee11a6` — FOUND (ActionInput clearable)

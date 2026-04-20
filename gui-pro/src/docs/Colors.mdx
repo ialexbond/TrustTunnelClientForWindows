@@ -1,0 +1,119 @@
+import { Meta, ColorPalette, ColorItem } from '@storybook/addon-docs/blocks';
+
+<Meta title="Foundations/Colors" />
+
+# Colors
+
+Near-monochrome system. Restrained elegance. Two themes that feel like one cohesive family.
+
+## Accent -- Slate-Teal
+
+Not indigo. Professional and pleasant. Reserved for interactive elements only (10% rule).
+
+<ColorPalette>
+  <ColorItem
+    title="Accent Scale"
+    subtitle="Slate-teal -- desaturated teal/sage"
+    colors={{
+      /* IMPORTANT: Все keys должны быть non-integer-like, иначе JS
+       * сортирует integer keys numerically в начале, ломая градиент
+       * (see memory/v3/design-system/storybook.md §Integer key bug).
+       * Простое '50' / '100' / '900' ломают order — добавляем суффикс.
+       */
+      '50 · lightest': '#f0f4f4',
+      '100 · pale': '#d9e8e7',
+      '200 · sage': '#b3d1cf',
+      '300 · dark hover': '#80b3b0',
+      '400 · dark interactive': '#4d9490',
+      '500 · brand midpoint': '#2d7a76',
+      '600 · light interactive': '#236260',
+      '700 · light hover': '#1a4a48',
+      '800 · light active': '#123533',
+      '900 · darkest': '#0b2221',
+    }}
+  />
+</ColorPalette>
+
+## Status Colors
+
+<ColorPalette>
+  <ColorItem
+    title="Success"
+    subtitle="VPN connected, positive actions"
+    colors={{
+      '400 · dark theme': '#34d399',
+      '500 · midpoint': '#10b981',
+      '600 · light theme': '#059669',
+    }}
+  />
+  <ColorItem
+    title="Warning"
+    subtitle="VPN connecting, caution states"
+    colors={{
+      '400 · dark theme': '#fbbf24',
+      '500 · midpoint': '#f59e0b',
+      '600 · light theme': '#d97706',
+    }}
+  />
+  <ColorItem
+    title="Danger"
+    subtitle="VPN error, destructive actions"
+    colors={{
+      '400 · dark theme': '#f87171',
+      '500 · midpoint': '#ef4444',
+      '600 · light theme': '#dc2626',
+    }}
+  />
+  <ColorItem
+    title="Info"
+    subtitle="Informational messages"
+    colors={{
+      '400 · dark theme': '#60a5fa',
+      '500 · midpoint': '#3b82f6',
+      '600 · light theme': '#2563eb',
+    }}
+  />
+</ColorPalette>
+
+## Dark Theme Surfaces
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `--color-bg-primary` | `#0d0d0d` | Window background |
+| `--color-bg-secondary` | `#161616` | Sidebar, secondary panels |
+| `--color-bg-surface` | `#1c1c1c` | Cards (always + border) |
+| `--color-bg-elevated` | `#222222` | Modals, dropdowns |
+| `--color-bg-hover` | `#2a2a2a` | Hover state |
+| `--color-bg-active` | `#323232` | Active/pressed state |
+
+## Light Theme Surfaces
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `--color-bg-primary` | `#f9f9f7` | Window background (warm cream) |
+| `--color-bg-secondary` | `#ffffff` | Sidebar |
+| `--color-bg-surface` | `#f0f0ed` | Cards |
+| `--color-bg-elevated` | `#e8e8e5` | Modals |
+| `--color-bg-hover` | `#e2e2de` | Hover state |
+| `--color-bg-active` | `#d8d8d4` | Active/pressed state |
+
+## Text Colors
+
+| Token | Dark | Light | Contrast (dark) | Contrast (light) |
+|-------|------|-------|-----------------|------------------|
+| `--color-text-primary` | `#f2f2f2` | `#161616` | 18.3:1 | 18.3:1 |
+| `--color-text-secondary` | `#9a9a9a` | `#5a5a5a` | 7.4:1 | 6.6:1 |
+| `--color-text-muted` | `#6e6e6e` | `#767676` | 4.6:1 | 4.5:1 |
+
+All pairs meet WCAG 2.1 AA (4.5:1 minimum for normal text).
+
+## Accent Reserved For
+
+1. Primary action buttons (connect/apply/save)
+2. Toggle control "on" state
+3. Input :focus-visible ring
+4. Active sidebar navigation indicator
+5. Inline links within body text
+6. Storybook accent swatches (this page)
+
+Accent is **not** used for: headings, card borders, icons at rest, badges, status indicators, secondary buttons, background fills.

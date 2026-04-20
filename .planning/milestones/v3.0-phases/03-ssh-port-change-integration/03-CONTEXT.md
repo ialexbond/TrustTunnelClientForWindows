@@ -63,32 +63,32 @@ Phase 3 полностью переделывает Control Panel и StatusPanel
 - `.planning/phases/02-ssh-port-change-core-engine/02-CONTEXT.md` — D-01 to D-19: CVA + Tailwind, full redesign approach, shadcn/ui reference, component conventions
 
 ### Design System Foundation
-- `gui-app/src/shared/styles/tokens.css` — Two-tier token system (primitives + semantics), slate-teal accent
-- `gui-app/src/shared/styles/fonts/` — Geist Sans + Geist Mono
-- `gui-app/src/index.css` — Global styles, animations, scrollbars
+- `gui-pro/src/shared/styles/tokens.css` — Two-tier token system (primitives + semantics), slate-teal accent
+- `gui-pro/src/shared/styles/fonts/` — Geist Sans + Geist Mono
+- `gui-pro/src/index.css` — Global styles, animations, scrollbars
 
 ### Design Philosophy
 - `memory/decisions/v3-philosophy.md` — Contract-first development process
 - `memory/decisions/v3-design-guidelines.md` — Visual direction, anti-patterns
 
 ### Source Code (current state to transform)
-- `gui-app/src/components/ControlPanelPage.tsx` — Main page: SSH creds state → SshConnectForm or header + ServerPanel
-- `gui-app/src/components/StatusPanel.tsx` — VPN status strip: Badge + Button + uptime counter
-- `gui-app/src/components/server/SshConnectForm.tsx` — SSH form with password/key modes, legacy colors import
-- `gui-app/src/components/ServerPanel.tsx` — Orchestrator for 13+ sections (Phase 4 — NOT in scope)
+- `gui-pro/src/components/ControlPanelPage.tsx` — Main page: SSH creds state → SshConnectForm or header + ServerPanel
+- `gui-pro/src/components/StatusPanel.tsx` — VPN status strip: Badge + Button + uptime counter
+- `gui-pro/src/components/server/SshConnectForm.tsx` — SSH form with password/key modes, legacy colors import
+- `gui-pro/src/components/ServerPanel.tsx` — Orchestrator for 13+ sections (Phase 4 — NOT in scope)
 
 ### Phase 2 Components (available for use)
-- `gui-app/src/shared/ui/StatusBadge.tsx` — VPN-state-aware badge (connected/connecting/error/disconnected)
-- `gui-app/src/shared/ui/FormField.tsx` — Label + Input + error + helper composition
-- `gui-app/src/shared/ui/Card.tsx` — Card container with variants
-- `gui-app/src/shared/ui/Section.tsx` — Content grouping with header
-- `gui-app/src/shared/ui/EmptyState.tsx` — Zero-data placeholder
-- `gui-app/src/shared/ui/ErrorBanner.tsx` — CVA severity error display
-- `gui-app/src/shared/ui/SnackBar.tsx` — Toast notifications
-- `gui-app/src/shared/ui/Button.tsx` — CVA variants (primary, danger, ghost, icon, success, warning)
-- `gui-app/src/shared/ui/Input.tsx` — Redesigned input with clearable, helper, error
-- `gui-app/src/shared/ui/PasswordInput.tsx` — Password input with toggle visibility
-- `gui-app/src/shared/ui/Separator.tsx` — Visual divider
+- `gui-pro/src/shared/ui/StatusBadge.tsx` — VPN-state-aware badge (connected/connecting/error/disconnected)
+- `gui-pro/src/shared/ui/FormField.tsx` — Label + Input + error + helper composition
+- `gui-pro/src/shared/ui/Card.tsx` — Card container with variants
+- `gui-pro/src/shared/ui/Section.tsx` — Content grouping with header
+- `gui-pro/src/shared/ui/EmptyState.tsx` — Zero-data placeholder
+- `gui-pro/src/shared/ui/ErrorBanner.tsx` — CVA severity error display
+- `gui-pro/src/shared/ui/SnackBar.tsx` — Toast notifications
+- `gui-pro/src/shared/ui/Button.tsx` — CVA variants (primary, danger, ghost, icon, success, warning)
+- `gui-pro/src/shared/ui/Input.tsx` — Redesigned input with clearable, helper, error
+- `gui-pro/src/shared/ui/PasswordInput.tsx` — Password input with toggle visibility
+- `gui-pro/src/shared/ui/Separator.tsx` — Visual divider
 
 </canonical_refs>
 

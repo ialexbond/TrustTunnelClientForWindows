@@ -13,7 +13,7 @@ dependency_graph:
     - TabNavigation component: 5-tab bar using AppTab with i18n + disabled state
     - WindowControls redesign: all colors via CSS tokens
   affects:
-    - gui-app/src/App.tsx (will use TitleBar + TabNavigation in Plan 04-06)
+    - gui-pro/src/App.tsx (will use TitleBar + TabNavigation in Plan 04-06)
 tech_stack:
   added: []
   patterns:
@@ -22,12 +22,12 @@ tech_stack:
     - aria-selected + role="tablist" for accessible tab navigation
 key_files:
   created:
-    - gui-app/src/components/layout/TitleBar.tsx
-    - gui-app/src/components/layout/TitleBar.test.tsx
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/components/layout/TabNavigation.test.tsx
+    - gui-pro/src/components/layout/TitleBar.tsx
+    - gui-pro/src/components/layout/TitleBar.test.tsx
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/components/layout/TabNavigation.test.tsx
   modified:
-    - gui-app/src/components/layout/WindowControls.tsx
+    - gui-pro/src/components/layout/WindowControls.tsx
 decisions:
   - "TitleBar extracted as standalone component with children slot for WindowControls"
   - "TabNavigation settings tab uses tabs.appSettings key (matches existing Sidebar behavior)"
@@ -106,10 +106,10 @@ None. Both new components are fully implemented and wired up. App.tsx integratio
 
 ## Self-Check: PASSED
 
-- `gui-app/src/components/layout/TitleBar.tsx` — exists, renders "TrustTunnel" + "PRO", has data-tauri-drag-region, uses CSS vars ✓
-- `gui-app/src/components/layout/TitleBar.test.tsx` — 7 tests passing ✓
-- `gui-app/src/components/layout/TabNavigation.tsx` — exists, role=tablist, 5 TABS, uses AppTab type ✓
-- `gui-app/src/components/layout/TabNavigation.test.tsx` — 13 tests passing ✓
-- `gui-app/src/components/layout/WindowControls.tsx` — no hardcoded colors, all CSS vars ✓
+- `gui-pro/src/components/layout/TitleBar.tsx` — exists, renders "TrustTunnel" + "PRO", has data-tauri-drag-region, uses CSS vars ✓
+- `gui-pro/src/components/layout/TitleBar.test.tsx` — 7 tests passing ✓
+- `gui-pro/src/components/layout/TabNavigation.tsx` — exists, role=tablist, 5 TABS, uses AppTab type ✓
+- `gui-pro/src/components/layout/TabNavigation.test.tsx` — 13 tests passing ✓
+- `gui-pro/src/components/layout/WindowControls.tsx` — no hardcoded colors, all CSS vars ✓
 - Commit f1acb6e5 exists ✓
 - Commit eecb7369 exists ✓

@@ -100,7 +100,7 @@ No glow effects. No hardcoded RGBA. No hex outside tokens.css (Phase 1 D-13).
 
 ## Component Inventory
 
-All primitives come from Phase 2 output (`gui-app/src/shared/ui/`).
+All primitives come from Phase 2 output (`gui-pro/src/shared/ui/`).
 
 ### SshConnectForm layout
 
@@ -289,7 +289,7 @@ Theme coverage: every story verified in both dark and light (addon-themes toolba
 |----------|-------------|-------------|
 | None — no shadcn, no third-party registries | n/a | not applicable |
 
-All components are project-owned (`gui-app/src/shared/ui/`). No external registry blocks.
+All components are project-owned (`gui-pro/src/shared/ui/`). No external registry blocks.
 
 ---
 

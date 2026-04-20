@@ -26,12 +26,12 @@ tech-stack:
 key-files:
   created: []  # uptime.ts and uptime.test.ts already existed
   modified:
-    - gui-app/src/shared/utils/translateSshError.ts (+15 lines: 4 cases + dev-warn extension)
-    - gui-app/src/shared/utils/translateSshError.test.ts (+23 lines: 4 it-blocks)
-    - gui-app/src/shared/utils/uptime.ts (+30 lines: TFunction import + formatServerUptime function)
-    - gui-app/src/shared/utils/uptime.test.ts (+79 lines: mockT helper + 12 it-blocks)
-    - gui-app/src/shared/i18n/locales/ru.json (+11 lines: geoipErrors block + uptimeFormat block)
-    - gui-app/src/shared/i18n/locales/en.json (+11 lines: same blocks, English)
+    - gui-pro/src/shared/utils/translateSshError.ts (+15 lines: 4 cases + dev-warn extension)
+    - gui-pro/src/shared/utils/translateSshError.test.ts (+23 lines: 4 it-blocks)
+    - gui-pro/src/shared/utils/uptime.ts (+30 lines: TFunction import + formatServerUptime function)
+    - gui-pro/src/shared/utils/uptime.test.ts (+79 lines: mockT helper + 12 it-blocks)
+    - gui-pro/src/shared/i18n/locales/ru.json (+11 lines: geoipErrors block + uptimeFormat block)
+    - gui-pro/src/shared/i18n/locales/en.json (+11 lines: same blocks, English)
 decisions:
   - Reuse existing uptime.ts (already had formatUptime/formatBytes) instead of creating new file (Rule 3 deviation — see Deviations section)
   - Append to existing uptime.test.ts (extend, not replace) — preserved existing 12 formatUptime/formatBytes tests
@@ -99,12 +99,12 @@ JSON validation:
 
 **1. [Rule 3 - Blocking issue] Файлы `uptime.ts` и `uptime.test.ts` уже существовали**
 
-- **Found during:** Pre-execution check (ls gui-app/src/shared/utils/)
+- **Found during:** Pre-execution check (ls gui-pro/src/shared/utils/)
 - **Issue:** План говорил «СОЗДАТЬ новый файл `uptime.ts`», но файл уже существует с двумя ранее реализованными функциями (`formatUptime(since: Date)`, `formatBytes(bytes: number)`) и 12 тестами для них.
 - **Fix:** Расширил существующий `uptime.ts` новой функцией `formatServerUptime` (с `import type { TFunction } from "i18next"` сверху). В `uptime.test.ts` добавил отдельный `describe("formatServerUptime", ...)` блок в конец файла, не трогая существующие 12 тестов.
 - **Files modified:**
-  - `gui-app/src/shared/utils/uptime.ts` (extend, not create)
-  - `gui-app/src/shared/utils/uptime.test.ts` (extend, not create)
+  - `gui-pro/src/shared/utils/uptime.ts` (extend, not create)
+  - `gui-pro/src/shared/utils/uptime.test.ts` (extend, not create)
 - **Commits:** `74fade97` (RED), `f2d7a6de` (GREEN)
 - **Rationale:** Удаление существующих `formatUptime`/`formatBytes` сломало бы их потребителей (см. в кодовой базе). Расширение — консервативный путь, сохраняющий публичный API.
 
@@ -137,12 +137,12 @@ JSON validation:
 ## Self-Check: PASSED
 
 **Files exist:**
-- `gui-app/src/shared/utils/translateSshError.ts` — FOUND (modified)
-- `gui-app/src/shared/utils/translateSshError.test.ts` — FOUND (modified)
-- `gui-app/src/shared/utils/uptime.ts` — FOUND (modified, contains `formatServerUptime`)
-- `gui-app/src/shared/utils/uptime.test.ts` — FOUND (modified, contains `formatServerUptime` describe)
-- `gui-app/src/shared/i18n/locales/ru.json` — FOUND (modified, contains `geoipErrors` + `uptimeFormat`)
-- `gui-app/src/shared/i18n/locales/en.json` — FOUND (modified, contains `geoipErrors` + `uptimeFormat`)
+- `gui-pro/src/shared/utils/translateSshError.ts` — FOUND (modified)
+- `gui-pro/src/shared/utils/translateSshError.test.ts` — FOUND (modified)
+- `gui-pro/src/shared/utils/uptime.ts` — FOUND (modified, contains `formatServerUptime`)
+- `gui-pro/src/shared/utils/uptime.test.ts` — FOUND (modified, contains `formatServerUptime` describe)
+- `gui-pro/src/shared/i18n/locales/ru.json` — FOUND (modified, contains `geoipErrors` + `uptimeFormat`)
+- `gui-pro/src/shared/i18n/locales/en.json` — FOUND (modified, contains `geoipErrors` + `uptimeFormat`)
 
 **Commits exist (verified via `git log`):**
 - `c6f6f6a0` — test(13-04): add failing GEOIP_* tests for translateSshError (RED)

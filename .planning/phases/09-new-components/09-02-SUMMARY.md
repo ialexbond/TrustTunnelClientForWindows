@@ -11,7 +11,7 @@ dependency_graph:
     - Accordion Storybook stories (shared/ui/Accordion.stories.tsx)
     - Accordion tests (shared/ui/Accordion.test.tsx)
   affects:
-    - gui-app/src/shared/ui/Section.tsx (refactored to use useCollapse)
+    - gui-pro/src/shared/ui/Section.tsx (refactored to use useCollapse)
     - Phase 10 CP-03 (Accordion used for DangerZone in Tools tab)
 tech_stack:
   added:
@@ -24,12 +24,12 @@ tech_stack:
     - single prop for exclusive open mode (next.clear() before add)
 key_files:
   created:
-    - gui-app/src/shared/hooks/useCollapse.ts
-    - gui-app/src/shared/ui/Accordion.tsx
-    - gui-app/src/shared/ui/Accordion.stories.tsx
-    - gui-app/src/shared/ui/Accordion.test.tsx
+    - gui-pro/src/shared/hooks/useCollapse.ts
+    - gui-pro/src/shared/ui/Accordion.tsx
+    - gui-pro/src/shared/ui/Accordion.stories.tsx
+    - gui-pro/src/shared/ui/Accordion.test.tsx
   modified:
-    - gui-app/src/shared/ui/Section.tsx
+    - gui-pro/src/shared/ui/Section.tsx
 decisions:
   - "useCollapse uses useCallback for toggle to avoid stale closure"
   - "AccordionItemComponent is internal (not exported) — only Accordion and AccordionItem interface are public"
@@ -59,19 +59,19 @@ metrics:
 
 ### Task 1: useCollapse hook + Section.tsx refactoring
 
-`gui-app/src/shared/hooks/useCollapse.ts` — новый хук:
+`gui-pro/src/shared/hooks/useCollapse.ts` — новый хук:
 - `useState(defaultOpen)` + `useCallback` для toggle
 - Возвращает `{ open, toggle, setOpen }` — публичный контракт
 - Паттерн совпадает с useTheme.ts: named export, return object
 
-`gui-app/src/shared/ui/Section.tsx` — рефакторинг:
+`gui-pro/src/shared/ui/Section.tsx` — рефакторинг:
 - Убран `import { useState }` — заменён на `import { useCollapse }`
 - `const [open, setOpen] = useState(defaultOpen)` → `const { open, setOpen } = useCollapse(defaultOpen)`
 - Все 6 существующих тестов Section прошли без изменений (backward compatible)
 
 ### Task 2: Accordion component + Storybook + tests
 
-`gui-app/src/shared/ui/Accordion.tsx`:
+`gui-pro/src/shared/ui/Accordion.tsx`:
 - `AccordionItem` interface (экспортируется для использования в Phase 10)
 - `Accordion` функция: `openIds: Set<string>`, `toggle(id)` с очисткой при `single` режиме
 - `AccordionItemComponent` (внутренний, не экспортируется): `useId()` для aria IDs
@@ -82,12 +82,12 @@ metrics:
 - `border-b border-[var(--color-border)]` разделитель между пунктами (кроме последнего)
 - `focus-visible:shadow-[var(--focus-ring)]` на кнопке заголовка
 
-`gui-app/src/shared/ui/Accordion.stories.tsx`:
+`gui-pro/src/shared/ui/Accordion.stories.tsx`:
 - `title: "Primitives/Accordion"` — в категории Primitives вместе с Section
 - `tags: ["autodocs"]` — автоматическая документация
 - 4 story: Default, MultiOpen (первые 2 открыты), SingleMode (эксклюзивный), AllClosed
 
-`gui-app/src/shared/ui/Accordion.test.tsx`:
+`gui-pro/src/shared/ui/Accordion.test.tsx`:
 - 10 тестов: renders headers, all closed by default, defaultOpen, expand on click, collapse on click, multi-open, single mode, aria-expanded, aria-hidden, role=region+aria-labelledby
 - Все 10 тестов прошли; все 6 Section тестов прошли (16 из 16)
 
@@ -112,11 +112,11 @@ None — Accordion является чисто презентационным к
 
 ## Self-Check: PASSED
 
-- [x] gui-app/src/shared/hooks/useCollapse.ts — создан
-- [x] gui-app/src/shared/ui/Section.tsx — рефакторинг применён (useCollapse импортирован)
-- [x] gui-app/src/shared/ui/Accordion.tsx — создан
-- [x] gui-app/src/shared/ui/Accordion.stories.tsx — создан
-- [x] gui-app/src/shared/ui/Accordion.test.tsx — создан
+- [x] gui-pro/src/shared/hooks/useCollapse.ts — создан
+- [x] gui-pro/src/shared/ui/Section.tsx — рефакторинг применён (useCollapse импортирован)
+- [x] gui-pro/src/shared/ui/Accordion.tsx — создан
+- [x] gui-pro/src/shared/ui/Accordion.stories.tsx — создан
+- [x] gui-pro/src/shared/ui/Accordion.test.tsx — создан
 - [x] Commit 61502b91 — Task 1 (useCollapse + Section.tsx)
 - [x] Commit 98c86f46 — Task 2 (Accordion + stories + tests)
 - [x] 16/16 tests pass

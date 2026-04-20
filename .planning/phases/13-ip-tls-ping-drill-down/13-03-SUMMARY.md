@@ -25,8 +25,8 @@ tech-stack:
 
 key-files:
   created:
-    - "gui-app/src/components/server/useServerGeoIp.ts"
-    - "gui-app/src/components/server/useServerGeoIp.test.ts"
+    - "gui-pro/src/components/server/useServerGeoIp.ts"
+    - "gui-pro/src/components/server/useServerGeoIp.test.ts"
   modified: []
 
 key-decisions:
@@ -80,8 +80,8 @@ _Note: TDD plan — test commit предшествует feat-коммиту в 
 ## Files Created/Modified
 
 ### Created
-- **`gui-app/src/components/server/useServerGeoIp.ts`** (128 строк) — React hook + cache helpers + GeoIpInfo type
-- **`gui-app/src/components/server/useServerGeoIp.test.ts`** (132 строки) — 5 unit-тестов с mockInvoke и localStorage
+- **`gui-pro/src/components/server/useServerGeoIp.ts`** (128 строк) — React hook + cache helpers + GeoIpInfo type
+- **`gui-pro/src/components/server/useServerGeoIp.test.ts`** (132 строки) — 5 unit-тестов с mockInvoke и localStorage
 
 ### Modified
 None.
@@ -131,7 +131,7 @@ useEffect(() => {
 - **Found during:** Task 13-03-TASK-02 (после `npm run lint`)
 - **Issue:** Реализация по шаблону плана вызывала `setGeo(cached)` синхронно в теле useEffect при cache hit. Правило `react-hooks/set-state-in-effect` (recommended preset) это запрещает; репозиторий блокирует prerelease на любом ESLint warning (`--max-warnings 0`).
 - **Fix:** Cache lookup и весь invoke-блок обёрнуты в `void Promise.resolve().then(...)`. Cancelled-flag дублируется внутри callback для race-safe cleanup на смене host. Тесты не пострадали (`vi.waitFor` в тесте cache hit ждёт стабилизации; внутри теста синхронный `expect(geo).toEqual(mockGeo)` после первого render по-прежнему работает за счёт lazy initializer `useState(() => loadCache(host))`).
-- **Files modified:** `gui-app/src/components/server/useServerGeoIp.ts`
+- **Files modified:** `gui-pro/src/components/server/useServerGeoIp.ts`
 - **Verification:** `npx eslint ... --max-warnings 0` → clean; `npx vitest run ...` → 5/5 зелёных; `npx tsc --noEmit` → clean.
 - **Committed in:** `e45bf7f8` (часть task-02 commit, до фиксации проверено что lint падает на исходной версии).
 
@@ -167,8 +167,8 @@ const { geo, loading } = useServerGeoIp({ host: state.host });
 ## Self-Check: PASSED
 
 **Files exist:**
-- `gui-app/src/components/server/useServerGeoIp.ts` — FOUND
-- `gui-app/src/components/server/useServerGeoIp.test.ts` — FOUND
+- `gui-pro/src/components/server/useServerGeoIp.ts` — FOUND
+- `gui-pro/src/components/server/useServerGeoIp.test.ts` — FOUND
 
 **Commits exist:**
 - `e793c06a` (test, RED) — FOUND

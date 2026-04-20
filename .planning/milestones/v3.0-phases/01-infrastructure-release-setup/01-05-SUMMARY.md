@@ -6,15 +6,15 @@ tags: [css, tokens, theme, flash-prevention, deprecation]
 dependency_graph:
   requires: [01-04]
   provides: [clean-index-css, deprecated-glows, flash-free-html, memory-v3-docs]
-  affects: [gui-app/src/index.css, gui-app/src/shared/ui/colors.ts, gui-app/index.html]
+  affects: [gui-pro/src/index.css, gui-pro/src/shared/ui/colors.ts, gui-pro/index.html]
 tech_stack:
   added: []
   patterns: [data-theme attribute, IIFE theme script, JSDoc @deprecated]
 key_files:
   modified:
-    - gui-app/src/index.css
-    - gui-app/src/shared/ui/colors.ts
-    - gui-app/index.html
+    - gui-pro/src/index.css
+    - gui-pro/src/shared/ui/colors.ts
+    - gui-pro/index.html
   created:
     - memory/v3/design-system/tokens.md (gitignored, local-only)
     - memory/v3/decisions/phase-1-decisions.md (gitignored, local-only)
@@ -40,8 +40,8 @@ metrics:
 
 | Task | Name | Commit | Files |
 |------|------|--------|-------|
-| 1 | Remove [data-theme] overrides from index.css, deprecate glow in colors.ts | `3a725104` | gui-app/src/index.css, gui-app/src/shared/ui/colors.ts |
-| 2 | Add theme flash prevention script, create memory/v3/ docs | `e8e94358` | gui-app/index.html, memory/v3/ (local) |
+| 1 | Remove [data-theme] overrides from index.css, deprecate glow in colors.ts | `3a725104` | gui-pro/src/index.css, gui-pro/src/shared/ui/colors.ts |
+| 2 | Add theme flash prevention script, create memory/v3/ docs | `e8e94358` | gui-pro/index.html, memory/v3/ (local) |
 
 ## What Was Built
 
@@ -100,9 +100,9 @@ None. The localStorage read in index.html is local-only (no external data), sani
 
 | Check | Result |
 |-------|--------|
-| gui-app/src/index.css exists | FOUND |
-| gui-app/src/shared/ui/colors.ts exists | FOUND |
-| gui-app/index.html exists | FOUND |
+| gui-pro/src/index.css exists | FOUND |
+| gui-pro/src/shared/ui/colors.ts exists | FOUND |
+| gui-pro/index.html exists | FOUND |
 | memory/v3/design-system/tokens.md exists | FOUND |
 | memory/v3/decisions/phase-1-decisions.md exists | FOUND |
 | Commit 3a725104 exists | FOUND |

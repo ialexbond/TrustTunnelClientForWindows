@@ -13,8 +13,8 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src-tauri/src/ssh/server/server_security.rs
-    - gui-app/src-tauri/src/commands/ssh_commands.rs
+    - gui-pro/src-tauri/src/ssh/server/server_security.rs
+    - gui-pro/src-tauri/src/commands/ssh_commands.rs
 decisions:
   - "UFW firewall steps are conditional on ufw_active — skipped entirely if UFW not installed or inactive"
   - "Fail2Ban jail update is best-effort — failure does not block port change success"

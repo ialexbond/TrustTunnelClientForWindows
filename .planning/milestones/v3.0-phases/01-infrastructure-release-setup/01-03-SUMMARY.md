@@ -16,10 +16,10 @@ tech_stack:
     - Inline JSX in MDX for visual spacing/shadow rulers
 key_files:
   created:
-    - gui-app/src/docs/Colors.mdx
-    - gui-app/src/docs/Typography.mdx
-    - gui-app/src/docs/Spacing.mdx
-    - gui-app/src/docs/Shadows.mdx
+    - gui-pro/src/docs/Colors.mdx
+    - gui-pro/src/docs/Typography.mdx
+    - gui-pro/src/docs/Spacing.mdx
+    - gui-pro/src/docs/Shadows.mdx
     - memory/v3/design-system/tokens.md
     - memory/v3/decisions/phase-1-decisions.md
   modified: []
@@ -42,7 +42,7 @@ Four MDX Foundations pages (Colors, Typography, Spacing, Shadows) created for St
 
 | Task | Name | Commit | Files |
 |------|------|--------|-------|
-| 1 | Create MDX Foundations pages for Storybook | 44ab2017 | gui-app/src/docs/Colors.mdx, Typography.mdx, Spacing.mdx, Shadows.mdx |
+| 1 | Create MDX Foundations pages for Storybook | 44ab2017 | gui-pro/src/docs/Colors.mdx, Typography.mdx, Spacing.mdx, Shadows.mdx |
 | 2 | Create memory/v3/ documentation for tokens and decisions | (gitignored) | memory/v3/design-system/tokens.md, memory/v3/decisions/phase-1-decisions.md |
 
 ## Checkpoint — Verification Result
@@ -57,26 +57,26 @@ User approved the checkpoint without manual testing — visual verification acce
 
 ### Task 1: MDX Foundations Pages
 
-**`gui-app/src/docs/Colors.mdx`** — Foundations/Colors page with:
+**`gui-pro/src/docs/Colors.mdx`** — Foundations/Colors page with:
 - Full slate-teal accent scale (50-900) via ColorPalette/ColorItem
 - Status color groups (Success, Warning, Danger, Info) with dark/light shades
 - Dark and light surface token tables
 - Text color WCAG contrast ratios (18.3:1 primary, 7.4:1 secondary, 4.6:1 muted)
 - "Accent Reserved For" list with 6 items
 
-**`gui-app/src/docs/Typography.mdx`** — Foundations/Typography page with:
+**`gui-pro/src/docs/Typography.mdx`** — Foundations/Typography page with:
 - Typeset at 11/12/14/16px at weight 400
 - Typeset at 11/12/14/16px at weight 600 (semibold)
 - Token reference table (--font-size-xs through --font-size-lg, tracking tokens)
 - Design notes on scale rationale
 
-**`gui-app/src/docs/Spacing.mdx`** — Foundations/Spacing page with:
+**`gui-pro/src/docs/Spacing.mdx`** — Foundations/Spacing page with:
 - Visual ruler via inline JSX: all 8 steps (--space-1 through --space-8, 4px-40px)
 - Color accent bars proportional to spacing value
 - Token name + pixel value + usage description per step
 - Exceptions table (sidebar widths, OS chrome, click targets)
 
-**`gui-app/src/docs/Shadows.mdx`** — Foundations/Shadows page with:
+**`gui-pro/src/docs/Shadows.mdx`** — Foundations/Shadows page with:
 - Shadow cards for sm/md/lg/xl showing actual box-shadow via CSS variable
 - Dark and light values listed for each level
 - "Removed in v3.0" section: successGlow, dangerGlow, accentLogoGlow (deprecated)
@@ -118,10 +118,10 @@ None — MDX pages are Storybook dev-only tool, not shipped. Token values are CS
 ## Self-Check: PASSED
 
 Files verified:
-- gui-app/src/docs/Colors.mdx — EXISTS, contains "Foundations/Colors", "#4d9490", "#236260", "18.3:1", "Accent Reserved For"
-- gui-app/src/docs/Typography.mdx — EXISTS, contains "Foundations/Typography", "Typeset", "fontSizes={[11, 12, 14, 16]}", "--tracking-tight"
-- gui-app/src/docs/Spacing.mdx — EXISTS, contains "Foundations/Spacing", "--space-1" through "--space-8"
-- gui-app/src/docs/Shadows.mdx — EXISTS, contains "Foundations/Shadows", "--shadow-xl", "Removed in v3.0", "focus-ring"
+- gui-pro/src/docs/Colors.mdx — EXISTS, contains "Foundations/Colors", "#4d9490", "#236260", "18.3:1", "Accent Reserved For"
+- gui-pro/src/docs/Typography.mdx — EXISTS, contains "Foundations/Typography", "Typeset", "fontSizes={[11, 12, 14, 16]}", "--tracking-tight"
+- gui-pro/src/docs/Spacing.mdx — EXISTS, contains "Foundations/Spacing", "--space-1" through "--space-8"
+- gui-pro/src/docs/Shadows.mdx — EXISTS, contains "Foundations/Shadows", "--shadow-xl", "Removed in v3.0", "focus-ring"
 - memory/v3/design-system/tokens.md — EXISTS (local, gitignored), contains "Two-tier", "Slate-Teal", Rules section, Files section
 - memory/v3/decisions/phase-1-decisions.md — EXISTS (local, gitignored), contains "slate-teal", "#0d0d0d", "tt_theme", "viteFinal", "Alternatives considered"
 

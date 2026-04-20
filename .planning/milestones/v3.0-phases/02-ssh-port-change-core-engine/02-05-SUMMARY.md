@@ -41,21 +41,21 @@ tech-stack:
 
 key-files:
   created:
-    - gui-app/src/shared/ui/Section.tsx
-    - gui-app/src/shared/ui/Section.test.tsx
-    - gui-app/src/shared/ui/Section.stories.tsx
-    - gui-app/src/shared/ui/FormField.tsx
-    - gui-app/src/shared/ui/FormField.test.tsx
-    - gui-app/src/shared/ui/FormField.stories.tsx
-    - gui-app/src/shared/ui/StatusBadge.tsx
-    - gui-app/src/shared/ui/StatusBadge.test.tsx
-    - gui-app/src/shared/ui/StatusBadge.stories.tsx
-    - gui-app/src/shared/ui/EmptyState.tsx
-    - gui-app/src/shared/ui/EmptyState.test.tsx
-    - gui-app/src/shared/ui/EmptyState.stories.tsx
+    - gui-pro/src/shared/ui/Section.tsx
+    - gui-pro/src/shared/ui/Section.test.tsx
+    - gui-pro/src/shared/ui/Section.stories.tsx
+    - gui-pro/src/shared/ui/FormField.tsx
+    - gui-pro/src/shared/ui/FormField.test.tsx
+    - gui-pro/src/shared/ui/FormField.stories.tsx
+    - gui-pro/src/shared/ui/StatusBadge.tsx
+    - gui-pro/src/shared/ui/StatusBadge.test.tsx
+    - gui-pro/src/shared/ui/StatusBadge.stories.tsx
+    - gui-pro/src/shared/ui/EmptyState.tsx
+    - gui-pro/src/shared/ui/EmptyState.test.tsx
+    - gui-pro/src/shared/ui/EmptyState.stories.tsx
   modified:
-    - gui-app/package.json (added CVA dependencies)
-    - gui-app/package-lock.json
+    - gui-pro/package.json (added CVA dependencies)
+    - gui-pro/package-lock.json
 
 key-decisions:
   - "CVA installed in this plan (Wave 3) since it was missing from worktree despite Wave 1 building it — worktree isolation requires re-installing dependencies"
@@ -109,20 +109,20 @@ Each task was committed atomically (TDD: test commit → implementation commit):
 
 ## Files Created/Modified
 
-- `gui-app/src/shared/ui/Section.tsx` — Section + SectionHeader components, collapsible with chevron
-- `gui-app/src/shared/ui/Section.test.tsx` — 6 vitest tests (renders, collapsible, defaultOpen, action)
-- `gui-app/src/shared/ui/Section.stories.tsx` — Default, WithDescription, Collapsible, CollapsedByDefault, WithAction, NestedSections
-- `gui-app/src/shared/ui/FormField.tsx` — FormField with label/required/error/hint composition
-- `gui-app/src/shared/ui/FormField.test.tsx` — 6 vitest tests (label, required, error role=alert, hint priority)
-- `gui-app/src/shared/ui/FormField.stories.tsx` — Default, Required, WithHint, WithError, WithInputAndError, MultipleFields
-- `gui-app/src/shared/ui/StatusBadge.tsx` — CVA badge with 4 VPN state variants + exported statusBadgeVariants
-- `gui-app/src/shared/ui/StatusBadge.test.tsx` — 6 vitest tests (4 variant labels, custom label, dot indicator)
-- `gui-app/src/shared/ui/StatusBadge.stories.tsx` — Default, AllVariants, Connected, Connecting, Error, Disconnected, WithCustomLabel
-- `gui-app/src/shared/ui/EmptyState.tsx` — EmptyState with Russian defaults, icon/heading/body/action
-- `gui-app/src/shared/ui/EmptyState.test.tsx` — 6 vitest tests (defaults, custom props, icon, action)
-- `gui-app/src/shared/ui/EmptyState.stories.tsx` — Default, WithIcon, WithAction, CustomText, MinimalNoIcon
-- `gui-app/package.json` — added class-variance-authority, clsx, tailwind-merge
-- `gui-app/package-lock.json` — lockfile update
+- `gui-pro/src/shared/ui/Section.tsx` — Section + SectionHeader components, collapsible with chevron
+- `gui-pro/src/shared/ui/Section.test.tsx` — 6 vitest tests (renders, collapsible, defaultOpen, action)
+- `gui-pro/src/shared/ui/Section.stories.tsx` — Default, WithDescription, Collapsible, CollapsedByDefault, WithAction, NestedSections
+- `gui-pro/src/shared/ui/FormField.tsx` — FormField with label/required/error/hint composition
+- `gui-pro/src/shared/ui/FormField.test.tsx` — 6 vitest tests (label, required, error role=alert, hint priority)
+- `gui-pro/src/shared/ui/FormField.stories.tsx` — Default, Required, WithHint, WithError, WithInputAndError, MultipleFields
+- `gui-pro/src/shared/ui/StatusBadge.tsx` — CVA badge with 4 VPN state variants + exported statusBadgeVariants
+- `gui-pro/src/shared/ui/StatusBadge.test.tsx` — 6 vitest tests (4 variant labels, custom label, dot indicator)
+- `gui-pro/src/shared/ui/StatusBadge.stories.tsx` — Default, AllVariants, Connected, Connecting, Error, Disconnected, WithCustomLabel
+- `gui-pro/src/shared/ui/EmptyState.tsx` — EmptyState with Russian defaults, icon/heading/body/action
+- `gui-pro/src/shared/ui/EmptyState.test.tsx` — 6 vitest tests (defaults, custom props, icon, action)
+- `gui-pro/src/shared/ui/EmptyState.stories.tsx` — Default, WithIcon, WithAction, CustomText, MinimalNoIcon
+- `gui-pro/package.json` — added class-variance-authority, clsx, tailwind-merge
+- `gui-pro/package-lock.json` — lockfile update
 
 ## Decisions Made
 
@@ -138,8 +138,8 @@ Each task was committed atomically (TDD: test commit → implementation commit):
 **1. [Rule 3 - Blocking] Installed missing CVA dependencies in worktree**
 - **Found during:** Task 2 (StatusBadge creation)
 - **Issue:** class-variance-authority, clsx, tailwind-merge not present in worktree node_modules despite Wave 1 context saying they were built
-- **Fix:** `npm install --legacy-peer-deps class-variance-authority clsx tailwind-merge` in gui-app
-- **Files modified:** gui-app/package.json, gui-app/package-lock.json
+- **Fix:** `npm install --legacy-peer-deps class-variance-authority clsx tailwind-merge` in gui-pro
+- **Files modified:** gui-pro/package.json, gui-pro/package-lock.json
 - **Verification:** StatusBadge imports `cva` successfully, all tests pass
 - **Committed in:** 3ccb03c7 (Task 2 commit)
 

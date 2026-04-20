@@ -29,7 +29,7 @@ tech-stack:
 key-files:
   created: []
   modified:
-    - gui-app/src/shared/styles/tokens.css
+    - gui-pro/src/shared/styles/tokens.css
 
 key-decisions:
   - "Preserve all 19 existing backward-compatible semantic token names (no component breakage)"
@@ -79,7 +79,7 @@ completed: 2026-04-13
 
 ## Files Created/Modified
 
-- `gui-app/src/shared/styles/tokens.css` — Complete two-tier design token system (262 lines)
+- `gui-pro/src/shared/styles/tokens.css` — Complete two-tier design token system (262 lines)
 
 ## Decisions Made
 

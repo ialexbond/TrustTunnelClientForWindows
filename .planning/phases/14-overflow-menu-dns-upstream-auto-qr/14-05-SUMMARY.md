@@ -35,9 +35,9 @@ tech_stack:
     - "onRegenerateName prop delegating collision-check from UsersAddForm to parent UsersSection"
 key_files:
   created:
-    - gui-app/src/components/server/UsersAddForm.tsx
+    - gui-pro/src/components/server/UsersAddForm.tsx
   modified:
-    - gui-app/src/components/server/UsersSection.tsx
+    - gui-pro/src/components/server/UsersSection.tsx
 decisions:
   - "UsersAddForm uses <form onSubmit> so Enter from either input submits — matches Copywriting/Accessibility contract and removes a click."
   - "D-14 collision-check lives in parent UsersSection (generateUniqueUsername helper) — child UsersAddForm receives onRegenerateName prop. Storybook standalone falls back to generateUsername() via conditional."
@@ -62,7 +62,7 @@ metrics:
 
 ## Что сделано
 
-### Task 1 — `gui-app/src/components/server/UsersAddForm.tsx` (new, 182 LOC)
+### Task 1 — `gui-pro/src/components/server/UsersAddForm.tsx` (new, 182 LOC)
 
 Commit: `1a826b7c`
 
@@ -104,7 +104,7 @@ interface UsersAddFormProps {
 
 ---
 
-### Task 2 — `gui-app/src/components/server/UsersSection.tsx` (full rewrite, +260/-235)
+### Task 2 — `gui-pro/src/components/server/UsersSection.tsx` (full rewrite, +260/-235)
 
 Commit: `9f2f9a16`
 
@@ -269,14 +269,14 @@ Cancelled delete не логируется (D-28 правило — пользо
 **Found during:** `git commit` Task 1.
 **Issue:** `warning: LF will be replaced by CRLF the next time Git touches it` (Windows-хост, Git default autocrlf).
 **Fix:** Не применял активных действий — это стандартное предупреждение репозитория (каждый коммит его даёт). Файлы хранятся в репо с LF (через `.gitattributes` или core.autocrlf), на рабочем файле — CRLF. Не влияет на функциональность.
-**Files:** `gui-app/src/components/server/UsersAddForm.tsx`, `UsersSection.tsx`.
+**Files:** `gui-pro/src/components/server/UsersAddForm.tsx`, `UsersSection.tsx`.
 
 ### Minor — plan text adjusted to pass automated grep
 
 **Found during:** Task 2 verification grep `grep -c "OverflowMenu" ... | awk '$1 == 0'` дал 1 (не 0).
 **Issue:** JSDoc-комментарий в начале нового `UsersSection.tsx` содержал фразу "Removed OverflowMenu + radio-circle (D-03)..." — grep не различает код vs комментарий, поэтому verify-line падала.
 **Fix:** Переформулировал комментарий на "Removed the legacy overflow trigger + radio-circle" — семантика сохранена, automated grep проходит. Код остался идентичным.
-**Files:** `gui-app/src/components/server/UsersSection.tsx`.
+**Files:** `gui-pro/src/components/server/UsersSection.tsx`.
 **Note:** Не является функциональным отклонением от плана — только косметическое изменение comment text.
 
 ### Other notes
@@ -307,16 +307,16 @@ None — фронтенд-only работа. Не трогаем SSH/backend/Tau
 
 ### TypeScript + Lint
 
-- `cd gui-app && npx tsc --noEmit` — PASS (no errors on full project).
-- `cd gui-app && npx eslint --max-warnings 0 src/components/server/UsersSection.tsx src/components/server/UsersAddForm.tsx src/components/server/UserConfigModal.tsx` — PASS.
+- `cd gui-pro && npx tsc --noEmit` — PASS (no errors on full project).
+- `cd gui-pro && npx eslint --max-warnings 0 src/components/server/UsersSection.tsx src/components/server/UsersAddForm.tsx src/components/server/UserConfigModal.tsx` — PASS.
 
 ### Tests
 
-- `cd gui-app && npx vitest run src/components/server` — 16/17 files pass; 248/288 tests pass; 21 todo; 19 failed — **all 19 failures in `UsersSection.test.tsx` only**, each asserting on the removed OverflowMenu / radio-dot surface (per worktree contract not this plan's scope to fix — see Plan 14-06).
+- `cd gui-pro && npx vitest run src/components/server` — 16/17 files pass; 248/288 tests pass; 21 todo; 19 failed — **all 19 failures in `UsersSection.test.tsx` only**, each asserting on the removed OverflowMenu / radio-dot surface (per worktree contract not this plan's scope to fix — see Plan 14-06).
 
 ### Integration check
 
-`grep -rn "UsersSection" gui-app/src/components/` confirms:
+`grep -rn "UsersSection" gui-pro/src/components/` confirms:
 - Mount point `ServerTabs.tsx:205` unchanged — `<UsersSection state={state} />`.
 - `Plan 01 UsersSection.stories.tsx` imports from `./UsersSection` — public API `{ state: ServerState }` unchanged, stories keep rendering.
 
@@ -339,8 +339,8 @@ UserConfigModal (из Plan 04) — отдельный plan, в scope этого 
 ## Plan Artifacts
 
 - `.planning/phases/14-overflow-menu-dns-upstream-auto-qr/14-05-SUMMARY.md` — этот файл
-- `gui-app/src/components/server/UsersAddForm.tsx` — новый, 182 LOC
-- `gui-app/src/components/server/UsersSection.tsx` — полный rewrite, +260/-235 LOC
+- `gui-pro/src/components/server/UsersAddForm.tsx` — новый, 182 LOC
+- `gui-pro/src/components/server/UsersSection.tsx` — полный rewrite, +260/-235 LOC
 
 **Commits:**
 - `1a826b7c` feat(14-05): extract UsersAddForm inline component (clearable, regen, activity log)
@@ -357,8 +357,8 @@ UserConfigModal (из Plan 04) — отдельный plan, в scope этого 
 ## Self-Check: PASSED
 
 **Files:**
-- FOUND: `gui-app/src/components/server/UsersAddForm.tsx` (new, 182 LOC)
-- FOUND: `gui-app/src/components/server/UsersSection.tsx` (modified, full rewrite)
+- FOUND: `gui-pro/src/components/server/UsersAddForm.tsx` (new, 182 LOC)
+- FOUND: `gui-pro/src/components/server/UsersSection.tsx` (modified, full rewrite)
 - FOUND: `.planning/phases/14-overflow-menu-dns-upstream-auto-qr/14-05-SUMMARY.md` (this file)
 
 **Commits (verified via `git log --oneline`):**

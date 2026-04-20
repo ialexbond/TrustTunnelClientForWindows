@@ -12,10 +12,10 @@ tech_stack:
   patterns: ["Storybook CSF3 stories", "memory/v3 use-case documentation"]
 key_files:
   created:
-    - gui-app/src/components/layout/TitleBar.stories.tsx
-    - gui-app/src/components/layout/TabNavigation.stories.tsx
-    - gui-app/src/components/layout/WindowControls.stories.tsx
-    - gui-app/src/components/ServerSidebar.stories.tsx
+    - gui-pro/src/components/layout/TitleBar.stories.tsx
+    - gui-pro/src/components/layout/TabNavigation.stories.tsx
+    - gui-pro/src/components/layout/WindowControls.stories.tsx
+    - gui-pro/src/components/ServerSidebar.stories.tsx
     - memory/v3/use-cases/application-shell.md (gitignored, local only)
     - memory/v3/test-cases/application-shell.md (gitignored, local only)
   modified: []
@@ -69,7 +69,7 @@ Acceptance criteria met:
 This task is a `checkpoint:human-verify` gate. Automated work (Tasks 1-2) is complete. User verification of the visual result is required.
 
 **Steps for user:**
-1. Run Storybook: `cd gui-app && npm run storybook` — verify `Layout/` stories render correctly
+1. Run Storybook: `cd gui-pro && npm run storybook` — verify `Layout/` stories render correctly
 2. Check TabNavigation stories: AllEnabled (5 tabs), NoConfig (3 disabled), each active state
 3. Check ServerSidebar stories: Empty (EmptyState), SingleConnected (green dot), MixedStatuses, ErrorState
 4. Check TitleBar: "TrustTunnel" + "PRO" badge, WithWindowControls variant shows all 3 buttons
@@ -120,10 +120,10 @@ None — plan creates only Storybook stories and gitignored documentation files.
 ## Self-Check
 
 ### Files created:
-- [x] `gui-app/src/components/layout/TitleBar.stories.tsx` — FOUND
-- [x] `gui-app/src/components/layout/TabNavigation.stories.tsx` — FOUND
-- [x] `gui-app/src/components/layout/WindowControls.stories.tsx` — FOUND
-- [x] `gui-app/src/components/ServerSidebar.stories.tsx` — FOUND
+- [x] `gui-pro/src/components/layout/TitleBar.stories.tsx` — FOUND
+- [x] `gui-pro/src/components/layout/TabNavigation.stories.tsx` — FOUND
+- [x] `gui-pro/src/components/layout/WindowControls.stories.tsx` — FOUND
+- [x] `gui-pro/src/components/ServerSidebar.stories.tsx` — FOUND
 - [x] `memory/v3/use-cases/application-shell.md` — FOUND (gitignored, local)
 - [x] `memory/v3/test-cases/application-shell.md` — FOUND (gitignored, local)
 

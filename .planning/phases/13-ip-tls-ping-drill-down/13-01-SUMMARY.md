@@ -23,12 +23,12 @@ tech-stack:
     - "Inline #[cfg(test)] mod tests — без интеграционных файлов tests/ (project convention)"
 key-files:
   created:
-    - "gui-app/src-tauri/src/commands/geoip.rs (128 строк): GeoIpInfo + IpWhoResponse + IpWhoFlag + get_server_geoip + 3 inline serde-теста"
+    - "gui-pro/src-tauri/src/commands/geoip.rs (128 строк): GeoIpInfo + IpWhoResponse + IpWhoFlag + get_server_geoip + 3 inline serde-теста"
     - ".planning/phases/13-ip-tls-ping-drill-down/deferred-items.md: документирование 81 pre-existing clippy-error в legacy-файлах (out-of-scope)"
   modified:
-    - "gui-app/src-tauri/src/commands/mod.rs: добавлено `pub mod geoip;` после `pub mod network;`"
-    - "gui-app/src-tauri/src/lib.rs: добавлено `commands::geoip::get_server_geoip,` в invoke_handler! (после speedtest_run, строка 340)"
-    - "gui-app/src-tauri/Cargo.lock: автообновление при cargo test (без новых dependencies)"
+    - "gui-pro/src-tauri/src/commands/mod.rs: добавлено `pub mod geoip;` после `pub mod network;`"
+    - "gui-pro/src-tauri/src/lib.rs: добавлено `commands::geoip::get_server_geoip,` в invoke_handler! (после speedtest_run, строка 340)"
+    - "gui-pro/src-tauri/Cargo.lock: автообновление при cargo test (без новых dependencies)"
 decisions:
   - "RED-фаза TDD реализована через unimplemented!() body + 3 serde-теста на структуры (тесты не зависят от тела команды)"
   - "GREEN-фаза: точная копия Pattern 3 из 13-RESEARCH.md (план явно требует 'строго по коду')"
@@ -49,7 +49,7 @@ metrics:
 
 ### Task 1: TDD-цикл get_server_geoip (RED + GREEN)
 - **RED commit `5b7f4089`** — `test(13-01): add failing test scaffold for get_server_geoip`
-  - Создан `gui-app/src-tauri/src/commands/geoip.rs` с тремя структурами:
+  - Создан `gui-pro/src-tauri/src/commands/geoip.rs` с тремя структурами:
     - `pub struct GeoIpInfo { country, country_code, flag_emoji }` (Serialize + Deserialize + Debug + Clone + PartialEq)
     - `struct IpWhoResponse { success, message, country, country_code, flag }` (partial deserialize)
     - `struct IpWhoFlag { emoji }` (вложенная структура для эмодзи флага)
@@ -69,7 +69,7 @@ metrics:
 
 ### Task 2: Регистрация команды в Tauri invoke_handler
 - **Commit `1e449972`** — `feat(13-01): register get_server_geoip in tauri invoke_handler`
-  - В `gui-app/src-tauri/src/lib.rs` после строки `commands::network::speedtest_run,` (строка 339) добавлена `commands::geoip::get_server_geoip,`
+  - В `gui-pro/src-tauri/src/lib.rs` после строки `commands::network::speedtest_run,` (строка 339) добавлена `commands::geoip::get_server_geoip,`
   - Команда теперь доступна фронту через `invoke<GeoIpInfo>("get_server_geoip", { host })`
   - Warning `function get_server_geoip is never used` исчез (был ожидаем после RED-фазы — функция была private с т.з. Tauri)
   - Также включён `deferred-items.md` с задокументированными pre-existing clippy-проблемами
@@ -112,13 +112,13 @@ metrics:
 - **Found during:** Task 1 (RED-фаза, первый прогон тестов)
 - **Issue:** Использование `\u{1f1fa}\u{1f1f8}` (Rust Unicode escape) **внутри JSON raw-string** — `\u` в JSON синтаксисе требует ровно 4 hex-символа (`\u1F1FA` без скобок), а не Rust-нотацию. serde упал с `Error("invalid escape", line: 5, column: 38)`.
 - **Fix:** Перешёл на `format!()` с подстановкой переменной `us_flag = "\u{1f1fa}\u{1f1f8}"` в JSON-строку. Это даёт литеральную UTF-8 последовательность в JSON (которую serde парсит корректно), сохраняя при этом encoding-агностичность Rust исходника.
-- **Files modified:** `gui-app/src-tauri/src/commands/geoip.rs` (тело теста `deserializes_ipwho_success_response`)
+- **Files modified:** `gui-pro/src-tauri/src/commands/geoip.rs` (тело теста `deserializes_ipwho_success_response`)
 - **Commit:** `5b7f4089` (RED-фаза, fix перед коммитом)
 
 ### Деференшил-инфраструктура
 
 **2. [Tooling - Out-of-scope] Установка clippy для stable-toolchain**
-- В worktree-окружении `cargo clippy` падал с `cargo-clippy.exe is not installed for the toolchain stable-x86_64-pc-windows-msvc`. `gui-app/rust-toolchain.toml` фиксирует `channel = "stable"`, но clippy был установлен только для `1.88` (root toolchain).
+- В worktree-окружении `cargo clippy` падал с `cargo-clippy.exe is not installed for the toolchain stable-x86_64-pc-windows-msvc`. `gui-pro/rust-toolchain.toml` фиксирует `channel = "stable"`, но clippy был установлен только для `1.88` (root toolchain).
 - **Fix:** `rustup component add clippy --toolchain stable-x86_64-pc-windows-msvc` — clippy теперь доступен в обеих toolchains.
 - Это **не** деформация плана (не меняет код), но логирую как инфраструктурный шаг для воспроизводимости.
 
@@ -141,9 +141,9 @@ metrics:
 ## Self-Check: PASSED
 
 **Files exist:**
-- FOUND: `gui-app/src-tauri/src/commands/geoip.rs` (128 строк)
-- FOUND: `gui-app/src-tauri/src/commands/mod.rs` (с `pub mod geoip;` на строке 5)
-- FOUND: `gui-app/src-tauri/src/lib.rs` (с `commands::geoip::get_server_geoip,` на строке 340)
+- FOUND: `gui-pro/src-tauri/src/commands/geoip.rs` (128 строк)
+- FOUND: `gui-pro/src-tauri/src/commands/mod.rs` (с `pub mod geoip;` на строке 5)
+- FOUND: `gui-pro/src-tauri/src/lib.rs` (с `commands::geoip::get_server_geoip,` на строке 340)
 - FOUND: `.planning/phases/13-ip-tls-ping-drill-down/deferred-items.md`
 
 **Commits exist:**

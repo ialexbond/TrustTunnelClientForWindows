@@ -29,22 +29,22 @@ tech-stack:
 
 key-files:
   created:
-    - gui-app/src/shared/ui/Modal.stories.tsx
-    - gui-app/src/shared/ui/ConfirmDialog.stories.tsx
-    - gui-app/src/shared/ui/Toggle.stories.tsx
-    - gui-app/src/shared/ui/Card.stories.tsx
-    - gui-app/src/shared/ui/Tooltip.stories.tsx
+    - gui-pro/src/shared/ui/Modal.stories.tsx
+    - gui-pro/src/shared/ui/ConfirmDialog.stories.tsx
+    - gui-pro/src/shared/ui/Toggle.stories.tsx
+    - gui-pro/src/shared/ui/Card.stories.tsx
+    - gui-pro/src/shared/ui/Tooltip.stories.tsx
   modified:
-    - gui-app/src/shared/ui/Modal.tsx
-    - gui-app/src/shared/ui/Modal.test.tsx
-    - gui-app/src/shared/ui/ConfirmDialog.tsx
-    - gui-app/src/shared/ui/ConfirmDialog.test.tsx
-    - gui-app/src/shared/ui/Toggle.tsx
-    - gui-app/src/shared/ui/Toggle.test.tsx
-    - gui-app/src/shared/ui/Card.tsx
-    - gui-app/src/shared/ui/Card.test.tsx
-    - gui-app/src/shared/ui/Tooltip.tsx
-    - gui-app/src/shared/ui/Tooltip.test.tsx
+    - gui-pro/src/shared/ui/Modal.tsx
+    - gui-pro/src/shared/ui/Modal.test.tsx
+    - gui-pro/src/shared/ui/ConfirmDialog.tsx
+    - gui-pro/src/shared/ui/ConfirmDialog.test.tsx
+    - gui-pro/src/shared/ui/Toggle.tsx
+    - gui-pro/src/shared/ui/Toggle.test.tsx
+    - gui-pro/src/shared/ui/Card.tsx
+    - gui-pro/src/shared/ui/Card.test.tsx
+    - gui-pro/src/shared/ui/Tooltip.tsx
+    - gui-pro/src/shared/ui/Tooltip.test.tsx
 
 key-decisions:
   - "No clsx/CVA dependency — project uses plain template strings, kept consistent"
@@ -93,21 +93,21 @@ completed: 2026-04-14
 
 ## Files Created/Modified
 
-- `gui-app/src/shared/ui/Modal.tsx` — размеры sm/md/lg, --z-modal токен, isOpen/open dual props
-- `gui-app/src/shared/ui/Modal.test.tsx` — 13 тестов: size variants, z-index, overlay/escape/content click
-- `gui-app/src/shared/ui/Modal.stories.tsx` — Default, Small, Large, WithTitle, WithLongContent
-- `gui-app/src/shared/ui/ConfirmDialog.tsx` — "Удалить"/"Отмена" дефолты, confirmText/confirmLabel dual props
-- `gui-app/src/shared/ui/ConfirmDialog.test.tsx` — 13 тестов: defaults, legacy props, variants
-- `gui-app/src/shared/ui/ConfirmDialog.stories.tsx` — Default, CustomText, WithLongMessage
-- `gui-app/src/shared/ui/Toggle.tsx` — role=switch, aria-checked, focus-visible, checked/value dual props
-- `gui-app/src/shared/ui/Toggle.test.tsx` — 12 тестов: accessibility, focus-visible, opacity-disabled
-- `gui-app/src/shared/ui/Toggle.stories.tsx` — Default, Checked, Disabled, WithLabel, AllStates
-- `gui-app/src/shared/ui/Card.tsx` — bg-surface токен класс, shadow-sm, radius-lg
-- `gui-app/src/shared/ui/Card.test.tsx` — 12 тестов: token classes, no hex colors, CardHeader
-- `gui-app/src/shared/ui/Card.stories.tsx` — Default, WithHeader, WithContent, Empty
-- `gui-app/src/shared/ui/Tooltip.tsx` — z-[var(--z-dropdown)] вместо z-[9500]
-- `gui-app/src/shared/ui/Tooltip.test.tsx` — 7 тестов: hover/leave/delay + z-index проверка
-- `gui-app/src/shared/ui/Tooltip.stories.tsx` — Default, Positions, LongText
+- `gui-pro/src/shared/ui/Modal.tsx` — размеры sm/md/lg, --z-modal токен, isOpen/open dual props
+- `gui-pro/src/shared/ui/Modal.test.tsx` — 13 тестов: size variants, z-index, overlay/escape/content click
+- `gui-pro/src/shared/ui/Modal.stories.tsx` — Default, Small, Large, WithTitle, WithLongContent
+- `gui-pro/src/shared/ui/ConfirmDialog.tsx` — "Удалить"/"Отмена" дефолты, confirmText/confirmLabel dual props
+- `gui-pro/src/shared/ui/ConfirmDialog.test.tsx` — 13 тестов: defaults, legacy props, variants
+- `gui-pro/src/shared/ui/ConfirmDialog.stories.tsx` — Default, CustomText, WithLongMessage
+- `gui-pro/src/shared/ui/Toggle.tsx` — role=switch, aria-checked, focus-visible, checked/value dual props
+- `gui-pro/src/shared/ui/Toggle.test.tsx` — 12 тестов: accessibility, focus-visible, opacity-disabled
+- `gui-pro/src/shared/ui/Toggle.stories.tsx` — Default, Checked, Disabled, WithLabel, AllStates
+- `gui-pro/src/shared/ui/Card.tsx` — bg-surface токен класс, shadow-sm, radius-lg
+- `gui-pro/src/shared/ui/Card.test.tsx` — 12 тестов: token classes, no hex colors, CardHeader
+- `gui-pro/src/shared/ui/Card.stories.tsx` — Default, WithHeader, WithContent, Empty
+- `gui-pro/src/shared/ui/Tooltip.tsx` — z-[var(--z-dropdown)] вместо z-[9500]
+- `gui-pro/src/shared/ui/Tooltip.test.tsx` — 7 тестов: hover/leave/delay + z-index проверка
+- `gui-pro/src/shared/ui/Tooltip.stories.tsx` — Default, Positions, LongText
 
 ## Decisions Made
 
@@ -122,7 +122,7 @@ None — план выполнен точно как описан. Дополн�
 
 ## Issues Encountered
 
-- **node_modules в worktree:** при сбросе базы до `d7af542a` в worktree отсутствовали node_modules. Решено созданием Windows junction на `gui-app/node_modules` из основного репозитория через `New-Item -ItemType Junction`. Тесты запустились корректно.
+- **node_modules в worktree:** при сбросе базы до `d7af542a` в worktree отсутствовали node_modules. Решено созданием Windows junction на `gui-pro/node_modules` из основного репозитория через `New-Item -ItemType Junction`. Тесты запустились корректно.
 
 ## Known Stubs
 

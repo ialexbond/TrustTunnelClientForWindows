@@ -175,19 +175,19 @@ No shadcn/ui (`components.json` not present). UI-SPEC.md Registry Safety table: 
 
 | File | Purpose |
 |------|---------|
-| `gui-app/src/components/layout/TitleBar.tsx` | Title bar component |
-| `gui-app/src/components/layout/TabNavigation.tsx` | 5-tab bottom navigation |
-| `gui-app/src/components/layout/TabNavigation.test.tsx` | TabNavigation test coverage |
-| `gui-app/src/components/layout/WindowControls.tsx` | Window control buttons |
-| `gui-app/src/components/layout/AppShell.stories.tsx` | Composite shell stories |
-| `gui-app/src/components/ServerSidebar.tsx` | Server list sidebar |
-| `gui-app/src/App.tsx` | Application shell integration |
-| `gui-app/src/components/layout/TitleBar.stories.tsx` | TitleBar Storybook stories |
-| `gui-app/src/components/layout/TabNavigation.stories.tsx` | TabNavigation Storybook stories |
-| `gui-app/src/components/layout/WindowControls.stories.tsx` | WindowControls Storybook stories |
-| `gui-app/src/components/ServerSidebar.stories.tsx` | ServerSidebar Storybook stories |
-| `gui-app/src/components/server/StepProgress.tsx` | Step progress indicator |
-| `gui-app/src/shared/ui/EmptyState.tsx` | Empty state shared component |
-| `gui-app/src/shared/i18n/locales/ru.json` | Russian i18n strings |
-| `gui-app/src/index.css` | Global CSS (window-control-btn class) |
+| `gui-pro/src/components/layout/TitleBar.tsx` | Title bar component |
+| `gui-pro/src/components/layout/TabNavigation.tsx` | 5-tab bottom navigation |
+| `gui-pro/src/components/layout/TabNavigation.test.tsx` | TabNavigation test coverage |
+| `gui-pro/src/components/layout/WindowControls.tsx` | Window control buttons |
+| `gui-pro/src/components/layout/AppShell.stories.tsx` | Composite shell stories |
+| `gui-pro/src/components/ServerSidebar.tsx` | Server list sidebar |
+| `gui-pro/src/App.tsx` | Application shell integration |
+| `gui-pro/src/components/layout/TitleBar.stories.tsx` | TitleBar Storybook stories |
+| `gui-pro/src/components/layout/TabNavigation.stories.tsx` | TabNavigation Storybook stories |
+| `gui-pro/src/components/layout/WindowControls.stories.tsx` | WindowControls Storybook stories |
+| `gui-pro/src/components/ServerSidebar.stories.tsx` | ServerSidebar Storybook stories |
+| `gui-pro/src/components/server/StepProgress.tsx` | Step progress indicator |
+| `gui-pro/src/shared/ui/EmptyState.tsx` | Empty state shared component |
+| `gui-pro/src/shared/i18n/locales/ru.json` | Russian i18n strings |
+| `gui-pro/src/index.css` | Global CSS (window-control-btn class) |
 | `.planning/phases/04-mtproto-proxy/04-UI-SPEC.md` | Design contract (audit baseline) |

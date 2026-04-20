@@ -12,12 +12,12 @@ tech_stack:
   patterns: ["cross-fade visibility+opacity", "StatCard 2x2 grid", "CertSection sub-component"]
 key_files:
   created:
-    - gui-app/src/components/server/OverviewSection.tsx
+    - gui-pro/src/components/server/OverviewSection.tsx
   modified:
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/ServerPanel.test.tsx
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/ServerPanel.test.tsx
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 decisions:
   - "OverviewSection imports CertSection as sub-component — no inlining of handleRenew/loadCert logic (Pitfall 3)"
   - "IP address removed from status row in OverviewSection — only in ServerTabs header (DC-03)"
@@ -91,7 +91,7 @@ metrics:
 - **Found during:** Task 2 verification
 - **Issue:** Тест искал data-testid старых компонентов (server-status-section, version-section, config-section, logs-section, danger-zone-section), которые больше не рендерятся в ServerTabs
 - **Fix:** Обновлены vi.mock() — убраны моки 5 старых компонентов, добавлен mock OverviewSection. Тест переписан на проверку 4 табов и новых testId
-- **Files modified:** gui-app/src/components/ServerPanel.test.tsx
+- **Files modified:** gui-pro/src/components/ServerPanel.test.tsx
 - **Commit:** `11abcd24`
 
 **2. [Rule 3 - Blocking] node_modules отсутствовали в worktree**

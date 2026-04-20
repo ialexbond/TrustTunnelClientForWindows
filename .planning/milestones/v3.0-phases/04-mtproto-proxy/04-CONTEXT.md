@@ -85,14 +85,14 @@ NOT in scope:
 - `.planning/phases/03-ssh-port-change-integration/03-CONTEXT.md` — D-01 to D-12: SnackBar + ErrorBanner pattern, full visual redesign not token swap
 
 ### Design System Foundation
-- `gui-app/src/shared/styles/tokens.css` — Two-tier token system (primitives + semantics), slate-teal accent
-- `gui-app/src/shared/styles/fonts/` — Geist Sans + Geist Mono
+- `gui-pro/src/shared/styles/tokens.css` — Two-tier token system (primitives + semantics), slate-teal accent
+- `gui-pro/src/shared/styles/fonts/` — Geist Sans + Geist Mono
 
 ### Source Code (current state to transform)
-- `gui-app/src/components/layout/WindowControls.tsx` — Current: 3 buttons, hardcoded RGBA, no tokens
-- `gui-app/src/components/layout/Sidebar.tsx` — Current: hover-expand sidebar with 8 nav items, imports colors.ts
-- `gui-app/src/components/ServerSidebar.tsx` — Current: 200px left panel, server list, hardcoded Tailwind colors
-- `gui-app/src/App.tsx` — Contains Sidebar integration, page routing, SidebarPage type
+- `gui-pro/src/components/layout/WindowControls.tsx` — Current: 3 buttons, hardcoded RGBA, no tokens
+- `gui-pro/src/components/layout/Sidebar.tsx` — Current: hover-expand sidebar with 8 nav items, imports colors.ts
+- `gui-pro/src/components/ServerSidebar.tsx` — Current: 200px left panel, server list, hardcoded Tailwind colors
+- `gui-pro/src/App.tsx` — Contains Sidebar integration, page routing, SidebarPage type
 
 ### Design Philosophy
 - `memory/decisions/v3-philosophy.md` — Contract-first development process

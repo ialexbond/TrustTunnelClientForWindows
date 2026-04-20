@@ -17,18 +17,18 @@ created: 2026-04-13
 
 | Property | Value |
 |----------|-------|
-| **Framework** | Storybook test-runner + vitest (gui-app already has vitest) |
-| **Config file** | gui-app/.storybook/main.ts (Phase 1 creates), gui-app/vite.config.ts (existing) |
-| **Quick run command** | `cd gui-app && npx storybook dev --ci --smoke-test` |
-| **Full suite command** | `cd gui-app && npx storybook build --test 2>&1 | head -50` |
+| **Framework** | Storybook test-runner + vitest (gui-pro already has vitest) |
+| **Config file** | gui-pro/.storybook/main.ts (Phase 1 creates), gui-pro/vite.config.ts (existing) |
+| **Quick run command** | `cd gui-pro && npx storybook dev --ci --smoke-test` |
+| **Full suite command** | `cd gui-pro && npx storybook build --test 2>&1 | head -50` |
 | **Estimated runtime** | ~15 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `cd gui-app && npx storybook dev --ci --smoke-test`
-- **After every plan wave:** Run `cd gui-app && npx storybook build --test`
+- **After every task commit:** Run `cd gui-pro && npx storybook dev --ci --smoke-test`
+- **After every plan wave:** Run `cd gui-pro && npx storybook build --test`
 - **Before `/gsd-verify-work`:** Full suite must be green
 - **Max feedback latency:** 15 seconds
 
@@ -38,10 +38,10 @@ created: 2026-04-13
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | DS-01 | — | N/A | file-check | `grep -- '--color-accent-400' gui-app/src/shared/styles/tokens.css` | TBD | ⬜ pending |
-| TBD | TBD | TBD | DS-02 | — | N/A | file-check | `grep -- '--color-bg-primary' gui-app/src/shared/styles/tokens.css` | TBD | ⬜ pending |
-| TBD | TBD | TBD | SB-01 | — | N/A | smoke | `cd gui-app && npx storybook dev --ci --smoke-test` | TBD | ⬜ pending |
-| TBD | TBD | TBD | QA-01 | — | N/A | file-check | `grep 'data-theme' gui-app/index.html` | TBD | ⬜ pending |
+| TBD | TBD | TBD | DS-01 | — | N/A | file-check | `grep -- '--color-accent-400' gui-pro/src/shared/styles/tokens.css` | TBD | ⬜ pending |
+| TBD | TBD | TBD | DS-02 | — | N/A | file-check | `grep -- '--color-bg-primary' gui-pro/src/shared/styles/tokens.css` | TBD | ⬜ pending |
+| TBD | TBD | TBD | SB-01 | — | N/A | smoke | `cd gui-pro && npx storybook dev --ci --smoke-test` | TBD | ⬜ pending |
+| TBD | TBD | TBD | QA-01 | — | N/A | file-check | `grep 'data-theme' gui-pro/index.html` | TBD | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -49,8 +49,8 @@ created: 2026-04-13
 
 ## Wave 0 Requirements
 
-- [ ] `gui-app/.storybook/main.ts` — Storybook config with viteFinal Tauri mocks
-- [ ] `gui-app/.storybook/preview.ts` — imports tokens.css, registers theme decorator
+- [ ] `gui-pro/.storybook/main.ts` — Storybook config with viteFinal Tauri mocks
+- [ ] `gui-pro/.storybook/preview.ts` — imports tokens.css, registers theme decorator
 - [ ] `@storybook/react-vite`, `@storybook/addon-themes` — npm install
 
 *Storybook does not exist yet — Wave 0 must install and configure from scratch.*

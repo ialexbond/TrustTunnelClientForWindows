@@ -38,20 +38,20 @@ overrides_applied: 0
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `gui-app/src/components/server/UsersSection.tsx` | Redesigned — no OverflowMenu, no radio-circle, 2 inline icons | ✓ VERIFIED | 399 LOC; grep OverflowMenu→0; FileText+Trash2 inline; role="listbox"+role="option"+aria-selected; isLast→disabled Trash; handleAddUser с Pitfall-4 ordering (L196-204) |
-| `gui-app/src/components/server/UsersAddForm.tsx` | NEW — inline form extracted | ✓ VERIFIED | 183 LOC; ActionInput+ActionPasswordInput с clearable; 5 activity log events; `<form onSubmit>` для Enter submit; D-16 no min-length (canSubmit проверяет только trim().length>0); onRegenerateName prop для D-14 делегирования |
-| `gui-app/src/components/server/UserConfigModal.tsx` | Full compound (QR, deeplink, download, X) — NOT a stub | ✓ VERIFIED | 392 LOC; invoke("server_export_config_deeplink"), QRCodeSVG 240px clickable, handleCopyQr с canvas→PNG→ClipboardItem + fallback, handleDownload (fetch_server_config→save→copy_file), auto-focus X после 250ms |
-| `gui-app/src/components/server/UserConfigModal.test.tsx` | 10+ tests | ✓ VERIFIED | 15 tests в 1 describe, все passing. Покрытие: fetch, render QR, close X, copy link, QR fallback, **D-29 SECURITY** (deeplink never in log), download happy+cancel, loading, error, retry, storybook props |
-| `gui-app/src/components/server/UsersSection.test.tsx` | Full rewrite — no OverflowMenu/radio-dot asserts | ✓ VERIFIED | 24 tests, все passing. Покрытие D-02 (row click, aria-selected), D-03 (2 icons, stopPropagation), D-06 (row content), D-16 (1-char password OK), D-21 (disabled Trash), D-22 (confirm→invoke), **D-26 (pushSuccess exact string match)**, D-28 (activity events), **D-29 SECURITY** (password never in log) |
-| `gui-app/src/shared/ui/OverflowMenu.tsx` | Auto-flip fix | ✓ VERIFIED | Ported Tooltip algorithm: fitsBelow/fitsAbove + neither-fits fallback + viewport clamp. Scroll/resize close handlers. Public API (OverflowMenuProps) не изменён. |
-| `gui-app/src/shared/ui/OverflowMenu.stories.tsx` | +3 near-edge stories | ✓ VERIFIED | 8 total (5 existing + NearBottomRight, NearTopLeft, TallMenuFlipsUp). `parameters.layout: "fullscreen"` + `position:fixed` для trigger размещения. |
-| `gui-app/src/shared/ui/OverflowMenu.test.tsx` | +5 auto-flip tests | ✓ VERIFIED | 20 tests (15 existing + 5 new): positions below/above/right-align + closes on scroll/resize. Все passing. |
-| `gui-app/src/shared/ui/ActionInput.tsx` | `clearable` + `onClear` | ✓ VERIFIED | 155 LOC; `clearable?: boolean`, `onClear?: () => void` props; `showClear` guard; `effectiveActionCount = actionCount + clearCount` для rightPadding; X-button в actions cluster. |
-| `gui-app/src/shared/ui/ActionPasswordInput.tsx` | `clearable` + `onClear` + `onVisibilityToggle` | ✓ VERIFIED | 164 LOC; все 3 props; `handleVisibilityClick` вызывает `setVisible(!visible)` потом `onVisibilityToggle?.()`; X левее eye-toggle (flex-row layout: actions → Clear → Eye). |
-| `gui-app/src/components/server/UsersSection.stories.tsx` | 10 screen stories | ✓ VERIFIED | Empty, SingleUser, MultipleUsers, SelectedUser, LongUsername, AddFormPrefilled, AddInProgress, PasswordVisible, AddError, LightTheme. SnackBarProvider + ConfirmDialogProvider decorator stack. |
-| `gui-app/src/components/server/UserConfigModal.stories.tsx` | 5 modal stories | ✓ VERIFIED | Default, Loading, Error, LongDeeplink, LightTheme. Используют `_deeplinkOverride` / `_forceLoading` / `_forceError` для bypass backend. |
-| `gui-app/src/shared/i18n/locales/ru.json` | +9 keys | ✓ VERIFIED | Все 9 ключей с точными русскими текстами из UI-SPEC. |
-| `gui-app/src/shared/i18n/locales/en.json` | +9 keys (parity) | ✓ VERIFIED | Все 9 ключей с английским текстом. |
+| `gui-pro/src/components/server/UsersSection.tsx` | Redesigned — no OverflowMenu, no radio-circle, 2 inline icons | ✓ VERIFIED | 399 LOC; grep OverflowMenu→0; FileText+Trash2 inline; role="listbox"+role="option"+aria-selected; isLast→disabled Trash; handleAddUser с Pitfall-4 ordering (L196-204) |
+| `gui-pro/src/components/server/UsersAddForm.tsx` | NEW — inline form extracted | ✓ VERIFIED | 183 LOC; ActionInput+ActionPasswordInput с clearable; 5 activity log events; `<form onSubmit>` для Enter submit; D-16 no min-length (canSubmit проверяет только trim().length>0); onRegenerateName prop для D-14 делегирования |
+| `gui-pro/src/components/server/UserConfigModal.tsx` | Full compound (QR, deeplink, download, X) — NOT a stub | ✓ VERIFIED | 392 LOC; invoke("server_export_config_deeplink"), QRCodeSVG 240px clickable, handleCopyQr с canvas→PNG→ClipboardItem + fallback, handleDownload (fetch_server_config→save→copy_file), auto-focus X после 250ms |
+| `gui-pro/src/components/server/UserConfigModal.test.tsx` | 10+ tests | ✓ VERIFIED | 15 tests в 1 describe, все passing. Покрытие: fetch, render QR, close X, copy link, QR fallback, **D-29 SECURITY** (deeplink never in log), download happy+cancel, loading, error, retry, storybook props |
+| `gui-pro/src/components/server/UsersSection.test.tsx` | Full rewrite — no OverflowMenu/radio-dot asserts | ✓ VERIFIED | 24 tests, все passing. Покрытие D-02 (row click, aria-selected), D-03 (2 icons, stopPropagation), D-06 (row content), D-16 (1-char password OK), D-21 (disabled Trash), D-22 (confirm→invoke), **D-26 (pushSuccess exact string match)**, D-28 (activity events), **D-29 SECURITY** (password never in log) |
+| `gui-pro/src/shared/ui/OverflowMenu.tsx` | Auto-flip fix | ✓ VERIFIED | Ported Tooltip algorithm: fitsBelow/fitsAbove + neither-fits fallback + viewport clamp. Scroll/resize close handlers. Public API (OverflowMenuProps) не изменён. |
+| `gui-pro/src/shared/ui/OverflowMenu.stories.tsx` | +3 near-edge stories | ✓ VERIFIED | 8 total (5 existing + NearBottomRight, NearTopLeft, TallMenuFlipsUp). `parameters.layout: "fullscreen"` + `position:fixed` для trigger размещения. |
+| `gui-pro/src/shared/ui/OverflowMenu.test.tsx` | +5 auto-flip tests | ✓ VERIFIED | 20 tests (15 existing + 5 new): positions below/above/right-align + closes on scroll/resize. Все passing. |
+| `gui-pro/src/shared/ui/ActionInput.tsx` | `clearable` + `onClear` | ✓ VERIFIED | 155 LOC; `clearable?: boolean`, `onClear?: () => void` props; `showClear` guard; `effectiveActionCount = actionCount + clearCount` для rightPadding; X-button в actions cluster. |
+| `gui-pro/src/shared/ui/ActionPasswordInput.tsx` | `clearable` + `onClear` + `onVisibilityToggle` | ✓ VERIFIED | 164 LOC; все 3 props; `handleVisibilityClick` вызывает `setVisible(!visible)` потом `onVisibilityToggle?.()`; X левее eye-toggle (flex-row layout: actions → Clear → Eye). |
+| `gui-pro/src/components/server/UsersSection.stories.tsx` | 10 screen stories | ✓ VERIFIED | Empty, SingleUser, MultipleUsers, SelectedUser, LongUsername, AddFormPrefilled, AddInProgress, PasswordVisible, AddError, LightTheme. SnackBarProvider + ConfirmDialogProvider decorator stack. |
+| `gui-pro/src/components/server/UserConfigModal.stories.tsx` | 5 modal stories | ✓ VERIFIED | Default, Loading, Error, LongDeeplink, LightTheme. Используют `_deeplinkOverride` / `_forceLoading` / `_forceError` для bypass backend. |
+| `gui-pro/src/shared/i18n/locales/ru.json` | +9 keys | ✓ VERIFIED | Все 9 ключей с точными русскими текстами из UI-SPEC. |
+| `gui-pro/src/shared/i18n/locales/en.json` | +9 keys (parity) | ✓ VERIFIED | Все 9 ключей с английским текстом. |
 
 ### Key Link Verification
 
@@ -164,8 +164,8 @@ Automated gates are green. 2 items cannot be programmatically verified in this w
 **Test:**
 ```bash
 # На основной копии репо (worktree не имеет sidecar binaries)
-cd gui-app
-cp -r ../../gui-app/sidecar ./sidecar   # если работаем в worktree
+cd gui-pro
+cp -r ../../gui-pro/sidecar ./sidecar   # если работаем в worktree
 npm install
 npm run prerelease
 ```

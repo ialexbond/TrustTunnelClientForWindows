@@ -13,11 +13,11 @@ dependency_graph:
     - PanelErrorBoundary with correct token references
     - cn() utility in shared/lib/cn.ts
   affects:
-    - gui-app/src/shared/ui/Select.tsx
-    - gui-app/src/shared/ui/SnackBar.tsx
-    - gui-app/src/shared/ui/IconButton.tsx
-    - gui-app/src/shared/ui/DropOverlay.tsx
-    - gui-app/src/shared/ui/PanelErrorBoundary.tsx
+    - gui-pro/src/shared/ui/Select.tsx
+    - gui-pro/src/shared/ui/SnackBar.tsx
+    - gui-pro/src/shared/ui/IconButton.tsx
+    - gui-pro/src/shared/ui/DropOverlay.tsx
+    - gui-pro/src/shared/ui/PanelErrorBoundary.tsx
 tech_stack:
   added: []
   patterns:
@@ -28,22 +28,22 @@ tech_stack:
     - "Dev-mode console.error for accessibility violations"
 key_files:
   created:
-    - gui-app/src/shared/lib/cn.ts
-    - gui-app/src/shared/ui/Select.stories.tsx
-    - gui-app/src/shared/ui/SnackBar.stories.tsx
-    - gui-app/src/shared/ui/IconButton.stories.tsx
-    - gui-app/src/shared/ui/DropOverlay.stories.tsx
-    - gui-app/src/shared/ui/PanelErrorBoundary.stories.tsx
+    - gui-pro/src/shared/lib/cn.ts
+    - gui-pro/src/shared/ui/Select.stories.tsx
+    - gui-pro/src/shared/ui/SnackBar.stories.tsx
+    - gui-pro/src/shared/ui/IconButton.stories.tsx
+    - gui-pro/src/shared/ui/DropOverlay.stories.tsx
+    - gui-pro/src/shared/ui/PanelErrorBoundary.stories.tsx
   modified:
-    - gui-app/src/shared/ui/Select.tsx
-    - gui-app/src/shared/ui/Select.test.tsx
-    - gui-app/src/shared/ui/SnackBar.tsx
-    - gui-app/src/shared/ui/SnackBar.test.tsx
-    - gui-app/src/shared/ui/SnackBarContext.tsx (verified clean — no changes needed)
-    - gui-app/src/shared/ui/IconButton.tsx
-    - gui-app/src/shared/ui/DropOverlay.tsx
-    - gui-app/src/shared/ui/DropOverlay.test.tsx
-    - gui-app/src/shared/ui/PanelErrorBoundary.tsx
+    - gui-pro/src/shared/ui/Select.tsx
+    - gui-pro/src/shared/ui/Select.test.tsx
+    - gui-pro/src/shared/ui/SnackBar.tsx
+    - gui-pro/src/shared/ui/SnackBar.test.tsx
+    - gui-pro/src/shared/ui/SnackBarContext.tsx (verified clean — no changes needed)
+    - gui-pro/src/shared/ui/IconButton.tsx
+    - gui-pro/src/shared/ui/DropOverlay.tsx
+    - gui-pro/src/shared/ui/DropOverlay.test.tsx
+    - gui-pro/src/shared/ui/PanelErrorBoundary.tsx
 decisions:
   - "cn() implemented as minimal string-join utility without clsx/tailwind-merge (Plan 01 installs those; this is a stub that works correctly for these components)"
   - "DropOverlay keeps pointerEvents: 'none' as inline style (not Tailwind class) to keep test-observable behavior"
@@ -84,7 +84,7 @@ Full rewrite of `Select.tsx`:
 - `colors.accentBg` / `color-accent-500` replaced with `color-bg-active` / `color-accent-interactive`
 - `useDropdownPortal` preserved as-is per plan constraint
 
-Created `gui-app/src/shared/lib/cn.ts`: minimal string-merge utility (Plan 01 will upgrade to clsx+tailwind-merge; this stub is forward-compatible).
+Created `gui-pro/src/shared/lib/cn.ts`: minimal string-merge utility (Plan 01 will upgrade to clsx+tailwind-merge; this stub is forward-compatible).
 
 Tests expanded from 8 to 18: added ARIA role assertions, aria-expanded, listbox/option roles, aria-selected, keyboard nav (ArrowDown, Enter, Escape).
 
@@ -136,9 +136,9 @@ Created `node_modules` junction link in worktree (`mklink /J`) to allow vitest e
 
 **[Rule 3 - Blocking Issue] Created cn.ts stub before Plan 01 ran**
 - **Found during:** Task 1
-- **Issue:** Plan 01 (wave 1) was supposed to create `gui-app/src/shared/lib/cn.ts` and install clsx+tailwind-merge, but Plan 01 had not been executed when this wave 2 agent ran
+- **Issue:** Plan 01 (wave 1) was supposed to create `gui-pro/src/shared/lib/cn.ts` and install clsx+tailwind-merge, but Plan 01 had not been executed when this wave 2 agent ran
 - **Fix:** Created minimal `cn()` implementation that joins class strings without external dependencies. Compatible with future upgrade to clsx+tailwind-merge
-- **Files modified:** `gui-app/src/shared/lib/cn.ts` (created)
+- **Files modified:** `gui-pro/src/shared/lib/cn.ts` (created)
 - **Commit:** f0bdb897
 
 ### Rule 1 Fix: DropOverlay pointer-events
@@ -151,7 +151,7 @@ Created `node_modules` junction link in worktree (`mklink /J`) to allow vitest e
 
 ## Known Stubs
 
-**cn.ts** (`gui-app/src/shared/lib/cn.ts`): Minimal implementation without clsx/tailwind-merge. Will not deduplicate conflicting Tailwind classes (e.g., `text-sm text-lg` → keeps both). Plan 01 should replace this with the full implementation. No runtime issues for current components.
+**cn.ts** (`gui-pro/src/shared/lib/cn.ts`): Minimal implementation without clsx/tailwind-merge. Will not deduplicate conflicting Tailwind classes (e.g., `text-sm text-lg` → keeps both). Plan 01 should replace this with the full implementation. No runtime issues for current components.
 
 ## Threat Flags
 

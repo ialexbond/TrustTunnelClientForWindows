@@ -12,14 +12,14 @@ tech_stack:
   patterns: [CVA variants, forwardRef + displayName, aria-hidden decorative, role=img accessibility]
 key_files:
   created:
-    - gui-app/src/shared/ui/Skeleton.tsx
-    - gui-app/src/shared/ui/Skeleton.stories.tsx
-    - gui-app/src/shared/ui/Skeleton.test.tsx
-    - gui-app/src/shared/ui/StatusIndicator.tsx
-    - gui-app/src/shared/ui/StatusIndicator.stories.tsx
-    - gui-app/src/shared/ui/StatusIndicator.test.tsx
+    - gui-pro/src/shared/ui/Skeleton.tsx
+    - gui-pro/src/shared/ui/Skeleton.stories.tsx
+    - gui-pro/src/shared/ui/Skeleton.test.tsx
+    - gui-pro/src/shared/ui/StatusIndicator.tsx
+    - gui-pro/src/shared/ui/StatusIndicator.stories.tsx
+    - gui-pro/src/shared/ui/StatusIndicator.test.tsx
   modified:
-    - gui-app/src/index.css
+    - gui-pro/src/index.css
 decisions:
   - "Skeleton uses aria-hidden=true — decorative element, no semantic meaning"
   - "StatusIndicator uses role=img + aria-label for screen reader accessibility"
@@ -130,13 +130,13 @@ None — both components are purely presentational with no external data flow (c
 ## Self-Check: PASSED
 
 Files created:
-- FOUND: gui-app/src/shared/ui/Skeleton.tsx
-- FOUND: gui-app/src/shared/ui/Skeleton.stories.tsx
-- FOUND: gui-app/src/shared/ui/Skeleton.test.tsx
-- FOUND: gui-app/src/shared/ui/StatusIndicator.tsx
-- FOUND: gui-app/src/shared/ui/StatusIndicator.stories.tsx
-- FOUND: gui-app/src/shared/ui/StatusIndicator.test.tsx
-- FOUND: @keyframes skeleton-pulse in gui-app/src/index.css
+- FOUND: gui-pro/src/shared/ui/Skeleton.tsx
+- FOUND: gui-pro/src/shared/ui/Skeleton.stories.tsx
+- FOUND: gui-pro/src/shared/ui/Skeleton.test.tsx
+- FOUND: gui-pro/src/shared/ui/StatusIndicator.tsx
+- FOUND: gui-pro/src/shared/ui/StatusIndicator.stories.tsx
+- FOUND: gui-pro/src/shared/ui/StatusIndicator.test.tsx
+- FOUND: @keyframes skeleton-pulse in gui-pro/src/index.css
 - FOUND: opacity: 0.4 in skeleton-pulse keyframe
 
 Commits:

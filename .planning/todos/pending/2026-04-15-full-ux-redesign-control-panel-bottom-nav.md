@@ -3,18 +3,18 @@ created: 2026-04-15T08:15:09.997Z
 title: "Полный UX-редизайн панели управления и нижнего меню"
 area: ux
 files:
-  - gui-app/src/components/layout/TabNavigation.tsx
-  - gui-app/src/components/ServerTabs.tsx
-  - gui-app/src/components/ServerPanel.tsx
-  - gui-app/src/components/ControlPanelPage.tsx
-  - gui-app/src/components/server/ServerStatusSection.tsx
-  - gui-app/src/components/server/UsersSection.tsx
-  - gui-app/src/components/server/ConfigSection.tsx
-  - gui-app/src/components/server/SecuritySection.tsx
-  - gui-app/src/components/server/UtilitiesSection.tsx
-  - gui-app/src/components/server/DangerZoneSection.tsx
-  - gui-app/src/components/server/SshConnectForm.tsx
-  - gui-app/src/shared/styles/tokens.css
+  - gui-pro/src/components/layout/TabNavigation.tsx
+  - gui-pro/src/components/ServerTabs.tsx
+  - gui-pro/src/components/ServerPanel.tsx
+  - gui-pro/src/components/ControlPanelPage.tsx
+  - gui-pro/src/components/server/ServerStatusSection.tsx
+  - gui-pro/src/components/server/UsersSection.tsx
+  - gui-pro/src/components/server/ConfigSection.tsx
+  - gui-pro/src/components/server/SecuritySection.tsx
+  - gui-pro/src/components/server/UtilitiesSection.tsx
+  - gui-pro/src/components/server/DangerZoneSection.tsx
+  - gui-pro/src/components/server/SshConnectForm.tsx
+  - gui-pro/src/shared/styles/tokens.css
 ---
 
 ## Problem

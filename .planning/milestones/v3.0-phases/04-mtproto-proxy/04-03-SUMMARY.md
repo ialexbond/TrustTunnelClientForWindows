@@ -10,9 +10,9 @@ dependency_graph:
     - i18n keys for 5 tabs and ServerSidebar in en.json + ru.json
     - Updated keyboard shortcuts (Ctrl+1..5 = 5 tabs)
   affects:
-    - gui-app/src/App.tsx (will use AppTab in Plan 05)
-    - gui-app/src/components/layout/TabNavigation (Plan 04)
-    - gui-app/src/components/layout/ServerSidebar (Plan 05)
+    - gui-pro/src/App.tsx (will use AppTab in Plan 05)
+    - gui-pro/src/components/layout/TabNavigation (Plan 04)
+    - gui-pro/src/components/layout/ServerSidebar (Plan 05)
 tech_stack:
   added: []
   patterns:
@@ -20,13 +20,13 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/types.ts
-    - gui-app/src/shared/hooks/useKeyboardShortcuts.ts
-    - gui-app/src/shared/i18n/locales/en.json
-    - gui-app/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/types.ts
+    - gui-pro/src/shared/hooks/useKeyboardShortcuts.ts
+    - gui-pro/src/shared/i18n/locales/en.json
+    - gui-pro/src/shared/i18n/locales/ru.json
   deleted:
-    - gui-app/src/components/Header.tsx
-    - gui-app/src/components/Header.test.tsx
+    - gui-pro/src/components/Header.tsx
+    - gui-pro/src/components/Header.test.tsx
 decisions:
   - "AppTab now 5-value union: control|connection|routing|settings|about (per D-03)"
   - "Header.tsx removed as dead code — was only imported by its own test file"
@@ -94,11 +94,11 @@ Running `tsc --noEmit` shows pre-existing errors in other components (Button `ic
 
 ## Self-Check: PASSED
 
-- `gui-app/src/shared/types.ts` — contains `export type AppTab = "control" | "connection" | "routing" | "settings" | "about"` ✓
-- `gui-app/src/shared/hooks/useKeyboardShortcuts.ts` — pages array has 5 elements ✓
-- `gui-app/src/shared/i18n/locales/en.json` — tabs.connection = "Connection", sidebar.servers = "Servers" ✓
-- `gui-app/src/shared/i18n/locales/ru.json` — tabs.connection = "Подключение", sidebar.no_servers_hint starts with "Настройте" ✓
-- `gui-app/src/components/Header.tsx` — does not exist ✓
-- `gui-app/src/components/Header.test.tsx` — does not exist ✓
+- `gui-pro/src/shared/types.ts` — contains `export type AppTab = "control" | "connection" | "routing" | "settings" | "about"` ✓
+- `gui-pro/src/shared/hooks/useKeyboardShortcuts.ts` — pages array has 5 elements ✓
+- `gui-pro/src/shared/i18n/locales/en.json` — tabs.connection = "Connection", sidebar.servers = "Servers" ✓
+- `gui-pro/src/shared/i18n/locales/ru.json` — tabs.connection = "Подключение", sidebar.no_servers_hint starts with "Настройте" ✓
+- `gui-pro/src/components/Header.tsx` — does not exist ✓
+- `gui-pro/src/components/Header.test.tsx` — does not exist ✓
 - `.planning/ROADMAP.md` — Phase 4 title "Application Shell", 4 plans listed, deferred note present ✓
 - Commits exist: 68ddad58, 6328b552 ✓

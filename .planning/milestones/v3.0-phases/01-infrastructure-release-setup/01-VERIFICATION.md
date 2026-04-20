@@ -32,13 +32,13 @@ gaps:
     status: failed
     reason: "РЕГРЕССИЯ: HMR override был в .storybook/main.ts при первоначальной верификации (коммит 3dab219c). Коммит 0f5e1649 (fix(01-02): remove HMR port override) удалил server:{hmr:{host,port,protocol}} блок из viteFinal. Сейчас vite.config.ts содержит hmr:false без компенсирующего override в Storybook viteFinal. Storybook наследует hmr:false из vite.config.ts."
     artifacts:
-      - path: "gui-app/.storybook/main.ts"
+      - path: "gui-pro/.storybook/main.ts"
         issue: "viteFinal содержит только resolve.alias блок. Нет server.hmr override. vite.config.ts строка 16: hmr: false."
     missing:
       - "Добавить в viteFinal server: { hmr: { host: 'localhost', port: 6007, protocol: 'ws' } } или иной способ включения HMR для Storybook"
 deferred: []
 human_verification:
-  - test: "Запустить Storybook (cd gui-app && npm run storybook), открыть Foundations/Colors в браузере"
+  - test: "Запустить Storybook (cd gui-pro && npm run storybook), открыть Foundations/Colors в браузере"
     expected: "Palette сwatch показывает slate-teal (#4d9490) как dark interactive; тема переключается через toolbar без перезагрузки страницы"
     why_human: "Визуальный рендер colours и тема-тоггл нельзя проверить статически"
   - test: "Запустить Tauri приложение (cargo tauri dev) и наблюдать за стартом"
@@ -78,7 +78,7 @@ human_verification:
 | 7 | Storybook запускается без crash с Tauri API мокингом | ✓ VERIFIED | 6 viteFinal resolve.alias (@tauri-apps/*); все 6 mock файлов в .storybook/tauri-mocks/ |
 | 8 | Theme toggle через data-theme в Storybook toolbar | ✓ VERIFIED | preview.ts: withThemeByDataAttribute, attributeName:'data-theme', defaultTheme:'dark' |
 | 9 | HMR работает в Storybook (override inherited hmr:false) | ✗ FAILED (REGRESSION) | server.hmr override удалён в commit 0f5e1649. vite.config.ts строка 16: hmr:false без замены в viteFinal |
-| 10 | Scaffold stories удалены | ✓ VERIFIED | gui-app/src/stories/ не существует |
+| 10 | Scaffold stories удалены | ✓ VERIFIED | gui-pro/src/stories/ не существует |
 | 11 | Все 83+ behavioral тесты проходят | ✓ VERIFIED | SUMMARY 01-02: 1285 тестов прошли; изменения 01-04/01-05 касаются только CSS/HTML/TS константы, не logic |
 | 12 | Storybook — Foundations/Colors MDX страница | ✓ VERIFIED | Colors.mdx: Meta title="Foundations/Colors", #4d9490, 18.3:1 WCAG |
 | 13 | Storybook — Foundations/Typography MDX страница | ✓ VERIFIED | Typography.mdx: Typeset, fontSizes=[11,12,14,16], --tracking-tight |
@@ -92,21 +92,21 @@ human_verification:
 
 | Artifact | Ожидалось | Status | Детали |
 |----------|-----------|--------|--------|
-| `gui-app/src/shared/styles/tokens.css` | Двухуровневые токены со slate-teal | ✓ VERIFIED | 262 строк; :root primitives + dark/light semantics + reduced-motion; все новые масштабы присутствуют |
-| `gui-app/index.html` | Flash-prevention скрипт | ✓ VERIFIED | IIFE + try/catch + localStorage.getItem('tt_theme') + data-theme setAttribute |
-| `gui-app/src/shared/ui/colors.ts` | @deprecated glow="none" | ✓ VERIFIED | 3 @deprecated; successGlow/dangerGlow/accentLogoGlow = "none" |
-| `gui-app/.storybook/main.ts` | Storybook config + viteFinal Tauri mocks | ✓ VERIFIED (частично) | 6 tauri-apps aliases присутствуют; HMR override УДАЛЁН |
-| `gui-app/.storybook/preview.ts` | Theme toggle + CSS imports | ✓ VERIFIED | withThemeByDataAttribute; tokens.css + index.css импортированы |
-| `gui-app/.storybook/tauri-mocks/api-core.ts` | Mock invoke | ✓ VERIFIED | export const invoke |
-| `gui-app/.storybook/tauri-mocks/api-event.ts` | Mock listen/emit | ✓ VERIFIED | export const listen + emit |
-| `gui-app/.storybook/tauri-mocks/api-app.ts` | Mock getVersion | ✓ VERIFIED | export const getVersion |
-| `gui-app/.storybook/tauri-mocks/api-window.ts` | Mock getCurrentWindow + Window | ✓ VERIFIED | export const getCurrentWindow + class Window |
-| `gui-app/.storybook/tauri-mocks/plugin-dialog.ts` | Mock open | ✓ VERIFIED | export const open |
-| `gui-app/.storybook/tauri-mocks/plugin-shell.ts` | Mock open | ✓ VERIFIED | export const open |
-| `gui-app/src/docs/Colors.mdx` | Foundations/Colors MDX | ✓ VERIFIED | Meta title="Foundations/Colors", #4d9490, #236260, WCAG |
-| `gui-app/src/docs/Typography.mdx` | Foundations/Typography MDX | ✓ VERIFIED | Typeset, fontSizes, tracking tokens |
-| `gui-app/src/docs/Spacing.mdx` | Foundations/Spacing MDX | ✓ VERIFIED | 8 шагов spacing ruler |
-| `gui-app/src/docs/Shadows.mdx` | Foundations/Shadows MDX | ✓ VERIFIED | 4 уровня, deprecated glow, focus-ring |
+| `gui-pro/src/shared/styles/tokens.css` | Двухуровневые токены со slate-teal | ✓ VERIFIED | 262 строк; :root primitives + dark/light semantics + reduced-motion; все новые масштабы присутствуют |
+| `gui-pro/index.html` | Flash-prevention скрипт | ✓ VERIFIED | IIFE + try/catch + localStorage.getItem('tt_theme') + data-theme setAttribute |
+| `gui-pro/src/shared/ui/colors.ts` | @deprecated glow="none" | ✓ VERIFIED | 3 @deprecated; successGlow/dangerGlow/accentLogoGlow = "none" |
+| `gui-pro/.storybook/main.ts` | Storybook config + viteFinal Tauri mocks | ✓ VERIFIED (частично) | 6 tauri-apps aliases присутствуют; HMR override УДАЛЁН |
+| `gui-pro/.storybook/preview.ts` | Theme toggle + CSS imports | ✓ VERIFIED | withThemeByDataAttribute; tokens.css + index.css импортированы |
+| `gui-pro/.storybook/tauri-mocks/api-core.ts` | Mock invoke | ✓ VERIFIED | export const invoke |
+| `gui-pro/.storybook/tauri-mocks/api-event.ts` | Mock listen/emit | ✓ VERIFIED | export const listen + emit |
+| `gui-pro/.storybook/tauri-mocks/api-app.ts` | Mock getVersion | ✓ VERIFIED | export const getVersion |
+| `gui-pro/.storybook/tauri-mocks/api-window.ts` | Mock getCurrentWindow + Window | ✓ VERIFIED | export const getCurrentWindow + class Window |
+| `gui-pro/.storybook/tauri-mocks/plugin-dialog.ts` | Mock open | ✓ VERIFIED | export const open |
+| `gui-pro/.storybook/tauri-mocks/plugin-shell.ts` | Mock open | ✓ VERIFIED | export const open |
+| `gui-pro/src/docs/Colors.mdx` | Foundations/Colors MDX | ✓ VERIFIED | Meta title="Foundations/Colors", #4d9490, #236260, WCAG |
+| `gui-pro/src/docs/Typography.mdx` | Foundations/Typography MDX | ✓ VERIFIED | Typeset, fontSizes, tracking tokens |
+| `gui-pro/src/docs/Spacing.mdx` | Foundations/Spacing MDX | ✓ VERIFIED | 8 шагов spacing ruler |
+| `gui-pro/src/docs/Shadows.mdx` | Foundations/Shadows MDX | ✓ VERIFIED | 4 уровня, deprecated glow, focus-ring |
 | `memory/v3/design-system/tokens.md` | Token architecture docs | ✗ MISSING | Директория memory/v3/ не создана локально |
 | `memory/v3/decisions/phase-1-decisions.md` | Phase 1 decision log | ✗ MISSING | Директория memory/v3/ не создана локально |
 
@@ -114,19 +114,19 @@ human_verification:
 
 | From | To | Via | Status | Детали |
 |------|----|-----|--------|--------|
-| `gui-app/index.html` | `gui-app/src/shared/styles/tokens.css` | data-theme attribute до React mount | ✓ WIRED | Inline script устанавливает data-theme на documentElement синхронно; tokens.css потребляет [data-theme="dark/light"] блоки |
-| `gui-app/.storybook/main.ts` | `gui-app/.storybook/tauri-mocks/` | viteFinal resolve.alias | ✓ WIRED | 6 aliases для @tauri-apps/* |
-| `gui-app/.storybook/preview.ts` | `gui-app/src/index.css` | import '../src/index.css' | ✓ WIRED | Импорт присутствует |
-| `gui-app/.storybook/preview.ts` | `gui-app/src/shared/styles/tokens.css` | import '../src/shared/styles/tokens.css' | ✓ WIRED | Явный импорт присутствует в preview.ts |
-| `gui-app/src/docs/Colors.mdx` | `gui-app/src/shared/styles/tokens.css` | MDX документирует токены из tokens.css | ✓ WIRED | tokens.css теперь содержит #4d9490; MDX документирует корректные значения |
+| `gui-pro/index.html` | `gui-pro/src/shared/styles/tokens.css` | data-theme attribute до React mount | ✓ WIRED | Inline script устанавливает data-theme на documentElement синхронно; tokens.css потребляет [data-theme="dark/light"] блоки |
+| `gui-pro/.storybook/main.ts` | `gui-pro/.storybook/tauri-mocks/` | viteFinal resolve.alias | ✓ WIRED | 6 aliases для @tauri-apps/* |
+| `gui-pro/.storybook/preview.ts` | `gui-pro/src/index.css` | import '../src/index.css' | ✓ WIRED | Импорт присутствует |
+| `gui-pro/.storybook/preview.ts` | `gui-pro/src/shared/styles/tokens.css` | import '../src/shared/styles/tokens.css' | ✓ WIRED | Явный импорт присутствует в preview.ts |
+| `gui-pro/src/docs/Colors.mdx` | `gui-pro/src/shared/styles/tokens.css` | MDX документирует токены из tokens.css | ✓ WIRED | tokens.css теперь содержит #4d9490; MDX документирует корректные значения |
 
 ## Anti-Patterns Found
 
 | File | Проблема | Severity | Impact |
 |------|----------|----------|--------|
-| `gui-app/.storybook/main.ts` | HMR override удалён; vite.config.ts hmr:false наследуется Storybook | ⚠️ Warning | SB-08 не выполнен; разработчик не получает live updates при редактировании историй |
-| `gui-app/src/index.css` | `.btn-primary` и `.btn-danger` используют `from-indigo-500`, `from-red-500` Tailwind классы (hardcoded, не токены) | ℹ️ Info | Вне scope Phase 1 (Phase 2 — компонентная миграция). Не блокирует Phase 1 goal. |
-| `gui-app/src/index.css` | `.wizard-input:focus` содержит `rgba(99, 102, 241, 0.15)` hardcoded (старый indigo) | ℹ️ Info | Вне scope Phase 1 (Phase 2 — компонентная миграция). Не блокирует Phase 1 goal. |
+| `gui-pro/.storybook/main.ts` | HMR override удалён; vite.config.ts hmr:false наследуется Storybook | ⚠️ Warning | SB-08 не выполнен; разработчик не получает live updates при редактировании историй |
+| `gui-pro/src/index.css` | `.btn-primary` и `.btn-danger` используют `from-indigo-500`, `from-red-500` Tailwind классы (hardcoded, не токены) | ℹ️ Info | Вне scope Phase 1 (Phase 2 — компонентная миграция). Не блокирует Phase 1 goal. |
+| `gui-pro/src/index.css` | `.wizard-input:focus` содержит `rgba(99, 102, 241, 0.15)` hardcoded (старый indigo) | ℹ️ Info | Вне scope Phase 1 (Phase 2 — компонентная миграция). Не блокирует Phase 1 goal. |
 
 ## Requirements Coverage
 
@@ -144,10 +144,10 @@ human_verification:
 | SB-01 | 01-02 | Storybook запускается с полным CSS | ✓ SATISFIED | main.ts + preview.ts корректно настроены; оба CSS импортированы |
 | SB-02 | 01-02 | Tauri API моки через viteFinal aliases | ✓ SATISFIED | 6 resolve.alias в viteFinal |
 | SB-03 | 01-02 | Theme toggle через addon-themes | ✓ SATISFIED | withThemeByDataAttribute, attributeName:'data-theme' |
-| SB-06 | 01-03 | MDX Foundations: Colors, Typography, Spacing, Shadows | ✓ SATISFIED | Все 4 файла в gui-app/src/docs/ с Foundations/ prefix |
+| SB-06 | 01-03 | MDX Foundations: Colors, Typography, Spacing, Shadows | ✓ SATISFIED | Все 4 файла в gui-pro/src/docs/ с Foundations/ prefix |
 | SB-07 | 01-03 | Организация Storybook по иерархии Foundations → Primitives → Patterns | ✓ SATISFIED | Meta title="Foundations/X" во всех 4 MDX |
 | SB-08 | 01-02 | HMR override для Storybook | ✗ BLOCKED (regression) | server.hmr удалён из viteFinal в коммите 0f5e1649; vite.config.ts hmr:false не компенсирован |
-| SB-09 | 01-02 | Scaffold stories удалены | ✓ SATISFIED | gui-app/src/stories/ не существует |
+| SB-09 | 01-02 | Scaffold stories удалены | ✓ SATISFIED | gui-pro/src/stories/ не существует |
 | QA-01 | 01-01, 01-05 | Theme flash исправлен | ✓ SATISFIED | IIFE скрипт в <head> читает tt_theme, устанавливает data-theme до React mount |
 | QA-03 | 01-02 | Все 83+ behavioral тесты проходят | ✓ SATISFIED | 1285 тестов (SUMMARY 01-02); последующие изменения CSS/HTML не затрагивают логику |
 | DOC-01 | 01-03, 01-05 | memory/v3/design-system/ с документацией токенов | ✗ BLOCKED | memory/v3/ не существует ни локально в worktree, ни в основном репозитории |
@@ -157,7 +157,7 @@ human_verification:
 
 ### 1. Визуальная проверка Storybook с реальными токенами
 
-**Test:** Запустить Storybook (`cd gui-app && npm run storybook`), открыть Foundations/Colors в браузере
+**Test:** Запустить Storybook (`cd gui-pro && npm run storybook`), открыть Foundations/Colors в браузере
 **Expected:** Color swatches показывают slate-teal палитру (#4d9490 как dark interactive, #236260 как light interactive); тема переключается через toolbar; Foundations/Typography показывает Geist Sans на 11/12/14/16px
 **Why human:** Визуальный рендер и корректность цветов нельзя проверить статически
 

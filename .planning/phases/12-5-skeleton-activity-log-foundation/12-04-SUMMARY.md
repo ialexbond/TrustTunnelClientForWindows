@@ -13,9 +13,9 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/ui/PanelErrorBoundary.tsx
-    - gui-app/src/App.tsx
-    - gui-app/src/components/ServerTabs.tsx
+    - gui-pro/src/shared/ui/PanelErrorBoundary.tsx
+    - gui-pro/src/App.tsx
+    - gui-pro/src/components/ServerTabs.tsx
 decisions:
   - open_logs_folder вместо export_activity_log+open_path — открывает папку logs/ целиком, лучший UX для Windows
   - activityLog в class component через onClick callback, без хуков — invoke напрямую

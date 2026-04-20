@@ -7,11 +7,11 @@ dependency_graph:
   requires: [08-01]
   provides: [pill-tab-indicator, disconnect-a11y, shadow-xs-token, auth-button-contrast]
   affects:
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/StatusPanel.tsx
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/components/server/SshConnectForm.tsx
-    - gui-app/src/shared/styles/tokens.css
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/StatusPanel.tsx
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/components/server/SshConnectForm.tsx
+    - gui-pro/src/shared/styles/tokens.css
 tech_stack:
   added: []
   patterns:
@@ -21,11 +21,11 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/StatusPanel.tsx
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/components/server/SshConnectForm.tsx
-    - gui-app/src/shared/styles/tokens.css
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/StatusPanel.tsx
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/components/server/SshConnectForm.tsx
+    - gui-pro/src/shared/styles/tokens.css
 decisions:
   - "D-18: pill indicator — bg-[var(--color-bg-elevated)] + shadow-xs вместо border-b underline"
   - "D-15: maxWidth:120 вместо width:120 — вкладки сжимаются, не растягиваются на широких окнах"
@@ -130,13 +130,13 @@ None. Изменения затрагивают только визуальны�
 
 ## Self-Check: PASSED
 
-- `gui-app/src/components/ServerTabs.tsx` содержит `rounded-[var(--radius-md)]` ✓
-- `gui-app/src/components/ServerTabs.tsx` содержит `bg-[var(--color-bg-elevated)]` ✓
-- `gui-app/src/components/ServerTabs.tsx` НЕ содержит `border-b -mb-px` ✓
-- `gui-app/src/components/ServerTabs.tsx` содержит `focus-visible:shadow-[var(--focus-ring)]` ✓
-- `gui-app/src/components/ServerTabs.tsx` содержит `aria-label` ✓
-- `gui-app/src/components/StatusPanel.tsx` содержит `aria-label={t("buttons.disconnect")}` ✓
-- `gui-app/src/components/layout/TabNavigation.tsx` содержит `maxWidth: 120` ✓
-- `gui-app/src/components/server/SshConnectForm.tsx` содержит `bg-[var(--color-input-bg)]` ✓
-- `gui-app/src/shared/styles/tokens.css` содержит `--shadow-xs` ✓
+- `gui-pro/src/components/ServerTabs.tsx` содержит `rounded-[var(--radius-md)]` ✓
+- `gui-pro/src/components/ServerTabs.tsx` содержит `bg-[var(--color-bg-elevated)]` ✓
+- `gui-pro/src/components/ServerTabs.tsx` НЕ содержит `border-b -mb-px` ✓
+- `gui-pro/src/components/ServerTabs.tsx` содержит `focus-visible:shadow-[var(--focus-ring)]` ✓
+- `gui-pro/src/components/ServerTabs.tsx` содержит `aria-label` ✓
+- `gui-pro/src/components/StatusPanel.tsx` содержит `aria-label={t("buttons.disconnect")}` ✓
+- `gui-pro/src/components/layout/TabNavigation.tsx` содержит `maxWidth: 120` ✓
+- `gui-pro/src/components/server/SshConnectForm.tsx` содержит `bg-[var(--color-input-bg)]` ✓
+- `gui-pro/src/shared/styles/tokens.css` содержит `--shadow-xs` ✓
 - Коммит e0614653 существует ✓

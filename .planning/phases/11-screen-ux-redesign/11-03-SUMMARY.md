@@ -12,11 +12,11 @@ tech_stack:
   patterns: ["Accordion wrapping DangerZone", "aria-live polite for diagnostics", "useSecurityState in Settings for SshPortSection", "ConfirmDialog before destructive service action"]
 key_files:
   created:
-    - gui-app/src/components/server/ServerSettingsSection.tsx
-    - gui-app/src/components/server/ServiceSection.tsx
+    - gui-pro/src/components/server/ServerSettingsSection.tsx
+    - gui-pro/src/components/server/ServiceSection.tsx
   modified:
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/ServerPanel.test.tsx
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/ServerPanel.test.tsx
 decisions:
   - "ServerSettingsSection instantiates own useSecurityState for SshPortSection (SecuritySection stays self-contained per Pitfall 4)"
   - "ServiceSection wraps SecuritySection as <SecuritySection state={state} /> preserving its internal hook"
@@ -106,7 +106,7 @@ ServerSettingsSection и ServiceSection созданы и подключены �
 - **Found during:** Task 2 verification (vitest run)
 - **Issue:** ServerSettingsSection рендерит VersionSection, который вызывает `availableVersions.filter()` — мок-стейт в тесте не содержал `availableVersions`, TypeError при рендере
 - **Fix:** Добавлены 4 `vi.mock` (ServerSettingsSection, ServiceSection) в ServerPanel.test.tsx — аналогично существующим mockам OverviewSection/UsersSection
-- **Files modified:** `gui-app/src/components/ServerPanel.test.tsx`
+- **Files modified:** `gui-pro/src/components/ServerPanel.test.tsx`
 - **Commit:** `9badec0c`
 
 ## Known Stubs

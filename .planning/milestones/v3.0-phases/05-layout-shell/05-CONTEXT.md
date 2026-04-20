@@ -87,21 +87,21 @@ All 16 todos from `.planning/todos/pending/` are folded into this phase:
 **Downstream agents MUST read these before planning or implementing.**
 
 ### Design System
-- `gui-app/src/tokens.css` — All design tokens (primitives + semantics)
-- `gui-app/src/index.css` — Global styles, remaining Tailwind overrides
+- `gui-pro/src/tokens.css` — All design tokens (primitives + semantics)
+- `gui-pro/src/index.css` — Global styles, remaining Tailwind overrides
 
 ### Shell Components (Phase 4 outputs)
-- `gui-app/src/components/layout/TitleBar.tsx` — Custom title bar (32px, seamless)
-- `gui-app/src/components/layout/TabNavigation.tsx` — Bottom tabs (5 tabs, 56px, elevated pill)
-- `gui-app/src/components/layout/WindowControls.tsx` — Minimize/maximize/close
-- `gui-app/src/components/ServerSidebar.tsx` — Server list sidebar
-- `gui-app/src/App.tsx` — Tab routing, startup logic
+- `gui-pro/src/components/layout/TitleBar.tsx` — Custom title bar (32px, seamless)
+- `gui-pro/src/components/layout/TabNavigation.tsx` — Bottom tabs (5 tabs, 56px, elevated pill)
+- `gui-pro/src/components/layout/WindowControls.tsx` — Minimize/maximize/close
+- `gui-pro/src/components/ServerSidebar.tsx` — Server list sidebar
+- `gui-pro/src/App.tsx` — Tab routing, startup logic
 
 ### Bug Fix Targets
-- `gui-app/src/components/server/` — ServerPanel sections with invalid Button variants
-- `gui-app/src/shared/ui/Select.tsx` — Hardcoded Russian strings
-- `gui-app/src/shared/ui/StatusBadge.tsx` — Hardcoded Russian strings
-- `gui-app/src/shared/ui/EmptyState.tsx` — Hardcoded Russian strings
+- `gui-pro/src/components/server/` — ServerPanel sections with invalid Button variants
+- `gui-pro/src/shared/ui/Select.tsx` — Hardcoded Russian strings
+- `gui-pro/src/shared/ui/StatusBadge.tsx` — Hardcoded Russian strings
+- `gui-pro/src/shared/ui/EmptyState.tsx` — Hardcoded Russian strings
 
 ### Todo Files
 - `.planning/todos/pending/` — All 16 todo files with detailed descriptions

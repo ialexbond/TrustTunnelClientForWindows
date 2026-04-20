@@ -12,18 +12,18 @@ tech_stack:
   patterns: [cn() for class merging, CSS custom properties only, forwardRef on all components, token-driven error states]
 key_files:
   created:
-    - gui-app/src/shared/ui/Input.stories.tsx
-    - gui-app/src/shared/ui/NumberInput.stories.tsx
-    - gui-app/src/shared/ui/PasswordInput.stories.tsx
-    - gui-app/src/shared/ui/ActionInput.stories.tsx
-    - gui-app/src/shared/ui/ActionPasswordInput.stories.tsx
+    - gui-pro/src/shared/ui/Input.stories.tsx
+    - gui-pro/src/shared/ui/NumberInput.stories.tsx
+    - gui-pro/src/shared/ui/PasswordInput.stories.tsx
+    - gui-pro/src/shared/ui/ActionInput.stories.tsx
+    - gui-pro/src/shared/ui/ActionPasswordInput.stories.tsx
   modified:
-    - gui-app/src/shared/ui/Input.tsx
-    - gui-app/src/shared/ui/Input.test.tsx
-    - gui-app/src/shared/ui/NumberInput.tsx
-    - gui-app/src/shared/ui/PasswordInput.tsx
-    - gui-app/src/shared/ui/ActionInput.tsx
-    - gui-app/src/shared/ui/ActionPasswordInput.tsx
+    - gui-pro/src/shared/ui/Input.tsx
+    - gui-pro/src/shared/ui/Input.test.tsx
+    - gui-pro/src/shared/ui/NumberInput.tsx
+    - gui-pro/src/shared/ui/PasswordInput.tsx
+    - gui-pro/src/shared/ui/ActionInput.tsx
+    - gui-pro/src/shared/ui/ActionPasswordInput.tsx
 decisions:
   - "Clearable button uses aria-label=Clear for accessibility and testability"
   - "helperText hidden when error is present (error takes precedence)"
@@ -96,7 +96,7 @@ All 5 `.stories.tsx` files created with `tags: ["autodocs"]`.
 **1. [Rule 3 - Blocking] npm dependencies absent from worktree**
 - **Found during:** Task 1 verification
 - **Issue:** `node_modules` was not present in this worktree — `npx vitest run` failed with `ERR_MODULE_NOT_FOUND`
-- **Fix:** Ran `npm install --legacy-peer-deps` in `gui-app/`
+- **Fix:** Ran `npm install --legacy-peer-deps` in `gui-pro/`
 - **Commit:** no separate commit (setup only)
 
 ### Style Alignment
@@ -111,12 +111,12 @@ None — all components fully functional with real token-driven styling.
 ## Self-Check: PASSED
 
 Files verified to exist:
-- gui-app/src/shared/ui/Input.tsx (clearable, helperText, error, forwardRef present)
-- gui-app/src/shared/ui/Input.stories.tsx (title "Primitives/Input", tags ["autodocs"])
-- gui-app/src/shared/ui/NumberInput.stories.tsx (title "Primitives/NumberInput")
-- gui-app/src/shared/ui/PasswordInput.stories.tsx (title "Primitives/PasswordInput")
-- gui-app/src/shared/ui/ActionInput.stories.tsx (title "Primitives/ActionInput")
-- gui-app/src/shared/ui/ActionPasswordInput.stories.tsx (title "Primitives/ActionPasswordInput")
+- gui-pro/src/shared/ui/Input.tsx (clearable, helperText, error, forwardRef present)
+- gui-pro/src/shared/ui/Input.stories.tsx (title "Primitives/Input", tags ["autodocs"])
+- gui-pro/src/shared/ui/NumberInput.stories.tsx (title "Primitives/NumberInput")
+- gui-pro/src/shared/ui/PasswordInput.stories.tsx (title "Primitives/PasswordInput")
+- gui-pro/src/shared/ui/ActionInput.stories.tsx (title "Primitives/ActionInput")
+- gui-pro/src/shared/ui/ActionPasswordInput.stories.tsx (title "Primitives/ActionPasswordInput")
 
 Commits verified:
 - 6b340d28 present in git log

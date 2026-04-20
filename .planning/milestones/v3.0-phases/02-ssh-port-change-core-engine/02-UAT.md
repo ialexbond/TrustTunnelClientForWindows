@@ -13,7 +13,7 @@ updated: 2026-04-14T12:00:00Z
 ## Tests
 
 ### 1. Storybook renders all 25 components
-expected: `cd gui-app && npm run storybook` opens Storybook at localhost:6006. Sidebar shows all 25 components under "Primitives/" without crashes.
+expected: `cd gui-pro && npm run storybook` opens Storybook at localhost:6006. Sidebar shows all 25 components under "Primitives/" without crashes.
 result: pass
 
 ### 2. Button CVA variants
@@ -49,7 +49,7 @@ expected: Storybook toolbar theme toggle switches all components between dark an
 result: pass
 
 ### 10. All vitest tests pass
-expected: `cd gui-app && npx vitest run --reporter=verbose` runs all tests. All pass (expected ~100+ tests across all component files). Zero failures, zero TypeScript errors.
+expected: `cd gui-pro && npx vitest run --reporter=verbose` runs all tests. All pass (expected ~100+ tests across all component files). Zero failures, zero TypeScript errors.
 result: pass
 note: Auto-verified — 1356 tests passed, 94 test files, 0 failures (8.56s)
 

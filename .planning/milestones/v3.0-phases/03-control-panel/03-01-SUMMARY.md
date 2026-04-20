@@ -13,9 +13,9 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/server/SshConnectForm.tsx
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src/components/server/SshConnectForm.tsx
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 decisions:
   - "Card padding=lg wraps entire form — provides surface/border/radius without inline style"
   - "icons placed as children of Button (not icon= prop) per Phase 2 API"
@@ -110,8 +110,8 @@ Acceptance criteria met:
 
 **1. [Rule 3 - Blocking] npm dependencies absent from worktree**
 - **Found during:** Task 2 verification
-- **Issue:** `node_modules` not present in worktree gui-app — `npx vitest run` failed with `ERR_MODULE_NOT_FOUND`
-- **Fix:** Ran `npm install --legacy-peer-deps` in worktree `gui-app/`
+- **Issue:** `node_modules` not present in worktree gui-pro — `npx vitest run` failed with `ERR_MODULE_NOT_FOUND`
+- **Fix:** Ran `npm install --legacy-peer-deps` in worktree `gui-pro/`
 - **Commit:** no separate commit (setup only, same pattern as Phase 2 agents)
 
 ## Known Stubs
@@ -125,9 +125,9 @@ No new trust boundaries introduced. Phase 3 Plan 01 is visual-only migration —
 ## Self-Check: PASSED
 
 Files verified to exist:
-- gui-app/src/components/server/SshConnectForm.tsx (Card import, loading prop, no colors.ts)
-- gui-app/src/shared/i18n/locales/ru.json (vpnErrors namespace present)
-- gui-app/src/shared/i18n/locales/en.json (vpnErrors namespace present)
+- gui-pro/src/components/server/SshConnectForm.tsx (Card import, loading prop, no colors.ts)
+- gui-pro/src/shared/i18n/locales/ru.json (vpnErrors namespace present)
+- gui-pro/src/shared/i18n/locales/en.json (vpnErrors namespace present)
 
 Commits verified:
 - 37997511 present in git log

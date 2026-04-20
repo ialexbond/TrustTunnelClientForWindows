@@ -18,7 +18,7 @@ dependency_graph:
     - UtilitiesSection card container
     - ServerPanel wiring for Utilities
   affects:
-    - gui-app/src/components/ServerPanel.tsx
+    - gui-pro/src/components/ServerPanel.tsx
 tech_stack:
   added: []
   patterns:
@@ -27,11 +27,11 @@ tech_stack:
     - 5-step INSTALL_STEPS with STEP_INDEX mapping
 key_files:
   created:
-    - gui-app/src/components/server/useMtProtoState.ts
-    - gui-app/src/components/server/MtProtoSection.tsx
-    - gui-app/src/components/server/UtilitiesSection.tsx
+    - gui-pro/src/components/server/useMtProtoState.ts
+    - gui-pro/src/components/server/MtProtoSection.tsx
+    - gui-pro/src/components/server/UtilitiesSection.tsx
   modified:
-    - gui-app/src/components/ServerPanel.tsx
+    - gui-pro/src/components/ServerPanel.tsx
 decisions:
   - Used localStorage keyed by host for MTPROTO-06 proxy_link persistence across restarts
   - Rehydrate cached status on hook mount for immediate display before server query

@@ -12,11 +12,11 @@ dependency_graph:
     - i18n-compliant EmptyState (D-17)
     - sanitize() multi-occurrence confirmed (D-18)
   affects:
-    - gui-app/src/shared/ui/StatusBadge.tsx
-    - gui-app/src/shared/ui/Select.tsx
-    - gui-app/src/shared/ui/EmptyState.tsx
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src/shared/ui/StatusBadge.tsx
+    - gui-pro/src/shared/ui/Select.tsx
+    - gui-pro/src/shared/ui/EmptyState.tsx
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 tech_stack:
   added: []
   patterns:
@@ -26,14 +26,14 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/ui/StatusBadge.tsx
-    - gui-app/src/shared/ui/Select.tsx
-    - gui-app/src/shared/ui/EmptyState.tsx
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
-    - gui-app/src/shared/ui/StatusBadge.test.tsx
-    - gui-app/src/shared/ui/EmptyState.test.tsx
-    - gui-app/src/shared/ui/Select.test.tsx
+    - gui-pro/src/shared/ui/StatusBadge.tsx
+    - gui-pro/src/shared/ui/Select.tsx
+    - gui-pro/src/shared/ui/EmptyState.tsx
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
+    - gui-pro/src/shared/ui/StatusBadge.test.tsx
+    - gui-pro/src/shared/ui/EmptyState.test.tsx
+    - gui-pro/src/shared/ui/Select.test.tsx
 decisions:
   - "D-17 closed: StatusBadge/Select/EmptyState use useTranslation — no hardcoded Russian strings"
   - "D-18 closed: sanitize() loop+search_from pattern verified by all 6 logging tests"
@@ -129,11 +129,11 @@ None — locale JSON files are bundled at build time (T-05-07 accepted), fallbac
 ## Self-Check: PASSED
 
 Files exist:
-- gui-app/src/shared/ui/StatusBadge.tsx — FOUND
-- gui-app/src/shared/ui/Select.tsx — FOUND
-- gui-app/src/shared/ui/EmptyState.tsx — FOUND
-- gui-app/src/shared/i18n/locales/ru.json — FOUND
-- gui-app/src/shared/i18n/locales/en.json — FOUND
+- gui-pro/src/shared/ui/StatusBadge.tsx — FOUND
+- gui-pro/src/shared/ui/Select.tsx — FOUND
+- gui-pro/src/shared/ui/EmptyState.tsx — FOUND
+- gui-pro/src/shared/i18n/locales/ru.json — FOUND
+- gui-pro/src/shared/i18n/locales/en.json — FOUND
 
 Commits exist:
 - 838db224 — FOUND (feat(05-03): i18n StatusBadge, Select, EmptyState — close D-17)

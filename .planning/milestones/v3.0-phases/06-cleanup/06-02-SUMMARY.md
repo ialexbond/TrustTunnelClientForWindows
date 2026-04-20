@@ -18,9 +18,9 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/tailwind.config.js
-    - gui-app/src/index.css
-    - gui-app/src/components/ConfigPanel.tsx
+    - gui-pro/tailwind.config.js
+    - gui-pro/src/index.css
+    - gui-pro/src/components/ConfigPanel.tsx
     - memory/v3/design-system/known-issues.md
     - memory/v3/design-system/tokens.md
 key-decisions:
@@ -64,9 +64,9 @@ Each task was committed atomically:
 2. **Task 2: Update design system documentation** - not committed (memory/ is gitignored per CLAUDE.md)
 
 ## Files Created/Modified
-- `gui-app/tailwind.config.js` - Removed surface.* color palette, kept fontSize token bridge
-- `gui-app/src/index.css` - Removed 2 !important overrides, used [data-theme] for specificity
-- `gui-app/src/components/ConfigPanel.tsx` - Replaced bg-surface-900 with semantic token class
+- `gui-pro/tailwind.config.js` - Removed surface.* color palette, kept fontSize token bridge
+- `gui-pro/src/index.css` - Removed 2 !important overrides, used [data-theme] for specificity
+- `gui-pro/src/components/ConfigPanel.tsx` - Replaced bg-surface-900 with semantic token class
 - `memory/v3/design-system/known-issues.md` - Marked 4 cleanup targets as completed (local only)
 - `memory/v3/design-system/tokens.md` - Added Tint Tokens section and Cross-References (local only)
 

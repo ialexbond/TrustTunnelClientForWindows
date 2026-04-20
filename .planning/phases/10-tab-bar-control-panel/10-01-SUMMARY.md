@@ -13,8 +13,8 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/App.tsx
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/App.tsx
 decisions:
   - "Pill uses translateX (not left) for animation — GPU-accelerated, locked decision D-01/NAV-01"
   - "Active panel position:relative, inactive position:absolute inset:0 — avoids layout collapse"
@@ -82,8 +82,8 @@ None — план выполнен точно как описано.
 ## Self-Check
 
 Файлы существуют:
-- gui-app/src/components/layout/TabNavigation.tsx ✓
-- gui-app/src/App.tsx ✓
+- gui-pro/src/components/layout/TabNavigation.tsx ✓
+- gui-pro/src/App.tsx ✓
 
 Коммиты существуют:
 - f4f2586f ✓

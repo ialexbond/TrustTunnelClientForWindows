@@ -44,28 +44,28 @@
 
 | Каталог       | Пакет                 | Версия (на момент записи) | Роль                                  |
 | ------------- | --------------------- | ------------------------- | ------------------------------------- |
-| `gui-app/`    | `trusttunnel-gui`     | 3.0.0                     | Pro — SSH-деплой + подключение        |
+| `gui-pro/`    | `trusttunnel-gui`     | 3.0.0                     | Pro — SSH-деплой + подключение        |
 | `gui-light/`  | `trusttunnel-light`   | 2.7.0                     | Light — только импорт и подключение   |
 
 Обе редакции используют **один и тот же sidecar** (`trusttunnel_client.exe`)
 и разделяют идеи дизайн-системы. Различие — в Rust-бэкенде и наборе экранов:
 
-- `gui-app/src-tauri/src/` содержит модули `ssh/`, `tray.rs`,
+- `gui-pro/src-tauri/src/` содержит модули `ssh/`, `tray.rs`,
   `commands/ssh_commands.rs`, `commands/activity_log.rs`, `commands/history.rs`,
   `commands/network.rs`, `commands/protocol.rs`, `commands/vpn.rs`.
 - `gui-light/src-tauri/src/` содержит только `commands/config.rs`,
   `commands/deeplink.rs`, `commands/updater.rs`, `connectivity.rs`, `sidecar.rs` —
   то есть всё, что нужно для импорта конфига и запуска туннеля. SSH-модулей нет.
 
-Версия и productName для Pro фиксируются в трёх файлах: `gui-app/package.json`,
-`gui-app/src-tauri/Cargo.toml`, `gui-app/src-tauri/tauri.conf.json`. Light —
+Версия и productName для Pro фиксируются в трёх файлах: `gui-pro/package.json`,
+`gui-pro/src-tauri/Cargo.toml`, `gui-pro/src-tauri/tauri.conf.json`. Light —
 симметрично в `gui-light/…`.
 
 ---
 
 ## 3. Frontend: слои от корня к экранам
 
-Точка входа — `gui-app/src/App.tsx`. Корневой компонент склеивает тему, язык,
+Точка входа — `gui-pro/src/App.tsx`. Корневой компонент склеивает тему, язык,
 контекст VPN, обработку deep-link, драг-дроп конфигов и верхнеуровневую
 навигацию по табам (`AppTab` из `shared/types.ts`). VPN-состояние раздаётся
 через `VpnProvider` (`shared/context/VpnContext.tsx`).
@@ -122,7 +122,7 @@ App.tsx
 
 ## 4. Backend: модули и их роли
 
-`gui-app/src-tauri/src/lib.rs` регистрирует плагины Tauri
+`gui-pro/src-tauri/src/lib.rs` регистрирует плагины Tauri
 (`single-instance`, `shell`, `dialog`, `window-state`, `notification`,
 `autostart`), стейт приложения (`AppState`) и все команды. Далее структура:
 
@@ -147,7 +147,7 @@ App.tsx
 | `processes.rs`                        | Поиск процессов (для фильтров маршрутизации)                             |
 | `diagnostics.rs`, `logging.rs`        | Запись диагностики, файловое логирование                                 |
 
-Общее количество атрибутов `#[tauri::command]` в `gui-app/src-tauri/src` —
+Общее количество атрибутов `#[tauri::command]` в `gui-pro/src-tauri/src` —
 около **73**; CLAUDE.md округляет до «~90», и это окно включает планируемые
 в Phase 12–18.
 
@@ -197,7 +197,7 @@ app.emit("vpn-status", serde_json::json!({ "status": "connected" })).ok();
 
 ## 6. Sidecar-процесс
 
-Файл `gui-app/src-tauri/src/sidecar.rs` спавнит бинарник
+Файл `gui-pro/src-tauri/src/sidecar.rs` спавнит бинарник
 `trusttunnel_client.exe` через Tauri shell (`externalBin` в
 `tauri.conf.json`). Имя бинарника с целевой тройкой — например,
 `trusttunnel_client-x86_64-pc-windows-msvc.exe`.
@@ -208,7 +208,7 @@ app.emit("vpn-status", serde_json::json!({ "status": "connected" })).ok();
 «Сборка из исходников» в [README.md](README.md#сборка-из-исходников)).
 
 > **В git-worktree** sidecar и DLL-ы отсутствуют. Перед `cargo check`
-> нужно `cp -r ../../../gui-app/sidecar ./sidecar` и прогнать `npm install`
+> нужно `cp -r ../../../gui-pro/sidecar ./sidecar` и прогнать `npm install`
 > / `npm run build`, иначе tauri упадёт на этапе externalBin-проверки.
 
 Изоляция процессов: после v2.3 выход одного приложения (Pro или Light)

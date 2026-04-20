@@ -26,8 +26,8 @@ tech-stack:
 
 key-files:
   created:
-    - gui-app/src/components/server/useServerStats.ts
-    - gui-app/src/components/server/useServerStats.test.ts
+    - gui-pro/src/components/server/useServerStats.ts
+    - gui-pro/src/components/server/useServerStats.test.ts
   modified: []
 
 key-decisions:
@@ -76,8 +76,8 @@ _TDD-цикл: RED-коммит фиксирует "Cannot find module './useSer
 
 ## Files Created/Modified
 
-- `gui-app/src/components/server/useServerStats.ts` (134 строки) — хук + типы `ServerStats`, `SshParams`, константа `BACKOFF_SEQUENCE`, JSDoc с обоснованием recursive setTimeout
-- `gui-app/src/components/server/useServerStats.test.ts` (225 строк) — 6 it-блоков (poll 10s / no poll on disabled / stop on flip / backoff after 3 fails / reset failureCount / error state)
+- `gui-pro/src/components/server/useServerStats.ts` (134 строки) — хук + типы `ServerStats`, `SshParams`, константа `BACKOFF_SEQUENCE`, JSDoc с обоснованием recursive setTimeout
+- `gui-pro/src/components/server/useServerStats.test.ts` (225 строк) — 6 it-блоков (poll 10s / no poll on disabled / stop on flip / backoff after 3 fails / reset failureCount / error state)
 
 ## Decisions Made
 
@@ -94,7 +94,7 @@ _TDD-цикл: RED-коммит фиксирует "Cannot find module './useSer
 - **Found during:** Task 13-02-TASK-02 (первая попытка имплементации)
 - **Issue:** Изначальная реализация по шаблону плана использовала `void fetchStats()` immediate + `setInterval(fetchStats, currentInterval)` с зависимостью useEffect от `failureCount`. На каждом fail `setFailureCount` инкрементировался → useEffect перезапускался → cleanup → immediate `fetchStats` → ещё fail → лавина (тест 4 видел `callCount=6` вместо 1, тест 6 уходил в timeout 5s).
 - **Fix:** Заменил на рекурсивный `setTimeout` с локальным `cancelled` флагом и `scheduleNext()` функцией, которая динамически рассчитывает `nextDelay` из `failureRef.current` перед каждым новым `setTimeout`. `useEffect` зависит только от `enabled/fetchStats/intervalMs` (не от `failureCount`), что устраняет race. First fire планируется через `nextDelay`, не immediate.
-- **Files modified:** `gui-app/src/components/server/useServerStats.ts`
+- **Files modified:** `gui-pro/src/components/server/useServerStats.ts`
 - **Verification:** Все 6 тестов зелёные (`npx vitest run src/components/server/useServerStats.test.ts`).
 - **Committed in:** `07426557` (часть Task-02 GREEN)
 
@@ -103,7 +103,7 @@ _TDD-цикл: RED-коммит фиксирует "Cannot find module './useSer
 - **Found during:** Task 13-02-TASK-02 (lint check после успешного teста)
 - **Issue:** Шаблон плана (строки 560-561) включал `// eslint-disable-next-line react-hooks/exhaustive-deps` перед deps массивом `useCallback`. ESLint v9 не нашёл проблем с deps (`[host, port, user, password, keyPath, t]` корректно покрывает все зависимости) и пожаловался на неиспользуемую директиву.
 - **Fix:** Удалил `// eslint-disable-next-line react-hooks/exhaustive-deps` — все зависимости явно перечислены и валидны.
-- **Files modified:** `gui-app/src/components/server/useServerStats.ts`
+- **Files modified:** `gui-pro/src/components/server/useServerStats.ts`
 - **Verification:** `npx eslint src/components/server/useServerStats.ts --max-warnings 0` чистый.
 - **Committed in:** `07426557` (часть Task-02 GREEN)
 
@@ -128,8 +128,8 @@ None — внутренний хук, никаких внешних зависи
 
 ## Self-Check: PASSED
 
-- [x] `gui-app/src/components/server/useServerStats.ts` существует
-- [x] `gui-app/src/components/server/useServerStats.test.ts` существует
+- [x] `gui-pro/src/components/server/useServerStats.ts` существует
+- [x] `gui-pro/src/components/server/useServerStats.test.ts` существует
 - [x] Коммит `afc5b0a8` (test RED) присутствует в `git log`
 - [x] Коммит `07426557` (feat GREEN) присутствует в `git log`
 - [x] `npx vitest run useServerStats.test.ts` → 6/6 зелёные

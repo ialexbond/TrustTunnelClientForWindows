@@ -64,9 +64,9 @@ These items from known-issues.md are DONE — do not re-do:
 <canonical_refs>
 ## Reference Files
 
-- `gui-app/src/shared/styles/tokens.css` — token definitions (add new tint tokens here)
-- `gui-app/src/index.css` — global styles (!important targets)
-- `gui-app/tailwind.config.js` — check for legacy surface palette
+- `gui-pro/src/shared/styles/tokens.css` — token definitions (add new tint tokens here)
+- `gui-pro/src/index.css` — global styles (!important targets)
+- `gui-pro/tailwind.config.js` — check for legacy surface palette
 - `memory/v3/design-system/known-issues.md` — cleanup targets list
 - `memory/v3/design-system/tokens.md` — token documentation to update
 </canonical_refs>

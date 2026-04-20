@@ -19,19 +19,19 @@ tech_stack:
     - ESM fileURLToPath pattern for __dirname in .storybook/main.ts
 key_files:
   created:
-    - gui-app/.storybook/main.ts
-    - gui-app/.storybook/preview.ts
-    - gui-app/.storybook/tauri-mocks/api-core.ts
-    - gui-app/.storybook/tauri-mocks/api-event.ts
-    - gui-app/.storybook/tauri-mocks/api-app.ts
-    - gui-app/.storybook/tauri-mocks/api-window.ts
-    - gui-app/.storybook/tauri-mocks/plugin-dialog.ts
-    - gui-app/.storybook/tauri-mocks/plugin-shell.ts
+    - gui-pro/.storybook/main.ts
+    - gui-pro/.storybook/preview.ts
+    - gui-pro/.storybook/tauri-mocks/api-core.ts
+    - gui-pro/.storybook/tauri-mocks/api-event.ts
+    - gui-pro/.storybook/tauri-mocks/api-app.ts
+    - gui-pro/.storybook/tauri-mocks/api-window.ts
+    - gui-pro/.storybook/tauri-mocks/plugin-dialog.ts
+    - gui-pro/.storybook/tauri-mocks/plugin-shell.ts
   modified:
-    - gui-app/package.json
-    - gui-app/package-lock.json
-    - gui-app/.gitignore
-    - gui-app/eslint.config.js
+    - gui-pro/package.json
+    - gui-pro/package-lock.json
+    - gui-pro/.gitignore
+    - gui-pro/eslint.config.js
 decisions:
   - "Used --skip-install flag (not --no-install, which does not exist in Storybook 10) + manual npm install --legacy-peer-deps"
   - "HMR override on port 6007 (not 6006) to avoid conflict with Storybook UI port"
@@ -89,7 +89,7 @@ Plain ESM exports — NOT vi.fn() (Storybook context, not Vitest):
 - **package.json** — Added `storybook` and `build-storybook` scripts; storybook + addon-themes + eslint-plugin-storybook in devDependencies
 - **eslint.config.js** — Added `eslint-plugin-storybook` in flat config format
 - **.gitignore** — Added `*storybook.log` and `storybook-static` patterns
-- **Scaffold stories removed** — `gui-app/src/stories/` deleted entirely
+- **Scaffold stories removed** — `gui-pro/src/stories/` deleted entirely
 
 ## Deviations from Plan
 

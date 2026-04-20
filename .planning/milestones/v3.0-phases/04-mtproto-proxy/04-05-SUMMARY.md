@@ -1,12 +1,12 @@
 ---
 phase: "04-application-shell"
 plan: "05"
-subsystem: "gui-app"
+subsystem: "gui-pro"
 tags: ["app-shell", "routing", "tab-navigation", "token-migration", "sidebar-deletion"]
 dependency_graph:
   requires: ["04-04"]
   provides: ["04-06"]
-  affects: ["gui-app/src/App.tsx", "gui-app/src/components/ServerSidebar.tsx"]
+  affects: ["gui-pro/src/App.tsx", "gui-pro/src/components/ServerSidebar.tsx"]
 tech_stack:
   added: []
   patterns:
@@ -17,11 +17,11 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - "gui-app/src/App.tsx"
-    - "gui-app/src/components/ServerSidebar.tsx"
+    - "gui-pro/src/App.tsx"
+    - "gui-pro/src/components/ServerSidebar.tsx"
   deleted:
-    - "gui-app/src/components/layout/Sidebar.tsx"
-    - "gui-app/src/components/layout/Sidebar.test.tsx"
+    - "gui-pro/src/components/layout/Sidebar.tsx"
+    - "gui-pro/src/components/layout/Sidebar.test.tsx"
 decisions:
   - "SetupWizard renders inside control tab when hasConfig=false (no separate server page)"
   - "handleClearConfig does not setActiveTab — control tab auto-shows wizard via hasConfig conditional"
@@ -47,7 +47,7 @@ requirements:
 
 | Task | Name | Commit | Files |
 |------|------|--------|-------|
-| 1 | Refactor App.tsx — TitleBar + TabNavigation + 5-tab routing | edf1a881 | gui-app/src/App.tsx |
+| 1 | Refactor App.tsx — TitleBar + TabNavigation + 5-tab routing | edf1a881 | gui-pro/src/App.tsx |
 | 2 | ServerSidebar token migration + delete Sidebar | 2649a986 | ServerSidebar.tsx, Sidebar.tsx (del), Sidebar.test.tsx (del) |
 
 ---
@@ -121,7 +121,7 @@ None — plan executed with one minor adaptation:
 - **Found during:** Task 1
 - **Issue:** Wave 2 TitleBar was created with `children?: ReactNode` interface, not `hasUpdate?: boolean` as specified in the plan's interface section. The plan's JSX guide showed `<TitleBar hasUpdate={updateInfo.available} />`.
 - **Fix:** Used `<TitleBar><WindowControls /></TitleBar>` — passes WindowControls as children, matching the actual TitleBar interface from wave 2. This is semantically equivalent and correct.
-- **Files modified:** gui-app/src/App.tsx
+- **Files modified:** gui-pro/src/App.tsx
 - **Commit:** edf1a881
 
 **2. [Rule 2 - Adaptation] vpnLogs state retained**
@@ -148,10 +148,10 @@ No new security-relevant surface introduced. The localStorage tabMap uses a stri
 
 | Check | Result |
 |-------|--------|
-| gui-app/src/App.tsx exists | FOUND |
-| gui-app/src/components/ServerSidebar.tsx exists | FOUND |
-| gui-app/src/components/layout/Sidebar.tsx deleted | CONFIRMED |
-| gui-app/src/components/layout/Sidebar.test.tsx deleted | CONFIRMED |
+| gui-pro/src/App.tsx exists | FOUND |
+| gui-pro/src/components/ServerSidebar.tsx exists | FOUND |
+| gui-pro/src/components/layout/Sidebar.tsx deleted | CONFIRMED |
+| gui-pro/src/components/layout/Sidebar.test.tsx deleted | CONFIRMED |
 | Commit edf1a881 exists | CONFIRMED |
 | Commit 2649a986 exists | CONFIRMED |
 | TypeScript compiles (no errors beyond missing node_modules typeRoots) | CONFIRMED |

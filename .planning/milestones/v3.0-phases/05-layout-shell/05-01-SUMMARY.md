@@ -16,10 +16,10 @@ dependency_graph:
     - a11y disconnect button (D-19)
     - Add Server VPN safety fix (D-10)
   affects:
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/components/ServerSidebar.tsx
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/ControlPanelPage.tsx
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/components/ServerSidebar.tsx
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/ControlPanelPage.tsx
 tech_stack:
   added: []
   patterns:
@@ -30,10 +30,10 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/components/ServerSidebar.tsx
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/ControlPanelPage.tsx
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/components/ServerSidebar.tsx
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/ControlPanelPage.tsx
 decisions:
   - D-01 implemented: all border-[var(--color-border)] removed from shell components
   - D-10 safety fix: onAddServer no longer calls handleDisconnect
@@ -95,14 +95,14 @@ metrics:
 - **Found during:** Task 3
 - **Issue:** `showAddForm` state was declared and set (`setShowAddForm(true)`) but never read in JSX — TypeScript reported TS6133 unused variable warning
 - **Fix:** Removed the state entirely. The Add Server button now triggers `setRefreshKey(k => k + 1)` only, which refreshes the panel
-- **Files modified:** gui-app/src/components/ControlPanelPage.tsx
+- **Files modified:** gui-pro/src/components/ControlPanelPage.tsx
 - **Commit:** ecd40321
 
 **2. [Rule 2 - Missing coverage] Removed color-border from ControlPanelPage server header**
 - **Found during:** Post-task verification
 - **Issue:** Connected server header bar still had `border-b border-[var(--color-border)]` — plan verification step 2 requires zero occurrences
 - **Fix:** Removed the class from the header div
-- **Files modified:** gui-app/src/components/ControlPanelPage.tsx
+- **Files modified:** gui-pro/src/components/ControlPanelPage.tsx
 - **Commit:** e1896bac
 
 ## Known Stubs
@@ -118,10 +118,10 @@ None — no new network endpoints, auth paths, or trust boundary changes introdu
 ## Self-Check: PASSED
 
 Files exist:
-- gui-app/src/components/layout/TabNavigation.tsx — FOUND
-- gui-app/src/components/ServerSidebar.tsx — FOUND
-- gui-app/src/components/ServerTabs.tsx — FOUND
-- gui-app/src/components/ControlPanelPage.tsx — FOUND
+- gui-pro/src/components/layout/TabNavigation.tsx — FOUND
+- gui-pro/src/components/ServerSidebar.tsx — FOUND
+- gui-pro/src/components/ServerTabs.tsx — FOUND
+- gui-pro/src/components/ControlPanelPage.tsx — FOUND
 
 Commits exist:
 - f01eb264 — FOUND

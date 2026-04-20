@@ -29,9 +29,9 @@ tech-stack:
 key-files:
   created: []
   modified:
-    - "gui-app/src/components/server/OverviewSection.tsx (+55 строк, -10 строк)"
-    - "gui-app/src/components/ServerTabs.tsx (+14 строк, -1 строка)"
-    - "gui-app/src/components/server/OverviewSection.test.tsx (+97 строк, переименование 6 it-блоков)"
+    - "gui-pro/src/components/server/OverviewSection.tsx (+55 строк, -10 строк)"
+    - "gui-pro/src/components/ServerTabs.tsx (+14 строк, -1 строка)"
+    - "gui-pro/src/components/server/OverviewSection.test.tsx (+97 строк, переименование 6 it-блоков)"
 
 key-decisions:
   - "ClickableCard как локальный компонент в OverviewSection.tsx (не shared/ui) — используется только в одном месте, scope-локализация согласно YAGNI"
@@ -97,17 +97,17 @@ Each task committed atomically с `--no-verify` (Wave 3 sequential executor conv
 
 ### Modified
 
-- **`gui-app/src/components/server/OverviewSection.tsx`** (+55 строк, -10 строк)
+- **`gui-pro/src/components/server/OverviewSection.tsx`** (+55 строк, -10 строк)
   - Локальный компонент `ClickableCard` (29 строк) перед `export function OverviewSection`
   - Деструктуризация: `_onNavigate` → `onNavigate` (callback теперь используется)
   - 3 карточки `<Card padding="md" ...>` → `<ClickableCard onClick={() => onNavigate?.(...)} ariaLabel={...} ...>`
   - Закрывающие теги `</Card>` → `</ClickableCard>` для 3 карточек
 
-- **`gui-app/src/components/ServerTabs.tsx`** (+14 строк, -1 строка)
+- **`gui-pro/src/components/ServerTabs.tsx`** (+14 строк, -1 строка)
   - Одна строка `<OverviewSection state={state} />` (строка 189) → 13 строк JSX-блок с `activeServerTab={activeTab}` + `onNavigate` callback
   - Внутри callback: `setActiveTab(nextTab)` + `activityLog` с `source="overview-drilldown"`
 
-- **`gui-app/src/components/server/OverviewSection.test.tsx`** (+97 строк, переименование 6 it-блоков)
+- **`gui-pro/src/components/server/OverviewSection.test.tsx`** (+97 строк, переименование 6 it-блоков)
   - Новый describe-блок `OverviewSection drill-down (D-09, D-11)` с 6 it-тестами
   - Каждый it-блок префиксирован `drill-down:` для acceptance criterion и читаемости
   - 25 → 31 it-блоков
@@ -159,7 +159,7 @@ Acceptance criterion требовал `grep -n "drill-down" ... возвраща
 - **Found during:** Task-03 после первого прогона тестов и acceptance grep
 - **Issue:** Базовая структура плана (1 describe-блок `OverviewSection drill-down`) давала только 1 совпадение `drill-down` в файле. Acceptance criterion требовал минимум 4.
 - **Fix:** Префиксировал 6 it-блоков `drill-down:` → 7 совпадений итого. Дополнительный бонус — vitest output становится более читаемым.
-- **Files modified:** `gui-app/src/components/server/OverviewSection.test.tsx`
+- **Files modified:** `gui-pro/src/components/server/OverviewSection.test.tsx`
 - **Verification:** `grep -c "drill-down" ...test.tsx` → 7 (>=4); все 31 теста зелёные после переименования.
 - **Committed in:** `68df7b72` (включает оба — добавление тестов и переименование, как один логический "test:" коммит)
 
@@ -240,9 +240,9 @@ Acceptance criterion требовал `grep -n "drill-down" ... возвраща
 ## Self-Check: PASSED
 
 **Files exist:**
-- `gui-app/src/components/server/OverviewSection.tsx` — FOUND (modified)
-- `gui-app/src/components/ServerTabs.tsx` — FOUND (modified)
-- `gui-app/src/components/server/OverviewSection.test.tsx` — FOUND (modified)
+- `gui-pro/src/components/server/OverviewSection.tsx` — FOUND (modified)
+- `gui-pro/src/components/ServerTabs.tsx` — FOUND (modified)
+- `gui-pro/src/components/server/OverviewSection.test.tsx` — FOUND (modified)
 
 **Commits exist (verified via `git log`):**
 - `7d0910db` — feat(13-07): add ClickableCard wrapper and wrap 3 drill-down cards (D-09, D-11) — FOUND
@@ -259,7 +259,7 @@ Acceptance criterion требовал `grep -n "drill-down" ... возвраща
 
 NSIS инсталлер с v3.1.0 (Phase 13 завершена) должен быть собран в отдельной session согласно `feedback_build_installers.md`:
 ```bash
-cd gui-app
+cd gui-pro
 npm run tauri build -- --bundles nsis
 # Скопировать инсталлер на рабочий стол
 ```

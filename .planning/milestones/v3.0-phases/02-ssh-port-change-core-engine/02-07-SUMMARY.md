@@ -14,7 +14,7 @@ requires:
     provides: All 26 components built across waves 1–3
 
 provides:
-  - "Complete barrel export: gui-app/src/shared/ui/index.ts exports all 25 component files"
+  - "Complete barrel export: gui-pro/src/shared/ui/index.ts exports all 25 component files"
   - "Component documentation: memory/v3/design-system/components.md (DOC-02)"
   - "Zero colors.ts imports in Badge.tsx and ErrorBanner.tsx (token-clean)"
   - "Design system audit results per D-19"
@@ -35,9 +35,9 @@ key-files:
     - memory/v3/design-system/components.md
     - .planning/phases/02-ssh-port-change-core-engine/02-07-SUMMARY.md
   modified:
-    - gui-app/src/shared/ui/index.ts
-    - gui-app/src/shared/ui/Badge.tsx
-    - gui-app/src/shared/ui/ErrorBanner.tsx
+    - gui-pro/src/shared/ui/index.ts
+    - gui-pro/src/shared/ui/Badge.tsx
+    - gui-pro/src/shared/ui/ErrorBanner.tsx
 
 key-decisions:
   - "SnackBarContext exports SnackBarProvider+useSnackBar (not a 'SnackBarContext' named export) — barrel reflects actual exports"
@@ -71,7 +71,7 @@ completed: 2026-04-14
 
 ## Accomplishments
 
-- Updated `gui-app/src/shared/ui/index.ts` to export all 25 component files (Section/SectionHeader, FormField, StatusBadge+statusBadgeVariants, EmptyState, Separator, ProgressBar, SnackBarProvider, useSnackBar added)
+- Updated `gui-pro/src/shared/ui/index.ts` to export all 25 component files (Section/SectionHeader, FormField, StatusBadge+statusBadgeVariants, EmptyState, Separator, ProgressBar, SnackBarProvider, useSnackBar added)
 - Removed `colors.ts` imports from `Badge.tsx` and `ErrorBanner.tsx` — replaced with equivalent inline rgba() values
 - Created `memory/v3/design-system/components.md` — per DOC-02, full props/variants/states/tokens/usage docs for all 26 components grouped into 6 sections
 - Design system audit per D-19: zero hardcoded hex colors, CVA only on StatusBadge (correct), full ARIA on Toggle/Select/ProgressBar/Separator/IconButton, all 25 files PascalCase, 25 exports match 25 component files
@@ -85,9 +85,9 @@ completed: 2026-04-14
 
 ## Files Created/Modified
 
-- `gui-app/src/shared/ui/index.ts` — Complete barrel export of all 25 component files (25 export lines)
-- `gui-app/src/shared/ui/Badge.tsx` — Removed `colors.ts` import; inline rgba() values for tinted bgs
-- `gui-app/src/shared/ui/ErrorBanner.tsx` — Removed `colors.ts` import; inline rgba() values for tinted bgs
+- `gui-pro/src/shared/ui/index.ts` — Complete barrel export of all 25 component files (25 export lines)
+- `gui-pro/src/shared/ui/Badge.tsx` — Removed `colors.ts` import; inline rgba() values for tinted bgs
+- `gui-pro/src/shared/ui/ErrorBanner.tsx` — Removed `colors.ts` import; inline rgba() values for tinted bgs
 - `memory/v3/design-system/components.md` — Full component documentation (gitignored, local only)
 
 ## Decisions Made
@@ -104,7 +104,7 @@ completed: 2026-04-14
 - **Found during:** Task 1 (index.ts update)
 - **Issue:** Plan specified `export { SnackBarContext } from "./SnackBarContext"` but the file exports `SnackBarProvider` and `useSnackBar` — no export named `SnackBarContext` exists
 - **Fix:** Used correct export names: `export { SnackBarProvider, useSnackBar } from "./SnackBarContext"`
-- **Files modified:** gui-app/src/shared/ui/index.ts
+- **Files modified:** gui-pro/src/shared/ui/index.ts
 - **Verification:** TypeScript compiles with zero errors
 - **Committed in:** e122f620
 
@@ -112,7 +112,7 @@ completed: 2026-04-14
 - **Found during:** Task 1 acceptance criteria check (`grep -c "import.*colors"`)
 - **Issue:** Badge.tsx and ErrorBanner.tsx still imported from colors.ts (1 import each), violating the "zero colors imports" acceptance criterion
 - **Fix:** Replaced colors.ts constants with equivalent inline rgba() values (same pixel values, no import needed)
-- **Files modified:** gui-app/src/shared/ui/Badge.tsx, gui-app/src/shared/ui/ErrorBanner.tsx
+- **Files modified:** gui-pro/src/shared/ui/Badge.tsx, gui-pro/src/shared/ui/ErrorBanner.tsx
 - **Verification:** `grep -c "import.*colors"` returns 0 for all four checked files; 1285 tests pass
 - **Committed in:** e122f620
 
@@ -123,7 +123,7 @@ completed: 2026-04-14
 
 ## Design System Audit Results (D-19)
 
-Run manually against `gui-app/src/shared/ui/` since no dedicated design system audit skill found in `.claude/skills/`.
+Run manually against `gui-pro/src/shared/ui/` since no dedicated design system audit skill found in `.claude/skills/`.
 
 ### Token Compliance
 - **Hardcoded hex colors:** 0 (zero hex values in all .tsx component files)
@@ -166,7 +166,7 @@ Run manually against `gui-app/src/shared/ui/` since no dedicated design system a
 Task 2 is a `checkpoint:human-verify` requiring visual inspection of all 26 components in Storybook. The plan objective says to execute as much as possible autonomously, so this is documented as needing follow-up.
 
 **To complete visual sign-off:**
-1. In the main repo: `cd gui-app && npm run storybook`
+1. In the main repo: `cd gui-pro && npm run storybook`
 2. Open http://localhost:6006
 3. Navigate Primitives section — verify all 26 components render correctly
 4. Test dark/light theme toggle in Storybook toolbar
@@ -174,7 +174,7 @@ Task 2 is a `checkpoint:human-verify` requiring visual inspection of all 26 comp
 
 ## Issues Encountered
 
-- **node_modules junction in worktree:** Tests run from main repo (`/TrustTunnelClient/gui-app/`) since the worktree node_modules is a junction pointing there. This is expected behavior per previous plan summaries.
+- **node_modules junction in worktree:** Tests run from main repo (`/TrustTunnelClient/gui-pro/`) since the worktree node_modules is a junction pointing there. This is expected behavior per previous plan summaries.
 - **Storybook build:** Not run in this plan execution. The Storybook binary requires the full dev server — validated TypeScript + Vitest instead.
 
 ## Next Phase Readiness
@@ -190,9 +190,9 @@ Task 2 is a `checkpoint:human-verify` requiring visual inspection of all 26 comp
 
 ## Self-Check: PASSED
 
-- FOUND: gui-app/src/shared/ui/index.ts (25 export lines)
-- FOUND: gui-app/src/shared/ui/Badge.tsx (0 colors imports)
-- FOUND: gui-app/src/shared/ui/ErrorBanner.tsx (0 colors imports)
+- FOUND: gui-pro/src/shared/ui/index.ts (25 export lines)
+- FOUND: gui-pro/src/shared/ui/Badge.tsx (0 colors imports)
+- FOUND: gui-pro/src/shared/ui/ErrorBanner.tsx (0 colors imports)
 - FOUND: memory/v3/design-system/components.md (in project memory/)
 - FOUND: .planning/phases/02-ssh-port-change-core-engine/02-07-SUMMARY.md
 - FOUND: e122f620 (task commit)

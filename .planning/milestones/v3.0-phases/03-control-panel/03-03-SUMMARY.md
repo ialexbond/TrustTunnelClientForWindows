@@ -1,23 +1,23 @@
 ---
 phase: 03-control-panel
 plan: "03"
-subsystem: gui-app/storybook
+subsystem: gui-pro/storybook
 tags: [storybook, stories, behavior-spec, control-panel, documentation]
 dependency_graph:
   requires: [03-01, 03-02]
   provides: [storybook-stories-control-panel, behavior-spec-control-panel]
-  affects: [gui-app/src/components]
+  affects: [gui-pro/src/components]
 tech_stack:
   added: []
   patterns: [storybook-story-per-state, fullscreen-layout, snackbar-decorator]
 key_files:
   created:
-    - gui-app/src/components/server/SshConnectForm.stories.tsx
-    - gui-app/src/components/StatusPanel.stories.tsx
-    - gui-app/src/components/ControlPanelPage.stories.tsx
+    - gui-pro/src/components/server/SshConnectForm.stories.tsx
+    - gui-pro/src/components/StatusPanel.stories.tsx
+    - gui-pro/src/components/ControlPanelPage.stories.tsx
     - memory/v3/screens/control-panel.md
   modified:
-    - gui-app/.storybook/tauri-mocks/plugin-dialog.ts
+    - gui-pro/.storybook/tauri-mocks/plugin-dialog.ts
 decisions:
   - SshConnectForm key modes are interactive (user clicks auth toggle in live story) — no separate stories needed
   - ControlPanelPage NoCredentials is the primary verifiable state in Storybook (Tauri mock returns null)
@@ -90,7 +90,7 @@ Not executed — checkpoint task awaiting user visual verification.
 - **Found during:** Task 1 verification (Storybook build)
 - **Issue:** `UsersSection.tsx` imports `save` from `@tauri-apps/plugin-dialog` but the Storybook mock only exported `open`. This caused Storybook build to fail with rollup error: "save is not exported".
 - **Fix:** Added `save` mock function to `.storybook/tauri-mocks/plugin-dialog.ts` with warning log.
-- **Files modified:** `gui-app/.storybook/tauri-mocks/plugin-dialog.ts`
+- **Files modified:** `gui-pro/.storybook/tauri-mocks/plugin-dialog.ts`
 - **Commit:** 0696e9d5
 
 **2. [Rule 3 - Blocking] Installed missing npm dependencies**
@@ -111,9 +111,9 @@ Logged for future attention — out of scope for Phase 3 Plan 3.
 ## Self-Check
 
 ### Files Created
-- [x] `gui-app/src/components/server/SshConnectForm.stories.tsx` — EXISTS
-- [x] `gui-app/src/components/StatusPanel.stories.tsx` — EXISTS
-- [x] `gui-app/src/components/ControlPanelPage.stories.tsx` — EXISTS
+- [x] `gui-pro/src/components/server/SshConnectForm.stories.tsx` — EXISTS
+- [x] `gui-pro/src/components/StatusPanel.stories.tsx` — EXISTS
+- [x] `gui-pro/src/components/ControlPanelPage.stories.tsx` — EXISTS
 - [x] `memory/v3/screens/control-panel.md` — EXISTS (gitignored, on disk)
 
 ### Commits

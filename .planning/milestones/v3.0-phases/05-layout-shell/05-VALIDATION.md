@@ -18,17 +18,17 @@ created: 2026-04-15
 | Property | Value |
 |----------|-------|
 | **Framework** | Vitest + jsdom (frontend); cargo test (Rust) |
-| **Config file** | `gui-app/vite.config.ts` (test: { globals: true, environment: "jsdom" }) |
-| **Quick run command** | `cd gui-app && npx vitest run src/components/layout/` |
-| **Full suite command** | `cd gui-app && npx vitest run && cd src-tauri && cargo test` |
+| **Config file** | `gui-pro/vite.config.ts` (test: { globals: true, environment: "jsdom" }) |
+| **Quick run command** | `cd gui-pro && npx vitest run src/components/layout/` |
+| **Full suite command** | `cd gui-pro && npx vitest run && cd src-tauri && cargo test` |
 | **Estimated runtime** | ~15 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `cd gui-app && npx vitest run src/components/layout/ && npx tsc --noEmit`
-- **After every plan wave:** Run `cd gui-app && npx vitest run && cd src-tauri && cargo test`
+- **After every task commit:** Run `cd gui-pro && npx vitest run src/components/layout/ && npx tsc --noEmit`
+- **After every plan wave:** Run `cd gui-pro && npx vitest run && cd src-tauri && cargo test`
 - **Before `/gsd-verify-work`:** Full suite must be green
 - **Max feedback latency:** 15 seconds
 
@@ -52,8 +52,8 @@ created: 2026-04-15
 
 ## Wave 0 Requirements
 
-- [ ] `gui-app/src/components/ServerSidebar.test.tsx` — test `servers.length < 2 → sidebar hidden`
-- [ ] `gui-app/src/components/ServerTabs.test.tsx` — test state preservation on tab switch
+- [ ] `gui-pro/src/components/ServerSidebar.test.tsx` — test `servers.length < 2 → sidebar hidden`
+- [ ] `gui-pro/src/components/ServerTabs.test.tsx` — test state preservation on tab switch
 
 *Existing infrastructure covers remaining phase requirements.*
 

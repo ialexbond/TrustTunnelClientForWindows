@@ -13,10 +13,10 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/ServerTabs.tsx
-    - gui-app/src/components/ControlPanelPage.tsx
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src/components/ServerTabs.tsx
+    - gui-pro/src/components/ControlPanelPage.tsx
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 decisions:
   - security/utilities tabs use placeholder divs — Plan 03 will replace with real sections
   - server.config.port_title added to existing config section rather than creating new disconnect-only object

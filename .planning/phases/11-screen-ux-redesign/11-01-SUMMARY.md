@@ -9,15 +9,15 @@ provides:
   - focus-visible-ring-tab-navigation
   - focus-visible-ring-inputs
 affects:
-  - gui-app/src/shared/styles/tokens.css
-  - gui-app/src/components/layout/TabNavigation.tsx
-  - gui-app/src/components/LogPanel.tsx
-  - gui-app/src/components/routing/AddRuleInput.tsx
-  - gui-app/src/components/server/ConfigSection.tsx
-  - gui-app/src/components/settings/TunnelSection.tsx
-  - gui-app/src/components/routing/ProcessPickerModal.tsx
-  - gui-app/src/components/server/VersionSection.tsx
-  - gui-app/src/components/server/SshConnectForm.tsx
+  - gui-pro/src/shared/styles/tokens.css
+  - gui-pro/src/components/layout/TabNavigation.tsx
+  - gui-pro/src/components/LogPanel.tsx
+  - gui-pro/src/components/routing/AddRuleInput.tsx
+  - gui-pro/src/components/server/ConfigSection.tsx
+  - gui-pro/src/components/settings/TunnelSection.tsx
+  - gui-pro/src/components/routing/ProcessPickerModal.tsx
+  - gui-pro/src/components/server/VersionSection.tsx
+  - gui-pro/src/components/server/SshConnectForm.tsx
 tech-stack:
   added: []
   patterns:
@@ -26,15 +26,15 @@ tech-stack:
 key-files:
   created: []
   modified:
-    - gui-app/src/shared/styles/tokens.css
-    - gui-app/src/components/layout/TabNavigation.tsx
-    - gui-app/src/components/LogPanel.tsx
-    - gui-app/src/components/routing/AddRuleInput.tsx
-    - gui-app/src/components/server/ConfigSection.tsx
-    - gui-app/src/components/settings/TunnelSection.tsx
-    - gui-app/src/components/routing/ProcessPickerModal.tsx
-    - gui-app/src/components/server/VersionSection.tsx
-    - gui-app/src/components/server/SshConnectForm.tsx
+    - gui-pro/src/shared/styles/tokens.css
+    - gui-pro/src/components/layout/TabNavigation.tsx
+    - gui-pro/src/components/LogPanel.tsx
+    - gui-pro/src/components/routing/AddRuleInput.tsx
+    - gui-pro/src/components/server/ConfigSection.tsx
+    - gui-pro/src/components/settings/TunnelSection.tsx
+    - gui-pro/src/components/routing/ProcessPickerModal.tsx
+    - gui-pro/src/components/server/VersionSection.tsx
+    - gui-pro/src/components/server/SshConnectForm.tsx
 decisions:
   - "Light theme accent-500 (#2d7a76) selected — passes WCAG AA 4.5:1 contrast with white text"
   - "focus-visible:shadow-[var(--focus-ring)] added to outer button in TabNavigation (not just inner span)"
@@ -95,8 +95,8 @@ None — план выполнен точно как написан.
 
 ### Замечания
 
-- `LogPanel.tsx` находится в `gui-app/src/components/` (не в `components/dashboard/` как указано в плане). Исправлено автоматически при поиске файла.
-- `TunnelSection.tsx` находится в `gui-app/src/components/settings/` (не в `components/connection/`). Исправлено автоматически.
+- `LogPanel.tsx` находится в `gui-pro/src/components/` (не в `components/dashboard/` как указано в плане). Исправлено автоматически при поиске файла.
+- `TunnelSection.tsx` находится в `gui-pro/src/components/settings/` (не в `components/connection/`). Исправлено автоматически.
 - `ConfigSection.tsx` использует `focus:outline-none` (не просто `outline-none`) на toggle button — добавлен `focus-visible:shadow-[var(--focus-ring)]` рядом.
 - В worktree отсутствовали node_modules — установлены через `npm install --legacy-peer-deps` перед запуском тестов (Rule 3).
 

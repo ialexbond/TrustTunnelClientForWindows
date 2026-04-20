@@ -113,7 +113,7 @@ The Storybook work is greenfield — no .storybook/ directory exists. The critic
 | Manual Storybook config | Chromatic | Paid, more than needed |
 | @storybook/addon-themes | storybook-dark-mode | Third-party, less reliable, uses class not data-attr |
 
-**Installation (run from gui-app/):**
+**Installation (run from gui-pro/):**
 ```bash
 npx storybook@latest init
 npm install --save-dev @storybook/addon-themes
@@ -132,7 +132,7 @@ npm install --save-dev @storybook/addon-themes
 ### Recommended Project Structure
 
 ```
-gui-app/
+gui-pro/
 ├── .storybook/
 │   ├── main.ts              # Framework, stories glob, addons, viteFinal
 │   ├── preview.ts           # Global decorators (withThemeByDataAttribute), CSS imports
@@ -521,7 +521,7 @@ stories: [
 
 **Why it happens:** Phase 1 is "zero component changes" but the executor might accidentally touch component files while exploring the codebase.
 
-**How to avoid:** Phase 1 touches exactly these files: `tokens.css` (expand), `index.css` (remove [data-theme] blocks), `index.html` (add script), `colors.ts` (add @deprecated, set glows to 'none'), `gui-app/package.json` (add Storybook deps), `gui-app/.storybook/` (create from scratch). Zero changes to `src/shared/ui/**`, `src/components/**`, or any `.tsx` component file.
+**How to avoid:** Phase 1 touches exactly these files: `tokens.css` (expand), `index.css` (remove [data-theme] blocks), `index.html` (add script), `colors.ts` (add @deprecated, set glows to 'none'), `gui-pro/package.json` (add Storybook deps), `gui-pro/.storybook/` (create from scratch). Zero changes to `src/shared/ui/**`, `src/components/**`, or any `.tsx` component file.
 
 **Warning signs:** Any TypeScript error in a component file signals scope creep.
 
@@ -664,7 +664,7 @@ Near-monochrome system. Restrained elegance.
 
 ```html
 <!-- Source: dev.to/gaisdav — verified pattern; REQUIREMENTS.md QA-01 -->
-<!-- gui-app/index.html, before </head> -->
+<!-- gui-pro/index.html, before </head> -->
 <script>
   // Apply saved theme before React mounts to prevent flash
   (function() {
@@ -685,7 +685,7 @@ Near-monochrome system. Restrained elegance.
 ### 6. Tauri Mock File Pattern (from existing test mock)
 
 ```typescript
-// Source: gui-app/src/test/tauri-mock.ts (existing, verified in codebase)
+// Source: gui-pro/src/test/tauri-mock.ts (existing, verified in codebase)
 // .storybook/tauri-mocks/api-core.ts
 // Plain ESM exports — no vi.fn(), these are Storybook mocks not Vitest mocks
 
@@ -730,7 +730,7 @@ export const invoke = async (_command: string, _args?: unknown): Promise<unknown
    - What we know: index.html currently uses `class="dark"` (not data-theme). The app has a theme toggle somewhere.
    - What's unclear: What key does the existing React theme logic write to localStorage? `'theme'`, `'data-theme'`, or something else?
    - Recommendation: Before writing the flash script, grep for `localStorage.setItem` in the src/ to find the exact key. Use that key in the script.
-   - **RESOLVED: Key is `tt_theme` (confirmed in gui-app/src/shared/hooks/useTheme.ts line: `localStorage.getItem("tt_theme")`). Flash prevention script in 01-01-PLAN.md Task 2 uses this exact key.**
+   - **RESOLVED: Key is `tt_theme` (confirmed in gui-pro/src/shared/hooks/useTheme.ts line: `localStorage.getItem("tt_theme")`). Flash prevention script in 01-01-PLAN.md Task 2 uses this exact key.**
 
 2. **Whether index.css @imports tokens.css**
    - What we know: Both files exist. Vite's main.tsx likely imports both.
@@ -763,8 +763,8 @@ No `workflow.nyquist_validation` found in config.json (file absent) — treating
 |----------|-------|
 | Framework | vitest 4.1.x (not yet installed — closest: vitest@4.1.0 is listed in package.json devDeps) |
 | Config file | vite.config.ts (test block inline) |
-| Quick run command | `cd gui-app && npx vitest run --reporter=dot` |
-| Full suite command | `cd gui-app && npx vitest run` |
+| Quick run command | `cd gui-pro && npx vitest run --reporter=dot` |
+| Full suite command | `cd gui-pro && npx vitest run` |
 
 ### Phase Requirements → Test Map
 
@@ -773,15 +773,15 @@ No `workflow.nyquist_validation` found in config.json (file absent) — treating
 | DS-01 | tokens.css contains two-tier structure | manual | inspect file structure | N/A — CSS file audit |
 | DS-02 | index.css has zero [data-theme] blocks | manual | `grep -c "data-theme" src/index.css` → must be 0 | N/A |
 | QA-01 | Theme flash prevented | manual | Open app — no flash on load | N/A |
-| QA-03 | 83+ tests continue passing | automated | `cd gui-app && npx vitest run` | ✅ existing tests |
-| SB-01 | Storybook starts without crash | manual | `cd gui-app && npm run storybook` | N/A |
+| QA-03 | 83+ tests continue passing | automated | `cd gui-pro && npx vitest run` | ✅ existing tests |
+| SB-01 | Storybook starts without crash | manual | `cd gui-pro && npm run storybook` | N/A |
 | SB-02 | Tauri imports don't crash | manual | Open any component story in Storybook | N/A |
 | SB-03 | Theme toggle works | manual | Toggle in Storybook toolbar | N/A |
 | SB-08 | HMR works | manual | Edit tokens.css — browser updates | N/A |
 
 ### Sampling Rate
 
-- **Per task commit:** `grep -c "data-theme" gui-app/src/index.css` + `npm run storybook` smoke test
+- **Per task commit:** `grep -c "data-theme" gui-pro/src/index.css` + `npm run storybook` smoke test
 - **Per wave merge:** `npx vitest run` full suite
 - **Phase gate:** Full vitest suite green + Storybook opens + theme toggle works + no flash
 

@@ -10,33 +10,33 @@
 
 | New/Modified File | Role | Data Flow | Closest Analog | Match Quality |
 |-------------------|------|-----------|----------------|---------------|
-| `gui-app/src/components/layout/TabNavigation.tsx` | component | request-response | self (modify in place) | self |
-| `gui-app/src/components/layout/TitleBar.tsx` | component | — | self (no-op per D-07) | self |
-| `gui-app/src/components/layout/WindowControls.tsx` | component | — | self (no-op per D-07) | self |
-| `gui-app/src/components/ServerSidebar.tsx` | component | event-driven | self (modify in place) | self |
-| `gui-app/src/App.tsx` | component | event-driven | self (modify in place) | self |
-| `gui-app/src/components/ServerTabs.tsx` | component | request-response | `App.tsx` lines 355–431 | exact (display:none pattern) |
-| `gui-app/src/index.css` | config | — | self (no-op, confirmed stable) | self |
-| `gui-app/src/components/server/Fail2banSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
-| `gui-app/src/components/server/CertSection.tsx` | component | CRUD | `Badge.tsx` (CVA variants) | exact |
-| `gui-app/src/components/server/ServerStatusSection.tsx` | component | CRUD | `Button.tsx` + `Badge.tsx` | exact |
-| `gui-app/src/components/server/DiagnosticsSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
-| `gui-app/src/components/server/LogsSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
-| `gui-app/src/components/server/FirewallSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
-| `gui-app/src/components/server/UsersSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
-| `gui-app/src/components/server/VersionSection.tsx` | component | CRUD | `Badge.tsx` (CVA variants) | exact |
-| `gui-app/src/shared/ui/Select.tsx` | ui | request-response | `StatusBadge.tsx` (i18n pattern) | role-match |
-| `gui-app/src/shared/ui/StatusBadge.tsx` | ui | request-response | `ServerSidebar.tsx` (useTranslation) | exact |
-| `gui-app/src/shared/ui/EmptyState.tsx` | ui | request-response | `App.tsx` (EmptyState caller pattern) | role-match |
-| `gui-app/src/shared/i18n/locales/ru.json` | config | — | self (extend existing keys) | self |
-| `gui-app/src/shared/i18n/locales/en.json` | config | — | self (extend existing keys) | self |
-| `gui-app/src-tauri/src/logging.rs` | utility | transform | self (verify-only, D-18) | self |
+| `gui-pro/src/components/layout/TabNavigation.tsx` | component | request-response | self (modify in place) | self |
+| `gui-pro/src/components/layout/TitleBar.tsx` | component | — | self (no-op per D-07) | self |
+| `gui-pro/src/components/layout/WindowControls.tsx` | component | — | self (no-op per D-07) | self |
+| `gui-pro/src/components/ServerSidebar.tsx` | component | event-driven | self (modify in place) | self |
+| `gui-pro/src/App.tsx` | component | event-driven | self (modify in place) | self |
+| `gui-pro/src/components/ServerTabs.tsx` | component | request-response | `App.tsx` lines 355–431 | exact (display:none pattern) |
+| `gui-pro/src/index.css` | config | — | self (no-op, confirmed stable) | self |
+| `gui-pro/src/components/server/Fail2banSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
+| `gui-pro/src/components/server/CertSection.tsx` | component | CRUD | `Badge.tsx` (CVA variants) | exact |
+| `gui-pro/src/components/server/ServerStatusSection.tsx` | component | CRUD | `Button.tsx` + `Badge.tsx` | exact |
+| `gui-pro/src/components/server/DiagnosticsSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
+| `gui-pro/src/components/server/LogsSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
+| `gui-pro/src/components/server/FirewallSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
+| `gui-pro/src/components/server/UsersSection.tsx` | component | CRUD | `Button.tsx` (CVA variants) | exact |
+| `gui-pro/src/components/server/VersionSection.tsx` | component | CRUD | `Badge.tsx` (CVA variants) | exact |
+| `gui-pro/src/shared/ui/Select.tsx` | ui | request-response | `StatusBadge.tsx` (i18n pattern) | role-match |
+| `gui-pro/src/shared/ui/StatusBadge.tsx` | ui | request-response | `ServerSidebar.tsx` (useTranslation) | exact |
+| `gui-pro/src/shared/ui/EmptyState.tsx` | ui | request-response | `App.tsx` (EmptyState caller pattern) | role-match |
+| `gui-pro/src/shared/i18n/locales/ru.json` | config | — | self (extend existing keys) | self |
+| `gui-pro/src/shared/i18n/locales/en.json` | config | — | self (extend existing keys) | self |
+| `gui-pro/src-tauri/src/logging.rs` | utility | transform | self (verify-only, D-18) | self |
 
 ---
 
 ## Pattern Assignments
 
-### `gui-app/src/components/layout/TabNavigation.tsx` (component, request-response)
+### `gui-pro/src/components/layout/TabNavigation.tsx` (component, request-response)
 
 **Analog:** self — modify in place
 
@@ -116,7 +116,7 @@ const navRef = useRef<HTMLElement>(null);
 
 ---
 
-### `gui-app/src/components/ServerSidebar.tsx` (component, event-driven)
+### `gui-pro/src/components/ServerSidebar.tsx` (component, event-driven)
 
 **Analog:** self — modify in place
 
@@ -182,7 +182,7 @@ className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 p-0.
 
 ---
 
-### `gui-app/src/App.tsx` (component, event-driven)
+### `gui-pro/src/App.tsx` (component, event-driven)
 
 **Analog:** self — modify in place
 
@@ -218,9 +218,9 @@ const sidebarVisible = servers.length >= 2;
 
 ---
 
-### `gui-app/src/components/ServerTabs.tsx` (component, request-response)
+### `gui-pro/src/components/ServerTabs.tsx` (component, request-response)
 
-**Analog:** `gui-app/src/App.tsx` lines 355–431 (display:none tab pattern)
+**Analog:** `gui-pro/src/App.tsx` lines 355–431 (display:none tab pattern)
 
 **Fix D-13/D-14 — tab state preservation (lines 70–93):**
 ```tsx
@@ -273,9 +273,9 @@ const sidebarVisible = servers.length >= 2;
 
 ---
 
-### `gui-app/src/components/server/*Section.tsx` — Button/Badge variant fixes (D-12)
+### `gui-pro/src/components/server/*Section.tsx` — Button/Badge variant fixes (D-12)
 
-**Analog:** `gui-app/src/shared/ui/Button.tsx` (valid variants) + `gui-app/src/shared/ui/Badge.tsx` (valid variants)
+**Analog:** `gui-pro/src/shared/ui/Button.tsx` (valid variants) + `gui-pro/src/shared/ui/Badge.tsx` (valid variants)
 
 **Валидные варианты Button** (Button.tsx lines 17–46):
 - `primary` — синий акцент, белый текст
@@ -315,9 +315,9 @@ const sidebarVisible = servers.length >= 2;
 
 ---
 
-### `gui-app/src/shared/ui/StatusBadge.tsx` (ui, request-response)
+### `gui-pro/src/shared/ui/StatusBadge.tsx` (ui, request-response)
 
-**Analog:** `gui-app/src/components/ServerSidebar.tsx` (useTranslation pattern, line 1, 31)
+**Analog:** `gui-pro/src/components/ServerSidebar.tsx` (useTranslation pattern, line 1, 31)
 
 **Fix D-17 — i18n defaultLabels (lines 25–30):**
 ```tsx
@@ -346,13 +346,13 @@ export function StatusBadge({ variant = "disconnected", label, className }: Stat
   // ru.json уже содержит: status.connected, status.connecting, status.error, status.disconnected
 ```
 
-**Источник ключей:** `gui-app/src/shared/i18n/locales/ru.json` строки 17–30 — ключи `status.connected`, `status.connecting`, `status.error`, `status.disconnected` уже существуют.
+**Источник ключей:** `gui-pro/src/shared/i18n/locales/ru.json` строки 17–30 — ключи `status.connected`, `status.connecting`, `status.error`, `status.disconnected` уже существуют.
 
 ---
 
-### `gui-app/src/shared/ui/Select.tsx` (ui, request-response)
+### `gui-pro/src/shared/ui/Select.tsx` (ui, request-response)
 
-**Analog:** `gui-app/src/shared/ui/StatusBadge.tsx` (useTranslation pattern после фикса)
+**Analog:** `gui-pro/src/shared/ui/StatusBadge.tsx` (useTranslation pattern после фикса)
 
 **Fix D-17 — placeholder i18n (line 33):**
 ```tsx
@@ -397,9 +397,9 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
 
 ---
 
-### `gui-app/src/shared/ui/EmptyState.tsx` (ui, request-response)
+### `gui-pro/src/shared/ui/EmptyState.tsx` (ui, request-response)
 
-**Analog:** `gui-app/src/App.tsx` (EmptyState caller, lines 390–396)
+**Analog:** `gui-pro/src/App.tsx` (EmptyState caller, lines 390–396)
 
 **Fix D-17 — убрать hardcoded RU defaults (lines 13–16):**
 ```tsx
@@ -434,9 +434,9 @@ export function EmptyState({
 
 ---
 
-### `gui-app/src/components/server/ServerStatusSection.tsx` — D-15 auth buttons
+### `gui-pro/src/components/server/ServerStatusSection.tsx` — D-15 auth buttons
 
-**Analog:** `gui-app/src/shared/ui/Button.tsx` primary variant (lines 19–25)
+**Analog:** `gui-pro/src/shared/ui/Button.tsx` primary variant (lines 19–25)
 
 **D-15 проблема:** кнопки auth (connect/disconnect) слишком белые на light theme. Предположительно `variant="secondary"` (несуществующий) или inline white bg.
 
@@ -446,20 +446,20 @@ export function EmptyState({
 
 ---
 
-### `gui-app/src-tauri/src/logging.rs` — D-18 sanitize verify
+### `gui-pro/src-tauri/src/logging.rs` — D-18 sanitize verify
 
 **Analog:** self
 
 **Текущее состояние** (logging.rs lines 30–59): функция уже использует `loop` + `search_from` паттерн для multi-occurrence. Тест `sanitize_replaces_all_occurrences` должен существовать.
 
-**Действие:** только верификация (`cargo test -p gui-app -- sanitize`). Если PASS — D-18 закрыть как DONE без изменений. Если FAIL — исправить.
+**Действие:** только верификация (`cargo test -p gui-pro -- sanitize`). Если PASS — D-18 закрыть как DONE без изменений. Если FAIL — исправить.
 
 ---
 
 ## Shared Patterns
 
 ### Паттерн 1: CSS display:none для state preservation
-**Источник:** `gui-app/src/App.tsx` lines 355–431
+**Источник:** `gui-pro/src/App.tsx` lines 355–431
 **Применить к:** `ServerTabs.tsx` (D-13, D-14)
 ```tsx
 <div
@@ -471,7 +471,7 @@ export function EmptyState({
 ```
 
 ### Паттерн 2: Inline style для design token vars (не Tailwind arbitrary)
-**Источник:** `gui-app/src/components/ServerSidebar.tsx` line 80, line 90
+**Источник:** `gui-pro/src/components/ServerSidebar.tsx` line 80, line 90
 **Применить к:** всем изменениям в ServerSidebar, App.tsx sidebar wrapper
 ```tsx
 // Правильно:
@@ -482,7 +482,7 @@ className="hover:bg-[var(--color-bg-elevated)]/50"
 ```
 
 ### Паттерн 3: useTranslation i18n
-**Источник:** `gui-app/src/components/ServerSidebar.tsx` lines 1, 31
+**Источник:** `gui-pro/src/components/ServerSidebar.tsx` lines 1, 31
 **Применить к:** Select.tsx, StatusBadge.tsx, EmptyState.tsx
 ```tsx
 import { useTranslation } from "react-i18next";
@@ -493,13 +493,13 @@ t("key.name", "fallback string")
 ```
 
 ### Паттерн 4: CVA variant-only (Button)
-**Источник:** `gui-app/src/shared/ui/Button.tsx` lines 17–46
+**Источник:** `gui-pro/src/shared/ui/Button.tsx` lines 17–46
 **Применить к:** всем `<Button>` в server/*Section.tsx
 - Допустимо: `primary`, `danger`, `ghost`, `icon`
 - Недопустимо: `secondary`, `success`, `danger-outline`, `default`
 
 ### Паттерн 5: CVA variant-only (Badge)
-**Источник:** `gui-app/src/shared/ui/Badge.tsx` lines 16–47
+**Источник:** `gui-pro/src/shared/ui/Badge.tsx` lines 16–47
 **Применить к:** всем `<Badge>` в server/*Section.tsx
 - Допустимо: `success`, `warning`, `danger`, `neutral`, `dot`
 - Недопустимо: `default`, `accent`
@@ -528,15 +528,15 @@ Asymmetric: появление `--transition-normal` (200ms), скрытие `--
 
 Плановщик должен включить эти верификации как первый шаг плана:
 
-1. **D-18 sanitize:** `cargo test -p gui-app -- sanitize_replaces_all_occurrences` → если PASS, закрыть D-18 без изменений
-2. **D-15 auth buttons:** `grep -rn "SshConnectForm\|auth.*Button\|variant.*auth" gui-app/src/` → найти точные строки
-3. **D-12 Button variants:** `npx tsc --noEmit` в `gui-app/` → TypeScript покажет все невалидные variants
-4. **EmptyState callers:** `grep -rn "<EmptyState" gui-app/src/` → убедиться что все callers передают heading перед удалением дефолтов
+1. **D-18 sanitize:** `cargo test -p gui-pro -- sanitize_replaces_all_occurrences` → если PASS, закрыть D-18 без изменений
+2. **D-15 auth buttons:** `grep -rn "SshConnectForm\|auth.*Button\|variant.*auth" gui-pro/src/` → найти точные строки
+3. **D-12 Button variants:** `npx tsc --noEmit` в `gui-pro/` → TypeScript покажет все невалидные variants
+4. **EmptyState callers:** `grep -rn "<EmptyState" gui-pro/src/` → убедиться что все callers передают heading перед удалением дефолтов
 
 ---
 
 ## Metadata
 
-**Analog search scope:** `gui-app/src/components/`, `gui-app/src/shared/ui/`, `gui-app/src-tauri/src/`
+**Analog search scope:** `gui-pro/src/components/`, `gui-pro/src/shared/ui/`, `gui-pro/src-tauri/src/`
 **Files scanned:** 21 (исходные файлы) + 2 (locales)
 **Pattern extraction date:** 2026-04-15

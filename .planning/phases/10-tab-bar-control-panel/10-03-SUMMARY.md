@@ -13,9 +13,9 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/ServerPanel.tsx
-    - gui-app/src/components/server/SshConnectForm.tsx
-    - gui-app/src/components/ControlPanelPage.tsx
+    - gui-pro/src/components/ServerPanel.tsx
+    - gui-pro/src/components/server/SshConnectForm.tsx
+    - gui-pro/src/components/ControlPanelPage.tsx
 decisions:
   - "Skeleton as overlay + ServerPanel behind display:none — ensures ServerPanel mounts immediately to start SSH calls while skeleton shows as visual placeholder"
   - "onPanelReady is optional prop — existing callers unaffected, zero breaking change"
@@ -116,9 +116,9 @@ No new network endpoints, auth paths, or trust boundary changes introduced. loca
 
 ## Self-Check: PASSED
 
-- FOUND: gui-app/src/components/ControlPanelPage.tsx
-- FOUND: gui-app/src/components/ServerPanel.tsx
-- FOUND: gui-app/src/components/server/SshConnectForm.tsx
+- FOUND: gui-pro/src/components/ControlPanelPage.tsx
+- FOUND: gui-pro/src/components/ServerPanel.tsx
+- FOUND: gui-pro/src/components/server/SshConnectForm.tsx
 - FOUND: .planning/phases/10-tab-bar-control-panel/10-03-SUMMARY.md
 - FOUND commit: e439a561 (Task 1)
 - FOUND commit: 75349612 (Task 2)

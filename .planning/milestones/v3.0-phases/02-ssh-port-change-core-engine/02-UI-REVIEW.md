@@ -120,7 +120,7 @@ Modal, ConfirmDialog, Card, Tooltip используют template literal для
 
 ## Files Audited
 
-**Компоненты (25 файлов):** gui-app/src/shared/ui/*.tsx
-**Инфраструктура:** gui-app/src/shared/lib/cn.ts, gui-app/src/shared/styles/tokens.css
-**Exports:** gui-app/src/shared/ui/index.ts (25 exports)
+**Компоненты (25 файлов):** gui-pro/src/shared/ui/*.tsx
+**Инфраструктура:** gui-pro/src/shared/lib/cn.ts, gui-pro/src/shared/styles/tokens.css
+**Exports:** gui-pro/src/shared/ui/index.ts (25 exports)
 **Планы:** 02-01 через 02-07 PLAN.md и SUMMARY.md

@@ -1,12 +1,12 @@
 ---
 phase: 03-control-panel
 plan: 02
-subsystem: gui-app/components
+subsystem: gui-pro/components
 tags: [statusbadge, errorbanner, button-variants, tailwind-tokens, vpn-states]
 dependency_graph:
   requires: [03-01]
   provides: [StatusPanel redesign, ControlPanelPage header redesign]
-  affects: [gui-app/src/components/StatusPanel.tsx, gui-app/src/components/ControlPanelPage.tsx]
+  affects: [gui-pro/src/components/StatusPanel.tsx, gui-pro/src/components/ControlPanelPage.tsx]
 tech_stack:
   added: []
   patterns:
@@ -17,8 +17,8 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/components/StatusPanel.tsx
-    - gui-app/src/components/ControlPanelPage.tsx
+    - gui-pro/src/components/StatusPanel.tsx
+    - gui-pro/src/components/ControlPanelPage.tsx
 decisions:
   - ErrorBanner uses variant="error" / prop named severity (Phase 2 updated API uses severity)
   - statusBadgeVariant() maps disconnecting/recovering to "connecting" (no 5th variant needed)

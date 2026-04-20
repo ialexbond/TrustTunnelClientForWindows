@@ -65,7 +65,7 @@ No new packages needed. All dependencies satisfied by Phase 1 + Phase 2 output.
 ### Recommended Project Structure (no changes needed)
 
 ```
-gui-app/src/
+gui-pro/src/
 ├── components/
 │   ├── ControlPanelPage.tsx     ← migrate header styles only
 │   ├── StatusPanel.tsx          ← replace Badge+raw styles with StatusBadge+tokens
@@ -417,9 +417,9 @@ const statusBadgeVariant = (status: VpnStatus) => {
 | Property | Value |
 |----------|-------|
 | Framework | vitest + @testing-library/react |
-| Config file | `gui-app/vite.config.ts` (test section, jsdom environment) |
-| Quick run command | `cd gui-app && npx vitest run src/components/ControlPanelPage.test.tsx src/components/StatusPanel.test.tsx src/components/server/SshConnectForm.test.tsx` |
-| Full suite command | `cd gui-app && npx vitest run` |
+| Config file | `gui-pro/vite.config.ts` (test section, jsdom environment) |
+| Quick run command | `cd gui-pro && npx vitest run src/components/ControlPanelPage.test.tsx src/components/StatusPanel.test.tsx src/components/server/SshConnectForm.test.tsx` |
+| Full suite command | `cd gui-pro && npx vitest run` |
 
 ### Phase Requirements → Test Map
 
@@ -435,15 +435,15 @@ const statusBadgeVariant = (status: VpnStatus) => {
 | DOC-03 | Behavior spec file exists at memory/v3/screens/control-panel.md | manual | — | ❌ Wave 0 |
 
 ### Sampling Rate
-- **Per task commit:** `cd gui-app && npx vitest run src/components/ControlPanelPage.test.tsx src/components/StatusPanel.test.tsx src/components/server/SshConnectForm.test.tsx`
-- **Per wave merge:** `cd gui-app && npx vitest run`
+- **Per task commit:** `cd gui-pro && npx vitest run src/components/ControlPanelPage.test.tsx src/components/StatusPanel.test.tsx src/components/server/SshConnectForm.test.tsx`
+- **Per wave merge:** `cd gui-pro && npx vitest run`
 - **Phase gate:** Full suite green before `/gsd-verify-work`
 
 ### Wave 0 Gaps
 - [ ] `memory/v3/screens/` directory — must be created (DOC-03 requirement)
 - [ ] `memory/v3/screens/control-panel.md` — behavior spec file (DOC-03)
-- [ ] `gui-app/src/components/StatusPanel.test.tsx` — assertions need updating for StatusBadge text and ErrorBanner presence (Pitfall 5)
-- [ ] `gui-app/src/shared/i18n/locales/ru.json` and `en.json` — add `vpnErrors.*` keys before StatusPanel ErrorBanner can render translated text
+- [ ] `gui-pro/src/components/StatusPanel.test.tsx` — assertions need updating for StatusBadge text and ErrorBanner presence (Pitfall 5)
+- [ ] `gui-pro/src/shared/i18n/locales/ru.json` and `en.json` — add `vpnErrors.*` keys before StatusPanel ErrorBanner can render translated text
 
 ---
 
@@ -466,22 +466,22 @@ QA-04 compliance: all commits in this phase MUST contain only CSS/tokens/classNa
 ## Sources
 
 ### Primary (HIGH confidence — verified by codebase scan)
-- `gui-app/src/components/ControlPanelPage.tsx` — current implementation, 180 lines
-- `gui-app/src/components/StatusPanel.tsx` — current implementation, confirms variant mismatch
-- `gui-app/src/components/server/SshConnectForm.tsx` — current implementation, colors.ts usage
-- `gui-app/src/shared/ui/StatusBadge.tsx` — Phase 2 API, variant names, defaultLabels
-- `gui-app/src/shared/ui/Button.tsx` — Phase 2 API, confirmed 4 variants: primary/danger/ghost/icon
-- `gui-app/src/shared/ui/Card.tsx` — Phase 2 API, padding lg = `p-[var(--space-5)]`
-- `gui-app/src/shared/ui/ErrorBanner.tsx` — Phase 2 API, severity + onDismiss props
-- `gui-app/src/shared/ui/FormField.tsx` — Phase 2 API, label/error/hint composition
-- `gui-app/src/shared/ui/Input.tsx` — Phase 2 API, clearable + label + error props
-- `gui-app/src/shared/ui/SnackBarContext.tsx` — Phase 2 API, useSnackBar() hook
-- `gui-app/src/shared/ui/Badge.tsx` — confirmed it is NOT the same as StatusBadge
-- `gui-app/src/shared/styles/tokens.css` — warning/destructive/status tokens verified
-- `gui-app/src/shared/i18n/locales/ru.json` — confirmed vpnErrors namespace missing
-- `gui-app/src/components/ControlPanelPage.test.tsx` — 16 tests covering all state transitions
-- `gui-app/src/components/StatusPanel.test.tsx` — 9 tests covering all VPN states
-- `gui-app/src/components/server/SshConnectForm.test.tsx` — 20 tests
+- `gui-pro/src/components/ControlPanelPage.tsx` — current implementation, 180 lines
+- `gui-pro/src/components/StatusPanel.tsx` — current implementation, confirms variant mismatch
+- `gui-pro/src/components/server/SshConnectForm.tsx` — current implementation, colors.ts usage
+- `gui-pro/src/shared/ui/StatusBadge.tsx` — Phase 2 API, variant names, defaultLabels
+- `gui-pro/src/shared/ui/Button.tsx` — Phase 2 API, confirmed 4 variants: primary/danger/ghost/icon
+- `gui-pro/src/shared/ui/Card.tsx` — Phase 2 API, padding lg = `p-[var(--space-5)]`
+- `gui-pro/src/shared/ui/ErrorBanner.tsx` — Phase 2 API, severity + onDismiss props
+- `gui-pro/src/shared/ui/FormField.tsx` — Phase 2 API, label/error/hint composition
+- `gui-pro/src/shared/ui/Input.tsx` — Phase 2 API, clearable + label + error props
+- `gui-pro/src/shared/ui/SnackBarContext.tsx` — Phase 2 API, useSnackBar() hook
+- `gui-pro/src/shared/ui/Badge.tsx` — confirmed it is NOT the same as StatusBadge
+- `gui-pro/src/shared/styles/tokens.css` — warning/destructive/status tokens verified
+- `gui-pro/src/shared/i18n/locales/ru.json` — confirmed vpnErrors namespace missing
+- `gui-pro/src/components/ControlPanelPage.test.tsx` — 16 tests covering all state transitions
+- `gui-pro/src/components/StatusPanel.test.tsx` — 9 tests covering all VPN states
+- `gui-pro/src/components/server/SshConnectForm.test.tsx` — 20 tests
 - `.planning/phases/03-control-panel/03-UI-SPEC.md` — visual + interaction contract
 - `memory/v3/design-system/known-issues.md` — Tailwind font-size gotcha, twMerge conflict
 - `memory/v3/design-system/components.md` — Phase 2 component catalog

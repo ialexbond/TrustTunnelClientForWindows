@@ -7,20 +7,20 @@ one_liner: "Replace all invalid CVA variants (secondary/success/danger-outline/d
 dependency_graph:
   requires: []
   provides: [valid-cva-variants-server]
-  affects: [gui-app/src/components/server]
+  affects: [gui-pro/src/components/server]
 tech_stack:
   added: []
   patterns: [CVA variant enforcement]
 key_files:
   modified:
-    - gui-app/src/components/server/Fail2banSection.tsx
-    - gui-app/src/components/server/CertSection.tsx
-    - gui-app/src/components/server/ServerStatusSection.tsx
-    - gui-app/src/components/server/DiagnosticsSection.tsx
-    - gui-app/src/components/server/LogsSection.tsx
-    - gui-app/src/components/server/FirewallSection.tsx
-    - gui-app/src/components/server/UsersSection.tsx
-    - gui-app/src/components/server/VersionSection.tsx
+    - gui-pro/src/components/server/Fail2banSection.tsx
+    - gui-pro/src/components/server/CertSection.tsx
+    - gui-pro/src/components/server/ServerStatusSection.tsx
+    - gui-pro/src/components/server/DiagnosticsSection.tsx
+    - gui-pro/src/components/server/LogsSection.tsx
+    - gui-pro/src/components/server/FirewallSection.tsx
+    - gui-pro/src/components/server/UsersSection.tsx
+    - gui-pro/src/components/server/VersionSection.tsx
 decisions:
   - "danger-outline -> danger: план указывал только secondary/success, но danger-outline тоже несуществующий вариант — исправлен по Rule 1"
   - "pingVariant default -> neutral: исправлено в вычисляемой функции и type cast одновременно"

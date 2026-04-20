@@ -174,7 +174,7 @@ Milestone v3.0 — полный визуальный редизайн Pro-вер
 
 ### Run the project
 ```bash
-cd gui-app
+cd gui-pro
 npm install --legacy-peer-deps
 npm run dev                    # Vite dev server on :1420
 npm run tauri:dev              # Full Tauri app with hot reload
@@ -183,7 +183,7 @@ npm run storybook              # Component stories on :6006
 
 ### Key directories
 ```
-gui-app/src/
+gui-pro/src/
   shared/ui/          # 25 shared components (Button, Input, Modal, Badge, etc.)
   shared/styles/      # tokens.css — THE source of truth for all visual tokens
   shared/i18n/        # ru.json, en.json

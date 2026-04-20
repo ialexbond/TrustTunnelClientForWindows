@@ -128,7 +128,7 @@ This phase installs zero new npm packages. All required building blocks exist: [
 ### Recommended Project Structure
 
 ```
-gui-app/src/
+gui-pro/src/
 ├── components/
 │   └── layout/
 │       ├── TitleBar.tsx          # NEW — logo + drag + WindowControls
@@ -142,7 +142,7 @@ gui-app/src/
 └── App.tsx                       # MODIFIED — routing refactor
 ```
 
-[VERIFIED: directory structure confirmed by ls of gui-app/src/components/layout/ and App.tsx]
+[VERIFIED: directory structure confirmed by ls of gui-pro/src/components/layout/ and App.tsx]
 
 ### Pattern 1: TitleBar Component Structure
 
@@ -477,8 +477,8 @@ Step 2.6: SKIPPED — Phase 4 is purely frontend code changes. No external tools
 | Property | Value |
 |----------|-------|
 | Framework | Vitest + @testing-library/react |
-| Config file | `gui-app/vite.config.ts` (vitest config inline) |
-| Quick run command | `npm test` (from gui-app/) |
+| Config file | `gui-pro/vite.config.ts` (vitest config inline) |
+| Quick run command | `npm test` (from gui-pro/) |
 | Full suite command | `npm test` (runs all 83+ tests) |
 
 ### Phase Requirements → Test Map
@@ -499,9 +499,9 @@ Step 2.6: SKIPPED — Phase 4 is purely frontend code changes. No external tools
 - **Phase gate:** Full `npm run prerelease` green before `/gsd-verify-work`
 
 ### Wave 0 Gaps
-- [ ] `gui-app/src/components/layout/TabNavigation.test.tsx` — covers tab rendering, active state, disabled state, click handler
-- [ ] `gui-app/src/components/layout/TitleBar.test.tsx` — covers TitleBar renders Shield icon, TrustTunnel text, PRO badge, no border-bottom, imports WindowControls
-- [ ] Replace `gui-app/src/components/layout/Sidebar.test.tsx` → either delete alongside Sidebar.tsx deletion or clear and rename
+- [ ] `gui-pro/src/components/layout/TabNavigation.test.tsx` — covers tab rendering, active state, disabled state, click handler
+- [ ] `gui-pro/src/components/layout/TitleBar.test.tsx` — covers TitleBar renders Shield icon, TrustTunnel text, PRO badge, no border-bottom, imports WindowControls
+- [ ] Replace `gui-pro/src/components/layout/Sidebar.test.tsx` → either delete alongside Sidebar.tsx deletion or clear and rename
 
 *(Sidebar.test.tsx tests are entirely invalidated by the component deletion. The planner must include its deletion as a task.)*
 
@@ -518,19 +518,19 @@ Phase 4 is a pure frontend visual/layout refactor with zero backend changes, no 
 ### Primary (HIGH confidence)
 - `04-UI-SPEC.md` — Full visual contract for all Phase 4 components (verified by codebase read)
 - `04-CONTEXT.md` — All locked decisions D-01 through D-19 (verified by file read)
-- `gui-app/src/components/layout/Sidebar.tsx` — Current sidebar implementation (verified by file read)
-- `gui-app/src/components/layout/WindowControls.tsx` — Current WindowControls (verified by file read)
-- `gui-app/src/components/ServerSidebar.tsx` — Current ServerSidebar (verified by file read)
-- `gui-app/src/App.tsx` — Routing structure, SidebarPage usage, title bar current state (verified by file read)
-- `gui-app/src/shared/styles/tokens.css` — Full token inventory (verified by file read)
-- `gui-app/src/shared/types.ts` — AppTab deprecated stub, SidebarPage dependency (verified by file read)
-- `gui-app/src/shared/hooks/useKeyboardShortcuts.ts` — Hardcoded pages array (verified by file read)
-- `gui-app/src/shared/i18n/locales/en.json` + `ru.json` — Existing tabs keys (verified by partial read)
-- `gui-app/src/components/layout/Sidebar.test.tsx` — Tests to be replaced (verified by file read)
+- `gui-pro/src/components/layout/Sidebar.tsx` — Current sidebar implementation (verified by file read)
+- `gui-pro/src/components/layout/WindowControls.tsx` — Current WindowControls (verified by file read)
+- `gui-pro/src/components/ServerSidebar.tsx` — Current ServerSidebar (verified by file read)
+- `gui-pro/src/App.tsx` — Routing structure, SidebarPage usage, title bar current state (verified by file read)
+- `gui-pro/src/shared/styles/tokens.css` — Full token inventory (verified by file read)
+- `gui-pro/src/shared/types.ts` — AppTab deprecated stub, SidebarPage dependency (verified by file read)
+- `gui-pro/src/shared/hooks/useKeyboardShortcuts.ts` — Hardcoded pages array (verified by file read)
+- `gui-pro/src/shared/i18n/locales/en.json` + `ru.json` — Existing tabs keys (verified by partial read)
+- `gui-pro/src/components/layout/Sidebar.test.tsx` — Tests to be replaced (verified by file read)
 
 ### Secondary (MEDIUM confidence)
-- `gui-app/src/shared/ui/EmptyState.tsx` — Confirmed EmptyState API for ServerSidebar empty state
-- `gui-app/src/shared/ui/` directory listing — Confirmed Phase 2 component inventory is complete
+- `gui-pro/src/shared/ui/EmptyState.tsx` — Confirmed EmptyState API for ServerSidebar empty state
+- `gui-pro/src/shared/ui/` directory listing — Confirmed Phase 2 component inventory is complete
 
 ---
 

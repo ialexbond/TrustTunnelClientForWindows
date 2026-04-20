@@ -6,17 +6,17 @@ tags: [overflow-menu, users-section, aria, accessibility, fitts-law]
 dependency_graph:
   requires: ["11-03"]
   provides: ["OverflowMenu shared/ui component", "DC-05 fix in UsersSection"]
-  affects: ["gui-app/src/shared/ui/OverflowMenu.tsx", "gui-app/src/components/server/UsersSection.tsx"]
+  affects: ["gui-pro/src/shared/ui/OverflowMenu.tsx", "gui-pro/src/components/server/UsersSection.tsx"]
 tech_stack:
   added: ["OverflowMenu component (createPortal, aria menu pattern)"]
   patterns: ["portal dropdown", "ARIA menu role/menuitem", "keyboard navigation"]
 key_files:
   created:
-    - gui-app/src/shared/ui/OverflowMenu.tsx
+    - gui-pro/src/shared/ui/OverflowMenu.tsx
   modified:
-    - gui-app/src/shared/ui/index.ts
-    - gui-app/src/components/server/UsersSection.tsx
-    - gui-app/src/components/server/UsersSection.test.tsx
+    - gui-pro/src/shared/ui/index.ts
+    - gui-pro/src/components/server/UsersSection.tsx
+    - gui-pro/src/components/server/UsersSection.test.tsx
 decisions:
   - "OverflowMenu uses createPortal to render dropdown under document.body (same pattern as VersionSection)"
   - "Items accessed via role=menuitem — tests updated from CSS selector queries to ARIA role queries"
@@ -41,7 +41,7 @@ metrics:
 
 ## What Was Built
 
-### OverflowMenu (`gui-app/src/shared/ui/OverflowMenu.tsx`)
+### OverflowMenu (`gui-pro/src/shared/ui/OverflowMenu.tsx`)
 
 Новый переиспользуемый компонент overflow menu для shared/ui:
 
@@ -83,7 +83,7 @@ metrics:
 - **Found during:** Task 2
 - **Issue:** Старые тесты использовали `document.querySelectorAll("button[style*='color: var(--color-danger-400)']")` и `button[style*='color: var(--color-text-muted)']` — прямые селекторы по стилям устаревшей реализации. После замены на OverflowMenu 16 тестов провалились.
 - **Fix:** Переписаны тесты с использованием ARIA queries (`role="menuitem"`, `aria-haspopup`). Добавлен helper `openOverflowMenu()`. Добавлены новые тесты для проверки overflow menu ARIA атрибутов.
-- **Files modified:** `gui-app/src/components/server/UsersSection.test.tsx`
+- **Files modified:** `gui-pro/src/components/server/UsersSection.test.tsx`
 - **Commit:** ee862c91
 
 ## Known Stubs

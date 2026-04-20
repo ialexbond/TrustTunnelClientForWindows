@@ -1,0 +1,87 @@
+/* Override Tauri desktop app styles that break Storybook */
+body {
+  overflow: auto !important;
+}
+
+/* ── Storybook Docs readability fix ─────────────────────────────────
+ *
+ * Корень проблемы:
+ *   Storybook docs-page имеет **белый/cream** background (фиксированно,
+ *   это styling контейнера docs), но tokens.css определяет CSS variables
+ *   в `:root + [data-theme="dark"]` комбинированном селекторе (см.
+ *   tokens.css:141). Тема-декоратор Storybook вешает `data-theme` атрибут
+ *   только на preview iframe, НЕ на docs root → на docs-странице
+ *   `var(--color-text-muted)` резолвится в `#6e6e6e` (dark theme value)
+ *   на белом фоне = низкий контраст, метки «--shadow-lg» / «--space-4»
+ *   визуально теряются.
+ *
+ * Решение:
+ *   В docs-контейнере переопределяем tokens на **light theme** values
+ *   (backed by WCAG-compliant pairs из tokens.css:252). Все inline
+ *   стили вида `style={{ color: 'var(--color-text-muted)' }}` внутри
+ *   MDX автоматически получают readable цвета на белом фоне, БЕЗ
+ *   необходимости hardcode'ить colors в каждом отдельном MDX-файле.
+ *
+ *   Это future-proof: любые новые MDX docs со стилями `var(--color-*)`
+ *   будут работать корректно из коробки.
+ *
+ * **НЕ УДАЛЯТЬ без синхронизации с tokens.css изменениями.**
+ * См. memory/v3/design-system/storybook.md §Docs-page colors.
+ */
+.sbdocs,
+.sbdocs-wrapper,
+.sbdocs-content {
+  /* Text — light theme values (tokens.css:262-265) */
+  --color-text-primary: #161616;
+  --color-text-secondary: #5a5a5a;
+  --color-text-muted: #666666;
+  --color-text-inverse: #f9f9f7;
+
+  /* Surfaces — light theme values (tokens.css:257-260) */
+  --color-bg-primary: #f9f9f7;
+  --color-bg-secondary: #ffffff;
+  --color-bg-surface: #f0f0ed;
+  --color-bg-elevated: #e8e8e5;
+  --color-bg-hover: #e2e2de;
+  --color-bg-active: #d8d8d4;
+
+  /* Base text color fallback (если элемент без inline style) */
+  color: #161616;
+}
+
+/* Заголовки и body-текст — наследовать цвет от docs container (не из
+ * глобальных tokens которые могли бы быть darker-theme). */
+.sbdocs h1,
+.sbdocs h2,
+.sbdocs h3,
+.sbdocs h4,
+.sbdocs p,
+.sbdocs li,
+.sbdocs td,
+.sbdocs th,
+.sbdocs span:not([style*="color"]),
+.sbdocs label,
+.sbdocs code {
+  color: inherit;
+}
+
+/* Inline code + table borders — соответствуют light surface */
+.sbdocs code:not(pre code) {
+  background-color: #f0f0ed;
+  border: 1px solid #d8d8d4;
+}
+
+.sbdocs table {
+  border-collapse: collapse;
+}
+
+.sbdocs table th,
+.sbdocs table td {
+  border: 1px solid #d8d8d4;
+  padding: 8px 12px;
+}
+
+.sbdocs table th {
+  background-color: #f0f0ed;
+  font-weight: 600;
+}

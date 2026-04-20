@@ -25,9 +25,9 @@ build_log.txt
 build_*.bat
 build_*.ps1
 build_output.log
-gui-app/src-tauri/vcruntime*.dll
-gui-app/src-tauri/wintun.dll
-gui-app/src-tauri/trusttunnel_client-*.exe
+gui-pro/src-tauri/vcruntime*.dll
+gui-pro/src-tauri/wintun.dll
+gui-pro/src-tauri/trusttunnel_client-*.exe
 gui-light/src-tauri/vcruntime*.dll
 gui-light/src-tauri/wintun.dll
 gui-light/src-tauri/trusttunnel_client-*.exe
@@ -46,6 +46,6 @@ memory/
 TrustTunnel-Portable/
 TrustTunnel-v*-portable-*/
 exclusions.json
-gui-app/coverage/
+gui-pro/coverage/
 .planning/
 AGENTS.md

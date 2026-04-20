@@ -13,7 +13,7 @@
 - **`master` — read-only.** Никаких коммитов и мержей напрямую в `master`.
 - Работа идёт в релизных ветках вида `release/tt-win-X.Y.Z` (см. `git branch -a`:
   активные сейчас — `release/tt-win-2.7.0` и выше; точная версия указана в
-  `gui-app/package.json`).
+  `gui-pro/package.json`).
 - Pull request'ы таргетятся **в активную release-ветку**, а не в `master`.
 - Если вы не уверены, какая ветка активна — откройте issue и спросите перед PR.
 
@@ -51,7 +51,7 @@
 
 3. Внесите изменения. Для worktree без sidecar-бинарей см.
    [CLAUDE.md → Worktree Setup](CLAUDE.md#worktree-setup).
-4. Запустите полную проверку **из `gui-app/`** — должна быть зелёной:
+4. Запустите полную проверку **из `gui-pro/`** — должна быть зелёной:
 
    ```bash
    npm run prerelease   # typecheck + lint + test + clippy + build
@@ -67,7 +67,7 @@
 
 - TypeScript **strict mode**, `npm run typecheck` без ошибок.
 - ESLint с `--max-warnings 0` — ни одного warning'а.
-- Все цвета — через CSS-токены из `gui-app/src/shared/styles/tokens.css`.
+- Все цвета — через CSS-токены из `gui-pro/src/shared/styles/tokens.css`.
   **Никаких хардкод-hex** в компонентах.
 - Font size: `text-xs/sm/base/lg` (Tailwind), а не `text-[var(--font-size-*)]`.
 - Font weight: только `font-[var(--font-weight-semibold)]` или нормальный.
@@ -80,8 +80,8 @@
 Приложение переведено на **русский и английский**. Любой пользовательский текст
 должен иметь записи **в обоих** файлах локалей:
 
-- `gui-app/src/shared/i18n/locales/ru.json`
-- `gui-app/src/shared/i18n/locales/en.json`
+- `gui-pro/src/shared/i18n/locales/ru.json`
+- `gui-pro/src/shared/i18n/locales/en.json`
 - Аналогично для Light: `gui-light/src/shared/i18n/locales/{ru,en}.json`
 
 Правила:
@@ -96,7 +96,7 @@
 Подробности по паттернам (visibility vs DOM, RAF mock, i18n в beforeEach) —
 в [TESTING.md](TESTING.md) и [CLAUDE.md → Testing Patterns](CLAUDE.md#testing-patterns).
 
-Команды из `gui-app/`:
+Команды из `gui-pro/`:
 
 ```bash
 npm run test           # Vitest: все тесты (режим run)

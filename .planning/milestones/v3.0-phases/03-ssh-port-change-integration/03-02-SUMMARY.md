@@ -12,17 +12,17 @@ tech_stack:
   patterns: [callback-chain, useEffect-dependency-reload, custom-invoke-flow]
 key_files:
   created:
-    - gui-app/src/components/server/SshPortSection.test.tsx
+    - gui-pro/src/components/server/SshPortSection.test.tsx
   modified:
-    - gui-app/src/components/server/useSecurityState.ts
-    - gui-app/src/components/server/useSecurityState.test.ts
-    - gui-app/src/components/server/SshPortSection.tsx
-    - gui-app/src/components/server/SecuritySection.tsx
-    - gui-app/src/components/server/useServerState.ts
-    - gui-app/src/components/ServerPanel.tsx
-    - gui-app/src/components/ControlPanelPage.tsx
-    - gui-app/src/shared/i18n/locales/ru.json
-    - gui-app/src/shared/i18n/locales/en.json
+    - gui-pro/src/components/server/useSecurityState.ts
+    - gui-pro/src/components/server/useSecurityState.test.ts
+    - gui-pro/src/components/server/SshPortSection.tsx
+    - gui-pro/src/components/server/SecuritySection.tsx
+    - gui-pro/src/components/server/useServerState.ts
+    - gui-pro/src/components/ServerPanel.tsx
+    - gui-pro/src/components/ControlPanelPage.tsx
+    - gui-pro/src/shared/i18n/locales/ru.json
+    - gui-pro/src/shared/i18n/locales/en.json
 decisions:
   - Custom changeSshPort flow instead of generic run() to avoid stale sshParams in load()
   - Rely on useEffect dependency chain for auto-reload instead of direct load() call

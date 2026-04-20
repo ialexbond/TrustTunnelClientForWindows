@@ -25,7 +25,7 @@ created: 2026-04-15
 | Component library | Кастомные компоненты (shared/ui/) — 19+ примитивов |
 | Icon library | lucide-react (Shield, Monitor, Cable, GitBranch, Settings, Info, Server, Plus, Power, Loader2) |
 | Font | Geist Sans (variable woff2 100-900), Geist Mono для кода/логов |
-| Token file | gui-app/src/shared/styles/tokens.css |
+| Token file | gui-pro/src/shared/styles/tokens.css |
 | Tailwind | v3, fontSize remapped на token vars в tailwind.config.js |
 
 **Источник:** REQUIREMENTS.md (Out of Scope: shadcn/ui или Radix UI), memory/v3/design-system.md, tokens.css
@@ -36,7 +36,7 @@ created: 2026-04-15
 
 ### Наследованная шкала (Inherited Scale)
 
-Все spacing-токены ниже **унаследованы из `gui-app/src/shared/styles/tokens.css`**, который был установлен до Phase 5 и используется во всём приложении. Phase 5 не вводит новых spacing-значений — она документирует уже существующий контракт кодовой базы.
+Все spacing-токены ниже **унаследованы из `gui-pro/src/shared/styles/tokens.css`**, который был установлен до Phase 5 и используется во всём приложении. Phase 5 не вводит новых spacing-значений — она документирует уже существующий контракт кодовой базы.
 
 Три значения (`--space-3: 12px`, `--space-5: 20px`, `--space-8: 40px`) отсутствуют в стандартном наборе GSD {4, 8, 16, 24, 32, 48, 64}, но все они кратны 4px и являются частью **8-ступенчатой шкалы проекта** (space-1 через space-8), объявленной в tokens.css в `:root`. Это не новые дизайн-решения Phase 5 — это унаследованные токены, устоявшиеся в ходе Phase 2–4.
 
@@ -359,7 +359,7 @@ Content bg:  --color-bg-primary   (#0d0d0d dark  / #f9f9f7 light)
 
 | Field group | Source |
 |-------------|--------|
-| Design tokens (spacing, typography, colors) | tokens.css — прямое чтение файла (gui-app/src/shared/styles/tokens.css) |
+| Design tokens (spacing, typography, colors) | tokens.css — прямое чтение файла (gui-pro/src/shared/styles/tokens.css) |
 | Semantic token names | memory/v3/design-system.md |
 | Phase decisions (D-01..D-19) | 05-CONTEXT.md §decisions |
 | Existing component structure | TitleBar.tsx, TabNavigation.tsx, WindowControls.tsx, ServerSidebar.tsx, App.tsx |

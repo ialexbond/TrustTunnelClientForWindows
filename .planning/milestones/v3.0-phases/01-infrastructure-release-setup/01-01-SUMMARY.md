@@ -13,9 +13,9 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src-tauri/Cargo.toml
-    - gui-app/package.json
-    - gui-app/src-tauri/tauri.conf.json
+    - gui-pro/src-tauri/Cargo.toml
+    - gui-pro/package.json
+    - gui-pro/src-tauri/tauri.conf.json
     - gui-light/src-tauri/Cargo.toml
     - gui-light/package.json
     - gui-light/src-tauri/tauri.conf.json
@@ -35,16 +35,16 @@ Version bump from 2.6.0 to 2.7.0 across all 6 version files (8 replacement point
 
 | Task | Name | Commit | Files |
 |------|------|--------|-------|
-| 1 | Create release branch and bump version to 2.7.0 | f395436c | gui-app/src-tauri/Cargo.toml, gui-app/package.json, gui-app/src-tauri/tauri.conf.json, gui-light/src-tauri/Cargo.toml, gui-light/package.json, gui-light/src-tauri/tauri.conf.json |
+| 1 | Create release branch and bump version to 2.7.0 | f395436c | gui-pro/src-tauri/Cargo.toml, gui-pro/package.json, gui-pro/src-tauri/tauri.conf.json, gui-light/src-tauri/Cargo.toml, gui-light/package.json, gui-light/src-tauri/tauri.conf.json |
 
 ## Changes Made
 
 ### Version Fields Updated (6 files, 8 replacement points)
 
-1. **gui-app/src-tauri/Cargo.toml** line 3: `version = "2.7.0"`
-2. **gui-app/package.json** line 4: `"version": "2.7.0"`
-3. **gui-app/src-tauri/tauri.conf.json** line 4: `"version": "2.7.0"`
-4. **gui-app/src-tauri/tauri.conf.json** line 15: `"title": "TrustTunnel Client for Windows Pro v2.7.0"`
+1. **gui-pro/src-tauri/Cargo.toml** line 3: `version = "2.7.0"`
+2. **gui-pro/package.json** line 4: `"version": "2.7.0"`
+3. **gui-pro/src-tauri/tauri.conf.json** line 4: `"version": "2.7.0"`
+4. **gui-pro/src-tauri/tauri.conf.json** line 15: `"title": "TrustTunnel Client for Windows Pro v2.7.0"`
 5. **gui-light/src-tauri/Cargo.toml** line 3: `version = "2.7.0"`
 6. **gui-light/package.json** line 4: `"version": "2.7.0"`
 7. **gui-light/src-tauri/tauri.conf.json** line 4: `"version": "2.7.0"`
@@ -52,7 +52,7 @@ Version bump from 2.6.0 to 2.7.0 across all 6 version files (8 replacement point
 
 ### Preserved (not changed)
 
-- `gui-app/package.json`: `"@tauri-apps/plugin-dialog": "^2.6.0"` (Tauri plugin version, not app version)
+- `gui-pro/package.json`: `"@tauri-apps/plugin-dialog": "^2.6.0"` (Tauri plugin version, not app version)
 - `gui-light/package.json`: `"@tauri-apps/plugin-dialog": "^2.6.0"` (Tauri plugin version, not app version)
 
 ## Deviations from Plan

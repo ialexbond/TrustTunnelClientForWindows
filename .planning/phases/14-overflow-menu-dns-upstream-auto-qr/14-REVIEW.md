@@ -4,22 +4,22 @@ reviewed: 2026-04-17T21:00:00Z
 depth: standard
 files_reviewed: 15
 files_reviewed_list:
-  - gui-app/src/components/server/UserConfigModal.stories.tsx
-  - gui-app/src/components/server/UserConfigModal.test.tsx
-  - gui-app/src/components/server/UserConfigModal.tsx
-  - gui-app/src/components/server/UsersAddForm.tsx
-  - gui-app/src/components/server/UsersSection.stories.tsx
-  - gui-app/src/components/server/UsersSection.test.tsx
-  - gui-app/src/components/server/UsersSection.tsx
-  - gui-app/src/shared/i18n/locales/en.json
-  - gui-app/src/shared/i18n/locales/ru.json
-  - gui-app/src/shared/ui/ActionInput.stories.tsx
-  - gui-app/src/shared/ui/ActionInput.tsx
-  - gui-app/src/shared/ui/ActionPasswordInput.stories.tsx
-  - gui-app/src/shared/ui/ActionPasswordInput.tsx
-  - gui-app/src/shared/ui/OverflowMenu.stories.tsx
-  - gui-app/src/shared/ui/OverflowMenu.test.tsx
-  - gui-app/src/shared/ui/OverflowMenu.tsx
+  - gui-pro/src/components/server/UserConfigModal.stories.tsx
+  - gui-pro/src/components/server/UserConfigModal.test.tsx
+  - gui-pro/src/components/server/UserConfigModal.tsx
+  - gui-pro/src/components/server/UsersAddForm.tsx
+  - gui-pro/src/components/server/UsersSection.stories.tsx
+  - gui-pro/src/components/server/UsersSection.test.tsx
+  - gui-pro/src/components/server/UsersSection.tsx
+  - gui-pro/src/shared/i18n/locales/en.json
+  - gui-pro/src/shared/i18n/locales/ru.json
+  - gui-pro/src/shared/ui/ActionInput.stories.tsx
+  - gui-pro/src/shared/ui/ActionInput.tsx
+  - gui-pro/src/shared/ui/ActionPasswordInput.stories.tsx
+  - gui-pro/src/shared/ui/ActionPasswordInput.tsx
+  - gui-pro/src/shared/ui/OverflowMenu.stories.tsx
+  - gui-pro/src/shared/ui/OverflowMenu.test.tsx
+  - gui-pro/src/shared/ui/OverflowMenu.tsx
 findings:
   critical: 0
   warning: 6
@@ -55,7 +55,7 @@ status: issues_found
 
 ### WR-01: Утечка Object URL при ошибке загрузки QR-изображения
 
-**File:** `gui-app/src/components/server/UserConfigModal.tsx:174-197`
+**File:** `gui-pro/src/components/server/UserConfigModal.tsx:174-197`
 
 **Issue:** В `handleCopyQr` вызов `URL.createObjectURL(svgBlob)` создаёт Object URL, но `URL.revokeObjectURL(svgUrl)` вызывается только в двух случаях: (1) когда `ctx === null` (строка 181-182), (2) после успешного `ctx.drawImage` (строка 197). Если `img.onerror` срабатывает (строка 193) — Promise rejects, управление передаётся в catch-блок (строка 211), но `svgUrl` остаётся живым до GC блоба. На длинной сессии с плохим SVG-рендером это даёт утечку на 4-8 КБ на попытку.
 
@@ -102,7 +102,7 @@ try {
 
 ### WR-02: Hardcoded английский aria-label "Clear field" в ActionInput/ActionPasswordInput
 
-**File:** `gui-app/src/shared/ui/ActionInput.tsx:118` и `gui-app/src/shared/ui/ActionPasswordInput.tsx:124`
+**File:** `gui-pro/src/shared/ui/ActionInput.tsx:118` и `gui-pro/src/shared/ui/ActionPasswordInput.tsx:124`
 
 **Issue:** Clear-кнопка имеет `aria-label="Clear field"` — строка захардкожена на английском. В `ru.json:1125` и `en.json:1125` уже существует ключ `common.clear_field` («Очистить поле» / «Clear field»), но компоненты его не используют. Русскоязычные пользователи со screen reader услышат английскую метку.
 
@@ -158,7 +158,7 @@ interface ActionPasswordInputProps extends ... {
 
 ### WR-03: Тест "does not render when isOpen=false" — ложноположительный assertion
 
-**File:** `gui-app/src/components/server/UserConfigModal.test.tsx:64-74`
+**File:** `gui-pro/src/components/server/UserConfigModal.test.tsx:64-74`
 
 **Issue:** Тест `expect(container.querySelector('[role="dialog"]')).toBeNull()` всегда пройдёт независимо от поведения UserConfigModal, потому что `Modal` (shared/ui/Modal.tsx) **не выставляет** атрибут `role="dialog"` на своих div'ах. Даже когда модал открыт и mounted, селектор вернёт null.
 
@@ -188,7 +188,7 @@ it("does not render when isOpen=false", () => {
 
 ### WR-04: Дублирование fetch-логики в `useEffect` и `handleRetry`
 
-**File:** `gui-app/src/components/server/UserConfigModal.tsx:82-109` и `119-130`
+**File:** `gui-pro/src/components/server/UserConfigModal.tsx:82-109` и `119-130`
 
 **Issue:** `useEffect` (линии 82-109) и `handleRetry` (линии 119-130) содержат практически идентичный код fetch+setDeeplink/setError/setLoading. Изменение логики (например, добавление timeout или logging) требует правки в двух местах — легко забыть одно из них. Также `handleRetry` не учитывает Storybook-overrides (`_forceLoading`, `_forceError`), что не критично (stories не clickать retry), но рассогласовано.
 
@@ -238,7 +238,7 @@ const handleRetry = () => { void fetchDeeplink(); };
 
 ### WR-05: `sshParams` как объект в useEffect deps может триггерить лишние fetch
 
-**File:** `gui-app/src/components/server/UserConfigModal.tsx:109`
+**File:** `gui-pro/src/components/server/UserConfigModal.tsx:109`
 
 **Issue:** `sshParams` включён в deps массив useEffect. Поскольку `sshParams` — plain object, React сравнивает его по reference. Если родитель (UsersSection) не мемоизирует `sshParams` и пересоздаёт объект на каждый рендер (что часто бывает), useEffect будет триггериться на каждый родительский re-render → повторный invoke `server_export_config_deeplink`, то есть лишний SSH round-trip.
 
@@ -260,7 +260,7 @@ const handleRetry = () => { void fetchDeeplink(); };
 
 ### WR-06: `handleShowConfig` не блокируется при уже открытой модалке другого пользователя
 
-**File:** `gui-app/src/components/server/UsersSection.tsx:145-148`
+**File:** `gui-pro/src/components/server/UsersSection.tsx:145-148`
 
 **Issue:** Если пользователь быстро кликнул FileText на alice, потом FileText на bob до того, как модалка для alice фактически mounted → `setModalUsername("alice")` → ещё не успел useEffect в UserConfigModal перезапустить fetch → `setModalUsername("bob")`. Получаем:
 - модалка сразу открывается с username=bob (UserConfigModal видит новый username)
@@ -297,7 +297,7 @@ useEffect(() => {
 
 ### IN-01: `_forceLoading` / `_forceError` / `_deeplinkOverride` в production API
 
-**File:** `gui-app/src/components/server/UserConfigModal.tsx:53-57`
+**File:** `gui-pro/src/components/server/UserConfigModal.tsx:53-57`
 
 **Issue:** Storybook-only props экспортируются как часть публичного `UserConfigModalProps` интерфейса. Любой call-site может случайно их передать. В Phase 14 Plan 04 SUMMARY документирует, что production call-sites не передают их, но TypeScript не запрещает.
 
@@ -326,7 +326,7 @@ interface UserConfigModalPropsWithOverrides extends UserConfigModalProps {
 
 ### IN-02: Auto-flip useEffect: порядок setState при open
 
-**File:** `gui-app/src/shared/ui/OverflowMenu.tsx:144-156`
+**File:** `gui-pro/src/shared/ui/OverflowMenu.tsx:144-156`
 
 **Issue:** В `handleToggle` вызывается `setMenuStyle({ ..., visibility: "hidden" })` **до** `setOpen((prev) => !prev)`. Но React batches state updates — оба state-change применятся в одном render cycle. При закрытии `open` переключается в false, menuStyle с visibility:hidden остаётся в state до следующего open. Это не баг (closure), но лишний state update.
 
@@ -353,7 +353,7 @@ const handleToggle = useCallback(() => {
 
 ### IN-03: Тесты auto-flip в JSDOM — проверяют только отсутствие visibility:hidden
 
-**File:** `gui-app/src/shared/ui/OverflowMenu.test.tsx:197-268`
+**File:** `gui-pro/src/shared/ui/OverflowMenu.test.tsx:197-268`
 
 **Issue:** Тесты в блоке "auto-flip positioning" помечают rect через `mockRect`, потом ждут смены `visibility` с "hidden" на non-hidden. Но JSDOM не выполняет layout → `menuRef.current.getBoundingClientRect()` всегда возвращает `{0,0,0,0,...}` если mockRect на menu вызван **после** useEffect измерил (что и происходит — fireEvent.click запускает synchronous effect). По факту эти тесты проверяют только "effect не упал с exception". Комментарий в тесте (строки 167-171) это признаёт.
 
@@ -377,7 +377,7 @@ beforeEach(() => {
 
 ### IN-04: OverflowMenu — firstEnabled focus: refs может быть stale
 
-**File:** `gui-app/src/shared/ui/OverflowMenu.tsx:135-142`
+**File:** `gui-pro/src/shared/ui/OverflowMenu.tsx:135-142`
 
 **Issue:** `itemRefs.current.find((el) => el && !el.disabled)` читает refs в useEffect, который запускается при `open → true`. При первом рендере меню items могут не успеть mount → refs ещё `null`. Обёртка `requestAnimationFrame(() => firstEnabled.focus())` откладывает fokus, но если items mount после первого RAF, focus пропадёт.
 
@@ -398,7 +398,7 @@ useEffect(() => {
 
 ### IN-05: UsersSection useEffect mount-only pre-fill — lint disable
 
-**File:** `gui-app/src/components/server/UsersSection.tsx:104-109`
+**File:** `gui-pro/src/components/server/UsersSection.tsx:104-109`
 
 **Issue:** `useEffect` pre-fill пишет `setNewUsername` + `setNewPassword` один раз на mount с пустым deps `[]` и eslint-disable. Это обходит react-hooks/exhaustive-deps. Корректно работает, но обход lint рисков — если в будущем кто-то добавит условие, зависящее от `serverInfo.users`, deps уже пустые и regenerate не сработает.
 
@@ -420,7 +420,7 @@ useEffect(() => {
 
 ### IN-06: Inconsistent right-padding calculation ActionInput vs ActionPasswordInput
 
-**File:** `gui-app/src/shared/ui/ActionInput.tsx:64-68` и `gui-app/src/shared/ui/ActionPasswordInput.tsx:69-74`
+**File:** `gui-pro/src/shared/ui/ActionInput.tsx:64-68` и `gui-pro/src/shared/ui/ActionPasswordInput.tsx:69-74`
 
 **Issue:** ActionInput считает: `rightPadding = 8 + effectiveActionCount * 28` (шаг 28px/icon).  
 ActionPasswordInput считает: `rightPadding = 8 + totalIconCount * 22 + Math.max(0, totalIconCount - 1) * 4` (шаг 22px/icon + gap 4px).
@@ -441,13 +441,13 @@ const rightPadding =
 
 ### IN-07: `actions_menu` i18n key теперь dead code
 
-**File:** `gui-app/src/shared/i18n/locales/ru.json:1030-1032` и `en.json:1030-1032`
+**File:** `gui-pro/src/shared/i18n/locales/ru.json:1030-1032` и `en.json:1030-1032`
 
 **Issue:** Ключ `users.actions_menu` («Действия с пользователем» / «User actions») был aria-label для удалённого OverflowMenu trigger. Тест `UsersSection.test.tsx:170-174` явно проверяет, что OverflowMenu НЕ используется (grep `queryByRole("button", { name: i18n.t("users.actions_menu") })` возвращает null). Ключ остался, но больше не используется в source.
 
 **Fix:** Удалить из обоих locales если нет других упоминаний:
 ```bash
-grep -rn "users.actions_menu\|actions_menu" gui-app/src
+grep -rn "users.actions_menu\|actions_menu" gui-pro/src
 ```
 Если только в тесте, который проверяет отсутствие — можно оставить как «guarding key» (тест использует `i18n.t("users.actions_menu")` для сравнения), либо заменить на inline-строку в тесте.
 
@@ -455,7 +455,7 @@ grep -rn "users.actions_menu\|actions_menu" gui-app/src
 
 ### IN-08: UserConfigModal — auto-focus таймер 250ms магическое число
 
-**File:** `gui-app/src/components/server/UserConfigModal.tsx:114`
+**File:** `gui-pro/src/components/server/UserConfigModal.tsx:114`
 
 **Issue:** `setTimeout(() => closeButtonRef.current?.focus(), 250)` с магическим числом 250. Это, видимо, соответствует duration ModalPrimitive transition (`duration-200`). Если transition меняется, focus может сломаться.
 

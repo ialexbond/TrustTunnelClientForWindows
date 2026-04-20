@@ -4,12 +4,12 @@ plan: 02
 subsystem: shared/ui primitives
 tags: [overflow-menu, viewport-clipping, auto-flip, d-12, tooltip-port, primitive-fix]
 requires:
-  - gui-app/src/shared/ui/Tooltip.tsx (reference algorithm with WR-07/WR-08 fixes)
-  - gui-app/src/shared/ui/OverflowMenu.tsx (pre-existing primitive with viewport-clip bug)
+  - gui-pro/src/shared/ui/Tooltip.tsx (reference algorithm with WR-07/WR-08 fixes)
+  - gui-pro/src/shared/ui/OverflowMenu.tsx (pre-existing primitive with viewport-clip bug)
 provides:
-  - gui-app/src/shared/ui/OverflowMenu.tsx (viewport-aware auto-flip primitive)
+  - gui-pro/src/shared/ui/OverflowMenu.tsx (viewport-aware auto-flip primitive)
 affects:
-  - gui-app/src/components/server/UsersSection.tsx (only current consumer — no API change)
+  - gui-pro/src/components/server/UsersSection.tsx (only current consumer — no API change)
 tech_stack:
   added: []
   patterns:
@@ -20,9 +20,9 @@ tech_stack:
 key_files:
   created: []
   modified:
-    - gui-app/src/shared/ui/OverflowMenu.tsx
-    - gui-app/src/shared/ui/OverflowMenu.stories.tsx
-    - gui-app/src/shared/ui/OverflowMenu.test.tsx
+    - gui-pro/src/shared/ui/OverflowMenu.tsx
+    - gui-pro/src/shared/ui/OverflowMenu.stories.tsx
+    - gui-pro/src/shared/ui/OverflowMenu.test.tsx
 decisions:
   - D-12 (viewport auto-flip fix, port algorithm from Tooltip)
   - Close-on-scroll/resize over recompute-on-scroll (simpler, matches Select)
@@ -146,9 +146,9 @@ JSDOM не запускает реальный layout — useEffect может �
 
 | File | Lines changed | Purpose |
 |------|---------------|---------|
-| `gui-app/src/shared/ui/OverflowMenu.tsx` | +85 / −14 | Port auto-flip алгоритма из Tooltip + close-on-scroll/resize |
-| `gui-app/src/shared/ui/OverflowMenu.stories.tsx` | +69 / −1 | 3 near-edge stories + расширение импортов |
-| `gui-app/src/shared/ui/OverflowMenu.test.tsx` | +136 / −1 | 5 auto-flip тестов + waitFor import |
+| `gui-pro/src/shared/ui/OverflowMenu.tsx` | +85 / −14 | Port auto-flip алгоритма из Tooltip + close-on-scroll/resize |
+| `gui-pro/src/shared/ui/OverflowMenu.stories.tsx` | +69 / −1 | 3 near-edge stories + расширение импортов |
+| `gui-pro/src/shared/ui/OverflowMenu.test.tsx` | +136 / −1 | 5 auto-flip тестов + waitFor import |
 
 **Файлы НЕ созданы.** Все изменения — расширение существующих файлов primitive уровня.
 
@@ -175,22 +175,22 @@ export interface OverflowMenuProps {
 export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMenuProps): JSX.Element;
 ```
 
-### Consumer analysis (grep `OverflowMenu` в gui-app/src)
+### Consumer analysis (grep `OverflowMenu` в gui-pro/src)
 
 Текущих consumers primitive'а: **1** (на данный момент):
 
 | File | Line | Usage |
 |------|------|-------|
-| `gui-app/src/components/server/UsersSection.tsx` | L21, L234 | row OverflowMenu для показа конфига / удаления (будет заменён на 2 inline иконки в Plan 03 по D-03) |
+| `gui-pro/src/components/server/UsersSection.tsx` | L21, L234 | row OverflowMenu для показа конфига / удаления (будет заменён на 2 inline иконки в Plan 03 по D-03) |
 
 Поскольку сигнатура `OverflowMenuProps` не тронута — `UsersSection` работает без изменений. Фикс просто исправит clip когда trigger близко к краю viewport (например, нижние строки списка пользователей в маленьком окне 900×1000).
 
-Primitive экспортируется из `gui-app/src/shared/ui/index.ts` (L24) — доступен для будущих consumers (Phase 15-17).
+Primitive экспортируется из `gui-pro/src/shared/ui/index.ts` (L24) — доступен для будущих consumers (Phase 15-17).
 
 ## Verification
 
-- **Quick check:** `cd gui-app && npx vitest run src/shared/ui/OverflowMenu.test.tsx` → **20 passed (15 existing + 5 new)**
-- **Typecheck:** `cd gui-app && npx tsc --noEmit` → **exit 0, no errors**
+- **Quick check:** `cd gui-pro && npx vitest run src/shared/ui/OverflowMenu.test.tsx` → **20 passed (15 existing + 5 new)**
+- **Typecheck:** `cd gui-pro && npx tsc --noEmit` → **exit 0, no errors**
 - **Visual (Storybook, manual):** `npm run storybook` → открыть `Primitives/OverflowMenu` → `NearBottomRight` / `NearTopLeft` / `TallMenuFlipsUp` stories. Клик по trigger-кнопке должен показать меню с корректным flip.
 
 ## Deviations from Plan

@@ -12,11 +12,11 @@ tech_stack:
   patterns: [Card-wrapper, Skeleton-loading-state, CVA-variants, auto-color-trend]
 key_files:
   created:
-    - gui-app/src/shared/ui/StatCard.tsx
-    - gui-app/src/shared/ui/StatCard.stories.tsx
-    - gui-app/src/shared/ui/StatCard.test.tsx
+    - gui-pro/src/shared/ui/StatCard.tsx
+    - gui-pro/src/shared/ui/StatCard.stories.tsx
+    - gui-pro/src/shared/ui/StatCard.test.tsx
   modified:
-    - gui-app/src/shared/ui/index.ts
+    - gui-pro/src/shared/ui/index.ts
 decisions:
   - "StatCard wraps Card (padding=md) rather than reimplementing card styles — consistent with existing Card component"
   - "Trend value 0 is hidden (not shown as 0%) — zero trend is irrelevant visually"
@@ -79,10 +79,10 @@ None — StatCard презентационный, данные передают�
 
 ## Self-Check: PASSED
 
-- [x] gui-app/src/shared/ui/StatCard.tsx — создан (e296b448)
-- [x] gui-app/src/shared/ui/StatCard.stories.tsx — создан (e296b448)
-- [x] gui-app/src/shared/ui/StatCard.test.tsx — создан (e296b448)
-- [x] gui-app/src/shared/ui/index.ts — обновлён (d381b9c0)
+- [x] gui-pro/src/shared/ui/StatCard.tsx — создан (e296b448)
+- [x] gui-pro/src/shared/ui/StatCard.stories.tsx — создан (e296b448)
+- [x] gui-pro/src/shared/ui/StatCard.test.tsx — создан (e296b448)
+- [x] gui-pro/src/shared/ui/index.ts — обновлён (d381b9c0)
 - [x] 10 тестов StatCard — все прошли
 - [x] Полный тест-сюит 1373/1373 — зелёный
 - [x] index.ts содержит 29 экспортов

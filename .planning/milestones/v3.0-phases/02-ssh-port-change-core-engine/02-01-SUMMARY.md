@@ -7,10 +7,10 @@ dependency_graph:
   requires: []
   provides: [cn_utility, button_cva, badge_cva, errorbanner_cva, button_stories, badge_stories, errorbanner_stories]
   affects:
-    - gui-app/src/shared/lib/cn.ts
-    - gui-app/src/shared/ui/Button.tsx
-    - gui-app/src/shared/ui/Badge.tsx
-    - gui-app/src/shared/ui/ErrorBanner.tsx
+    - gui-pro/src/shared/lib/cn.ts
+    - gui-pro/src/shared/ui/Button.tsx
+    - gui-pro/src/shared/ui/Badge.tsx
+    - gui-pro/src/shared/ui/ErrorBanner.tsx
 tech_stack:
   added:
     - class-variance-authority@^0.7.1
@@ -19,17 +19,17 @@ tech_stack:
   patterns: [cva-variant-system, forwardRef-components, token-based-styling, storybook-autodocs]
 key_files:
   created:
-    - gui-app/src/shared/ui/Button.stories.tsx
-    - gui-app/src/shared/ui/Badge.stories.tsx
-    - gui-app/src/shared/ui/ErrorBanner.stories.tsx
+    - gui-pro/src/shared/ui/Button.stories.tsx
+    - gui-pro/src/shared/ui/Badge.stories.tsx
+    - gui-pro/src/shared/ui/ErrorBanner.stories.tsx
   modified:
-    - gui-app/src/shared/lib/cn.ts
-    - gui-app/src/shared/ui/Button.tsx
-    - gui-app/src/shared/ui/Button.test.tsx
-    - gui-app/src/shared/ui/Badge.tsx
-    - gui-app/src/shared/ui/Badge.test.tsx
-    - gui-app/src/shared/ui/ErrorBanner.tsx
-    - gui-app/src/shared/ui/ErrorBanner.test.tsx
+    - gui-pro/src/shared/lib/cn.ts
+    - gui-pro/src/shared/ui/Button.tsx
+    - gui-pro/src/shared/ui/Button.test.tsx
+    - gui-pro/src/shared/ui/Badge.tsx
+    - gui-pro/src/shared/ui/Badge.test.tsx
+    - gui-pro/src/shared/ui/ErrorBanner.tsx
+    - gui-pro/src/shared/ui/ErrorBanner.test.tsx
 decisions:
   - "cn() upgraded from stub to clsx+twMerge — enables correct consumer className override merging"
   - "Badge size prop removed in favour of single token-defined size — simplifies API, avoids inconsistency"
@@ -59,7 +59,7 @@ Upgraded cn() utility to clsx+tailwind-merge and fully redesigned Button (4 vari
 
 ### Task 1: cn() Upgrade
 
-`gui-app/src/shared/lib/cn.ts` previously contained a hand-rolled stub that only concatenated strings without Tailwind conflict resolution. Replaced with the standard shadcn/ui pattern:
+`gui-pro/src/shared/lib/cn.ts` previously contained a hand-rolled stub that only concatenated strings without Tailwind conflict resolution. Replaced with the standard shadcn/ui pattern:
 
 ```ts
 import { clsx, type ClassValue } from "clsx";
@@ -107,15 +107,15 @@ Badge and ErrorBanner tests updated from rgba inline-style assertions to classNa
 
 **1. [Rule 3 - Blocking] node_modules missing in worktree**
 - **Found during:** Task 2 verification (vitest run)
-- **Issue:** `gui-app/node_modules` not present in worktree — vitest could not find `vite` package
-- **Fix:** `npm install --legacy-peer-deps` in worktree gui-app (525 packages, 7s)
+- **Issue:** `gui-pro/node_modules` not present in worktree — vitest could not find `vite` package
+- **Fix:** `npm install --legacy-peer-deps` in worktree gui-pro (525 packages, 7s)
 - **No commit needed** (node_modules is gitignored)
 
 **2. [Rule 2 - API] Badge size prop removed**
 - **Found during:** Task 3 implementation
 - **Issue:** Plan spec says "no size variants on Badge" (D-07), but existing Badge had sm/md size
 - **Fix:** Removed size prop entirely — single token-sized badge per spec
-- **Files modified:** gui-app/src/shared/ui/Badge.tsx, gui-app/src/shared/ui/Badge.test.tsx
+- **Files modified:** gui-pro/src/shared/ui/Badge.tsx, gui-pro/src/shared/ui/Badge.test.tsx
 - **Commit:** 8e0f67f9
 
 **3. [Rule 1 - Compatibility] Old 02-01-SUMMARY.md contained SSH-era content**
@@ -134,13 +134,13 @@ No new network endpoints, auth paths, file access patterns, or schema changes in
 
 ## Self-Check: PASSED
 
-- gui-app/src/shared/lib/cn.ts: FOUND
-- gui-app/src/shared/ui/Button.tsx: FOUND
-- gui-app/src/shared/ui/Button.stories.tsx: FOUND
-- gui-app/src/shared/ui/Badge.tsx: FOUND
-- gui-app/src/shared/ui/Badge.stories.tsx: FOUND
-- gui-app/src/shared/ui/ErrorBanner.tsx: FOUND
-- gui-app/src/shared/ui/ErrorBanner.stories.tsx: FOUND
+- gui-pro/src/shared/lib/cn.ts: FOUND
+- gui-pro/src/shared/ui/Button.tsx: FOUND
+- gui-pro/src/shared/ui/Button.stories.tsx: FOUND
+- gui-pro/src/shared/ui/Badge.tsx: FOUND
+- gui-pro/src/shared/ui/Badge.stories.tsx: FOUND
+- gui-pro/src/shared/ui/ErrorBanner.tsx: FOUND
+- gui-pro/src/shared/ui/ErrorBanner.stories.tsx: FOUND
 - Commit d44d2cda (Task 1): FOUND
 - Commit d43fd645 (Task 2): FOUND
 - Commit 8e0f67f9 (Task 3): FOUND

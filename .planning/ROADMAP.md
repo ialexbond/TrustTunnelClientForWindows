@@ -159,7 +159,7 @@ Plans:
 
 ### Phase 14.1: Advanced user config via gear icon — per-user anti-DPI, CIDR restriction, advanced deeplink params
 
-**Status:** Complete (2026-04-18)
+**Status:** In verification (plans shipped 2026-04-18; UAT + Nyquist validation pending — VERIFICATION.md not created, VALIDATION.md status=draft/nyquist_compliant=false)
 **Goal:** UserModal compound с 2 секциями (credentials + deeplink) заменяет inline UsersAddForm. Plus-icon (Add) + gear-icon per row (Edit), password rotation, certificate pinning, все 7 опциональных TLV deeplink-полей per D-4. Backend получает 7 новых Tauri-команд с rules.toml round-trip, atomic password rotation, TLS endpoint probe.
 **Requirements**: D-1, D-2, D-3, D-4, D-5, D-6, D-7, D-8, D-9
 **Depends on:** Phase 14

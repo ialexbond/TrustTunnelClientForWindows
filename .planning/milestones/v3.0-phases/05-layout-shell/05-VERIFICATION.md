@@ -54,20 +54,20 @@ human_verification:
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `gui-app/src/components/layout/TabNavigation.tsx` | Border-free tab bar, max-width 640, roving focus | ✓ VERIFIED | Содержит `onKeyDown`, `ArrowRight/ArrowLeft`, `maxWidth: 640`, `justify-center`, нет `borderTop` |
-| `gui-app/src/components/ServerSidebar.tsx` | Border-free, bg-secondary, no status dots, a11y disconnect | ✓ VERIFIED | `backgroundColor: "var(--color-bg-secondary)"`, `width: 220`, `group-focus-within:opacity-100`, нет `border-r/border-b` |
-| `gui-app/src/components/ServerTabs.tsx` | display:none tab caching | ✓ VERIFIED | Строки 74,80,86,93,100,106: `display: activeTab === "..." ? "flex" : "none"`, outer wrapper `flex-1 min-h-0 overflow-hidden` |
-| `gui-app/src/components/ControlPanelPage.tsx` | Sidebar animation wrapper, safe onAddServer | ✓ VERIFIED | `sidebarVisible = servers.length >= 2`, animated div, `onAddServer` только `setRefreshKey` — нет `handleDisconnect` |
-| `gui-app/src/components/server/Fail2banSection.tsx` | variant="ghost" | ✓ VERIFIED | Нет `variant="secondary"` |
-| `gui-app/src/components/server/CertSection.tsx` | variant="neutral" | ✓ VERIFIED | Нет `variant="default"` или `variant="accent"` |
-| `gui-app/src/components/server/ServerStatusSection.tsx` | variant="ghost" и variant="primary" | ✓ VERIFIED | Нет `variant="secondary"` или `variant="success"` на Button |
-| `gui-app/src/components/server/VersionSection.tsx` | variant="neutral" (было "accent") | ✓ VERIFIED | Нет `variant="accent"` |
-| `gui-app/src/components/server/UsersSection.tsx` | variant="primary" | ✓ VERIFIED | Нет `variant="success"` на Button |
-| `gui-app/src/shared/ui/StatusBadge.tsx` | useTranslation, нет defaultLabels | ✓ VERIFIED | `import { useTranslation }`, `const { t } = useTranslation()`, `displayLabel = label ?? t(...)` |
-| `gui-app/src/shared/ui/Select.tsx` | useTranslation, нет hardcoded placeholder | ✓ VERIFIED | `const resolvedPlaceholder = placeholder ?? t("select.placeholder", ...)` |
-| `gui-app/src/shared/ui/EmptyState.tsx` | useTranslation, нет hardcoded defaults | ✓ VERIFIED | `resolvedHeading = heading ?? t("empty.heading", ...)` |
-| `gui-app/src/shared/i18n/locales/ru.json` | Ключи select.placeholder, empty.heading, empty.body | ✓ VERIFIED | Строки 1035-1041: `"select": { "placeholder": "Выберите..." }`, `"empty": { "heading": ..., "body": ... }` |
-| `gui-app/src/shared/i18n/locales/en.json` | Ключи select.placeholder, empty.heading, empty.body | ✓ VERIFIED | Строки 1035-1041: `"select": { "placeholder": "Select..." }`, `"empty": { "heading": "Nothing here", "body": ... }` |
+| `gui-pro/src/components/layout/TabNavigation.tsx` | Border-free tab bar, max-width 640, roving focus | ✓ VERIFIED | Содержит `onKeyDown`, `ArrowRight/ArrowLeft`, `maxWidth: 640`, `justify-center`, нет `borderTop` |
+| `gui-pro/src/components/ServerSidebar.tsx` | Border-free, bg-secondary, no status dots, a11y disconnect | ✓ VERIFIED | `backgroundColor: "var(--color-bg-secondary)"`, `width: 220`, `group-focus-within:opacity-100`, нет `border-r/border-b` |
+| `gui-pro/src/components/ServerTabs.tsx` | display:none tab caching | ✓ VERIFIED | Строки 74,80,86,93,100,106: `display: activeTab === "..." ? "flex" : "none"`, outer wrapper `flex-1 min-h-0 overflow-hidden` |
+| `gui-pro/src/components/ControlPanelPage.tsx` | Sidebar animation wrapper, safe onAddServer | ✓ VERIFIED | `sidebarVisible = servers.length >= 2`, animated div, `onAddServer` только `setRefreshKey` — нет `handleDisconnect` |
+| `gui-pro/src/components/server/Fail2banSection.tsx` | variant="ghost" | ✓ VERIFIED | Нет `variant="secondary"` |
+| `gui-pro/src/components/server/CertSection.tsx` | variant="neutral" | ✓ VERIFIED | Нет `variant="default"` или `variant="accent"` |
+| `gui-pro/src/components/server/ServerStatusSection.tsx` | variant="ghost" и variant="primary" | ✓ VERIFIED | Нет `variant="secondary"` или `variant="success"` на Button |
+| `gui-pro/src/components/server/VersionSection.tsx` | variant="neutral" (было "accent") | ✓ VERIFIED | Нет `variant="accent"` |
+| `gui-pro/src/components/server/UsersSection.tsx` | variant="primary" | ✓ VERIFIED | Нет `variant="success"` на Button |
+| `gui-pro/src/shared/ui/StatusBadge.tsx` | useTranslation, нет defaultLabels | ✓ VERIFIED | `import { useTranslation }`, `const { t } = useTranslation()`, `displayLabel = label ?? t(...)` |
+| `gui-pro/src/shared/ui/Select.tsx` | useTranslation, нет hardcoded placeholder | ✓ VERIFIED | `const resolvedPlaceholder = placeholder ?? t("select.placeholder", ...)` |
+| `gui-pro/src/shared/ui/EmptyState.tsx` | useTranslation, нет hardcoded defaults | ✓ VERIFIED | `resolvedHeading = heading ?? t("empty.heading", ...)` |
+| `gui-pro/src/shared/i18n/locales/ru.json` | Ключи select.placeholder, empty.heading, empty.body | ✓ VERIFIED | Строки 1035-1041: `"select": { "placeholder": "Выберите..." }`, `"empty": { "heading": ..., "body": ... }` |
+| `gui-pro/src/shared/i18n/locales/en.json` | Ключи select.placeholder, empty.heading, empty.body | ✓ VERIFIED | Строки 1035-1041: `"select": { "placeholder": "Select..." }`, `"empty": { "heading": "Nothing here", "body": ... }` |
 
 ---
 
@@ -119,8 +119,8 @@ human_verification:
 
 | Файл | Строка | Паттерн | Серьёзность | Влияние |
 |------|--------|---------|-------------|---------|
-| `gui-app/src/components/server/DangerZoneSection.tsx` | 84 | `variant="danger-outline"` | ⚠️ Warning | Pre-existing; вне scope Phase 5; требует исправления в Phase 6 |
-| `gui-app/src/components/server/MtProtoSection.tsx` | 116 | `variant="danger-outline"` | ⚠️ Warning | Pre-existing; вне scope Phase 5; требует исправления в Phase 6 |
+| `gui-pro/src/components/server/DangerZoneSection.tsx` | 84 | `variant="danger-outline"` | ⚠️ Warning | Pre-existing; вне scope Phase 5; требует исправления в Phase 6 |
+| `gui-pro/src/components/server/MtProtoSection.tsx` | 116 | `variant="danger-outline"` | ⚠️ Warning | Pre-existing; вне scope Phase 5; требует исправления в Phase 6 |
 
 **Блокеров нет.** Обе проблемы — pre-existing, задокументированы в SUMMARY-02 как "Out of Scope".
 
