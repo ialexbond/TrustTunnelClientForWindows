@@ -12,7 +12,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 
 const meta = {
   title: "Foundations/Typography",
-  tags: ["autodocs"],
+  // autodocs removed — Typography.mdx (linked via <Meta of={}>) provides the Docs tab.
   parameters: {
     layout: "padded",
     docs: {
