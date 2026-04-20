@@ -104,7 +104,8 @@ v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, д�
 - **Phase 12-12.5:** ConfirmDialogProvider+useConfirm imperative API, Skeleton+Activity Log foundation, useServerState hook splitting
 - **Phase 13:** OverviewSection 10 live-карточек, drill-down, ServerPanelSkeleton, IP/TLS/ping (G-01..G-08 post-UAT fixes shipped)
 - **Phase 14:** Users tab редизайн — 2 inline icons (FileText+Trash2) вместо OverflowMenu+radio, UserConfigModal compound (QR+deeplink+download), ActionInput/PasswordInput.clearable, OverflowMenu auto-flip
-- **Phase 15-18 (planned):** TOML-парсер, SSH-ключ, Fail2Ban, каскадная индикация обновлений, welcome+rollback
+- **Phase 14.1:** Advanced user config — UserModal compound (2 секции: credentials + deeplink TLV), CIDRPicker primitive, PasswordRotationPrompt, CertificateFingerprintCard (endpoint probe через `tokio-rustls`), anti-DPI per-user prefix (rules.toml), 8 plans + 20+ post-ship revisions (M-01..M-11 polish, WR-01..WR-06 regressions, CR-01..CR-05 security). Retrospective: `memory/project_phase14.1_advanced_config.md`. UAT закрыт как `deferred-stale` — revision commits не отражены в SUMMARY.md.
+- **Phase 15-18 (planned):** Phase 15 CONTEXT.md готов (TOML-парсер Advanced Accordion + Quick Settings + двухуровневое сохранение); дальше SSH-ключ, Fail2Ban, каскадная индикация обновлений, welcome+rollback
 
 **Layout:** bottom tab bar (5 pill-кнопок, 64px), кастомный TitleBar 32px, окно 900×1000, minWidth 800, **maxWidth 1000** (per `tauri.conf.json`)
 
@@ -136,6 +137,7 @@ v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, д�
 - **Seamless design:** body has `bg-primary`, all components transparent — no layered backgrounds
 - **Window:** custom decorations (`decorations: false`), `data-tauri-drag-region` on TitleBar
 - **Sidecar:** C++ binary `trusttunnel_client-x86_64-pc-windows-msvc.exe` (declared в `tauri.conf.json` как `externalBin: ["trusttunnel_client"]`) + DLLs (`wintun.dll`, `vcruntime140*.dll`) — лежат в `gui-app/src-tauri/`, не в `sidecar/`. В worktree их нужно скопировать перед `cargo check` / build
+- **SSH channel gate:** `ssh/mod.rs:CHANNEL_OPEN_GATE = LazyLock<Semaphore::new(5)>` — global limiter на parallel `channel_open_session()`. Panel mount fires ~10 команд на shared handle; без gate упирались в sshd default `MaxSessions=10` → `SSH_MSG_CHANNEL_OPEN_FAILURE reason=ConnectFailed`. Retry поверх gate: 6 attempts × exp-backoff 50/100/200/400/800ms + jitter. НЕ повышать permit выше 6-7 (нужен headroom для keepalive + ad-hoc kill-sidecar команд). Полный контекст: `memory/project_phase14.1_advanced_config.md` §Infrastructure fixes.
 
 ## Critical Rules
 
@@ -144,6 +146,7 @@ v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, д�
 - **Version bumps:** update version in: `gui-app/package.json`, `gui-app/src-tauri/Cargo.toml`, `gui-app/src-tauri/tauri.conf.json`, `gui-light/package.json`, `gui-light/src-tauri/Cargo.toml`, `gui-light/src-tauri/tauri.conf.json`
 - **NSIS installers:** after changes, build and copy to Desktop
 - **Memory docs:** `memory/` directory contains design documentation (gitignored) — keep up to date after UI changes
+- **Tray menu = native only** (2026-04-20 lesson) — custom webview tray-menu window (rounded + transparent) заблокирован Tauri issue #13859: DWM отключает composition для dark-themed transparent окон на Windows 11 → чёрный прямоугольник вокруг card, rounded corners исчезают. Canonical путь = `.menu(&tray_menu)` + native OS context menu + `on_menu_event` handler. Left-click toggle main window — custom (`on_tray_icon_event` Left: `is_visible()` → hide/show), но НЕ через второй webview. `tray-menu.tsx` + `tray-menu.html` оставлены как dead reference, НЕ wired в `tauri.conf.json`.
 
 ## Security Rules
 
