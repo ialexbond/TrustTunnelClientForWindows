@@ -8,8 +8,9 @@ export const badgeVariants = cva(
     "inline-flex items-center gap-1.5",
     "px-2 py-0.5",
     "rounded-[var(--radius-full)]",
-    "text-xs",
-    "font-medium",
+    // Semantic composite: text-caption = 12px / medium / 1.35 / sans.
+    // Badge-specific transform + tracking applied on top.
+    "text-caption",
     "uppercase tracking-[var(--tracking-wide)]",
   ].join(" "),
   {
@@ -47,8 +48,9 @@ export const badgeVariants = cva(
         ].join(" "),
       },
       size: {
-        sm: "text-xs px-1.5 py-0",
-        md: "text-xs px-2 py-0.5",
+        // Size variants control padding only — font-size/weight/family come from .text-caption base.
+        sm: "px-1.5 py-0",
+        md: "px-2 py-0.5",
       },
     },
     defaultVariants: {
