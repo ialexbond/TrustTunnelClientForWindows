@@ -4,40 +4,381 @@ import { Meta, Typeset } from '@storybook/addon-docs/blocks';
 
 # Typography
 
-Font stack: Geist Sans, Segoe UI, system-ui, -apple-system, sans-serif.
-14px body is standard for compact desktop utility apps (Linear, Raycast).
-Geist — шрифт от Vercel с полной поддержкой кириллицы. Monospace: Geist Mono.
+Типографическая система TrustTunnel (Pro & Light).
 
-## Scale
+**Три шрифта, три роли.** Все поддерживают кириллицу.
+
+| Шрифт | Tailwind | Применение |
+|---|---|---|
+| **Geist Sans** | `font-sans` (default) | Весь UI: тексты, кнопки, заголовки, формы. |
+| **Geist Mono** | `font-mono` | Только technical data: IP-адреса, порты, SHA-fingerprint, hex, deeplink TLV, лог-строки, timestamp в логах. |
+| **Outfit** | `font-display` | Исключительно wordmark «TrustTunnel» (AboutPanel, TitleBar). Нигде больше. |
+
+**Правило labels vs values:**
+> Подпись (label) — в sans. Техническое значение (value) — в mono.
+> «Ваш IP: 192.168.1.1» — «Ваш IP» sans, `192.168.1.1` mono.
+
+---
+
+## Шкала — UI (7 шагов)
+
+Шаг 2px, всё чётное, минимум 12px.
 
 <Typeset
-  fontSizes={[11, 12, 14, 16]}
+  fontSizes={[12, 14, 16, 18, 20, 22, 24]}
   fontWeight={400}
   sampleText="Быстрая коричневая лиса / The quick brown fox"
   fontFamily='"Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif'
 />
 
-## Weight 600 (Semibold)
+## Шкала — Display (Geist Sans bold)
+
+Два display-размера для wizard hero и splash / critical states. Шрифт — Geist Sans bold.
 
 <Typeset
-  fontSizes={[11, 12, 14, 16]}
+  fontSizes={[32, 40]}
+  fontWeight={700}
+  sampleText="Добро пожаловать / Welcome"
+  fontFamily='"Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif'
+/>
+
+## Wordmark — Outfit 48px
+
+Отдельный display-face. Применяется **только** для wordmark «TrustTunnel» (AboutPanel, TitleBar). В обычном UI Outfit не используется.
+
+<Typeset
+  fontSizes={[48]}
+  fontWeight={700}
+  sampleText="TrustTunnel"
+  fontFamily='"Outfit", "Geist Sans", system-ui, -apple-system, sans-serif'
+/>
+
+## Размеры — reference
+
+| Token | Size | Tailwind | Role |
+|---|---|---|---|
+| `--font-size-caption` | 12px | `text-xs` | Meta, version, timestamp, mini-labels |
+| `--font-size-body-sm` | 14px | `text-sm` | Helper text, form hints, secondary body |
+| `--font-size-body` | **16px** | `text-base` | Default body: параграфы, input text, descriptions |
+| `--font-size-body-lg` | 18px | `text-lg` | Subtitle, emphasis body |
+| `--font-size-title-sm` | 20px | `text-xl` | Card titles |
+| `--font-size-title` | 22px | *(composite only)* | Section titles, modal headers |
+| `--font-size-title-lg` | 24px | `text-2xl` | Page / tab headings |
+| `--font-size-display-sm` | 32px | `text-3xl` | Wizard hero |
+| `--font-size-display` | 40px | `text-4xl` | Splash, critical states |
+| `--font-size-display-lg` | 48px | `text-5xl` | AboutPanel wordmark (Outfit) |
+
+---
+
+## Веса
+
+Четыре веса. Regular и Medium — для обычного текста, Semibold — для заголовков, Bold — для display.
+
+**Regular (400)** — body, paragraph, description:
+
+<Typeset
+  fontSizes={[16]}
+  fontWeight={400}
+  sampleText="Быстрая коричневая лиса / The quick brown fox"
+  fontFamily='"Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif'
+/>
+
+**Medium (500)** — buttons, subtitle, active tab, chip labels:
+
+<Typeset
+  fontSizes={[16]}
+  fontWeight={500}
+  sampleText="Быстрая коричневая лиса / The quick brown fox"
+  fontFamily='"Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif'
+/>
+
+**Semibold (600)** — headings, section titles, card titles:
+
+<Typeset
+  fontSizes={[16]}
   fontWeight={600}
   sampleText="Быстрая коричневая лиса / The quick brown fox"
   fontFamily='"Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif'
 />
 
-## Token Reference
+**Bold (700)** — display only (wordmark, hero, critical):
 
-| Role | CSS Var | Size | Weight | Line Height | Tracking |
-|------|---------|------|--------|-------------|----------|
-| xs (caption) | `--font-size-xs` | 11px | 400 | 1.4 | `--tracking-wide` (0.02em) |
-| sm (helper) | `--font-size-sm` | 12px | 400 | 1.5 | `--tracking-normal` (0) |
-| md (body) | `--font-size-md` | 14px | 400 | 1.5 | `--tracking-normal` (0) |
-| lg (heading) | `--font-size-lg` | 16px | 600 | 1.3 | `--tracking-tight` (-0.01em) |
+<Typeset
+  fontSizes={[16]}
+  fontWeight={700}
+  sampleText="Быстрая коричневая лиса / The quick brown fox"
+  fontFamily='"Geist Sans", "Segoe UI", system-ui, -apple-system, sans-serif'
+/>
 
-## Design Notes
+### Веса — reference
 
-- Only 2 weights: 400 (normal) and 600 (semibold). No medium or bold.
-- Scale steps: 11 -> 12 -> 14 -> 16. Each step is perceptually distinct (min 2px gap).
-- 11px captions use wider tracking (0.02em) to prevent character collapse at small size.
-- Headings use tighter tracking (-0.01em) for density.
+| Token | Value | Tailwind | Where |
+|---|---|---|---|
+| `--font-weight-regular` | 400 | `font-normal` / `font-regular` | Body, paragraph, description |
+| `--font-weight-medium` | 500 | `font-medium` | Buttons, subtitle, chips, active tab |
+| `--font-weight-semibold` | 600 | `font-semibold` | Headings, section / card titles |
+| `--font-weight-bold` | 700 | `font-bold` | Display, wordmark, hero, critical |
+
+---
+
+## Line heights
+
+| Token | Ratio | Tailwind | Where |
+|---|---|---|---|
+| `--line-height-tight` | 1.2 | `leading-tight` | Display 32px+ |
+| `--line-height-snug` | 1.35 | `leading-snug` | Titles 18–24px |
+| `--line-height-normal` | 1.5 | `leading-normal` | Body 14–16px (default) |
+| `--line-height-relaxed` | 1.625 | `leading-relaxed` | Long-form текст (changelog, release notes, описания) |
+
+## Letter spacing
+
+| Token | Value | Tailwind | Where |
+|---|---|---|---|
+| `--tracking-tight` | -0.01em | `tracking-tight` | Display 32px+ (уплотнение крупного текста) |
+| `--tracking-normal` | 0 | `tracking-normal` | Default body |
+| `--tracking-wide` | 0.02em | `tracking-wide` | Buttons, UPPERCASE badges, keyboard shortcuts |
+
+---
+
+## Semantic classes — ЭТО главный инструмент
+
+14 композитных классов. Каждый устанавливает **family + size + weight + line-height** (+ опционально tracking) одновременно.
+
+**Используй их напрямую.** Не комбинируй `text-lg font-semibold leading-snug` вручную — для этого есть `text-title`.
+
+| Class | Recipe | Use for |
+|---|---|---|
+| `.text-caption` | 12 / medium / 1.35 / sans | Version, timestamp, count, meta-labels |
+| `.text-body-sm` | 14 / regular / 1.5 / sans | Helper under inputs, secondary text |
+| `.text-body` | 16 / regular / 1.5 / sans | **Default body** — параграф, input text, description |
+| `.text-body-lg` | 18 / regular / 1.5 / sans | Emphasis body |
+| `.text-subtitle` | 18 / medium / 1.35 / sans | Subtitle, emphasis, accordion trigger |
+| `.text-button` | 14 / medium / 1 / sans / tracking-wide | Button labels |
+| `.text-title-sm` | 20 / semibold / 1.35 / sans | Card titles |
+| `.text-title` | 22 / semibold / 1.35 / sans | Section titles, modal headers |
+| `.text-title-lg` | 24 / semibold / 1.35 / sans | Page / tab headings |
+| `.text-display-sm` | 32 / bold / 1.2 / sans / tracking-tight | Wizard hero, welcome |
+| `.text-display` | 40 / bold / 1.2 / sans / tracking-tight | Splash, critical error state |
+| `.text-wordmark` | 48 / bold / 1.1 / **Outfit** / tracking-tight | Wordmark «TrustTunnel» only |
+| `.text-mono` | 14 / regular / 1.5 / **mono** | IP, SHA256, hex, log line, TLV payload |
+| `.text-mono-sm` | 12 / regular / 1.5 / **mono** | Log timestamps, caption-level tech data |
+
+---
+
+## Component → class mapping
+
+Эта таблица — **единый источник истины** о том, какой класс применять в каком компоненте. При вайб-кодинге новой фичи — свериться здесь.
+
+Каждая секция содержит **ссылки на Storybook stories** — клик открывает компонент для визуального сравнения с описанием.
+
+### Формы и ввод
+
+**Storybook:** [Input](?path=/docs/shared-ui-input--docs) · [FormField](?path=/docs/shared-ui-formfield--docs) · [Select](?path=/docs/shared-ui-select--docs) · [Toggle](?path=/docs/shared-ui-toggle--docs) · [PasswordInput](?path=/docs/shared-ui-passwordinput--docs) · [NumberInput](?path=/docs/shared-ui-numberinput--docs) · [ActionInput](?path=/docs/shared-ui-actioninput--docs) · [ActionPasswordInput](?path=/docs/shared-ui-actionpasswordinput--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| Input field text | `text-body` | 16px |
+| Input label (сверху) | `text-body-sm` + `font-medium` | или `text-subtitle` для emphasis |
+| Input placeholder | `text-body` | color `--color-text-muted` |
+| Input helper text (снизу) | `text-caption` | `--color-text-secondary` |
+| Input error message | `text-caption` | color `--color-danger-500` |
+| FormField label | `text-body-sm` + `font-medium` | |
+| Select trigger | `text-body` | |
+| Select item | `text-body` | |
+| Select item hint (description) | `text-caption` | |
+| Checkbox / Radio label | `text-body` | |
+| Toggle label | `text-body-sm` | |
+
+### Кнопки и action-элементы
+
+**Storybook:** [Button](?path=/docs/shared-ui-button--docs) · [IconButton](?path=/docs/shared-ui-iconbutton--docs) · [OverflowMenu](?path=/docs/shared-ui-overflowmenu--docs) · [TabNavigation](?path=/docs/components-layout-tabnavigation--docs) · [ServerTabs](?path=/docs/components-servertabs--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| Button (primary/secondary/danger) | `text-button` | 14 / medium / tracking-wide |
+| IconButton | — | только icon, без text |
+| Link (inline text link) | inherit | underline + accent color |
+| Tab label (active/inactive) | `text-body-sm` + `font-medium` | |
+| Chip / Tag | `text-caption` | |
+
+### Карточки и секции
+
+**Storybook:** [Card](?path=/docs/shared-ui-card--docs) · [Section](?path=/docs/shared-ui-section--docs) · [Accordion](?path=/docs/shared-ui-accordion--docs) · [ServerTabs](?path=/docs/components-servertabs--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| Card title | `text-title-sm` | 20 / semibold |
+| Card body | `text-body` | 16 / regular |
+| Card meta (под title) | `text-caption` | muted color |
+| Section title | `text-title` | 22 / semibold |
+| Section description | `text-body-sm` | secondary color |
+| Accordion trigger (header) | `text-subtitle` | 18 / medium |
+| Accordion content | `text-body` | 16 / regular |
+
+### Навигация
+
+**Storybook:** [TabNavigation](?path=/docs/components-layout-tabnavigation--docs) · [ServerTabs](?path=/docs/components-servertabs--docs) · [TitleBar](?path=/docs/components-layout-titlebar--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| Page / Tab heading | `text-title-lg` | 24 / semibold |
+| Breadcrumb | `text-body-sm` | |
+| Sidebar item | `text-body-sm` + `font-medium` | |
+
+### Бейджи и статусы
+
+**Storybook:** [Badge](?path=/docs/shared-ui-badge--docs) · [StatusBadge](?path=/docs/shared-ui-statusbadge--docs) · [StatusIndicator](?path=/docs/shared-ui-statusindicator--docs) · [ProgressBar](?path=/docs/shared-ui-progressbar--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| Badge (success/warning/danger/neutral) | `text-caption` | 12 / medium |
+| StatusBadge dot + label | `text-caption` | |
+| ProgressBar label | `text-caption` | |
+
+### Данные (tables / stats / overview)
+
+**Storybook:** [StatCard](?path=/docs/shared-ui-statcard--docs) · [StatCard Overview](?path=/story/shared-ui-statcard-overview--control-panel) · [UsersSection](?path=/docs/components-server-userssection--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| StatCard label (сверху) | `text-caption` | muted |
+| StatCard numeric value | `text-title-sm` + `font-mono` | 20 / mono — цифры выравниваются |
+| StatCard trend (под value) | `text-caption` | success/danger color |
+| Overview table row — label | `text-body-sm` | sans |
+| Overview table row — value | `text-mono` | если технические данные |
+| ActivityLog row | `text-mono` | 14 / mono |
+| ActivityLog timestamp | `text-mono-sm` | 12 / mono / muted |
+| ConnectionLog entry | `text-mono` | |
+
+### Модалки и диалоги
+
+**Storybook:** [Modal](?path=/docs/shared-ui-modal--docs) · [ConfirmDialog](?path=/docs/shared-ui-confirmdialog--docs) · [SnackBar](?path=/docs/shared-ui-snackbar--docs) · [UserModal](?path=/docs/components-server-usermodal--docs) · [UserConfigModal](?path=/docs/components-server-userconfigmodal--docs)
+
+| Element | Class | Notes |
+|---|---|---|
+| Modal title | `text-title` | 22 / semibold |
+| Modal body paragraph | `text-body` | |
+| Modal action buttons | `text-button` | |
+| Tooltip content | `text-caption` | sans или mono для tech data |
+| Snackbar / Toast message | `text-body-sm` | |
+| ConfirmDialog title | `text-title` | |
+| ConfirmDialog body | `text-body` | |
+
+### Technical data displays
+
+**Storybook примеры:** внутри [SshConnectForm](?path=/docs/components-server-sshconnectform--docs), [UserModal](?path=/docs/components-server-usermodal--docs), [StatCard Overview](?path=/story/shared-ui-statcard-overview--control-panel) (IP/численные stats), [UsersSection](?path=/docs/components-server-userssection--docs) (generated usernames)
+
+| Element | Class | Notes |
+|---|---|---|
+| IP address | `text-mono` | |
+| Port number | `text-mono` | |
+| SHA256 fingerprint | `text-mono` | often `text-mono-sm` для compact |
+| Deeplink TLV hex | `text-mono` | |
+| SSH host identifier | `text-mono` | |
+| Username (generated) | `text-mono` | |
+| Password (displayed) | `text-mono` | |
+| File path | `text-mono-sm` | |
+
+### Wizard
+
+**Storybook:** [SshConnectForm](?path=/docs/components-server-sshconnectform--docs) · [ControlPanelPage](?path=/docs/components-controlpanelpage--docs) (entry point)
+
+| Element | Class | Notes |
+|---|---|---|
+| Wizard hero heading | `text-display-sm` | 32 / bold |
+| Wizard step title | `text-title` | 22 / semibold |
+| Wizard step description | `text-body` | |
+| Wizard error step heading | `text-title-lg` | danger color |
+| Wizard success indicator | `text-display-sm` | |
+
+### AboutPanel (редизайн в отдельной сессии)
+
+*Storybook story пока не создана (AboutPanel deferred). Будет добавлена после редизайна.*
+
+| Element | Class | Notes |
+|---|---|---|
+| Wordmark «TrustTunnel» | `text-wordmark` | Outfit, 48px |
+| Version «v2.1.0» | `text-mono-sm` | |
+| Description | `text-body` | |
+| © copyright | `text-caption` | muted |
+
+---
+
+## Decision tree — если компонент не в таблице выше
+
+1. **Meta, version, timestamp, count?** → `text-caption`
+2. **Helper text, secondary, short hint?** → `text-body-sm`
+3. **Основной параграф, input text, label?** → `text-body` (default)
+4. **Emphasis body, subtitle?** → `text-body-lg` / `text-subtitle`
+5. **Кнопка?** → `text-button`
+6. **Card title?** → `text-title-sm`
+7. **Section / modal title?** → `text-title`
+8. **Page / tab heading?** → `text-title-lg`
+9. **Wizard hero?** → `text-display-sm`
+10. **Splash / critical state?** → `text-display`
+11. **Wordmark «TrustTunnel»?** → `text-wordmark`
+12. **Technical data (IP / SHA / hex / log)?** → `text-mono` (или `text-mono-sm` для compact)
+
+---
+
+## Rules
+
+### Minimums
+
+- **Body text:** минимум 12px. Всё что ниже — нечитаемо для кириллицы на Win11 HiDPI.
+- **Display:** минимум 32px. Всё что 24 и ниже — это `text-title-lg`, не display.
+
+### Maximums
+
+- **Regular body:** максимум 18px (`text-body-lg`). Выше — это уже title или display.
+- **Inline text:** максимум `text-title-lg` (24). Display — для изолированных hero-блоков, не inline.
+
+### Font usage
+
+- **Sans** — UI text. Default, ничего не надо писать.
+- **Mono** — **только** technical data (IP, hex, SHA, log lines, numeric tabular data).
+- **Display (Outfit)** — **только** wordmark «TrustTunnel». Нигде больше.
+
+### Weight usage
+
+- **Regular (400):** body, paragraph, description — 90% контента.
+- **Medium (500):** buttons, subtitle, active state, labels в формах.
+- **Semibold (600):** headings (title-sm, title, title-lg).
+- **Bold (700):** display-only. Обычный текст в bold не пишем.
+
+### Letter spacing
+
+- **tracking-tight:** автоматически применяется в `.text-display-*` и `.text-wordmark`. Руками не надо.
+- **tracking-wide:** автоматически в `.text-button`. Плюс — UPPERCASE badges / keyboard shortcuts (например `<kbd>Ctrl+C</kbd>`).
+- **tracking-normal:** default для всего остального.
+
+---
+
+## Don'ts
+
+- ❌ **`font-size < 12px`** — нечитаемо для кириллицы.
+- ❌ **`font-mono` для body-текста** — mono предназначен для technical data.
+- ❌ **Outfit** для обычного UI — только wordmark.
+- ❌ **`font-[var(--font-weight-semibold)]`** — старый arbitrary-value pattern. Используй `font-semibold`.
+- ❌ **`text-[var(--font-size-*)]`** — Tailwind генерирует `color:` вместо `font-size:`. Используй обычные классы или semantic (`text-body` etc.).
+- ❌ **`style={{ fontSize: "var(--font-size-*)" }}`** — inline style. Используй Tailwind class.
+- ❌ **Ручная комбинация `text-lg font-semibold leading-snug`** — есть semantic class (`text-subtitle`, `text-title`).
+- ❌ **Bold (700) для обычного текста** — bold only для display/hero.
+
+---
+
+## Cyrillic
+
+- Русский визуально шире английского на ~15%. Длинные слова («Переподключиться», «Синхронизация», «Деинсталлировать») проверяй на overflow.
+- **Минимум размера для RU-текста:** 12px. Ниже кириллица теряет читаемость.
+- Geist Sans, Geist Mono, Outfit — все три с полной поддержкой кириллицы.
+- При локализации: если англ текст помещается на 14px, для русского — тот же размер или на шаг выше (14 → 16).
+
+---
+
+## Sources
+
+- **Tokens:** `gui-pro/src/shared/styles/tokens.css`
+- **Tailwind:** `gui-pro/tailwind.config.js`
+- **cn merge helper:** `gui-pro/src/shared/lib/cn.ts`
+- **Design system index:** [Foundations → Colors / Spacing / Shadows](?path=/docs/foundations-colors--docs)
