@@ -27,19 +27,23 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Phase: 14.2 — Typography Foundation
 Plan: Executing directly from `.planning/typography-refactor.md` (Path A — vibe-friendly)
-Status: In progress — Plans 14.2-01..05 shipped, next 14.2-06 (Storybook stories)
+Status: **SHIPPED** — all 7 plans completed 2026-04-20. Phase 14.2 = complete.
 Last activity: 2026-04-20
 
-Progress: [▰▰▰▰▰▱▱] plans 5/7
+Progress: [▰▰▰▰▰▰▰] plans 7/7 ✅
 
 **Plan status:**
 - ✅ 14.2-01 Canonical tokens — `485bc008`
-- ✅ 14.2-02 Tailwind config remap + docs — `85947053` + `c7904b02` + `d8f8ed12`
+- ✅ 14.2-02 Tailwind config + docs — `85947053` + `c7904b02` + `d8f8ed12`
 - ✅ 14.2-03 Code migration — `032b744a`
 - ✅ 14.2-04 Geist Mono application — `b080b32b` + `49c6d318` (unit fix)
-- ✅ 14.2-05 Documentation final polish — CLAUDE.md rules v2 + memory docs synced — pending commit
-- ⏳ 14.2-06 Storybook stories + MDX — Typography.mdx done; Typography.stories.tsx pending
-- ⏳ 14.2-07 Final verification
+- ✅ 14.2-05 Documentation polish — `e53db1bc`
+- ✅ 14.2-06 Typography.stories.tsx — `a106a11b`
+- ✅ 14.2-07 Final verification — pending commit (SUMMARY.md + cn.ts comment cleanup)
+
+**SUMMARY:** `.planning/phases/14.2-typography-foundation/14.2-SUMMARY.md`
+
+**Ready for Phase 15** — Config tab (Quick Settings + TOML Advanced Accordion) with normalized typography foundation.
 
 **Prior phase (14.1):** Plans 8/8 shipped. UAT closed as deferred-stale per user 2026-04-20 (20+ post-ship revision commits not in SUMMARY.md made test list outdated; Phase 14.1 work is de-facto complete in production).
 
