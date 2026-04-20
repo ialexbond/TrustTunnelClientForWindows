@@ -141,7 +141,7 @@ export function ServerStatusSection({ state }: Props) {
             <span className="text-sm font-medium" style={{ color: "var(--color-warning-500)" }}>
               {t("server.status.rebooting")}
             </span>
-            <span className="text-xs ml-2" style={{ color: "var(--color-text-muted)" }}>
+            <span className="text-xs ml-2 font-mono tabular-nums" style={{ color: "var(--color-text-muted)" }}>
               {rebootCountdown > 0 ? `${rebootCountdown}s` : ""}
             </span>
           </div>
@@ -160,7 +160,7 @@ export function ServerStatusSection({ state }: Props) {
             <span className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
               {serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
             </span>
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{state.host}</span>
+            <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>{state.host}</span>
             <Tooltip text={t("server.actions.refresh_status")}>
               <button
                 onClick={handleSoftRefresh}
@@ -172,7 +172,7 @@ export function ServerStatusSection({ state }: Props) {
               </button>
             </Tooltip>
             {ping !== null && ping > 0 && (
-              <Badge variant={pingVariant as "success" | "warning" | "danger" | "neutral"} size="sm">
+              <Badge variant={pingVariant as "success" | "warning" | "danger" | "neutral"} size="sm" className="font-mono">
                 <Activity className="w-2.5 h-2.5" />
                 {ping}ms
               </Badge>

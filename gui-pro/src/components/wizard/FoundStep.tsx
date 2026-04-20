@@ -42,7 +42,7 @@ function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void })
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
             >
-              <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{u}</span>
+              <span className="text-sm font-mono" style={{ color: "var(--color-text-primary)" }}>{u}</span>
               <Button
                 variant="primary"
                 size="sm"
@@ -260,7 +260,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                         >
                           {isSelected && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />}
                         </div>
-                        <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{u}</span>
+                        <span className="text-xs font-medium font-mono" style={{ color: "var(--color-text-primary)" }}>{u}</span>
                       </div>
                       <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                         <IconButton aria-label={t("server.users.qr_tooltip")} tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
