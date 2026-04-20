@@ -463,7 +463,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
           {ping !== null && ping > 0 ? (
             <div className="flex items-baseline justify-center gap-1">
               <span className="font-mono" style={{ ...bigNum, color: pingColor }}>{ping}</span>
-              <span className="text-sm" style={muted}>ms</span>
+              <span className="text-sm font-mono" style={muted}>ms</span>
             </div>
           ) : (
             <>
@@ -512,7 +512,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
               <ArrowDown className="w-6 h-6 shrink-0" style={{ color: "var(--color-success-400)" }} />
               <div className="flex items-baseline gap-1">
                 <span className="font-mono" style={bigNum}>{Math.round(speed.download_mbps)}</span>
-                <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
+                <span className="text-sm whitespace-nowrap font-mono" style={muted}>{t("server.overview.speedUnit")}</span>
               </div>
             </div>
             <div className="h-7 shrink-0" style={{ width: 1, backgroundColor: "var(--color-border)" }} />
@@ -520,7 +520,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
               <ArrowUp className="w-6 h-6 shrink-0" style={{ color: "var(--color-warning-500)" }} />
               <div className="flex items-baseline gap-1">
                 <span className="font-mono" style={bigNum}>{Math.round(speed.upload_mbps)}</span>
-                <span className="text-sm whitespace-nowrap" style={muted}>{t("server.overview.speedUnit")}</span>
+                <span className="text-sm whitespace-nowrap font-mono" style={muted}>{t("server.overview.speedUnit")}</span>
               </div>
             </div>
           </div>

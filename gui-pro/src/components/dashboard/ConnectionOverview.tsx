@@ -78,7 +78,7 @@ export function ConnectionOverview({
           {isConnected && currentPing !== null && (
             <div className="flex items-center gap-1 text-xs" style={{ color: pingColor }}>
               <Activity className="w-3.5 h-3.5" />
-              <span>{currentPing < 0 ? "—" : `${currentPing} ms`}</span>
+              <span className="font-mono">{currentPing < 0 ? "—" : `${currentPing} ms`}</span>
             </div>
           )}
 
