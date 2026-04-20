@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 
 export const statusBadgeVariants = cva(
-  "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-full)] uppercase font-medium tracking-[var(--tracking-wide)]",
+  // Semantic composite: text-caption = 12px / medium / 1.35 / sans.
+  // Badge-specific transform + tracking applied on top.
+  "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-full)] uppercase text-caption tracking-[var(--tracking-wide)]",
   {
     variants: {
       variant: {
@@ -43,7 +45,7 @@ export function StatusBadge({ variant = "disconnected", label, className }: Stat
 
   return (
     <span
-      className={cn(statusBadgeVariants({ variant }), "text-xs", className)}
+      className={cn(statusBadgeVariants({ variant }), className)}
     >
       <span
         data-testid="status-dot"
