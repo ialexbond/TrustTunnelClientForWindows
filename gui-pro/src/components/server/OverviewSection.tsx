@@ -681,10 +681,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
             const bg = tone === null
               ? "var(--color-bg-elevated)"
               : tone === "ok"
-                ? "rgba(var(--color-status-connected-rgb, 16 185 129) / 0.08)"
+                ? "var(--color-status-connected-bg)"
                 : tone === "warning"
-                  ? "rgba(var(--color-status-warning-rgb, 234 179 8) / 0.08)"
-                  : "rgba(var(--color-status-error-rgb, 224 85 69) / 0.08)";
+                  ? "var(--color-status-connecting-bg)"
+                  : "var(--color-status-error-bg)";
             const color = tone === null
               ? "var(--color-text-muted)"
               : tone === "ok"
