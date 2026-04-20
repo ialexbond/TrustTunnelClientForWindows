@@ -362,7 +362,7 @@ export function CertificateFingerprintCard({
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <p className="text-xs font-[var(--font-weight-semibold)] text-[var(--color-text-secondary)]">
+                <p className="text-xs font-semibold text-[var(--color-text-secondary)]">
                   {t("server.users.cert_fingerprint")}
                 </p>
                 {/* M-03: inline copy-to-clipboard. 2-секундный success state

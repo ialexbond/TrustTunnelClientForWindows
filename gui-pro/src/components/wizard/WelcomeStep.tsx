@@ -56,7 +56,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
                 <Server className="w-4.5 h-4.5 text-white" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
                   {t('wizard.welcome.setup_new')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
@@ -81,7 +81,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
                 <Download className="w-4.5 h-4.5" style={{ color: "var(--color-accent-500)" }} />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
                   {t('wizard.welcome.fetch_config')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
@@ -106,7 +106,7 @@ export function WelcomeStep({ setWizardStep, handleSkip: _handleSkip, saveField,
                 <FileText className="w-4.5 h-4.5" style={{ color: "var(--color-text-secondary)" }} />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
                   {t('wizard.welcome.import_config')}
                 </h3>
                 <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-text-muted)" }}>

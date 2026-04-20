@@ -82,7 +82,7 @@ export function ProcessPickerModal({
         {/* Header */}
         <div className="px-5 pt-5 pb-3">
           <h3
-            className="text-sm font-[var(--font-weight-semibold)] mb-3"
+            className="text-sm font-semibold mb-3"
             style={{ color: "var(--color-text-primary)" }}
           >
             {t("routing.selectProcesses")}

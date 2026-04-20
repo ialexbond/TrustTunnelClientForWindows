@@ -29,7 +29,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
           "flex flex-col items-center gap-3",
           "text-white",
           "text-lg",
-          "font-[var(--font-weight-semibold)]",
+          "font-semibold",
         )}
         style={{
           textShadow: "0 1px 4px var(--color-glass-bg)",
@@ -51,7 +51,7 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         </svg>
         <span>{t("drop.overlay_text")}</span>
         <span
-          className="text-xs font-[var(--font-weight-normal)] opacity-70"
+          className="text-xs font-normal opacity-70"
         >
           {t("drop.overlay_hint")}
         </span>

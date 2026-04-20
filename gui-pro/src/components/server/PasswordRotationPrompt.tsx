@@ -97,7 +97,7 @@ export function PasswordRotationPrompt({
       data-testid="password-rotation-prompt"
     >
       {/* Title */}
-      <p className="text-sm font-[var(--font-weight-semibold)] text-[var(--color-text-primary)]">
+      <p className="text-sm font-semibold text-[var(--color-text-primary)]">
         {t("server.users.rotate_password_title")}
       </p>
 

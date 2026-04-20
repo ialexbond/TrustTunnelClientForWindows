@@ -127,7 +127,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
       >
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
             {t("wizard.import.title")}
           </h2>
           <button onClick={handleClose} className="p-1 rounded hover:bg-[var(--color-bg-hover)]">

@@ -36,17 +36,16 @@ export function EmptyState({
         </div>
       )}
       <p
-        className="font-[var(--font-weight-semibold)]"
+        className="font-semibold text-base"
         style={{
-          fontSize: "var(--font-size-md)",
           color: "var(--color-text-secondary)",
         }}
       >
         {resolvedHeading}
       </p>
       <p
+        className="text-sm"
         style={{
-          fontSize: "var(--font-size-sm)",
           color: "var(--color-text-muted)",
         }}
       >

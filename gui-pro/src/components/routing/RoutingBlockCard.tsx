@@ -88,7 +88,7 @@ export function RoutingBlockCard({
       >
         <Icon className="w-4 h-4 shrink-0" style={{ color: config.borderColor }} />
         <span
-          className="text-sm font-[var(--font-weight-semibold)] flex-1 text-left"
+          className="text-sm font-semibold flex-1 text-left"
           style={{ color: "var(--color-text-primary)" }}
         >
           {t(config.titleKey)}

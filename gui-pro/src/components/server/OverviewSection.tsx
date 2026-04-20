@@ -64,7 +64,7 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel 
     <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
       <div className="flex items-center gap-2 h-full whitespace-nowrap">
         <span className="flex items-center justify-center w-5 h-5 shrink-0" style={accent}>{icon}</span>
-        <span className="text-lg font-[var(--font-weight-semibold)]" style={primary}>{text}</span>
+        <span className="text-lg font-semibold" style={primary}>{text}</span>
       </div>
       <div className="flex items-center h-full shrink-0 ml-2">
         {onRefresh && (
@@ -593,7 +593,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
               <span>{getLocalizedCountry(geo.country_code, geo.country, i18n.language)}</span>
             </span>
           ) : (
-            <span className="text-xl font-[var(--font-weight-semibold)]" style={muted}>—</span>
+            <span className="text-xl font-semibold" style={muted}>—</span>
           )}
         </div>
       </Card>
@@ -694,7 +694,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                   : "var(--color-danger-500)";
             return (
               <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: bg }}>
-                <div className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{item.name}</div>
+                <div className="text-sm font-semibold" style={primary}>{item.name}</div>
                 <div className="text-sm" style={{ color }}>{item.label}</div>
               </div>
             );
@@ -726,7 +726,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm" style={muted}>CPU</span>
                   {stats ? (
-                    <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>{Math.round(stats.cpu_percent)}%</span>
+                    <span className="text-sm font-semibold" style={primary}>{Math.round(stats.cpu_percent)}%</span>
                   ) : (
                     <span className="text-sm" style={muted}>—</span>
                   )}
@@ -737,7 +737,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm" style={muted}>RAM</span>
                   {stats && stats.mem_total > 0 ? (
-                    <span className="text-sm font-[var(--font-weight-semibold)]" style={primary}>
+                    <span className="text-sm font-semibold" style={primary}>
                       {Math.round(stats.mem_used / 1024 / 1024)} / {Math.round(stats.mem_total / 1024 / 1024)} {t("server.overview.ramUnit")}
                     </span>
                   ) : (

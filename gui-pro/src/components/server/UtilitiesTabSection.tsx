@@ -136,7 +136,7 @@ export function UtilitiesTabSection({ state }: Props) {
             id: "danger-zone",
             title: (
               <span
-                className="flex items-center gap-2 text-sm font-[var(--font-weight-semibold)]"
+                className="flex items-center gap-2 text-sm font-semibold"
                 style={{ color: "var(--color-danger-500)" }}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />

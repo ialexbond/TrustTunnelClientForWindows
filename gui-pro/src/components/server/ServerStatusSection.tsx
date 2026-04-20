@@ -157,7 +157,7 @@ export function ServerStatusSection({ state }: Props) {
                 boxShadow: "none",
               }}
             />
-            <span className="text-base font-[var(--font-weight-semibold)]" style={{ color: "var(--color-text-primary)" }}>
+            <span className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
               {serverInfo.serviceActive ? t("server.status.running") : t("server.status.stopped")}
             </span>
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{state.host}</span>

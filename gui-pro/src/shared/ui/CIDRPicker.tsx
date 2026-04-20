@@ -286,7 +286,7 @@ export function CIDRPicker({
   return (
     <div className={cn(className)} aria-label={ariaLabel}>
       {label && (
-        <label className="block text-sm font-[var(--font-weight-semibold)] mb-1.5 text-[var(--color-text-secondary)]">
+        <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
           {label}
         </label>
       )}
