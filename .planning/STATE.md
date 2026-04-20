@@ -27,18 +27,18 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Phase: 14.2 — Typography Foundation
 Plan: Executing directly from `.planning/typography-refactor.md` (Path A — vibe-friendly)
-Status: In progress — Plans 14.2-01/02/03/04 shipped, next 14.2-05 (Documentation final polish)
+Status: In progress — Plans 14.2-01..05 shipped, next 14.2-06 (Storybook stories)
 Last activity: 2026-04-20
 
-Progress: [▰▰▰▰▱▱▱] plans 4/7
+Progress: [▰▰▰▰▰▱▱] plans 5/7
 
 **Plan status:**
 - ✅ 14.2-01 Canonical tokens — `485bc008`
 - ✅ 14.2-02 Tailwind config remap + docs — `85947053` + `c7904b02` + `d8f8ed12`
-- ✅ 14.2-03 Code migration (weights + inline fontSize + legacy aliases removed) — `032b744a`
-- ✅ 14.2-04 Geist Mono application (9 files, +58 usages) — pending commit
-- ⏳ 14.2-05 Documentation final polish — partially done through 14.2-02/03/04; remaining: CLAUDE.md rules update + final review
-- ⏳ 14.2-06 Storybook stories + MDX — partially done (Typography.mdx done; Typography.stories.tsx pending)
+- ✅ 14.2-03 Code migration — `032b744a`
+- ✅ 14.2-04 Geist Mono application — `b080b32b` + `49c6d318` (unit fix)
+- ✅ 14.2-05 Documentation final polish — CLAUDE.md rules v2 + memory docs synced — pending commit
+- ⏳ 14.2-06 Storybook stories + MDX — Typography.mdx done; Typography.stories.tsx pending
 - ⏳ 14.2-07 Final verification
 
 **Prior phase (14.1):** Plans 8/8 shipped. UAT closed as deferred-stale per user 2026-04-20 (20+ post-ship revision commits not in SUMMARY.md made test list outdated; Phase 14.1 work is de-facto complete in production).

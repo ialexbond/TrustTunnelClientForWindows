@@ -122,13 +122,15 @@ v3.0 shipped (Phases 1-6): полный редизайн → bottom tab bar, д�
 
 ## Design System Rules
 
-1. **All colors via CSS tokens** from `tokens.css` — never hardcode hex in components
-2. **Font weight:** only `font-[var(--font-weight-semibold)]` (600) and normal (400) — never use Tailwind's `font-semibold` directly
-3. **Font size in Tailwind:** use `text-xs/sm/base/lg` (mapped in tailwind.config.js) — never `text-[var(--font-size-*)]` (Tailwind generates `color:` instead of `font-size:`)
-4. **Buttons with colored backgrounds:** use `text-white`, not `text-[var(--color-text-inverse)]`
-5. **Accent color:** only for interactive elements (10% rule)
-6. **Class merging:** always use `cn()` from `shared/lib/cn.ts`
-7. **Components use CVA** (class-variance-authority) for variants: Button (primary/secondary/danger/danger-outline/ghost/icon), Badge (success/warning/danger/neutral/dot/default × sm/md), StatusBadge
+1. **All colors via CSS tokens** from `tokens.css` — never hardcode hex in components.
+2. **Typography (v2, Phase 14.2):** use Tailwind classes mapped to tokens — `font-normal/medium/semibold/bold`, `text-xs/sm/base/lg/xl/2xl/3xl/4xl/5xl`, `leading-tight/snug/normal/relaxed`, `tracking-tight/normal/wide`. **Prefer semantic composite classes** — `text-caption/body-sm/body/body-lg/subtitle/button/title-sm/title/title-lg/display-sm/display/wordmark/mono/mono-sm` (apply family+size+weight+leading atomically). **Weight rules:** `font-medium` для buttons/form-labels/tabs/chips, `font-semibold` для headings/titles, `font-bold` только display/wordmark. **NEVER** use legacy patterns: `font-[var(--font-weight-*)]`, `text-[var(--font-size-*)]`, inline `style={{ fontSize }}` — all removed in Plan 14.2-03.
+3. **Font families:** `font-sans` (default UI — Geist Sans), `font-mono` (technical data: IP, SHA, hex, logs, tabular numbers, **units accompanying values** like "42 ms", "124 Мбит/с" — full unit-value combo mono), `font-display` (wordmark «TrustTunnel» only — AboutPanel / TitleBar). Rule: **labels in sans, values in mono**. CPU/RAM/TLS/«Работает»/«Активен» — labels = sans.
+4. **Buttons with colored backgrounds:** use `text-white`, not `text-[var(--color-text-inverse)]` — inverse = black in dark theme.
+5. **Accent color:** only for interactive elements (10% rule).
+6. **Class merging:** always use `cn()` from `shared/lib/cn.ts` — extended with semantic typography composite classes in font-size group.
+7. **Components use CVA** (class-variance-authority) for variants: Button (primary/secondary/danger/danger-outline/ghost/icon), Badge (success/warning/danger/neutral/dot/default × sm/md), StatusBadge.
+
+**Typography reference** (Phase 14.2 canonical): [`memory/v3/design-system/typography.md`](memory/v3/design-system/typography.md) — decision tree + component → class mapping + rules + anti-patterns. Visual: Storybook → Foundations → Typography.
 
 ## Key Patterns
 
