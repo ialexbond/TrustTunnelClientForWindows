@@ -175,6 +175,24 @@ Plans:
 - [x] 14.1-06-PLAN.md — i18n keys (ru.json + en.json parity)
 - [x] 14.1-07-PLAN.md — Memory docs + ROADMAP/STATE finalize (version bump + NSIS skipped per user)
 
+### Phase 14.2: Typography Foundation — unified scale, 4 weights, semantic tokens, Geist Mono adoption
+
+**Goal:** Шрифтовая система приведена к best practices (Material Design 3, Apple HIG, Radix Themes, Vercel Geist): минимум 12px, чётная шкала 12/14/16/18/20/22/24 + display 32/40/48, 4 веса (400/500/600/700), line-height tokens, semantic composite `--text-*` tokens, Geist Mono применён в logs/fingerprint/IP/numeric-stats, docs полностью синхронизированы с реальностью.
+**Requirements**: TYPO-01, TYPO-02, TYPO-03, TYPO-04, TYPO-05, TYPO-06, TYPO-07
+**Depends on:** Phase 14.1 (shipped; UAT deferred-stale per user 2026-04-20)
+**Why before Phase 15:** Phase 15 вводит Config tab UI с form fields и advanced TOML editor — без исправленной шрифтовой системы UX деградирует (10px кириллица нечитаема, semantic tokens для новых компонентов отсутствуют).
+**Scope excludes:** AboutPanel редизайн (deferred на отдельную сессию), gui-light sync (отдельный micro-phase после Pro shipped).
+**Plans:** 7 plans
+
+Plans:
+- [ ] 14.2-01-PLAN.md — Canonical tokens (tokens.css) — 10 size-tokens, 4 weights, line-heights, family-tokens, 13 composite --text-*
+- [ ] 14.2-02-PLAN.md — Tailwind config remap + semantic-class plugin + cn.ts class-group updates
+- [ ] 14.2-03-PLAN.md — Code migration: 22 font-bold breakdown, 18 inline fontSize removals (AboutPanel deferred), 22 leading-relaxed review, pilot semantic-class adoption
+- [ ] 14.2-04-PLAN.md — Geist Mono application: ActivityLog, SHA256 fingerprint, IP:port, deeplink TLV, numeric stats
+- [ ] 14.2-05-PLAN.md — Docs rewrite: typography.md (new), design-system.md §Типографика, CLAUDE.md §Design System Rules
+- [ ] 14.2-06-PLAN.md — Storybook: Typography.stories.tsx (7 stories) + Typography.mdx docs page
+- [ ] 14.2-07-PLAN.md — Final verification: full test suite + cargo check + grep anti-patterns + visual audit
+
 ### Phase 15: Таб Конфигурация — Quick Settings, TOML-парсер Advanced Accordion, двухуровневое сохранение
 
 **Goal:** [To be planned]
