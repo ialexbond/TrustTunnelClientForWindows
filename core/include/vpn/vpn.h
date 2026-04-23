@@ -450,6 +450,12 @@ typedef enum {
  * List of VPN client settings
  */
 typedef struct {
+    /**
+     * A function, together with its argument, that gets called to notify the application of an event.
+     *
+     * NOTE: VPN library functions should NOT be called from this function directly: doing so may lead to a deadlock.
+     * Schedule a call from another thread instead.
+     */
     VpnHandler handler;
     /** The VPN mode (see `VpnMode`) */
     VpnMode mode;
@@ -667,7 +673,6 @@ bool vpn_process_client_packets(Vpn *vpn, VpnPackets packets);
 
 /**
  * Complete connect request according to action.
- * MAY be called from `VPN_EVENT_CONNECT_REQUEST` handler without a context switch.
  * @param vpn VPN client
  * @param info connection info
  */
