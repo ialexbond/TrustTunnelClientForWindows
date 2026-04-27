@@ -67,10 +67,15 @@ describe("AdvancedConfigAccordion", () => {
       expect(screen.getByTestId("section-trigger-metrics")).toBeVisible(),
     );
     fireEvent.click(screen.getByTestId("section-trigger-metrics"));
-    // Section modal opens with «Метрики» title
+    // Section modal opens — verify через section TOML slice testid + h2 title
     await waitFor(() =>
-      expect(screen.getByText("Метрики")).toBeInTheDocument(),
+      expect(screen.getByTestId("section-toml-slice")).toBeInTheDocument(),
     );
+    // VpnTomlSectionsModal renders «Метрики» as Modal title (h2). Section.metrics
+    // key = "Метрики", that uses .text-lg.font-semibold from Modal.
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Метрики" }),
+    ).toBeInTheDocument();
   });
 
   it("opens RawTomlModal when «Показать сырой TOML» clicked", async () => {
