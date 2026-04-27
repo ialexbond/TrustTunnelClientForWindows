@@ -70,7 +70,7 @@ pub async fn uninstall_server(
     emit_step(app, "uninstall", "progress", "Connecting to server...");
 
     let handle = params.connect_with_app(app.clone()).await
-        .map_err(|e| { emit_step(app, "uninstall", "error", &e); e })?;
+        .inspect_err(|e| { emit_step(app, "uninstall", "error", e); })?;
 
     // Determine sudo
     let sudo = detect_sudo(&handle, app).await;
@@ -201,7 +201,7 @@ async fn add_server_user_internal(
         .filter(|l| !l.is_empty())
         .collect();
 
-    if existing_users.iter().any(|u| *u == vpn_username.as_str()) {
+    if existing_users.contains(&vpn_username.as_str()) {
         let msg = format!("User '{}' already exists on server", vpn_username);
         emit_step(app, "check", "error", &msg);
         return Err(msg);

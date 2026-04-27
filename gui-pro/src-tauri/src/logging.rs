@@ -38,7 +38,7 @@ const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client
 pub fn sanitize(text: &str) -> String {
     let mut redacted = text
         .lines()
-        .map(|line| redact_assignment_line(line))
+        .map(redact_assignment_line)
         .collect::<Vec<_>>()
         .join("\n");
     if text.ends_with('\n') {

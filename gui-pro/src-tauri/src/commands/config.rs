@@ -194,7 +194,7 @@ pub fn watch_config_file(app: tauri::AppHandle, config_path: String) {
                         EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
                             // Only react to our specific file
                             let relevant = event.paths.iter().any(|p| {
-                                p.file_name().map_or(false, |n| n == watched_name)
+                                p.file_name().is_some_and(|n| n == watched_name)
                             });
                             if relevant {
                                 let exists = std::path::Path::new(&watched_path).is_file();
@@ -305,7 +305,7 @@ pub fn read_client_config(config_path: String) -> Result<serde_json::Value, Stri
 pub fn save_client_config(config_path: String, config: serde_json::Value) -> Result<(), String> {
     validate_app_path(&config_path)?;
     // Safety: refuse to save config that's missing [endpoint] — would break the sidecar
-    if config.get("endpoint").and_then(|e| e.as_object()).map_or(true, |e| e.is_empty()) {
+    if config.get("endpoint").and_then(|e| e.as_object()).is_none_or(|e| e.is_empty()) {
         return Err("Refusing to save: endpoint section is missing or empty".into());
     }
 
@@ -376,7 +376,7 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
         // Remove empty custom_sni — sidecar may interpret "" as "empty SNI"
         if let Some(endpoint) = doc.get_mut("endpoint").and_then(|e| e.as_table_mut()) {
             if let Some(sni) = endpoint.get("custom_sni") {
-                if sni.as_str().map_or(false, |s| s.is_empty()) {
+                if sni.as_str().is_some_and(|s| s.is_empty()) {
                     endpoint.remove("custom_sni");
                 }
             }

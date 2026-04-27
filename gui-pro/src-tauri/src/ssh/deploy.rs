@@ -551,7 +551,7 @@ pub async fn deploy_server(
     // ── Step 1: SSH Connect + Authenticate ──
     emit_step(app, "connect", "progress", "Connecting to server...");
     let handle = params.connect_with_app(app.clone()).await
-        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
+        .inspect_err(|e| { emit_step(app, "connect", "error", e); })?;
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");
 

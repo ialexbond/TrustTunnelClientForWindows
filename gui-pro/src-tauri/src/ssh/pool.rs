@@ -17,6 +17,12 @@ pub struct SshPool {
     inner: Arc<TokioMutex<Option<CachedSsh>>>,
 }
 
+impl Default for SshPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SshPool {
     pub fn new() -> Self {
         Self {

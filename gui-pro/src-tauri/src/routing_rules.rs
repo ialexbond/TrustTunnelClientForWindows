@@ -501,7 +501,7 @@ fn update_toml_config(
         if has_content {
             doc[*key] = value(path.to_string_lossy().replace('\\', "/"));
         } else {
-            doc.remove(*key);
+            doc.remove(key);
         }
     }
 
@@ -578,15 +578,15 @@ fn apply_hosts_block(domains: &[String]) -> Result<(), String> {
     }
 
     let mut block = String::new();
-    block.push_str("\n");
+    block.push('\n');
     block.push_str(HOSTS_MARKER_BEGIN);
-    block.push_str("\n");
+    block.push('\n');
     for domain in &domain_set {
         block.push_str(&format!("0.0.0.0 {domain}\n"));
         block.push_str(&format!("::0 {domain}\n"));
     }
     block.push_str(HOSTS_MARKER_END);
-    block.push_str("\n");
+    block.push('\n');
 
     let hosts = hosts_file_path();
     let existing = std::fs::read_to_string(&hosts)
