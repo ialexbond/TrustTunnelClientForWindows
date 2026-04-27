@@ -89,7 +89,12 @@ export function QuickSettingsSection({
   // _storybookState OR the parent (ServerSettingsSection) provides its own
   // shared hook instance, we shadow `liveState` for rendering. This keeps
   // a single bundle-load IPC roundtrip across Quick + Advanced + SNI editors.
-  const liveState = useVpnTomlState(sshParams);
+  //
+  // skipLoad=true когда есть external state — иначе internal hook делает
+  // parallel bundle load (Pitfall 4 violation на Configuration tab mount).
+  const hasExternalState =
+    _storybookState !== undefined || parentState !== undefined;
+  const liveState = useVpnTomlState(sshParams, { skipLoad: hasExternalState });
   const state: VpnTomlState = _storybookState ?? parentState ?? liveState;
 
   const errors = useMemo<FieldErrors>(
