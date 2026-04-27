@@ -131,17 +131,15 @@ pub fn copy_config_to_app_dir(source_path: String) -> Result<String, String> {
 pub fn auto_detect_config() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    for entry in std::fs::read_dir(dir).ok()? {
-        if let Ok(e) = entry {
-            let path = e.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("toml")
-                && path.file_name().and_then(|s| s.to_str()) != Some("Cargo.toml")
-            {
-                // Verify it looks like a trusttunnel config (has [endpoint] or [listener])
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if content.contains("[endpoint]") || content.contains("[listener") {
-                        return Some(path.to_string_lossy().to_string());
-                    }
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = e.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("toml")
+            && path.file_name().and_then(|s| s.to_str()) != Some("Cargo.toml")
+        {
+            // Verify it looks like a trusttunnel config (has [endpoint] or [listener])
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if content.contains("[endpoint]") || content.contains("[listener") {
+                    return Some(path.to_string_lossy().to_string());
                 }
             }
         }

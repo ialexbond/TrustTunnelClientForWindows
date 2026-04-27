@@ -1,8 +1,8 @@
-/// Register trusttunnel:// and tt:// URL protocol handlers in Windows registry.
-/// Uses HKEY_CURRENT_USER (no admin rights needed).
-///
-/// Strategy: register a small launcher script that writes the URL to a temp file,
-/// then the main app picks it up via file watcher. This avoids UAC for the protocol handler.
+//! Register trusttunnel:// and tt:// URL protocol handlers in Windows registry.
+//! Uses HKEY_CURRENT_USER (no admin rights needed).
+//!
+//! Strategy: register a small launcher script that writes the URL to a temp file,
+//! then the main app picks it up via file watcher. This avoids UAC for the protocol handler.
 
 #[cfg(windows)]
 use winreg::enums::HKEY_CURRENT_USER;

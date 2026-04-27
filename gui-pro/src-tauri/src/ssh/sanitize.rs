@@ -1,7 +1,7 @@
-/// Input validators for user-supplied values used in SSH commands.
-/// All values interpolated into shell commands on remote servers MUST be
-/// validated through these functions before use. This prevents command
-/// injection attacks (RCE).
+//! Input validators for user-supplied values used in SSH commands.
+//! All values interpolated into shell commands on remote servers MUST be
+//! validated through these functions before use. This prevents command
+//! injection attacks (RCE).
 
 /// VPN username: alphanumeric + limited punctuation, no shell metacharacters.
 pub fn validate_vpn_username(s: &str) -> Result<(), String> {

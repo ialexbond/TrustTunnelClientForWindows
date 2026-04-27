@@ -106,7 +106,7 @@ fn try_parse_ipv4(bytes: &[u8], pos: usize) -> Option<(usize, bool)> {
     let mut i = pos;
     let mut octets: [u16; 4] = [0; 4];
 
-    for oct_idx in 0..4 {
+    for (oct_idx, octet) in octets.iter_mut().enumerate() {
         // Read up to 3 digits
         let start = i;
         let mut val: u16 = 0;
@@ -119,7 +119,7 @@ fn try_parse_ipv4(bytes: &[u8], pos: usize) -> Option<(usize, bool)> {
         if digit_count == 0 {
             return None; // no digits at all
         }
-        octets[oct_idx] = val;
+        *octet = val;
 
         if oct_idx < 3 {
             // Must be followed by a dot

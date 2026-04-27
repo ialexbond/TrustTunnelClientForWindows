@@ -431,8 +431,8 @@ pub async fn ssh_connect(
 /// Global limiter на одновременные channel_open. sshd default MaxSessions=10 —
 /// без ограничения ~10 параллельных panel-mount команд упирались в этот
 /// лимит и получали `Error::ChannelOpenFailure(ConnectFailed)`, даже при
-/// успешной установленной SSH-сессии (например — `users.displayname_fetch_failed`
-/// + `overview.security.failed` через 400ms после panel.load.completed при
+/// успешной установленной SSH-сессии (например `users.displayname_fetch_failed`
+/// и `overview.security.failed` через 400ms после panel.load.completed при
 /// первой авторизации в новый сервер, см. D-bug-ssh-pool-stampede).
 ///
 /// Permit=5 оставляет 5 слотов в запас для keepalive heartbeats + ad-hoc

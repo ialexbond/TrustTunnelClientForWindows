@@ -310,10 +310,10 @@ pub fn load_ssh_credentials() -> Option<serde_json::Value> {
     if let Some(pwd_val) = obj.remove("password") {
         if let Some(pwd_str) = pwd_val.as_str() {
             if !pwd_str.is_empty() {
-                let decoded = if pwd_str.starts_with("b64:") {
+                let decoded = if let Some(b64_payload) = pwd_str.strip_prefix("b64:") {
                     // Decode base64-obfuscated password
                     base64::engine::general_purpose::STANDARD
-                        .decode(&pwd_str[4..])
+                        .decode(b64_payload)
                         .ok()
                         .and_then(|bytes| String::from_utf8(bytes).ok())
                         .unwrap_or_else(|| pwd_str.to_string())
