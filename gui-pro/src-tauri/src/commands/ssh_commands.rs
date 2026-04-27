@@ -1,3 +1,11 @@
+// SSH command functions intentionally take many flat parameters because
+// they mirror the frontend `invoke()` argument shape (host, port, user,
+// password, key_path, key_data + per-command extras). Bundling them into
+// a struct would force the React layer to construct it on every call site
+// without functional benefit, so we silence `too_many_arguments` for the
+// whole module.
+#![allow(clippy::too_many_arguments)]
+
 use crate::ssh;
 
 // ─── Macro to eliminate SshParams boilerplate (direct connect) ─────
