@@ -792,7 +792,12 @@
       "network_title": "Network",
       "advanced": "Advanced",
       "save_settings": "Apply Settings",
-      "port_title": "SSH Port"
+      "port_title": "SSH Port",
+      "restart_disrupt_high": "Will interrupt active connections",
+      "restart_disrupt_low": "Will restart the service",
+      "dirty_banner_label": "You have {{count}} unsaved changes",
+      "apply_settings": "Apply settings",
+      "discard_changes": "Discard changes"
     },
     "disconnect": {
       "confirm_title": "Disconnect from server?",

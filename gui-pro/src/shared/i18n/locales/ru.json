@@ -792,7 +792,12 @@
       "network_title": "Сеть",
       "advanced": "Дополнительно",
       "save_settings": "Применить настройки",
-      "port_title": "Порт SSH"
+      "port_title": "Порт SSH",
+      "restart_disrupt_high": "Прервёт активные подключения",
+      "restart_disrupt_low": "Перезапустит сервис",
+      "dirty_banner_label": "У вас несохранённых изменений: {{count}}",
+      "apply_settings": "Применить настройки",
+      "discard_changes": "Отменить изменения"
     },
     "disconnect": {
       "confirm_title": "Отключиться от сервера?",
