@@ -841,6 +841,8 @@
       "raw_toml_readonly_hint": "File is read-only. For direct editing use SSH.",
       "copy_raw_toml": "Copy",
       "copied_raw_toml": "TOML copied to clipboard",
+      "copy_failed": "Copy failed",
+      "copy_unsupported": "Copy not supported in this environment",
       "allowed_sni_label": "Allowed SNI",
       "allowed_sni_hint": "Servers will accept only specified SNI hostnames for anti-DPI decoration",
       "sni_placeholder": "cdn.example.com",

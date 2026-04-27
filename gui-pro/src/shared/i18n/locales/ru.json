@@ -841,6 +841,8 @@
       "raw_toml_readonly_hint": "Файл доступен только для чтения. Для прямого редактирования используйте SSH.",
       "copy_raw_toml": "Копировать",
       "copied_raw_toml": "TOML скопирован в буфер обмена",
+      "copy_failed": "Не удалось скопировать",
+      "copy_unsupported": "Копирование не поддерживается в этом окружении",
       "allowed_sni_label": "Разрешённые SNI",
       "allowed_sni_hint": "Серверы будут принимать только указанные SNI-имена для anti-DPI декораций",
       "sni_placeholder": "cdn.example.com",
