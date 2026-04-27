@@ -21,6 +21,7 @@ import { UsersSection } from "./server/UsersSection";
 import { ServerSettingsSection } from "./server/ServerSettingsSection";
 import { SecurityTabSection } from "./server/SecurityTabSection";
 import { UtilitiesTabSection } from "./server/UtilitiesTabSection";
+import { vpnTomlDirtyRef } from "./server/useVpnTomlState";
 
 type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
 
@@ -90,7 +91,34 @@ export function ServerTabs({ state }: ServerTabsProps) {
   const { log: activityLog } = useActivityLog();
   const confirm = useConfirm();
   const [activeTab, setActiveTabState] = useState<TabId>(() => loadActiveTab());
-  const setActiveTab = (id: TabId) => {
+
+  /**
+   * Tab switch with navigate-away dirty guard.
+   *
+   * When user leaves Configuration tab while `vpnTomlDirtyRef.current=true`
+   * (unsaved Quick Settings changes), opens a ConfirmDialog warning. Cancel
+   * keeps user on Configuration; confirm proceeds to next tab — dirty fields
+   * stay until next bundle refetch (на user discretion).
+   *
+   * Returns Promise<void> — caller must `await` if it relies on activeTab
+   * being updated synchronously. ConfirmDialog asynchrony is invisible when
+   * не leaving Configuration или dirty=false (resolves synchronously).
+   */
+  const setActiveTab = async (id: TabId): Promise<void> => {
+    if (
+      activeTab === "configuration" &&
+      id !== "configuration" &&
+      vpnTomlDirtyRef.current
+    ) {
+      const ok = await confirm({
+        title: t("server.config.confirm_discard_title"),
+        message: t("server.config.confirm_discard_message"),
+        variant: "warning",
+        confirmText: t("server.config.discard_confirm_cta"),
+        cancelText: t("buttons.cancel", "Отмена"),
+      });
+      if (!ok) return; // user cancelled — stay on Configuration
+    }
     setActiveTabState(id);
     saveActiveTab(id);
   };
@@ -148,8 +176,10 @@ export function ServerTabs({ state }: ServerTabsProps) {
             aria-controls={`panel-${tab.id}`}
             tabIndex={activeTab === tab.id ? 0 : -1}
             onClick={() => {
-              setActiveTab(tab.id);
-              activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
+              void (async () => {
+                await setActiveTab(tab.id);
+                activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
+              })();
             }}
             onKeyDown={(e) => handleTabKeyDown(e, idx)}
             className={cn(
@@ -239,12 +269,14 @@ export function ServerTabs({ state }: ServerTabsProps) {
                     state={state}
                     activeServerTab={activeTab}
                     onNavigate={(nextTab) => {
-                      setActiveTab(nextTab);
-                      activityLog(
-                        "USER",
-                        `tab.switch target="${nextTab}" source="overview-drilldown"`,
-                        "OverviewSection",
-                      );
+                      void (async () => {
+                        await setActiveTab(nextTab);
+                        activityLog(
+                          "USER",
+                          `tab.switch target="${nextTab}" source="overview-drilldown"`,
+                          "OverviewSection",
+                        );
+                      })();
                     }}
                   />
                 )}
