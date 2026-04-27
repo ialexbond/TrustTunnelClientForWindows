@@ -27,6 +27,16 @@ import {
 
 interface Props {
   sshParams: SshParamsLite;
+  /**
+   * Optional shared state from parent — when provided, the section uses this
+   * state instead of calling useVpnTomlState internally. Allows the parent
+   * (ServerSettingsSection) to own a single hook instance shared across
+   * Quick Settings, Advanced Accordion, and AllowedSniEditor — mitigates
+   * Pitfall 4 (parallel bundle loads on tab mount).
+   *
+   * Selection precedence: `_storybookState` > `state` > internal hook.
+   */
+  state?: VpnTomlState;
   /** Storybook escape hatch — supply a pre-baked state instead of triggering load. */
   _storybookState?: VpnTomlState;
 }
@@ -66,15 +76,21 @@ const AUTH_STATUS_OPTIONS = [
  * Storybook integration via `_storybookState` prop bypasses the hook entirely
  * so stories can render any state combination without IPC mocks.
  */
-export function QuickSettingsSection({ sshParams, _storybookState }: Props) {
+export function QuickSettingsSection({
+  sshParams,
+  state: parentState,
+  _storybookState,
+}: Props) {
   const { t } = useTranslation();
   const confirm = useConfirm();
   const pushSuccess = useSnackBar();
 
-  // Always invoke the hook to satisfy rules-of-hooks; if a story provides
-  // _storybookState we shadow `liveState` for rendering.
+  // Always invoke the hook to satisfy rules-of-hooks. If a story provides
+  // _storybookState OR the parent (ServerSettingsSection) provides its own
+  // shared hook instance, we shadow `liveState` for rendering. This keeps
+  // a single bundle-load IPC roundtrip across Quick + Advanced + SNI editors.
   const liveState = useVpnTomlState(sshParams);
-  const state: VpnTomlState = _storybookState ?? liveState;
+  const state: VpnTomlState = _storybookState ?? parentState ?? liveState;
 
   const errors = useMemo<FieldErrors>(
     () => ({
