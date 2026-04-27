@@ -4,8 +4,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { useVpnTomlState, type SshParamsLite } from "./useVpnTomlState";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+// Stable `log` reference — `useActivityLog` is invoked on every render and a
+// fresh object literal would force `loadBundle` (useCallback) to re-create,
+// which would re-trigger the bundle-load useEffect and produce an infinite
+// render loop in tests. Module-level `vi.fn()` keeps the reference stable.
+const stableLog = vi.fn();
 vi.mock("../../shared/hooks/useActivityLog", () => ({
-  useActivityLog: () => ({ log: vi.fn() }),
+  useActivityLog: () => ({ log: stableLog }),
 }));
 
 const mockSshParams: SshParamsLite = {
