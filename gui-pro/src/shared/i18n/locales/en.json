@@ -797,8 +797,6 @@
       "restart_disrupt_high": "Will interrupt active connections",
       "restart_disrupt_low": "Will restart the service",
       "dirty_banner": "You have {{count}} unsaved changes",
-      "dirty_banner_one": "You have {{count}} unsaved change",
-      "dirty_banner_other": "You have {{count}} unsaved changes",
       "dirty_banner_with_risk": "You have {{count}} unsaved changes ({{risk}} high-risk)",
       "dirty_banner_label": "You have {{count}} unsaved changes",
       "apply_settings": "Apply settings",
