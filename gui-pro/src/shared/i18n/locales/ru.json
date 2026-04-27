@@ -853,6 +853,8 @@
       "sni_empty": "Нет декораций anti-DPI",
       "sni_empty_hint": "Добавьте SNI-имена хостов, чтобы маскировать VPN-трафик под HTTPS.",
       "remove_sni": "Удалить SNI {{domain}}",
+      "remove_last_sni_title": "Удалить последний SNI?",
+      "remove_last_sni_message": "Anti-DPI декорации отключатся для хоста «{{hostname}}». Удалить?",
       "saved": "Настройки сохранены",
       "save_failed": "Не удалось сохранить настройки",
       "empty_not_loaded": "Конфигурация не загружена",
