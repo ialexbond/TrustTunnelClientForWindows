@@ -203,10 +203,14 @@ describe("QuickSettingsSection", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Адрес и порт")).toBeInTheDocument();
     });
-    // Open log_level Select and select "debug"
-    const logLevelTrigger = screen.getByRole("combobox", {
-      name: /уровень логов/i,
-    });
+    // Open log_level Select and select "debug". Select primitive renders
+    // the trigger as `<button role="combobox">` without an accessible name —
+    // the visible value is in an inner `<span>`, but role-name matching does
+    // not pick that up reliably. We use index-based selection (first combobox
+    // = log_level, second = auth_status_code) which matches the render order.
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes.length).toBe(2);
+    const logLevelTrigger = comboboxes[0];
     fireEvent.click(logLevelTrigger);
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "debug" })).toBeInTheDocument();
