@@ -646,7 +646,7 @@ pub fn resolve_geoip(state: &GeoDataState, category: &str) -> Result<Vec<String>
         .ok_or(format!("GeoIP category '{}' not found", category))?;
 
     let cidrs: Vec<String> = entry.cidrs.iter()
-        .filter_map(|c| format_cidr(c))
+        .filter_map(format_cidr)
         .collect();
 
     Ok(cidrs)
@@ -663,7 +663,7 @@ pub fn resolve_geosite(state: &GeoDataState, category: &str) -> Result<Vec<Strin
         .ok_or(format!("GeoSite category '{}' not found", category))?;
 
     let domains: Vec<String> = entry.domains.iter()
-        .map(|d| format_geo_domain(d))
+        .map(format_geo_domain)
         .collect();
 
     Ok(domains)

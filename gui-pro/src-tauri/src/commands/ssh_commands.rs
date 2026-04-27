@@ -125,7 +125,7 @@ pub async fn security_get_status(
 ) -> Result<serde_json::Value, String> {
     let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
-    let result = ssh::get_security_status(&app, &*handle, port).await?;
+    let result = ssh::get_security_status(&app, &handle, port).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
 }
 
@@ -143,7 +143,7 @@ pub async fn security_install_firewall(
 ) -> Result<serde_json::Value, String> {
     let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
-    ssh::install_firewall(&app, &*handle, port, keep_http_open).await?;
+    ssh::install_firewall(&app, &handle, port, keep_http_open).await?;
     Ok(serde_json::Value::Null)
 }
 
@@ -180,7 +180,7 @@ pub async fn security_change_ssh_port(
 ) -> Result<serde_json::Value, String> {
     let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
-    let actual_port = ssh::change_ssh_port(&app, &*handle, new_port, port).await?;
+    let actual_port = ssh::change_ssh_port(&app, &handle, new_port, port).await?;
     // Drop stale handle and invalidate pool — the SSH daemon restarted on a new port
     drop(handle);
     pool.invalidate().await;
@@ -206,7 +206,7 @@ pub async fn mtproto_get_status(
 ) -> Result<serde_json::Value, String> {
     let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
-    let result = ssh::mtproto_get_status(&app, &*handle, &host).await?;
+    let result = ssh::mtproto_get_status(&app, &handle, &host).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
 }
 

@@ -198,7 +198,7 @@ pub async fn change_ssh_port(
         return Err("SSH_PORT_CHANGE_FAILED|port_out_of_range".into());
     }
 
-    emit_log(app, "info", &format!("Detecting SSH service type..."));
+    emit_log(app, "info", &"Detecting SSH service type...".to_string());
     let sudo = detect_sudo(handle, app).await;
     let service_type = detect_ssh_service_type(handle, app, sudo).await?;
 
@@ -472,7 +472,7 @@ pub async fn get_security_status(
                 .unwrap_or_default();
 
             for name in jail_names {
-                let info = parse_jail(handle, app, &sudo, &name).await;
+                let info = parse_jail(handle, app, sudo, &name).await;
                 jails.push(info);
             }
         }
@@ -510,7 +510,7 @@ pub async fn get_security_status(
                     else if p.contains("(routed)") { default_routed = p.split_whitespace().next().unwrap_or("unknown").to_string(); }
                 }
             } else if let Some(rest) = l.strip_prefix("Logging:") {
-                logging = rest.trim().split_whitespace().next().unwrap_or("off").to_string();
+                logging = rest.split_whitespace().next().unwrap_or("off").to_string();
             }
         }
 
@@ -523,7 +523,7 @@ pub async fn get_security_status(
         }
     }
 
-    let vpn_port = read_vpn_port(handle, app, &sudo).await;
+    let vpn_port = read_vpn_port(handle, app, sudo).await;
 
     Ok(SecurityStatus {
         fail2ban: Fail2banStatus { installed: f2b_installed, active: f2b_active, jails },
@@ -928,7 +928,7 @@ pub async fn install_firewall(
         emit_log(app, "info", "UFW already active — appending TrustTunnel rules without resetting policies");
     }
 
-    if let Some(vpn) = read_vpn_port(handle, app, &sudo).await {
+    if let Some(vpn) = read_vpn_port(handle, app, sudo).await {
         let _ = exec_command(handle, app, &format!("{sudo}ufw allow {vpn}/tcp comment 'TrustTunnel VPN'")).await?;
         let _ = exec_command(handle, app, &format!("{sudo}ufw allow {vpn}/udp comment 'TrustTunnel QUIC'")).await?;
     } else {

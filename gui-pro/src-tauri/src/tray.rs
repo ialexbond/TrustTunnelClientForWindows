@@ -82,7 +82,7 @@ fn start_pulse(app: tauri::AppHandle, theme: String) {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
-            let icon_status = if tick % 2 == 0 { "reconnect" } else { "off" };
+            let icon_status = if tick.is_multiple_of(2) { "reconnect" } else { "off" };
             if let Some(tray) = app.tray_by_id("main-tray") {
                 tray.set_icon(Some(load_tray_icon(icon_status, &theme))).ok();
             }
@@ -226,7 +226,7 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
     // Get config path: stored from last connect, or auto-detect
     let config_path = state.config_path.lock().ok()
         .and_then(|g| g.clone())
-        .or_else(|| crate::commands::config::auto_detect_config());
+        .or_else(crate::commands::config::auto_detect_config);
 
     let Some(config_path) = config_path else {
         // No config found — show the window so user can configure

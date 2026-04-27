@@ -265,13 +265,10 @@ fn emit_connected(app: &tauri::AppHandle, is_connected: &Arc<Mutex<bool>>, spawn
 async fn dns_probe(max_wait: std::time::Duration) -> bool {
     let start = Instant::now();
     while start.elapsed() < max_wait {
-        match tokio::net::lookup_host("clients3.google.com:443").await {
-            Ok(mut addrs) => {
-                if addrs.next().is_some() {
-                    return true;
-                }
+        if let Ok(mut addrs) = tokio::net::lookup_host("clients3.google.com:443").await {
+            if addrs.next().is_some() {
+                return true;
             }
-            Err(_) => {}
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }

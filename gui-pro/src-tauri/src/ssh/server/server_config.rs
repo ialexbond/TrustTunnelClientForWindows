@@ -194,7 +194,7 @@ pub async fn fetch_server_config(
 ) -> Result<String, String> {
     emit_step(app, "connect", "progress", "Connecting to server...");
     let handle = params.connect_with_app(app.clone()).await
-        .map_err(|e| { emit_step(app, "connect", "error", &e); e })?;
+        .inspect_err(|e| { emit_step(app, "connect", "error", e); })?;
     emit_step(app, "connect", "ok", "Connected to server");
     emit_step(app, "auth", "ok", "Authentication successful");
 
@@ -272,7 +272,7 @@ pub async fn fetch_server_config(
 
     if !available_users.is_empty() {
         emit_log(app, "info", &format!("Available users: {}", available_users.join(", ")));
-        if !available_users.iter().any(|u| *u == name.as_str()) {
+        if !available_users.contains(&name.as_str()) {
             let msg = format!(
                 "User '{}' not found in credentials.toml. Available: {}",
                 name,
