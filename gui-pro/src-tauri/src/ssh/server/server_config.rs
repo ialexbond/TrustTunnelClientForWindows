@@ -2,7 +2,126 @@ use super::super::*;
 use super::super::sanitize::{validate_client_name, validate_display_name, validate_fqdn_sni, validate_dns_list};
 use russh::client;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use super::users_advanced::UserAdvanced;
+
+// ── REQ-15.1: Typed vpn.toml parser with extras preservation ───────────────
+//
+// Pattern follows `commands/config.rs::ClientConfig` (Phase 14.1 — known fields
+// typed for safety, unknown fields preserved via `#[serde(flatten)] extra` so
+// upstream sidecar additions don't get silently dropped on roundtrip).
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct VpnConfigKnown {
+    // Quick Settings (D-1) — фокус Plan 04
+    pub listen_address: String,
+    pub ipv6_available: bool,
+    pub allow_private_network_connections: bool,
+    pub log_level: Option<String>,
+    pub auth_failure_status_code: u16,
+
+    // Already-shipped Overview toggles (D-1 — НЕ дублировать в Quick Settings UI;
+    // парсятся для полноты bundle, но frontend Configuration не редактирует)
+    pub ping_enable: bool,
+    pub speedtest_enable: bool,
+    pub ping_path: String,
+    pub speedtest_path: String,
+
+    // Required paths
+    pub credentials_file: String,
+
+    // Catch-all для всего остального (timeouts, listen_protocols.*, forward_protocol,
+    // reverse_proxy, icmp, metrics) — preserved verbatim для Advanced editor
+    #[serde(flatten)]
+    pub extra: HashMap<String, toml::Value>,
+}
+
+impl Default for VpnConfigKnown {
+    fn default() -> Self {
+        Self {
+            listen_address: "0.0.0.0:443".into(),
+            ipv6_available: true,
+            allow_private_network_connections: false,
+            log_level: None,
+            auth_failure_status_code: 407,
+            ping_enable: false,
+            speedtest_enable: false,
+            ping_path: "/ping".into(),
+            speedtest_path: "/speedtest".into(),
+            credentials_file: "credentials.toml".into(),
+            extra: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigBundle {
+    pub vpn_toml: String,
+    pub hosts_toml: String,
+    pub typed: VpnConfigKnown,
+    pub allowed_sni: Vec<AllowedSniHost>,
+    pub service_status: String,
+}
+
+/// Pure helper: parse raw vpn.toml string into typed struct, soft-failing to default
+/// (so a corrupt server config doesn't break the entire UI).
+pub fn parse_vpn_config_known(raw: &str) -> VpnConfigKnown {
+    toml::from_str::<VpnConfigKnown>(raw).unwrap_or_default()
+}
+
+/// Pure helper: format-preserving listen_address mutation. Tested in isolation.
+/// Layer 1 = char whitelist (returns Err with shell-metachar); Layer 2 = toml_edit parse (returns Err on malformed TOML).
+pub fn update_listen_address_in_toml(raw_toml: &str, new_addr: &str) -> Result<String, String> {
+    crate::ssh::sanitize::validate_listen_address(new_addr)?;
+    let mut doc: toml_edit::DocumentMut = raw_toml
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
+    doc["listen_address"] = toml_edit::value(new_addr);
+    Ok(doc.to_string())
+}
+
+/// Bundle parser: split raw &&-chained shell output into 3 sections by markers.
+/// Returns (vpn_toml, hosts_toml, service_status). All three default to "" if marker missing.
+pub fn parse_config_bundle_output(raw: &str) -> (String, String, String) {
+    let mut vpn = String::new();
+    let mut hosts = String::new();
+    let mut service = String::new();
+    let mut state: u8 = 0; // 0=skip, 1=vpn, 2=hosts, 3=service
+    for line in raw.lines() {
+        match line.trim() {
+            "---VPN_TOML---" => {
+                state = 1;
+                continue;
+            }
+            "---HOSTS_TOML---" => {
+                state = 2;
+                continue;
+            }
+            "---SERVICE---" => {
+                state = 3;
+                continue;
+            }
+            _ => {}
+        }
+        match state {
+            1 => {
+                vpn.push_str(line);
+                vpn.push('\n');
+            }
+            2 => {
+                hosts.push_str(line);
+                hosts.push('\n');
+            }
+            3 => {
+                service.push_str(line.trim());
+            }
+            _ => {}
+        }
+    }
+    (vpn, hosts, service)
+}
 
 // ── M-01: allowed_sni discovery for Custom SNI autocomplete ─────────────────
 
@@ -785,6 +904,185 @@ fn der_b64_to_pem(der_b64: &str) -> Result<String, String> {
         .map_err(|e| format!("der → pem: {e}"))
 }
 
+// ── REQ-15.2: Phase 15 typed mutation commands ─────────────────────────────
+//
+// Each mutation:
+//   1. Validate input via char-whitelist (sanitize.rs) — S-02 layer 1
+//   2. Read current vpn.toml via SSH (single channel)
+//   3. Edit via toml_edit::DocumentMut (preserves comments + order) — S-02 layer 2
+//   4. Write via UUID-randomized heredoc tee — S-04
+//   5. systemctl --no-block restart trusttunnel (existing pattern)
+//   6. Return Ok or detailed error code
+
+async fn write_vpn_toml_via_heredoc(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    new_content: &str,
+    field_label: &str,
+) -> Result<(), String> {
+    let sudo = detect_sudo(handle, app).await;
+    let delim = format!("VPN_TOML_EOF_{}", uuid::Uuid::new_v4().simple());
+    let cmd = format!(
+        "{sudo}tee {cfg} > /dev/null << '{delim}'\n{new_content}\n{delim}",
+        cfg = ENDPOINT_CONFIG
+    );
+    let (_, code) = exec_command(handle, app, &cmd).await?;
+    if code != 0 {
+        return Err(format!("VPN_TOML_WRITE_FAILED|{field_label}|code={code}"));
+    }
+    let _ = exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl --no-block restart trusttunnel"),
+    )
+    .await;
+    Ok(())
+}
+
+pub async fn update_listen_address(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    address: String,
+) -> Result<(), String> {
+    crate::ssh::sanitize::validate_listen_address(&address)?;
+    let sudo = detect_sudo(handle, app).await;
+    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
+    let new_content = update_listen_address_in_toml(&raw, &address)?;
+    write_vpn_toml_via_heredoc(app, handle, &new_content, "listen_address").await
+}
+
+pub async fn update_log_level(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    level: String,
+) -> Result<(), String> {
+    crate::ssh::sanitize::validate_log_level(&level)?;
+    let sudo = detect_sudo(handle, app).await;
+    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
+    let mut doc: toml_edit::DocumentMut = raw
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
+    if level.is_empty() {
+        doc.remove("log_level");
+    } else {
+        doc["log_level"] = toml_edit::value(&level);
+    }
+    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "log_level").await
+}
+
+pub async fn update_allow_private(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    enabled: bool,
+) -> Result<(), String> {
+    let sudo = detect_sudo(handle, app).await;
+    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
+    let mut doc: toml_edit::DocumentMut = raw
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
+    doc["allow_private_network_connections"] = toml_edit::value(enabled);
+    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "allow_private_network_connections").await
+}
+
+pub async fn update_auth_status(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    code: u16,
+) -> Result<(), String> {
+    crate::ssh::sanitize::validate_auth_status_code(code)?;
+    let sudo = detect_sudo(handle, app).await;
+    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
+    let mut doc: toml_edit::DocumentMut = raw
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
+    doc["auth_failure_status_code"] = toml_edit::value(code as i64);
+    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "auth_failure_status_code").await
+}
+
+pub async fn update_ping_path(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    path: String,
+) -> Result<(), String> {
+    crate::ssh::sanitize::validate_url_path(&path)?;
+    let sudo = detect_sudo(handle, app).await;
+    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
+    let mut doc: toml_edit::DocumentMut = raw
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
+    doc["ping_path"] = toml_edit::value(&path);
+    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "ping_path").await
+}
+
+pub async fn update_speedtest_path(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    path: String,
+) -> Result<(), String> {
+    crate::ssh::sanitize::validate_url_path(&path)?;
+    let sudo = detect_sudo(handle, app).await;
+    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
+    let mut doc: toml_edit::DocumentMut = raw
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
+    doc["speedtest_path"] = toml_edit::value(&path);
+    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "speedtest_path").await
+}
+
+// ── REQ-15.3: Raw write fallback for Advanced editor ───────────────────────
+//
+// Frontend can supply a fully edited vpn.toml string (e.g. from "Show raw TOML"
+// modal). Backend re-parses for validation (corrupt TOML rejected) then writes
+// + restarts. Used ONLY for edge cases not covered by typed mutations above.
+pub async fn write_vpn_toml_raw(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    content: String,
+) -> Result<(), String> {
+    if content.is_empty() {
+        return Err("vpn.toml content cannot be empty".into());
+    }
+    if content.len() > 65536 {
+        return Err("vpn.toml content too large (max 64 KiB)".into());
+    }
+    // Validate TOML syntax before writing — refuse to commit corrupt config
+    let _: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Invalid TOML: {e}"))?;
+    write_vpn_toml_via_heredoc(app, handle, &content, "raw_write").await
+}
+
+// ── REQ-15.0: Single-channel bundle reader (Pitfall 4 mitigation) ──────────
+//
+// Mount of the Configuration tab would naively fire 3-5 parallel SSH commands
+// (vpn.toml read, hosts.toml read, service status). With CHANNEL_OPEN_GATE=5
+// and other tabs already in flight (Overview, Users), this risks
+// `SSH_CHANNEL_FAILED|ConnectFailed`. Bundle reads everything in ONE channel
+// via && shell pipeline.
+pub async fn get_config_bundle(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<ConfigBundle, String> {
+    let sudo = detect_sudo(handle, app).await;
+    let dir = ENDPOINT_DIR;
+    let cmd = format!(
+        "echo '---VPN_TOML---' && {sudo}cat {dir}/vpn.toml && \
+         echo '---HOSTS_TOML---' && {sudo}cat {dir}/hosts.toml 2>/dev/null && \
+         echo '---SERVICE---' && systemctl is-active trusttunnel"
+    );
+    let (output, _) = exec_command(handle, app, &cmd).await?;
+    let (vpn_toml, hosts_toml, service_status) = parse_config_bundle_output(&output);
+    let typed = parse_vpn_config_known(&vpn_toml);
+    let allowed_sni = parse_allowed_sni_from_hosts_toml(&hosts_toml);
+    Ok(ConfigBundle {
+        vpn_toml,
+        hosts_toml,
+        typed,
+        allowed_sni,
+        service_status,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1100,5 +1398,65 @@ hostname = "valid.example.com"
         let pem = der_b64_to_pem(der_b64).unwrap();
         assert_eq!(pem.matches("-----BEGIN CERTIFICATE-----").count(), 2);
         assert_eq!(pem.matches("-----END CERTIFICATE-----").count(), 2);
+    }
+
+    // ── REQ-15.1 / REQ-15.2: VpnConfigKnown + ConfigBundle + helpers ──
+
+    #[test]
+    fn vpn_config_known_default_listen_is_0_0_0_0_443() {
+        let cfg = VpnConfigKnown::default();
+        assert_eq!(cfg.listen_address, "0.0.0.0:443");
+        assert_eq!(cfg.auth_failure_status_code, 407);
+        assert!(cfg.ipv6_available);
+    }
+
+    #[test]
+    fn vpn_config_known_parses_minimal_config() {
+        let raw = r#"
+listen_address = "0.0.0.0:8443"
+ipv6_available = false
+"#;
+        let cfg = parse_vpn_config_known(raw);
+        assert_eq!(cfg.listen_address, "0.0.0.0:8443");
+        assert!(!cfg.ipv6_available);
+        // Defaults remain for unspecified fields
+        assert_eq!(cfg.auth_failure_status_code, 407);
+    }
+
+    #[test]
+    fn vpn_config_known_preserves_extras() {
+        let raw = r#"
+listen_address = "0.0.0.0:443"
+
+[forward_protocol]
+foo = "bar"
+"#;
+        let cfg = parse_vpn_config_known(raw);
+        assert!(cfg.extra.contains_key("forward_protocol"));
+    }
+
+    #[test]
+    fn parse_config_bundle_extracts_three_sections() {
+        let raw = "---VPN_TOML---\nlisten_address = \"0.0.0.0:443\"\n---HOSTS_TOML---\n[[main_hosts]]\nhostname = \"a.example.com\"\n---SERVICE---\nactive";
+        let (vpn, hosts, service) = parse_config_bundle_output(raw);
+        assert!(vpn.contains("listen_address"));
+        assert!(hosts.contains("main_hosts"));
+        assert_eq!(service, "active");
+    }
+
+    #[test]
+    fn toml_edit_roundtrip_preserves_listen_address_change() {
+        let raw = "# my server\nlisten_address = \"0.0.0.0:443\"\nipv6_available = true\n";
+        let updated = update_listen_address_in_toml(raw, "0.0.0.0:8443").unwrap();
+        assert!(updated.contains("listen_address = \"0.0.0.0:8443\""));
+        assert!(updated.contains("# my server"), "comment must be preserved");
+        assert!(updated.contains("ipv6_available"), "other fields must remain");
+    }
+
+    #[test]
+    fn validators_called_before_shell_interpolation_listen_address() {
+        let raw = "listen_address = \"0.0.0.0:443\"\n";
+        let result = update_listen_address_in_toml(raw, "0.0.0.0:443; rm -rf /");
+        assert!(result.is_err(), "shell metachars must reject before parser runs");
     }
 }
