@@ -240,6 +240,60 @@ pub fn validate_fqdn_sni(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Log level enum: trace / debug / info / warn / error.
+/// Empty string accepted (means "use default"). Case-sensitive (matches upstream CONFIGURATION.md).
+///
+/// Whitelist defense (S-02): rejects shell metachars even though enum-comparison would also reject.
+pub fn validate_log_level(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Ok(());
+    }
+    let allowed = ["trace", "debug", "info", "warn", "error"];
+    if !allowed.contains(&s) {
+        return Err(format!(
+            "Invalid log_level '{}' (allowed: {})",
+            s,
+            allowed.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// HTTP status code: 405 or 407 only (per upstream CONFIGURATION.md `auth_failure_status_code`).
+pub fn validate_auth_status_code(code: u16) -> Result<(), String> {
+    if code == 405 || code == 407 {
+        Ok(())
+    } else {
+        Err(format!(
+            "auth_failure_status_code must be 405 or 407 (got {code})"
+        ))
+    }
+}
+
+/// URL path subset for ping_path / speedtest_path:
+/// - MUST start with `/`
+/// - 1 .. 255 chars total
+/// - Allowed chars: ASCII alphanumeric + `/` + `-` + `_` + `.`
+///
+/// Rejects shell injection (`;`, `$`, backticks, spaces) and path traversal (allowed because
+/// `..` is two `.` chars but NOT a directory separator at the shell level — server-side TrustTunnel
+/// treats this string as URL path, not filesystem path; defence in depth nonetheless).
+pub fn validate_url_path(s: &str) -> Result<(), String> {
+    if s.is_empty() || s.len() > 255 {
+        return Err("Path must be 1-255 characters".into());
+    }
+    if !s.starts_with('/') {
+        return Err("Path must start with '/'".into());
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+    {
+        return Err("Path contains invalid characters (only A-Z, a-z, 0-9, '/', '-', '_', '.' allowed)".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,5 +552,72 @@ mod tests {
         assert!(validate_display_name("with\nnewline").is_err());
         assert!(validate_display_name("with\0null").is_err());
         assert!(validate_display_name(&"a".repeat(65)).is_err());
+    }
+
+    // ─── log_level ───────────────────────────────────────
+
+    #[test]
+    fn log_level_accepts_known() {
+        assert!(validate_log_level("info").is_ok());
+        assert!(validate_log_level("debug").is_ok());
+        assert!(validate_log_level("warn").is_ok());
+        assert!(validate_log_level("error").is_ok());
+        assert!(validate_log_level("trace").is_ok());
+        assert!(validate_log_level("").is_ok()); // empty = default
+    }
+
+    #[test]
+    fn log_level_rejects_unknown() {
+        assert!(validate_log_level("verbose").is_err());
+        assert!(validate_log_level("INFO").is_err()); // case-sensitive
+        assert!(validate_log_level("$(whoami)").is_err());
+        assert!(validate_log_level("info; rm -rf /").is_err());
+    }
+
+    // ─── auth_status_code ────────────────────────────────
+
+    #[test]
+    fn auth_status_code_accepts_whitelist() {
+        assert!(validate_auth_status_code(405).is_ok());
+        assert!(validate_auth_status_code(407).is_ok());
+    }
+
+    #[test]
+    fn auth_status_code_rejects_other() {
+        assert!(validate_auth_status_code(200).is_err());
+        assert!(validate_auth_status_code(401).is_err());
+        assert!(validate_auth_status_code(403).is_err());
+        assert!(validate_auth_status_code(500).is_err());
+        assert!(validate_auth_status_code(0).is_err());
+    }
+
+    // ─── url_path ────────────────────────────────────────
+
+    #[test]
+    fn url_path_accepts_valid() {
+        assert!(validate_url_path("/ping").is_ok());
+        assert!(validate_url_path("/speedtest").is_ok());
+        assert!(validate_url_path("/api/health.json").is_ok());
+        assert!(validate_url_path("/v1/_internal-test").is_ok());
+    }
+
+    #[test]
+    fn url_path_rejects_empty_or_missing_leading_slash() {
+        assert!(validate_url_path("").is_err());
+        assert!(validate_url_path("ping").is_err());
+    }
+
+    #[test]
+    fn url_path_rejects_injection() {
+        assert!(validate_url_path("/ping; rm -rf /").is_err());
+        assert!(validate_url_path("/$(whoami)").is_err());
+        assert!(validate_url_path("/path with spaces").is_err());
+        assert!(validate_url_path("/`id`").is_err());
+    }
+
+    #[test]
+    fn url_path_rejects_too_long() {
+        let long = format!("/{}", "a".repeat(255));
+        assert!(validate_url_path(&long).is_err());
     }
 }
