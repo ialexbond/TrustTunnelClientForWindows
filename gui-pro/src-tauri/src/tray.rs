@@ -331,6 +331,11 @@ fn compute_menu_position(
 
 /// Show custom tray context menu. Caches icon rect для последующего
 /// `tray_menu_reposition` после auto-size измерения на фронте.
+///
+/// Dead reference per CLAUDE.md «Tray menu = native only» — Tauri issue
+/// #13859 блокирует custom webview tray-menu в dark theme Win11. Оставлено
+/// для возможного восстановления если upstream issue будет закрыт.
+#[allow(dead_code)]
 pub fn show_custom_tray_menu(
     app: &tauri::AppHandle,
     icon_x: f64,
@@ -388,10 +393,15 @@ pub fn tray_menu_reposition(app: tauri::AppHandle, width: u32, height: u32) {
 /// с версией, которую использует Tauri 2 internally: Tauri пригвождён
 /// к конкретной windows-crate версии, а cross-version HWND types в
 /// Rust считаются разными нарошно даже если ABI identical.
+///
+/// Dead reference per CLAUDE.md «Tray menu = native only» — оставлено как
+/// шаблон для восстановления custom-webview tray, если Tauri issue #13859
+/// будет закрыт.
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub fn apply_win11_rounded_corners(win: &tauri::WebviewWindow) {
     #[link(name = "dwmapi")]
-    extern "system" {
+    unsafe extern "system" {
         fn DwmSetWindowAttribute(
             hwnd: isize,
             attribute: u32,
@@ -421,6 +431,7 @@ pub fn apply_win11_rounded_corners(win: &tauri::WebviewWindow) {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 pub fn apply_win11_rounded_corners(_win: &tauri::WebviewWindow) {}
 
 /// Tauri command: menu item clicked — dispatches the action and hides
