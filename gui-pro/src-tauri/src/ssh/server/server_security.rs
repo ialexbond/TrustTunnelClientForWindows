@@ -198,7 +198,7 @@ pub async fn change_ssh_port(
         return Err("SSH_PORT_CHANGE_FAILED|port_out_of_range".into());
     }
 
-    emit_log(app, "info", &"Detecting SSH service type...".to_string());
+    emit_log(app, "info", "Detecting SSH service type...");
     let sudo = detect_sudo(handle, app).await;
     let service_type = detect_ssh_service_type(handle, app, sudo).await?;
 

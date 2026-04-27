@@ -18,6 +18,7 @@
 //!     - 01xxxxxx xxxxxxxx → 2 bytes (0..=16383)
 //!     - 10xxxxxx ... (4 bytes) (0..=2^30-1)
 //!     - 11xxxxxx ... (8 bytes) (0..=2^62-1)
+//!
 //!   Earlier revisions of this module used LEB128 varint instead, which matches
 //!   QUIC for values ≤63 but diverges for anything larger — that broke certificate
 //!   TLV decoding (cert length is typically 500-2000 bytes, i.e. always ≥64).

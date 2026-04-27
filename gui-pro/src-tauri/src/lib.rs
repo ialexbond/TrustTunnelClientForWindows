@@ -154,31 +154,30 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    match event {
-                        // Left click Up → toggle main window visibility
-                        // (Telegram-style). Проверяем только visible,
-                        // игнорируем focus — клик по tray иконке сам по
-                        // себе забирает focus у main window, и проверка
-                        // focused ломала toggle-логику (всегда false →
-                        // всегда show, никогда hide).
-                        TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Left,
-                            button_state: tauri::tray::MouseButtonState::Up,
-                            ..
-                        } => {
-                            if let Some(w) = tray.app_handle().get_webview_window("main") {
-                                if w.is_visible().unwrap_or(false) {
-                                    let _ = w.hide();
-                                } else {
-                                    let _ = w.show();
-                                    let _ = w.set_focus();
-                                }
+                    // Left click Up → toggle main window visibility
+                    // (Telegram-style). Проверяем только visible,
+                    // игнорируем focus — клик по tray иконке сам по
+                    // себе забирает focus у main window, и проверка
+                    // focused ломала toggle-логику (всегда false →
+                    // всегда show, никогда hide).
+                    //
+                    // Right click — native menu показывается OS автоматом
+                    // (потому что `.menu(&tray_menu)` задано выше).
+                    // Никакого custom handler не нужен.
+                    if let TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(w) = tray.app_handle().get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) {
+                                let _ = w.hide();
+                            } else {
+                                let _ = w.show();
+                                let _ = w.set_focus();
                             }
                         }
-                        // Right click — native menu показывается OS автоматом
-                        // (потому что `.menu(&tray_menu)` задано выше).
-                        // Никакого custom handler не нужен.
-                        _ => {}
                     }
                 })
                 .build(app)?;
