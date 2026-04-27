@@ -179,7 +179,7 @@ async fn read_vpn_port(handle: &client::Handle<SshHandler>, app: &tauri::AppHand
         handle, app,
         &format!(r#"{sudo}sed -n 's/^[[:space:]]*listen_address[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' {cfg} 2>/dev/null"#, cfg = ENDPOINT_CONFIG),
     ).await.ok()?;
-    raw.trim().split(':').last().and_then(|p| p.parse::<u16>().ok())
+    raw.trim().split(':').next_back().and_then(|p| p.parse::<u16>().ok())
 }
 
 // ═══════════════════════════════════════════════════════════════

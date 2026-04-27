@@ -453,7 +453,7 @@ async fn deploy_start_service(
     }
 
     // Check if the port is actually listening
-    let listen_port = settings.listen_address.split(':').last().unwrap_or("443");
+    let listen_port = settings.listen_address.split(':').next_back().unwrap_or("443");
     let (port_check, _) = exec_command(
         handle, app,
         &format!("ss -tlnp | grep :{listen_port} || echo 'PORT_NOT_LISTENING'")
@@ -482,9 +482,9 @@ async fn deploy_export_config(
 
     // Use the endpoint's own export to get proper config with certificate PEM
     let export_address = if !settings.domain.is_empty() {
-        format!("{}:{}", settings.domain, settings.listen_address.split(':').last().unwrap_or("443"))
+        format!("{}:{}", settings.domain, settings.listen_address.split(':').next_back().unwrap_or("443"))
     } else {
-        let port = settings.listen_address.split(':').last().unwrap_or("443");
+        let port = settings.listen_address.split(':').next_back().unwrap_or("443");
         format!("{}:{port}", params.host)
     };
 

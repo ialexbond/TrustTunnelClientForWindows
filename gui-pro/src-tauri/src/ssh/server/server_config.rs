@@ -232,7 +232,7 @@ pub async fn fetch_server_config(
         &format!(r#"grep -oP 'listen_address\s*=\s*"\K[^"]+' {cfg} 2>/dev/null || echo '0.0.0.0:443'"#, cfg = ENDPOINT_CONFIG)
     ).await?;
     let listen_addr = listen_raw.trim();
-    let listen_port = listen_addr.split(':').last().unwrap_or("443");
+    let listen_port = listen_addr.split(':').next_back().unwrap_or("443");
 
     // Try to determine the address the endpoint uses (domain from hosts.toml or fallback to host IP)
     let (hostname_raw, _) = exec_command(
@@ -426,7 +426,7 @@ pub async fn export_config_deeplink(
     )
     .await?;
     let listen_addr = listen_raw.trim();
-    let listen_port = listen_addr.split(':').last().unwrap_or("443");
+    let listen_port = listen_addr.split(':').next_back().unwrap_or("443");
 
     // Try to determine hostname from hosts.toml, fallback to connection host
     let (hostname_raw, _) = exec_command(
@@ -471,8 +471,7 @@ pub async fn export_config_deeplink(
     // Extract the deeplink URL (skip any warning/log lines)
     let deeplink = export_output
         .lines()
-        .filter(|l| l.starts_with("trusttunnel://") || l.starts_with("tt://"))
-        .last()
+        .rfind(|l| l.starts_with("trusttunnel://") || l.starts_with("tt://"))
         .unwrap_or(export_output.trim());
 
     Ok(deeplink.trim().to_string())
@@ -670,8 +669,7 @@ pub async fn export_config_deeplink_advanced(
     // expects that prefix exactly.
     let mut base_deeplink = output
         .lines()
-        .filter(|l| l.starts_with("tt://") || l.starts_with("trusttunnel://"))
-        .next_back()
+        .rfind(|l| l.starts_with("tt://") || l.starts_with("trusttunnel://"))
         .map(|l| l.trim().to_string())
         .unwrap_or_default();
     if let Some(rest) = base_deeplink.strip_prefix("trusttunnel://") {
