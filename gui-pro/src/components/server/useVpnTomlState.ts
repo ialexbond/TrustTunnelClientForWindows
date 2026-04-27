@@ -20,6 +20,22 @@ import { useActivityLog } from "../../shared/hooks/useActivityLog";
  * those belong to QuickSettingsSection (the consumer).
  */
 
+/**
+ * Module-level mutable ref tracking dirty state of the most-recently-mounted
+ * useVpnTomlState instance. Read synchronously by ServerTabs.setActiveTab to
+ * gate navigate-away with a confirm dialog when user tries to switch tabs
+ * mid-edit.
+ *
+ * NOT a true cross-instance store — assumes single ServerPanel mount at a
+ * time (matches current architecture; multi-server v3.1+ may need rework).
+ *
+ * Lifecycle:
+ *  - Hook updates `current` to latest dirtyFlag value via useEffect.
+ *  - Cleanup (unmount / sshParams change) resets to `false` so stale dirty
+ *    state from prior mount can't block navigation.
+ */
+export const vpnTomlDirtyRef = { current: false };
+
 /** Subset of vpn.toml fields editable via Quick Settings (D-1). */
 export interface QuickSettingsFields {
   listen_address: string;
@@ -280,6 +296,16 @@ export function useVpnTomlState(
     () => dirtyFields.filter((k) => DISRUPT_HIGH_FIELDS.has(k)).length,
     [dirtyFields],
   );
+
+  // Sync module-level dirty ref so ServerTabs.setActiveTab can gate
+  // navigate-away in its synchronous click handler. Cleanup ensures stale
+  // dirty state from prior mount doesn't block navigation after unmount.
+  useEffect(() => {
+    vpnTomlDirtyRef.current = dirtyFlag;
+    return () => {
+      vpnTomlDirtyRef.current = false;
+    };
+  }, [dirtyFlag]);
 
   const saveBatch = useCallback(async () => {
     if (dirtyFields.length === 0) return;
