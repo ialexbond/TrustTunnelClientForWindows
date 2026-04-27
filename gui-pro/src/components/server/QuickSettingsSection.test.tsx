@@ -5,7 +5,11 @@ import i18n from "../../shared/i18n";
 import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 import { ConfirmDialogProvider } from "../../shared/ui/ConfirmDialogProvider";
 import { QuickSettingsSection } from "./QuickSettingsSection";
-import type { SshParamsLite } from "./useVpnTomlState";
+import type {
+  SshParamsLite,
+  VpnTomlState,
+  QuickSettingsFields,
+} from "./useVpnTomlState";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const stableLog = vi.fn();
@@ -245,5 +249,55 @@ describe("QuickSettingsSection", () => {
     });
     // ErrorBanner uses generic save-error i18n string ("Не удалось ...")
     expect(screen.getByText(/не удалось/i)).toBeInTheDocument();
+  });
+
+  it("uses parent-provided state instead of internal hook when state prop set", async () => {
+    // Make invoke hang — internal hook would stay in loading=true forever
+    vi.mocked(invoke).mockImplementation(
+      () => new Promise(() => { /* hangs */ }),
+    );
+    const parentFields: QuickSettingsFields = {
+      listen_address: "0.0.0.0:443",
+      log_level: "debug", // pre-edited via parent state
+      allow_private_network_connections: false,
+      auth_failure_status_code: 407,
+      ping_path: "/ping",
+      speedtest_path: "/speedtest",
+    };
+    const initialFields: QuickSettingsFields = {
+      ...parentFields,
+      log_level: "info",
+    };
+    const parentState: VpnTomlState = {
+      vpnTomlRaw: 'listen_address = "0.0.0.0:443"\n',
+      hostsTomlRaw: "",
+      fields: parentFields,
+      initialFields,
+      allowedSni: [],
+      serviceStatus: "active",
+      loading: false, // <-- key: parent says NOT loading even though invoke hangs
+      saving: false,
+      error: null,
+      isDirty: true,
+      dirtyFields: ["log_level"],
+      highRiskCount: 0,
+      setField: vi.fn(),
+      discard: vi.fn(),
+      loadBundle: vi.fn(),
+      saveBatch: vi.fn(),
+    };
+    render(
+      <SnackBarProvider>
+        <ConfirmDialogProvider>
+          <QuickSettingsSection sshParams={mockSsh} state={parentState} />
+        </ConfirmDialogProvider>
+      </SnackBarProvider>,
+    );
+    // Despite invoke hanging, parent state has loading=false → form is rendered
+    await waitFor(() =>
+      expect(screen.getByLabelText("Адрес и порт")).toBeInTheDocument(),
+    );
+    // Skeleton is NOT shown because parent-provided state has loading=false
+    expect(screen.queryByTestId("quick-settings-loading")).toBeNull();
   });
 });
