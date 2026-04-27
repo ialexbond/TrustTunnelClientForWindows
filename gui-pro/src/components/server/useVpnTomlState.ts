@@ -162,8 +162,23 @@ function projectFields(typed: ConfigBundleJs["typed"]): QuickSettingsFields {
   };
 }
 
-export function useVpnTomlState(sshParams: SshParamsLite): VpnTomlState {
+/**
+ * Options for useVpnTomlState. `skipLoad=true` — call hook for rules-of-hooks
+ * compliance, но НЕ запускает bundle load на mount. Используется когда
+ * caller (например QuickSettingsSection с parent-provided state) знает что
+ * external state перекроет internal state — иначе получим parallel bundle
+ * loads (Pitfall 4 violation: Plan 07 single-instance contract).
+ */
+export interface UseVpnTomlStateOptions {
+  skipLoad?: boolean;
+}
+
+export function useVpnTomlState(
+  sshParams: SshParamsLite,
+  options?: UseVpnTomlStateOptions,
+): VpnTomlState {
   const { log } = useActivityLog();
+  const skipLoad = options?.skipLoad ?? false;
 
   const [vpnTomlRaw, setVpnTomlRaw] = useState<string>("");
   const [hostsTomlRaw, setHostsTomlRaw] = useState<string>("");
@@ -172,7 +187,9 @@ export function useVpnTomlState(sshParams: SshParamsLite): VpnTomlState {
     useState<QuickSettingsFields>(DEFAULT_FIELDS);
   const [allowedSni, setAllowedSni] = useState<AllowedSniHostJs[]>([]);
   const [serviceStatus, setServiceStatus] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
+  // skipLoad=true — caller использует external state, internal стартует с
+  // loading=false чтобы не показывать ложный Skeleton.
+  const [loading, setLoading] = useState<boolean>(!skipLoad);
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -222,13 +239,16 @@ export function useVpnTomlState(sshParams: SshParamsLite): VpnTomlState {
 
   // Bundle load on mount + when sshParams change. Cleanup flips cancelledRef so
   // a stale in-flight invoke cannot overwrite fresh state when sshParams change
-  // (or the hook unmounts).
+  // (or the hook unmounts). When `skipLoad=true`, caller has its own state
+  // source and we skip the IPC entirely — but useEffect still registers cleanup
+  // for symmetry с rules-of-hooks.
   useEffect(() => {
+    if (skipLoad) return;
     void loadBundle();
     return () => {
       cancelledRef.current = true;
     };
-  }, [loadBundle]);
+  }, [loadBundle, skipLoad]);
 
   const setField = useCallback(
     <K extends keyof QuickSettingsFields>(key: K, value: QuickSettingsFields[K]) => {
