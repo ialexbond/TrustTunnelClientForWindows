@@ -78,6 +78,26 @@ ssh_pool_command!(server_reboot, ssh::server_reboot);
 ssh_pool_command!(server_remove_user, ssh::server_remove_user, vpn_username: String);
 ssh_pool_command!(add_server_user, ssh::add_server_user, vpn_username: String, vpn_password: String);
 
+// ─── Phase 15: vpn.toml Quick Settings + Bundle reader (REQ-15.0, 15.2) ───
+ssh_pool_command!(server_get_config_bundle, ssh::get_config_bundle);
+ssh_pool_command!(server_update_listen_address, ssh::update_listen_address, address: String);
+ssh_pool_command!(server_update_log_level, ssh::update_log_level, level: String);
+ssh_pool_command!(server_update_allow_private, ssh::update_allow_private, enabled: bool);
+ssh_pool_command!(server_update_auth_status, ssh::update_auth_status, code: u16);
+ssh_pool_command!(server_update_ping_path, ssh::update_ping_path, path: String);
+ssh_pool_command!(server_update_speedtest_path, ssh::update_speedtest_path, path: String);
+
+// ─── Phase 15: Advanced raw TOML write (REQ-15.3) ─────────────────────────
+ssh_pool_command!(server_write_vpn_toml_raw, ssh::write_vpn_toml_raw, content: String);
+
+// ─── Phase 15: hosts.toml allowed_sni mutation (REQ-15.A) ─────────────────
+ssh_pool_command!(
+    server_update_hosts_allowed_sni,
+    ssh::update_hosts_allowed_sni,
+    hostname: String,
+    allowed_sni: Vec<String>
+);
+
 // ─── Pooled security commands ─────────────────────────────────────
 
 // security_get_status and security_install_firewall are manual because they

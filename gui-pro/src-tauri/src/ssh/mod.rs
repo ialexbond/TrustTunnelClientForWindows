@@ -44,6 +44,12 @@ pub use server::{
     // FIX-NN — server-side TLV persistence
     users_advanced,
     UserAdvanced,
+    // Phase 15 — vpn.toml typed mutations + bundle reader (Plan 01)
+    get_config_bundle, update_listen_address, update_log_level,
+    update_allow_private, update_auth_status, update_ping_path,
+    update_speedtest_path, write_vpn_toml_raw,
+    // Phase 15 — hosts.toml allowed_sni mutation (Plan 02, REQ-15.A)
+    update_hosts_allowed_sni,
 };
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
