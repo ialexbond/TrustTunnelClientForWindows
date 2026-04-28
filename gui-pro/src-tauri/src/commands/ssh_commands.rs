@@ -106,6 +106,14 @@ ssh_pool_command!(
     allowed_sni: Vec<String>
 );
 
+// ─── Phase 15.1: schema-driven generic save (REQ-15.0, 15.7, 15.8) ────────
+ssh_pool_command!(
+    server_save_config_file,
+    ssh::save_config_file,
+    file_name: String,
+    raw_content: String
+);
+
 // ─── Pooled security commands ─────────────────────────────────────
 
 // security_get_status and security_install_firewall are manual because they

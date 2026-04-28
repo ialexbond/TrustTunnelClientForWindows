@@ -294,6 +294,101 @@ pub fn validate_url_path(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ── Phase 15.1: TOML content validators (REQ-15.6) ────────────────────────
+//
+// Schema-driven Configuration tab batches edits across vpn.toml / hosts.toml /
+// rules.toml через единый Tauri command (server_save_config_file). Каждый
+// validator реализует defence stack:
+//   Layer 1: size cap 64 KiB (matches `write_vpn_toml_raw` historical limit)
+//   Layer 2: toml_edit parse — rejects malformed TOML (structural integrity)
+//   Layer 3: defence-in-depth для rules.toml — cidr fields обязательно проходят
+//            existing `validate_cidr` char-whitelist (no shell metachars)
+//
+// Все три validators вызываются на backend стороне save_config_file (V13 trust
+// boundary invariant — backend re-validates даже если frontend pre-validated).
+// Shell-injection risk smiered through UUID heredoc delim в save layer
+// (S-04 invariant from Phase 14.1 — random delimiter cannot be guessed by
+// user-controlled TOML content).
+
+/// REQ-15.6 — Phase 15.1 generic content validator для vpn.toml batch save.
+///
+/// Defence stack:
+///   Layer 1: size cap 64 KiB (matches `write_vpn_toml_raw` historical limit)
+///   Layer 2: toml_edit parse (rejects malformed TOML; structural validation)
+///   Layer 3: char-whitelist на shell-metachars вне TOML strings — covered by
+///            toml_edit's structural parse + UUID heredoc delim в save_config_file
+///
+/// V13 trust boundary: backend re-validates даже если frontend pre-validated.
+pub fn validate_vpn_toml_content(content: &str) -> Result<(), String> {
+    if content.is_empty() {
+        return Err("vpn.toml content cannot be empty".into());
+    }
+    if content.len() > 65536 {
+        return Err("vpn.toml content too large (max 64 KiB)".into());
+    }
+    let _: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Invalid TOML in vpn.toml: {e}"))?;
+    Ok(())
+}
+
+/// REQ-15.6 + REQ-15.A — hosts.toml content validator (Phase 15.1).
+///
+/// Same defence stack as `validate_vpn_toml_content`. hosts.toml typical shape:
+/// [[main_hosts]] / [[ping_hosts]] / [[speedtest_hosts]] / [[reverse_proxy_hosts]]
+/// — все array-of-tables проверяются на структурную корректность через toml_edit.
+pub fn validate_hosts_toml_content(content: &str) -> Result<(), String> {
+    if content.is_empty() {
+        return Err("hosts.toml content cannot be empty".into());
+    }
+    if content.len() > 65536 {
+        return Err("hosts.toml content too large (max 64 KiB)".into());
+    }
+    let _: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Invalid TOML in hosts.toml: {e}"))?;
+    Ok(())
+}
+
+/// REQ-15.6 + REQ-15.8 — rules.toml content validator (Phase 15.1).
+///
+/// Defence stack как у vpn/hosts +
+///   Layer 3 (defence-in-depth): walk array-of-tables `[[rule]]` and validate
+///   `cidr` field via existing `validate_cidr` (char-whitelist `[0-9./]`).
+///   Phase 14.1 anti-DPI rules используют `client_random_prefix` без cidr —
+///   эти entries разрешены (cidr field optional).
+///
+/// Frontend pre-merges по D-2.3 ownership rules перед save; backend validates
+/// merged content here.
+pub fn validate_rules_toml_content(content: &str) -> Result<(), String> {
+    if content.is_empty() {
+        // rules.toml CAN have zero [[rule]] entries (comment-only file is valid TOML)
+        // but raw_content sent from frontend must not be 0-byte — that signals a bug.
+        return Err(
+            "rules.toml content cannot be empty (use comment-only file if no rules)".into(),
+        );
+    }
+    if content.len() > 65536 {
+        return Err("rules.toml content too large (max 64 KiB)".into());
+    }
+    let doc: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("Invalid TOML in rules.toml: {e}"))?;
+
+    // Defence in depth: walk [[rule]] array-of-tables and validate cidr fields.
+    // T-15.1-07: even though TOML parses, validate_cidr blocks shell metachars
+    // in cidr values. Phase 14.1 anti-DPI rules без cidr — те entries skip-аются.
+    if let Some(rules_arr) = doc.get("rule").and_then(|i| i.as_array_of_tables()) {
+        for (idx, table) in rules_arr.iter().enumerate() {
+            if let Some(cidr_val) = table.get("cidr").and_then(|i| i.as_str()) {
+                validate_cidr(cidr_val)
+                    .map_err(|e| format!("rules.toml [[rule]] #{}: {}", idx + 1, e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,5 +714,74 @@ mod tests {
     fn url_path_rejects_too_long() {
         let long = format!("/{}", "a".repeat(255));
         assert!(validate_url_path(&long).is_err());
+    }
+
+    // ─── Phase 15.1: TOML content validators ──────────────
+
+    #[test]
+    fn vpn_toml_content_accepts_valid() {
+        assert!(validate_vpn_toml_content(
+            "listen_address = \"0.0.0.0:443\"\nipv6_available = true\n"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn vpn_toml_content_rejects_empty() {
+        assert!(validate_vpn_toml_content("").is_err());
+    }
+
+    #[test]
+    fn vpn_toml_content_rejects_oversize() {
+        let huge = "key = \"".to_string() + &"x".repeat(70000) + "\"";
+        assert!(validate_vpn_toml_content(&huge).is_err());
+    }
+
+    #[test]
+    fn vpn_toml_content_rejects_malformed() {
+        // Layer 2 toml_edit parse rejects structurally invalid TOML.
+        assert!(validate_vpn_toml_content("listen_address = \"unclosed").is_err());
+        assert!(validate_vpn_toml_content("[[unclosed").is_err());
+    }
+
+    #[test]
+    fn hosts_toml_content_accepts_valid() {
+        let toml = "[[main_hosts]]\nhostname = \"a.com\"\ncert_chain_path = \"/etc/c.pem\"\nprivate_key_path = \"/etc/k.pem\"\n";
+        assert!(validate_hosts_toml_content(toml).is_ok());
+    }
+
+    #[test]
+    fn hosts_toml_content_rejects_empty() {
+        assert!(validate_hosts_toml_content("").is_err());
+    }
+
+    #[test]
+    fn rules_toml_content_accepts_valid() {
+        let toml = "[[rule]]\ncidr = \"10.0.0.0/8\"\naction = \"allow\"\n";
+        assert!(validate_rules_toml_content(toml).is_ok());
+    }
+
+    #[test]
+    fn rules_toml_content_rejects_invalid_cidr() {
+        // T-15.1-07: cidr field structural validation (defence in depth).
+        let bad = "[[rule]]\ncidr = \"not.a.cidr\"\naction = \"allow\"\n";
+        assert!(validate_rules_toml_content(bad).is_err());
+    }
+
+    #[test]
+    fn rules_toml_content_rejects_shell_in_cidr() {
+        // Defence in depth: even though TOML parses (cidr is just a string),
+        // validate_cidr blocks shell metachars to prevent any downstream injection.
+        let bad = "[[rule]]\ncidr = \"$(whoami)/24\"\naction = \"allow\"\n";
+        assert!(validate_rules_toml_content(bad).is_err());
+    }
+
+    #[test]
+    fn rules_toml_content_accepts_no_cidr_entries() {
+        // Phase 14.1 anti-DPI rules use `client_random_prefix` без cidr — must validate.
+        // D-2.3 ownership: Users tab owns client_random_prefix entries; Configuration
+        // tab owns cidr entries. Validator must permit both shapes.
+        let toml = "[[rule]]\nclient_random_prefix = \"abc123\"\naction = \"allow\"\n";
+        assert!(validate_rules_toml_content(toml).is_ok());
     }
 }
