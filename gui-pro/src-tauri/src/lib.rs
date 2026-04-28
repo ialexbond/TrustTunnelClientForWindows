@@ -347,6 +347,7 @@ pub fn run() {
             commands::ssh_commands::server_update_ping_path,
             commands::ssh_commands::server_update_speedtest_path,
             commands::ssh_commands::server_write_vpn_toml_raw,
+            commands::ssh_commands::server_save_config_file,
             commands::ssh_commands::server_update_hosts_allowed_sni,
             commands::ssh_commands::server_export_config_deeplink,
             commands::ssh_commands::server_get_available_versions,

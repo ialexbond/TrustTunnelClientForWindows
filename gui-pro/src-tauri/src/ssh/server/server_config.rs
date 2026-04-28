@@ -55,11 +55,16 @@ impl Default for VpnConfigKnown {
     }
 }
 
+// REQ-15.1 extended: ConfigBundle covers 4 TOML files + service status (Phase 15.1).
+// Plan 15.1-01 D-PRE-1: schema-driven editor reads vpn.toml + hosts.toml +
+// credentials.toml + rules.toml in a single SSH channel (Pitfall 4 mitigation).
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigBundle {
     pub vpn_toml: String,
     pub hosts_toml: String,
+    pub credentials_toml: String, // NEW Phase 15.1 — D-2.1 read-only preview (full content, masked at frontend D-11.1)
+    pub rules_toml: String,       // NEW Phase 15.1 — D-2.3 editable с frontend-side ownership merge
     pub typed: VpnConfigKnown,
     pub allowed_sni: Vec<AllowedSniHost>,
     pub service_status: String,
@@ -82,13 +87,16 @@ pub fn update_listen_address_in_toml(raw_toml: &str, new_addr: &str) -> Result<S
     Ok(doc.to_string())
 }
 
-/// Bundle parser: split raw &&-chained shell output into 3 sections by markers.
-/// Returns (vpn_toml, hosts_toml, service_status). All three default to "" if marker missing.
-pub fn parse_config_bundle_output(raw: &str) -> (String, String, String) {
+/// Bundle parser: split raw &&-chained shell output into 5 sections by markers.
+/// Returns (vpn_toml, hosts_toml, credentials_toml, rules_toml, service_status).
+/// All five default to "" if marker missing (forward-compatible — Phase 15.1).
+pub fn parse_config_bundle_output(raw: &str) -> (String, String, String, String, String) {
     let mut vpn = String::new();
     let mut hosts = String::new();
+    let mut credentials = String::new();
+    let mut rules = String::new();
     let mut service = String::new();
-    let mut state: u8 = 0; // 0=skip, 1=vpn, 2=hosts, 3=service
+    let mut state: u8 = 0; // 0=skip, 1=vpn, 2=hosts, 3=credentials, 4=rules, 5=service
     for line in raw.lines() {
         match line.trim() {
             "---VPN_TOML---" => {
@@ -99,8 +107,16 @@ pub fn parse_config_bundle_output(raw: &str) -> (String, String, String) {
                 state = 2;
                 continue;
             }
-            "---SERVICE---" => {
+            "---CREDENTIALS_TOML---" => {
                 state = 3;
+                continue;
+            }
+            "---RULES_TOML---" => {
+                state = 4;
+                continue;
+            }
+            "---SERVICE---" => {
+                state = 5;
                 continue;
             }
             _ => {}
@@ -115,12 +131,20 @@ pub fn parse_config_bundle_output(raw: &str) -> (String, String, String) {
                 hosts.push('\n');
             }
             3 => {
+                credentials.push_str(line);
+                credentials.push('\n');
+            }
+            4 => {
+                rules.push_str(line);
+                rules.push('\n');
+            }
+            5 => {
                 service.push_str(line.trim());
             }
             _ => {}
         }
     }
-    (vpn, hosts, service)
+    (vpn, hosts, credentials, rules, service)
 }
 
 // ── M-01: allowed_sni discovery for Custom SNI autocomplete ─────────────────
@@ -1050,13 +1074,107 @@ pub async fn write_vpn_toml_raw(
     write_vpn_toml_via_heredoc(app, handle, &content, "raw_write").await
 }
 
-// ── REQ-15.0: Single-channel bundle reader (Pitfall 4 mitigation) ──────────
+// ── REQ-15.0 + REQ-15.7 + REQ-15.8: Generic per-file save (Phase 15.1) ─────
+//
+// Schema-driven editor (Phase 15.1) batches edits across vpn.toml / hosts.toml /
+// rules.toml через единый IPC. file_name accepts "vpn" / "hosts" / "rules" only —
+// credentials.toml rejected at this layer to enforce D-2.1 (read-only preview,
+// edited via Users tab). After successful rules.toml write, emits Tauri event
+// `rules-toml-changed` for cross-tab cache invalidation (Users tab subscribes
+// per REQ-15.8 D-2.3).
+//
+// Defence stack (S-02 + S-04):
+//   - file_name whitelist {"vpn", "hosts", "rules"} blocks path traversal /
+//     credentials write (D-2.1 + T-15.1-04 + T-15.1-08).
+//   - Per-file content validator (sanitize.rs) — size cap + toml_edit parse +
+//     defence-in-depth checks (e.g. cidr fields в rules.toml).
+//   - UUID-randomized heredoc delimiter `{prefix}_EOF_{uuid}` — user content
+//     cannot collide с delimiter (T-15.1-01).
+//
+// V13 invariant: backend re-validates даже если frontend pre-validated. Tauri IPC
+// is the trust boundary; frontend is untrusted at this layer.
+//
+// NOTE: This function does NOT trigger systemctl restart automatically. The
+// Configuration tab orchestrates batch save + single restart via the existing
+// `server_restart_service` command (D-4.1 unified batch flow).
+pub async fn save_config_file(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    file_name: String,
+    raw_content: String,
+) -> Result<(), String> {
+    // Step 1: validate file_name whitelist (V13 trust boundary).
+    // Tuple maps file_name → (filename on disk, heredoc prefix, validator).
+    let (filename, prefix, validator): (&str, &str, fn(&str) -> Result<(), String>) =
+        match file_name.as_str() {
+            "vpn" => (
+                "vpn.toml",
+                "VPN_TOML",
+                crate::ssh::sanitize::validate_vpn_toml_content,
+            ),
+            "hosts" => (
+                "hosts.toml",
+                "HOSTS_TOML",
+                crate::ssh::sanitize::validate_hosts_toml_content,
+            ),
+            "rules" => (
+                "rules.toml",
+                "RULES_TOML",
+                crate::ssh::sanitize::validate_rules_toml_content,
+            ),
+            "credentials" => {
+                return Err("credentials.toml is read-only — edit via Users tab (D-2.1)".into());
+            }
+            other => {
+                return Err(format!(
+                    "Invalid file_name '{other}' (allowed: vpn, hosts, rules)"
+                ));
+            }
+        };
+
+    // Step 2: per-file content validator (S-02 Layer 1 size cap + Layer 2 toml_edit parse).
+    validator(&raw_content)?;
+
+    // Step 3: heredoc write via UUID delim (S-04 invariant) — same pattern as
+    // write_vpn_toml_via_heredoc helper above, generalized for arbitrary file.
+    let sudo = detect_sudo(handle, app).await;
+    let delim = format!("{prefix}_EOF_{}", uuid::Uuid::new_v4().simple());
+    let cmd = format!(
+        "{sudo}tee {dir}/{filename} > /dev/null << '{delim}'\n{raw_content}\n{delim}",
+        dir = ENDPOINT_DIR
+    );
+    let (_, code) = exec_command(handle, app, &cmd).await?;
+    if code != 0 {
+        return Err(format!("CONFIG_FILE_WRITE_FAILED|{filename}|code={code}"));
+    }
+
+    // Step 4: emit cross-tab event for rules.toml only (REQ-15.8 D-2.3).
+    // Users tab listens to `rules-toml-changed` and refetches cached entries
+    // when this event fires after a Configuration-tab save.
+    if file_name == "rules" {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "rules-toml-changed",
+            serde_json::json!({ "file": "rules.toml" }),
+        );
+    }
+
+    // Step 5: NO automatic restart here — frontend orchestrates batch + restart
+    // via server_restart_service after all pending file writes succeed (D-4.1).
+    Ok(())
+}
+
+// ── REQ-15.0 + REQ-15.1: Single-channel bundle reader (Pitfall 4 mitigation) ─────
 //
 // Mount of the Configuration tab would naively fire 3-5 parallel SSH commands
 // (vpn.toml read, hosts.toml read, service status). With CHANNEL_OPEN_GATE=5
 // and other tabs already in flight (Overview, Users), this risks
 // `SSH_CHANNEL_FAILED|ConnectFailed`. Bundle reads everything in ONE channel
 // via && shell pipeline.
+//
+// Phase 15.1 extension: bundle now covers 4 TOML files (vpn / hosts / credentials
+// / rules) + service status — all through ONE SSH channel. Configuration tab
+// fires только ОДИН SSH command вместо 4 — устраняет channel stampede (Pitfall 4).
 pub async fn get_config_bundle(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
@@ -1066,15 +1184,20 @@ pub async fn get_config_bundle(
     let cmd = format!(
         "echo '---VPN_TOML---' && {sudo}cat {dir}/vpn.toml && \
          echo '---HOSTS_TOML---' && {sudo}cat {dir}/hosts.toml 2>/dev/null && \
+         echo '---CREDENTIALS_TOML---' && {sudo}cat {dir}/credentials.toml 2>/dev/null && \
+         echo '---RULES_TOML---' && {sudo}cat {dir}/rules.toml 2>/dev/null && \
          echo '---SERVICE---' && systemctl is-active trusttunnel"
     );
     let (output, _) = exec_command(handle, app, &cmd).await?;
-    let (vpn_toml, hosts_toml, service_status) = parse_config_bundle_output(&output);
+    let (vpn_toml, hosts_toml, credentials_toml, rules_toml, service_status) =
+        parse_config_bundle_output(&output);
     let typed = parse_vpn_config_known(&vpn_toml);
     let allowed_sni = parse_allowed_sni_from_hosts_toml(&hosts_toml);
     Ok(ConfigBundle {
         vpn_toml,
         hosts_toml,
+        credentials_toml,
+        rules_toml,
         typed,
         allowed_sni,
         service_status,
@@ -1435,11 +1558,56 @@ foo = "bar"
 
     #[test]
     fn parse_config_bundle_extracts_three_sections() {
+        // Plan 15-01 carry-forward — verify 3-section subset still works after
+        // Phase 15.1 5-marker extension (forward-compatibility for legacy fixtures).
         let raw = "---VPN_TOML---\nlisten_address = \"0.0.0.0:443\"\n---HOSTS_TOML---\n[[main_hosts]]\nhostname = \"a.example.com\"\n---SERVICE---\nactive";
-        let (vpn, hosts, service) = parse_config_bundle_output(raw);
+        let (vpn, hosts, _creds, _rules, service) = parse_config_bundle_output(raw);
         assert!(vpn.contains("listen_address"));
         assert!(hosts.contains("main_hosts"));
         assert_eq!(service, "active");
+    }
+
+    #[test]
+    fn parse_config_bundle_output_handles_5_markers() {
+        // REQ-15.1 extended (Phase 15.1): bundle reader covers vpn / hosts /
+        // credentials / rules + service status — all через единую &&-цепочку.
+        let input = "\
+---VPN_TOML---
+listen_address = \"0.0.0.0:443\"
+---HOSTS_TOML---
+[[main_hosts]]
+hostname = \"a.com\"
+---CREDENTIALS_TOML---
+[[client]]
+username = \"u\"
+password = \"p\"
+---RULES_TOML---
+[[rule]]
+cidr = \"10.0.0.0/8\"
+action = \"allow\"
+---SERVICE---
+active
+";
+        let (vpn, hosts, creds, rules, svc) = parse_config_bundle_output(input);
+        assert!(vpn.contains("listen_address"));
+        assert!(hosts.contains("main_hosts"));
+        assert!(creds.contains("username"));
+        assert!(rules.contains("cidr"));
+        assert!(svc.contains("active"));
+    }
+
+    #[test]
+    fn parse_config_bundle_output_missing_markers_returns_empty() {
+        // Forward-compatibility: missing markers (e.g. server без credentials.toml
+        // or rules.toml) → empty string, NOT error. Lets bundle reader survive
+        // partial-config servers.
+        let input = "---VPN_TOML---\nlisten_address = \"0.0.0.0:443\"\n---SERVICE---\nactive\n";
+        let (vpn, hosts, creds, rules, svc) = parse_config_bundle_output(input);
+        assert!(vpn.contains("listen_address"));
+        assert!(hosts.is_empty());
+        assert!(creds.is_empty());
+        assert!(rules.is_empty());
+        assert!(svc.contains("active"));
     }
 
     #[test]

@@ -50,6 +50,8 @@ pub use server::{
     update_speedtest_path, write_vpn_toml_raw,
     // Phase 15 — hosts.toml allowed_sni mutation (Plan 02, REQ-15.A)
     update_hosts_allowed_sni,
+    // Phase 15.1 — generic per-file config save (REQ-15.0 + 15.7 + 15.8)
+    save_config_file,
 };
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
