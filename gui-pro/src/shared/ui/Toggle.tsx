@@ -11,6 +11,13 @@ interface ToggleProps {
   labelExtra?: ReactNode;
   disabled?: boolean;
   className?: string;
+  /**
+   * Phase 15.1: a11y label для случаев когда Toggle используется без
+   * внутреннего `label` prop (e.g. ToggleField wrapping schema-driven layout).
+   * Renders на role="switch" button. Без него screen-reader полагается на
+   * соседний визуальный текст — приемлемо, но явный label предпочтительнее.
+   */
+  "aria-label"?: string;
 }
 
 export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
@@ -25,6 +32,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
       labelExtra,
       disabled,
       className = "",
+      "aria-label": ariaLabel,
     },
     ref
   ) => {
@@ -74,6 +82,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
           type="button"
           role="switch"
           aria-checked={isChecked}
+          aria-label={ariaLabel}
           onClick={() => !disabled && onChange(!isChecked)}
           disabled={disabled}
           className={`
