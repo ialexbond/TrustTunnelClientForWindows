@@ -883,6 +883,7 @@
       "partial_save_snackbar": "Сохранено {{n}}/{{total}}, ошибка в {{file}}. Сервис не перезапущен.",
       "retry_save": "Повторить сохранение",
       "show_defaults": "Показать все поля (+{{count}} default)",
+      "show_all_fields": "Показать все поля (+{{n}} default)",
       "hide_defaults": "Скрыть default поля",
       "docs_link": "Документация TrustTunnel",
       "unsaved_title": "Несохранённые изменения",
