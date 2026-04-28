@@ -883,6 +883,7 @@
       "partial_save_snackbar": "Saved {{n}}/{{total}}, error in {{file}}. Service not restarted.",
       "retry_save": "Retry save",
       "show_defaults": "Show all fields (+{{count}} default)",
+      "show_all_fields": "Show all fields (+{{n}} default)",
       "hide_defaults": "Hide default fields",
       "docs_link": "TrustTunnel documentation",
       "unsaved_title": "Unsaved changes",
