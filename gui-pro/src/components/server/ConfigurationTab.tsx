@@ -75,15 +75,11 @@ export function ConfigurationTab({
   const pushSnack = useSnackBar();
   const { log: activityLog } = useActivityLog();
 
-  // Touch _mockBundleProp so the linter doesn't flag the optional escape-hatch
-  // Storybook prop as unused — Plan 15.1-07 stories will pass it through to
-  // override the real ConfigBundle.
-  void _mockBundleProp;
-
   const config = useTomlConfigState(sshParams, {
     defaultsMaps: DEFAULTS_MAPS,
     disruptSets: DISRUPT_SETS,
     skipAutoLoad: _storybook,
+    initialBundle: _storybook ? _mockBundleProp : undefined,
   });
 
   // Storybook overrides
@@ -319,7 +315,6 @@ export function ConfigurationTab({
       <QuickSettingsCard
         getSchema={getQuickSchema}
         onChange={(path, value) => onChangeAny(path, value)}
-        disabled={_storybook}
       />
 
       {/* 4 LazyAccordionSection — collapsed by default (D-PRE-2) */}

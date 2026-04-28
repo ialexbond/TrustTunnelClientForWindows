@@ -51,6 +51,12 @@ export interface SshParams {
 export interface UseTomlConfigStateOptions {
   /** Skip auto-load на mount (used for storybook). */
   skipAutoLoad?: boolean;
+  /**
+   * Pre-loaded bundle for Storybook / tests. When `skipAutoLoad=true` AND
+   * `initialBundle` provided, hook builds trees + editedParsed from the bundle
+   * synchronously on mount (no SSH invoke). Plan 15.1-07 escape hatch.
+   */
+  initialBundle?: ConfigBundle;
   /** Override defaults map (Plan 15.1-05 production map; tests can inject). */
   defaultsMaps: Record<ConfigFileName | "credentials", DefaultsMap>;
   /** Override disrupt sets (Plan 15.1-05 production set). */
@@ -192,6 +198,24 @@ export function useTomlConfigState(
   // Effect: load on mount + sshParams change
   useEffect(() => {
     if (options.skipAutoLoad) {
+      // Storybook escape hatch — synchronously seed state from initialBundle
+      if (options.initialBundle) {
+        const fetched = options.initialBundle;
+        setBundle(fetched);
+        const builtTrees = buildSchemaFromBundle(
+          fetched,
+          options.defaultsMaps,
+          options.disruptSets,
+        );
+        setTrees(builtTrees);
+        setEditedParsed({
+          vpn: parseSafe(fetched.vpnToml),
+          hosts: parseSafe(fetched.hostsToml),
+          rules: parseSafe(fetched.rulesToml),
+          credentials: parseSafe(fetched.credentialsToml),
+        });
+        setDirtyFields(new Map());
+      }
       setLoading(false);
       return;
     }
@@ -200,7 +224,13 @@ export function useTomlConfigState(
     return () => {
       cancelled.current = true;
     };
-  }, [loadBundle, options.skipAutoLoad]);
+  }, [
+    loadBundle,
+    options.skipAutoLoad,
+    options.initialBundle,
+    options.defaultsMaps,
+    options.disruptSets,
+  ]);
 
   const reloadBundle = useCallback(async (): Promise<void> => {
     const cancelled = { current: false };
