@@ -18,7 +18,12 @@ import { useConfirm } from "../shared/ui/useConfirm";
 import type { ServerState } from "./server/useServerState";
 import { OverviewSection } from "./server/OverviewSection";
 import { UsersSection } from "./server/UsersSection";
-import { ServerSettingsSection } from "./server/ServerSettingsSection";
+import {
+  ConfigurationTab,
+  configTabDirtyRef,
+} from "./server/ConfigurationTab";
+// ServerSettingsSection removed (was Phase 11 baseline) — replaced by
+// ConfigurationTab (Phase 15.1 schema-driven editor).
 import { SecurityTabSection } from "./server/SecurityTabSection";
 import { UtilitiesTabSection } from "./server/UtilitiesTabSection";
 
@@ -90,13 +95,57 @@ export function ServerTabs({ state }: ServerTabsProps) {
   const { log: activityLog } = useActivityLog();
   const confirm = useConfirm();
   const [activeTab, setActiveTabState] = useState<TabId>(() => loadActiveTab());
-  const setActiveTab = (id: TabId) => {
+  const setActiveTab = async (id: TabId): Promise<void> => {
+    // D-14.1: navigate-away guard — only intercepts when leaving Configuration
+    // tab w/ dirty changes. ConfirmDialog API supports only boolean — single
+    // dialog с danger variant: Confirm = Discard&Leave; Cancel = Stay.
+    // Save&Leave triple-choice covered внутри ConfigurationTab (useNavigateAwayGuard
+    // hook — Plan 15.1-07 may surface need для wider integration).
+    if (activeTab === "configuration" && id !== "configuration" && configTabDirtyRef.current) {
+      const ok = await confirm({
+        title: t("server.config.unsaved_title"),
+        message: t("server.config.unsaved_desc"),
+        variant: "danger",
+        confirmText: t("server.config.discard_and_leave"),
+        cancelText: t("server.config.stay"),
+      });
+      if (!ok) {
+        // User chose to stay
+        activityLog("USER", "tab.switch.cancelled.unsaved", "ServerTabs");
+        return;
+      }
+      // User chose to discard and leave — clear dirty ref (ConfigurationTab will
+      // re-sync on next dirtyCount change via its useEffect).
+      // eslint-disable-next-line react-hooks/immutability -- module-level shared ref pattern (Phase 15-07 carry-forward); ConfigurationTab subsequently calls discardAll which resets dirtyCount to 0 → useEffect there re-syncs ref to false.
+      configTabDirtyRef.current = false;
+    }
     setActiveTabState(id);
     saveActiveTab(id);
   };
 
   const handleDisconnect = async () => {
     activityLog("USER", "server.disconnect.initiated", "ServerTabs.LogOutIcon");
+
+    // D-14.1: extra guard для disconnect когда configuration tab dirty
+    if (activeTab === "configuration" && configTabDirtyRef.current) {
+      const okUnsaved = await confirm({
+        title: t("server.config.unsaved_title"),
+        message: t("server.config.unsaved_desc"),
+        variant: "danger",
+        confirmText: t("server.config.discard_and_leave"),
+        cancelText: t("server.config.stay"),
+      });
+      if (!okUnsaved) {
+        activityLog(
+          "USER",
+          "server.disconnect.cancelled.unsaved",
+          "ServerTabs",
+        );
+        return;
+      }
+      configTabDirtyRef.current = false;
+    }
+
     const ok = await confirm({
       title: t("server.disconnect.confirm_title"),
       message: t("server.disconnect.confirm_message"),
@@ -147,8 +196,8 @@ export function ServerTabs({ state }: ServerTabsProps) {
             aria-selected={activeTab === tab.id}
             aria-controls={`panel-${tab.id}`}
             tabIndex={activeTab === tab.id ? 0 : -1}
-            onClick={() => {
-              setActiveTab(tab.id);
+            onClick={async () => {
+              await setActiveTab(tab.id);
               activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
             }}
             onKeyDown={(e) => handleTabKeyDown(e, idx)}
@@ -239,7 +288,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
                     state={state}
                     activeServerTab={activeTab}
                     onNavigate={(nextTab) => {
-                      setActiveTab(nextTab);
+                      void setActiveTab(nextTab);
                       activityLog(
                         "USER",
                         `tab.switch target="${nextTab}" source="overview-drilldown"`,
@@ -249,7 +298,12 @@ export function ServerTabs({ state }: ServerTabsProps) {
                   />
                 )}
                 {tab.id === "users" && <UsersSection state={state} activeServerTab={activeTab} />}
-                {tab.id === "configuration" && <ServerSettingsSection state={state} />}
+                {tab.id === "configuration" && (
+                  <ConfigurationTab
+                    sshParams={state.sshParams}
+                    onNavigateToTab={(targetTab) => void setActiveTab(targetTab)}
+                  />
+                )}
                 {tab.id === "security" && <SecurityTabSection state={state} />}
                 {tab.id === "utilities" && <UtilitiesTabSection state={state} />}
               </>
