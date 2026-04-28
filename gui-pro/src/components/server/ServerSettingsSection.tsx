@@ -1,71 +1,170 @@
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Network } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { SlidersHorizontal, Network, AlertTriangle } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
+import { Button } from "../../shared/ui/Button";
+import { Toggle } from "../../shared/ui/Toggle";
+import { Accordion } from "../../shared/ui/Accordion";
+import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
 import { SshPortSection } from "./SshPortSection";
 import { VersionSection } from "./VersionSection";
-import { useVpnTomlState } from "./useVpnTomlState";
-import { QuickSettingsSection } from "./QuickSettingsSection";
-import { AdvancedConfigAccordion } from "./AdvancedConfigAccordion";
-import { AllowedSniEditor } from "./AllowedSniEditor";
 
 interface Props {
   state: ServerState;
 }
 
-/**
- * Phase 15 — «Конфигурация» tab orchestrator (REWRITE of Phase 13 version).
- *
- * Layout (top → bottom):
- *   1. **Quick Settings** (Plan 04) — 6 most-used vpn.toml fields with inline
- *      restart-required badges, dirty banner, и explicit save flow.
- *   2. **SSH Port** — separate concern (sshd_config + firewall, NOT vpn.toml)
- *      kept as standalone Card. Phase 11 carry-over.
- *   3. **Advanced Accordion** (Plan 05) — sectioned per-field editors,
- *      AllowedSniEditor (Plan 06) wired через `allowedSniSlot`, и Raw TOML.
- *   4. **Version** (Phase 11 carry-over) — sidecar version section, separate
- *      concern, NOT vpn.toml.
- *
- * **Single hook instance:** `useVpnTomlState` runs once here at the top, и
- * shared state передаётся в:
- *   - `<QuickSettingsSection state={vpnState} />` — bypasses internal hook
- *     (Task 1 refactor — `state` prop precedence above internal call).
- *   - `<AdvancedConfigAccordion vpnTomlContent={vpnState.vpnTomlRaw} ... />` —
- *     reads raw TOML и hosts.toml from same bundle.
- *   - `<AllowedSniEditor hosts={vpnState.allowedSni} ... />` — reads
- *     allowed_sni list from bundle. After mutation, `onHostsChange` triggers
- *     `vpnState.loadBundle()` to resync server state.
- *
- * Pitfall 4 (SSH stampede on tab mount) mitigated — only one
- * `server_get_config_bundle` IPC call per Configuration tab activation.
- *
- * **Removed from Phase 13 version:**
- *   - `parseTomlConfig` regex helper — replaced by typed serde parsing in
- *     `useVpnTomlState` (Plan 04 + backend Plan 01 `VpnConfigKnown` struct).
- *   - Feature toggle UI for `ping_enable` / `speedtest_enable` / `ipv6_available` —
- *     per D-1 those toggles живут в Overview tab (Phase 13 G-01..G-08), не
- *     дублируются здесь.
- *   - `handleSaveSettings` (server_apply_config invoke) — каждая секция теперь
- *     управляет своим save flow (per-field typed mutations vs raw TOML write).
- *   - Bottom Save CTA — заменена per-section apply buttons и dirty banner.
- *   - Loading warning banner — replaced QuickSettingsSection's own Skeleton
- *     loading state (3 cards × 120px placeholders).
- */
+function parseTomlConfig(raw: string) {
+  const pingMatch = raw.match(/ping_enable\s*=\s*(true|false)/);
+  const speedMatch = raw.match(/speedtest_enable\s*=\s*(true|false)/);
+  const ipv6Match = raw.match(/ipv6_available\s*=\s*(true|false)/);
+  return {
+    pingEnable: pingMatch ? pingMatch[1] === "true" : false,
+    speedtestEnable: speedMatch ? speedMatch[1] === "true" : false,
+    ipv6Available: ipv6Match ? ipv6Match[1] === "true" : false,
+  };
+}
+
 export function ServerSettingsSection({ state }: Props) {
   const { t } = useTranslation();
-  const { sshParams } = state;
+  const { sshParams, configRaw: preloadedConfig, setConfigRaw: setPreloadedConfig, setActionResult } = state;
 
-  // Sub-hooks — single instance owned by this component
+  const configRaw = preloadedConfig ?? "";
+
+  // ─── Feature toggles state ───
+  const [togglingFeatures, setTogglingFeatures] = useState<Set<string>>(new Set());
+  const [localOverrides, setLocalOverrides] = useState<Record<string, boolean>>({});
+  const activeTogglesRef = useRef(0);
+
+  // ─── Sub-hooks ───
   const security = useSecurityState(sshParams, state.pushSuccess, state.onPortChanged);
-  const vpnState = useVpnTomlState(sshParams);
+
+  // ─── Save settings state ───
+  const [saveLoading, setSaveLoading] = useState(false);
+
+  const parsed = configRaw ? parseTomlConfig(configRaw) : null;
+
+  const loadConfig = async () => {
+    try {
+      const raw = await invoke<string>("server_get_config", sshParams);
+      setPreloadedConfig(raw);
+    } catch (e) {
+      state.pushSuccess(formatError(e), "error");
+    }
+  };
+
+  const featureNames: Record<string, string> = {
+    ping_enable: t("server.config.ping_enable_name"),
+    speedtest_enable: t("server.config.speedtest_enable_name"),
+    ipv6_available: t("server.config.ipv6_available_name"),
+  };
+
+  const handleToggleFeature = async (feature: string, currentValue: boolean) => {
+    if (togglingFeatures.has(feature)) return;
+    setTogglingFeatures((prev) => new Set(prev).add(feature));
+    activeTogglesRef.current += 1;
+    try {
+      await invoke("server_update_config_feature", {
+        ...sshParams,
+        feature,
+        enabled: !currentValue,
+      });
+      setLocalOverrides((prev) => ({ ...prev, [feature]: !currentValue }));
+      const name = featureNames[feature] || feature;
+      const stateText = !currentValue
+        ? t("server.config.toggled_on")
+        : t("server.config.toggled_off");
+      state.pushSuccess(`${name} ${stateText}`);
+    } catch (e) {
+      setLocalOverrides((prev) => {
+        const next = { ...prev };
+        delete next[feature];
+        return next;
+      });
+      setActionResult({ type: "error", message: formatError(e) });
+    } finally {
+      setTogglingFeatures((prev) => {
+        const next = new Set(prev);
+        next.delete(feature);
+        return next;
+      });
+      activeTogglesRef.current -= 1;
+      if (activeTogglesRef.current === 0) {
+        await loadConfig();
+        setLocalOverrides({});
+      }
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSaveLoading(true);
+    try {
+      await invoke("server_apply_config", sshParams);
+      state.pushSuccess(t("server.actions.success_generic"));
+    } catch (e) {
+      setActionResult({ type: "error", message: formatError(e) });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  const featureItems = parsed
+    ? [
+        {
+          key: "ping_enable",
+          label: t("server.config.ping_enable_name"),
+          desc: t("server.config.ping_desc"),
+          value: localOverrides.ping_enable ?? parsed.pingEnable,
+        },
+        {
+          key: "speedtest_enable",
+          label: t("server.config.speedtest_enable_name"),
+          desc: t("server.config.speedtest_desc"),
+          value: localOverrides.speedtest_enable ?? parsed.speedtestEnable,
+        },
+        {
+          key: "ipv6_available",
+          label: t("server.config.ipv6_available_name"),
+          desc: t("server.config.ipv6_desc"),
+          value: localOverrides.ipv6_available ?? parsed.ipv6Available,
+        },
+      ]
+    : [];
 
   return (
-    <div className="space-y-4" data-testid="server-settings-section">
-      {/* 1. Quick Settings — top, owns vpn.toml mutations */}
-      <QuickSettingsSection sshParams={sshParams} state={vpnState} />
+    <div className="space-y-4">
+      {/* Block 1: Feature Toggles */}
+      <Card>
+        <CardHeader
+          title={t("server.config.toggles_title")}
+          icon={<SlidersHorizontal className="w-3.5 h-3.5" />}
+        />
+        {featureItems.length > 0 ? (
+          <div className="space-y-1">
+            {featureItems.map((feat) => (
+              <Toggle
+                key={feat.key}
+                value={feat.value}
+                onChange={() => void handleToggleFeature(feat.key, feat.value)}
+                label={feat.label}
+                description={feat.desc}
+                disabled={togglingFeatures.has(feat.key)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div
+            className="text-xs py-2"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {t("server.config.loading")}
+          </div>
+        )}
+      </Card>
 
-      {/* 2. SSH Port — separate concern (sshd_config), NOT vpn.toml */}
+      {/* Block 2: SSH Port */}
       <Card>
         <CardHeader
           title={t("server.config.port_title")}
@@ -74,29 +173,75 @@ export function ServerSettingsSection({ state }: Props) {
         <SshPortSection state={security} />
       </Card>
 
-      {/* 3. Advanced Accordion — closed by default; opens per-section modals.
-           AllowedSniEditor получает hosts из shared vpnState; после успешной
-           mutation reload bundle через `onHostsChange` callback. */}
-      <AdvancedConfigAccordion
-        vpnTomlContent={vpnState.vpnTomlRaw}
-        hostsTomlContent={vpnState.hostsTomlRaw}
-        allowedSniSlot={
-          <AllowedSniEditor
-            hosts={vpnState.allowedSni}
-            sshParams={sshParams}
-            onHostsChange={() => {
-              // Resync useVpnTomlState с server state — после optimistic
-              // update + persist, refetch confirms backend wrote the file
-              // и AllowedSniEditor receives fresh prop reference (its
-              // length-guarded sync logic absorbs the update).
-              void vpnState.loadBundle();
-            }}
-          />
-        }
+      {/* Block 3: Advanced Accordion */}
+      <Accordion
+        defaultOpen={[]}
+        items={[
+          {
+            id: "advanced",
+            title: (
+              <span
+                className="text-sm font-semibold"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                {t("server.config.advanced")}
+              </span>
+            ),
+            content: (
+              <div className="space-y-4">
+                {/* Version Section */}
+                <VersionSection state={state} />
+
+                {/* Raw vpn.toml */}
+                {configRaw && (
+                  <div>
+                    <span
+                      className="text-xs font-semibold block mb-2"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      vpn.toml
+                    </span>
+                    <pre
+                      className="p-3 rounded-[var(--radius-md)] text-xs leading-relaxed overflow-auto max-h-48 whitespace-pre-wrap font-mono"
+                      style={{
+                        backgroundColor: "var(--color-bg-primary)",
+                        border: "1px solid var(--color-border)",
+                        color: "var(--color-text-muted)",
+                        paddingRight: "1rem",
+                      }}
+                    >
+                      {configRaw}
+                    </pre>
+                  </div>
+                )}
+
+              </div>
+            ),
+          },
+        ]}
       />
 
-      {/* 4. Version — separate concern, sidecar binary management */}
-      <VersionSection state={state} />
+      {/* Save CTA */}
+      <div className="flex justify-end pt-2">
+        <Button
+          variant="primary"
+          onClick={() => void handleSaveSettings()}
+          loading={saveLoading}
+        >
+          {t("server.config.save_settings")}
+        </Button>
+      </div>
+
+      {/* Warning if no config loaded */}
+      {!configRaw && (
+        <div
+          className="flex items-center gap-2 text-xs"
+          style={{ color: "var(--color-warning-500)" }}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>{t("server.config.loading")}</span>
+        </div>
+      )}
     </div>
   );
 }
