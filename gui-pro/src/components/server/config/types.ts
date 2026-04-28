@@ -207,3 +207,32 @@ export interface DirtyFieldRecord {
   /** Which file this change belongs to (used for save batching). */
   fileName: ConfigFileName;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Plan 15.1-05 schema data contracts (defaults + disrupt sets).
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Static defaults map для одного TOML файла (D-6.2).
+ *
+ * Map keys = path joined with dots ("listen_protocols.http2.max_concurrent_streams").
+ * Map values = upstream defaults (per CONFIGURATION.md). Schema-builder использует
+ * defaults для (а) explicit-vs-default detection (D-6.1: показать только overridden
+ * поля + toggle «Показать все default»), (б) type inference fallback when value
+ * is not present в файле, (в) initial values при первом render «Показать все».
+ *
+ * Typed as `Record<string, unknown>` чтобы покрыть смешанные scalar/object/array
+ * defaults без жёсткого type narrowing на этом уровне; визуальный renderer
+ * использует `inferTomlFieldType` для dispatch.
+ */
+export type DefaultsMap = Record<string, unknown>;
+
+/**
+ * Set of "joined.path" strings flagging fields that disconnect active VPN
+ * users when changed (D-4.4).
+ *
+ * Plan 15.1-04 useTomlConfigState computes `hasDisruptHighField` by
+ * intersecting dirty paths с этим set; ConfigurationTab footer показывает
+ * disrupt warning Banner в case of intersection.
+ */
+export type DisruptSet = Set<string>;
