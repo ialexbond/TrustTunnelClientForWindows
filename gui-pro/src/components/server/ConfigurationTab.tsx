@@ -2,10 +2,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openExternalUrl } from "@tauri-apps/plugin-shell";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, AlertCircle, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { Button } from "../../shared/ui/Button";
+import { EmptyState } from "../../shared/ui/EmptyState";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { cn } from "../../shared/lib/cn";
@@ -133,19 +134,19 @@ export function ConfigurationTab({
 
   if (finalError) {
     return (
-      <div className="flex flex-col items-center gap-3 py-8">
-        <p className="text-body text-[var(--color-text-secondary)]">
-          {t("server.config.error_load", {
-            defaultValue: "Не удалось загрузить конфигурацию",
-          })}
-        </p>
-        <p className="text-body-sm text-[var(--color-text-muted)]">
-          {finalError}
-        </p>
-        <Button variant="secondary" onClick={reload}>
-          {t("errors.retry", { defaultValue: "Повторить" })}
-        </Button>
-      </div>
+      <EmptyState
+        icon={<AlertCircle size={48} strokeWidth={1.5} />}
+        heading={t("server.config.error_load", {
+          defaultValue: "Не удалось загрузить конфигурацию",
+        })}
+        body={finalError}
+        action={
+          <Button variant="secondary" onClick={reload}>
+            <RotateCcw size={16} className="mr-1.5" aria-hidden="true" />
+            {t("errors.retry", { defaultValue: "Повторить" })}
+          </Button>
+        }
+      />
     );
   }
 
