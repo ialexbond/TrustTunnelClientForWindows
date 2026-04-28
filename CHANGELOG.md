@@ -1,5 +1,8 @@
 # CHANGELOG
 
+- [Feature] Add wildcard port syntax (`*:port`) to `VpnSettings::exclusions`.
+            Any connection to the specified port is matched regardless of the destination address.
+
 ## 1.0.49
 
 - [Fix] Protect service socket for DNS query forwarding with securely generated password #62
