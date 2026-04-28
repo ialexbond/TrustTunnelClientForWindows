@@ -293,12 +293,8 @@ export function ConfigurationTab({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* DirtyChangesBanner (D-1.3) */}
-      <DirtyChangesBanner
-        changeCount={dirtyCount}
-        onApply={dirtyCount > 0 ? handleSaveClick : undefined}
-        onDiscard={dirtyCount > 0 ? handleDiscard : undefined}
-      />
+      {/* DirtyChangesBanner (D-1.3) — info-only; actions live в footer */}
+      <DirtyChangesBanner changeCount={dirtyCount} />
 
       {/* RetryBanner (D-8.1) */}
       {retryState && (
