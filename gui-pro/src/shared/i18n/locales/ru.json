@@ -868,7 +868,152 @@
       "error_sni_format": "Неверный формат домена",
       "error_sni_spaces": "Домен не может содержать пробелы",
       "error_sni_ascii_only": "Домен должен содержать только ASCII символы",
-      "error_sni_too_long": "Домен слишком длинный (макс 253 символа)"
+      "error_sni_too_long": "Домен слишком длинный (макс 253 символа)",
+      "save_button": "Сохранить настройки",
+      "save_and_leave": "Сохранить и выйти",
+      "discard_and_leave": "Отменить и выйти",
+      "stay": "Остаться",
+      "credentials_readonly_notice": "Этот файл редактируется в Пользователях",
+      "edit_in_users": "Редактировать в Пользователях",
+      "confirm_save_desc": "Сервис будет перезапущен. Активные подключения прервутся примерно на 5 секунд.",
+      "confirm_save_disrupt_desc": "Эти изменения отключат активных пользователей VPN. Сервис перезапустится по новым настройкам.",
+      "confirm_apply": "Применить изменения",
+      "disrupt_warning": "Эти изменения отключат активных пользователей VPN",
+      "partial_save_error": "Сохранено {{n}}/{{total}}, ошибка в {{file}}. Сервис не перезапущен.",
+      "partial_save_snackbar": "Сохранено {{n}}/{{total}}, ошибка в {{file}}. Сервис не перезапущен.",
+      "retry_save": "Повторить сохранение",
+      "show_defaults": "Показать все поля (+{{count}} default)",
+      "hide_defaults": "Скрыть default поля",
+      "docs_link": "Документация TrustTunnel",
+      "unsaved_title": "Несохранённые изменения",
+      "unsaved_desc": "Покинуть вкладку? Несохранённые изменения будут потеряны.",
+      "delete_host": "Удалить host {{hostname}}",
+      "delete_rule": "Удалить правило {{hostname}}",
+      "min_one_host": "Сервер требует минимум 1 main host",
+      "info_for": "Описание поля {{key}}",
+      "diff_col_file": "Файл",
+      "diff_col_field": "Поле",
+      "diff_col_before": "Было",
+      "diff_col_after": "Стало",
+      "empty_array": "Нет записей",
+      "empty_array_body": "Добавьте первую запись.",
+      "empty_rules": "Нет правил доступа",
+      "empty_rules_body": "Добавьте правило для управления доступом.",
+      "empty_credentials": "Нет пользователей",
+      "empty_credentials_body": "Пользователи добавляются во вкладке Пользователи.",
+      "empty_load_failed": "Не удалось загрузить конфигурацию",
+      "empty_load_failed_body": "Проверьте SSH-подключение и попробуйте снова.",
+      "error_save_file": "Не удалось сохранить {{file}}. Сервис не перезапущен.",
+      "error_listen_address": "Неверный формат. Используйте 0.0.0.0:443 или [::]:443",
+      "error_int_range": "Значение должно быть от {{min}} до {{max}}",
+      "error_cidr_format": "Неверный CIDR. Пример: 192.168.1.0/24",
+      "error_fqdn_format": "Неверный формат домена",
+      "unknown_field_badge": "новое upstream поле",
+      "unknown_field_desc": "Нет описания — обновите GUI",
+      "save_success": "Настройки сохранены. Сервис перезапущен.",
+      "field_desc": {
+        "vpn": {
+          "listen_address": "Адрес и порт, на котором сервер принимает подключения",
+          "ipv6_available": "Включить поддержку IPv6 подключений",
+          "allow_private_network_connections": "Разрешить подключения из локальных сетей (10.0.0.0/8, 192.168.0.0/16 и т.д.)",
+          "tls_handshake_timeout_secs": "Таймаут TLS-рукопожатия в секундах",
+          "client_listener_timeout_secs": "Таймаут ожидания входящих клиентских подключений в секундах",
+          "connection_establishment_timeout_secs": "Таймаут установки соединения с целевым хостом в секундах",
+          "tcp_connections_timeout_secs": "Таймаут TCP-соединений в секундах",
+          "udp_connections_timeout_secs": "Таймаут UDP-соединений в секундах",
+          "credentials_file": "Имя файла с учётными данными пользователей (относительно settings/)",
+          "rules_file": "Имя файла правил доступа (относительно settings/)",
+          "speedtest_enable": "Включить endpoint для теста скорости",
+          "ping_enable": "Включить endpoint для проверки доступности (health check)",
+          "ping_path": "URL-путь endpoint'а ping (например: /ping)",
+          "speedtest_path": "URL-путь endpoint'а speedtest (например: /speedtest)",
+          "auth_failure_status_code": "HTTP-статус код при неудачной авторизации (407 или 405)",
+          "log_level": "Уровень логирования: trace, debug, info, warn, error",
+          "listen_protocols": {
+            "http1": {
+              "max_header_list_size": "Максимальный размер списка HTTP-заголовков в байтах"
+            },
+            "http2": {
+              "max_header_list_size": "Максимальный размер списка HTTP-заголовков в байтах",
+              "max_concurrent_streams": "Максимальное количество одновременных HTTP/2 потоков на соединение",
+              "initial_connection_window_size": "Начальный размер окна на уровне соединения в байтах",
+              "initial_stream_window_size": "Начальный размер окна на уровне потока в байтах",
+              "max_frame_size": "Максимальный размер HTTP/2 кадра в байтах"
+            },
+            "quic": {
+              "max_idle_timeout_ms": "Таймаут простоя QUIC-соединения в миллисекундах",
+              "max_concurrent_bidi_streams": "Максимум одновременных двунаправленных потоков",
+              "max_concurrent_uni_streams": "Максимум одновременных однонаправленных потоков",
+              "recv_udp_payload_size": "Максимальный размер принимаемого UDP-пакета в байтах",
+              "send_udp_payload_size": "Максимальный размер отправляемого UDP-пакета в байтах",
+              "initial_max_data": "Начальный лимит данных на соединение в байтах",
+              "initial_max_stream_data_bidi_local": "Начальный лимит данных для локального двунаправленного потока",
+              "initial_max_stream_data_bidi_remote": "Начальный лимит данных для удалённого двунаправленного потока",
+              "initial_max_stream_data_uni": "Начальный лимит данных для однонаправленного потока",
+              "ack_delay_exponent": "Экспонента задержки ACK (степень двойки в микросекундах)",
+              "max_ack_delay_ms": "Максимальная задержка ACK в миллисекундах",
+              "disable_active_migration": "Отключить активную миграцию соединения",
+              "active_connection_id_limit": "Лимит активных идентификаторов соединения"
+            }
+          },
+          "forward_protocol": {
+            "socks5": {
+              "address": "Адрес SOCKS5 прокси (host:port)",
+              "extended_auth": "Использовать расширенную аутентификацию SOCKS5"
+            }
+          },
+          "reverse_proxy": {
+            "bind_address": "Адрес и порт для входящих HTTP-запросов",
+            "target_address": "Адрес и порт целевого upstream-сервера",
+            "tls_terminate": "Терминировать TLS на этом прокси"
+          },
+          "icmp": {
+            "enable": "Включить ICMP echo (ping)",
+            "bind_address": "Адрес для ICMP-сокета",
+            "timeout_ms": "Таймаут ICMP-запроса в миллисекундах"
+          },
+          "metrics": {
+            "enable": "Включить экспорт метрик Prometheus",
+            "bind_address": "Адрес и порт endpoint'а метрик"
+          }
+        },
+        "hosts": {
+          "main_hosts": {
+            "hostname": "Доменное имя сервера для TLS SNI",
+            "cert_chain_path": "Путь к файлу цепочки TLS-сертификатов",
+            "private_key_path": "Путь к файлу приватного ключа TLS",
+            "allowed_sni": "Список SNI-доменов для anti-DPI декорации (Phase 14.1)"
+          },
+          "ping_hosts": {
+            "hostname": "Доменное имя для ping endpoint'а",
+            "cert_chain_path": "Путь к файлу цепочки TLS-сертификатов",
+            "private_key_path": "Путь к файлу приватного ключа TLS"
+          },
+          "speedtest_hosts": {
+            "hostname": "Доменное имя для speedtest endpoint'а",
+            "cert_chain_path": "Путь к файлу цепочки TLS-сертификатов",
+            "private_key_path": "Путь к файлу приватного ключа TLS"
+          },
+          "reverse_proxy_hosts": {
+            "hostname": "Доменное имя для reverse proxy endpoint'а",
+            "cert_chain_path": "Путь к файлу цепочки TLS-сертификатов",
+            "private_key_path": "Путь к файлу приватного ключа TLS"
+          }
+        },
+        "rules": {
+          "rule": {
+            "cidr": "IP-диапазон в CIDR нотации (например: 192.168.1.0/24)",
+            "client_random_prefix": "Anti-DPI префикс для конкретного пользователя (управляется в Пользователях)",
+            "action": "Действие: allow = разрешить, deny = запретить"
+          }
+        },
+        "credentials": {
+          "client": {
+            "username": "Имя пользователя VPN",
+            "password": "Пароль VPN (показан только маской — редактируется в Пользователях)"
+          }
+        }
+      }
     },
     "disconnect": {
       "confirm_title": "Отключиться от сервера?",
@@ -1303,7 +1448,8 @@
     "clear_field": "Очистить поле",
     "show_password": "Показать пароль",
     "hide_password": "Скрыть пароль",
-    "details": "Детали"
+    "details": "Детали",
+    "add": "Добавить"
   },
   "sidebar": {
     "servers": "Серверы",

@@ -868,7 +868,152 @@
       "error_sni_format": "Invalid domain format",
       "error_sni_spaces": "Domain cannot contain spaces",
       "error_sni_ascii_only": "Domain must contain only ASCII characters",
-      "error_sni_too_long": "Domain too long (max 253 characters)"
+      "error_sni_too_long": "Domain too long (max 253 characters)",
+      "save_button": "Save settings",
+      "save_and_leave": "Save and leave",
+      "discard_and_leave": "Discard and leave",
+      "stay": "Stay",
+      "credentials_readonly_notice": "This file is edited in Users tab",
+      "edit_in_users": "Edit in Users",
+      "confirm_save_desc": "The service will restart. Active connections drop for approximately 5 seconds.",
+      "confirm_save_disrupt_desc": "These changes will disconnect active VPN users. Service will restart with new settings.",
+      "confirm_apply": "Apply changes",
+      "disrupt_warning": "These changes will disconnect active VPN users",
+      "partial_save_error": "Saved {{n}}/{{total}}, error in {{file}}. Service not restarted.",
+      "partial_save_snackbar": "Saved {{n}}/{{total}}, error in {{file}}. Service not restarted.",
+      "retry_save": "Retry save",
+      "show_defaults": "Show all fields (+{{count}} default)",
+      "hide_defaults": "Hide default fields",
+      "docs_link": "TrustTunnel documentation",
+      "unsaved_title": "Unsaved changes",
+      "unsaved_desc": "Leave tab? Unsaved changes will be lost.",
+      "delete_host": "Delete host {{hostname}}",
+      "delete_rule": "Delete rule {{hostname}}",
+      "min_one_host": "Server requires at least 1 main host",
+      "info_for": "Description for field {{key}}",
+      "diff_col_file": "File",
+      "diff_col_field": "Field",
+      "diff_col_before": "Before",
+      "diff_col_after": "After",
+      "empty_array": "No entries",
+      "empty_array_body": "Add the first entry.",
+      "empty_rules": "No access rules",
+      "empty_rules_body": "Add a rule to manage access.",
+      "empty_credentials": "No users",
+      "empty_credentials_body": "Users are added in the Users tab.",
+      "empty_load_failed": "Failed to load configuration",
+      "empty_load_failed_body": "Check SSH connection and try again.",
+      "error_save_file": "Failed to save {{file}}. Service not restarted.",
+      "error_listen_address": "Invalid format. Use 0.0.0.0:443 or [::]:443",
+      "error_int_range": "Value must be between {{min}} and {{max}}",
+      "error_cidr_format": "Invalid CIDR. Example: 192.168.1.0/24",
+      "error_fqdn_format": "Invalid domain format",
+      "unknown_field_badge": "new upstream field",
+      "unknown_field_desc": "No description — update the GUI",
+      "save_success": "Settings saved. Service restarted.",
+      "field_desc": {
+        "vpn": {
+          "listen_address": "Address and port the server listens on",
+          "ipv6_available": "Enable IPv6 connection support",
+          "allow_private_network_connections": "Allow connections from private networks (10.0.0.0/8, 192.168.0.0/16, etc.)",
+          "tls_handshake_timeout_secs": "TLS handshake timeout in seconds",
+          "client_listener_timeout_secs": "Client listener timeout in seconds",
+          "connection_establishment_timeout_secs": "Connection establishment timeout to target host in seconds",
+          "tcp_connections_timeout_secs": "TCP connections timeout in seconds",
+          "udp_connections_timeout_secs": "UDP connections timeout in seconds",
+          "credentials_file": "Credentials file name (relative to settings/)",
+          "rules_file": "Access rules file name (relative to settings/)",
+          "speedtest_enable": "Enable speed test endpoint",
+          "ping_enable": "Enable health check (ping) endpoint",
+          "ping_path": "Ping endpoint URL path (e.g. /ping)",
+          "speedtest_path": "Speedtest endpoint URL path (e.g. /speedtest)",
+          "auth_failure_status_code": "HTTP status code on auth failure (407 or 405)",
+          "log_level": "Log level: trace, debug, info, warn, error",
+          "listen_protocols": {
+            "http1": {
+              "max_header_list_size": "Max HTTP header list size in bytes"
+            },
+            "http2": {
+              "max_header_list_size": "Max HTTP header list size in bytes",
+              "max_concurrent_streams": "Max concurrent HTTP/2 streams per connection",
+              "initial_connection_window_size": "Initial connection-level window size in bytes",
+              "initial_stream_window_size": "Initial stream-level window size in bytes",
+              "max_frame_size": "Max HTTP/2 frame size in bytes"
+            },
+            "quic": {
+              "max_idle_timeout_ms": "QUIC connection idle timeout in milliseconds",
+              "max_concurrent_bidi_streams": "Max concurrent bidirectional streams",
+              "max_concurrent_uni_streams": "Max concurrent unidirectional streams",
+              "recv_udp_payload_size": "Max received UDP packet size in bytes",
+              "send_udp_payload_size": "Max sent UDP packet size in bytes",
+              "initial_max_data": "Initial connection-level data limit in bytes",
+              "initial_max_stream_data_bidi_local": "Initial data limit for local bidirectional stream",
+              "initial_max_stream_data_bidi_remote": "Initial data limit for remote bidirectional stream",
+              "initial_max_stream_data_uni": "Initial data limit for unidirectional stream",
+              "ack_delay_exponent": "ACK delay exponent (power of two in microseconds)",
+              "max_ack_delay_ms": "Max ACK delay in milliseconds",
+              "disable_active_migration": "Disable active connection migration",
+              "active_connection_id_limit": "Active connection ID limit"
+            }
+          },
+          "forward_protocol": {
+            "socks5": {
+              "address": "SOCKS5 proxy address (host:port)",
+              "extended_auth": "Use SOCKS5 extended authentication"
+            }
+          },
+          "reverse_proxy": {
+            "bind_address": "Address and port for incoming HTTP requests",
+            "target_address": "Address and port of the upstream target server",
+            "tls_terminate": "Terminate TLS at this proxy"
+          },
+          "icmp": {
+            "enable": "Enable ICMP echo (ping)",
+            "bind_address": "ICMP socket bind address",
+            "timeout_ms": "ICMP request timeout in milliseconds"
+          },
+          "metrics": {
+            "enable": "Enable Prometheus metrics export",
+            "bind_address": "Metrics endpoint address and port"
+          }
+        },
+        "hosts": {
+          "main_hosts": {
+            "hostname": "Server domain name for TLS SNI",
+            "cert_chain_path": "Path to TLS certificate chain file",
+            "private_key_path": "Path to TLS private key file",
+            "allowed_sni": "List of SNI domains for anti-DPI decoration (Phase 14.1)"
+          },
+          "ping_hosts": {
+            "hostname": "Domain name for ping endpoint",
+            "cert_chain_path": "Path to TLS certificate chain file",
+            "private_key_path": "Path to TLS private key file"
+          },
+          "speedtest_hosts": {
+            "hostname": "Domain name for speedtest endpoint",
+            "cert_chain_path": "Path to TLS certificate chain file",
+            "private_key_path": "Path to TLS private key file"
+          },
+          "reverse_proxy_hosts": {
+            "hostname": "Domain name for reverse proxy endpoint",
+            "cert_chain_path": "Path to TLS certificate chain file",
+            "private_key_path": "Path to TLS private key file"
+          }
+        },
+        "rules": {
+          "rule": {
+            "cidr": "IP range in CIDR notation (e.g. 192.168.1.0/24)",
+            "client_random_prefix": "Anti-DPI prefix for a specific user (managed in Users tab)",
+            "action": "Action: allow = permit, deny = block"
+          }
+        },
+        "credentials": {
+          "client": {
+            "username": "VPN username",
+            "password": "VPN password (shown masked only — edit in Users tab)"
+          }
+        }
+      }
     },
     "disconnect": {
       "confirm_title": "Disconnect from server?",
@@ -1303,7 +1448,8 @@
     "clear_field": "Clear field",
     "show_password": "Show password",
     "hide_password": "Hide password",
-    "details": "Details"
+    "details": "Details",
+    "add": "Add"
   },
   "sidebar": {
     "servers": "Servers",
