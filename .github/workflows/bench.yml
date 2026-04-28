@@ -21,21 +21,14 @@ on:
         description: "Endpoint branch/ref"
         required: false
         default: "master"
-      tunnel_type:
-        description: "Tunnel type to benchmark"
-        required: false
-        default: "ag"
-        type: choice
-        options:
-          - ag
-          - all
-          - wg
-          - no-vpn
 
 jobs:
   dispatch:
     name: Dispatch Bench to Endpoint Repo
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
     if: >
       github.event_name == 'workflow_dispatch' ||
       (
@@ -63,16 +56,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            let clientRef, clientUrl, clientRepo, prNumber, endpointRepo, endpointRef, tunnelType;
+            let clientRef, clientRepo, prNumber, endpointRepo, endpointRef;
 
             if (context.eventName === 'workflow_dispatch') {
               clientRef = context.ref.replace('refs/heads/', '');
-              clientUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}.git`;
               clientRepo = `${context.repo.owner}/${context.repo.repo}`;
               prNumber = '';
               endpointRepo = '${{ github.event.inputs.endpoint_repo }}' || 'TrustTunnel/TrustTunnel';
               endpointRef = '${{ github.event.inputs.endpoint_ref }}' || 'master';
-              tunnelType = '${{ github.event.inputs.tunnel_type }}' || 'ag';
             } else {
               const pr = await github.rest.pulls.get({
                 owner: context.repo.owner,
@@ -80,21 +71,17 @@ jobs:
                 pull_number: context.issue.number
               });
               clientRef = pr.data.head.ref;
-              clientUrl = pr.data.head.repo.clone_url;
               clientRepo = pr.data.head.repo.full_name;
               prNumber = String(context.issue.number);
               endpointRepo = 'TrustTunnel/TrustTunnel';
               endpointRef = 'master';
-              tunnelType = 'ag';
             }
 
             core.setOutput('client_ref', clientRef);
             core.setOutput('client_repo', clientRepo);
-            core.setOutput('client_url', clientUrl);
             core.setOutput('pr_number', prNumber);
             core.setOutput('endpoint_repo', endpointRepo);
             core.setOutput('endpoint_ref', endpointRef);
-            core.setOutput('tunnel_type', tunnelType);
 
       - name: Dispatch to endpoint repo
         uses: actions/github-script@v7
