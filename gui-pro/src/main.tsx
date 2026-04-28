@@ -12,7 +12,14 @@ import "./shared/i18n";
 // flag glyph. The polyfill swaps in Twemoji's country-flag subset via
 // @font-face so the Country card on the Overview tab renders correctly.
 // No-op on platforms where flags already render natively (Mac/Linux/mobile).
-polyfillCountryFlagEmojis();
+//
+// Font bundled locally в /fonts/TwemojiCountryFlags.woff2 — CDN
+// (cdn.jsdelivr.net) ненадёжен в Tauri webview (offline use, corporate
+// firewalls), а Vite копирует public/* в bundle.
+polyfillCountryFlagEmojis(
+  "Twemoji Country Flags",
+  "/fonts/TwemojiCountryFlags.woff2",
+);
 
 // Block F5, Ctrl+R reload shortcuts
 document.addEventListener("keydown", (e) => {
