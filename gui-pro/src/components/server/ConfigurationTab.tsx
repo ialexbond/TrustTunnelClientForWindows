@@ -13,7 +13,6 @@ import { cn } from "../../shared/lib/cn";
 import { LazyAccordionSection } from "./config/LazyAccordionSection";
 import type { SshParams } from "./config/useTomlConfigState";
 import type { ConfigBundle } from "./config/types";
-import { Badge } from "../../shared/ui/Badge";
 
 /**
  * Phase 15.1 (raw-view) — Configuration tab.
@@ -156,7 +155,6 @@ export function ConfigurationTab({
     name: string;
     title: string;
     content: string;
-    badge?: string;
   }> = [
     { name: "vpn", title: "vpn.toml", content: bundle.vpnToml ?? "" },
     { name: "hosts", title: "hosts.toml", content: bundle.hostsToml ?? "" },
@@ -164,9 +162,6 @@ export function ConfigurationTab({
       name: "credentials",
       title: "credentials.toml",
       content: maskCredentialsToml(bundle.credentialsToml ?? ""),
-      badge: t("server.config.readonly_label", {
-        defaultValue: "ТОЛЬКО ЧТЕНИЕ",
-      }),
     },
     { name: "rules", title: "rules.toml", content: bundle.rulesToml ?? "" },
   ];
@@ -174,17 +169,7 @@ export function ConfigurationTab({
   return (
     <div className="flex flex-col gap-4">
       {files.map((file) => (
-        <LazyAccordionSection
-          key={file.name}
-          title={file.title}
-          badge={
-            file.badge ? (
-              <Badge variant="neutral" size="sm">
-                {file.badge}
-              </Badge>
-            ) : undefined
-          }
-        >
+        <LazyAccordionSection key={file.name} title={file.title}>
           {file.content.trim().length === 0 ? (
             <p className="text-body-sm text-[var(--color-text-muted)] italic">
               {t("server.config.empty_file", {
