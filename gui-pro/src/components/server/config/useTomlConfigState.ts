@@ -19,6 +19,7 @@ import type {
   ConfigBundle,
   ConfigFileName,
   DirtyFieldRecord,
+  TomlFieldSchema,
 } from "./types";
 
 /**
@@ -277,6 +278,27 @@ export function useTomlConfigState(
       setEditedParsed((prev) => {
         if (!prev) return prev;
         return { ...prev, [fileName]: newParsed };
+      });
+
+      // Update tree schema so renderers read the new value (otherwise schema.value
+      // stays stale and toggles/inputs don't reflect user edits).
+      setTrees((prev) => {
+        if (!prev) return prev;
+        const tree = prev[fileName as ConfigFileName | "credentials"];
+        if (!tree) return prev;
+        const schema = tree.flatMap.get(pathKey);
+        if (!schema) return prev;
+        const t = schema.type as { kind: string; value?: unknown };
+        const updatedSchema: TomlFieldSchema = {
+          ...schema,
+          type: { ...t, value } as typeof schema.type,
+        };
+        const newFlatMap = new Map(tree.flatMap);
+        newFlatMap.set(pathKey, updatedSchema);
+        return {
+          ...prev,
+          [fileName]: { ...tree, flatMap: newFlatMap },
+        };
       });
 
       // Update dirty map
