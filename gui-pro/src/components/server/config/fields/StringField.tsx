@@ -28,19 +28,25 @@ export interface StringFieldProps {
 export function StringField({ schema, validator, onChange, disabled }: StringFieldProps) {
   const { t } = useTranslation();
 
-  if (schema.type.kind !== "string") return null;
-
-  const initialValue = schema.type.value;
+  // Hooks must be called unconditionally (react-hooks/rules-of-hooks).
+  // Defensive guard для non-string kind рендерится null ниже, ПОСЛЕ всех hooks.
+  const initialValue = schema.type.kind === "string" ? schema.type.value : "";
 
   const [localValue, setLocalValue] = useState<string>(initialValue);
   const [error, setError] = useState<string | null>(null);
 
   // Re-sync local state when schema value changes externally
-  // (e.g., bundle reload, discardAll). Reset error on each external change.
+  // (e.g., bundle reload, discardAll). D-7.1 onBlur pattern needs a local
+  // buffer that mirrors parent state when the parent updates externally.
+  // Legit "external sync" case per react.dev (resetting on prop change).
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setLocalValue(schema.type.kind === "string" ? schema.type.value : "");
     setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [schema.type]);
+
+  if (schema.type.kind !== "string") return null;
 
   const handleBlur = () => {
     const errorKey = validator ? validator(localValue) : "";

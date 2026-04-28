@@ -26,15 +26,19 @@ export interface RawUnknownFieldProps {
 export function RawUnknownField({ schema, onChange, disabled }: RawUnknownFieldProps) {
   const { t } = useTranslation();
 
-  if (schema.type.kind !== "unknown") return null;
-
-  const initialValue = schema.type.rawValue;
+  // Hooks must be called unconditionally (react-hooks/rules-of-hooks).
+  const initialValue = schema.type.kind === "unknown" ? schema.type.rawValue : "";
 
   const [localValue, setLocalValue] = useState<string>(initialValue);
 
+  // External sync (D-7.1 buffered field): parent updates schema → mirror it.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setLocalValue(schema.type.kind === "unknown" ? schema.type.rawValue : "");
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [schema.type]);
+
+  if (schema.type.kind !== "unknown") return null;
 
   const handleBlur = () => {
     if (localValue !== initialValue) {

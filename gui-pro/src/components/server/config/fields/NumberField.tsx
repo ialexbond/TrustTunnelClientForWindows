@@ -30,19 +30,23 @@ export interface NumberFieldProps {
 export function NumberField({ schema, validator, onChange, disabled }: NumberFieldProps) {
   const { t } = useTranslation();
 
-  if (schema.type.kind !== "integer") return null;
-
-  const initialValue = schema.type.value;
+  // Hooks must be called unconditionally (react-hooks/rules-of-hooks).
+  const initialValue = schema.type.kind === "integer" ? schema.type.value : 0;
 
   const [localValue, setLocalValue] = useState<string>(String(initialValue));
   const [error, setError] = useState<string | null>(null);
 
+  // External sync (D-7.1 buffered field): parent updates schema → mirror it.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setLocalValue(
       schema.type.kind === "integer" ? String(schema.type.value) : ""
     );
     setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [schema.type]);
+
+  if (schema.type.kind !== "integer") return null;
 
   const handleBlur = () => {
     const parsed = parseInt(localValue, 10);
