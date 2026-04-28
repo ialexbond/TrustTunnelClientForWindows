@@ -268,19 +268,48 @@ export function applyEditToParsed(
 ): Record<string, unknown> {
   if (path.length === 0) return parsed;
   const result: Record<string, unknown> = { ...parsed };
-  let cursor: Record<string, unknown> = result;
+  // Cursor walks through nested objects/arrays; treats numeric path segments
+  // as array indices so paths like ["main_hosts", "0", "hostname"] target
+  // the array entry's field correctly.
+  let cursor: unknown = result;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
-    const child = cursor[key];
-    if (typeof child !== "object" || child === null) {
-      // Path doesn't exist — create it
-      cursor[key] = {};
+    const isIndex = /^\d+$/.test(key);
+    if (Array.isArray(cursor)) {
+      const idx = Number(key);
+      const child = cursor[idx];
+      const next =
+        Array.isArray(child)
+          ? [...child]
+          : typeof child === "object" && child !== null
+            ? { ...(child as Record<string, unknown>) }
+            : {};
+      cursor[idx] = next;
+      cursor = next;
+    } else if (typeof cursor === "object" && cursor !== null) {
+      const obj = cursor as Record<string, unknown>;
+      const child = obj[key];
+      let next: unknown;
+      if (Array.isArray(child)) {
+        next = [...child];
+      } else if (typeof child === "object" && child !== null) {
+        next = { ...(child as Record<string, unknown>) };
+      } else {
+        next = isIndex ? [] : {};
+      }
+      obj[key] = next;
+      cursor = next;
     } else {
-      cursor[key] = { ...(child as Record<string, unknown>) };
+      // Cannot traverse — bail out
+      return result;
     }
-    cursor = cursor[key] as Record<string, unknown>;
   }
-  cursor[path[path.length - 1]] = newValue;
+  const last = path[path.length - 1];
+  if (Array.isArray(cursor)) {
+    cursor[Number(last)] = newValue;
+  } else if (typeof cursor === "object" && cursor !== null) {
+    (cursor as Record<string, unknown>)[last] = newValue;
+  }
   return result;
 }
 

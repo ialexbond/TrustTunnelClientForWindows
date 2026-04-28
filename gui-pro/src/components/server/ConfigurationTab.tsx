@@ -148,12 +148,53 @@ export function ConfigurationTab({
 
   const getArrayEntrySchemas = (
     parentPath: string[],
-    _entryIndex: number,
+    entryIndex: number,
   ): TomlFieldSchema[] => {
-    // For Phase 15.1 minimal — entries render их fields через children walking
-    // (Plan 15.1-04 schema-builder may extend per-entry sub-trees later).
-    void _entryIndex;
-    return getTableChildSchemas(parentPath);
+    // Build schemas from CURRENT editedParsed (live state — survives edits)
+    // rather than from trees.flatMap (only updated on bundle (re)load).
+    if (!editedParsed) return [];
+    const fileName = fileNameForPath(parentPath);
+    const fileParsed = editedParsed[fileName];
+    if (!fileParsed) return [];
+    let cursor: unknown = fileParsed;
+    for (const seg of parentPath) {
+      if (Array.isArray(cursor)) cursor = cursor[Number(seg)];
+      else if (typeof cursor === "object" && cursor !== null)
+        cursor = (cursor as Record<string, unknown>)[seg];
+      else cursor = undefined;
+    }
+    if (!Array.isArray(cursor)) return [];
+    const entry = cursor[entryIndex];
+    if (!entry || typeof entry !== "object") return [];
+
+    const tooltipPrefix = `server.config.field_desc.${fileName}.${parentPath.join(".")}`;
+    const result: TomlFieldSchema[] = [];
+    for (const [key, value] of Object.entries(entry as Record<string, unknown>)) {
+      let type: TomlFieldSchema["type"];
+      if (typeof value === "boolean") type = { kind: "boolean", value };
+      else if (typeof value === "number" && Number.isInteger(value))
+        type = { kind: "integer", value };
+      else if (typeof value === "string") type = { kind: "string", value };
+      else if (Array.isArray(value) && value.every((v) => typeof v === "string"))
+        type = { kind: "array-of-strings", value: value as string[] };
+      else if (Array.isArray(value))
+        type = {
+          kind: "array-of-tables",
+          value: value as Record<string, unknown>[],
+        };
+      else if (typeof value === "object" && value !== null)
+        type = { kind: "table", fields: {} };
+      else type = { kind: "unknown", rawValue: String(value ?? "") };
+
+      result.push({
+        key,
+        path: [...parentPath, String(entryIndex), key],
+        type,
+        isExplicit: true,
+        tooltipKey: `${tooltipPrefix}.${key}`,
+      });
+    }
+    return result;
   };
 
   const fileNameForPath = (path: string[]): ConfigFileName | "credentials" => {
