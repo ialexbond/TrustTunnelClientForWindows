@@ -264,6 +264,41 @@ pub fn validate_ed25519_armored_pubkey(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Phase 16 — Protocol enum для UFW firewall rules (REQ-16-FW).
+///
+/// Allowed values: `"tcp"` | `"udp"` | `"any"` | `""` (empty == "any" by default).
+/// Char-whitelist на enum-уровне: shell-metachar никогда не пройдёт через `matches!()`.
+///
+/// Defence stack (S-02 char-whitelist invariant):
+///  - Layer 1: enum membership check (implicit whitelist).
+///  - Layer 2: backend re-validates via existing `is_safe_proto` в server_security.rs (V13).
+///
+/// Aligns с frontend `validators.ts:validateProtocolEnum` (mirror — V13 trust boundary).
+pub fn validate_protocol_enum(s: &str) -> Result<(), String> {
+    if matches!(s, "tcp" | "udp" | "any" | "") {
+        Ok(())
+    } else {
+        Err(format!("Invalid protocol '{s}' (allowed: tcp, udp, any)"))
+    }
+}
+
+/// Phase 16 — Fail2Ban numeric configuration range guard (REQ-16-F2B-PRESETS).
+///
+/// `label`: human-readable name для error message (`"maxretry"` / `"bantime"` / `"findtime"`).
+/// `value`: parsed `u32` from frontend (фактически already type-narrow via Tauri IPC).
+/// `max`: upper inclusive bound (e.g. maxretry max=1000, bantime max=86400, findtime max=86400).
+///
+/// Rejects `value == 0` (would disable jail entirely — never desired) и `value > max`.
+/// Aligns с frontend `validators.ts:validateFail2banInt` (mirror — V13 trust boundary).
+pub fn validate_fail2ban_int(label: &str, value: u32, max: u32) -> Result<(), String> {
+    if value == 0 || value > max {
+        return Err(format!(
+            "Fail2ban {label} out of range (1..={max}, got {value})"
+        ));
+    }
+    Ok(())
+}
+
 /// FQDN for `custom_sni` TLV field — letters, digits, dots, hyphens only.
 /// Empty string accepted (field optional).
 /// Max length 253 chars (RFC 1035).
@@ -690,6 +725,50 @@ mod tests {
         let pk = "ssh-ed25519 not-base64-?@! comment";
         let err = validate_ed25519_armored_pubkey(pk).unwrap_err();
         assert!(err.contains("base64"), "Got: {err}");
+    }
+
+    // ─── Phase 16: Protocol enum (UFW) + Fail2Ban int range ──
+
+    #[test]
+    fn validate_protocol_enum_accepts_canonical() {
+        assert!(validate_protocol_enum("tcp").is_ok());
+        assert!(validate_protocol_enum("udp").is_ok());
+        assert!(validate_protocol_enum("any").is_ok());
+        assert!(validate_protocol_enum("").is_ok()); // empty == "any" by default
+    }
+
+    #[test]
+    fn validate_protocol_enum_rejects_invalid() {
+        let err = validate_protocol_enum("icmp").unwrap_err();
+        assert!(err.contains("allowed: tcp, udp, any"), "Got: {err}");
+        let err = validate_protocol_enum("tcp;rm -rf /").unwrap_err();
+        assert!(err.contains("Invalid protocol"), "Got: {err}");
+        // Shell-injection attempts uniformly rejected via enum membership.
+        assert!(validate_protocol_enum("$(whoami)").is_err());
+        assert!(validate_protocol_enum("`id`").is_err());
+    }
+
+    #[test]
+    fn validate_fail2ban_int_accepts_range() {
+        assert!(validate_fail2ban_int("maxretry", 5, 1000).is_ok());
+        assert!(validate_fail2ban_int("bantime", 600, 86400).is_ok());
+        assert!(validate_fail2ban_int("findtime", 1, 1).is_ok()); // boundary value
+        assert!(validate_fail2ban_int("maxretry", 1, 1000).is_ok()); // lower bound
+        assert!(validate_fail2ban_int("bantime", 86400, 86400).is_ok()); // upper bound
+    }
+
+    #[test]
+    fn validate_fail2ban_int_rejects_out_of_range() {
+        let err = validate_fail2ban_int("maxretry", 0, 1000).unwrap_err();
+        assert!(err.contains("out of range"), "Got: {err}");
+        assert!(err.contains("got 0"), "Got: {err}");
+
+        let err = validate_fail2ban_int("bantime", 100000, 86400).unwrap_err();
+        assert!(err.contains("out of range"), "Got: {err}");
+        assert!(err.contains("got 100000"), "Got: {err}");
+
+        let err = validate_fail2ban_int("findtime", u32::MAX, 86400).unwrap_err();
+        assert!(err.contains("out of range"), "Got: {err}");
     }
 
     // ─── Display name (CR-02) ─────────────────────────

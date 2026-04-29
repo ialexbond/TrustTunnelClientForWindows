@@ -1,0 +1,5 @@
+sha256 Fingerprint=DE:AD:BE:EF:CA:FE:BA:BE:11:22:33:44:55:66:77:88:99:00:AA:BB:CC:DD:EE:FF:11:22:33:44:55:66:77:88
+subject=CN = self-signed.local
+issuer=CN = self-signed.local
+notBefore=Jan  1 00:00:00 2026 GMT
+notAfter=Jan  1 00:00:00 2027 GMT
