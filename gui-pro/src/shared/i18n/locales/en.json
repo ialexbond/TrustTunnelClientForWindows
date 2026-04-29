@@ -1117,7 +1117,42 @@
         "logs_title": "Fail2ban log",
         "show_logs": "Show log",
         "hide_logs": "Hide log",
-        "log_lines": "Lines"
+        "log_lines": "Lines",
+        "modal_title": "Fail2Ban configuration",
+        "tabs_aria": "Fail2Ban settings and activity",
+        "tabs": {
+          "settings": "Settings",
+          "banned": "Banned IPs"
+        },
+        "presets": {
+          "soft": "Soft",
+          "soft_help": "10 attempts per 10 minutes, ban 5 minutes",
+          "balanced": "Balanced",
+          "balanced_help": "5 attempts per 10 minutes, ban 10 minutes (recommended)",
+          "strict": "Strict",
+          "strict_help": "3 attempts per 10 minutes, ban 1 hour",
+          "custom": "Custom configuration"
+        },
+        "custom_title": "Custom configuration",
+        "custom_maxretry_label": "Attempts",
+        "custom_maxretry_help": "How many failed logins before ban",
+        "custom_bantime_label": "Ban time (sec)",
+        "custom_bantime_help": "Block duration",
+        "custom_findtime_label": "Window (sec)",
+        "custom_findtime_help": "Time period for counting attempts",
+        "custom_apply_button": "Apply",
+        "banned_ip_label": "IP",
+        "banned_at_label": "Blocked",
+        "banned_unban_button": "Unban",
+        "banned_empty": "No banned IPs",
+        "install_title": "Fail2Ban not installed",
+        "install_button": "Install Fail2Ban",
+        "install_help": "Protection against SSH brute-force attacks. Will be installed via apt with default configuration (Balanced).",
+        "snack": {
+          "preset_applied": "Configuration applied: {{preset}}",
+          "preset_applied_custom": "Custom configuration applied",
+          "ip_unbanned": "IP {{ip}} unbanned"
+        }
       },
       "firewall": {
         "title": "Firewall (UFW)",

@@ -6,6 +6,19 @@ import { translateSshError } from "../../shared/utils/translateSshError";
 import { useConfirm } from "../../shared/ui/useConfirm";
 
 // ═══════════════════════════════════════════════════════
+// Phase 16 Plan 04 — Fail2Ban presets (D-4.2).
+// Three rule-of-thumb configurations + custom slot. Frontend constructs
+// the values; backend `security_fail2ban_set_jail` is unchanged.
+// ═══════════════════════════════════════════════════════
+
+export const FAIL2BAN_PRESETS = {
+  soft:     { maxretry: 10, bantime: "300",  findtime: "600" },
+  balanced: { maxretry: 5,  bantime: "600",  findtime: "600" },
+  strict:   { maxretry: 3,  bantime: "3600", findtime: "600" },
+} as const;
+export type Fail2banPresetId = keyof typeof FAIL2BAN_PRESETS | "custom";
+
+// ═══════════════════════════════════════════════════════
 // Types mirroring Rust structs
 // ═══════════════════════════════════════════════════════
 
@@ -503,6 +516,37 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     );
   };
 
+  // ── Phase 16 Plan 04 — Fail2Ban preset actions (D-4.2) ──
+  // Backend command unchanged; frontend just constructs config from PRESETS map.
+  // Note: ConfirmDialog NOT here — Fail2banModal owns immediate-apply UX
+  // (preset radio click triggers apply; no confirm needed).
+  const applyFail2banPreset = async (preset: keyof typeof FAIL2BAN_PRESETS): Promise<void> => {
+    const cfg = FAIL2BAN_PRESETS[preset];
+    void run(
+      `f2b-preset-${preset}`,
+      () => invoke("security_fail2ban_set_jail", {
+        ...sshParams,
+        jail: "sshd",
+        config: { enabled: true, ...cfg },
+      }),
+      t("server.security.fail2ban.snack.preset_applied", {
+        preset: t(`server.security.fail2ban.presets.${preset}`),
+      }),
+    );
+  };
+
+  const applyFail2banCustom = async (custom: { maxretry: number; bantime: string; findtime: string }): Promise<void> => {
+    void run(
+      "f2b-preset-custom",
+      () => invoke("security_fail2ban_set_jail", {
+        ...sshParams,
+        jail: "sshd",
+        config: { enabled: true, ...custom },
+      }),
+      t("server.security.fail2ban.snack.preset_applied_custom"),
+    );
+  };
+
   return {
     // State
     status,
@@ -538,6 +582,10 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     exportSshKeyBackup,
     disablePasswordAuth,
     importSshKey,
+
+    // Phase 16 Plan 04 — Fail2Ban preset actions
+    applyFail2banPreset,
+    applyFail2banCustom,
 
     // For sub-components that need to run arbitrary ops
     run,

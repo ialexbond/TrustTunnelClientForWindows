@@ -1117,7 +1117,42 @@
         "logs_title": "Лог fail2ban",
         "show_logs": "Показать лог",
         "hide_logs": "Скрыть лог",
-        "log_lines": "Строк"
+        "log_lines": "Строк",
+        "modal_title": "Настройка Fail2Ban",
+        "tabs_aria": "Настройка и активность Fail2Ban",
+        "tabs": {
+          "settings": "Настройки",
+          "banned": "Забаненные IP"
+        },
+        "presets": {
+          "soft": "Мягкая",
+          "soft_help": "10 попыток за 10 минут, бан 5 минут",
+          "balanced": "Сбалансированная",
+          "balanced_help": "5 попыток за 10 минут, бан 10 минут (рекомендуется)",
+          "strict": "Строгая",
+          "strict_help": "3 попытки за 10 минут, бан 1 час",
+          "custom": "Своя конфигурация"
+        },
+        "custom_title": "Своя конфигурация",
+        "custom_maxretry_label": "Попытки",
+        "custom_maxretry_help": "Сколько неудачных входов до бана",
+        "custom_bantime_label": "Время бана (сек)",
+        "custom_bantime_help": "Длительность блокировки",
+        "custom_findtime_label": "Окно (сек)",
+        "custom_findtime_help": "За какой период считать попытки",
+        "custom_apply_button": "Применить",
+        "banned_ip_label": "IP",
+        "banned_at_label": "Заблокирован",
+        "banned_unban_button": "Разбанить",
+        "banned_empty": "Нет заблокированных IP",
+        "install_title": "Fail2Ban не установлен",
+        "install_button": "Установить Fail2Ban",
+        "install_help": "Защита от brute-force атак на SSH. Будет установлено через apt и активирована конфигурация по умолчанию (Сбалансированная).",
+        "snack": {
+          "preset_applied": "Применена конфигурация: {{preset}}",
+          "preset_applied_custom": "Применена своя конфигурация",
+          "ip_unbanned": "IP {{ip}} разбанен"
+        }
       },
       "firewall": {
         "title": "Firewall (UFW)",
