@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Shield, Key, FileKey } from "lucide-react";
+import { Shield, Key, FileKey, Upload } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
@@ -44,6 +44,10 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
   const [keyData, setKeyData] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("password");
   const [connecting, setConnecting] = useState(false);
+  // Phase 16 — auto-detect-once flag prevents repeat auto-connect attempts
+  // when host text changes mid-typing or after a fallback to password.
+  const [autoConnectAttempted, setAutoConnectAttempted] = useState(false);
+  const handleConnectRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const pushSuccess = useSnackBar();
 
   const handleSelectKey = async () => {
@@ -68,12 +72,15 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
       : keyPath.trim() || keyData.trim());
 
   const handleConnect = async () => {
-    if (!isValid) return;
+    if (!isValid && authMode === "password") return;
+    // In key mode we may have neither keyPath nor pasted keyData when the
+    // user is relying on a saved keyring entry — still allow attempt.
     setConnecting(true);
 
     try {
+      const trimmedHost = host.trim();
       const params: Record<string, unknown> = {
-        host: host.trim(),
+        host: trimmedHost,
         port: parseInt(port) || 22,
         user: user.trim() || "root",
         password: authMode === "password" ? password : "",
@@ -83,13 +90,30 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
           params.keyPath = keyPath;
         } else if (keyData.trim()) {
           params.keyData = keyData.trim();
+        } else {
+          // Phase 16 — Resolve plaintext PEM from Windows Credential Store
+          // (D-1.4). Backend reads keyring entry by host. Frontend never
+          // persists the PEM and only forwards it in-memory to connect_ssh.
+          try {
+            const pem = await invoke<string>("load_ssh_key_for_host", { host: trimmedHost });
+            if (pem) params.keyData = pem;
+          } catch (loadErr) {
+            const loadStr = formatError(loadErr);
+            if (loadStr.includes("KEY_NOT_FOUND")) {
+              pushSuccess(t("control.ssh_key_not_found"), "error");
+              setAuthMode("password");
+              setConnecting(false);
+              return;
+            }
+            throw loadErr;
+          }
         }
       }
 
       await invoke("check_server_installation", params);
 
       const creds: SshCredentials = {
-        host: host.trim(),
+        host: trimmedHost,
         port: port || "22",
         user: user.trim() || "root",
         password: authMode === "password" ? password : "",
@@ -106,6 +130,17 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
       onConnect(creds);
     } catch (e) {
       const errStr = formatError(e);
+      // Phase 16 — D-6.1: SSH key rejected → fallback to password manually.
+      // No auto-retry — user must explicitly choose action. Stale flag in
+      // localStorage cleared so next mount won't re-attempt the bad key.
+      if (errStr.includes("PermissionDenied") || errStr.includes("SSH_KEY_REJECTED")) {
+        pushSuccess(t("control.ssh_key_rejected_fallback"), "error");
+        setAuthMode("password");
+        localStorage.removeItem(`tt_auth_method_${host.trim()}`);
+        setAutoConnectAttempted(false);
+        setConnecting(false);
+        return;
+      }
       if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {
         await invoke("forget_ssh_host_key", { host: host.trim(), port: parseInt(port) || 22 }).catch(() => {});
         pushSuccess(t("sshErrors.hostKeyReset", "Host key was reset. Press Connect again."));
@@ -114,6 +149,59 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
       }
     } finally {
       setConnecting(false);
+    }
+  };
+
+  // Stable ref so the mount-effect can call latest handleConnect without
+  // re-firing when the closure identity changes.
+  handleConnectRef.current = handleConnect;
+
+  // Phase 16 — REQ-16-SSH-AUTO-DETECT (D-1.4 + D-6.1): on first mount with a
+  // stable host, read tt_auth_method_<host> from localStorage. If "key", flip
+  // auth mode and trigger handleConnect (which resolves keyData via
+  // load_ssh_key_for_host). PermissionDenied path inside handleConnect clears
+  // the flag and falls back to password.
+  useEffect(() => {
+    if (autoConnectAttempted) return;
+    const trimmedHost = host.trim();
+    if (!trimmedHost) return;
+    const authMethod = localStorage.getItem(`tt_auth_method_${trimmedHost}`);
+    if (authMethod !== "key") return;
+    setAutoConnectAttempted(true);
+    setAuthMode("key");
+    // Defer one tick so latest state (host/port/user) is reflected.
+    void Promise.resolve().then(() => handleConnectRef.current());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host]);
+
+  // Phase 16 — REQ-16-SSH-IMPORT-RECOVERY (D-2.3): user picks a backup .pem,
+  // backend validates + writes it to the keyring entry for this host.
+  // Frontend persists the auth-method flag so future mounts auto-connect.
+  const handleImportKey = async () => {
+    const trimmedHost = host.trim();
+    if (!trimmedHost) {
+      pushSuccess(t("labels.server_address"), "error");
+      return;
+    }
+    let selected: string | string[] | null;
+    try {
+      selected = await open({
+        multiple: false,
+        filters: [{ name: t("control.key_file_label", "Файл ключа"), extensions: ["pem", "key"] }],
+      });
+    } catch {
+      // user cancelled
+      return;
+    }
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      await invoke("security_import_ssh_key", { host: trimmedHost, pemPath: selected });
+      localStorage.setItem(`tt_auth_method_${trimmedHost}`, "key");
+      setAuthMode("key");
+      setAutoConnectAttempted(false); // allow auto-connect after import
+      pushSuccess(t("control.ssh_key_imported"));
+    } catch (e) {
+      pushSuccess(formatError(e), "error");
     }
   };
 
@@ -226,6 +314,21 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
                   </p>
                 )}
               </div>
+
+              {/* Phase 16 — Загрузить .pem из backup в Windows Credential Store
+                  (D-2.3 import recovery). При успехе SshConnectForm запоминает
+                  tt_auth_method_<host>=key, чтобы следующий mount подключился
+                  по ключу автоматически. */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleImportKey}
+                icon={<Upload className="w-3.5 h-3.5" />}
+                fullWidth
+              >
+                {t("control.ssh_key_load_button")}
+              </Button>
 
               {/* Разделитель */}
               <Separator label={t("control.or_separator", "или")} />
