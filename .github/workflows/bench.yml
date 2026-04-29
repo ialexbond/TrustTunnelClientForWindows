@@ -26,6 +26,8 @@ jobs:
   dispatch:
     name: Dispatch Bench to Endpoint Repo
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     if: >
       github.event_name == 'workflow_dispatch' ||
       (
@@ -40,7 +42,6 @@ jobs:
         if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.CLIENT_ISSUES_TOKEN }}
           script: |
             await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
