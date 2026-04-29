@@ -441,6 +441,45 @@ pub async fn load_ssh_key_for_host(host: String) -> Result<String, String> {
     ssh::ssh_key_keyring_load_pem(&host)?.ok_or_else(|| "KEY_NOT_FOUND".to_string())
 }
 
+// ─── Phase 16 — Disable PasswordAuth, Certbot Timer (D-2.2 + D-5.3) ─
+
+/// security_disable_password_auth — sshd_config edit + restart с rollback.
+///
+/// MANUAL command (NOT macro) because needs `pool.invalidate()` after success
+/// — sshd restart kills existing pool handles. Mirrors `security_change_ssh_port` pattern.
+#[tauri::command]
+pub async fn security_disable_password_auth(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<(), String> {
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::disable_password_auth(&app, &handle).await?;
+    // sshd restarted — all pool handles stale, force re-acquire on next call.
+    drop(handle);
+    pool.invalidate().await;
+    Ok(())
+}
+
+// server_get_certbot_timer_status — read systemctl + cron file state (D-5.3).
+ssh_pool_command!(server_get_certbot_timer_status, ssh::get_certbot_timer_status);
+
+// server_enable_certbot_timer — systemctl enable --now + fallback к cron file.
+ssh_pool_command!(server_enable_certbot_timer, ssh::enable_certbot_timer);
+
 // ─── Phase 14.1 — advanced user config commands ──────────────────
 
 ssh_pool_command!(
