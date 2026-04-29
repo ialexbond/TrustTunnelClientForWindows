@@ -29,6 +29,9 @@ pub use server::{
     install_firewall, uninstall_firewall, firewall_add_rule, firewall_delete_rule,
     firewall_set_logging, firewall_tail_log, firewall_set_http_port,
     change_ssh_port,
+    // Phase 16 — disable PasswordAuthentication + certbot.timer (D-2.2 + D-5.3)
+    disable_password_auth,
+    get_certbot_timer_status, enable_certbot_timer,
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,
     // MtProtoStatus, MtProtoInstallStep are re-exported via commands
