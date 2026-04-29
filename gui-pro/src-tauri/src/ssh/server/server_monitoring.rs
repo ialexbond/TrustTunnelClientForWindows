@@ -143,7 +143,56 @@ pub async fn server_get_stats(
     }))
 }
 
+/// Phase 16 — Pure helper extracts cert fields from `openssl x509` output.
+///
+/// Pulled out для unit-test isolation (no SSH/AppHandle setup needed).
+/// Output JSON object preserves backwards-compat keys (notAfter / issuer / subject)
+/// и добавляет Phase 16 fields (notBefore / sha256Fingerprint).
+///
+/// Expected input format (from `openssl x509 ... -fingerprint -sha256 -subject -issuer -startdate -enddate`):
+/// ```text
+/// sha256 Fingerprint=AA:BB:...:ZZ
+/// subject=CN = example.com
+/// issuer=C = US, O = Let's Encrypt, CN = R3
+/// notBefore=Apr 28 12:00:00 2026 GMT
+/// notAfter=Jul 27 12:00:00 2026 GMT
+/// ```
+pub fn parse_openssl_cert_output(cert_info: &str) -> serde_json::Value {
+    let mut not_after = String::new();
+    let mut not_before = String::new();
+    let mut issuer = String::new();
+    let mut subject = String::new();
+    let mut sha256_fingerprint = String::new();
+
+    for line in cert_info.lines() {
+        let trimmed = line.trim();
+        if let Some(val) = trimmed.strip_prefix("notAfter=") {
+            not_after = val.trim().to_string();
+        } else if let Some(val) = trimmed.strip_prefix("notBefore=") {
+            not_before = val.trim().to_string();
+        } else if let Some(val) = trimmed.strip_prefix("issuer=") {
+            issuer = val.trim().to_string();
+        } else if let Some(val) = trimmed.strip_prefix("subject=") {
+            subject = val.trim().to_string();
+        } else if let Some(val) = trimmed.strip_prefix("sha256 Fingerprint=") {
+            sha256_fingerprint = val.trim().to_string();
+        }
+    }
+
+    serde_json::json!({
+        "notAfter": not_after,
+        "notBefore": not_before,
+        "issuer": issuer,
+        "subject": subject,
+        "sha256Fingerprint": sha256_fingerprint,
+    })
+}
+
 /// Fetch TLS certificate information from the remote server.
+///
+/// Phase 16 (D-5.1) — extends additively с `sha256Fingerprint` + `notBefore`.
+/// `notAfter` / `issuer` / `subject` / `autoRenew` keys preserved для backwards-compat
+/// (per R-9 — OverviewSection security summary block consumes existing shape).
 pub async fn get_cert_info(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
@@ -175,30 +224,31 @@ pub async fn get_cert_info(
         format!("{}/{cert_path}", ENDPOINT_DIR)
     };
 
-    // Get cert details via openssl
+    // Phase 16: extended openssl call — добавляет -fingerprint -sha256 + -startdate.
+    // Path A (RESEARCH.md CQ-4) — extend existing openssl call vs separate cert_probe.rs roundtrip.
     let (cert_info, cert_code) = exec_command(
         handle,
         app,
-        &format!("{sudo}openssl x509 -enddate -subject -issuer -noout -in {resolved_cert_path} 2>&1"),
+        &format!("{sudo}openssl x509 -in {resolved_cert_path} -noout -fingerprint -sha256 -subject -issuer -startdate -enddate 2>&1"),
     )
     .await?;
 
-    let mut not_after = String::new();
-    let mut issuer = String::new();
-    let mut subject = String::new();
-
-    if cert_code == 0 {
-        for line in cert_info.lines() {
-            let trimmed = line.trim();
-            if let Some(val) = trimmed.strip_prefix("notAfter=") {
-                not_after = val.trim().to_string();
-            } else if let Some(val) = trimmed.strip_prefix("issuer=") {
-                issuer = val.trim().to_string();
-            } else if let Some(val) = trimmed.strip_prefix("subject=") {
-                subject = val.trim().to_string();
-            }
-        }
-    }
+    // Parse via pure helper (testable без SSH setup).
+    let parsed = if cert_code == 0 {
+        parse_openssl_cert_output(&cert_info)
+    } else {
+        // Empty defaults preserved for failed parse — UI handles "unknown" state.
+        serde_json::json!({
+            "notAfter": "",
+            "notBefore": "",
+            "issuer": "",
+            "subject": "",
+            "sha256Fingerprint": "",
+        })
+    };
+    let parsed_obj = parsed
+        .as_object()
+        .expect("parse_openssl_cert_output returns object");
 
     // Check auto-renewal cron
     let (renew_check, _) = exec_command(
@@ -212,9 +262,14 @@ pub async fn get_cert_info(
     Ok(serde_json::json!({
         "hostname": hostname,
         "certPath": resolved_cert_path,
-        "notAfter": not_after,
-        "issuer": issuer,
-        "subject": subject,
+        "notAfter": parsed_obj.get("notAfter").cloned().unwrap_or_default(),
+        "notBefore": parsed_obj.get("notBefore").cloned().unwrap_or_default(),
+        "issuer": parsed_obj.get("issuer").cloned().unwrap_or_default(),
+        "subject": parsed_obj.get("subject").cloned().unwrap_or_default(),
+        "sha256Fingerprint": parsed_obj
+            .get("sha256Fingerprint")
+            .cloned()
+            .unwrap_or_default(),
         "autoRenew": auto_renew,
     }))
 }
@@ -326,4 +381,86 @@ pub async fn renew_cert(
 
     let output = renew_result.map(|(out, _)| out).unwrap_or_default();
     Ok(output)
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   Phase 16 — Tests for pure parser helpers
+// ═══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Read fixture relative to crate root (cargo test sets cwd = src-tauri/).
+    fn read_fixture(name: &str) -> String {
+        let path = format!("tests/fixtures/{name}");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("fixture {name} unreadable from cwd: {e}"))
+    }
+
+    #[test]
+    fn cert_extended_parsing_letsencrypt() {
+        let raw = read_fixture("openssl_x509_letsencrypt.txt");
+        let parsed = parse_openssl_cert_output(&raw);
+        let obj = parsed.as_object().unwrap();
+
+        assert_eq!(
+            obj["sha256Fingerprint"],
+            serde_json::json!(
+                "A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90"
+            )
+        );
+        assert_eq!(obj["subject"], serde_json::json!("CN = vpn.example.com"));
+        assert_eq!(
+            obj["issuer"],
+            serde_json::json!("C = US, O = Let's Encrypt, CN = R3")
+        );
+        assert_eq!(
+            obj["notBefore"],
+            serde_json::json!("Apr 28 12:00:00 2026 GMT")
+        );
+        assert_eq!(
+            obj["notAfter"],
+            serde_json::json!("Jul 27 12:00:00 2026 GMT")
+        );
+    }
+
+    #[test]
+    fn cert_extended_parsing_self_signed() {
+        let raw = read_fixture("openssl_x509_self_signed.txt");
+        let parsed = parse_openssl_cert_output(&raw);
+        let obj = parsed.as_object().unwrap();
+
+        // Self-signed indicator: subject == issuer.
+        assert_eq!(obj["subject"], obj["issuer"]);
+        assert_eq!(
+            obj["sha256Fingerprint"],
+            serde_json::json!(
+                "DE:AD:BE:EF:CA:FE:BA:BE:11:22:33:44:55:66:77:88:99:00:AA:BB:CC:DD:EE:FF:11:22:33:44:55:66:77:88"
+            )
+        );
+        assert_eq!(obj["subject"], serde_json::json!("CN = self-signed.local"));
+    }
+
+    #[test]
+    fn cert_parse_handles_empty_input() {
+        // Defense in depth: empty / malformed openssl output → all fields empty (no panic).
+        let parsed = parse_openssl_cert_output("");
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["sha256Fingerprint"], serde_json::json!(""));
+        assert_eq!(obj["notAfter"], serde_json::json!(""));
+        assert_eq!(obj["notBefore"], serde_json::json!(""));
+        assert_eq!(obj["subject"], serde_json::json!(""));
+        assert_eq!(obj["issuer"], serde_json::json!(""));
+    }
+
+    #[test]
+    fn cert_parse_ignores_unrelated_lines() {
+        // Real openssl output может содержать `unable to load certificate` на error path.
+        // Parser должен tolerate это без panic (silently fields останутся пустыми).
+        let raw = "unable to load certificate\nsome random output\n";
+        let parsed = parse_openssl_cert_output(raw);
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["sha256Fingerprint"], serde_json::json!(""));
+    }
 }

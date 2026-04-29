@@ -430,6 +430,257 @@ fi'"#
 }
 
 // ═══════════════════════════════════════════════════════════════
+//   Phase 16 — Disable PasswordAuthentication SSH (D-2.2)
+// ═══════════════════════════════════════════════════════════════
+
+/// Phase 16 — Disable `PasswordAuthentication` в `/etc/ssh/sshd_config`.
+///
+/// Per CONTEXT.md D-2.2 + RESEARCH.md CQ-3 (sshd_config.d/*.conf strip step).
+///
+/// Steps:
+///
+/// 1. Backup main `/etc/ssh/sshd_config` с deterministic timestamp suffix.
+/// 2. **CQ-3 strip step** — `sed -i '/^[[:space:]]*PasswordAuthentication/d' /etc/ssh/sshd_config.d/*.conf`
+///    удаляет любые override-entries в drop-in directory (cloud-init, DigitalOcean snap-installs).
+///    Без этого шага Ubuntu 24.04 sshd берёт первое значение из `Include` directive
+///    → main config edit бы не сработал.
+/// 3. Idempotent edit main config (handle existing/commented/missing line).
+/// 4. Validate с `sshd -t` → rollback at failure.
+/// 5. Restart appropriate service (`ssh.socket` Ubuntu 24.04+ или `ssh.service` Ubuntu 22.04 / Debian 11/12).
+///
+/// **Caller MUST invoke `pool.invalidate()` после success** — sshd restart kills existing handles
+/// (mirrors `change_ssh_port` pattern в `commands/ssh_commands.rs:194`).
+pub async fn disable_password_auth(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<(), String> {
+    let sudo = detect_sudo(handle, app).await;
+    let service_type = detect_ssh_service_type(handle, app, sudo).await?;
+
+    // Step 1: Backup main /etc/ssh/sshd_config с deterministic timestamp name.
+    let backup_name = format!(
+        "/etc/ssh/sshd_config.bak.{}",
+        chrono::Utc::now().timestamp()
+    );
+    emit_log(app, "info", "Backing up /etc/ssh/sshd_config (PasswordAuth disable)...");
+    let (_, bak_code) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}cp /etc/ssh/sshd_config '{backup_name}'"),
+    )
+    .await?;
+    if bak_code != 0 {
+        return Err("PWAUTH_DISABLE_FAILED|backup_failed".into());
+    }
+
+    // Step 2 (CQ-3): strip any conflicting PasswordAuthentication entry from sshd_config.d/*.conf.
+    // Cloud-init / 60-cloudimg-settings.conf etc. могут содержать `PasswordAuthentication yes`
+    // который wins precedence через `Include` directive в main config.
+    // Failure здесь non-fatal (`; true`) — files могут не существовать на legacy systems.
+    emit_log(
+        app,
+        "info",
+        "Stripping PasswordAuthentication overrides из sshd_config.d/*.conf (CQ-3)...",
+    );
+    let _ = exec_command(
+        handle,
+        app,
+        &format!(
+            r#"{sudo}sed -i '/^[[:space:]]*PasswordAuthentication/d' /etc/ssh/sshd_config.d/*.conf 2>/dev/null; true"#
+        ),
+    )
+    .await;
+
+    // Step 3: Edit main /etc/ssh/sshd_config — idempotent (handle existing/commented/missing).
+    emit_log(app, "info", "Setting PasswordAuthentication no in main sshd_config...");
+    let edit_cmd = format!(
+        r#"{sudo}bash -c 'if grep -q "^PasswordAuthentication" /etc/ssh/sshd_config; then
+  sed -i "s/^PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config
+elif grep -q "^#PasswordAuthentication" /etc/ssh/sshd_config; then
+  sed -i "s/^#PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config
+else
+  echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
+fi'"#
+    );
+    let (_, edit_code) = exec_command(handle, app, &edit_cmd).await?;
+    if edit_code != 0 {
+        // Rollback main config from backup.
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+        )
+        .await;
+        return Err("PWAUTH_DISABLE_FAILED|edit_failed".into());
+    }
+
+    // Step 4: Validate с sshd -t.
+    emit_log(app, "info", "Validating sshd config с sshd -t...");
+    let (sshd_out, sshd_code) =
+        exec_command(handle, app, &format!("{sudo}sshd -t 2>&1")).await?;
+    if sshd_code != 0 {
+        emit_log(app, "warn", "sshd -t validation failed, rolling back...");
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+        )
+        .await;
+        return Err(format!("PWAUTH_DISABLE_FAILED|sshd_validation|{}", sshd_out.trim()));
+    }
+
+    // Step 5: Restart appropriate service.
+    let restart_target = match service_type {
+        SshServiceType::Socket => "ssh.socket",
+        SshServiceType::Service => "ssh.service",
+    };
+    emit_log(app, "info", &format!("Restarting {restart_target}..."));
+    let (restart_out, restart_code) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl restart {restart_target}"),
+    )
+    .await?;
+    if restart_code != 0 {
+        // Rollback both config + restart again.
+        emit_log(app, "warn", "Service restart failed, rolling back...");
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+        )
+        .await;
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}systemctl restart {restart_target}"),
+        )
+        .await;
+        return Err(format!(
+            "PWAUTH_DISABLE_FAILED|restart_failed|{}",
+            restart_out.trim()
+        ));
+    }
+
+    emit_log(app, "info", "PasswordAuthentication disabled — login по SSH-key only");
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   Phase 16 — certbot.timer status (D-5.3)
+// ═══════════════════════════════════════════════════════════════
+
+/// Pure helper — parses systemctl is-enabled / is-active outputs and cron-file presence
+/// into structured timer status. Extracted для unit-test isolation (no SSH/AppHandle setup).
+///
+/// Inputs:
+///  - `enabled_out`: stdout `systemctl is-enabled certbot.timer` (`"enabled"` | `"disabled"` | `"not-found"` | etc.)
+///  - `active_out`: stdout `systemctl is-active certbot.timer` (`"active"` | `"inactive"` | etc.)
+///  - `cron_out`: literal `"true"` / `"false"` от `test -f /etc/cron.d/certbot && echo true || echo false`
+///
+/// Output JSON object:
+///  - `timer_enabled`: `enabled_out.trim() == "enabled"`
+///  - `timer_active`: `active_out.trim() == "active"`
+///  - `cron_present`: `cron_out.trim() == "true"`
+///  - `auto_renewal_active`: `(timer_enabled && timer_active) || cron_present`
+pub fn parse_certbot_timer_outputs(
+    enabled_out: &str,
+    active_out: &str,
+    cron_out: &str,
+) -> serde_json::Value {
+    let timer_enabled = enabled_out.trim() == "enabled";
+    let timer_active = active_out.trim() == "active";
+    let cron_present = cron_out.trim() == "true";
+    let auto_renewal_active = (timer_enabled && timer_active) || cron_present;
+
+    serde_json::json!({
+        "timer_enabled": timer_enabled,
+        "timer_active": timer_active,
+        "cron_present": cron_present,
+        "auto_renewal_active": auto_renewal_active,
+    })
+}
+
+/// Phase 16 — Read certbot.timer status (D-5.3).
+///
+/// Returns `{ timer_enabled, timer_active, cron_present, auto_renewal_active }`.
+/// Дополнительно к systemd timer проверяет legacy `/etc/cron.d/certbot` для non-systemd installs.
+pub async fn get_certbot_timer_status(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<serde_json::Value, String> {
+    let sudo = detect_sudo(handle, app).await;
+
+    // is-enabled: "enabled" | "disabled" | "not-found" | "static" etc.
+    let (timer_enabled_out, _) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl is-enabled certbot.timer 2>&1 || echo not-found"),
+    )
+    .await?;
+
+    // Check active state (timer can be enabled but not running yet).
+    let (timer_active_out, _) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl is-active certbot.timer 2>&1 || echo inactive"),
+    )
+    .await?;
+
+    // Fallback: check legacy /etc/cron.d/certbot для non-systemd installs.
+    let (cron_out, _) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}test -f /etc/cron.d/certbot && echo true || echo false"),
+    )
+    .await?;
+
+    Ok(parse_certbot_timer_outputs(
+        &timer_enabled_out,
+        &timer_active_out,
+        &cron_out,
+    ))
+}
+
+/// Phase 16 — Enable certbot.timer (modern Ubuntu/Debian path) с fallback на /etc/cron.d/certbot.
+///
+/// `systemctl enable --now certbot.timer` запускает + auto-enable boot.
+/// Если systemd unit отсутствует → fallback пишет cron file для legacy installs.
+pub async fn enable_certbot_timer(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<(), String> {
+    let sudo = detect_sudo(handle, app).await;
+
+    emit_log(app, "info", "Enabling certbot.timer (systemd)...");
+    let (out, code) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl enable --now certbot.timer 2>&1"),
+    )
+    .await?;
+
+    if code != 0 {
+        // Fallback: legacy cron file (для non-systemd / minimal installs).
+        emit_log(
+            app,
+            "warn",
+            "systemd timer unavailable, falling back to /etc/cron.d/certbot",
+        );
+        let cron_cmd = format!(
+            "{sudo}tee /etc/cron.d/certbot >/dev/null <<'CRONEOF'\n0 */12 * * * root certbot renew --quiet --no-self-upgrade\nCRONEOF"
+        );
+        let (_, cron_code) = exec_command(handle, app, &cron_cmd).await?;
+        if cron_code != 0 {
+            return Err(format!("CERTBOT_TIMER_ENABLE_FAILED|{}", out.trim()));
+        }
+    }
+
+    emit_log(app, "info", "certbot auto-renewal enabled");
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════
 //   STATUS — single roundtrip, fetches everything
 // ═══════════════════════════════════════════════════════════════
 
@@ -1243,5 +1494,85 @@ mod tests {
         assert!(!ufw_line_is_active("Status: inactive"));
         assert!(!ufw_line_is_active(""));
         assert!(ufw_line_is_active("Status:    active")); // extra spaces — trim handles it
+    }
+
+    // ── Phase 16: disable_password_auth — CQ-3 sshd_config.d strip regex ──
+
+    /// Phase 16 — sshd_config.d/*.conf strip pattern verification (CQ-3).
+    ///
+    /// `disable_password_auth` использует POSIX `[[:space:]]*PasswordAuthentication` regex
+    /// внутри `sed` для удаления override entries. Этот тест эмулирует regex через
+    /// rust `regex` crate и проверяет что match'ит ВСЕ возможные leading-whitespace варианты:
+    /// space-prefix / tab-prefix / mixed / no-prefix — но NOT comments или unrelated keys.
+    #[test]
+    fn sshd_config_strip_regex_matches_overrides() {
+        // POSIX `[[:space:]]*PasswordAuthentication` ↔ rust `^\s*PasswordAuthentication`.
+        let pattern = regex::Regex::new(r"^\s*PasswordAuthentication").expect("regex compiles");
+
+        // Should be stripped — все variants leading whitespace.
+        let lines_should_match = [
+            "PasswordAuthentication yes",
+            "  PasswordAuthentication no",
+            "\tPasswordAuthentication yes",
+            "PasswordAuthentication\tno",
+            "    PasswordAuthentication yes # comment",
+        ];
+        for line in lines_should_match {
+            assert!(pattern.is_match(line), "Should match: {line:?}");
+        }
+
+        // Should NOT be stripped — comments + unrelated SSH options.
+        let lines_should_not_match = [
+            "# PasswordAuthentication yes",
+            "  # PasswordAuthentication yes",
+            "PubkeyAuthentication yes",
+            "MaxAuthTries 3",
+            "PermitRootLogin yes",
+        ];
+        for line in lines_should_not_match {
+            assert!(!pattern.is_match(line), "Should NOT match: {line:?}");
+        }
+    }
+
+    // ── Phase 16: parse_certbot_timer_outputs (D-5.3) ──
+
+    #[test]
+    fn parse_certbot_timer_status_active() {
+        let parsed = parse_certbot_timer_outputs("enabled\n", "active\n", "false\n");
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["timer_enabled"], serde_json::json!(true));
+        assert_eq!(obj["timer_active"], serde_json::json!(true));
+        assert_eq!(obj["cron_present"], serde_json::json!(false));
+        assert_eq!(obj["auto_renewal_active"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn parse_certbot_timer_status_disabled_no_cron() {
+        let parsed = parse_certbot_timer_outputs("disabled\n", "inactive\n", "false\n");
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["timer_enabled"], serde_json::json!(false));
+        assert_eq!(obj["timer_active"], serde_json::json!(false));
+        assert_eq!(obj["auto_renewal_active"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn parse_certbot_timer_status_cron_fallback() {
+        // Legacy install: systemd timer не установлен, но cron file есть.
+        let parsed = parse_certbot_timer_outputs("not-found\n", "inactive\n", "true\n");
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["timer_enabled"], serde_json::json!(false));
+        assert_eq!(obj["timer_active"], serde_json::json!(false));
+        assert_eq!(obj["cron_present"], serde_json::json!(true));
+        // Auto-renewal active because cron picks up the slack.
+        assert_eq!(obj["auto_renewal_active"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn parse_certbot_timer_status_enabled_but_inactive() {
+        // Edge case: timer enabled (boot autostart) но не active сейчас (только что перезагружен).
+        // auto_renewal_active = false потому что timer должен быть active для current renewal.
+        let parsed = parse_certbot_timer_outputs("enabled\n", "inactive\n", "false\n");
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["auto_renewal_active"], serde_json::json!(false));
     }
 }
