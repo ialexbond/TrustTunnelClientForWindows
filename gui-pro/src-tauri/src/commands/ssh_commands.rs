@@ -384,6 +384,63 @@ pub fn kill_existing_process() -> Result<(), String> {
     ssh::kill_existing_process()
 }
 
+// ─── Phase 16 — SSH-key feature commands (D-1.1..D-2.3) ──────────
+//
+// Two-tier shape:
+//   1. SSH-using commands (ssh_pool_command!) — pool ensures `CHANNEL_OPEN_GATE`
+//      semaphore + retry. host_arg duplicates SshParams.host because the
+//      orchestrator function `generate_and_deploy` нужен host для keyring
+//      target name (frontend передаёт тот же host обоим путям).
+//   2. Local-only commands (manual #[tauri::command]) — DPAPI / fs ops без SSH.
+
+// security_generate_ssh_key — generate Ed25519 + persist в keyring + upload pub.
+// Returns: { fingerprint, publicKey, generated }
+ssh_pool_command!(
+    security_generate_ssh_key,
+    ssh::ssh_key_generate_and_deploy,
+    host_arg: String
+);
+
+// security_get_ssh_key_status — check keyring entry + authorized_keys + sshd_config state.
+// Returns: { generated, authorized_on_server, pubkey_fingerprint, password_auth_disabled }
+ssh_pool_command!(
+    security_get_ssh_key_status,
+    ssh::ssh_key_get_status,
+    host_arg: String
+);
+
+/// security_export_ssh_key_backup — read keyring → write PEM to user-selected dest_path.
+/// Per D-2.1 forced backup export flow. NO SSH required (local-only operation).
+#[tauri::command]
+pub async fn security_export_ssh_key_backup(host: String, dest_path: String) -> Result<(), String> {
+    let pem = ssh::ssh_key_keyring_load_pem(&host)?
+        .ok_or_else(|| "KEY_NOT_FOUND".to_string())?;
+
+    // Write PEM bytes to user-chosen path (LF line endings preserved)
+    std::fs::write(&dest_path, pem.as_bytes())
+        .map_err(|e| format!("KEY_BACKUP_WRITE_FAILED|{e}"))?;
+
+    Ok(())
+}
+
+/// security_import_ssh_key — validate user-provided .pem + persist в keyring.
+/// Per D-2.3 recovery flow (SshConnectForm "Загрузить SSH-ключ" button).
+/// NO SSH required.
+#[tauri::command]
+pub async fn security_import_ssh_key(host: String, pem_path: String) -> Result<(), String> {
+    let pem = std::fs::read_to_string(&pem_path)
+        .map_err(|e| format!("KEY_IMPORT_READ_FAILED|{e}"))?;
+    ssh::ssh_key_import_pem(&host, &pem)
+}
+
+/// load_ssh_key_for_host — read keyring entry → return plaintext PEM in-memory.
+/// Frontend uses this to pass keyData to connect_ssh (per D-1.4 — frontend
+/// does NOT persist plaintext to disk, just hold in JS memory briefly).
+#[tauri::command]
+pub async fn load_ssh_key_for_host(host: String) -> Result<String, String> {
+    ssh::ssh_key_keyring_load_pem(&host)?.ok_or_else(|| "KEY_NOT_FOUND".to_string())
+}
+
 // ─── Phase 14.1 — advanced user config commands ──────────────────
 
 ssh_pool_command!(

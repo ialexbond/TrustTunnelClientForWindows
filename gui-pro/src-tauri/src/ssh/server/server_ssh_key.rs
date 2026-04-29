@@ -158,10 +158,13 @@ pub async fn upload_public_key(
     Ok(())
 }
 
-/// High-level orchestrator for `security_generate_ssh_key` Tauri command:
+/// High-level orchestrator for `security_generate_ssh_key` Tauri command.
+///
+/// Steps:
 ///   1. Generate Ed25519 locally (no SSH).
 ///   2. Save private PEM to keyring (no SSH — Windows Cred Manager via DPAPI).
 ///   3. Upload public key to ~/.ssh/authorized_keys via SSH.
+///
 /// Returns fingerprint + public key для UI display.
 ///
 /// D-29 — log ONLY fingerprint + host, NEVER PEM body.
