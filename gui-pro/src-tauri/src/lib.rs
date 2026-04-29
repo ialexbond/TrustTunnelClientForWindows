@@ -373,6 +373,12 @@ pub fn run() {
             commands::ssh_commands::security_firewall_tail_log,
             commands::ssh_commands::security_firewall_set_http_port,
             commands::ssh_commands::security_change_ssh_port,
+            // Phase 16 — SSH-key feature (D-1.1..D-2.3)
+            commands::ssh_commands::security_generate_ssh_key,
+            commands::ssh_commands::security_get_ssh_key_status,
+            commands::ssh_commands::security_export_ssh_key_backup,
+            commands::ssh_commands::security_import_ssh_key,
+            commands::ssh_commands::load_ssh_key_for_host,
             commands::ssh_commands::mtproto_install,
             commands::ssh_commands::mtproto_get_status,
             commands::ssh_commands::mtproto_uninstall,
