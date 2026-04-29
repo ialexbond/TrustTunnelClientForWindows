@@ -26,9 +26,7 @@ jobs:
   dispatch:
     name: Dispatch Bench to Endpoint Repo
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: read
+    github-token: ${{ secrets.CLIENT_ISSUES_TOKEN }}
     if: >
       github.event_name == 'workflow_dispatch' ||
       (
