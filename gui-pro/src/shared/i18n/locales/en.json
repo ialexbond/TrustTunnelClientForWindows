@@ -1063,7 +1063,19 @@
       "days_many": "{{count}} days",
       "valid_days": "Valid for {{count}} more days",
       "expiring_days": "Expires in {{count}} days",
-      "auto_renewal": "Auto-renewal"
+      "auto_renewal": "Auto-renewal",
+      "fingerprint_label": "Fingerprint (SHA256)",
+      "fingerprint_copied": "Fingerprint copied",
+      "subject_cn_label": "Server name",
+      "issuer_label": "Issuer",
+      "not_before_label": "Valid from",
+      "not_after_label": "Valid until",
+      "auto_renewal_enabled": "Auto-renewing",
+      "auto_renewal_not_setup": "Auto-renewal not configured",
+      "enable_auto_renewal_button": "Enable auto-renewal",
+      "snack": {
+        "auto_renewal_enabled": "Certificate auto-renewal enabled"
+      }
     },
     "export": {
       "title": "Export Configuration",
@@ -1206,7 +1218,32 @@
         "preset_ssh": "SSH",
         "preset_https": "HTTPS",
         "preset_http": "HTTP",
-        "preset_custom": "Custom"
+        "preset_custom": "Custom",
+        "modal_title": "Firewall configuration",
+        "modal_summary_title": "Current rules",
+        "toggle_enable_label": "Firewall enabled",
+        "toggle_disable_confirm_title": "Disable Firewall?",
+        "toggle_disable_confirm_message": "The server will be open to all incoming connections. Not recommended for production.",
+        "toggle_disable_confirm_action": "Disable",
+        "add_rule_button": "Add rule",
+        "snack": {
+          "rule_added": "Rule added",
+          "rule_deleted": "Rule deleted",
+          "fw_enabled": "Firewall enabled",
+          "fw_disabled": "Firewall disabled"
+        }
+      },
+      "summary": {
+        "configure_button": "Configure",
+        "status_active": "Active",
+        "status_inactive": "Inactive",
+        "status_not_installed": "Not installed",
+        "fail2ban_card_title": "Fail2Ban",
+        "fail2ban_card_subtitle": "Brute-force protection",
+        "ssh_key_card_title": "SSH key",
+        "ssh_key_card_subtitle": "Secure login",
+        "firewall_card_title": "Firewall",
+        "firewall_card_subtitle": "Network protection"
       },
       "ssh_port": {
         "title": "SSH Port",
