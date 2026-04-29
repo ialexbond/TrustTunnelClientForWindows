@@ -49,9 +49,19 @@ export interface FirewallStatus {
   vpn_port: number | null;
 }
 
+export interface SshKeyStatus {
+  generated: boolean;
+  authorized_on_server: boolean;
+  pubkey_fingerprint?: string;
+  password_auth_disabled: boolean;
+}
+
 export interface SecurityStatus {
   fail2ban: Fail2banStatus;
   firewall: FirewallStatus;
+  // Phase 16 — additive optional field per R-9 backwards-compat (OverviewSection
+  // security summary block consumes existing shape unchanged).
+  ssh_key?: SshKeyStatus;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -191,6 +201,31 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     if (raw.includes("SSH_UNSUPPORTED_OS")) {
       return t("server.security.errors.unsupported_os");
     }
+    // Phase 16 — SSH key + disable PWAuth + certbot timer error markers.
+    if (raw.includes("KEY_GEN_FAILED"))               return t("server.security.errors.key_gen_failed");
+    if (raw.includes("KEY_STORE_FAILED"))             return t("server.security.errors.key_store_failed");
+    if (raw.includes("KEY_NOT_FOUND"))                return t("server.security.errors.key_not_found");
+    if (raw.includes("INVALID_ED25519_PUBKEY") || raw.includes("INVALID_PEM"))
+                                                      return t("server.security.errors.pubkey_invalid");
+    if (raw.includes("AUTHORIZED_KEYS_WRITE_FAILED")) return t("server.security.errors.authorized_keys_failed");
+    if (raw.includes("KEY_BACKUP_WRITE_FAILED")) {
+      const detail = raw.split("|").slice(1).join("|");
+      return t("server.security.errors.key_backup_write_failed", { detail });
+    }
+    if (raw.includes("KEY_IMPORT_READ_FAILED")) {
+      const detail = raw.split("|").slice(1).join("|");
+      return t("server.security.errors.key_import_read_failed", { detail });
+    }
+    if (raw.includes("PWAUTH_DISABLE_FAILED|sshd_validation")) {
+      const detail = raw.split("|").slice(2).join("|");
+      return t("server.security.errors.pwauth_sshd_validation_failed", { detail });
+    }
+    if (raw.includes("PWAUTH_DISABLE_FAILED|restart_failed")) {
+      const detail = raw.split("|").slice(2).join("|");
+      return t("server.security.errors.pwauth_restart_failed", { detail });
+    }
+    if (raw.includes("PWAUTH_DISABLE_FAILED|backup_failed")) return t("server.security.errors.pwauth_backup_failed");
+    if (raw.includes("CERTBOT_TIMER_ENABLE_FAILED"))         return t("server.security.errors.certbot_timer_failed");
     // FIX-MM: defer to the generic SSH error translator for codes we didn't
     // special-case above (SSH_CHANNEL_FAILED, SSH_CONNECT_FAILED, etc.).
     // That table already covers the common connection-layer failures — no
@@ -420,6 +455,54 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
   };
   const portBusy = isBusy("change-ssh-port");
 
+  // ── Phase 16 — SSH key actions ──
+  // Note: ConfirmDialog NOT here — SshKeyModal owns 2-step state machine
+  // with forced backup export gate (D-2.1).
+  const generateSshKey = async (): Promise<void> => {
+    void run(
+      "gen-ssh-key",
+      async () => {
+        const result = await invoke<{ fingerprint: string; generated: boolean }>(
+          "security_generate_ssh_key",
+          { ...sshParams, hostArg: sshParams.host },
+        );
+        // Persist localStorage flag for SshConnectForm auto-detect (D-1.4).
+        localStorage.setItem(`tt_auth_method_${sshParams.host}`, "key");
+        return result;
+      },
+      // Fingerprint substituted by component if it needs full snack with value;
+      // here we keep generic per run() contract (single string at action time).
+      t("server.security.ssh_key.generated_snack", { fingerprint: "" }),
+    );
+  };
+
+  const exportSshKeyBackup = async (destPath: string): Promise<void> => {
+    void run(
+      "export-ssh-key",
+      () => invoke("security_export_ssh_key_backup", { host: sshParams.host, destPath }),
+      t("server.security.ssh_key.backup_saved", { path: destPath }),
+    );
+  };
+
+  const disablePasswordAuth = async (): Promise<void> => {
+    void run(
+      "disable-pw",
+      () => invoke("security_disable_password_auth", sshParams),
+      t("server.security.ssh_key.pwauth_disabled_snack"),
+    );
+  };
+
+  const importSshKey = async (pemPath: string): Promise<void> => {
+    void run(
+      "import-ssh-key",
+      async () => {
+        await invoke("security_import_ssh_key", { host: sshParams.host, pemPath });
+        localStorage.setItem(`tt_auth_method_${sshParams.host}`, "key");
+      },
+      t("control.ssh_key_imported"),
+    );
+  };
+
   return {
     // State
     status,
@@ -450,6 +533,12 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     deleteRule, addRule, loadFwLog,
     changeSshPort, portBusy,
 
+    // Phase 16 — SSH key actions
+    generateSshKey,
+    exportSshKeyBackup,
+    disablePasswordAuth,
+    importSshKey,
+
     // For sub-components that need to run arbitrary ops
     run,
     pushSuccess,
@@ -458,3 +547,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
 }
 
 export type SecurityState = ReturnType<typeof useSecurityState>;
+// Phase 16 — alias for SshKeyModal/Fail2banModal/FirewallModal consumers per
+// PATTERNS.md naming. SecurityState is the canonical name; Use*Return is
+// kept for plan compliance + new compound Modals reading hook surface.
+export type UseSecurityStateReturn = SecurityState;
