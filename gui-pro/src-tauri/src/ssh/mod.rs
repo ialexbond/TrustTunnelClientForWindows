@@ -53,6 +53,19 @@ pub use server::{
     // Phase 15.1 — generic per-file config save (REQ-15.0 + 15.7 + 15.8)
     save_config_file,
 };
+// Phase 16 — SSH-key feature (D-1.1..D-2.3, REQ-16-SSH-KEY-*).
+// Re-exported under namespaced names so commands::ssh_commands может вызывать
+// `ssh::ssh_key_*` без prefix collision с existing `keyring_save/load/clear`
+// password helpers (различные KEYRING_SERVICE namespaces).
+pub use server::server_ssh_key::{
+    generate_and_deploy as ssh_key_generate_and_deploy,
+    get_ssh_key_status as ssh_key_get_status,
+    import_pem_and_persist as ssh_key_import_pem,
+    keyring_clear_pem as ssh_key_keyring_clear_pem,
+    keyring_load_pem as ssh_key_keyring_load_pem,
+    keyring_save_pem as ssh_key_keyring_save_pem,
+    validate_pem_format as ssh_key_validate_pem,
+};
 pub use pool::SshPool;
 pub use process::{check_process_conflict, kill_existing_process};
 
