@@ -77,6 +77,17 @@ export interface SecurityStatus {
   ssh_key?: SshKeyStatus;
 }
 
+// Phase 16 Plan 05 — Certbot timer (auto-renewal) status (D-5.3).
+// Returned by `server_get_certbot_timer_status` backend command. Optional —
+// invoke-time error (cert path missing / certbot not installed) fallbacks
+// to all-false stub locally.
+export interface CertbotTimerStatus {
+  timer_enabled: boolean;
+  timer_active: boolean;
+  cron_present: boolean;
+  auto_renewal_active: boolean;
+}
+
 // ═══════════════════════════════════════════════════════
 // Client-side validators (mirror Rust server_security.rs)
 // Returns an i18n error key on failure, or null if OK.
@@ -166,6 +177,9 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
   const [showFwLog, setShowFwLog] = useState(false);
   const [fwLog, setFwLog] = useState("");
   const [newRule, setNewRule] = useState({ port: "", proto: "tcp", action: "allow", from: "", comment: "" });
+
+  // Phase 16 Plan 05 — Certbot timer (TLS auto-renewal) state.
+  const [certbotTimerStatus, setCertbotTimerStatus] = useState<CertbotTimerStatus | null>(null);
 
 
   // Depend on primitives, not the sshParams object.
@@ -547,6 +561,38 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     );
   };
 
+  // ── Phase 16 Plan 05 — Certbot timer (TLS auto-renewal) actions (D-5.3) ──
+  // Reads systemd timer state via `server_get_certbot_timer_status`. If the
+  // backend command rejects (cert path missing / certbot not installed),
+  // we fallback to an all-false stub so the UI can render the
+  // "Включить автообновление" CTA without throwing.
+  const loadCertbotTimerStatus = useCallback(async () => {
+    try {
+      const result = await invoke<CertbotTimerStatus>("server_get_certbot_timer_status", sshParams);
+      setCertbotTimerStatus(result);
+    } catch {
+      // Non-fatal — backend rejects when cert/certbot missing. UI shows
+      // "auto_renewal_not_setup" + enable CTA, mirroring real-world flow.
+      setCertbotTimerStatus({
+        timer_enabled: false,
+        timer_active: false,
+        cron_present: false,
+        auto_renewal_active: false,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on primitives just like load()
+  }, [host, port, user, password, keyPath]);
+
+  const enableCertbotTimer = async (): Promise<void> => {
+    await run(
+      "enable-certbot-timer",
+      () => invoke("server_enable_certbot_timer", sshParams),
+      t("server.cert.snack.auto_renewal_enabled"),
+    );
+    // Refresh timer status so UI flips to auto_renewal_active=true.
+    await loadCertbotTimerStatus();
+  };
+
   return {
     // State
     status,
@@ -586,6 +632,11 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     // Phase 16 Plan 04 — Fail2Ban preset actions
     applyFail2banPreset,
     applyFail2banCustom,
+
+    // Phase 16 Plan 05 — Certbot timer (TLS auto-renewal)
+    certbotTimerStatus,
+    loadCertbotTimerStatus,
+    enableCertbotTimer,
 
     // For sub-components that need to run arbitrary ops
     run,

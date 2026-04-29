@@ -1063,7 +1063,19 @@
       "days": "{{count}} дн.",
       "valid_days": "Действителен ещё {{count}} дн.",
       "expiring_days": "Истекает через {{count}} дн.",
-      "auto_renewal": "Авто-продление"
+      "auto_renewal": "Авто-продление",
+      "fingerprint_label": "Отпечаток (SHA256)",
+      "fingerprint_copied": "Отпечаток скопирован",
+      "subject_cn_label": "Имя сервера",
+      "issuer_label": "Издатель",
+      "not_before_label": "Действителен с",
+      "not_after_label": "Действителен до",
+      "auto_renewal_enabled": "Автоматически обновляется",
+      "auto_renewal_not_setup": "Автообновление не настроено",
+      "enable_auto_renewal_button": "Включить автообновление",
+      "snack": {
+        "auto_renewal_enabled": "Автообновление сертификата включено"
+      }
     },
     "export": {
       "title": "Экспорт конфигурации",
@@ -1206,7 +1218,32 @@
         "preset_ssh": "SSH",
         "preset_https": "HTTPS",
         "preset_http": "HTTP",
-        "preset_custom": "Свой"
+        "preset_custom": "Свой",
+        "modal_title": "Настройка Firewall",
+        "modal_summary_title": "Текущие правила",
+        "toggle_enable_label": "Firewall включён",
+        "toggle_disable_confirm_title": "Отключить Firewall?",
+        "toggle_disable_confirm_message": "Сервер будет открыт для всех входящих подключений. Не рекомендуется в продакшене.",
+        "toggle_disable_confirm_action": "Отключить",
+        "add_rule_button": "Добавить правило",
+        "snack": {
+          "rule_added": "Правило добавлено",
+          "rule_deleted": "Правило удалено",
+          "fw_enabled": "Firewall включён",
+          "fw_disabled": "Firewall отключён"
+        }
+      },
+      "summary": {
+        "configure_button": "Настроить",
+        "status_active": "Активен",
+        "status_inactive": "Неактивен",
+        "status_not_installed": "Не установлен",
+        "fail2ban_card_title": "Fail2Ban",
+        "fail2ban_card_subtitle": "Защита от brute-force",
+        "ssh_key_card_title": "SSH-ключ",
+        "ssh_key_card_subtitle": "Безопасный вход",
+        "firewall_card_title": "Firewall",
+        "firewall_card_subtitle": "Сетевая защита"
       },
       "ssh_port": {
         "title": "SSH Порт",
