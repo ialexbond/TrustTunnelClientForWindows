@@ -305,7 +305,11 @@ describe("CertSection", () => {
       },
     });
     render(<CertSection state={state} />);
-    expect(screen.getByText("my-vpn.com")).toBeInTheDocument();
+    // Phase 16 Plan 05 — domain extracted from subject now appears в TWO places:
+    // (1) the existing legacy "Domain" row (Badge), (2) the new Subject CN row
+    // (text-mono-sm code). Both are valid renderings of the same value — assert
+    // на presence of either, not uniqueness.
+    expect(screen.getAllByText("my-vpn.com").length).toBeGreaterThan(0);
   });
 
   // ── String parsing (non-JSON certRaw) ──
@@ -341,5 +345,182 @@ describe("CertSection", () => {
     });
     render(<CertSection state={state} />);
     expect(screen.queryByText(i18n.t("server.cert.expires"))).not.toBeInTheDocument();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 16 Plan 05 — Extended cert fields + auto-renewal toggle.
+// SHA256 / Subject CN / Issuer / Not Before render only when backend supplied
+// the field (additive). Auto-renewal section renders only when SecuritySection
+// passes a `security` hook instance (legacy callers without it skip the block).
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CertSection Phase 16 Plan 05 extension", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    i18n.changeLanguage("ru");
+  });
+
+  it("renders SHA256 fingerprint truncated с full в title attr", () => {
+    const fp = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+        sha256Fingerprint: fp,
+      },
+    });
+    render(<CertSection state={state} />);
+    const elem = screen.getByTestId("cert-fingerprint");
+    expect(elem).toHaveAttribute("title", fp);
+    expect(elem.textContent).toContain("…");
+  });
+
+  it("renders Subject CN row when subject contains CN= field", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        subject: "CN = vpn.example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+      },
+    });
+    render(<CertSection state={state} />);
+    expect(screen.getByTestId("cert-subject-cn")).toHaveTextContent("vpn.example.com");
+  });
+
+  it("renders Issuer summary when issuer has O + CN fields", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "C = US, O = Let's Encrypt, CN = R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+      },
+    });
+    render(<CertSection state={state} />);
+    expect(screen.getByTestId("cert-issuer-summary")).toHaveTextContent("Let's Encrypt R3");
+  });
+
+  it("renders Not Before row when backend supplied it", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notBefore: "Apr 28 12:00:00 2026 GMT",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+      },
+    });
+    render(<CertSection state={state} />);
+    expect(screen.getByTestId("cert-not-before")).toHaveTextContent("Apr 28 12:00:00 2026 GMT");
+  });
+
+  it("does NOT render extended rows when backend skipped them (R-9 backwards-compat)", () => {
+    // Old-shape response — only legacy fields. Extension rows should be absent.
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+      },
+    });
+    render(<CertSection state={state} />);
+    expect(screen.queryByTestId("cert-fingerprint")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cert-subject-cn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cert-not-before")).not.toBeInTheDocument();
+  });
+
+  it("auto-renewal section hidden when no `security` prop (legacy callers)", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+      },
+    });
+    render(<CertSection state={state} />);
+    expect(screen.queryByTestId("cert-auto-renewal-section")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("enable-auto-renewal-button")).not.toBeInTheDocument();
+  });
+
+  it("shows enable-auto-renewal button when timer not active", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: false,
+      },
+    });
+    const security = {
+      certbotTimerStatus: {
+        timer_enabled: false,
+        timer_active: false,
+        cron_present: false,
+        auto_renewal_active: false,
+      },
+      isBusy: vi.fn().mockReturnValue(false),
+      loadCertbotTimerStatus: vi.fn().mockResolvedValue(undefined),
+      enableCertbotTimer: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ReturnType<typeof import("./useSecurityState").useSecurityState>;
+    render(<CertSection state={state} security={security} />);
+    expect(screen.getByTestId("enable-auto-renewal-button")).toBeVisible();
+  });
+
+  it("shows '✓ автоматически обновляется' when timer active", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: true,
+      },
+    });
+    const security = {
+      certbotTimerStatus: {
+        timer_enabled: true,
+        timer_active: true,
+        cron_present: false,
+        auto_renewal_active: true,
+      },
+      isBusy: vi.fn().mockReturnValue(false),
+      loadCertbotTimerStatus: vi.fn().mockResolvedValue(undefined),
+      enableCertbotTimer: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ReturnType<typeof import("./useSecurityState").useSecurityState>;
+    render(<CertSection state={state} security={security} />);
+    expect(screen.getByTestId("auto-renewal-active")).toBeVisible();
+    expect(screen.queryByTestId("enable-auto-renewal-button")).not.toBeInTheDocument();
+  });
+
+  it("clicking enable-auto-renewal button invokes enableCertbotTimer", () => {
+    const state = makeState({
+      certRaw: {
+        issuer: "R3",
+        hostname: "example.com",
+        notAfter: "2027-06-15T00:00:00Z",
+        autoRenew: false,
+      },
+    });
+    const enableMock = vi.fn().mockResolvedValue(undefined);
+    const security = {
+      certbotTimerStatus: {
+        timer_enabled: false,
+        timer_active: false,
+        cron_present: false,
+        auto_renewal_active: false,
+      },
+      isBusy: vi.fn().mockReturnValue(false),
+      loadCertbotTimerStatus: vi.fn().mockResolvedValue(undefined),
+      enableCertbotTimer: enableMock,
+    } as unknown as ReturnType<typeof import("./useSecurityState").useSecurityState>;
+    render(<CertSection state={state} security={security} />);
+    screen.getByTestId("enable-auto-renewal-button").click();
+    expect(enableMock).toHaveBeenCalled();
   });
 });

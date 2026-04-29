@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ShieldCheck,
   Info,
   RefreshCw,
+  RotateCw,
 } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
@@ -13,10 +14,21 @@ import { Tooltip } from "../../shared/ui/Tooltip";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
-import { parseCertInfo, daysUntil, type CertInfo } from "./certUtils";
+import { useSecurityState } from "./useSecurityState";
+import { parseCertInfo, daysUntil, truncateFingerprint, type CertInfo } from "./certUtils";
 
 interface Props {
   state: ServerState;
+  /**
+   * Phase 16 Plan 05 — Optional shared `useSecurityState` instance. When the
+   * parent (e.g. `SecuritySection.tsx` 4-cards layout) already owns a hook
+   * instance, it should pass it here so the auto-renewal toggle reads the
+   * same `certbotTimerStatus` snapshot. When omitted (legacy 12.5 layout,
+   * standalone tests, Storybook stories without SecuritySection wrapper) the
+   * auto-renewal block is hidden — feature is unavailable until the
+   * SecuritySection-owned `useSecurityState` is wired in.
+   */
+  security?: ReturnType<typeof useSecurityState>;
 }
 
 function pluralRu(n: number, one: string, few: string, many: string): string {
@@ -53,7 +65,7 @@ function formatDaysHuman(totalDays: number, lang: string): string {
   return parts.join(" ");
 }
 
-export function CertSection({ state }: Props) {
+export function CertSection({ state, security }: Props) {
   const { t, i18n } = useTranslation();
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
   const confirm = useConfirm();
@@ -62,6 +74,16 @@ export function CertSection({ state }: Props) {
   const [, setRenewStatus] = useState<string>("");
 
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;
+
+  // Phase 16 Plan 05 — auto-renewal state lives in the optional shared
+  // `useSecurityState` instance passed by SecuritySection. When omitted
+  // (legacy callers / tests), `security` is undefined → auto-renewal block
+  // is hidden via short-circuit below.
+  useEffect(() => {
+    if (!security) return;
+    void security.loadCertbotTimerStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on host primitive only
+  }, [sshParams.host]);
 
   const loadCert = async () => {
     try {
@@ -174,12 +196,101 @@ export function CertSection({ state }: Props) {
           </div>
         )}
 
+        {/* Phase 16 Plan 05 — additive cert detail rows (D-5.1).
+            Each row only renders when backend supplied the field — old backend
+            responses skipping these continue to render the legacy 4 rows
+            unchanged (R-9 backwards-compat invariant). */}
+        {certInfo.subjectCn && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+              {t("server.cert.subject_cn_label")}
+            </span>
+            <code className="text-mono-sm" data-testid="cert-subject-cn">
+              {certInfo.subjectCn}
+            </code>
+          </div>
+        )}
+        {certInfo.issuerSummary && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+              {t("server.cert.issuer_label")}
+            </span>
+            <span className="text-xs" data-testid="cert-issuer-summary">
+              {certInfo.issuerSummary}
+            </span>
+          </div>
+        )}
+        {certInfo.notBefore && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+              {t("server.cert.not_before_label")}
+            </span>
+            <code className="text-mono-sm" data-testid="cert-not-before">
+              {certInfo.notBefore}
+            </code>
+          </div>
+        )}
+        {certInfo.sha256Fingerprint && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs shrink-0" style={{ color: "var(--color-text-secondary)" }}>
+              {t("server.cert.fingerprint_label")}
+            </span>
+            <code
+              className="text-mono-sm cursor-help truncate text-right"
+              title={certInfo.sha256Fingerprint}
+              data-testid="cert-fingerprint"
+            >
+              {truncateFingerprint(certInfo.sha256Fingerprint)}
+            </code>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("server.cert.auto_renew")}</span>
           <Badge variant={certInfo.autoRenew ? "success" : "neutral"} size="sm">
             {certInfo.autoRenew ? t("server.cert.configured") : t("server.cert.not_configured")}
           </Badge>
         </div>
+
+        {/* Phase 16 Plan 05 — Auto-renewal toggle (D-5.3).
+            Only renders when SecuritySection passed a `security` hook instance.
+            Legacy 12.5 callers (no `security` prop) continue with the static
+            "configured" badge above (driven by certInfo.autoRenew). */}
+        {security && (
+          <div
+            className="pt-3 border-t"
+            style={{ borderColor: "var(--color-border)" }}
+            data-testid="cert-auto-renewal-section"
+          >
+            {security.certbotTimerStatus?.auto_renewal_active ? (
+              <div
+                className="flex items-center gap-2 text-body-sm"
+                style={{ color: "var(--color-status-connected)" }}
+                data-testid="auto-renewal-active"
+              >
+                <span aria-hidden="true">✓</span>
+                <span>{t("server.cert.auto_renewal_enabled")}</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-body-sm" style={{ color: "var(--color-text-muted)" }}>
+                  {t("server.cert.auto_renewal_not_setup")}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<RotateCw className="w-3 h-3" />}
+                  onClick={() => void security.enableCertbotTimer()}
+                  loading={security.isBusy("enable-certbot-timer")}
+                  disabled={security.isBusy("enable-certbot-timer")}
+                  data-testid="enable-auto-renewal-button"
+                >
+                  {t("server.cert.enable_auto_renewal_button")}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         {certInfo.certType === "lets_encrypt" && (
           <Button
