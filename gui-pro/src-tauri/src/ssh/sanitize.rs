@@ -224,6 +224,46 @@ pub fn validate_display_name(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Phase 16 — Ed25519 OpenSSH armored public key for authorized_keys append.
+///
+/// Format: `ssh-ed25519 BASE64 [optional comment]`
+///
+/// Defence stack (S-02 char-whitelist invariant):
+///  - Layer 1: length cap 1..=200 chars (Ed25519 OpenSSH = ~80 chars + comment).
+///  - Layer 2: shape check — must be `ssh-ed25519` prefix + base64 body + optional comment.
+///  - Layer 3: base64 body restricted to `[A-Za-z0-9+/=]`.
+///  - Layer 4: comment field rejects shell-metachars (control chars + `' " ` $ \ ; | & \n \r`).
+///
+/// Backend re-validates per V13 invariant (Tauri IPC = trust boundary). Caller
+/// embeds validated pubkey в UUID heredoc per S-04 (`upload_public_key`).
+pub fn validate_ed25519_armored_pubkey(s: &str) -> Result<(), String> {
+    if s.is_empty() || s.len() > 200 {
+        return Err("Pubkey length out of range (1..=200)".into());
+    }
+    let parts: Vec<&str> = s.splitn(3, ' ').collect();
+    if parts.len() < 2 {
+        return Err("Pubkey shape invalid (expected 'ssh-ed25519 BASE64 [comment]')".into());
+    }
+    if parts[0] != "ssh-ed25519" {
+        return Err("Pubkey type must be ssh-ed25519".into());
+    }
+    if !parts[1]
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+    {
+        return Err("Pubkey base64 invalid".into());
+    }
+    if let Some(comment) = parts.get(2) {
+        if comment.chars().any(|c| {
+            c.is_control()
+                || matches!(c, '\'' | '"' | '`' | '$' | '\\' | ';' | '|' | '&' | '\n' | '\r')
+        }) {
+            return Err("Pubkey comment contains invalid characters".into());
+        }
+    }
+    Ok(())
+}
+
 /// FQDN for `custom_sni` TLV field — letters, digits, dots, hyphens only.
 /// Empty string accepted (field optional).
 /// Max length 253 chars (RFC 1035).
@@ -614,6 +654,42 @@ mod tests {
         assert!(validate_fqdn_sni("example.com; ls").is_err());
         assert!(validate_fqdn_sni("ex ample.com").is_err());
         assert!(validate_fqdn_sni("example`com`").is_err());
+    }
+
+    // ─── Phase 16: Ed25519 armored pubkey (S-02 + V13) ─
+
+    #[test]
+    fn validate_ed25519_armored_pubkey_accepts_canonical() {
+        let pk = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPxJiNqOoQYjA6KmHnxuHXDxLRC2gP9z8z+TGsj1V5sw trusttunnel@example.com";
+        assert!(validate_ed25519_armored_pubkey(pk).is_ok());
+    }
+
+    #[test]
+    fn validate_ed25519_armored_pubkey_rejects_shell_metachars() {
+        let pk = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPxJ comment;rm -rf /";
+        let err = validate_ed25519_armored_pubkey(pk).unwrap_err();
+        assert!(err.contains("invalid characters"), "Got: {err}");
+    }
+
+    #[test]
+    fn validate_ed25519_armored_pubkey_rejects_non_ed25519() {
+        let pk = "ssh-rsa AAAAB3NzaC1yc2EAAAA user@host";
+        let err = validate_ed25519_armored_pubkey(pk).unwrap_err();
+        assert!(err.contains("ssh-ed25519"), "Got: {err}");
+    }
+
+    #[test]
+    fn validate_ed25519_armored_pubkey_rejects_too_long() {
+        let pk = format!("ssh-ed25519 AAAA{}", "A".repeat(300));
+        let err = validate_ed25519_armored_pubkey(&pk).unwrap_err();
+        assert!(err.contains("out of range"), "Got: {err}");
+    }
+
+    #[test]
+    fn validate_ed25519_armored_pubkey_rejects_invalid_base64() {
+        let pk = "ssh-ed25519 not-base64-?@! comment";
+        let err = validate_ed25519_armored_pubkey(pk).unwrap_err();
+        assert!(err.contains("base64"), "Got: {err}");
     }
 
     // ─── Display name (CR-02) ─────────────────────────

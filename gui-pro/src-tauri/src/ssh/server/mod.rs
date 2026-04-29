@@ -4,6 +4,7 @@ mod server_config;
 mod server_monitoring;
 mod server_version;
 mod server_security;
+pub mod server_ssh_key;
 mod server_mtproto;
 mod server_bbr;
 mod server_uptime;
