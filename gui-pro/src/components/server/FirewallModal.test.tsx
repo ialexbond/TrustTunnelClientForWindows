@@ -150,8 +150,16 @@ describe("FirewallModal", () => {
     await waitFor(() =>
       expect(screen.getByText(/отключить firewall\?/i)).toBeVisible(),
     );
-    // Click confirm — same RU label as confirmText.
-    fireEvent.click(screen.getByRole("button", { name: /^отключить$/i }));
+    // Click confirm in ConfirmDialog — disambiguated by button index because
+    // P0-4 #O added a second "Отключить" button (the ufw-toggle-button shows
+    // the same imperative label). The ufw-toggle-button has data-testid; the
+    // remaining "Отключить" button is the ConfirmDialog's confirm CTA.
+    const allDisableButtons = await screen.findAllByRole("button", { name: /^отключить$/i });
+    const confirmButton = allDisableButtons.find(
+      (b) => b.getAttribute("data-testid") !== "ufw-toggle-button",
+    );
+    expect(confirmButton).toBeDefined();
+    fireEvent.click(confirmButton!);
     await waitFor(() => expect(state.stopFirewall).toHaveBeenCalled());
     expect(state.startFirewall).not.toHaveBeenCalled();
   });

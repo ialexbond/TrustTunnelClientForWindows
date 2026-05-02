@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { X, Shield, Trash2, Plus, Loader2 } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
+import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { Input } from "../../shared/ui/Input";
 import { Select } from "../../shared/ui/Select";
 import { useConfirm } from "../../shared/ui/useConfirm";
@@ -124,15 +125,32 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
         <h2 className="text-title">{t("server.security.firewall.modal_title")}</h2>
       </div>
 
-      {/* Section 1 — Toggle UFW (D-3.3) */}
+      {/* Section 1 — Toggle UFW (D-3.3) — P0-4 #O ФИКС:
+          Разделили статус (StatusIndicator pill) и действие (Button с явным
+          imperative label «Включить» / «Отключить» / «Установить»). Старый
+          single-button-показывал-status-как-label был anti-pattern: пользователь
+          видел кнопку «Активен» и не понимал что click отключит. */}
       <div
-        className="flex items-center justify-between py-2 border-b"
+        className="flex items-center justify-between gap-3 py-2 border-b"
         style={{ borderColor: "var(--color-border)" }}
         data-testid="ufw-toggle-row"
       >
-        <span className="text-body-sm">
-          {t("server.security.firewall.toggle_enable_label")}
-        </span>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="text-body-sm">
+            {t("server.security.firewall.toggle_enable_label")}
+          </span>
+          <StatusIndicator
+            status={fwActive ? "success" : fwInstalled ? "warning" : "danger"}
+            size="sm"
+            label={
+              fwActive
+                ? t("server.security.summary.status_active")
+                : !fwInstalled
+                  ? t("server.security.summary.status_not_installed")
+                  : t("server.security.summary.status_inactive")
+            }
+          />
+        </div>
         <Button
           variant={fwActive ? "secondary" : "primary"}
           size="sm"
@@ -141,11 +159,11 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
           disabled={state.fwBusy}
           data-testid="ufw-toggle-button"
         >
-          {fwActive
-            ? t("server.security.summary.status_active")
-            : !fwInstalled
-              ? t("server.security.summary.status_not_installed")
-              : t("server.security.summary.status_inactive")}
+          {!fwInstalled
+            ? t("server.security.firewall.action_install")
+            : fwActive
+              ? t("server.security.firewall.action_disable")
+              : t("server.security.firewall.action_enable")}
         </Button>
       </div>
 
