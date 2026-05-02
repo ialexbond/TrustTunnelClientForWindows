@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { X, KeyRound, Download, ShieldAlert, Unlock } from "lucide-react";
+import { X, KeyRound, Download, LockKeyhole, Unlock, Copy, Check } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
@@ -87,18 +87,21 @@ export function SshKeyModal(props: SshKeyModalProps) {
   const [exporting, setExporting] = useState(false);
   const [disabling, setDisabling] = useState(false);
   const [enablingPw, setEnablingPw] = useState(false);
+  const [fpCopied, setFpCopied] = useState(false);
 
   // T-03 — Load status on open. Storybook escape hatches short-circuit.
   // Depend on primitives (host/port/user) to avoid extra fetches when
   // parents pass non-memoized sshParams refs.
   const { host: sshHost, port: sshPort, user: sshUser, password: sshPassword, keyPath: sshKeyPath, keyData: sshKeyData } = sshParams;
-  useEffect(() => {
-    if (!isOpen) return;
-    if (_forceStatus !== undefined || _forceLoading || _forceError !== undefined) return;
-    let cancelled = false;
+
+  // P2-16 #H — single-source-of-truth для status fetch. Прежде handleRetry
+  // дублировал логику useEffect (~22 lines DRY violation, easy to drift).
+  // Now: fetchStatus() called by both useEffect и handleRetry с явным
+  // cancel signal pattern.
+  const fetchStatus = (signal: { cancelled: boolean }) => {
     setLoading(true);
     setError(null);
-    invoke<SshKeyStatus>("security_get_ssh_key_status", {
+    return invoke<SshKeyStatus>("security_get_ssh_key_status", {
       host: sshHost,
       port: sshPort,
       user: sshUser,
@@ -108,16 +111,23 @@ export function SshKeyModal(props: SshKeyModalProps) {
       hostArg: sshHost,
     })
       .then((s) => {
-        if (!cancelled) setKeyStatus(s);
+        if (!signal.cancelled) setKeyStatus(s);
       })
       .catch((e) => {
-        if (!cancelled) setError(formatError(e));
+        if (!signal.cancelled) setError(formatError(e));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!signal.cancelled) setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (_forceStatus !== undefined || _forceLoading || _forceError !== undefined) return;
+    const signal = { cancelled: false };
+    void fetchStatus(signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, sshHost, sshPort, sshUser, sshPassword, sshKeyPath, sshKeyData]);
@@ -265,27 +275,38 @@ export function SshKeyModal(props: SshKeyModalProps) {
     }
   };
 
+  // P2-16 #H — DRY refactor: handleRetry now delegates to fetchStatus.
   const handleRetry = () => {
-    setError(null);
-    setLoading(true);
-    invoke<SshKeyStatus>("security_get_ssh_key_status", {
-      host: sshHost,
-      port: sshPort,
-      user: sshUser,
-      password: sshPassword,
-      keyPath: sshKeyPath,
-      keyData: sshKeyData,
-      hostArg: sshHost,
-    })
-      .then(setKeyStatus)
-      .catch((e) => setError(formatError(e)))
-      .finally(() => setLoading(false));
+    void fetchStatus({ cancelled: false });
   };
 
   // Storybook overrides take priority over runtime state.
   const effectiveStatus = _forceStatus !== undefined ? _forceStatus : keyStatus;
   const effectiveLoading = _forceLoading ?? loading;
   const effectiveError = _forceError ?? error;
+
+  // P2-13 #F — copy fingerprint в clipboard. Defined after `effectiveStatus`
+  // so closure captures latest value (effectiveStatus depends on _forceStatus
+  // override и runtime keyStatus).
+  const handleCopyFingerprint = async () => {
+    if (!effectiveStatus?.pubkey_fingerprint) return;
+    try {
+      await navigator.clipboard.writeText(effectiveStatus.pubkey_fingerprint);
+      setFpCopied(true);
+      setTimeout(() => setFpCopied(false), 1500);
+    } catch (e) {
+      pushSuccess(formatError(e), "error");
+    }
+  };
+
+  // P2-12 #G — middle-ellipsis для long file paths (typical Windows
+  // OneDrive paths могут быть 100+ chars).
+  const truncatePath = (path: string): string => {
+    if (path.length <= 50) return path;
+    const head = path.slice(0, 20);
+    const tail = path.slice(-25);
+    return `${head}…${tail}`;
+  };
 
   // T-03: NEVER early-return null. Modal primitive owns mount/animating.
   return (
@@ -344,12 +365,26 @@ export function SshKeyModal(props: SshKeyModalProps) {
                   : t("server.security.ssh_key.status_not_generated")}
               </h3>
               {effectiveStatus?.generated && effectiveStatus.pubkey_fingerprint && (
-                <code
-                  className="text-mono-sm block mt-2 break-all"
-                  data-testid="ssh-key-fingerprint"
-                >
-                  {effectiveStatus.pubkey_fingerprint}
-                </code>
+                <div className="flex items-center gap-2 mt-2">
+                  <code
+                    className="text-mono-sm flex-1 truncate"
+                    title={effectiveStatus.pubkey_fingerprint}
+                    data-testid="ssh-key-fingerprint"
+                  >
+                    {effectiveStatus.pubkey_fingerprint}
+                  </code>
+                  {/* P2-13 #F — copy fingerprint button */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void handleCopyFingerprint()}
+                    icon={fpCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    aria-label={t("server.security.ssh_key.copy_fingerprint_aria")}
+                    data-testid="ssh-key-copy-fingerprint"
+                  >
+                    {fpCopied ? t("buttons.copied") : t("buttons.copy")}
+                  </Button>
+                </div>
               )}
               <Button
                 onClick={handleGenerate}
@@ -395,11 +430,13 @@ export function SshKeyModal(props: SshKeyModalProps) {
                   </Button>
                   {exportPath && (
                     <p
-                      className="text-caption mt-1 font-mono"
+                      className="text-caption mt-1 font-mono truncate"
+                      title={exportPath}
                       style={{ color: "var(--color-status-connected)" }}
                       data-testid="ssh-key-export-path"
                     >
-                      ✓ {exportPath}
+                      {/* P2-12 #G — middle-ellipsis: full path в title attr */}
+                      ✓ {truncatePath(exportPath)}
                     </p>
                   )}
                 </div>
@@ -414,7 +451,7 @@ export function SshKeyModal(props: SshKeyModalProps) {
                     loading={disabling}
                     disabled={!exportPath || disabling}
                     variant="danger"
-                    icon={<ShieldAlert className="w-4 h-4" />}
+                    icon={<LockKeyhole className="w-4 h-4" />}
                     className="mt-2"
                     aria-describedby={!exportPath ? "ssh-step2-hint" : undefined}
                   >

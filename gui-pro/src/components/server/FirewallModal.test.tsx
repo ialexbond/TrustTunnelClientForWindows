@@ -149,7 +149,7 @@ describe("FirewallModal", () => {
 
     // ConfirmDialog appears with "Отключить Firewall?" title (Modal-scoped wording).
     await waitFor(() =>
-      expect(screen.getByText(/отключить firewall\?/i)).toBeVisible(),
+      expect(screen.getByText(/отключить брандмауэр\?/i)).toBeVisible(),
     );
     // Click confirm in ConfirmDialog — disambiguated by button index because
     // P0-4 #O added a second "Отключить" button (the ufw-toggle-button shows
