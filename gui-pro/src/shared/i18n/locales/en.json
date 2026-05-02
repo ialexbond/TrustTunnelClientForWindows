@@ -1143,7 +1143,8 @@
           "balanced_help": "5 attempts per 10 minutes, ban 10 minutes (recommended)",
           "strict": "Strict",
           "strict_help": "3 attempts per 10 minutes, ban 1 hour",
-          "custom": "Custom configuration"
+          "custom": "Custom configuration",
+          "custom_help": "Manually configure ban parameters"
         },
         "custom_title": "Custom configuration",
         "custom_maxretry_label": "Attempts",
@@ -1164,7 +1165,11 @@
           "preset_applied": "Configuration applied: {{preset}}",
           "preset_applied_custom": "Custom configuration applied",
           "ip_unbanned": "IP {{ip}} unbanned"
-        }
+        },
+        "custom_dirty_aria": "Unsaved changes",
+        "close_dirty_title": "Close without applying?",
+        "close_dirty_message": "You have unsaved changes in custom mode. Closing now will discard them.",
+        "close_dirty_confirm": "Close without applying"
       },
       "firewall": {
         "title": "Firewall (UFW)",
