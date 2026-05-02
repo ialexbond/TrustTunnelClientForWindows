@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Shield } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { TabsInline } from "../../shared/ui/TabsInline";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import type { SecurityState, SshParams } from "./useSecurityState";
 import { Fail2banSettingsTab } from "./Fail2banSettingsTab";
 import { Fail2banBannedTab } from "./Fail2banBannedTab";
@@ -46,11 +47,30 @@ export function Fail2banModal({
   _forceTab,
 }: Fail2banModalProps) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Find sshd jail (primary). Phase 16 Plan 04 wires только sshd.
   const sshdJail = state.status?.fail2ban.jails.find((j) => j.name === "sshd");
   const installed = state.status?.fail2ban.installed ?? false;
+
+  // P0-2 #K — track custom-mode dirty state из Fail2banSettingsTab.
+  // Used для close-confirm dialog когда юзер закрывает Modal с unsaved edits.
+  const [customDirty, setCustomDirty] = useState(false);
+
+  const handleClose = async () => {
+    if (customDirty) {
+      const ok = await confirm({
+        title: t("server.security.fail2ban.close_dirty_title"),
+        message: t("server.security.fail2ban.close_dirty_message"),
+        variant: "warning",
+        confirmText: t("server.security.fail2ban.close_dirty_confirm"),
+        cancelText: t("buttons.cancel"),
+      });
+      if (!ok) return;
+    }
+    onClose();
+  };
 
   // T-03 — refresh status on open if installed (initial state may be stale
   // when Modal re-mounted from previously-closed instance).
@@ -72,7 +92,7 @@ export function Fail2banModal({
     {
       id: "settings",
       label: t("server.security.fail2ban.tabs.settings"),
-      content: <Fail2banSettingsTab state={state} jail={sshdJail} />,
+      content: <Fail2banSettingsTab state={state} jail={sshdJail} onDirtyChange={setCustomDirty} />,
     },
     {
       id: "banned",
@@ -85,12 +105,12 @@ export function Fail2banModal({
 
   // T-03 — NEVER early return null. Modal owns mount/animating lifecycle.
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" className="relative">
+    <Modal isOpen={isOpen} onClose={() => void handleClose()} size="md" className="relative">
       <button
         ref={closeButtonRef}
         type="button"
         aria-label={t("buttons.close")}
-        onClick={onClose}
+        onClick={() => void handleClose()}
         className={cn(
           "absolute top-3 right-3 p-1 rounded",
           "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",

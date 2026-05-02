@@ -42,9 +42,14 @@ interface Fail2banSettingsTabProps {
         findtime: string;
       }
     | undefined;
+  /**
+   * P0-2 #K — fires when custom draft state diverges from / converges with jail
+   * config. Parent Modal uses this to show close-confirm warning.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function Fail2banSettingsTab({ state, jail }: Fail2banSettingsTabProps) {
+export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSettingsTabProps) {
   const { t } = useTranslation();
   // Optimistic preset selection — overrides derived detection между
   // click и refresh. null = use derived value.
@@ -103,6 +108,22 @@ export function Fail2banSettingsTab({ state, jail }: Fail2banSettingsTabProps) {
     }
   }, [detectedPreset, selectedPreset]);
 
+  // P0-2 #K — Dirty state: custom draft != jail config (pre-Apply edits exist).
+  // Used by Accordion title indicator + parent Modal close-warning.
+  const isCustomDirty = useMemo(() => {
+    if (!jail) return false;
+    return (
+      custom.maxretry !== jail.maxretry ||
+      custom.bantime !== jail.bantime ||
+      custom.findtime !== jail.findtime
+    );
+  }, [custom, jail]);
+
+  // Bubble dirty state to parent Modal via callback (для close-warning).
+  useEffect(() => {
+    onDirtyChange?.(isCustomDirty);
+  }, [isCustomDirty, onDirtyChange]);
+
   const handleApplyPreset = (preset: keyof typeof FAIL2BAN_PRESETS) => {
     setSelectedPreset(preset);
     void state.applyFail2banPreset(preset);
@@ -111,6 +132,14 @@ export function Fail2banSettingsTab({ state, jail }: Fail2banSettingsTabProps) {
   const handleApplyCustom = () => {
     setSelectedPreset("custom");
     void state.applyFail2banCustom(custom);
+  };
+
+  // Custom radio handler: when user explicitly picks "Своя конфигурация",
+  // open Accordion + flip optimistic override so UI reflects custom mode
+  // immediately (without waiting for any backend invoke — values stay
+  // whatever was last applied; user must explicitly hit Apply).
+  const handlePickCustom = () => {
+    setSelectedPreset("custom");
   };
 
   return (
@@ -157,13 +186,64 @@ export function Fail2banSettingsTab({ state, jail }: Fail2banSettingsTabProps) {
             </label>
           );
         })}
+
+        {/* P0-1 #J — 4-й radio "Своя конфигурация". Когда detected/selected = "custom",
+            radio checked + Accordion auto-opens (defaultOpen prop ниже).
+            Backend НЕ invoked при выборе — пользователь должен явно нажать
+            Apply внутри Accordion. */}
+        <label
+          key="custom"
+          className={cn(
+            "flex items-start gap-3 p-3 rounded-[var(--radius-md)] cursor-pointer",
+            "border transition-colors",
+            activePreset === "custom"
+              ? "border-[var(--color-accent-interactive)] bg-[var(--color-accent-tint-08)]"
+              : "border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]",
+          )}
+        >
+          <input
+            type="radio"
+            name="fail2ban-preset"
+            value="custom"
+            checked={activePreset === "custom"}
+            onChange={handlePickCustom}
+            className="mt-1"
+            data-testid="preset-radio-custom"
+          />
+          <div className="flex-1">
+            <div className="text-body font-medium">
+              {t("server.security.fail2ban.presets.custom")}
+            </div>
+            <div
+              className="text-caption"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {t("server.security.fail2ban.presets.custom_help")}
+            </div>
+          </div>
+        </label>
       </fieldset>
 
+      {/* P0-2 #K — Dirty indicator: показываем "●" в title когда custom draft
+          расходится с jail config. Pre-Apply edit'ы не теряются молча — пользователь
+          видит что изменения ждут apply. */}
       <Accordion
         items={[
           {
             id: "custom-mode",
-            title: t("server.security.fail2ban.custom_title"),
+            title: (
+              <span className="flex items-center gap-2">
+                {t("server.security.fail2ban.custom_title")}
+                {isCustomDirty && (
+                  <span
+                    aria-label={t("server.security.fail2ban.custom_dirty_aria")}
+                    className="inline-block w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: "var(--color-status-warning)" }}
+                    data-testid="custom-dirty-indicator"
+                  />
+                )}
+              </span>
+            ),
             content: (
               <div className="space-y-3 pt-2">
                 <div>
