@@ -1242,7 +1242,10 @@
         },
         "action_install": "Установить",
         "action_enable": "Включить",
-        "action_disable": "Отключить"
+        "action_disable": "Отключить",
+        "action_label_allow": "Разрешён",
+        "action_label_deny": "Запрещён",
+        "action_label_reject": "Отклонён"
       },
       "summary": {
         "configure_button": "Настроить",

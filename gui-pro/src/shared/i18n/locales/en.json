@@ -1242,7 +1242,10 @@
         },
         "action_install": "Install",
         "action_enable": "Enable",
-        "action_disable": "Disable"
+        "action_disable": "Disable",
+        "action_label_allow": "Allowed",
+        "action_label_deny": "Denied",
+        "action_label_reject": "Rejected"
       },
       "summary": {
         "configure_button": "Configure",
