@@ -1273,7 +1273,7 @@
         "fail2ban_subtitle_active": "{{preset}} • {{retries}} attempts before ban",
         "ssh_key_subtitle_not_generated": "Key not generated — password login only",
         "ssh_key_subtitle_dual": "Ed25519 + password SSH both allowed",
-        "ssh_key_subtitle_key_only": "Ed25519 only — password disabled",
+        "ssh_key_subtitle_key_only": "Ed25519 only • lock-out risk without backup key",
         "cert_card_title": "TLS Certificate",
         "cert_subtitle_loading": "Loading...",
         "cert_status_loading": "Loading",
