@@ -197,7 +197,10 @@ export function SecuritySection({ state }: Props) {
         </div>
       </Card>
 
-      {/* Card 3 — SSH-ключ summary (opens SshKeyModal) */}
+      {/* Card 3 — SSH-ключ summary (opens SshKeyModal). P3-18 #2 — subtitle
+          подсвечивается warning color когда pwAuthDisabled (lockout risk
+          если backup ключа нет). Status pill = warning при key_only, не
+          success — отражает что состояние требует внимания. */}
       <Card data-testid="ssh-key-summary-card">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -210,12 +213,19 @@ export function SecuritySection({ state }: Props) {
               <div className="flex items-center gap-2">
                 <h3 className="text-subtitle">{t("server.security.summary.ssh_key_card_title")}</h3>
                 <StatusIndicator
-                  status={sshKeyGenerated ? "success" : "neutral"}
+                  status={pwAuthDisabled ? "warning" : sshKeyGenerated ? "success" : "neutral"}
                   size="sm"
                   label={sshKeyStatusText}
                 />
               </div>
-              <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
+              <p
+                className="text-caption"
+                style={{
+                  color: pwAuthDisabled
+                    ? "var(--color-status-warning)"
+                    : "var(--color-text-muted)",
+                }}
+              >
                 {sshKeySubtitle}
               </p>
             </div>
