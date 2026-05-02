@@ -6,6 +6,7 @@ import { Button } from "../../shared/ui/Button";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
+import { formatBanTime } from "./fail2banUtils";
 
 /**
  * Phase 16 Plan 04 — Fail2banBannedTab.
@@ -31,7 +32,7 @@ export function Fail2banBannedTab({
   jail,
   sshParams,
 }: Fail2banBannedTabProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const pushSuccess = useSnackBar();
   const { log: activityLog } = useActivityLog();
 
@@ -100,7 +101,10 @@ export function Fail2banBannedTab({
               className="text-caption"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {bannedAt}
+              {/* P0+ #localization — Fail2Ban backend возвращает «5min ago»
+                  на английском (fail2ban-client output). Парсим и
+                  локализуем через formatBanTime → «5 минут назад» в RU. */}
+              {bannedAt ? formatBanTime(bannedAt, i18n.language) : ""}
             </span>
             <Button
               variant="danger-outline"

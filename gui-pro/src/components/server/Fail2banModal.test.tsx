@@ -269,7 +269,9 @@ describe("Fail2banModal", () => {
     );
     expect(await screen.findByText("1.2.3.4")).toBeVisible();
     expect(screen.getByText("5.6.7.8")).toBeVisible();
-    expect(screen.getByText("5min ago")).toBeVisible();
+    // Phase 16 polish — backend "5min ago" локализуется via Intl.RelativeTimeFormat
+    // (Russian: "5 мин. назад" / "через -5 мин." form variants).
+    expect(screen.getByText(/5\s*мин/i)).toBeVisible();
   });
 
   it("unban button invokes backend", async () => {
