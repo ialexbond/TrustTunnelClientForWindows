@@ -4,12 +4,34 @@ import { Shield, ShieldAlert, KeyRound } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
+import { Skeleton } from "../../shared/ui/Skeleton";
 import type { ServerState } from "./useServerState";
 import { useSecurityState, FAIL2BAN_PRESETS, type Fail2banPresetId } from "./useSecurityState";
 import { CertSection } from "./CertSection";
 import { FirewallModal } from "./FirewallModal";
 import { Fail2banModal } from "./Fail2banModal";
 import { SshKeyModal } from "./SshKeyModal";
+
+/**
+ * P UAT 2026-04-30 — Skeleton placeholder для card во время initial load.
+ * Mimics card grid (icon + title + status + subtitle + action button).
+ */
+function SecurityCardSkeleton({ testId }: { testId: string }) {
+  return (
+    <Card data-testid={testId}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <Skeleton variant="circle" width={20} height={20} rounded />
+          <div className="flex-1 min-w-0 space-y-2">
+            <Skeleton variant="line" height={14} width="40%" />
+            <Skeleton variant="line" height={12} width="70%" />
+          </div>
+        </div>
+        <Skeleton variant="card" height={32} width={96} />
+      </div>
+    </Card>
+  );
+}
 
 interface Props {
   state: ServerState;
@@ -124,6 +146,21 @@ export function SecuritySection({ state }: Props) {
     if (pwAuthDisabled) return t("server.security.summary.ssh_key_subtitle_key_only");
     return t("server.security.summary.ssh_key_subtitle_dual");
   }, [sshKeyGenerated, pwAuthDisabled, t]);
+
+  // P UAT 2026-04-30 — Show Skeleton placeholders во время initial fetch
+  // (security.loading && нет ещё status snapshot). Subsequent refresh не
+  // показывает Skeleton — это flicker от polling/refresh.
+  const isInitialLoading = security.loading && !security.status;
+  if (isInitialLoading) {
+    return (
+      <div aria-live="polite" className="space-y-3" data-testid="security-section-loading">
+        <SecurityCardSkeleton testId="firewall-card-skeleton" />
+        <SecurityCardSkeleton testId="fail2ban-card-skeleton" />
+        <SecurityCardSkeleton testId="ssh-key-card-skeleton" />
+        <SecurityCardSkeleton testId="cert-card-skeleton" />
+      </div>
+    );
+  }
 
   return (
     <div aria-live="polite" className="space-y-3" data-testid="security-section">

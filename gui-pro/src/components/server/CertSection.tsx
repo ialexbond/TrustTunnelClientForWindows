@@ -5,6 +5,7 @@ import { ShieldCheck } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
+import { Skeleton } from "../../shared/ui/Skeleton";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
@@ -52,6 +53,24 @@ function shortDays(totalDays: number, lang: string): string {
   return lang === "ru" ? pluralRu(totalDays, "день", "дня", "дней") : `${totalDays}d`;
 }
 
+/**
+ * Format absolute expiration date в human-readable «16 мая 2026 г.».
+ * Falls back на raw input если parse fail (defensive).
+ */
+function formatExpiryDate(raw: string, lang: string): string {
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  try {
+    return new Intl.DateTimeFormat(lang, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(d);
+  } catch {
+    return raw;
+  }
+}
+
 export function CertSection({ state, security: passedSecurity }: Props) {
   const { t, i18n } = useTranslation();
   const fallbackSecurity = useSecurityState(state.sshParams, state.pushSuccess, state.onPortChanged);
@@ -60,13 +79,22 @@ export function CertSection({ state, security: passedSecurity }: Props) {
 
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;
+  // Loading state — fetch ещё не завершён (preloadedCert === null AND
+  // mount-effect ещё в полёте). Показываем Skeleton card.
+  const [certFetched, setCertFetched] = useState(preloadedCert !== null);
 
   // Auto-load cert info on mount if not yet present.
   useEffect(() => {
-    if (preloadedCert) return;
+    if (preloadedCert) {
+      setCertFetched(true);
+      return;
+    }
     invoke<unknown>("server_get_cert_info", sshParams)
-      .then(setPreloadedCert)
-      .catch((e) => state.pushSuccess(formatError(e), "error"));
+      .then((raw) => {
+        setPreloadedCert(raw);
+      })
+      .catch((e) => state.pushSuccess(formatError(e), "error"))
+      .finally(() => setCertFetched(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on host primitive only
   }, [sshParams.host]);
 
@@ -83,8 +111,15 @@ export function CertSection({ state, security: passedSecurity }: Props) {
     const issuer = certInfo.issuerSummary
       ?? (certInfo.certType === "lets_encrypt" ? "Let's Encrypt" : t("server.cert.unknown"));
     const sub = certInfo.subjectCn || certInfo.domain || "—";
-    return `${issuer} • ${sub}`;
-  }, [certInfo, t]);
+    // Show absolute expiration date alongside issuer + domain так чтобы
+    // пользователь видел КОГДА истекает (не только относительное «67 дней»).
+    const expires = certInfo.notAfter
+      ? t("server.security.summary.cert_subtitle_expires", {
+          date: formatExpiryDate(certInfo.notAfter, i18n.language),
+        })
+      : null;
+    return expires ? `${issuer} • ${sub} • ${expires}` : `${issuer} • ${sub}`;
+  }, [certInfo, i18n.language, t]);
 
   const statusVariant: "success" | "warning" | "danger" | "neutral" = useMemo(() => {
     if (!certInfo) return "neutral";
@@ -100,6 +135,26 @@ export function CertSection({ state, security: passedSecurity }: Props) {
     if (daysLeft <= 0) return t("server.security.summary.cert_status_expired");
     return t("server.security.summary.cert_status_valid", { days: shortDays(daysLeft, i18n.language) });
   }, [certInfo, daysLeft, i18n.language, t]);
+
+  // Initial fetch ещё не завершён → Skeleton placeholder. После fetch
+  // (success или fail) показываем actual card даже если certInfo === null
+  // (subtitle покажет «Загрузка...» или fallback).
+  if (!certFetched) {
+    return (
+      <Card data-testid="cert-summary-card-loading">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <Skeleton variant="circle" width={20} height={20} rounded />
+            <div className="flex-1 min-w-0 space-y-2">
+              <Skeleton variant="line" height={14} width="40%" />
+              <Skeleton variant="line" height={12} width="70%" />
+            </div>
+          </div>
+          <Skeleton variant="card" height={32} width={96} />
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <>
