@@ -142,11 +142,16 @@ describe("SecuritySection Phase 16 Plan 05 layout", () => {
       return null;
     });
     render(<SecuritySection state={makeServerState()} />);
-    // After load() completes, both firewall + fail2ban subtitles read "Активен".
+    // P0-5 #1 — subtitles теперь несут информативные данные (а не дублируют
+    // status). После load() ждём появления firewall subtitle с метаданными:
+    // "0 правил • SSH порт 22 открыт" + fail2ban subtitle "Активен но jail
+    // для SSH не настроен" (mock fail2ban имеет jails=[]).
     await waitFor(() => {
-      const activeBadges = screen.getAllByText(/активен/i);
-      // 2 status texts from firewall + fail2ban subtitles (case-insensitive).
-      expect(activeBadges.length).toBeGreaterThanOrEqual(2);
+      // Firewall: 0 правил + порт 22 — точное совпадение pluralизации
+      // зависит от i18n key, но "SSH порт" + "22" должны быть.
+      expect(screen.getByText(/SSH порт 22/i)).toBeVisible();
+      // Fail2Ban: jails=[] → "no_jail" subtitle
+      expect(screen.getByText(/jail для SSH не настроен/i)).toBeVisible();
     });
   });
 });

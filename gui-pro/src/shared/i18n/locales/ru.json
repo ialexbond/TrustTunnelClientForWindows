@@ -1251,7 +1251,17 @@
         "ssh_key_card_title": "SSH-ключ",
         "ssh_key_card_subtitle": "Безопасный вход",
         "firewall_card_title": "Firewall",
-        "firewall_card_subtitle": "Сетевая защита"
+        "firewall_card_subtitle": "Сетевая защита",
+        "firewall_subtitle_not_installed": "UFW не установлен — все порты открыты",
+        "firewall_subtitle_inactive": "Установлен, но выключен — все порты открыты",
+        "firewall_subtitle_active": "{{count}} правил • SSH порт {{port}} открыт",
+        "fail2ban_subtitle_not_installed": "Не установлен — нет защиты от перебора паролей",
+        "fail2ban_subtitle_inactive": "Установлен, но выключен",
+        "fail2ban_subtitle_no_jail": "Активен, но jail для SSH не настроен",
+        "fail2ban_subtitle_active": "{{preset}} • {{retries}} попыток до бана",
+        "ssh_key_subtitle_not_generated": "Ключ не создан — вход только по паролю",
+        "ssh_key_subtitle_dual": "Ed25519 + парольный SSH разрешены",
+        "ssh_key_subtitle_key_only": "Только Ed25519 — пароль отключён"
       },
       "ssh_port": {
         "title": "SSH Порт",

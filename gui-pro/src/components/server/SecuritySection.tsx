@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Shield, ShieldAlert, KeyRound } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import type { ServerState } from "./useServerState";
-import { useSecurityState } from "./useSecurityState";
+import { useSecurityState, FAIL2BAN_PRESETS, type Fail2banPresetId } from "./useSecurityState";
 import { CertSection } from "./CertSection";
 import { FirewallModal } from "./FirewallModal";
 import { Fail2banModal } from "./Fail2banModal";
@@ -62,8 +62,11 @@ export function SecuritySection({ state }: Props) {
 
   const fwInstalled = security.status?.firewall.installed ?? false;
   const fwActive = security.status?.firewall.active ?? false;
+  const fwRulesCount = security.status?.firewall.rules.length ?? 0;
+  const fwSshPort = security.status?.firewall.current_ssh_port;
   const f2bInstalled = security.status?.fail2ban.installed ?? false;
   const f2bActive = security.status?.fail2ban.active ?? false;
+  const sshdJail = security.status?.fail2ban.jails.find((j) => j.name === "sshd");
   const sshKeyGenerated = security.status?.ssh_key?.generated ?? false;
   const pwAuthDisabled = security.status?.ssh_key?.password_auth_disabled ?? false;
 
@@ -84,6 +87,43 @@ export function SecuritySection({ state }: Props) {
     : sshKeyGenerated
       ? t("server.security.ssh_key.status_generated")
       : t("server.security.ssh_key.status_not_generated");
+
+  // P0-5 #1 — informative subtitles с реальными данными вместо пустых
+  // «Защита от brute-force — Активен» (status дублирует StatusIndicator dot).
+  // Каждая card теперь несёт UNIQUE info которая иначе требует open Modal.
+  const fwSubtitle = useMemo(() => {
+    if (!fwInstalled) return t("server.security.summary.firewall_subtitle_not_installed");
+    if (!fwActive) return t("server.security.summary.firewall_subtitle_inactive");
+    return t("server.security.summary.firewall_subtitle_active", {
+      count: fwRulesCount,
+      port: fwSshPort ?? "?",
+    });
+  }, [fwInstalled, fwActive, fwRulesCount, fwSshPort, t]);
+
+  const f2bSubtitle = useMemo(() => {
+    if (!f2bInstalled) return t("server.security.summary.fail2ban_subtitle_not_installed");
+    if (!f2bActive) return t("server.security.summary.fail2ban_subtitle_inactive");
+    if (!sshdJail) return t("server.security.summary.fail2ban_subtitle_no_jail");
+    // Detect preset matching jail config (mirror Fail2banSettingsTab logic).
+    const matched = Object.entries(FAIL2BAN_PRESETS).find(
+      ([, cfg]) =>
+        cfg.maxretry === sshdJail.maxretry &&
+        cfg.bantime === sshdJail.bantime &&
+        cfg.findtime === sshdJail.findtime,
+    );
+    const presetId = matched ? (matched[0] as Fail2banPresetId) : "custom";
+    const presetName = t(`server.security.fail2ban.presets.${presetId}`);
+    return t("server.security.summary.fail2ban_subtitle_active", {
+      preset: presetName,
+      retries: sshdJail.maxretry,
+    });
+  }, [f2bInstalled, f2bActive, sshdJail, t]);
+
+  const sshKeySubtitle = useMemo(() => {
+    if (!sshKeyGenerated) return t("server.security.summary.ssh_key_subtitle_not_generated");
+    if (pwAuthDisabled) return t("server.security.summary.ssh_key_subtitle_key_only");
+    return t("server.security.summary.ssh_key_subtitle_dual");
+  }, [sshKeyGenerated, pwAuthDisabled, t]);
 
   return (
     <div aria-live="polite" className="space-y-3" data-testid="security-section">
@@ -106,7 +146,7 @@ export function SecuritySection({ state }: Props) {
                 />
               </div>
               <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
-                {t("server.security.summary.firewall_card_subtitle")} — {fwStatusText}
+                {fwSubtitle}
               </p>
             </div>
           </div>
@@ -140,7 +180,7 @@ export function SecuritySection({ state }: Props) {
                 />
               </div>
               <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
-                {t("server.security.summary.fail2ban_card_subtitle")} — {f2bStatusText}
+                {f2bSubtitle}
               </p>
             </div>
           </div>
@@ -174,7 +214,7 @@ export function SecuritySection({ state }: Props) {
                 />
               </div>
               <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
-                {t("server.security.summary.ssh_key_card_subtitle")} — {sshKeyStatusText}
+                {sshKeySubtitle}
               </p>
             </div>
           </div>
