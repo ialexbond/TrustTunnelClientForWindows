@@ -1236,7 +1236,10 @@
           "rule_deleted": "Rule deleted",
           "fw_enabled": "Firewall enabled",
           "fw_disabled": "Firewall disabled"
-        }
+        },
+        "action_install": "Install",
+        "action_enable": "Enable",
+        "action_disable": "Disable"
       },
       "summary": {
         "configure_button": "Configure",

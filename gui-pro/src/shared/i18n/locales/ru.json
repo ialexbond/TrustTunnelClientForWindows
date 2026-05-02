@@ -1236,7 +1236,10 @@
           "rule_deleted": "Правило удалено",
           "fw_enabled": "Firewall включён",
           "fw_disabled": "Firewall отключён"
-        }
+        },
+        "action_install": "Установить",
+        "action_enable": "Включить",
+        "action_disable": "Отключить"
       },
       "summary": {
         "configure_button": "Настроить",
