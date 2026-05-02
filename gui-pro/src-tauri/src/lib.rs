@@ -381,6 +381,8 @@ pub fn run() {
             commands::ssh_commands::load_ssh_key_for_host,
             // Phase 16 — Disable PasswordAuth + Certbot Timer (D-2.2 + D-5.3)
             commands::ssh_commands::security_disable_password_auth,
+            // Phase 16 P0-3 #E — re-enable PasswordAuth (rollback companion)
+            commands::ssh_commands::security_enable_password_auth,
             commands::ssh_commands::server_get_certbot_timer_status,
             commands::ssh_commands::server_enable_certbot_timer,
             commands::ssh_commands::mtproto_install,

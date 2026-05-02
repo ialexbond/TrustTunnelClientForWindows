@@ -1286,7 +1286,14 @@
         "disable_pwauth_confirm": "Disable password",
         "pwauth_disabled_snack": "Password SSH disabled. Connections now key-only.",
         "generated_snack": "SSH key created. Fingerprint: {{fingerprint}}",
-        "modal_close_aria": "Close"
+        "modal_close_aria": "Close",
+        "enable_pwauth_section": "Re-enable password login",
+        "enable_pwauth_button": "Enable password SSH",
+        "enable_pwauth_help": "If you lose access to the key (stolen laptop, Windows Credential Manager failure), you won't be able to log in without the password. Enable as a fallback.",
+        "enable_pwauth_title": "Enable password SSH?",
+        "enable_pwauth_warning": "After enabling, the server will accept password login again. BOTH methods will work: key and password. This reduces security — passwords can be brute-forced. Continue?",
+        "enable_pwauth_confirm": "Enable password login",
+        "pwauth_enabled_snack": "Password SSH enabled. Both key and password now work."
       },
       "snack": {
         "fail2ban_installed": "Fail2ban installed and active",

@@ -519,6 +519,18 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     );
   };
 
+  // P0-3 #E — re-enable PasswordAuthentication (rollback companion).
+  // Use case: user disabled PW auth, потом понял что хочет dual-mode (key + pwd
+  // для recovery). Backend `security_enable_password_auth` mirrors disable
+  // protocol (backup → edit → sshd -t → restart → rollback on failure).
+  const enablePasswordAuth = async (): Promise<void> => {
+    void run(
+      "enable-pw",
+      () => invoke("security_enable_password_auth", sshParams),
+      t("server.security.ssh_key.pwauth_enabled_snack"),
+    );
+  };
+
   const importSshKey = async (pemPath: string): Promise<void> => {
     void run(
       "import-ssh-key",
@@ -627,6 +639,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     generateSshKey,
     exportSshKeyBackup,
     disablePasswordAuth,
+    enablePasswordAuth,
     importSshKey,
 
     // Phase 16 Plan 04 — Fail2Ban preset actions
