@@ -80,9 +80,13 @@ describe("SecuritySection Phase 16 Plan 05 layout", () => {
     };
     render(<SecuritySection state={makeServerState({ certRaw })} />);
     expect(await screen.findByTestId("firewall-summary-card")).toBeVisible();
-    // CertSection renders extended fields populated by Plan 16-05 Task 2.
-    expect(screen.getByTestId("cert-fingerprint")).toBeInTheDocument();
-    expect(screen.getByTestId("cert-subject-cn")).toHaveTextContent("vpn.example.com");
+    // P1-9 + P1-10 #R+#3 — CertSection теперь summary card; detail (fingerprint,
+    // subject CN) перенесены в CertModal. Здесь проверяем что summary card
+    // рендерит и subtitle несёт subject CN.
+    expect(await screen.findByTestId("cert-summary-card")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/vpn\.example\.com/);
+    });
   });
 
   it("Configure button opens FirewallModal", async () => {

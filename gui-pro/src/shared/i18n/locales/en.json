@@ -81,7 +81,9 @@
     "no": "No",
     "speed_test": "Speed Test",
     "whats_new": "What's new",
-    "close": "Close"
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied"
   },
   "modal": {
     "changelog_title": "What's new in v{{version}}"
@@ -1075,7 +1077,11 @@
       "enable_auto_renewal_button": "Enable auto-renewal",
       "snack": {
         "auto_renewal_enabled": "Certificate auto-renewal enabled"
-      }
+      },
+      "block_issued_by": "Issued by",
+      "block_validity": "Validity",
+      "no_cert": "Certificate not loaded or unavailable.",
+      "copy_fingerprint_aria": "Copy SHA256 fingerprint"
     },
     "export": {
       "title": "Export Configuration",
@@ -1267,7 +1273,13 @@
         "fail2ban_subtitle_active": "{{preset}} • {{retries}} attempts before ban",
         "ssh_key_subtitle_not_generated": "Key not generated — password login only",
         "ssh_key_subtitle_dual": "Ed25519 + password SSH both allowed",
-        "ssh_key_subtitle_key_only": "Ed25519 only — password disabled"
+        "ssh_key_subtitle_key_only": "Ed25519 only — password disabled",
+        "cert_card_title": "TLS Certificate",
+        "cert_subtitle_loading": "Loading...",
+        "cert_status_loading": "Loading",
+        "cert_status_unknown": "Unknown",
+        "cert_status_expired": "Expired",
+        "cert_status_valid": "Valid for {{days}}"
       },
       "ssh_port": {
         "title": "SSH Port",

@@ -81,7 +81,9 @@
     "no": "Нет",
     "speed_test": "Тест скорости",
     "whats_new": "Что нового",
-    "close": "Закрыть"
+    "close": "Закрыть",
+    "copy": "Копировать",
+    "copied": "Скопировано"
   },
   "modal": {
     "changelog_title": "Что нового в v{{version}}"
@@ -1075,7 +1077,11 @@
       "enable_auto_renewal_button": "Включить автообновление",
       "snack": {
         "auto_renewal_enabled": "Автообновление сертификата включено"
-      }
+      },
+      "block_issued_by": "Выдан",
+      "block_validity": "Срок действия",
+      "no_cert": "Сертификат не загружен или недоступен.",
+      "copy_fingerprint_aria": "Скопировать SHA256 отпечаток"
     },
     "export": {
       "title": "Экспорт конфигурации",
@@ -1267,7 +1273,13 @@
         "fail2ban_subtitle_active": "{{preset}} • {{retries}} попыток до бана",
         "ssh_key_subtitle_not_generated": "Ключ не создан — вход только по паролю",
         "ssh_key_subtitle_dual": "Ed25519 + парольный SSH разрешены",
-        "ssh_key_subtitle_key_only": "Только Ed25519 — пароль отключён"
+        "ssh_key_subtitle_key_only": "Только Ed25519 — пароль отключён",
+        "cert_card_title": "TLS Сертификат",
+        "cert_subtitle_loading": "Загрузка...",
+        "cert_status_loading": "Загрузка",
+        "cert_status_unknown": "Неизвестно",
+        "cert_status_expired": "Истёк",
+        "cert_status_valid": "Действителен {{days}}"
       },
       "ssh_port": {
         "title": "SSH Порт",
