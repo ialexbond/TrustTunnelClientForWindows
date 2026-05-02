@@ -1279,7 +1279,8 @@
         "cert_status_loading": "Loading",
         "cert_status_unknown": "Unknown",
         "cert_status_expired": "Expired",
-        "cert_status_valid": "Valid for {{days}}"
+        "cert_status_valid": "Valid for {{days}}",
+        "cert_subtitle_expires": "until {{date}}"
       },
       "ssh_port": {
         "title": "SSH Port",

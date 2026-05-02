@@ -1279,7 +1279,8 @@
         "cert_status_loading": "Загрузка",
         "cert_status_unknown": "Неизвестно",
         "cert_status_expired": "Истёк",
-        "cert_status_valid": "Действителен {{days}}"
+        "cert_status_valid": "Действителен {{days}}",
+        "cert_subtitle_expires": "до {{date}}"
       },
       "ssh_port": {
         "title": "SSH Порт",
