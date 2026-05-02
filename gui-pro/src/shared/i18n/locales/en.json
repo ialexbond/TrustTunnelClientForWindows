@@ -1169,7 +1169,10 @@
         "custom_dirty_aria": "Unsaved changes",
         "close_dirty_title": "Close without applying?",
         "close_dirty_message": "You have unsaved changes in custom mode. Closing now will discard them.",
-        "close_dirty_confirm": "Close without applying"
+        "close_dirty_confirm": "Close without applying",
+        "strict_confirm_title": "Apply «Strict» protection?",
+        "strict_confirm_message": "The Strict preset bans IPs for 1 hour after 3 failed attempts. Scripts or CI making frequent SSH connections may be locked out. Continue?",
+        "strict_confirm_action": "Apply «Strict»"
       },
       "firewall": {
         "title": "Firewall (UFW)",
@@ -1306,7 +1309,8 @@
         "enable_pwauth_title": "Enable password SSH?",
         "enable_pwauth_warning": "After enabling, the server will accept password login again. BOTH methods will work: key and password. This reduces security — passwords can be brute-forced. Continue?",
         "enable_pwauth_confirm": "Enable password login",
-        "pwauth_enabled_snack": "Password SSH enabled. Both key and password now work."
+        "pwauth_enabled_snack": "Password SSH enabled. Both key and password now work.",
+        "loading_aria": "Loading SSH-key status"
       },
       "snack": {
         "fail2ban_installed": "Fail2ban installed and active",

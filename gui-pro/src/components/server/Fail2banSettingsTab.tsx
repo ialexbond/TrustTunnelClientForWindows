@@ -7,6 +7,7 @@ import {
 } from "./useSecurityState";
 import { Button } from "../../shared/ui/Button";
 import { Accordion } from "../../shared/ui/Accordion";
+import { useConfirm } from "../../shared/ui/useConfirm";
 import { cn } from "../../shared/lib/cn";
 
 /**
@@ -51,6 +52,7 @@ interface Fail2banSettingsTabProps {
 
 export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSettingsTabProps) {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   // Optimistic preset selection — overrides derived detection между
   // click и refresh. null = use derived value.
   const [selectedPreset, setSelectedPreset] = useState<Fail2banPresetId | null>(
@@ -124,7 +126,20 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
     onDirtyChange?.(isCustomDirty);
   }, [isCustomDirty, onDirtyChange]);
 
-  const handleApplyPreset = (preset: keyof typeof FAIL2BAN_PRESETS) => {
+  const handleApplyPreset = async (preset: keyof typeof FAIL2BAN_PRESETS) => {
+    // P1-7 #L — confirm перед «Строгая» (3 retries / 1 hour ban). Aggressive
+    // preset может выбить legitimate scripts/CI делающих rapid SSH connect.
+    // Soft + Balanced apply без confirm — risk их низок.
+    if (preset === "strict") {
+      const ok = await confirm({
+        title: t("server.security.fail2ban.strict_confirm_title"),
+        message: t("server.security.fail2ban.strict_confirm_message"),
+        variant: "warning",
+        confirmText: t("server.security.fail2ban.strict_confirm_action"),
+        cancelText: t("buttons.cancel"),
+      });
+      if (!ok) return;
+    }
     setSelectedPreset(preset);
     void state.applyFail2banPreset(preset);
   };
@@ -167,7 +182,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 name="fail2ban-preset"
                 value={presetId}
                 checked={isActive}
-                onChange={() => handleApplyPreset(presetId)}
+                onChange={() => void handleApplyPreset(presetId)}
                 disabled={isBusy}
                 className="mt-1"
                 data-testid={`preset-radio-${presetId}`}

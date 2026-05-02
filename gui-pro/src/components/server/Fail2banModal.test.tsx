@@ -194,6 +194,13 @@ describe("Fail2banModal", () => {
     );
 
     fireEvent.click(await screen.findByTestId("preset-radio-strict"));
+    // P1-7 #L — strict preset теперь требует confirm (aggressive: 3 retries / 1h ban
+    // может выбить legitimate scripts). Click confirm в ConfirmDialog.
+    await waitFor(() =>
+      expect(screen.getByText(/применить «строгую»/i)).toBeVisible(),
+    );
+    // Find confirm button — match the action label "Применить «Строгую»"
+    fireEvent.click(screen.getByRole("button", { name: /применить «строгую»/i }));
     await waitFor(() =>
       expect(state.applyFail2banPreset).toHaveBeenCalledWith("strict"),
     );

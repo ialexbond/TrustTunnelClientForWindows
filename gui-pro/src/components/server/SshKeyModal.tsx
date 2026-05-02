@@ -6,6 +6,7 @@ import { X, KeyRound, Download, ShieldAlert, Unlock } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
+import { Skeleton } from "../../shared/ui/Skeleton";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
@@ -318,13 +319,13 @@ export function SshKeyModal(props: SshKeyModalProps) {
 
       <div className="mt-4 space-y-4" data-testid="ssh-key-content">
         {effectiveLoading ? (
-          <div
-            role="status"
-            aria-busy="true"
-            className="py-4 text-center text-body-sm"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            …
+          // P1-6 #A — proper Skeleton placeholders вместо text "…".
+          // Mimics Section 1 layout (status heading + fingerprint code +
+          // generate button) для smooth content swap при load complete.
+          <div role="status" aria-busy="true" aria-label={t("server.security.ssh_key.loading_aria")}>
+            <Skeleton variant="line" height={20} width="60%" className="mb-3" />
+            <Skeleton variant="line" height={14} width="90%" className="mb-2" />
+            <Skeleton variant="card" height={36} width={180} />
           </div>
         ) : effectiveError ? (
           <div className="flex flex-col items-center gap-3 py-4">
