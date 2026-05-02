@@ -139,8 +139,9 @@ export function SecuritySection({ state }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="text-subtitle">{t("server.security.summary.firewall_card_title")}</h3>
+                {/* P2-17 #X — not-installed = danger (nudges install) */}
                 <StatusIndicator
-                  status={fwInstalled && fwActive ? "success" : fwInstalled ? "warning" : "neutral"}
+                  status={fwInstalled && fwActive ? "success" : fwInstalled ? "warning" : "danger"}
                   size="sm"
                   label={fwStatusText}
                 />
@@ -173,8 +174,9 @@ export function SecuritySection({ state }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="text-subtitle">{t("server.security.summary.fail2ban_card_title")}</h3>
+                {/* P2-17 #X — not-installed = danger */}
                 <StatusIndicator
-                  status={f2bInstalled && f2bActive ? "success" : f2bInstalled ? "warning" : "neutral"}
+                  status={f2bInstalled && f2bActive ? "success" : f2bInstalled ? "warning" : "danger"}
                   size="sm"
                   label={f2bStatusText}
                 />

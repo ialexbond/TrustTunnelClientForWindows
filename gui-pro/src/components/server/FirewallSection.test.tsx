@@ -87,7 +87,8 @@ describe("FirewallSection", () => {
 
     render(<FirewallSection status={status} state={state} />);
 
-    expect(screen.getByText("Не установлен")).toBeInTheDocument();
+    // P2-15 #BB — RU: «Firewall» → «Брандмауэр».
+    expect(screen.getByText(/Брандмауэр не установлен/i)).toBeInTheDocument();
     expect(screen.getByText("Установить и включить firewall")).toBeInTheDocument();
     // Lockout warning contains the SSH port
     expect(screen.getByText(/SSH порт 22/)).toBeInTheDocument();

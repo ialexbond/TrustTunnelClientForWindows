@@ -94,7 +94,7 @@ describe("SecuritySection Phase 16 Plan 05 layout", () => {
     fireEvent.click(await screen.findByTestId("firewall-configure-button"));
     // Modal title визуальный (FirewallModal uses heading text "Настройка Firewall")
     await waitFor(() =>
-      expect(screen.getByText(/настройка firewall/i)).toBeVisible(),
+      expect(screen.getByText(/настройка брандмауэра/i)).toBeVisible(),
     );
   });
 
