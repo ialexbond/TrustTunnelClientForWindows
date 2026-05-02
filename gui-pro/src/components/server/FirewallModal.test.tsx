@@ -137,8 +137,9 @@ describe("FirewallModal", () => {
     );
     expect(await screen.findByTestId("rule-row-1")).toBeVisible();
     expect(screen.getByTestId("rule-row-2")).toBeVisible();
-    expect(screen.getByText("ALLOW IN")).toBeVisible();
-    expect(screen.getByText("DENY IN")).toBeVisible();
+    // P1-8 #P — ALLOW IN / DENY IN заменены RU-friendly labels.
+    expect(screen.getByText(/^разрешён$/i)).toBeVisible();
+    expect(screen.getByText(/^запрещён$/i)).toBeVisible();
   });
 
   it("UFW disable opens ConfirmDialog before invoking stopFirewall (D-3.3)", async () => {

@@ -202,8 +202,11 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
               <span className="font-mono text-right" style={{ color: "var(--color-text-muted)" }}>
                 {r.number}
               </span>
+              {/* P1-8 #P — UFW raw output («ALLOW IN» / «DENY IN» / «REJECT IN»)
+                  заменён на RU-friendly labels через translateAction(). Direction
+                  IN остаётся implicit (input rules — стандарт). */}
               <span
-                className="font-mono px-1.5 py-0.5 rounded text-center"
+                className="px-1.5 py-0.5 rounded text-center"
                 style={{
                   backgroundColor: r.action.startsWith("ALLOW")
                     ? "var(--color-success-tint-15)"
@@ -217,7 +220,13 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
                       : "var(--color-warning-500)",
                 }}
               >
-                {r.action}
+                {r.action.startsWith("ALLOW")
+                  ? t("server.security.firewall.action_label_allow")
+                  : r.action.startsWith("REJECT")
+                    ? t("server.security.firewall.action_label_reject")
+                    : r.action.startsWith("DENY")
+                      ? t("server.security.firewall.action_label_deny")
+                      : r.action}
               </span>
               <span className="font-mono truncate" style={{ color: "var(--color-text-primary)" }}>
                 {r.to}
