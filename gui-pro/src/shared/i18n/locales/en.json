@@ -1251,7 +1251,17 @@
         "ssh_key_card_title": "SSH key",
         "ssh_key_card_subtitle": "Secure login",
         "firewall_card_title": "Firewall",
-        "firewall_card_subtitle": "Network protection"
+        "firewall_card_subtitle": "Network protection",
+        "firewall_subtitle_not_installed": "UFW not installed — all ports open",
+        "firewall_subtitle_inactive": "Installed but inactive — all ports open",
+        "firewall_subtitle_active": "{{count}} rules • SSH port {{port}} open",
+        "fail2ban_subtitle_not_installed": "Not installed — no brute-force protection",
+        "fail2ban_subtitle_inactive": "Installed but inactive",
+        "fail2ban_subtitle_no_jail": "Active but no SSH jail configured",
+        "fail2ban_subtitle_active": "{{preset}} • {{retries}} attempts before ban",
+        "ssh_key_subtitle_not_generated": "Key not generated — password login only",
+        "ssh_key_subtitle_dual": "Ed25519 + password SSH both allowed",
+        "ssh_key_subtitle_key_only": "Ed25519 only — password disabled"
       },
       "ssh_port": {
         "title": "SSH Port",
