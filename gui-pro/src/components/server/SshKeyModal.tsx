@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { X, KeyRound, Download, ShieldAlert } from "lucide-react";
+import { X, KeyRound, Download, ShieldAlert, Unlock } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
@@ -85,6 +85,7 @@ export function SshKeyModal(props: SshKeyModalProps) {
   const [generating, setGenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [disabling, setDisabling] = useState(false);
+  const [enablingPw, setEnablingPw] = useState(false);
 
   // T-03 — Load status on open. Storybook escape hatches short-circuit.
   // Depend on primitives (host/port/user) to avoid extra fetches when
@@ -130,6 +131,7 @@ export function SshKeyModal(props: SshKeyModalProps) {
       setGenerating(false);
       setExporting(false);
       setDisabling(false);
+      setEnablingPw(false);
     }, 200);
     return () => clearTimeout(timer);
   }, [isOpen, _forceStatus, _forceError, _forceExportPath]);
@@ -228,6 +230,37 @@ export function SshKeyModal(props: SshKeyModalProps) {
       pushSuccess(formatError(e), "error");
     } finally {
       setDisabling(false);
+    }
+  };
+
+  // P0-3 #E — re-enable PasswordAuthentication (rollback companion).
+  // Use case: user disabled PW auth, потом понял что хочет dual-mode (key OR
+  // password для recovery scenario, e.g. ключ потерян + backup .pem недоступен).
+  const handleEnablePasswordAuth = async () => {
+    const ok = await confirm({
+      title: t("server.security.ssh_key.enable_pwauth_title"),
+      message: t("server.security.ssh_key.enable_pwauth_warning"),
+      variant: "warning",
+      confirmText: t("server.security.ssh_key.enable_pwauth_confirm"),
+    });
+    if (!ok) return;
+    setEnablingPw(true);
+    try {
+      await invoke("security_enable_password_auth", {
+        host: sshHost,
+        port: sshPort,
+        user: sshUser,
+        password: sshPassword,
+        keyPath: sshKeyPath,
+        keyData: sshKeyData,
+      });
+      activityLog("STATE", `ssh_key.pwauth_enabled host=${sshHost}`);
+      pushSuccess(t("server.security.ssh_key.pwauth_enabled_snack"));
+      setKeyStatus((prev) => (prev ? { ...prev, password_auth_disabled: false } : prev));
+    } catch (e) {
+      pushSuccess(formatError(e), "error");
+    } finally {
+      setEnablingPw(false);
     }
   };
 
@@ -399,10 +432,43 @@ export function SshKeyModal(props: SshKeyModalProps) {
               </section>
             )}
 
+            {/* Section 3 — P0-3 #E re-enable PasswordAuth (rollback). Renders
+                только когда password_auth_disabled === true. Даёт путь обратно
+                на dual-mode (key OR password) без необходимости в SSH terminal. */}
             {effectiveStatus?.password_auth_disabled && (
-              <p className="text-body-sm" style={{ color: "var(--color-status-connected)" }}>
-                ✓ {t("server.security.ssh_key.status_pwauth_disabled")}
-              </p>
+              <section
+                aria-labelledby="ssh-enable-pw-heading"
+                className="border-t pt-4"
+                style={{ borderColor: "var(--color-border)" }}
+                data-testid="ssh-key-enable-pw-section"
+              >
+                <h3 id="ssh-enable-pw-heading" className="text-subtitle">
+                  {t("server.security.ssh_key.enable_pwauth_section")}
+                </h3>
+                <p
+                  className="text-body-sm mt-1"
+                  style={{ color: "var(--color-status-connected)" }}
+                >
+                  ✓ {t("server.security.ssh_key.status_pwauth_disabled")}
+                </p>
+                <p
+                  className="text-caption mt-2"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {t("server.security.ssh_key.enable_pwauth_help")}
+                </p>
+                <Button
+                  onClick={handleEnablePasswordAuth}
+                  loading={enablingPw}
+                  disabled={enablingPw}
+                  variant="secondary"
+                  icon={<Unlock className="w-4 h-4" />}
+                  className="mt-2"
+                  data-testid="enable-pwauth-button"
+                >
+                  {t("server.security.ssh_key.enable_pwauth_button")}
+                </Button>
+              </section>
             )}
           </>
         )}

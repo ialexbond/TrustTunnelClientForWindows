@@ -31,6 +31,8 @@ pub use server::{
     change_ssh_port,
     // Phase 16 — disable PasswordAuthentication + certbot.timer (D-2.2 + D-5.3)
     disable_password_auth,
+    // Phase 16 P0-3 #E — re-enable PasswordAuthentication (rollback companion)
+    enable_password_auth,
     get_certbot_timer_status, enable_certbot_timer,
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,

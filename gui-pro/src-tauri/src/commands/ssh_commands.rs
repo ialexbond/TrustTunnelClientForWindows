@@ -474,6 +474,38 @@ pub async fn security_disable_password_auth(
     Ok(())
 }
 
+/// security_enable_password_auth — sshd_config edit + restart с rollback.
+///
+/// P0-3 #E rollback companion для disable_password_auth. MANUAL command (NOT macro)
+/// because needs `pool.invalidate()` after success — sshd restart kills existing
+/// pool handles.
+#[tauri::command]
+pub async fn security_enable_password_auth(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<(), String> {
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::enable_password_auth(&app, &handle).await?;
+    // sshd restarted — all pool handles stale, force re-acquire on next call.
+    drop(handle);
+    pool.invalidate().await;
+    Ok(())
+}
+
 // server_get_certbot_timer_status — read systemctl + cron file state (D-5.3).
 ssh_pool_command!(server_get_certbot_timer_status, ssh::get_certbot_timer_status);
 

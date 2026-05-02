@@ -566,6 +566,117 @@ fi'"#
     Ok(())
 }
 
+/// Phase 16 P0-3 #E — Re-enable PasswordAuthentication (companion to `disable_password_auth`).
+///
+/// Mirror of `disable_password_auth`:
+///   1. Backup main /etc/ssh/sshd_config с timestamp.
+///   2. Edit: `PasswordAuthentication yes` (idempotent).
+///   3. Validate с `sshd -t`. Rollback on failure.
+///   4. Restart ssh.service / ssh.socket. Rollback if restart fails.
+///
+/// **NOT** strip-overrides из sshd_config.d/*.conf (CQ-3 was disable-specific —
+/// при enable cloud-init defaults уже устанавливают `yes`, лишних edit'ов
+/// не нужно). Если кто-то явно положил `PasswordAuthentication no` в drop-in,
+/// мы оставляем его в покое — пользователь должен править его сам.
+///
+/// **Caller MUST invoke `pool.invalidate()` после success** — sshd restart
+/// kills existing handles (mirrors `disable_password_auth` pattern).
+pub async fn enable_password_auth(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<(), String> {
+    let sudo = detect_sudo(handle, app).await;
+    let service_type = detect_ssh_service_type(handle, app, sudo).await?;
+
+    // Step 1: Backup main /etc/ssh/sshd_config с deterministic timestamp name.
+    let backup_name = format!(
+        "/etc/ssh/sshd_config.bak.{}",
+        chrono::Utc::now().timestamp()
+    );
+    emit_log(app, "info", "Backing up /etc/ssh/sshd_config (PasswordAuth enable)...");
+    let (_, bak_code) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}cp /etc/ssh/sshd_config '{backup_name}'"),
+    )
+    .await?;
+    if bak_code != 0 {
+        return Err("PWAUTH_ENABLE_FAILED|backup_failed".into());
+    }
+
+    // Step 2: Edit main /etc/ssh/sshd_config — idempotent (handle existing/commented/missing).
+    emit_log(app, "info", "Setting PasswordAuthentication yes in main sshd_config...");
+    let edit_cmd = format!(
+        r#"{sudo}bash -c 'if grep -q "^PasswordAuthentication" /etc/ssh/sshd_config; then
+  sed -i "s/^PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config
+elif grep -q "^#PasswordAuthentication" /etc/ssh/sshd_config; then
+  sed -i "s/^#PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config
+else
+  echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+fi'"#
+    );
+    let (_, edit_code) = exec_command(handle, app, &edit_cmd).await?;
+    if edit_code != 0 {
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+        )
+        .await;
+        return Err("PWAUTH_ENABLE_FAILED|edit_failed".into());
+    }
+
+    // Step 3: Validate с sshd -t.
+    emit_log(app, "info", "Validating sshd config с sshd -t...");
+    let (sshd_out, sshd_code) =
+        exec_command(handle, app, &format!("{sudo}sshd -t 2>&1")).await?;
+    if sshd_code != 0 {
+        emit_log(app, "warn", "sshd -t validation failed, rolling back...");
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+        )
+        .await;
+        return Err(format!("PWAUTH_ENABLE_FAILED|sshd_validation|{}", sshd_out.trim()));
+    }
+
+    // Step 4: Restart appropriate service.
+    let restart_target = match service_type {
+        SshServiceType::Socket => "ssh.socket",
+        SshServiceType::Service => "ssh.service",
+    };
+    emit_log(app, "info", &format!("Restarting {restart_target}..."));
+    let (restart_out, restart_code) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl restart {restart_target}"),
+    )
+    .await?;
+    if restart_code != 0 {
+        emit_log(app, "warn", "Service restart failed, rolling back...");
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}cp '{backup_name}' /etc/ssh/sshd_config"),
+        )
+        .await;
+        let _ = exec_command(
+            handle,
+            app,
+            &format!("{sudo}systemctl restart {restart_target}"),
+        )
+        .await;
+        return Err(format!(
+            "PWAUTH_ENABLE_FAILED|restart_failed|{}",
+            restart_out.trim()
+        ));
+    }
+
+    emit_log(app, "info", "PasswordAuthentication enabled — login доступен через ключ ИЛИ пароль");
+    Ok(())
+}
+
 // ═══════════════════════════════════════════════════════════════
 //   Phase 16 — certbot.timer status (D-5.3)
 // ═══════════════════════════════════════════════════════════════

@@ -1286,7 +1286,14 @@
         "disable_pwauth_confirm": "Отключить пароль",
         "pwauth_disabled_snack": "Парольный SSH отключён. Подключения теперь только по ключу.",
         "generated_snack": "SSH-ключ создан. Отпечаток: {{fingerprint}}",
-        "modal_close_aria": "Закрыть"
+        "modal_close_aria": "Закрыть",
+        "enable_pwauth_section": "Включить парольный вход",
+        "enable_pwauth_button": "Включить парольный SSH",
+        "enable_pwauth_help": "Если вы потеряете доступ к ключу (украден ноутбук, сбой Windows Credential Manager), без пароля вы не сможете войти на сервер. Включите если хотите оставить страховку.",
+        "enable_pwauth_title": "Включить парольный SSH?",
+        "enable_pwauth_warning": "После включения сервер снова разрешит вход по паролю. Будут доступны ОБА способа: ключ и пароль. Это снижает уровень безопасности — пароль можно подобрать. Продолжить?",
+        "enable_pwauth_confirm": "Включить парольный вход",
+        "pwauth_enabled_snack": "Парольный SSH включён. Теперь доступны ключ И пароль."
       },
       "snack": {
         "fail2ban_installed": "Fail2ban установлен и активен",
