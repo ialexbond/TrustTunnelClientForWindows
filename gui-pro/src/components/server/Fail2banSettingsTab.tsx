@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FAIL2BAN_PRESETS,
@@ -54,6 +54,11 @@ interface Fail2banSettingsTabProps {
 export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSettingsTabProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
+  // BUG-22 fix: useId() для unique ids (не "f2b-maxretry" hardcode'ы).
+  // Многократные instances Fail2banSettingsTab (например, multi-server
+  // panels — planned future) или Storybook docs page rendering нескольких
+  // stories на одной странице — duplicate ids ломали label-input pairing.
+  const idPrefix = useId();
   // Optimistic preset selection — overrides derived detection между
   // click и refresh. null = use derived value.
   const [selectedPreset, setSelectedPreset] = useState<Fail2banPresetId | null>(
@@ -100,18 +105,23 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   });
 
   // External sync: jail config refreshes (backend reload after preset apply)
-  // → mirror values into draft state. Pattern allows user editing without
-  // losing pending edits on background refresh. Values нормализованы к
-  // numeric seconds (см. comment выше про NumberInput compatibility).
+  // → mirror values into draft state. Pattern allows user editing без
+  // losing pending edits on background refresh.
+  //
+  // BUG-10 fix: depend on PRIMITIVE values (maxretry/bantime/findtime),
+  // не на jail object reference. Когда backend.load() возвращает идентичные
+  // values но новый object identity, useEffect больше не fires → draft
+  // user'а не wipe'ается silently.
   useEffect(() => {
     if (!jail) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mirror of jail config primitives into draft state on backend refresh
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mirror of jail config primitives into draft state on backend refresh (only when actual values change)
     setCustom({
       maxretry: jail.maxretry,
       bantime: normalizeJailDuration(jail.bantime, "600"),
       findtime: normalizeJailDuration(jail.findtime, "600"),
     });
-  }, [jail]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: depend on primitive values not object reference
+  }, [jail?.maxretry, jail?.bantime, jail?.findtime]);
 
   // Clear optimistic override when jail catches up to selected — synchronously
   // обновляем чтобы radio reflected real backend state на том же frame.
@@ -136,8 +146,15 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   }, [custom, jail]);
 
   // Bubble dirty state to parent Modal via callback (для close-warning).
+  //
+  // BUG-08 fix: cleanup сбрасывает dirty=false на unmount. Без этого parent's
+  // customDirty оставался true после tab-switch (Settings tab unmount'ится
+  // когда TabsInline переключается на Banned IPs). Возврат на Settings →
+  // tab remount → useEffect re-syncs draft → dirty=false. Но parent's флаг
+  // оставался stale (с прошлой жизни tab'а).
   useEffect(() => {
     onDirtyChange?.(isCustomDirty);
+    return () => onDirtyChange?.(false);
   }, [isCustomDirty, onDirtyChange]);
 
   const handleApplyPreset = async (preset: keyof typeof FAIL2BAN_PRESETS) => {
@@ -155,8 +172,25 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
       if (!ok) return;
     }
     setSelectedPreset(preset);
-    void state.applyFail2banPreset(preset);
+    try {
+      await state.applyFail2banPreset(preset);
+    } catch {
+      // BUG-16 fix: revert optimistic selection on backend failure (sshd
+      // restart fail / SSH_CHANNEL_FAILED / etc.). Без revert'а radio
+      // оставался highlighted на failed preset, UI lying about backend state.
+      // applyFail2banPreset wraps run() которое catches и shows error toast,
+      // поэтому здесь только revert визуального state — toast already fired.
+      setSelectedPreset(null);
+    }
   };
+
+  // BUG-19 fix: disable ALL preset radios пока ANY preset apply в полёте.
+  // Раньше disabled={isBusy} (per-radio) — позволяло rapid-click через
+  // несколько presets, queue'ить параллельные invokes. End state мог не
+  // совпасть с last clicked. Now: один busy → все disabled.
+  const anyPresetBusy = (["soft", "balanced", "strict", "custom"] as const).some((p) =>
+    state.isBusy(`f2b-preset-${p}`),
+  );
 
   const handleApplyCustom = () => {
     setSelectedPreset("custom");
@@ -179,7 +213,6 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
       >
         {(["soft", "balanced", "strict"] as const).map((presetId) => {
           const isActive = activePreset === presetId;
-          const isBusy = state.isBusy(`f2b-preset-${presetId}`);
           return (
             <label
               key={presetId}
@@ -189,6 +222,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 isActive
                   ? "border-[var(--color-accent-interactive)] bg-[var(--color-accent-tint-08)]"
                   : "border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]",
+                anyPresetBusy && "opacity-60 cursor-wait",
               )}
             >
               <input
@@ -197,7 +231,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 value={presetId}
                 checked={isActive}
                 onChange={() => void handleApplyPreset(presetId)}
-                disabled={isBusy}
+                disabled={anyPresetBusy}
                 className="mt-1"
                 data-testid={`preset-radio-${presetId}`}
               />
@@ -228,6 +262,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
             activePreset === "custom"
               ? "border-[var(--color-accent-interactive)] bg-[var(--color-accent-tint-08)]"
               : "border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]",
+            anyPresetBusy && "opacity-60 cursor-wait",
           )}
         >
           <input
@@ -236,6 +271,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
             value="custom"
             checked={activePreset === "custom"}
             onChange={handlePickCustom}
+            disabled={anyPresetBusy}
             className="mt-1"
             data-testid="preset-radio-custom"
           />
@@ -277,13 +313,13 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
               <div className="space-y-3 pt-2">
                 <div>
                   <label
-                    htmlFor="f2b-maxretry"
+                    htmlFor={`${idPrefix}-maxretry`}
                     className="text-body-sm font-medium block mb-1"
                   >
                     {t("server.security.fail2ban.custom_maxretry_label")}
                   </label>
                   <input
-                    id="f2b-maxretry"
+                    id={`${idPrefix}-maxretry`}
                     type="number"
                     min={1}
                     max={1000}
@@ -307,13 +343,13 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 </div>
                 <div>
                   <label
-                    htmlFor="f2b-bantime"
+                    htmlFor={`${idPrefix}-bantime`}
                     className="text-body-sm font-medium block mb-1"
                   >
                     {t("server.security.fail2ban.custom_bantime_label")}
                   </label>
                   <input
-                    id="f2b-bantime"
+                    id={`${idPrefix}-bantime`}
                     type="number"
                     min={1}
                     max={86400}
@@ -334,13 +370,13 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 </div>
                 <div>
                   <label
-                    htmlFor="f2b-findtime"
+                    htmlFor={`${idPrefix}-findtime`}
                     className="text-body-sm font-medium block mb-1"
                   >
                     {t("server.security.fail2ban.custom_findtime_label")}
                   </label>
                   <input
-                    id="f2b-findtime"
+                    id={`${idPrefix}-findtime`}
                     type="number"
                     min={1}
                     max={86400}

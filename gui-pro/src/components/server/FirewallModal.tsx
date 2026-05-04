@@ -332,16 +332,20 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
                   >
                     {t("server.security.firewall.action_label")}
                   </div>
+                  {/* BUG-07 fix: hardcoded English labels → i18n keys.
+                      Existing rules-table column already uses RU labels
+                      via action_label_allow/_deny/_reject; form was оставшийся
+                      English leak. */}
                   <Select
                     value={state.newRule.action}
                     onChange={(e) =>
                       state.setNewRule({ ...state.newRule, action: e.target.value })
                     }
                     options={[
-                      { value: "allow", label: "Allow" },
-                      { value: "deny", label: "Deny" },
-                      { value: "limit", label: "Limit" },
-                      { value: "reject", label: "Reject" },
+                      { value: "allow", label: t("server.security.firewall.action_label_allow") },
+                      { value: "deny", label: t("server.security.firewall.action_label_deny") },
+                      { value: "limit", label: t("server.security.firewall.action_label_limit") },
+                      { value: "reject", label: t("server.security.firewall.action_label_reject") },
                     ]}
                   />
                 </div>

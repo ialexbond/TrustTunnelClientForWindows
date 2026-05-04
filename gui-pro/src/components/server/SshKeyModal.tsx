@@ -323,19 +323,32 @@ export function SshKeyModal(props: SshKeyModalProps) {
     return `${head}…${tail}`;
   };
 
+  // BUG-11 fix: lock close while ANY async op in flight. Race scenario was
+  // — user clicks Continue (disable PWAuth) → backend takes ~3s → user clicks
+  // X → onClose fires → cleanup wipes state → in-flight invoke resolves
+  // catch block → toast appears even though Modal gone.
+  const isBusy = generating || exporting || disabling || enablingPw;
+
   // T-03: NEVER early-return null. Modal primitive owns mount/animating.
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" className="relative">
+    <Modal
+      isOpen={isOpen}
+      onClose={isBusy ? () => {} : onClose}
+      size="md"
+      className="relative"
+    >
       <button
         ref={closeButtonRef}
         type="button"
         aria-label={t("server.security.ssh_key.modal_close_aria")}
         onClick={onClose}
+        disabled={isBusy}
         className={cn(
           "absolute top-3 right-3 p-1 rounded",
           "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
           "focus-visible:shadow-[var(--focus-ring)] outline-none",
           "transition-colors",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
         )}
       >
         <X className="w-4 h-4" />
