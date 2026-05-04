@@ -144,9 +144,18 @@ describe("formatBanTime", () => {
     expect(result).toMatch(/1\s*ч/i); // "1 ч. назад"
   });
 
-  it("localizes days ago in Russian", () => {
-    const result = formatBanTime("2 days ago", "ru");
-    expect(result).toMatch(/2\s*д/i); // "2 дн. назад"
+  it("localizes days ago in Russian (auto-numeric uses «позавчера» for 2)", () => {
+    // BUG-14 fix: numeric: "auto" in Intl.RelativeTimeFormat returns idiomatic
+    // forms — «позавчера» for -2 days, «вчера» for -1 day, «5 дн. назад» for ≤-3.
+    const result2 = formatBanTime("2 days ago", "ru");
+    expect(result2).toMatch(/позавчера/i);
+    const result5 = formatBanTime("5 days ago", "ru");
+    expect(result5).toMatch(/5\s*д/i); // "5 дн. назад"
+  });
+
+  it("zero amount returns raw (BUG-14 defensive)", () => {
+    expect(formatBanTime("0min ago", "ru")).toBe("0min ago");
+    expect(formatBanTime("0s", "ru")).toBe("0s");
   });
 
   it("falls back to raw when format unknown", () => {

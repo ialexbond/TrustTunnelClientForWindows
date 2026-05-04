@@ -10,7 +10,7 @@ import { formatError } from "../../shared/utils/formatError";
 import { cn } from "../../shared/lib/cn";
 import type { ServerState } from "./useServerState";
 import type { useSecurityState } from "./useSecurityState";
-import { parseCertInfo, daysUntil, truncateFingerprint, type CertInfo } from "./certUtils";
+import { parseCertInfo, daysUntil, truncateFingerprint, pluralRu, type CertInfo } from "./certUtils";
 
 /**
  * P1-9 + P1-10 #R+#3 — CertModal compound.
@@ -30,14 +30,7 @@ import { parseCertInfo, daysUntil, truncateFingerprint, type CertInfo } from "./
  * Modal lifecycle T-03 — НЕ early-return null, Modal primitive owns 200ms exit.
  */
 
-function pluralRu(n: number, one: string, few: string, many: string): string {
-  const abs = Math.abs(n) % 100;
-  const lastDigit = abs % 10;
-  if (abs >= 11 && abs <= 19) return `${n} ${many}`;
-  if (lastDigit === 1) return `${n} ${one}`;
-  if (lastDigit >= 2 && lastDigit <= 4) return `${n} ${few}`;
-  return `${n} ${many}`;
-}
+// pluralRu extracted to certUtils.ts (BUG-26 — was duplicated в CertSection + CertModal).
 
 function formatDaysHuman(totalDays: number, lang: string): string {
   if (totalDays <= 0) return lang === "ru" ? "Истёк" : "Expired";
@@ -223,7 +216,10 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
             </div>
           </section>
 
-          {/* Block 2 — Validity period (notBefore — notAfter + days remaining) */}
+          {/* Block 2 — Validity period (notBefore — notAfter + days remaining).
+              BUG-12 fix: при missing notBefore (older backend, self-signed cert
+              без этого field) показываем только notAfter с префиксом «до».
+              Раньше rendered «— — May 16, 2026» (двойной dash). */}
           <section
             className="border-t pt-3"
             style={{ borderColor: "var(--color-border)" }}
@@ -232,9 +228,18 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
               {t("server.cert.block_validity")}
             </div>
             <div className="text-body">
-              {formatDateHuman(certInfo.notBefore, i18n.language)}
-              <span className="mx-2" style={{ color: "var(--color-text-muted)" }}>—</span>
-              {formatDateHuman(certInfo.notAfter, i18n.language)}
+              {certInfo.notBefore ? (
+                <>
+                  {formatDateHuman(certInfo.notBefore, i18n.language)}
+                  <span className="mx-2" style={{ color: "var(--color-text-muted)" }}>—</span>
+                  {formatDateHuman(certInfo.notAfter, i18n.language)}
+                </>
+              ) : (
+                <>
+                  <span style={{ color: "var(--color-text-muted)" }}>{t("server.cert.until_prefix")} </span>
+                  {formatDateHuman(certInfo.notAfter, i18n.language)}
+                </>
+              )}
             </div>
             {daysLeft !== null && (
               <div className="mt-1">

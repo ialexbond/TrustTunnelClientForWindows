@@ -4,6 +4,15 @@ import i18n from "../../shared/i18n";
 import { CertSection } from "./CertSection";
 import { renderWithProviders as render } from "../../test/test-utils";
 import type { ServerState } from "./useServerState";
+import type { useSecurityState } from "./useSecurityState";
+
+// BUG-02 fix: CertSection теперь требует security prop. Mock minimal subset.
+const mockSecurity = {
+  certbotTimerStatus: null,
+  loadCertbotTimerStatus: vi.fn().mockResolvedValue(undefined),
+  enableCertbotTimer: vi.fn().mockResolvedValue(undefined),
+  isBusy: vi.fn().mockReturnValue(false),
+} as unknown as ReturnType<typeof useSecurityState>;
 
 /**
  * P1-9 + P1-10 #R+#3 — CertSection rewritten как summary card matching
@@ -57,13 +66,13 @@ describe("CertSection summary card", () => {
   });
 
   it("renders summary card title", async () => {
-    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} />);
+    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} security={mockSecurity} />);
     expect(await screen.findByTestId("cert-summary-card")).toBeVisible();
     expect(screen.getByText(/TLS Сертификат/i)).toBeVisible();
   });
 
   it("subtitle shows issuer + subject (compact)", async () => {
-    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} />);
+    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} security={mockSecurity} />);
     await waitFor(() => {
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/Let's Encrypt/i);
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/vpn\.example\.com/);
@@ -71,7 +80,7 @@ describe("CertSection summary card", () => {
   });
 
   it("status pill aria-label says «Действителен N дней» for valid cert", async () => {
-    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} />);
+    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} security={mockSecurity} />);
     // StatusIndicator renders label as aria-label (not visible text), so query
     // by aria-label rather than text content.
     await waitFor(() => {
@@ -80,7 +89,7 @@ describe("CertSection summary card", () => {
   });
 
   it("renders without crash for danger-zone cert (≤7 days)", async () => {
-    render(<CertSection state={makeState({ certRaw: sampleExpiringCert })} />);
+    render(<CertSection state={makeState({ certRaw: sampleExpiringCert })} security={mockSecurity} />);
     await waitFor(() => {
       expect(screen.getByTestId("cert-summary-card")).toBeVisible();
     });
@@ -88,13 +97,13 @@ describe("CertSection summary card", () => {
   });
 
   it("«Подробнее» CTA disabled when no cert", async () => {
-    render(<CertSection state={makeState({ certRaw: null })} />);
+    render(<CertSection state={makeState({ certRaw: null })} security={mockSecurity} />);
     const btn = await screen.findByTestId("cert-configure-button");
     expect(btn).toBeDisabled();
   });
 
   it("«Подробнее» CTA opens Modal when clicked", async () => {
-    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} />);
+    render(<CertSection state={makeState({ certRaw: sampleLetsEncryptCert })} security={mockSecurity} />);
     const btn = await screen.findByTestId("cert-configure-button");
     expect(btn).not.toBeDisabled();
     fireEvent.click(btn);
@@ -106,7 +115,7 @@ describe("CertSection summary card", () => {
   });
 
   it("self-signed cert shown in subtitle", async () => {
-    render(<CertSection state={makeState({ certRaw: sampleSelfSignedCert })} />);
+    render(<CertSection state={makeState({ certRaw: sampleSelfSignedCert })} security={mockSecurity} />);
     await waitFor(() => {
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/internal\.local/);
     });
