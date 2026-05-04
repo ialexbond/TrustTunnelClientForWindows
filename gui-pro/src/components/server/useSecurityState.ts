@@ -369,68 +369,43 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     });
 
   // ── Firewall actions ──
-  const installFirewall = async () => {
-    const ssh = status?.firewall.current_ssh_port ?? sshParams.port;
-    const vpn = status?.firewall.vpn_port ?? 443;
-    const ok = await confirm({
-      title: t("server.security.confirm.install_firewall_title"),
-      message: t("server.security.confirm.install_firewall_message", {
-        ssh, vpn, http: "",
-      }),
-      variant: "warning",
-    });
-    if (!ok) return;
-    void run(
+  // P UAT 2026-05-03 fix: removed hook-internal `confirm()` calls. Каждый
+  // Firewall action был оборачивал свой confirm dialog — но UI layer
+  // (FirewallModal) тоже добавлял confirm для same actions, в результате
+  // получалось 2 stacked dialogs. UI layer теперь — single source of truth
+  // для confirm UX. Hook actions = pure invocation + state.load() refresh.
+  // Plus the hook-side dialog text was hostile («Не рекомендуется в продакшене»,
+  // «Выключить firewall» mixed RU/EN, default «Удалить» button label).
+  const installFirewall = () =>
+    run(
       "install-fw",
       () => invoke("security_install_firewall", { ...sshParams, keepHttpOpen: false }),
       t("server.security.snack.firewall_enabled"),
     );
-  };
-  const uninstallFirewall = async () => {
-    const ok = await confirm({
-      title: t("server.security.confirm.uninstall_firewall_title"),
-      message: t("server.security.confirm.uninstall_firewall_message"),
-      variant: "danger",
-    });
-    if (!ok) return;
-    void run(
+  const uninstallFirewall = () =>
+    run(
       "uninstall-fw",
       () => invoke("security_uninstall_firewall", sshParams),
       t("server.security.snack.firewall_disabled"),
     );
-  };
-  const stopFirewall = async () => {
-    const ok = await confirm({
-      title: t("server.security.confirm.stop_firewall_title"),
-      message: t("server.security.confirm.stop_firewall_message"),
-      variant: "warning",
-    });
-    if (!ok) return;
-    void run(
+  const stopFirewall = () =>
+    run(
       "stop-fw",
       () => invoke("security_stop_firewall", sshParams),
       t("server.security.snack.firewall_stopped"),
     );
-  };
   const startFirewall = () =>
     run(
       "start-fw",
       () => invoke("security_start_firewall", sshParams),
       t("server.security.snack.firewall_started"),
     );
-  const deleteRule = async (n: number) => {
-    const ok = await confirm({
-      title: t("server.security.confirm.delete_rule_title"),
-      message: t("server.security.confirm.delete_rule_message", { n }),
-      variant: "danger",
-    });
-    if (!ok) return;
-    void run(
+  const deleteRule = (n: number) =>
+    run(
       `del-${n}`,
       () => invoke("security_firewall_delete_rule", { ...sshParams, number: n }),
       t("server.security.snack.rule_deleted", { n }),
     );
-  };
   const addRule = async () => {
     const portErr    = validatePort(newRule.port);
     if (portErr)    { showError(t(portErr)); return; }

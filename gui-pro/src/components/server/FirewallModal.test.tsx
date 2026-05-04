@@ -183,13 +183,21 @@ describe("FirewallModal", () => {
     await waitFor(() => expect(state.addRule).toHaveBeenCalled());
   });
 
-  it("Delete rule button invokes deleteRule with rule number", async () => {
+  it("Delete rule button opens ConfirmDialog → invokes deleteRule on confirm", async () => {
+    // P UAT 2026-05-03: hook-internal confirm removed; FirewallModal owns confirm UX.
+    // Click trash → confirm dialog → click "Удалить" → deleteRule(1).
     const rules: FirewallRule[] = [
       { number: 1, action: "ALLOW IN", to: "22/tcp", from: "Anywhere", proto: "tcp", comment: "" },
     ];
     const state = buildState({ firewall: { installed: true, active: true, rules } });
     render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
     fireEvent.click(await screen.findByTestId("delete-rule-1"));
+    // Wait for confirm dialog
+    await waitFor(() => expect(screen.getByText(/удалить правило\?/i)).toBeVisible());
+    // Click confirm — finds the dialog's confirm button (label "Удалить")
+    const buttons = screen.getAllByRole("button", { name: /^удалить$/i });
+    expect(buttons.length).toBeGreaterThan(0);
+    fireEvent.click(buttons[buttons.length - 1]);
     await waitFor(() => expect(state.deleteRule).toHaveBeenCalledWith(1));
   });
 

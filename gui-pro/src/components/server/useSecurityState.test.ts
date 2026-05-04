@@ -258,10 +258,11 @@ describe("useSecurityState", () => {
     });
   });
 
-  it("install firewall passes sshParams + keepHttpOpen=false after confirm", async () => {
+  it("install firewall passes sshParams + keepHttpOpen=false (no hook confirm)", async () => {
+    // P UAT 2026-05-03: hook-internal confirms removed (Brandmauer overhaul).
+    // installFirewall теперь pure invoke — UI layer (FirewallModal) owns confirm UX.
     setupInvokeForLoad();
     mockConfirm.mockClear();
-    mockConfirm.mockResolvedValue(true);
     const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
 
     await vi.waitFor(() => {
@@ -272,7 +273,8 @@ describe("useSecurityState", () => {
       await result.current.installFirewall();
     });
 
-    expect(mockConfirm).toHaveBeenCalled();
+    // mockConfirm should NOT have been called from the hook anymore.
+    expect(mockConfirm).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("security_install_firewall", expect.objectContaining({
         host: "1.2.3.4",
