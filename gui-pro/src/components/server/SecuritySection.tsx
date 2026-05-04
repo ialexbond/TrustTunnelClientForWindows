@@ -300,6 +300,7 @@ export function SecuritySection({ state }: Props) {
         isOpen={sshKeyOpen}
         onClose={() => setSshKeyOpen(false)}
         sshParams={state.sshParams}
+        onSecurityChanged={security.load}
       />
     </div>
   );
