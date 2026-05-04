@@ -174,18 +174,21 @@ export function SshKeyModal(props: SshKeyModalProps) {
     }
     setGenerating(true);
     try {
-      const result = await invoke<{ fingerprint: string; generated: boolean }>(
-        "security_generate_ssh_key",
-        {
-          host: sshHost,
-          port: sshPort,
-          user: sshUser,
-          password: sshPassword,
-          keyPath: sshKeyPath,
-          keyData: sshKeyData,
-          hostArg: sshHost,
-        },
-      );
+      // BUG-04 fix: read authorized_on_server из backend response (раньше
+      // optimistically true). Тип расширен для type-safe access.
+      const result = await invoke<{
+        fingerprint: string;
+        generated: boolean;
+        authorized_on_server?: boolean;
+      }>("security_generate_ssh_key", {
+        host: sshHost,
+        port: sshPort,
+        user: sshUser,
+        password: sshPassword,
+        keyPath: sshKeyPath,
+        keyData: sshKeyData,
+        hostArg: sshHost,
+      });
       // D-1.4: persist localStorage flag so SshConnectForm auto-detects key on next mount.
       localStorage.setItem(`tt_auth_method_${sshHost}`, "key");
       // D-29: log only fingerprint (public, non-secret). NEVER log PEM body.
@@ -193,7 +196,10 @@ export function SshKeyModal(props: SshKeyModalProps) {
       pushSuccess(t("server.security.ssh_key.generated_snack", { fingerprint: result.fingerprint }));
       setKeyStatus((prev) => ({
         generated: true,
-        authorized_on_server: true,
+        // BUG-04 fix: backend-confirmed flag, не optimistic. Older backends
+        // без этого field → fallback false (consistent with backend not having
+        // confirmed deployment).
+        authorized_on_server: result.authorized_on_server ?? false,
         pubkey_fingerprint: result.fingerprint,
         password_auth_disabled: prev?.password_auth_disabled ?? false,
       }));

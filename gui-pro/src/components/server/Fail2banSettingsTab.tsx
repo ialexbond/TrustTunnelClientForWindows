@@ -192,9 +192,40 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
     state.isBusy(`f2b-preset-${p}`),
   );
 
+  // BUG-05 fix: client-side validation перед invoke. Backend `is_safe_duration`
+  // принимает любое непустое строковое + цифры/буквы, но не gates min/max
+  // ranges → empty string, "0", или "99999999" приходили в `fail2ban-client
+  // set` и silently ломали jail. Frontend mirror invariant: maxretry 1-1000,
+  // bantime 1-31536000s (1y), findtime 1-86400s (1d).
+  const validateCustom = (): string | null => {
+    const r = custom.maxretry;
+    if (!Number.isFinite(r) || r < 1) return t("server.security.fail2ban.errors.maxretry_too_low");
+    if (r > 1000) return t("server.security.fail2ban.errors.maxretry_too_high");
+    const bt = normalizeDurationToSeconds(custom.bantime);
+    if (bt === null) return t("server.security.fail2ban.errors.bantime_invalid");
+    if (bt < 1) return t("server.security.fail2ban.errors.bantime_too_low");
+    if (bt > 31536000) return t("server.security.fail2ban.errors.bantime_too_high");
+    const ft = normalizeDurationToSeconds(custom.findtime);
+    if (ft === null) return t("server.security.fail2ban.errors.findtime_invalid");
+    if (ft < 1) return t("server.security.fail2ban.errors.findtime_too_low");
+    if (ft > 86400) return t("server.security.fail2ban.errors.findtime_too_high");
+    return null;
+  };
+
+  const [customError, setCustomError] = useState<string | null>(null);
+
   const handleApplyCustom = () => {
+    const err = validateCustom();
+    if (err) {
+      setCustomError(err);
+      return;
+    }
+    setCustomError(null);
     setSelectedPreset("custom");
-    void state.applyFail2banCustom(custom);
+    void state.applyFail2banCustom(custom).catch(() => {
+      // BUG-16 mirror: revert optimistic selection on backend failure.
+      setSelectedPreset(null);
+    });
   };
 
   // Custom radio handler: when user explicitly picks "Своя конфигурация",
@@ -395,6 +426,17 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                     {t("server.security.fail2ban.custom_findtime_help")}
                   </p>
                 </div>
+                {/* BUG-05 fix: validation error inline под inputs */}
+                {customError && (
+                  <p
+                    className="text-caption"
+                    style={{ color: "var(--color-status-danger)" }}
+                    role="alert"
+                    data-testid="custom-validation-error"
+                  >
+                    {customError}
+                  </p>
+                )}
                 <Button
                   onClick={handleApplyCustom}
                   loading={state.isBusy("f2b-preset-custom")}

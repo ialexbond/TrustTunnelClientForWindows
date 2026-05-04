@@ -1179,7 +1179,17 @@
         "close_dirty_confirm": "Close without applying",
         "strict_confirm_title": "Apply «Strict» protection?",
         "strict_confirm_message": "The Strict preset bans IPs for 1 hour after 3 failed attempts. Scripts or CI making frequent SSH connections may be locked out. Continue?",
-        "strict_confirm_action": "Apply «Strict»"
+        "strict_confirm_action": "Apply «Strict»",
+        "errors": {
+          "maxretry_too_low": "Retry count must be ≥ 1",
+          "maxretry_too_high": "Retry count cannot exceed 1000",
+          "bantime_invalid": "Invalid ban time format (use seconds or 1m/1h/1d)",
+          "bantime_too_low": "Ban time must be ≥ 1 second",
+          "bantime_too_high": "Ban time cannot exceed 1 year",
+          "findtime_invalid": "Invalid find window format (use seconds or 1m/1h)",
+          "findtime_too_low": "Find window must be ≥ 1 second",
+          "findtime_too_high": "Find window cannot exceed 24 hours"
+        }
       },
       "firewall": {
         "title": "Firewall (UFW)",
