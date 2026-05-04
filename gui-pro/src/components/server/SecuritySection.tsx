@@ -7,6 +7,7 @@ import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import type { ServerState } from "./useServerState";
 import { useSecurityState, FAIL2BAN_PRESETS, type Fail2banPresetId } from "./useSecurityState";
+import { durationsEqual } from "./fail2banUtils";
 import { CertSection } from "./CertSection";
 import { FirewallModal } from "./FirewallModal";
 import { Fail2banModal } from "./Fail2banModal";
@@ -126,12 +127,13 @@ export function SecuritySection({ state }: Props) {
     if (!f2bInstalled) return t("server.security.summary.fail2ban_subtitle_not_installed");
     if (!f2bActive) return t("server.security.summary.fail2ban_subtitle_inactive");
     if (!sshdJail) return t("server.security.summary.fail2ban_subtitle_no_jail");
-    // Detect preset matching jail config (mirror Fail2banSettingsTab logic).
+    // BUG-01 fix: durationsEqual нормализует "1h" ↔ "3600" перед сравнением
+    // (mirror Fail2banSettingsTab.detectedPreset logic).
     const matched = Object.entries(FAIL2BAN_PRESETS).find(
       ([, cfg]) =>
         cfg.maxretry === sshdJail.maxretry &&
-        cfg.bantime === sshdJail.bantime &&
-        cfg.findtime === sshdJail.findtime,
+        durationsEqual(cfg.bantime, sshdJail.bantime) &&
+        durationsEqual(cfg.findtime, sshdJail.findtime),
     );
     const presetId = matched ? (matched[0] as Fail2banPresetId) : "custom";
     const presetName = t(`server.security.fail2ban.presets.${presetId}`);
