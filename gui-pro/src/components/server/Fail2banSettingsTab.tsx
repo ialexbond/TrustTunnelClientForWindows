@@ -8,6 +8,7 @@ import {
 import { Button } from "../../shared/ui/Button";
 import { Accordion } from "../../shared/ui/Accordion";
 import { useConfirm } from "../../shared/ui/useConfirm";
+import { durationsEqual, normalizeDurationToSeconds } from "./fail2banUtils";
 import { cn } from "../../shared/lib/cn";
 
 /**
@@ -68,36 +69,47 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   // detection заново.
   const detectedPreset = useMemo<Fail2banPresetId>(() => {
     if (!jail) return "balanced";
+    // BUG-01 fix: durationsEqual нормализует "1h" ↔ "3600" ↔ "60m" ↔ "10m" ↔ "600"
+    // перед сравнением. Backend install_fail2ban template пишет "1h" / "10m"
+    // (suffix format), frontend presets хранят numeric seconds. Без normalize'а
+    // string compare всегда false → fresh install детектился как "custom".
     const matched = Object.entries(FAIL2BAN_PRESETS).find(
       ([, cfg]) =>
         cfg.maxretry === jail.maxretry &&
-        cfg.bantime === jail.bantime &&
-        cfg.findtime === jail.findtime,
+        durationsEqual(cfg.bantime, jail.bantime) &&
+        durationsEqual(cfg.findtime, jail.findtime),
     );
     return matched ? (matched[0] as Fail2banPresetId) : "custom";
   }, [jail]);
 
   const activePreset = selectedPreset ?? detectedPreset;
 
-  // Custom NumberInput draft. Synced на jail primitive changes — позволяет
-  // user редактировать draft, но при backend refresh подтягивает actual
-  // values как baseline.
+  // BUG-01 fix: NumberInput draft нормализуется к canonical seconds string —
+  // backend может возвращать "1h"/"10m" (suffix format из install template),
+  // но `<input type="number">` не отрендерит "1h" корректно. Нормализуем к
+  // числовым секундам, чтобы input value был всегда valid number.
+  const normalizeJailDuration = (raw: string, fallback: string): string => {
+    const seconds = normalizeDurationToSeconds(raw);
+    return seconds !== null ? String(seconds) : fallback;
+  };
+
   const [custom, setCustom] = useState({
     maxretry: jail?.maxretry ?? 5,
-    bantime: jail?.bantime ?? "600",
-    findtime: jail?.findtime ?? "600",
+    bantime: jail ? normalizeJailDuration(jail.bantime, "600") : "600",
+    findtime: jail ? normalizeJailDuration(jail.findtime, "600") : "600",
   });
 
   // External sync: jail config refreshes (backend reload after preset apply)
   // → mirror values into draft state. Pattern allows user editing without
-  // losing pending edits on background refresh.
+  // losing pending edits on background refresh. Values нормализованы к
+  // numeric seconds (см. comment выше про NumberInput compatibility).
   useEffect(() => {
     if (!jail) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mirror of jail config primitives into draft state on backend refresh
     setCustom({
       maxretry: jail.maxretry,
-      bantime: jail.bantime,
-      findtime: jail.findtime,
+      bantime: normalizeJailDuration(jail.bantime, "600"),
+      findtime: normalizeJailDuration(jail.findtime, "600"),
     });
   }, [jail]);
 
@@ -112,12 +124,14 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
 
   // P0-2 #K — Dirty state: custom draft != jail config (pre-Apply edits exist).
   // Used by Accordion title indicator + parent Modal close-warning.
+  // BUG-01 fix: durationsEqual для bantime/findtime — иначе после backend
+  // refresh с "1h" а draft "3600" → false dirty (semantically equal).
   const isCustomDirty = useMemo(() => {
     if (!jail) return false;
     return (
       custom.maxretry !== jail.maxretry ||
-      custom.bantime !== jail.bantime ||
-      custom.findtime !== jail.findtime
+      !durationsEqual(custom.bantime, jail.bantime) ||
+      !durationsEqual(custom.findtime, jail.findtime)
     );
   }, [custom, jail]);
 

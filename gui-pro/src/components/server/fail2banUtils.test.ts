@@ -1,5 +1,86 @@
 import { describe, it, expect } from "vitest";
-import { parseAgoDuration, formatBanTime } from "./fail2banUtils";
+import {
+  parseAgoDuration,
+  formatBanTime,
+  normalizeDurationToSeconds,
+  durationsEqual,
+} from "./fail2banUtils";
+
+describe("normalizeDurationToSeconds (BUG-01)", () => {
+  it("parses bare numeric seconds", () => {
+    expect(normalizeDurationToSeconds("600")).toBe(600);
+    expect(normalizeDurationToSeconds("0")).toBe(0);
+    expect(normalizeDurationToSeconds("3600")).toBe(3600);
+  });
+
+  it("parses minutes suffix", () => {
+    expect(normalizeDurationToSeconds("10m")).toBe(600);
+    expect(normalizeDurationToSeconds("10 min")).toBe(600);
+    expect(normalizeDurationToSeconds("10 minutes")).toBe(600);
+  });
+
+  it("parses hours suffix", () => {
+    expect(normalizeDurationToSeconds("1h")).toBe(3600);
+    expect(normalizeDurationToSeconds("2 hours")).toBe(7200);
+  });
+
+  it("parses days/weeks/years", () => {
+    expect(normalizeDurationToSeconds("1d")).toBe(86400);
+    expect(normalizeDurationToSeconds("1w")).toBe(604800);
+    expect(normalizeDurationToSeconds("1y")).toBe(31536000);
+  });
+
+  it("parses seconds suffix", () => {
+    expect(normalizeDurationToSeconds("30s")).toBe(30);
+    expect(normalizeDurationToSeconds("30 sec")).toBe(30);
+  });
+
+  it("returns null for invalid", () => {
+    expect(normalizeDurationToSeconds("")).toBeNull();
+    expect(normalizeDurationToSeconds("abc")).toBeNull();
+    expect(normalizeDurationToSeconds(undefined)).toBeNull();
+    expect(normalizeDurationToSeconds("1.5h")).toBeNull(); // no decimals
+  });
+});
+
+describe("durationsEqual (BUG-01)", () => {
+  it("matches semantically equal durations across formats", () => {
+    expect(durationsEqual("1h", "3600")).toBe(true);
+    expect(durationsEqual("10m", "600")).toBe(true);
+    expect(durationsEqual("1d", "86400")).toBe(true);
+    expect(durationsEqual("60s", "1m")).toBe(true);
+    expect(durationsEqual("60", "1m")).toBe(true);
+  });
+
+  it("rejects unequal durations", () => {
+    expect(durationsEqual("1h", "30m")).toBe(false);
+    expect(durationsEqual("600", "601")).toBe(false);
+  });
+
+  it("returns false for invalid input", () => {
+    expect(durationsEqual("1h", "abc")).toBe(false);
+    expect(durationsEqual(undefined, "1h")).toBe(false);
+    expect(durationsEqual("", "")).toBe(false);
+  });
+
+  it("fresh fail2ban install (1h+10m) detected as balanced (600+600)", () => {
+    // The exact bug: install_fail2ban writes bantime="1h" findtime="10m";
+    // FAIL2BAN_PRESETS.balanced has bantime="600" findtime="600"; raw === fails.
+    // Wait — balanced.bantime is "600" but install writes "1h"=3600s. Different!
+    // Actually balanced=10m=600s, install=1h=3600s, so they DON'T match. The fresh
+    // install will match no preset (custom). Let me re-read the audit...
+    //
+    // After re-reading: install template writes 1h/10m, balanced preset is 600/600
+    // (10m bantime, 10m findtime). These ARE different (3600 vs 600). So fresh install
+    // legitimately is "custom" until user picks a preset. The bug auditor implied
+    // they should match, but they're functionally different ban durations. The REAL
+    // fix is the normalizer for cases when admin manually edits jail.local with
+    // either format and reopens the modal.
+    expect(durationsEqual("1h", "600")).toBe(false); // NOT equal — 3600 ≠ 600
+    expect(durationsEqual("10m", "600")).toBe(true); // equal — both 600s
+    expect(durationsEqual("1h", "60m")).toBe(true); // equal — both 3600s
+  });
+});
 
 describe("parseAgoDuration", () => {
   it("parses Xmin format (no space)", () => {

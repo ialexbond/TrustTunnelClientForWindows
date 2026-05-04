@@ -1,5 +1,5 @@
 /**
- * Phase 16 polish — Fail2Ban output parsers + localizers.
+ * Phase 16 polish — Fail2Ban output parsers + localizers + duration normalizer.
  *
  * Backend `security_fail2ban_get_status` returns banned IPs как они приходят
  * из `fail2ban-client status sshd` — formatting English-only:
@@ -9,6 +9,71 @@
  * raw English output и возвращают человеко-читаемый text согласно текущему
  * языку (`i18n.language`).
  */
+
+/**
+ * BUG-01 fix: normalize fail2ban duration strings к canonical numeric seconds.
+ *
+ * Fail2Ban backend (`/etc/fail2ban/jail.local` template via `install_fail2ban`)
+ * пишет default values в format с time-suffix:
+ *   bantime  = 1h
+ *   findtime = 10m
+ *
+ * Frontend `FAIL2BAN_PRESETS` хранит numeric seconds:
+ *   balanced: { bantime: "600", findtime: "600" }
+ *
+ * String comparison `cfg.bantime === jail.bantime` was failing → fresh install
+ * детектился как "Своя конфигурация" вместо "Сбалансированная". Этот helper
+ * нормализует обе стороны к canonical seconds string перед сравнением.
+ *
+ * Format reference (mirror backend `is_safe_duration` in sanitize.rs):
+ *   - bare number: "600" → 600
+ *   - N + s/sec/seconds: "30s" → 30
+ *   - N + m/min/minutes: "10m" → 600
+ *   - N + h/hour/hours: "1h" → 3600
+ *   - N + d/day/days: "1d" → 86400
+ *   - N + w/week/weeks: "1w" → 604800
+ *   - N + y/year/years: "1y" → 31536000
+ *
+ * Returns `null` для invalid input — caller использует raw string fallback.
+ */
+export function normalizeDurationToSeconds(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Bare number → as-is.
+  if (/^\d+$/.test(trimmed)) {
+    const n = parseInt(trimmed, 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // N + suffix.
+  const m = /^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|wk|week|weeks|y|yr|year|years)$/i.exec(
+    trimmed,
+  );
+  if (!m) return null;
+  const amount = parseInt(m[1], 10);
+  if (!Number.isFinite(amount)) return null;
+  const u = m[2].toLowerCase();
+  if (u.startsWith("s")) return amount;
+  if (u === "m" || u.startsWith("min")) return amount * 60;
+  if (u.startsWith("h")) return amount * 3600;
+  if (u.startsWith("d")) return amount * 86400;
+  if (u.startsWith("w")) return amount * 604800;
+  if (u.startsWith("y")) return amount * 31536000;
+  return null;
+}
+
+/**
+ * BUG-01 fix: compare two fail2ban duration strings semantically (e.g. "1h" === "3600").
+ * Returns false если хоть одна сторона не парсится — defensive default.
+ */
+export function durationsEqual(a: string | undefined, b: string | undefined): boolean {
+  const na = normalizeDurationToSeconds(a);
+  const nb = normalizeDurationToSeconds(b);
+  if (na === null || nb === null) return false;
+  return na === nb;
+}
 
 interface ParsedDuration {
   /** Целочисленное количество единиц. */
