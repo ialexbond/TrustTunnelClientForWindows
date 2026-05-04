@@ -85,10 +85,30 @@ export function Fail2banBannedTab({
         <span></span>
       </div>
       {bannedIps.map((entry, idx) => {
-        // Entry format: "1.2.3.4" OR "1.2.3.4 (5min ago)" — split safely.
-        const match = /^(\S+)(?:\s+\((.+)\))?$/.exec(entry);
-        const ip = match?.[1] ?? entry;
-        const bannedAt = match?.[2] ?? "";
+        // Entry formats supported (BUG-13 hardened):
+        //   - "1.2.3.4"                  — IP only (older fail2ban output)
+        //   - "1.2.3.4 (5min ago)"        — fail2ban-client status sshd с ban times block
+        //   - "::1"                       — IPv6 (no spaces, captured as IP)
+        //   - "2001:db8::1 (1h ago)"      — IPv6 + ban time
+        //   - "1.2.3.4 5min ago"          — defensive: parens-less variant from older versions
+        // Two regex tries: paren-form first, then bare ip+time fallback.
+        let ip = entry;
+        let bannedAt = "";
+        const m1 = /^(\S+)\s+\(([^)]+)\)\s*$/.exec(entry);
+        if (m1) {
+          ip = m1[1];
+          bannedAt = m1[2];
+        } else {
+          const m2 = /^(\S+)\s+(\d+\s*(?:s|sec|seconds|m|min|minutes|h|hr|hours|d|day|days|w|wk|weeks|y|yr|years)(?:\s+ago)?)\s*$/i.exec(entry);
+          if (m2) {
+            ip = m2[1];
+            bannedAt = m2[2];
+          } else {
+            // Fallback: just IP, no time component.
+            const m3 = /^(\S+)\s*$/.exec(entry);
+            ip = m3?.[1] ?? entry;
+          }
+        }
         return (
           <div
             key={`${ip}-${idx}`}

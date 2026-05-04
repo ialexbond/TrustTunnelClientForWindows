@@ -133,8 +133,15 @@ export function formatBanTime(raw: string, lang: string): string {
   const parsed = parseAgoDuration(raw);
   if (!parsed) return raw; // unknown format → show as-is
 
+  // BUG-14 fix: short-circuit zero amount → return raw чтобы не получить
+  // confusing "0 минут назад" / "in 0 minutes". Real fail2ban-client
+  // практически никогда не возвращает 0, но defensive guard.
+  if (parsed.amount === 0) return raw;
+
   try {
-    const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "always" });
+    // BUG-14 fix: numeric: "auto" даёт human-friendly «вчера»/«yesterday»
+    // вместо «1 day ago» когда это применимо. Также корректно plural'ит.
+    const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
     // Negative because "X minutes ago" = -X minutes from now.
     return rtf.format(-parsed.amount, parsed.unit);
   } catch {

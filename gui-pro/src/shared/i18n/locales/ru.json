@@ -1081,7 +1081,8 @@
       "block_issued_by": "Выдан",
       "block_validity": "Срок действия",
       "no_cert": "Сертификат не загружен или недоступен.",
-      "copy_fingerprint_aria": "Скопировать SHA256 отпечаток"
+      "copy_fingerprint_aria": "Скопировать SHA256 отпечаток",
+      "until_prefix": "до"
     },
     "export": {
       "title": "Экспорт конфигурации",

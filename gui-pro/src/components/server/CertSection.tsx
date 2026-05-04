@@ -9,7 +9,7 @@ import { Skeleton } from "../../shared/ui/Skeleton";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
-import { parseCertInfo, daysUntil } from "./certUtils";
+import { parseCertInfo, daysUntil, pluralRu } from "./certUtils";
 import { CertModal } from "./CertModal";
 
 /**
@@ -31,22 +31,23 @@ import { CertModal } from "./CertModal";
 interface Props {
   state: ServerState;
   /**
-   * Optional shared `useSecurityState` instance. When parent (SecuritySection
-   * 4-cards layout) already owns a hook instance, it passes it here so
-   * CertModal reads the same `certbotTimerStatus` snapshot. When omitted
-   * (legacy callers, standalone tests), CertModal будет иметь свой instance.
+   * Shared `useSecurityState` instance (REQUIRED post BUG-02). Parent
+   * SecuritySection (4-cards layout) owns the hook и passes it здесь так
+   * что CertModal reads same `certbotTimerStatus` snapshot.
+   *
+   * BUG-02 fix: ранее этот prop был optional с `useSecurityState` fallback
+   * локально — но React hooks вызываются unconditionally, поэтому fallback
+   * hook ВСЕГДА запускался даже когда passedSecurity был provided. Result:
+   * 2× `security_get_status` SSH invokes на каждый mount, занимающие 2/5
+   * permits в CHANNEL_OPEN_GATE semaphore.
+   *
+   * Now required — каждый caller обязан передавать shared instance. Test
+   * fixtures + Storybook stories передают mock объект.
    */
-  security?: ReturnType<typeof useSecurityState>;
+  security: ReturnType<typeof useSecurityState>;
 }
 
-function pluralRu(n: number, one: string, few: string, many: string): string {
-  const abs = Math.abs(n) % 100;
-  const lastDigit = abs % 10;
-  if (abs >= 11 && abs <= 19) return `${n} ${many}`;
-  if (lastDigit === 1) return `${n} ${one}`;
-  if (lastDigit >= 2 && lastDigit <= 4) return `${n} ${few}`;
-  return `${n} ${many}`;
-}
+// pluralRu extracted to certUtils.ts (BUG-26 — was duplicated в CertSection + CertModal).
 
 function shortDays(totalDays: number, lang: string): string {
   if (totalDays <= 0) return lang === "ru" ? "Истёк" : "Expired";
@@ -71,10 +72,8 @@ function formatExpiryDate(raw: string, lang: string): string {
   }
 }
 
-export function CertSection({ state, security: passedSecurity }: Props) {
+export function CertSection({ state, security }: Props) {
   const { t, i18n } = useTranslation();
-  const fallbackSecurity = useSecurityState(state.sshParams, state.pushSuccess, state.onPortChanged);
-  const security = passedSecurity ?? fallbackSecurity;
   const [modalOpen, setModalOpen] = useState(false);
 
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
@@ -84,21 +83,33 @@ export function CertSection({ state, security: passedSecurity }: Props) {
   const [certFetched, setCertFetched] = useState(preloadedCert !== null);
 
   // Auto-load cert info on mount if not yet present.
+  // BUG-09 fix: cancel signal pattern — если user меняет host пока invoke
+  // в полёте, старый response не должен записать ОЛДовый cert в новый host slot.
   useEffect(() => {
     if (preloadedCert) {
       setCertFetched(true);
       return;
     }
+    const signal = { cancelled: false };
     invoke<unknown>("server_get_cert_info", sshParams)
       .then((raw) => {
-        setPreloadedCert(raw);
+        if (!signal.cancelled) setPreloadedCert(raw);
       })
-      .catch((e) => state.pushSuccess(formatError(e), "error"))
-      .finally(() => setCertFetched(true));
+      .catch((e) => {
+        if (!signal.cancelled) state.pushSuccess(formatError(e), "error");
+      })
+      .finally(() => {
+        if (!signal.cancelled) setCertFetched(true);
+      });
+    return () => {
+      signal.cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on host primitive only
   }, [sshParams.host]);
 
   // Pre-fetch certbot timer status on mount (so Modal renders без spinner).
+  // BUG-09 fix: hook's loadCertbotTimerStatus through `run()` already handles
+  // cancellation internally (через busy-state guards). Just don't await here.
   useEffect(() => {
     void security.loadCertbotTimerStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on host primitive only

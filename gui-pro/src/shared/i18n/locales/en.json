@@ -1081,7 +1081,8 @@
       "block_issued_by": "Issued by",
       "block_validity": "Validity",
       "no_cert": "Certificate not loaded or unavailable.",
-      "copy_fingerprint_aria": "Copy SHA256 fingerprint"
+      "copy_fingerprint_aria": "Copy SHA256 fingerprint",
+      "until_prefix": "until"
     },
     "export": {
       "title": "Export Configuration",
