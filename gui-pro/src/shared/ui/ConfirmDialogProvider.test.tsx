@@ -49,7 +49,7 @@ describe("ConfirmDialogProvider", () => {
     await user.click(screen.getByRole("button", { name: "ask" }));
     // ConfirmDialog renders its buttons with i18n defaults: "Подтвердить" / "Отмена"
     await user.click(
-      screen.getByRole("button", { name: /Удалить/i }),
+      screen.getByRole("button", { name: /Подтвердить/i }),
     );
     expect(results).toEqual([true]);
   });
@@ -110,7 +110,7 @@ describe("ConfirmDialogProvider", () => {
 
     const user = userEvent.setup();
     // Accept first
-    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+    await user.click(screen.getByRole("button", { name: /Подтвердить/i }));
 
     // Second must appear now
     await screen.findByText("second");
@@ -190,7 +190,7 @@ describe("ConfirmDialogProvider", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "ask" }));
-    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+    await user.click(screen.getByRole("button", { name: /Подтвердить/i }));
 
     // Action was invoked but its promise is pending — dialog MUST stay open.
     expect(action).toHaveBeenCalledTimes(1);
@@ -221,7 +221,7 @@ describe("ConfirmDialogProvider", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "ask" }));
-    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+    await user.click(screen.getByRole("button", { name: /Подтвердить/i }));
 
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
@@ -247,7 +247,7 @@ describe("ConfirmDialogProvider", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "ask" }));
-    await user.click(screen.getByRole("button", { name: /Удалить/i }));
+    await user.click(screen.getByRole("button", { name: /Подтвердить/i }));
     // Try Cancel while action is still running — should be ignored.
     // Cancel button is disabled via loading=true, but belt-and-suspenders: click does nothing.
     const cancelBtn = screen.getByRole("button", { name: /Отмена/i });

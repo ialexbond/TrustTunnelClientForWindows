@@ -1248,7 +1248,7 @@
         "modal_summary_title": "Текущие правила",
         "toggle_enable_label": "Брандмауэр включён",
         "toggle_disable_confirm_title": "Отключить брандмауэр?",
-        "toggle_disable_confirm_message": "Сервер будет открыт для всех входящих подключений. Не рекомендуется в продакшене.",
+        "toggle_disable_confirm_message": "Все входящие подключения станут разрешёнными. Сервер не будет защищён от внешних обращений.",
         "toggle_disable_confirm_action": "Отключить",
         "add_rule_button": "Добавить правило",
         "snack": {
@@ -1263,7 +1263,13 @@
         "action_label_allow": "Разрешён",
         "action_label_deny": "Запрещён",
         "action_label_reject": "Отклонён",
-        "action_label_limit": "Ограничить"
+        "action_label_limit": "Ограничить",
+        "state_label": "Состояние:",
+        "install_confirm_title": "Включить брандмауэр?",
+        "install_confirm_message": "Будет установлен и активирован UFW. SSH-порт ({{ssh}}) останется открытым, остальной входящий трафик будет блокироваться по умолчанию.",
+        "delete_rule_confirm_title": "Удалить правило?",
+        "delete_rule_confirm_message": "Правило #{{n}} будет удалено. Связанный трафик начнёт обрабатываться согласно остальным правилам или политике по умолчанию.",
+        "rules_hidden_inactive": "Правила не отображаются пока брандмауэр выключен. Они сохранены и применятся снова при включении. Чтобы добавлять или редактировать правила — включите брандмауэр."
       },
       "summary": {
         "configure_button": "Настроить",
@@ -1343,8 +1349,8 @@
       "snack": {
         "fail2ban_installed": "Fail2ban установлен и активен",
         "fail2ban_uninstalled": "Fail2ban удалён",
-        "firewall_enabled": "Firewall включён",
-        "firewall_disabled": "Firewall отключён",
+        "firewall_enabled": "Брандмауэр включён",
+        "firewall_disabled": "Брандмауэр удалён",
         "rule_added": "Правило firewall добавлено",
         "rule_deleted": "Правило firewall №{{n}} удалено",
         "ip_banned": "IP {{ip}} заблокирован",
@@ -1353,8 +1359,8 @@
         "logging_set": "Логирование firewall: {{level}}",
         "fail2ban_started": "Fail2ban запущен",
         "fail2ban_stopped": "Fail2ban остановлен",
-        "firewall_started": "Firewall включён",
-        "firewall_stopped": "Firewall выключен (правила сохранены)",
+        "firewall_started": "Брандмауэр запущен",
+        "firewall_stopped": "Брандмауэр остановлен",
         "port_changed": "SSH порт изменён на {{port}}",
         "port_reset": "SSH порт сброшен на 22"
       },
@@ -1392,15 +1398,7 @@
         "uninstall_fail2ban_message": "fail2ban будет остановлен и полностью удалён с сервера (purge).",
         "stop_fail2ban_title": "Остановить fail2ban?",
         "stop_fail2ban_message": "Сервис будет остановлен, но пакет останется установленным. Вы сможете запустить его снова в любой момент.",
-        "install_firewall_title": "Включить firewall?",
-        "install_firewall_message": "UFW будет установлен и включён. Будут открыты SSH порт {{ssh}}, VPN порт {{vpn}} (tcp+udp){{http}}. Политика по умолчанию: запрет входящих.",
         "install_firewall_http_extra": ", HTTP порт 80",
-        "uninstall_firewall_title": "Удалить firewall?",
-        "uninstall_firewall_message": "UFW будет отключён и полностью удалён (purge). Все правила будут потеряны.",
-        "stop_firewall_title": "Выключить firewall?",
-        "stop_firewall_message": "UFW будет выключен, но пакет и все правила останутся. Вы сможете включить его снова с теми же правилами в любой момент.",
-        "delete_rule_title": "Удалить правило?",
-        "delete_rule_message": "Правило #{{n}} будет удалено из firewall.",
         "unban_title": "Разблокировать {{ip}}?",
         "unban_message": "{{ip}} будет удалён из jail {{jail}}.",
         "reset_port_title": "Сброс SSH порта",
@@ -1503,7 +1501,7 @@
       "ramUnit": "МБ",
       "refreshAria": "Обновить",
       "security": {
-        "firewall": "Firewall",
+        "firewall": "Брандмауэр",
         "fail2ban": "Fail2Ban",
         "sshKey": "SSH-ключ",
         "tls": "TLS",
@@ -1646,7 +1644,7 @@
     "logLevel": "Уровень логирования"
   },
   "confirmDialog": {
-    "confirm": "Удалить",
+    "confirm": "Подтвердить",
     "cancel": "Отмена"
   }
 }

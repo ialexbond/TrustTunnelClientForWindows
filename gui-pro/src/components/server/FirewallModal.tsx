@@ -70,15 +70,23 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on close edge only
   }, [isOpen]);
 
-  // D-3.3 — UFW disable goes through `state.stopFirewall` which already owns
-  // the ConfirmDialog (см. useSecurityState.ts:402-414). НО Plan 16-05 wants a
-  // shorter "Отключить Firewall?" dialog with the production confirm message
-  // tuned for this Modal context, so we override here when fwActive=true.
-  // Note: plan-prescribed wording — "Сервер будет открыт для всех входящих..."
-  // которое более явное чем installFw default copy.
+  // P UAT 2026-05-03 — FirewallModal — single source of confirm UX.
+  // Hook-internal confirms removed (см. useSecurityState.ts comment) so this
+  // is the ONLY confirm dialog в toggle flow. install/disable get explicit
+  // user-facing copy tuned для брандмауэр терминологии.
   const handleToggle = async () => {
     if (!fwInstalled) {
-      // Not installed → install flow. installFirewall already has its own confirm.
+      // Install — confirm с user-facing summary (firewall = high-stakes,
+      // меняет inbound traffic policy сервера сразу).
+      const ok = await confirm({
+        title: t("server.security.firewall.install_confirm_title"),
+        message: t("server.security.firewall.install_confirm_message", {
+          ssh: state.status?.firewall.current_ssh_port ?? "22",
+        }),
+        variant: "warning",
+        confirmText: t("server.security.firewall.action_install"),
+      });
+      if (!ok) return;
       void state.installFirewall();
       return;
     }
@@ -87,16 +95,26 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
         title: t("server.security.firewall.toggle_disable_confirm_title"),
         message: t("server.security.firewall.toggle_disable_confirm_message"),
         variant: "danger",
-        confirmText: t("server.security.firewall.toggle_disable_confirm_action"),
+        confirmText: t("server.security.firewall.action_disable"),
       });
       if (!ok) return;
-      // stopFirewall has its own confirm internally — but it has been gated above.
-      // Direct invocation of `state.run` would be cleaner here, but stopFirewall
-      // re-confirming is acceptable defensive UX (FW disable is high-stakes).
       void state.stopFirewall();
     } else {
+      // Enable — instant, никаких confirm (включение безопасно).
       void state.startFirewall();
     }
+  };
+
+  // P UAT 2026-05-03 — Per-row delete confirm moved here (hook больше не делает).
+  const handleDeleteRule = async (n: number) => {
+    const ok = await confirm({
+      title: t("server.security.firewall.delete_rule_confirm_title"),
+      message: t("server.security.firewall.delete_rule_confirm_message", { n }),
+      variant: "danger",
+      confirmText: t("buttons.delete"),
+    });
+    if (!ok) return;
+    void state.deleteRule(n);
   };
 
   return (
@@ -130,14 +148,17 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
           imperative label «Включить» / «Отключить» / «Установить»). Старый
           single-button-показывал-status-как-label был anti-pattern: пользователь
           видел кнопку «Активен» и не понимал что click отключит. */}
+      {/* P UAT 2026-05-03 fix: label «Брандмауэр включён» был static text который
+          врал когда firewall выключен. Заменён на neutral «Состояние:» — а
+          actual state читается из StatusIndicator справа. */}
       <div
         className="flex items-center justify-between gap-3 py-2 border-b"
         style={{ borderColor: "var(--color-border)" }}
         data-testid="ufw-toggle-row"
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="text-body-sm">
-            {t("server.security.firewall.toggle_enable_label")}
+          <span className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>
+            {t("server.security.firewall.state_label")}
           </span>
           <StatusIndicator
             status={fwActive ? "success" : fwInstalled ? "warning" : "danger"}
@@ -178,6 +199,22 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
           data-testid="rules-empty"
         >
           {t("server.security.firewall.not_installed")}
+        </div>
+      ) : !fwActive ? (
+        // P UAT 2026-05-03 fix: rules скрыты пока UFW выключен (backend
+        // парсит `ufw status numbered` только когда active). Объясняем
+        // пользователю что правила НЕ удалены, они применятся при включении.
+        <div
+          className="py-3 text-body-sm rounded-[var(--radius-md)] border"
+          style={{
+            color: "var(--color-text-secondary)",
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-warning-tint-08)",
+            padding: "12px 16px",
+          }}
+          data-testid="rules-hidden-inactive"
+        >
+          {t("server.security.firewall.rules_hidden_inactive")}
         </div>
       ) : rules.length === 0 ? (
         <div
@@ -242,7 +279,7 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
                 {r.comment ? `# ${r.comment}` : ""}
               </span>
               <button
-                onClick={() => void state.deleteRule(r.number)}
+                onClick={() => void handleDeleteRule(r.number)}
                 disabled={state.loading || state.fwWriting}
                 className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
                 title={t("server.security.firewall.delete")}
@@ -260,8 +297,13 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
         </div>
       )}
 
-      {/* Section 3 — Add Rule (D-3.2) */}
-      {fwInstalled && (
+      {/* Section 3 — Add Rule (D-3.2). P UAT 2026-05-03 fix: показываем
+          «Add rule» button только когда UFW active. Backend `ufw allow ...`
+          accept'ит правило когда disabled тоже, но они НЕ отображаются в
+          rules table (parse_ufw_status пропускает при !active). User
+          добавляет → не видит → думает что не сработало. Решение: disable
+          add'а пока user не enable'нул UFW. */}
+      {fwInstalled && fwActive && (
         <>
           {!state.showAddRule ? (
             <Button

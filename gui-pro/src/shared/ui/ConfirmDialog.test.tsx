@@ -31,9 +31,9 @@ describe("ConfirmDialog", () => {
     expect(screen.getByText("This action cannot be undone.")).toBeInTheDocument();
   });
 
-  it("renders default confirm text 'Удалить'", () => {
+  it("renders default confirm text 'Подтвердить'", () => {
     render(<ConfirmDialog {...defaults} />);
-    expect(screen.getByText("Удалить")).toBeInTheDocument();
+    expect(screen.getByText("Подтвердить")).toBeInTheDocument();
   });
 
   it("renders default cancel text 'Отмена'", () => {
@@ -63,7 +63,7 @@ describe("ConfirmDialog", () => {
 
   it("calls onConfirm when confirm button clicked", () => {
     render(<ConfirmDialog {...defaults} />);
-    fireEvent.click(screen.getByText("Удалить"));
+    fireEvent.click(screen.getByText("Подтвердить"));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
@@ -142,7 +142,7 @@ describe("ConfirmDialog", () => {
   it("loading=true disables Cancel button + shows Confirm spinner", () => {
     render(<ConfirmDialog {...defaults} loading={true} />);
     const cancel = screen.getByRole("button", { name: /Отмена/i });
-    const confirm = screen.getByRole("button", { name: /Удалить|Подтвердить/i });
+    const confirm = screen.getByRole("button", { name: /Подтвердить/i });
     expect(cancel).toBeDisabled();
     expect(confirm).toBeDisabled();
     // Button primitive renders Loader2 with animate-spin when loading
