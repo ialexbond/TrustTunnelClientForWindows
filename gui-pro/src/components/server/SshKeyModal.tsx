@@ -53,6 +53,13 @@ export interface SshKeyModalProps {
     keyPath?: string;
     keyData?: string;
   };
+  /**
+   * BUG-03 fix — parent reload callback. SshKeyModal updates только local
+   * `keyStatus` state после generate/disable/enable PWAuth. Без этого
+   * callback parent SecuritySection card 3 status pill remains stale until
+   * manual panel reload. Wire to `useSecurityState.load` from SecuritySection.
+   */
+  onSecurityChanged?: () => void | Promise<void>;
   /** Storybook-only: bypass `security_get_ssh_key_status` invoke. `null` = explicit empty status. */
   _forceStatus?: SshKeyStatus | null;
   /** Storybook-only: pin loading state. */
@@ -68,6 +75,7 @@ export function SshKeyModal(props: SshKeyModalProps) {
     isOpen,
     onClose,
     sshParams,
+    onSecurityChanged,
     _forceStatus,
     _forceLoading,
     _forceError,
@@ -189,6 +197,9 @@ export function SshKeyModal(props: SshKeyModalProps) {
         pubkey_fingerprint: result.fingerprint,
         password_auth_disabled: prev?.password_auth_disabled ?? false,
       }));
+      // BUG-03 fix: refresh parent SecuritySection state так что card 3
+      // status pill отражает новое состояние сразу (без manual reload).
+      void onSecurityChanged?.();
     } catch (e) {
       pushSuccess(formatError(e), "error");
     } finally {
@@ -237,6 +248,8 @@ export function SshKeyModal(props: SshKeyModalProps) {
       activityLog("STATE", `ssh_key.pwauth_disabled host=${sshHost}`);
       pushSuccess(t("server.security.ssh_key.pwauth_disabled_snack"));
       setKeyStatus((prev) => (prev ? { ...prev, password_auth_disabled: true } : prev));
+      // BUG-03 fix: refresh parent SecuritySection state.
+      void onSecurityChanged?.();
     } catch (e) {
       pushSuccess(formatError(e), "error");
     } finally {
@@ -268,6 +281,8 @@ export function SshKeyModal(props: SshKeyModalProps) {
       activityLog("STATE", `ssh_key.pwauth_enabled host=${sshHost}`);
       pushSuccess(t("server.security.ssh_key.pwauth_enabled_snack"));
       setKeyStatus((prev) => (prev ? { ...prev, password_auth_disabled: false } : prev));
+      // BUG-03 fix: refresh parent SecuritySection state.
+      void onSecurityChanged?.();
     } catch (e) {
       pushSuccess(formatError(e), "error");
     } finally {
