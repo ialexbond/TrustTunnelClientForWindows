@@ -187,10 +187,14 @@ pub async fn generate_and_deploy(
         ),
     );
 
+    // BUG-04 fix: explicitly return authorized_on_server=true так что frontend
+    // не optimistically lying. `upload_public_key` уже вернулся Ok (иначе мы
+    // не дошли сюда через `?`), значит pubkey фактически в authorized_keys.
     Ok(serde_json::json!({
         "fingerprint": key.fingerprint,
         "publicKey": key.public_openssh,
         "generated": true,
+        "authorized_on_server": true,
     }))
 }
 

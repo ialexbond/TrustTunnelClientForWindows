@@ -1196,7 +1196,11 @@ pub async fn fail2ban_set_jail_config(
 ) -> Result<(), String> {
     // Strict validation — all fields end up in shell/sed, nothing else gets through.
     if !is_safe_jail(&jail)                  { return Err("SECURITY_F2B_INVALID_JAIL".into()); }
-    if config.maxretry > 1000                { return Err("SECURITY_F2B_INVALID_MAXRETRY".into()); }
+    // BUG-06 fix: wire validate_fail2ban_int (was dead code). Rejects maxretry=0
+    // (would silently disable jail) и enforces upper bound 1..=1000. Старая
+    // проверка `> 1000` пропускала 0.
+    crate::ssh::sanitize::validate_fail2ban_int("maxretry", config.maxretry, 1000)
+        .map_err(|_| "SECURITY_F2B_INVALID_MAXRETRY".to_string())?;
     if !is_safe_duration(&config.bantime)    { return Err("SECURITY_F2B_INVALID_BANTIME".into()); }
     if !is_safe_duration(&config.findtime)   { return Err("SECURITY_F2B_INVALID_FINDTIME".into()); }
 
