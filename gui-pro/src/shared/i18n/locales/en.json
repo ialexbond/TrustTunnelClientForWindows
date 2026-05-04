@@ -1252,7 +1252,8 @@
         "action_disable": "Disable",
         "action_label_allow": "Allowed",
         "action_label_deny": "Denied",
-        "action_label_reject": "Rejected"
+        "action_label_reject": "Rejected",
+        "action_label_limit": "Limit"
       },
       "summary": {
         "configure_button": "Configure",

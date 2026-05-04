@@ -1252,7 +1252,8 @@
         "action_disable": "Отключить",
         "action_label_allow": "Разрешён",
         "action_label_deny": "Запрещён",
-        "action_label_reject": "Отклонён"
+        "action_label_reject": "Отклонён",
+        "action_label_limit": "Ограничить"
       },
       "summary": {
         "configure_button": "Настроить",
