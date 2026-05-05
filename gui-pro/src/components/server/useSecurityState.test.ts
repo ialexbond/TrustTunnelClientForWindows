@@ -234,10 +234,11 @@ describe("useSecurityState", () => {
     expect(result.current.status!.fail2ban.installed).toBe(false);
   });
 
-  it("install fail2ban calls confirm dialog with warning variant, then invokes 'security_install_fail2ban'", async () => {
+  it("install fail2ban invokes 'security_install_fail2ban' (no hook confirm — UI layer owns it)", async () => {
+    // P UAT 2026-05-04: hook-internal confirms removed (mirror Brandmauer
+    // overhaul). installFail2ban now pure invoke; Fail2banModal owns confirm UX.
     setupInvokeForLoad();
     mockConfirm.mockClear();
-    mockConfirm.mockResolvedValue(true);
     const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
 
     await vi.waitFor(() => {
@@ -248,9 +249,7 @@ describe("useSecurityState", () => {
       await result.current.installFail2ban();
     });
 
-    expect(mockConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ variant: "warning" }),
-    );
+    expect(mockConfirm).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("security_install_fail2ban", expect.objectContaining({
         host: "1.2.3.4",

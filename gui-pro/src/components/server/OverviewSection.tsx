@@ -213,8 +213,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
 
+  // P UAT 2026-05-04 fix: re-fetch на каждый flip `isOverviewVisible` —
+  // когда user сделал change в Security tab (включил/выключил брандмауэр /
+  // F2B / SSH-key) и возвращается на Overview, security card auto-pull'ит
+  // свежий state. Раньше fetch был только on mount → Overview показывал
+  // stale кэш.
   useEffect(() => {
-    if (!serverInfo?.serviceActive || rebooting) return;
+    if (!serverInfo?.serviceActive || rebooting || !isOverviewVisible) return;
     setSecurityLoading(true);
     invoke<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } }>(
       "security_get_status",
@@ -233,7 +238,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         activityLog("ERROR", `overview.security.failed err=${String(e)}`, "security_get_status");
       })
       .finally(() => setSecurityLoading(false));
-  }, [sshParams, serverInfo?.serviceActive, rebooting, activityLog]);
+  }, [sshParams, serverInfo?.serviceActive, rebooting, isOverviewVisible, activityLog]);
 
   // ── Initial ping ──
   useEffect(() => {
