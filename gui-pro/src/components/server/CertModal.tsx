@@ -132,6 +132,12 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     }
   };
 
+  // P UAT 2026-05-04: показываем certbot output (success + error) в Modal'е.
+  // User жаловался «посмотреть логи я не знаю где» — теперь expandable
+  // блок «Подробности» прямо под renew button.
+  const [renewOutput, setRenewOutput] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [renewDetailsOpen, setRenewDetailsOpen] = useState(false);
+
   const handleRenew = async () => {
     const ok = await confirm({
       title: t("server.cert.renew"),
@@ -142,18 +148,39 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     });
     if (!ok) return;
     setRenewLoading(true);
+    setRenewOutput(null);
     let succeeded = false;
     try {
-      await invoke("server_renew_cert", sshParams);
+      const output = await invoke<string>("server_renew_cert", sshParams);
       succeeded = true;
+      setRenewOutput({ kind: "success", text: output || t("server.cert.no_output_placeholder") });
+      setRenewDetailsOpen(true);
     } catch (e) {
       const raw = formatError(e);
-      let msg: string;
-      if (raw.includes("CERT_RENEW_FAILED|1")) msg = t("server.cert.error_certbot_failed");
-      else if (raw.includes("CERT_RENEW_FAILED|2") || raw.includes("CERT_RENEW_FAILED|124"))
-        msg = t("server.cert.error_rate_limit");
-      else msg = t("server.cert.error_generic", { detail: raw });
-      state.pushSuccess(msg, "error");
+      // Backend now returns "SSH_CERT_RENEW_FAILED|<code><output_tail>".
+      // Separator  (Information Separator One) — ASCII 31.
+      let detailsText = "";
+      let toastMsg: string;
+      const m = /SSH_CERT_RENEW_FAILED\|(-?\d+)\x1F([\s\S]*)$/.exec(raw);
+      if (m) {
+        const exitCode = m[1];
+        detailsText = m[2];
+        if (exitCode === "1") toastMsg = t("server.cert.error_certbot_failed");
+        else if (exitCode === "2" || exitCode === "124") toastMsg = t("server.cert.error_rate_limit");
+        else toastMsg = t("server.cert.error_with_code", { code: exitCode });
+      } else if (raw.includes("CERT_RENEW_FAILED|1")) {
+        toastMsg = t("server.cert.error_certbot_failed");
+        detailsText = raw;
+      } else if (raw.includes("CERT_RENEW_FAILED|2") || raw.includes("CERT_RENEW_FAILED|124")) {
+        toastMsg = t("server.cert.error_rate_limit");
+        detailsText = raw;
+      } else {
+        toastMsg = t("server.cert.error_generic", { detail: raw });
+        detailsText = raw;
+      }
+      state.pushSuccess(toastMsg, "error");
+      setRenewOutput({ kind: "error", text: detailsText || raw });
+      setRenewDetailsOpen(true);
     } finally {
       await new Promise((r) => setTimeout(r, 2000));
       await loadCert();
@@ -318,18 +345,60 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
 
           {/* Action footer — Renew (Let's Encrypt only) */}
           {certInfo.certType === "lets_encrypt" && (
-            <div className="border-t pt-3 flex justify-end" style={{ borderColor: "var(--color-border)" }}>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<RefreshCw className="w-3.5 h-3.5" />}
-                loading={renewLoading}
-                disabled={renewLoading}
-                onClick={() => void handleRenew()}
-                data-testid="cert-renew-button"
-              >
-                {t("server.cert.renew")}
-              </Button>
+            <div className="border-t pt-3" style={{ borderColor: "var(--color-border)" }}>
+              <div className="flex justify-end">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<RefreshCw className="w-3.5 h-3.5" />}
+                  loading={renewLoading}
+                  disabled={renewLoading}
+                  onClick={() => void handleRenew()}
+                  data-testid="cert-renew-button"
+                >
+                  {t("server.cert.renew")}
+                </Button>
+              </div>
+
+              {/* P UAT 2026-05-04: expandable «Подробности» — certbot output после
+                  renewal (success ИЛИ error). User'у нужно видеть что именно
+                  произошло (rate limit, port conflict, DNS issue). */}
+              {renewOutput && (
+                <div className="mt-3" data-testid="cert-renew-details">
+                  <button
+                    type="button"
+                    className="text-caption flex items-center gap-1.5"
+                    style={{
+                      color: renewOutput.kind === "error"
+                        ? "var(--color-status-danger)"
+                        : "var(--color-text-secondary)",
+                    }}
+                    onClick={() => setRenewDetailsOpen((v) => !v)}
+                    aria-expanded={renewDetailsOpen}
+                  >
+                    <span aria-hidden="true">{renewDetailsOpen ? "▾" : "▸"}</span>
+                    {renewOutput.kind === "error"
+                      ? t("server.cert.renew_error_details_label")
+                      : t("server.cert.renew_success_details_label")}
+                  </button>
+                  {renewDetailsOpen && (
+                    <pre
+                      className="mt-2 p-3 rounded-[var(--radius-sm)] text-mono-sm overflow-auto"
+                      style={{
+                        backgroundColor: "var(--color-bg-elevated)",
+                        color: "var(--color-text-secondary)",
+                        border: "1px solid var(--color-border)",
+                        maxHeight: "240px",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                      data-testid="cert-renew-output"
+                    >
+                      {renewOutput.text}
+                    </pre>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
