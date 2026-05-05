@@ -6,7 +6,7 @@ import {
   type SecurityState,
 } from "./useSecurityState";
 import { Button } from "../../shared/ui/Button";
-import { Accordion } from "../../shared/ui/Accordion";
+import { Input } from "../../shared/ui/Input";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { durationsEqual, normalizeDurationToSeconds } from "./fail2banUtils";
 import { cn } from "../../shared/lib/cn";
@@ -98,8 +98,12 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
     return seconds !== null ? String(seconds) : fallback;
   };
 
+  // P UAT 2026-05-04 fix: maxretry state — STRING вместо number. Раньше
+  // `parseInt(e.target.value) || 5` — при empty input parseInt вернёт
+  // NaN → `|| 5` снова ставит 5 → backspace «не работает». Now string state
+  // позволяет empty/incomplete drafts; parse на submit (validateCustom).
   const [custom, setCustom] = useState({
-    maxretry: jail?.maxretry ?? 5,
+    maxretry: jail?.maxretry !== undefined ? String(jail.maxretry) : "5",
     bantime: jail ? normalizeJailDuration(jail.bantime, "600") : "600",
     findtime: jail ? normalizeJailDuration(jail.findtime, "600") : "600",
   });
@@ -116,7 +120,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
     if (!jail) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mirror of jail config primitives into draft state on backend refresh (only when actual values change)
     setCustom({
-      maxretry: jail.maxretry,
+      maxretry: String(jail.maxretry),
       bantime: normalizeJailDuration(jail.bantime, "600"),
       findtime: normalizeJailDuration(jail.findtime, "600"),
     });
@@ -138,8 +142,9 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   // refresh с "1h" а draft "3600" → false dirty (semantically equal).
   const isCustomDirty = useMemo(() => {
     if (!jail) return false;
+    const draftRetry = parseInt(custom.maxretry, 10);
     return (
-      custom.maxretry !== jail.maxretry ||
+      (Number.isFinite(draftRetry) ? draftRetry !== jail.maxretry : true) ||
       !durationsEqual(custom.bantime, jail.bantime) ||
       !durationsEqual(custom.findtime, jail.findtime)
     );
@@ -198,7 +203,8 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   // set` и silently ломали jail. Frontend mirror invariant: maxretry 1-1000,
   // bantime 1-31536000s (1y), findtime 1-86400s (1d).
   const validateCustom = (): string | null => {
-    const r = custom.maxretry;
+    // P UAT 2026-05-04: maxretry now string state — parse here.
+    const r = parseInt(custom.maxretry, 10);
     if (!Number.isFinite(r) || r < 1) return t("server.security.fail2ban.errors.maxretry_too_low");
     if (r > 1000) return t("server.security.fail2ban.errors.maxretry_too_high");
     const bt = normalizeDurationToSeconds(custom.bantime);
@@ -222,7 +228,13 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
     }
     setCustomError(null);
     setSelectedPreset("custom");
-    void state.applyFail2banCustom(custom).catch(() => {
+    // applyFail2banCustom expects { maxretry: number, ... } — parse string draft.
+    const payload = {
+      maxretry: parseInt(custom.maxretry, 10),
+      bantime: custom.bantime,
+      findtime: custom.findtime,
+    };
+    void state.applyFail2banCustom(payload).catch(() => {
       // BUG-16 mirror: revert optimistic selection on backend failure.
       setSelectedPreset(null);
     });
@@ -320,138 +332,137 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
         </label>
       </fieldset>
 
-      {/* P0-2 #K — Dirty indicator: показываем "●" в title когда custom draft
-          расходится с jail config. Pre-Apply edit'ы не теряются молча — пользователь
-          видит что изменения ждут apply. */}
-      <Accordion
-        items={[
-          {
-            id: "custom-mode",
-            title: (
-              <span className="flex items-center gap-2">
-                {t("server.security.fail2ban.custom_title")}
-                {isCustomDirty && (
-                  <span
-                    aria-label={t("server.security.fail2ban.custom_dirty_aria")}
-                    className="inline-block w-1.5 h-1.5 rounded-full"
-                    style={{ backgroundColor: "var(--color-status-warning)" }}
-                    data-testid="custom-dirty-indicator"
-                  />
-                )}
-              </span>
-            ),
-            content: (
-              <div className="space-y-3 pt-2">
-                <div>
-                  <label
-                    htmlFor={`${idPrefix}-maxretry`}
-                    className="text-body-sm font-medium block mb-1"
-                  >
-                    {t("server.security.fail2ban.custom_maxretry_label")}
-                  </label>
-                  <input
-                    id={`${idPrefix}-maxretry`}
-                    type="number"
-                    min={1}
-                    max={1000}
-                    value={custom.maxretry}
-                    onChange={(e) =>
-                      setCustom({
-                        ...custom,
-                        maxretry: parseInt(e.target.value, 10) || 5,
-                      })
-                    }
-                    className="w-24 px-3 py-2 rounded-[var(--radius-md)] border bg-[var(--color-input-bg)] text-mono-sm"
-                    style={{ borderColor: "var(--color-input-border)" }}
-                    data-testid="custom-maxretry-input"
-                  />
-                  <p
-                    className="text-caption mt-1"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    {t("server.security.fail2ban.custom_maxretry_help")}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    htmlFor={`${idPrefix}-bantime`}
-                    className="text-body-sm font-medium block mb-1"
-                  >
-                    {t("server.security.fail2ban.custom_bantime_label")}
-                  </label>
-                  <input
-                    id={`${idPrefix}-bantime`}
-                    type="number"
-                    min={1}
-                    max={86400}
-                    value={custom.bantime}
-                    onChange={(e) =>
-                      setCustom({ ...custom, bantime: e.target.value })
-                    }
-                    className="w-24 px-3 py-2 rounded-[var(--radius-md)] border bg-[var(--color-input-bg)] text-mono-sm"
-                    style={{ borderColor: "var(--color-input-border)" }}
-                    data-testid="custom-bantime-input"
-                  />
-                  <p
-                    className="text-caption mt-1"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    {t("server.security.fail2ban.custom_bantime_help")}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    htmlFor={`${idPrefix}-findtime`}
-                    className="text-body-sm font-medium block mb-1"
-                  >
-                    {t("server.security.fail2ban.custom_findtime_label")}
-                  </label>
-                  <input
-                    id={`${idPrefix}-findtime`}
-                    type="number"
-                    min={1}
-                    max={86400}
-                    value={custom.findtime}
-                    onChange={(e) =>
-                      setCustom({ ...custom, findtime: e.target.value })
-                    }
-                    className="w-24 px-3 py-2 rounded-[var(--radius-md)] border bg-[var(--color-input-bg)] text-mono-sm"
-                    style={{ borderColor: "var(--color-input-border)" }}
-                    data-testid="custom-findtime-input"
-                  />
-                  <p
-                    className="text-caption mt-1"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    {t("server.security.fail2ban.custom_findtime_help")}
-                  </p>
-                </div>
-                {/* BUG-05 fix: validation error inline под inputs */}
-                {customError && (
-                  <p
-                    className="text-caption"
-                    style={{ color: "var(--color-status-danger)" }}
-                    role="alert"
-                    data-testid="custom-validation-error"
-                  >
-                    {customError}
-                  </p>
-                )}
-                <Button
-                  onClick={handleApplyCustom}
-                  loading={state.isBusy("f2b-preset-custom")}
-                  disabled={state.isBusy("f2b-preset-custom")}
-                  variant="secondary"
-                  data-testid="apply-custom-button"
-                >
-                  {t("server.security.fail2ban.custom_apply_button")}
-                </Button>
-              </div>
-            ),
-          },
-        ]}
-        defaultOpen={activePreset === "custom" ? ["custom-mode"] : []}
-      />
+      {/* P UAT 2026-05-04: Accordion убран. Custom-mode fields появляются
+          inline ТОЛЬКО когда выбран radio «Своя конфигурация». При выборе
+          soft/balanced/strict — fields скрыты совсем (Accordion не нужен,
+          лишний level wrapper). Input primitive вместо raw `<input>`:
+          корректный focus ring, theme-aware colors, no browser default
+          thick blue outline. */}
+      {activePreset === "custom" && (
+        <div
+          className="space-y-3 pt-2 pl-4"
+          style={{
+            borderLeft: "2px solid var(--color-accent-interactive)",
+          }}
+          data-testid="custom-fields-section"
+        >
+          {isCustomDirty && (
+            <p
+              className="text-caption flex items-center gap-1.5"
+              style={{ color: "var(--color-status-warning)" }}
+            >
+              <span
+                aria-hidden="true"
+                className="inline-block w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: "var(--color-status-warning)" }}
+                data-testid="custom-dirty-indicator"
+              />
+              {t("server.security.fail2ban.custom_dirty_aria")}
+            </p>
+          )}
+          <div>
+            <label
+              htmlFor={`${idPrefix}-maxretry`}
+              className="text-body-sm font-medium block mb-1"
+            >
+              {t("server.security.fail2ban.custom_maxretry_label")}
+            </label>
+            <Input
+              id={`${idPrefix}-maxretry`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={1000}
+              fullWidth={false}
+              value={custom.maxretry}
+              onChange={(e) =>
+                setCustom({ ...custom, maxretry: e.target.value })
+              }
+              className="w-32"
+              data-testid="custom-maxretry-input"
+            />
+            <p
+              className="text-caption mt-1"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {t("server.security.fail2ban.custom_maxretry_help")}
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-bantime`}
+              className="text-body-sm font-medium block mb-1"
+            >
+              {t("server.security.fail2ban.custom_bantime_label")}
+            </label>
+            <Input
+              id={`${idPrefix}-bantime`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={86400}
+              fullWidth={false}
+              value={custom.bantime}
+              onChange={(e) => setCustom({ ...custom, bantime: e.target.value })}
+              className="w-32"
+              data-testid="custom-bantime-input"
+            />
+            <p
+              className="text-caption mt-1"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {t("server.security.fail2ban.custom_bantime_help")}
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-findtime`}
+              className="text-body-sm font-medium block mb-1"
+            >
+              {t("server.security.fail2ban.custom_findtime_label")}
+            </label>
+            <Input
+              id={`${idPrefix}-findtime`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={86400}
+              fullWidth={false}
+              value={custom.findtime}
+              onChange={(e) => setCustom({ ...custom, findtime: e.target.value })}
+              className="w-32"
+              data-testid="custom-findtime-input"
+            />
+            <p
+              className="text-caption mt-1"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {t("server.security.fail2ban.custom_findtime_help")}
+            </p>
+          </div>
+          {/* BUG-05 fix: validation error inline под inputs */}
+          {customError && (
+            <p
+              className="text-caption"
+              style={{ color: "var(--color-status-danger)" }}
+              role="alert"
+              data-testid="custom-validation-error"
+            >
+              {customError}
+            </p>
+          )}
+          <Button
+            onClick={handleApplyCustom}
+            loading={state.isBusy("f2b-preset-custom")}
+            disabled={state.isBusy("f2b-preset-custom")}
+            variant="primary"
+            size="sm"
+            data-testid="apply-custom-button"
+          >
+            {t("server.security.fail2ban.custom_apply_button")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
