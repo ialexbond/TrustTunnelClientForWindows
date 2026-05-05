@@ -441,6 +441,19 @@ pub async fn load_ssh_key_for_host(host: String) -> Result<String, String> {
     ssh::ssh_key_keyring_load_pem(&host)?.ok_or_else(|| "KEY_NOT_FOUND".to_string())
 }
 
+/// P UAT 2026-05-04 — extract OpenSSH public key from keyring's stored
+/// private PEM. Used для recovery UX: пользователь копирует pubkey текст
+/// и manually добавляет в `~/.ssh/authorized_keys` через VPS web console
+/// если pubkey upload silently failed на server-side.
+///
+/// Returns Err("KEY_NOT_FOUND") если keyring entry missing.
+/// Returns Err("PUBKEY_DERIVE_FAILED|...") если PEM corrupted.
+#[tauri::command]
+pub async fn security_get_pubkey_for_recovery(host: String) -> Result<String, String> {
+    crate::ssh::server::server_ssh_key::keyring_extract_pubkey(&host)?
+        .ok_or_else(|| "KEY_NOT_FOUND".to_string())
+}
+
 // ─── Phase 16 — Disable PasswordAuth, Certbot Timer (D-2.2 + D-5.3) ─
 
 /// security_disable_password_auth — sshd_config edit + restart с rollback.

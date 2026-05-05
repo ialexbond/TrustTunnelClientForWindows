@@ -144,7 +144,16 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
       // → backend uses file directly (bypass keyring). После success
       // keyring можно re-populate через import flow.
       if (errStr.includes("PermissionDenied") || errStr.includes("SSH_KEY_REJECTED")) {
-        pushSuccess(t("control.ssh_key_rejected_recovery"), "error");
+        // Context-aware message:
+        // - keyPath set (.pem file selected via Обзор) → server reject'ит
+        //   key из файла → проблема на server-side (pubkey НЕ в
+        //   authorized_keys). Подсказка: серверная recovery нужна.
+        // - keyData/keyring → key из хранилища не подошёл, попробовать .pem.
+        const usingFileKey = !!keyPath;
+        const msgKey = usingFileKey
+          ? "control.ssh_key_file_rejected_server_side"
+          : "control.ssh_key_rejected_recovery";
+        pushSuccess(t(msgKey), "error");
         setAuthMode("key"); // stay in key mode — password может быть disabled
         setKeyData(""); // clear cached PEM from keyring (failed)
         setAutoConnectAttempted(false);
