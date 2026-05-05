@@ -40,9 +40,15 @@ export interface FirewallModalProps {
   isOpen: boolean;
   onClose: () => void;
   state: SecurityState;
+  /**
+   * P UAT 2026-05-04 — parent reload callback. Без этого SecuritySection
+   * card 1 + Overview tab security card остаются stale после toggle/add/
+   * delete actions. SecuritySection wires это к `security.load`.
+   */
+  onSecurityChanged?: () => void | Promise<void>;
 }
 
-export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
+export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: FirewallModalProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -86,7 +92,11 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
         confirmText: t("server.security.firewall.action_install"),
       });
       if (!ok) return;
-      void state.installFirewall();
+      // P UAT 2026-05-04: trigger parent reload (Overview/SecuritySection cards)
+      // после успешной операции. `state.load` уже вызывается внутри hook'а
+      // через `run()` — но не информирует ВНЕШНЮЮ кэш-точку (Overview).
+      await state.installFirewall();
+      void onSecurityChanged?.();
       return;
     }
     if (fwActive) {
@@ -97,10 +107,12 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
         confirmText: t("server.security.firewall.action_disable"),
       });
       if (!ok) return;
-      void state.stopFirewall();
+      await state.stopFirewall();
+      void onSecurityChanged?.();
     } else {
       // Enable — instant, никаких confirm (включение безопасно).
-      void state.startFirewall();
+      await state.startFirewall();
+      void onSecurityChanged?.();
     }
   };
 
@@ -113,7 +125,8 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
       confirmText: t("buttons.delete"),
     });
     if (!ok) return;
-    void state.deleteRule(n);
+    await state.deleteRule(n);
+    void onSecurityChanged?.();
   };
 
   return (

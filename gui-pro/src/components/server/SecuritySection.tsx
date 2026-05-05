@@ -289,12 +289,14 @@ export function SecuritySection({ state }: Props) {
         isOpen={firewallOpen}
         onClose={() => setFirewallOpen(false)}
         state={security}
+        onSecurityChanged={security.load}
       />
       <Fail2banModal
         isOpen={fail2banOpen}
         onClose={() => setFail2banOpen(false)}
         state={security}
         sshParams={state.sshParams}
+        onSecurityChanged={security.load}
       />
       <SshKeyModal
         isOpen={sshKeyOpen}

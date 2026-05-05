@@ -1189,7 +1189,11 @@
           "findtime_invalid": "Invalid find window format (use seconds or 1m/1h)",
           "findtime_too_low": "Find window must be ≥ 1 second",
           "findtime_too_high": "Find window cannot exceed 24 hours"
-        }
+        },
+        "uninstall_button": "Uninstall Fail2Ban",
+        "uninstall_help": "Complete package and configuration removal",
+        "uninstall_confirm_title": "Uninstall Fail2Ban?",
+        "uninstall_confirm_message": "The Fail2Ban package and all its configuration (including the banned IP list) will be removed from the server. Brute-force protection will stop working."
       },
       "firewall": {
         "title": "Firewall (UFW)",
@@ -1392,15 +1396,7 @@
         "certbot_timer_failed": "Failed to enable certificate auto-renewal"
       },
       "confirm": {
-        "install_fail2ban_title": "Install fail2ban?",
-        "install_fail2ban_message": "fail2ban will be installed via apt and configured with a default sshd jail (5 retries, 1h ban).",
-        "uninstall_fail2ban_title": "Remove fail2ban?",
-        "uninstall_fail2ban_message": "fail2ban will be stopped and the package completely purged from the server.",
-        "stop_fail2ban_title": "Stop fail2ban?",
-        "stop_fail2ban_message": "The service will be stopped but the package stays installed. You can start it again anytime.",
         "install_firewall_http_extra": ", HTTP port 80",
-        "unban_title": "Unban {{ip}}?",
-        "unban_message": "{{ip}} will be removed from jail {{jail}}.",
         "reset_port_title": "Reset SSH Port",
         "reset_port_message": "Reset SSH port to the default value 22? The same safe process will be used (backup, firewall, validation)."
       }

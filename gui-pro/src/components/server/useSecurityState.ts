@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../../shared/utils/formatError";
 import { translateSshError } from "../../shared/utils/translateSshError";
-import { useConfirm } from "../../shared/ui/useConfirm";
 
 // ═══════════════════════════════════════════════════════
 // Phase 16 Plan 04 — Fail2Ban presets (D-4.2).
@@ -154,7 +153,6 @@ type PushSuccess = (msg: string, type?: "success" | "error") => void;
 
 export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess, onPortChanged?: (newPort: number) => void) {
   const { t } = useTranslation();
-  const confirm = useConfirm();
 
   const showError = useCallback((msg: string) => {
     pushSuccess(msg, "error");
@@ -284,64 +282,38 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     || Array.from(busySet).some(k => k.startsWith("del-") || k === "add-rule");
 
   // ── Fail2ban actions ──
-  const installFail2ban = async () => {
-    const ok = await confirm({
-      title: t("server.security.confirm.install_fail2ban_title"),
-      message: t("server.security.confirm.install_fail2ban_message"),
-      variant: "warning",
-    });
-    if (!ok) return;
-    void run(
+  // P UAT 2026-05-04: hook-internal confirm() removed (mirror Brandmauer
+  // overhaul pattern). UI layer (Fail2banModal) owns all confirm UX.
+  const installFail2ban = () =>
+    run(
       "install-f2b",
       () => invoke("security_install_fail2ban", sshParams),
       t("server.security.snack.fail2ban_installed"),
     );
-  };
-  const uninstallFail2ban = async () => {
-    const ok = await confirm({
-      title: t("server.security.confirm.uninstall_fail2ban_title"),
-      message: t("server.security.confirm.uninstall_fail2ban_message"),
-      variant: "danger",
-    });
-    if (!ok) return;
-    void run(
+  const uninstallFail2ban = () =>
+    run(
       "uninstall-f2b",
       () => invoke("security_uninstall_fail2ban", sshParams),
       t("server.security.snack.fail2ban_uninstalled"),
     );
-  };
-  const stopFail2ban = async () => {
-    const ok = await confirm({
-      title: t("server.security.confirm.stop_fail2ban_title"),
-      message: t("server.security.confirm.stop_fail2ban_message"),
-      variant: "warning",
-    });
-    if (!ok) return;
-    void run(
+  const stopFail2ban = () =>
+    run(
       "stop-f2b",
       () => invoke("security_stop_fail2ban", sshParams),
       t("server.security.snack.fail2ban_stopped"),
     );
-  };
   const startFail2ban = () =>
     run(
       "start-f2b",
       () => invoke("security_start_fail2ban", sshParams),
       t("server.security.snack.fail2ban_started"),
     );
-  const unbanIp = async (jail: string, ip: string) => {
-    const ok = await confirm({
-      title: t("server.security.confirm.unban_title", { ip }),
-      message: t("server.security.confirm.unban_message", { ip, jail }),
-      variant: "warning",
-    });
-    if (!ok) return;
-    void run(
+  const unbanIp = (jail: string, ip: string) =>
+    run(
       `unban-${ip}`,
       () => invoke("security_fail2ban_unban", { ...sshParams, jail, ip }),
       t("server.security.snack.ip_unbanned", { ip }),
     );
-  };
   const banIp = (jail: string) => {
     const ip = manualBanIp.trim();
     if (!ip) return;

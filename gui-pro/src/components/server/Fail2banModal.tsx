@@ -35,6 +35,12 @@ export interface Fail2banModalProps {
   onClose: () => void;
   state: SecurityState;
   sshParams: SshParams;
+  /**
+   * P UAT 2026-05-04 — parent reload callback. Без этого SecuritySection
+   * card 2 + Overview tab security card остаются stale после
+   * install/uninstall/preset apply.
+   */
+  onSecurityChanged?: () => void | Promise<void>;
   /** Storybook escape hatch — pre-select banned tab for stories. */
   _forceTab?: "settings" | "banned";
 }
@@ -44,10 +50,30 @@ export function Fail2banModal({
   onClose,
   state,
   sshParams,
+  onSecurityChanged,
   _forceTab,
 }: Fail2banModalProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
+
+  // P UAT 2026-05-04 — Uninstall handler с confirm. Hook больше не делает
+  // свой confirm для install/uninstall (Brandmauer overhaul pattern).
+  const handleUninstall = async () => {
+    const ok = await confirm({
+      title: t("server.security.fail2ban.uninstall_confirm_title"),
+      message: t("server.security.fail2ban.uninstall_confirm_message"),
+      variant: "danger",
+      confirmText: t("buttons.delete"),
+    });
+    if (!ok) return;
+    await state.uninstallFail2ban();
+    void onSecurityChanged?.();
+  };
+
+  const handleInstall = async () => {
+    await state.installFail2ban();
+    void onSecurityChanged?.();
+  };
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Find sshd jail (primary). Phase 16 Plan 04 wires только sshd.
@@ -138,7 +164,7 @@ export function Fail2banModal({
             {t("server.security.fail2ban.install_help")}
           </p>
           <Button
-            onClick={() => void state.installFail2ban()}
+            onClick={() => void handleInstall()}
             loading={state.isBusy("install-f2b")}
             disabled={state.isBusy("install-f2b")}
             data-testid="install-fail2ban-button"
@@ -147,11 +173,40 @@ export function Fail2banModal({
           </Button>
         </div>
       ) : (
-        <TabsInline
-          tabs={tabs}
-          defaultTab={_forceTab ?? "settings"}
-          ariaLabel={t("server.security.fail2ban.tabs_aria")}
-        />
+        <>
+          <TabsInline
+            tabs={tabs}
+            defaultTab={_forceTab ?? "settings"}
+            ariaLabel={t("server.security.fail2ban.tabs_aria")}
+          />
+
+          {/* P UAT 2026-05-04 — Uninstall Fail2Ban был доступен в legacy
+              Fail2banSection inline, потерялся при rewrite в Modal. User
+              жалуется «куда он делся». Добавляю как опасное действие в
+              footer'е modal'а — small, секции отдельной не нужно. */}
+          <div
+            className="mt-4 pt-4 border-t flex items-center justify-between gap-3"
+            style={{ borderColor: "var(--color-border)" }}
+            data-testid="fail2ban-danger-zone"
+          >
+            <span
+              className="text-caption"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {t("server.security.fail2ban.uninstall_help")}
+            </span>
+            <Button
+              variant="danger-outline"
+              size="sm"
+              onClick={() => void handleUninstall()}
+              loading={state.isBusy("uninstall-f2b")}
+              disabled={state.isBusy("uninstall-f2b")}
+              data-testid="uninstall-fail2ban-button"
+            >
+              {t("server.security.fail2ban.uninstall_button")}
+            </Button>
+          </div>
+        </>
       )}
     </Modal>
   );

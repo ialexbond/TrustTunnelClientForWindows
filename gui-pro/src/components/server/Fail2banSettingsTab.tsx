@@ -253,7 +253,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 isActive
                   ? "border-[var(--color-accent-interactive)] bg-[var(--color-accent-tint-08)]"
                   : "border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]",
-                anyPresetBusy && "opacity-60 cursor-wait",
+                anyPresetBusy && "opacity-60",
               )}
             >
               <input
@@ -293,7 +293,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
             activePreset === "custom"
               ? "border-[var(--color-accent-interactive)] bg-[var(--color-accent-tint-08)]"
               : "border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]",
-            anyPresetBusy && "opacity-60 cursor-wait",
+            anyPresetBusy && "opacity-60",
           )}
         >
           <input

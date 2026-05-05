@@ -1189,7 +1189,11 @@
           "findtime_invalid": "Неверный формат окна обнаружения (используйте число секунд или 1m/1h)",
           "findtime_too_low": "Окно обнаружения должно быть ≥ 1 секунды",
           "findtime_too_high": "Окно обнаружения не может быть больше 24 часов"
-        }
+        },
+        "uninstall_button": "Удалить Fail2Ban",
+        "uninstall_help": "Полное удаление пакета и конфигурации",
+        "uninstall_confirm_title": "Удалить Fail2Ban?",
+        "uninstall_confirm_message": "Пакет Fail2Ban и все его настройки (включая список заблокированных IP) будут удалены с сервера. Защита от перебора паролей перестанет действовать."
       },
       "firewall": {
         "title": "Firewall (UFW)",
@@ -1392,15 +1396,7 @@
         "certbot_timer_failed": "Не удалось включить автообновление сертификата"
       },
       "confirm": {
-        "install_fail2ban_title": "Установить fail2ban?",
-        "install_fail2ban_message": "fail2ban будет установлен через apt и настроен с jail для sshd по умолчанию (5 попыток, бан 1ч).",
-        "uninstall_fail2ban_title": "Удалить fail2ban?",
-        "uninstall_fail2ban_message": "fail2ban будет остановлен и полностью удалён с сервера (purge).",
-        "stop_fail2ban_title": "Остановить fail2ban?",
-        "stop_fail2ban_message": "Сервис будет остановлен, но пакет останется установленным. Вы сможете запустить его снова в любой момент.",
         "install_firewall_http_extra": ", HTTP порт 80",
-        "unban_title": "Разблокировать {{ip}}?",
-        "unban_message": "{{ip}} будет удалён из jail {{jail}}.",
         "reset_port_title": "Сброс SSH порта",
         "reset_port_message": "Вернуть SSH-порт на стандартный 22? Будет использован тот же безопасный процесс (бэкап, firewall, валидация)."
       }
