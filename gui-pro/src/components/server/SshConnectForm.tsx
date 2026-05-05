@@ -130,15 +130,26 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
       onConnect(creds);
     } catch (e) {
       const errStr = formatError(e);
-      // Phase 16 — D-6.1: SSH key rejected → fallback to password manually.
-      // No auto-retry — user must explicitly choose action. Stale flag in
-      // localStorage cleared so next mount won't re-attempt the bad key.
+      // Phase 16 — D-6.1: SSH key rejected → recovery flow.
+      //
+      // P UAT 2026-05-04 fix (CRITICAL — user locked out): раньше fallback
+      // выкидывал в password mode + clear localStorage flag. Но если user
+      // уже отключил password auth на server'е → password больше не
+      // работает → user locked out с no escape. Single escape hatch =
+      // backup .pem file (D-2.1 forced backup при disable PW).
+      //
+      // New flow: остаёмся в "key" mode, очищаем keyring data (на следующий
+      // attempt не пытаться снова через keyring), показываем prominent
+      // file picker через i18n сообщение. User loads .pem → params.keyPath
+      // → backend uses file directly (bypass keyring). После success
+      // keyring можно re-populate через import flow.
       if (errStr.includes("PermissionDenied") || errStr.includes("SSH_KEY_REJECTED")) {
-        pushSuccess(t("control.ssh_key_rejected_fallback"), "error");
-        setAuthMode("password");
-        localStorage.removeItem(`tt_auth_method_${host.trim()}`);
+        pushSuccess(t("control.ssh_key_rejected_recovery"), "error");
+        setAuthMode("key"); // stay in key mode — password может быть disabled
+        setKeyData(""); // clear cached PEM from keyring (failed)
         setAutoConnectAttempted(false);
         setConnecting(false);
+        // НЕ clear localStorage flag — user всё равно должен использовать key
         return;
       }
       if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {
