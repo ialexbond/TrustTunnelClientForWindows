@@ -83,7 +83,8 @@
     "whats_new": "What's new",
     "close": "Close",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "loading": "Loading..."
   },
   "modal": {
     "changelog_title": "What's new in v{{version}}"
@@ -1359,7 +1360,10 @@
         "enable_pwauth_warning": "After enabling, the server will accept password login again. BOTH methods will work: key and password. This reduces security — passwords can be brute-forced. Continue?",
         "enable_pwauth_confirm": "Enable password login",
         "pwauth_enabled_snack": "Password SSH enabled. Both key and password now work.",
-        "loading_aria": "Loading SSH-key status"
+        "loading_aria": "Loading SSH-key status",
+        "recovery_toggle_label": "Recovery: show public key",
+        "recovery_help": "If the server rejects the SSH key — copy this text and add it to ~/.ssh/authorized_keys on the server (single line) via your VPS provider's web console.",
+        "recovery_paste_hint": "Server command: echo 'PASTE' >> ~/.ssh/authorized_keys"
       },
       "snack": {
         "fail2ban_installed": "Fail2ban installed and active",

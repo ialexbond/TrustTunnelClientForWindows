@@ -379,6 +379,7 @@ pub fn run() {
             commands::ssh_commands::security_export_ssh_key_backup,
             commands::ssh_commands::security_import_ssh_key,
             commands::ssh_commands::load_ssh_key_for_host,
+            commands::ssh_commands::security_get_pubkey_for_recovery,
             // Phase 16 — Disable PasswordAuth + Certbot Timer (D-2.2 + D-5.3)
             commands::ssh_commands::security_disable_password_auth,
             // Phase 16 P0-3 #E — re-enable PasswordAuth (rollback companion)

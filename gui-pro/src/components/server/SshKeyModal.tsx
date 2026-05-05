@@ -97,6 +97,13 @@ export function SshKeyModal(props: SshKeyModalProps) {
   const [enablingPw, setEnablingPw] = useState(false);
   const [fpCopied, setFpCopied] = useState(false);
 
+  // P UAT 2026-05-04 — recovery state: показать pubkey для manual deploy
+  // через VPS console. Lazy-loaded — invoked только при click «Показать».
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [recoveryPubkey, setRecoveryPubkey] = useState<string | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
+
   // T-03 — Load status on open. Storybook escape hatches short-circuit.
   // Depend on primitives (host/port/user) to avoid extra fetches when
   // parents pass non-memoized sshParams refs.
@@ -297,6 +304,39 @@ export function SshKeyModal(props: SshKeyModalProps) {
   };
 
   // P2-16 #H — DRY refactor: handleRetry now delegates to fetchStatus.
+  // P UAT 2026-05-04 — show pubkey for manual recovery (paste through VPS console).
+  const handleShowRecovery = async () => {
+    if (recoveryOpen) {
+      setRecoveryOpen(false);
+      return;
+    }
+    setRecoveryOpen(true);
+    if (recoveryPubkey) return; // уже загружен
+    setRecoveryLoading(true);
+    try {
+      const pubkey = await invoke<string>("security_get_pubkey_for_recovery", {
+        host: sshHost,
+      });
+      setRecoveryPubkey(pubkey);
+    } catch (e) {
+      pushSuccess(formatError(e), "error");
+      setRecoveryOpen(false);
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const handleCopyRecoveryPubkey = async () => {
+    if (!recoveryPubkey) return;
+    try {
+      await navigator.clipboard.writeText(recoveryPubkey);
+      setRecoveryCopied(true);
+      setTimeout(() => setRecoveryCopied(false), 1500);
+    } catch (e) {
+      pushSuccess(formatError(e), "error");
+    }
+  };
+
   const handleRetry = () => {
     void fetchStatus({ cancelled: false });
   };
@@ -431,6 +471,83 @@ export function SshKeyModal(props: SshKeyModalProps) {
                   ? t("server.security.ssh_key.regenerate_button")
                   : t("server.security.ssh_key.generate_button")}
               </Button>
+
+              {/* P UAT 2026-05-04 — Recovery section: показать публичный ключ
+                  для manual deploy через VPS console. Доступно когда key
+                  generated. Эта возможность спасает когда сервер потерял
+                  pubkey (false-positive upload, manual edit, бэкап restore). */}
+              {effectiveStatus?.generated && (
+                <div className="mt-3" data-testid="ssh-key-recovery-section">
+                  <button
+                    type="button"
+                    className="text-caption flex items-center gap-1.5"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    onClick={() => void handleShowRecovery()}
+                    aria-expanded={recoveryOpen}
+                  >
+                    <span aria-hidden="true">{recoveryOpen ? "▾" : "▸"}</span>
+                    {t("server.security.ssh_key.recovery_toggle_label")}
+                  </button>
+                  {recoveryOpen && (
+                    <div
+                      className="mt-2 p-3 rounded-[var(--radius-md)] border space-y-2"
+                      style={{
+                        borderColor: "var(--color-border)",
+                        backgroundColor: "var(--color-bg-elevated)",
+                      }}
+                    >
+                      <p
+                        className="text-caption"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        {t("server.security.ssh_key.recovery_help")}
+                      </p>
+                      {recoveryLoading ? (
+                        <p
+                          className="text-caption"
+                          style={{ color: "var(--color-text-muted)" }}
+                        >
+                          {t("buttons.loading", "Загрузка...")}
+                        </p>
+                      ) : recoveryPubkey ? (
+                        <>
+                          <pre
+                            className="p-2 rounded-[var(--radius-sm)] text-mono-sm overflow-auto"
+                            style={{
+                              backgroundColor: "var(--color-bg-primary)",
+                              color: "var(--color-text-primary)",
+                              border: "1px solid var(--color-border)",
+                              maxHeight: "120px",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-all",
+                            }}
+                            data-testid="ssh-key-recovery-pubkey"
+                          >
+                            {recoveryPubkey}
+                          </pre>
+                          <div className="flex items-center justify-between gap-2">
+                            <p
+                              className="text-caption flex-1"
+                              style={{ color: "var(--color-text-muted)" }}
+                            >
+                              {t("server.security.ssh_key.recovery_paste_hint")}
+                            </p>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => void handleCopyRecoveryPubkey()}
+                              icon={recoveryCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                              data-testid="ssh-key-recovery-copy"
+                            >
+                              {recoveryCopied ? t("buttons.copied") : t("buttons.copy")}
+                            </Button>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
 
             {/* Section 2 — Disable PasswordAuth (gated by exportPath) */}

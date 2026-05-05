@@ -552,6 +552,16 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     await loadCertbotTimerStatus();
   };
 
+  // P UAT 2026-05-04 — get public key text for manual server-side recovery.
+  // Used когда server's authorized_keys потерял pubkey (false-positive
+  // upload, или пользователь deleted manually). User копирует pubkey текст
+  // и paste'ит через VPS web console в `~/.ssh/authorized_keys`.
+  const getPubkeyForRecovery = async (): Promise<string> => {
+    return await invoke<string>("security_get_pubkey_for_recovery", {
+      host: sshParams.host,
+    });
+  };
+
   // P UAT 2026-05-04 — verify auto-renewal works through certbot dry-run.
   // Returns success message OR throws с описанием failure для UI.
   const verifyCertbotRenewal = async (): Promise<string> => {
@@ -615,6 +625,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     loadCertbotTimerStatus,
     enableCertbotTimer,
     verifyCertbotRenewal,
+    getPubkeyForRecovery,
 
     // For sub-components that need to run arbitrary ops
     run,

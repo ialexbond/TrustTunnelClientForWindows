@@ -76,6 +76,27 @@ pub fn keyring_save_pem(host: &str, pem: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// P UAT 2026-05-04 — derive public key OpenSSH form from keyring's stored PEM.
+/// Used для recovery UX: показать pubkey пользователю чтобы он мог manually
+/// добавить в authorized_keys на сервере (если pubkey upload silently failed
+/// или server-side ключ потерялся).
+///
+/// Returns Ok(None) если keyring entry не существует.
+/// Returns Err("PUBKEY_DERIVE_FAILED|...") если PEM corrupted или parse fail.
+pub fn keyring_extract_pubkey(host: &str) -> Result<Option<String>, String> {
+    let pem = match keyring_load_pem(host)? {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let parsed = ssh_key::PrivateKey::from_openssh(pem.as_bytes())
+        .map_err(|e| format!("PUBKEY_DERIVE_FAILED|parse|{e}"))?;
+    let pubkey = parsed
+        .public_key()
+        .to_openssh()
+        .map_err(|e| format!("PUBKEY_DERIVE_FAILED|encode|{e}"))?;
+    Ok(Some(pubkey))
+}
+
 /// Load private PEM from Windows Credential Manager.
 /// Returns Ok(None) when no entry exists (not an error — каждый сервер имеет
 /// собственную entry, отсутствие = «ключ ещё не сгенерирован»).
