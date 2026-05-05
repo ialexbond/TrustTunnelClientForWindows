@@ -370,13 +370,19 @@ pub async fn renew_cert(
     close_temp_port_80().await;
 
     // Return based on certbot's actual exit code.
+    // P UAT 2026-05-04 fix: include actual certbot output (last 30 lines) в
+    // error message — раньше user видел только exit code, не понимал что
+    // конкретно упало (rate limit / port 80 conflict / DNS / network).
     if !certbot_ok {
-        // Defense in depth: if the logic above changes and the happy-path close is skipped
-        // (e.g. an early return gets added between the ufw allow and here), this second call
-        // still runs before the error surface. The underlying `ufw --force delete` is idempotent.
         close_temp_port_80().await;
         let code = renew_result.as_ref().map(|(_, c)| *c).unwrap_or(-1);
-        return Err(format!("SSH_CERT_RENEW_FAILED|{code}"));
+        let output = renew_result.as_ref().map(|(out, _)| out.as_str()).unwrap_or("");
+        // Take last 30 lines (где обычно error cause) and trim длину.
+        let tail: Vec<&str> = output.lines().rev().take(30).collect();
+        let tail_text = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+        // Use special separator («\u{1F}» — Information Separator One, ASCII 31)
+        // вместо «|» — certbot output может содержать pipe characters.
+        return Err(format!("SSH_CERT_RENEW_FAILED|{code}\u{1F}{tail_text}"));
     }
 
     let output = renew_result.map(|(out, _)| out).unwrap_or_default();
