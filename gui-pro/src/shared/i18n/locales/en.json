@@ -1076,13 +1076,17 @@
       "auto_renewal_not_setup": "Auto-renewal not configured",
       "enable_auto_renewal_button": "Enable auto-renewal",
       "snack": {
-        "auto_renewal_enabled": "Certificate auto-renewal enabled"
+        "auto_renewal_enabled": "Certificate auto-renewal enabled",
+        "dry_run_succeeded": "Verification passed — auto-renewal works"
       },
       "block_issued_by": "Issued by",
       "block_validity": "Validity",
       "no_cert": "Certificate not loaded or unavailable.",
       "copy_fingerprint_aria": "Copy SHA256 fingerprint",
-      "until_prefix": "until"
+      "until_prefix": "until",
+      "verify_renewal_button": "Verify",
+      "dry_run_timeout": "Verification did not complete in 2 minutes. Possible DNS or ACME server issue.",
+      "dry_run_failed": "Verification failed: {{detail}}"
     },
     "export": {
       "title": "Export Configuration",
@@ -1193,7 +1197,12 @@
         "uninstall_button": "Uninstall Fail2Ban",
         "uninstall_help": "Complete package and configuration removal",
         "uninstall_confirm_title": "Uninstall Fail2Ban?",
-        "uninstall_confirm_message": "The Fail2Ban package and all its configuration (including the banned IP list) will be removed from the server. Brute-force protection will stop working."
+        "uninstall_confirm_message": "The Fail2Ban package and all its configuration (including the banned IP list) will be removed from the server. Brute-force protection will stop working.",
+        "stop_button": "Disable",
+        "start_button": "Enable",
+        "stop_confirm_title": "Disable Fail2Ban?",
+        "stop_confirm_message": "The fail2ban service will be stopped. Brute-force protection will stop working. The package and configuration will remain — you can re-enable later.",
+        "stop_confirm_action": "Disable"
       },
       "firewall": {
         "title": "Firewall (UFW)",
@@ -1288,7 +1297,6 @@
         "firewall_card_subtitle": "Network protection",
         "firewall_subtitle_not_installed": "UFW not installed — all ports open",
         "firewall_subtitle_inactive": "Installed but inactive — all ports open",
-        "firewall_subtitle_active": "{{count}} rules • SSH port {{port}} open",
         "fail2ban_subtitle_not_installed": "Not installed — no brute-force protection",
         "fail2ban_subtitle_inactive": "Installed but inactive",
         "fail2ban_subtitle_no_jail": "Active but no SSH jail configured",
@@ -1302,7 +1310,10 @@
         "cert_status_unknown": "Unknown",
         "cert_status_expired": "Expired",
         "cert_status_valid": "Valid for {{days}}",
-        "cert_subtitle_expires": "until {{date}}"
+        "cert_subtitle_expires": "until {{date}}",
+        "firewall_subtitle_active_rules_one": "{{count}} rule",
+        "firewall_subtitle_active_rules_other": "{{count}} rules",
+        "firewall_subtitle_active_rules": "{{count}} rules"
       },
       "ssh_port": {
         "title": "SSH Port",

@@ -82,14 +82,17 @@ export function parseCertInfo(data: unknown): CertInfo {
       if (cnMatch) result.subjectCn = cnMatch[1].trim();
     }
     if (obj.issuer && typeof obj.issuer === "string") {
-      // Build "O CN" summary from "C = US, O = Let's Encrypt, CN = R3" style.
-      // Falls back to entire issuer string if neither O nor CN matched.
+      // Extract Organization (O) — это user-facing name CA. CN suffix
+      // (e.g. "R3", "E8") = intermediate cert serial — useless для end-user
+      // (P UAT 2026-05-04: «нахуя там E8, нахуя пользователю»).
+      // Используем O если есть, иначе fallback на CN.
       const oMatch = obj.issuer.match(/O\s*=\s*([^,]+)/i);
       const cnMatch = obj.issuer.match(/CN\s*=\s*([^,]+)/i);
-      const parts: string[] = [];
-      if (oMatch) parts.push(oMatch[1].trim());
-      if (cnMatch) parts.push(cnMatch[1].trim());
-      if (parts.length > 0) result.issuerSummary = parts.join(" ");
+      if (oMatch) {
+        result.issuerSummary = oMatch[1].trim();
+      } else if (cnMatch) {
+        result.issuerSummary = cnMatch[1].trim();
+      }
     }
     if (obj.notBefore && typeof obj.notBefore === "string") {
       result.notBefore = obj.notBefore;

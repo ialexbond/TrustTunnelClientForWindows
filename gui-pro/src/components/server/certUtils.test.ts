@@ -14,13 +14,15 @@ describe("certUtils Phase 16 Plan 05 extension", () => {
     expect(result.subjectCn).toBe("vpn.example.com");
   });
 
-  it("builds issuerSummary from O + CN", () => {
+  it("builds issuerSummary from O (CN intermediate suffix dropped per UAT 2026-05-04)", () => {
+    // CN suffix («R3», «E8») = intermediate cert serial — useless для
+    // end-user. Возвращаем только Organization name.
     const data = { issuer: "C = US, O = Let's Encrypt, CN = R3" };
     const result = parseCertInfo(data);
-    expect(result.issuerSummary).toBe("Let's Encrypt R3");
+    expect(result.issuerSummary).toBe("Let's Encrypt");
   });
 
-  it("builds issuerSummary with only CN when O is missing", () => {
+  it("falls back to CN when O is missing", () => {
     const data = { issuer: "CN = R3" };
     const result = parseCertInfo(data);
     expect(result.issuerSummary).toBe("R3");

@@ -552,6 +552,23 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     await loadCertbotTimerStatus();
   };
 
+  // P UAT 2026-05-04 — verify auto-renewal works through certbot dry-run.
+  // Returns success message OR throws с описанием failure для UI.
+  const verifyCertbotRenewal = async (): Promise<string> => {
+    setBusySet((p) => new Set(p).add("verify-certbot"));
+    try {
+      const msg = await invoke<string>("server_verify_certbot_renewal", sshParams);
+      pushSuccess(t("server.cert.snack.dry_run_succeeded"));
+      return msg;
+    } finally {
+      setBusySet((p) => {
+        const n = new Set(p);
+        n.delete("verify-certbot");
+        return n;
+      });
+    }
+  };
+
   return {
     // State
     status,
@@ -597,6 +614,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     certbotTimerStatus,
     loadCertbotTimerStatus,
     enableCertbotTimer,
+    verifyCertbotRenewal,
 
     // For sub-components that need to run arbitrary ops
     run,

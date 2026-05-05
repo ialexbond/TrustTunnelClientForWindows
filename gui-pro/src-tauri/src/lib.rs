@@ -385,6 +385,7 @@ pub fn run() {
             commands::ssh_commands::security_enable_password_auth,
             commands::ssh_commands::server_get_certbot_timer_status,
             commands::ssh_commands::server_enable_certbot_timer,
+            commands::ssh_commands::server_verify_certbot_renewal,
             commands::ssh_commands::mtproto_install,
             commands::ssh_commands::mtproto_get_status,
             commands::ssh_commands::mtproto_uninstall,
