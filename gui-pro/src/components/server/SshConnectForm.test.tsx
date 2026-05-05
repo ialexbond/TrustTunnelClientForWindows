@@ -231,7 +231,11 @@ describe("SshConnectForm — Phase 16 auto-detect + import recovery", () => {
     });
   });
 
-  it("clears stale flag and switches to password on PermissionDenied (D-6.1)", async () => {
+  it("KEEPS flag=key on PermissionDenied — recovery via .pem (UAT 2026-05-04)", async () => {
+    // Раньше после PermissionDenied flag clear'ился + switch в password mode.
+    // Но если password auth disabled на server'е → user locked out с no escape.
+    // New recovery flow: stay в key mode, clear cached PEM, user loads backup
+    // .pem file через «Обзор». localStorage flag preserved.
     localStorage.setItem("tt_auth_method_192.168.1.100", "key");
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === "load_ssh_key_for_host")
@@ -243,13 +247,10 @@ describe("SshConnectForm — Phase 16 auto-detect + import recovery", () => {
 
     render(<SshConnectForm onConnect={onConnect} initialHost="192.168.1.100" />);
 
-    await waitFor(() => {
-      expect(localStorage.getItem("tt_auth_method_192.168.1.100")).toBeNull();
-    });
-    // After fallback, password input should be visible.
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText(/Введите пароль/)).toBeInTheDocument();
-    });
+    // Wait for the connect attempt to complete (snackbar fires after fail).
+    // Check that flag PRESERVED (user всё ещё key mode для recovery).
+    await new Promise((r) => setTimeout(r, 100));
+    expect(localStorage.getItem("tt_auth_method_192.168.1.100")).toBe("key");
   });
 
   it("does not auto-connect if authMethod is password", async () => {

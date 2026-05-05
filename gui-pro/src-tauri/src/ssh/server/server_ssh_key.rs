@@ -147,15 +147,36 @@ pub async fn upload_public_key(
         "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
          touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && \
          (grep -qxF '{}' ~/.ssh/authorized_keys || \
-          tee -a ~/.ssh/authorized_keys >/dev/null <<'{}'\n{}\n{})",
+          tee -a ~/.ssh/authorized_keys >/dev/null <<'{}'\n{}\n{}) 2>&1",
         trimmed, delim, trimmed, delim,
     );
 
-    let (_, code) = exec_command(handle, app, &cmd).await?;
-    if code != 0 {
-        return Err("AUTHORIZED_KEYS_WRITE_FAILED".into());
+    let (output, code) = exec_command(handle, app, &cmd).await?;
+
+    // P UAT 2026-05-04: false-positive failure detection. User reported
+    // «не выдал ошибку но при этом сгенерировал охуенно» — backend returned
+    // AUTHORIZED_KEYS_WRITE_FAILED но key фактически был в authorized_keys.
+    //
+    // Causes — `tee` exit code unreliable through SSH transport (heredoc
+    // termination, non-bash shells, restricted shells). Source of truth =
+    // содержимое файла после операции, а не tee's exit code.
+    //
+    // Defensive re-grep: если pubkey в файле — success (regardless tee code).
+    let verify_cmd = format!("grep -qxF '{}' ~/.ssh/authorized_keys", trimmed);
+    let (_, verify_code) = exec_command(handle, app, &verify_cmd).await?;
+    if verify_code == 0 {
+        // Pubkey reliably в файле — операция succeeded даже если первый
+        // command вернул non-zero (false positive ignored).
+        return Ok(());
     }
-    Ok(())
+
+    // Verify failed — pubkey NOT в файле. Real failure. Include output для
+    // диагностики (last 20 lines).
+    let tail: Vec<&str> = output.lines().rev().take(20).collect();
+    let tail_text = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+    Err(format!(
+        "AUTHORIZED_KEYS_WRITE_FAILED|{code}\u{1F}{tail_text}"
+    ))
 }
 
 /// High-level orchestrator for `security_generate_ssh_key` Tauri command.

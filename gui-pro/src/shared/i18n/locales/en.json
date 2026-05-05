@@ -1550,7 +1550,8 @@
     "ssh_key_rejected_fallback": "SSH key was rejected. Please log in with password.",
     "ssh_key_not_found": "Saved SSH key not found. Log in with password or import a key.",
     "ssh_key_imported": "SSH key loaded. Key-based login enabled.",
-    "ssh_key_load_button": "Load SSH key"
+    "ssh_key_load_button": "Load SSH key",
+    "ssh_key_rejected_recovery": "SSH key from storage was rejected. Click «Browse» and load the backup (.pem) — it was saved when you disabled password login."
   },
   "sshErrors": {
     "timeout": "Could not connect to {{target}} — connection timed out (15s)",
