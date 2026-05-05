@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { X, Shield, Trash2, Plus, Loader2 } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
-import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { Input } from "../../shared/ui/Input";
 import { Select } from "../../shared/ui/Select";
 import { useConfirm } from "../../shared/ui/useConfirm";
@@ -148,9 +147,9 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
           imperative label «Включить» / «Отключить» / «Установить»). Старый
           single-button-показывал-status-как-label был anti-pattern: пользователь
           видел кнопку «Активен» и не понимал что click отключит. */}
-      {/* P UAT 2026-05-03 fix: label «Брандмауэр включён» был static text который
-          врал когда firewall выключен. Заменён на neutral «Состояние:» — а
-          actual state читается из StatusIndicator справа. */}
+      {/* P UAT 2026-05-04 fix: dot indicator убран — он только для табы
+          «Безопасность» (summary cards). В Modal'е достаточно текста.
+          Status text окрашен в соответствующий semantic color. */}
       <div
         className="flex items-center justify-between gap-3 py-2 border-b"
         style={{ borderColor: "var(--color-border)" }}
@@ -160,17 +159,23 @@ export function FirewallModal({ isOpen, onClose, state }: FirewallModalProps) {
           <span className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>
             {t("server.security.firewall.state_label")}
           </span>
-          <StatusIndicator
-            status={fwActive ? "success" : fwInstalled ? "warning" : "danger"}
-            size="sm"
-            label={
-              fwActive
-                ? t("server.security.summary.status_active")
+          <span
+            className="text-body-sm font-medium"
+            style={{
+              color: fwActive
+                ? "var(--color-status-connected)"
                 : !fwInstalled
-                  ? t("server.security.summary.status_not_installed")
-                  : t("server.security.summary.status_inactive")
-            }
-          />
+                  ? "var(--color-status-error)"
+                  : "var(--color-status-warning)",
+            }}
+            data-testid="ufw-state-text"
+          >
+            {fwActive
+              ? t("server.security.summary.status_active")
+              : !fwInstalled
+                ? t("server.security.summary.status_not_installed")
+                : t("server.security.summary.status_inactive")}
+          </span>
         </div>
         <Button
           variant={fwActive ? "secondary" : "primary"}
