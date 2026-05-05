@@ -8,6 +8,7 @@ import { Skeleton } from "../../shared/ui/Skeleton";
 import type { ServerState } from "./useServerState";
 import { useSecurityState, FAIL2BAN_PRESETS, type Fail2banPresetId } from "./useSecurityState";
 import { durationsEqual } from "./fail2banUtils";
+import { pluralRu } from "./certUtils";
 import { CertSection } from "./CertSection";
 import { FirewallModal } from "./FirewallModal";
 import { Fail2banModal } from "./Fail2banModal";
@@ -76,7 +77,7 @@ interface Props {
  * is preserved — Phase 16 only adds optional ssh_key + cert fields.
  */
 export function SecuritySection({ state }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const security = useSecurityState(state.sshParams, state.pushSuccess, state.onPortChanged);
 
   const [firewallOpen, setFirewallOpen] = useState(false);
@@ -86,7 +87,6 @@ export function SecuritySection({ state }: Props) {
   const fwInstalled = security.status?.firewall.installed ?? false;
   const fwActive = security.status?.firewall.active ?? false;
   const fwRulesCount = security.status?.firewall.rules.length ?? 0;
-  const fwSshPort = security.status?.firewall.current_ssh_port;
   const f2bInstalled = security.status?.fail2ban.installed ?? false;
   const f2bActive = security.status?.fail2ban.active ?? false;
   const sshdJail = security.status?.fail2ban.jails.find((j) => j.name === "sshd");
@@ -117,11 +117,14 @@ export function SecuritySection({ state }: Props) {
   const fwSubtitle = useMemo(() => {
     if (!fwInstalled) return t("server.security.summary.firewall_subtitle_not_installed");
     if (!fwActive) return t("server.security.summary.firewall_subtitle_inactive");
-    return t("server.security.summary.firewall_subtitle_active", {
-      count: fwRulesCount,
-      port: fwSshPort ?? "?",
-    });
-  }, [fwInstalled, fwActive, fwRulesCount, fwSshPort, t]);
+    // P UAT 2026-05-04: pluralization fix — было «3 правил» (wrong),
+    // стало «3 правила» (proper Russian plural). EN использует i18next
+    // built-in count pluralization через keys *_one/_other.
+    const rulesText = i18n.language === "ru"
+      ? pluralRu(fwRulesCount, "правило", "правила", "правил")
+      : t("server.security.summary.firewall_subtitle_active_rules", { count: fwRulesCount });
+    return rulesText;
+  }, [fwInstalled, fwActive, fwRulesCount, i18n.language, t]);
 
   const f2bSubtitle = useMemo(() => {
     if (!f2bInstalled) return t("server.security.summary.fail2ban_subtitle_not_installed");

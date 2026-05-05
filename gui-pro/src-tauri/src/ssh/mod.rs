@@ -33,7 +33,7 @@ pub use server::{
     disable_password_auth,
     // Phase 16 P0-3 #E — re-enable PasswordAuthentication (rollback companion)
     enable_password_auth,
-    get_certbot_timer_status, enable_certbot_timer,
+    get_certbot_timer_status, enable_certbot_timer, verify_certbot_renewal,
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,
     // MtProtoStatus, MtProtoInstallStep are re-exported via commands

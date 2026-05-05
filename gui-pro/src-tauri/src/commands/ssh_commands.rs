@@ -512,6 +512,9 @@ ssh_pool_command!(server_get_certbot_timer_status, ssh::get_certbot_timer_status
 // server_enable_certbot_timer — systemctl enable --now + fallback к cron file.
 ssh_pool_command!(server_enable_certbot_timer, ssh::enable_certbot_timer);
 
+// P UAT 2026-05-04 — verify auto-renewal works (certbot renew --dry-run, no rate limit hit).
+ssh_pool_command!(server_verify_certbot_renewal, ssh::verify_certbot_renewal);
+
 // ─── Phase 14.1 — advanced user config commands ──────────────────
 
 ssh_pool_command!(

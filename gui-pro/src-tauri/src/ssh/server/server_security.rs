@@ -791,6 +791,49 @@ pub async fn enable_certbot_timer(
     Ok(())
 }
 
+/// Phase 16 P UAT 2026-05-04 — verify certbot auto-renewal без реального
+/// обновления сертификата. Использует `certbot renew --dry-run --quiet`
+/// который полностью эмулирует процесс (проверяет ACME + DNS + cert chain)
+/// но не consume rate limit и не пишет новый cert.
+///
+/// Returns:
+///   - Ok(message) с success info
+///   - Err("CERTBOT_DRY_RUN_FAILED|<exit_code>|<output>")
+pub async fn verify_certbot_renewal(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+) -> Result<String, String> {
+    let sudo = detect_sudo(handle, app).await;
+    emit_log(app, "info", "Running certbot renew --dry-run...");
+
+    // timeout 120 — typical dry-run finishes in 10-30s, 120s safe margin.
+    let (output, code) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}timeout 120 certbot renew --dry-run --quiet 2>&1; echo EXITCODE=$?"),
+    )
+    .await?;
+
+    // Parse exit code from echo'ed marker (timeout не пропускает code обратно
+    // через ssh stream — приходится grep'ать stdout).
+    let exit_code: i32 = output
+        .lines()
+        .rev()
+        .find_map(|l| l.strip_prefix("EXITCODE=").and_then(|s| s.parse().ok()))
+        .unwrap_or(code);
+
+    if exit_code == 0 {
+        Ok("Dry-run succeeded — auto-renewal будет работать.".into())
+    } else if exit_code == 124 {
+        Err("CERTBOT_DRY_RUN_FAILED|124|timeout — certbot не ответил за 120 секунд".into())
+    } else {
+        // Сжимаем output — keep last 5 lines (где обычно error cause)
+        let snippet: Vec<&str> = output.lines().rev().take(5).collect();
+        let snippet = snippet.into_iter().rev().collect::<Vec<_>>().join("\n");
+        Err(format!("CERTBOT_DRY_RUN_FAILED|{exit_code}|{snippet}"))
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //   STATUS — single roundtrip, fetches everything
 // ═══════════════════════════════════════════════════════════════

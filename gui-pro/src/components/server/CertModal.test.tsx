@@ -44,7 +44,7 @@ describe("CertModal (P1-9 + P1-10)", () => {
     i18n.changeLanguage("ru");
   });
 
-  it("renders 4-block layout when isOpen + certInfo present", async () => {
+  it("renders 3-block layout when isOpen + certInfo present (P UAT 2026-05-04: SHA-256 block убран)", async () => {
     render(
       <CertModal
         isOpen={true}
@@ -56,7 +56,8 @@ describe("CertModal (P1-9 + P1-10)", () => {
     await waitFor(() => {
       expect(screen.getByText(/Выдан/i)).toBeInTheDocument();
       expect(screen.getByText(/Срок действия/i)).toBeInTheDocument();
-      expect(screen.getByTestId("cert-fingerprint")).toBeInTheDocument();
+      // SHA-256 fingerprint block убран per UAT — useless для end-user.
+      expect(screen.queryByTestId("cert-fingerprint")).not.toBeInTheDocument();
       expect(screen.getByTestId("cert-auto-renewal-section")).toBeInTheDocument();
     });
   });
@@ -89,9 +90,7 @@ describe("CertModal (P1-9 + P1-10)", () => {
     });
   });
 
-  it("copy button copies fingerprint to clipboard", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+  it("SHA-256 copy button removed per UAT 2026-05-04 (block убран)", async () => {
     render(
       <CertModal
         isOpen={true}
@@ -100,10 +99,7 @@ describe("CertModal (P1-9 + P1-10)", () => {
         security={mockSecurity}
       />,
     );
-    fireEvent.click(await screen.findByTestId("copy-fingerprint-button"));
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(sampleLetsEncryptCert.sha256Fingerprint);
-    });
+    expect(screen.queryByTestId("copy-fingerprint-button")).not.toBeInTheDocument();
   });
 
   it("enable-auto-renewal button calls security.enableCertbotTimer", async () => {

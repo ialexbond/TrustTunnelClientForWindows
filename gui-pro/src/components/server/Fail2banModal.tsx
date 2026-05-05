@@ -56,8 +56,7 @@ export function Fail2banModal({
   const { t } = useTranslation();
   const confirm = useConfirm();
 
-  // P UAT 2026-05-04 — Uninstall handler с confirm. Hook больше не делает
-  // свой confirm для install/uninstall (Brandmauer overhaul pattern).
+  // P UAT 2026-05-04 — Uninstall handler с confirm.
   const handleUninstall = async () => {
     const ok = await confirm({
       title: t("server.security.fail2ban.uninstall_confirm_title"),
@@ -74,6 +73,28 @@ export function Fail2banModal({
     await state.installFail2ban();
     void onSecurityChanged?.();
   };
+
+  // P UAT 2026-05-04 — Stop/Start handlers (отключить vs удалить).
+  // Stop = `systemctl stop fail2ban` (mute pkg sits, can be re-enabled).
+  // Uninstall = `apt-get remove` (полное удаление).
+  const handleStop = async () => {
+    const ok = await confirm({
+      title: t("server.security.fail2ban.stop_confirm_title"),
+      message: t("server.security.fail2ban.stop_confirm_message"),
+      variant: "warning",
+      confirmText: t("server.security.fail2ban.stop_confirm_action"),
+    });
+    if (!ok) return;
+    await state.stopFail2ban();
+    void onSecurityChanged?.();
+  };
+
+  const handleStart = async () => {
+    await state.startFail2ban();
+    void onSecurityChanged?.();
+  };
+
+  const fail2banActive = state.status?.fail2ban.active ?? false;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Find sshd jail (primary). Phase 16 Plan 04 wires только sshd.
@@ -180,21 +201,39 @@ export function Fail2banModal({
             ariaLabel={t("server.security.fail2ban.tabs_aria")}
           />
 
-          {/* P UAT 2026-05-04 — Uninstall Fail2Ban был доступен в legacy
-              Fail2banSection inline, потерялся при rewrite в Modal. User
-              жалуется «куда он делся». Добавляю как опасное действие в
-              footer'е modal'а — small, секции отдельной не нужно. */}
+          {/* P UAT 2026-05-04 — Footer с двумя действиями:
+              - Отключить/Включить (systemctl stop/start fail2ban — пакет
+                остаётся, конфиг сохранён, можно включить обратно)
+              - Удалить (apt-get remove — полное удаление пакета).
+              Разные impact'ы → разные buttons. */}
           <div
-            className="mt-4 pt-4 border-t flex items-center justify-between gap-3"
+            className="mt-4 pt-4 border-t flex items-center justify-end gap-2 flex-wrap"
             style={{ borderColor: "var(--color-border)" }}
             data-testid="fail2ban-danger-zone"
           >
-            <span
-              className="text-caption"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              {t("server.security.fail2ban.uninstall_help")}
-            </span>
+            {fail2banActive ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleStop()}
+                loading={state.isBusy("stop-f2b")}
+                disabled={state.isBusy("stop-f2b")}
+                data-testid="stop-fail2ban-button"
+              >
+                {t("server.security.fail2ban.stop_button")}
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleStart()}
+                loading={state.isBusy("start-f2b")}
+                disabled={state.isBusy("start-f2b")}
+                data-testid="start-fail2ban-button"
+              >
+                {t("server.security.fail2ban.start_button")}
+              </Button>
+            )}
             <Button
               variant="danger-outline"
               size="sm"

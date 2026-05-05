@@ -146,14 +146,11 @@ describe("SecuritySection Phase 16 Plan 05 layout", () => {
       return null;
     });
     render(<SecuritySection state={makeServerState()} />);
-    // P0-5 #1 — subtitles теперь несут информативные данные (а не дублируют
-    // status). После load() ждём появления firewall subtitle с метаданными:
-    // "0 правил • SSH порт 22 открыт" + fail2ban subtitle "Активен но jail
-    // для SSH не настроен" (mock fail2ban имеет jails=[]).
+    // P UAT 2026-05-04: subtitle упрощён — теперь только rules count с правильной
+    // плюрализацией (без «SSH порт 22 открыт» — useless info per user feedback).
     await waitFor(() => {
-      // Firewall: 0 правил + порт 22 — точное совпадение pluralизации
-      // зависит от i18n key, но "SSH порт" + "22" должны быть.
-      expect(screen.getByText(/SSH порт 22/i)).toBeVisible();
+      // Firewall subtitle: «0 правил» (Russian plural for 0).
+      expect(screen.getByText(/0\s*правил/i)).toBeVisible();
       // Fail2Ban: jails=[] → "no_jail" subtitle
       expect(screen.getByText(/jail для SSH не настроен/i)).toBeVisible();
     });

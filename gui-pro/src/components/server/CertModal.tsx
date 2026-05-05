@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { X, ShieldCheck, RefreshCw, RotateCw, Copy, Check } from "lucide-react";
+import { X, ShieldCheck, RefreshCw, RotateCw } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
@@ -10,7 +10,7 @@ import { formatError } from "../../shared/utils/formatError";
 import { cn } from "../../shared/lib/cn";
 import type { ServerState } from "./useServerState";
 import type { useSecurityState } from "./useSecurityState";
-import { parseCertInfo, daysUntil, truncateFingerprint, pluralRu, type CertInfo } from "./certUtils";
+import { parseCertInfo, daysUntil, pluralRu, type CertInfo } from "./certUtils";
 
 /**
  * P1-9 + P1-10 #R+#3 — CertModal compound.
@@ -84,7 +84,6 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
   const confirm = useConfirm();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [renewLoading, setRenewLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
   const certInfo: CertInfo | null = preloadedCert ? parseCertInfo(preloadedCert) : null;
 
@@ -100,7 +99,6 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     if (isOpen) return;
     const timer = setTimeout(() => {
       setRenewLoading(false);
-      setCopied(false);
     }, 200);
     return () => clearTimeout(timer);
   }, [isOpen]);
@@ -111,6 +109,26 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
       setPreloadedCert(raw);
     } catch (e) {
       state.pushSuccess(formatError(e), "error");
+    }
+  };
+
+  const handleVerifyRenewal = async () => {
+    try {
+      await security.verifyCertbotRenewal();
+      // Success snack уже fired в hook
+    } catch (e) {
+      const raw = formatError(e);
+      // Translate cryptic backend codes
+      let msg: string;
+      if (raw.includes("CERTBOT_DRY_RUN_FAILED|124")) {
+        msg = t("server.cert.dry_run_timeout");
+      } else if (raw.includes("CERTBOT_DRY_RUN_FAILED")) {
+        const detail = raw.split("|").slice(2).join("|");
+        msg = t("server.cert.dry_run_failed", { detail });
+      } else {
+        msg = t("server.cert.error_generic", { detail: raw });
+      }
+      state.pushSuccess(msg, "error");
     }
   };
 
@@ -141,17 +159,6 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
       await loadCert();
       setRenewLoading(false);
       if (succeeded) state.pushSuccess(t("server.cert.renewed"));
-    }
-  };
-
-  const handleCopyFingerprint = async () => {
-    if (!certInfo?.sha256Fingerprint) return;
-    try {
-      await navigator.clipboard.writeText(certInfo.sha256Fingerprint);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (e) {
-      state.pushSuccess(formatError(e), "error");
     }
   };
 
@@ -250,38 +257,11 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
             )}
           </section>
 
-          {/* Block 3 — Fingerprint + Copy (P2-13) */}
-          {certInfo.sha256Fingerprint && (
-            <section
-              className="border-t pt-3"
-              style={{ borderColor: "var(--color-border)" }}
-            >
-              <div className="text-caption mb-1" style={{ color: "var(--color-text-secondary)" }}>
-                {t("server.cert.fingerprint_label")}
-              </div>
-              <div className="flex items-center gap-2">
-                <code
-                  className="text-mono-sm flex-1 truncate"
-                  title={certInfo.sha256Fingerprint}
-                  data-testid="cert-fingerprint"
-                >
-                  {truncateFingerprint(certInfo.sha256Fingerprint)}
-                </code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void handleCopyFingerprint()}
-                  icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  aria-label={t("server.cert.copy_fingerprint_aria")}
-                  data-testid="copy-fingerprint-button"
-                >
-                  {copied ? t("buttons.copied") : t("buttons.copy")}
-                </Button>
-              </div>
-            </section>
-          )}
+          {/* P UAT 2026-05-04: SHA-256 fingerprint block убран — для end-user
+              он бесполезен (домен и issuer уже в Block 1). Если admin'у нужен
+              для верификации — может через ssh посмотреть `openssl x509 ...`. */}
 
-          {/* Block 4 — Auto-renewal toggle (D-5.3) */}
+          {/* Block 3 (was 4) — Auto-renewal toggle (D-5.3) */}
           <section
             className="border-t pt-3"
             style={{ borderColor: "var(--color-border)" }}
@@ -292,12 +272,29 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
             </div>
             {security.certbotTimerStatus?.auto_renewal_active ? (
               <div
-                className="flex items-center gap-2 text-body-sm"
-                style={{ color: "var(--color-status-connected)" }}
+                className="flex items-center justify-between gap-2"
                 data-testid="auto-renewal-active"
               >
-                <span aria-hidden="true">✓</span>
-                <span>{t("server.cert.auto_renewal_enabled")}</span>
+                <div
+                  className="flex items-center gap-2 text-body-sm"
+                  style={{ color: "var(--color-status-connected)" }}
+                >
+                  <span aria-hidden="true">✓</span>
+                  <span>{t("server.cert.auto_renewal_enabled")}</span>
+                </div>
+                {/* P UAT 2026-05-04 — Verify button: certbot renew --dry-run
+                    fully simulates renewal без consume rate limit. User
+                    видит что auto-renewal реально работает. */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleVerifyRenewal()}
+                  loading={security.isBusy("verify-certbot")}
+                  disabled={security.isBusy("verify-certbot")}
+                  data-testid="verify-renewal-button"
+                >
+                  {t("server.cert.verify_renewal_button")}
+                </Button>
               </div>
             ) : (
               <div className="flex items-center justify-between gap-2">
