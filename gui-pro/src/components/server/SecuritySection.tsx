@@ -292,20 +292,38 @@ export function SecuritySection({ state }: Props) {
         isOpen={firewallOpen}
         onClose={() => setFirewallOpen(false)}
         state={security}
-        onSecurityChanged={security.load}
+        onSecurityChanged={async () => {
+          await security.load();
+          // P UAT 2026-05-04 — broadcast event для cross-tab sync (Overview
+          // listens). Без этого Overview видит stale state пока user не
+          // переключится на него (visibility flip trigger).
+          window.dispatchEvent(new CustomEvent("tt:security-changed"));
+        }}
       />
       <Fail2banModal
         isOpen={fail2banOpen}
         onClose={() => setFail2banOpen(false)}
         state={security}
         sshParams={state.sshParams}
-        onSecurityChanged={security.load}
+        onSecurityChanged={async () => {
+          await security.load();
+          // P UAT 2026-05-04 — broadcast event для cross-tab sync (Overview
+          // listens). Без этого Overview видит stale state пока user не
+          // переключится на него (visibility flip trigger).
+          window.dispatchEvent(new CustomEvent("tt:security-changed"));
+        }}
       />
       <SshKeyModal
         isOpen={sshKeyOpen}
         onClose={() => setSshKeyOpen(false)}
         sshParams={state.sshParams}
-        onSecurityChanged={security.load}
+        onSecurityChanged={async () => {
+          await security.load();
+          // P UAT 2026-05-04 — broadcast event для cross-tab sync (Overview
+          // listens). Без этого Overview видит stale state пока user не
+          // переключится на него (visibility flip trigger).
+          window.dispatchEvent(new CustomEvent("tt:security-changed"));
+        }}
       />
     </div>
   );

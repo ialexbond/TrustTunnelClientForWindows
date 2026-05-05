@@ -1185,14 +1185,49 @@ pub async fn stop_firewall(
 }
 
 /// Enable a previously-installed UFW — re-activates saved rules.
+/// P UAT 2026-05-04 fix: defensive rules ensure перед enable. Раньше
+/// `start_firewall` был просто `ufw --force enable` — если у user'а пустые
+/// правила (no SSH allow), включение → lockout по SSH моментально.
+///
+/// Now: idempotently добавляем SSH+VPN ports BEFORE enable. UFW skip'ает
+/// duplicate rules, поэтому safe для already-configured firewall'ов.
 pub async fn start_firewall(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
+    ssh_port: u16,
 ) -> Result<(), String> {
-    emit_step(app, "security", "progress", "Enabling firewall...");
     let sudo = detect_sudo(handle, app).await;
+
+    // Defense against lockout: SSH port allow PRIOR to enable.
+    emit_log(app, "info", &format!("Ensuring SSH port {ssh_port}/tcp is allowed before enable..."));
+    let _ = exec_command(
+        handle,
+        app,
+        &format!("{sudo}ufw allow {ssh_port}/tcp comment 'SSH (TrustTunnel)'"),
+    )
+    .await?;
+
+    // Best-effort VPN port allow — read from hosts.toml. Если parse fail,
+    // fallback to standard 443.
+    let vpn_port = read_vpn_port(handle, app, sudo).await.unwrap_or(443);
+    emit_log(app, "info", &format!("Ensuring VPN port {vpn_port}/tcp is allowed..."));
+    let _ = exec_command(
+        handle,
+        app,
+        &format!("{sudo}ufw allow {vpn_port}/tcp comment 'VPN (TrustTunnel)'"),
+    )
+    .await?;
+
+    // Default policies — defensive: if firewall enabled fresh без default deny,
+    // user никогда не получит ожидаемой security. Idempotent.
+    let _ = exec_command(handle, app, &format!("{sudo}ufw default deny incoming")).await?;
+    let _ = exec_command(handle, app, &format!("{sudo}ufw default allow outgoing")).await?;
+
+    emit_step(app, "security", "progress", "Enabling firewall...");
     let (_, code) = exec_command(handle, app, &format!("{sudo}ufw --force enable")).await?;
-    if code != 0 { return Err("SECURITY_UFW_START_FAILED".into()); }
+    if code != 0 {
+        return Err("SECURITY_UFW_START_FAILED".into());
+    }
     emit_step(app, "security", "ok", "Firewall enabled");
     Ok(())
 }

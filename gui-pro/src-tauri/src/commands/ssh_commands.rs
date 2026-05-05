@@ -159,7 +159,30 @@ ssh_pool_command!(security_install_fail2ban, ssh::install_fail2ban);
 ssh_pool_command!(security_uninstall_fail2ban, ssh::uninstall_fail2ban);
 ssh_pool_command!(security_start_fail2ban, ssh::start_fail2ban);
 ssh_pool_command!(security_stop_fail2ban, ssh::stop_fail2ban);
-ssh_pool_command!(security_start_firewall, ssh::start_firewall);
+// P UAT 2026-05-04: security_start_firewall — manual (extra ssh_port param).
+// Previously macro-based; now нужен SSH port для defensive rule add перед enable.
+#[tauri::command]
+pub async fn security_start_firewall(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<(), String> {
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::start_firewall(&app, &handle, port).await
+}
 ssh_pool_command!(security_stop_firewall, ssh::stop_firewall);
 ssh_pool_command!(security_fail2ban_unban, ssh::fail2ban_unban, jail: String, ip: String);
 ssh_pool_command!(security_fail2ban_ban, ssh::fail2ban_ban, jail: String, ip: String);

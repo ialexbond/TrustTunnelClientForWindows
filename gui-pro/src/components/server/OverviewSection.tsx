@@ -213,13 +213,14 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
 
-  // P UAT 2026-05-04 fix: re-fetch на каждый flip `isOverviewVisible` —
-  // когда user сделал change в Security tab (включил/выключил брандмауэр /
-  // F2B / SSH-key) и возвращается на Overview, security card auto-pull'ит
-  // свежий state. Раньше fetch был только on mount → Overview показывал
-  // stale кэш.
-  useEffect(() => {
-    if (!serverInfo?.serviceActive || rebooting || !isOverviewVisible) return;
+  // P UAT 2026-05-04 fix: re-fetch на каждый flip `isOverviewVisible` +
+  // window event listener — когда user сделал change в Security tab
+  // (включил/выключил брандмауэр / F2B / SSH-key), Security tab dispatch'ит
+  // 'tt:security-changed' event → Overview re-fetch'ит немедленно (даже если
+  // user уже на Overview — но обычно user ещё переключает tab, тогда
+  // visibility flip триггерит). Двойная защита от stale state.
+  const refetchSecurity = () => {
+    if (!serverInfo?.serviceActive || rebooting) return;
     setSecurityLoading(true);
     invoke<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } }>(
       "security_get_status",
@@ -238,7 +239,23 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         activityLog("ERROR", `overview.security.failed err=${String(e)}`, "security_get_status");
       })
       .finally(() => setSecurityLoading(false));
-  }, [sshParams, serverInfo?.serviceActive, rebooting, isOverviewVisible, activityLog]);
+  };
+
+  useEffect(() => {
+    if (!isOverviewVisible) return;
+    refetchSecurity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional minimal deps
+  }, [sshParams.host, serverInfo?.serviceActive, rebooting, isOverviewVisible]);
+
+  // Listen to cross-component «security state changed» events from
+  // SecuritySection / FirewallModal / Fail2banModal. Even when user is
+  // на Overview tab while change happens (rare — but defensive).
+  useEffect(() => {
+    const handler = () => refetchSecurity();
+    window.addEventListener("tt:security-changed", handler);
+    return () => window.removeEventListener("tt:security-changed", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handler closure captures latest refetchSecurity via ref-like pattern
+  }, [sshParams.host, serverInfo?.serviceActive, rebooting]);
 
   // ── Initial ping ──
   useEffect(() => {
