@@ -1523,7 +1523,8 @@
       "reboot_title": "Reboot server?",
       "reboot_message": "Server will reboot. This will take 1-2 minutes.",
       "delete_title": "Delete TrustTunnel?",
-      "delete_message": "VPN will be completely removed from the server. This action is irreversible."
+      "delete_message": "VPN will be completely removed from the server. This action is irreversible.",
+      "uninstalled": "VPN removed from server"
     },
     "service": {
       "controls_title": "Service Control"
