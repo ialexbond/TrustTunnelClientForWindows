@@ -750,7 +750,27 @@
       "loading": "Loading...",
       "no_data": "No data",
       "copied": "Logs copied to clipboard",
-      "error": "Error: {{error}}"
+      "error": "Error: {{error}}",
+      "card": {
+        "title": "Server Logs",
+        "last_update": "Last updated: {{time}}",
+        "empty": "Click 'Open Logs' to load",
+        "open_button": "Open Logs"
+      },
+      "modal": {
+        "title": "Server Logs",
+        "search_placeholder": "Search logs… (e.g. 'error', 'connection')",
+        "match_count": "Found: {{count}} lines",
+        "no_matches": "No results for search query",
+        "no_data": "Logs not loaded",
+        "empty": "Logs are empty",
+        "hint_filter": "Auto-highlighting: red = error, yellow = warn",
+        "download": "Download",
+        "download_success": "Logs saved: {{path}}",
+        "refresh": "Refresh",
+        "copy": "Copy",
+        "copied": "Copied"
+      }
     },
     "diagnostics": {
       "title": "Diagnostics",
@@ -1427,6 +1447,64 @@
           "enable_error": "Failed to enable BBR: {{error}}",
           "disable_error": "Failed to disable BBR: {{error}}"
         }
+      },
+      "benchmark": {
+        "modal_title": "Server Quality Check",
+        "card": {
+          "title": "Server Check",
+          "empty": "No check has been performed yet",
+          "last_run": "Last check: {{time}}"
+        },
+        "button": {
+          "check_quality": "Check Quality",
+          "open_results": "Open Results"
+        },
+        "stages": {
+          "ip": "Getting IP",
+          "type": "Identifying type",
+          "risk": "Assessing risk",
+          "services": "Checking service availability",
+          "email": "Checking email"
+        },
+        "hint_running": "This may take 1-3 minutes",
+        "cancel_confirm_title": "Cancel check?",
+        "cancel_confirm_message": "The current check will be interrupted. Results will not be saved.",
+        "cancel_button": "Cancel",
+        "cancelling_button": "Cancelling...",
+        "cancelled_message": "The check was cancelled.",
+        "restart_button": "Run again",
+        "rerun_button": "Check again",
+        "close_button": "Close",
+        "start_button": "Start check",
+        "retry_button": "Retry",
+        "duration_label": "Duration: {{seconds}}s",
+        "raw_output_title": "Script output",
+        "copy_raw": "Copy",
+        "copied_raw": "Copied!",
+        "parser_fail_banner": "Could not parse output — showing full text",
+        "section": {
+          "basic": "IP / Location",
+          "ip_type": "IP Type",
+          "risk": "Risk Assessment",
+          "streaming": "Streaming Services",
+          "email": "Email / DNSBL"
+        },
+        "streaming_status": {
+          "available": "Available",
+          "restricted": "Restricted",
+          "blocked": "Blocked",
+          "unknown": "Unknown"
+        },
+        "history": {
+          "dropdown_label": "Previous checks",
+          "current": "Current ({{time}})"
+        },
+        "snack": {
+          "completed": "Check completed",
+          "failed": "Check error: {{error}}"
+        },
+        "empty_hint": "Click «Check Quality» to run a server quality check.",
+        "error_prefix": "Error:"
       }
     },
     "danger": {
