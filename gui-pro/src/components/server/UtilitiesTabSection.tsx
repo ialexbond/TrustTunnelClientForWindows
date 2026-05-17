@@ -123,7 +123,7 @@ export function UtilitiesTabSection({ state }: Props) {
       </Card>
 
       {/* Block 3: MTProto — перенесено из ServerSettingsSection Advanced Accordion */}
-      {mtproto.status && <MtProtoSection state={mtproto} />}
+      {mtproto.status && <MtProtoSection state={mtproto} sshParams={sshParams} />}
 
       {/* Block 4: Logs — перенесено из ServiceSection */}
       <LogsSection state={state} />

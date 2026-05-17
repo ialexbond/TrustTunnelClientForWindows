@@ -1,10 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 import { MtProtoSection } from "./MtProtoSection";
-import type { MtProtoState } from "./useMtProtoState";
+import type { MtProtoState, MtProtoStatus, SshParams } from "./useMtProtoState";
+import { renderWithProviders as render } from "../../test/test-utils";
 
-// ─── Helpers ────────────────────────────────────────
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("../../shared/hooks/useActivityLog", () => ({
+  useActivityLog: () => ({ log: vi.fn() }),
+}));
+
+const SSH_PARAMS: SshParams = {
+  host: "example.com",
+  port: 22,
+  user: "admin",
+  password: "test-section-pass",
+};
 
 const STEPS = [
   { key: "download", label: "Скачивание" },
@@ -14,9 +26,21 @@ const STEPS = [
   { key: "complete", label: "Готово" },
 ];
 
-function makeState(overrides?: Partial<MtProtoState>): MtProtoState {
+function mkState(statusOverride?: Partial<MtProtoStatus> | null): MtProtoState {
+  const status: MtProtoStatus | null =
+    statusOverride === null
+      ? null
+      : {
+          installed: false,
+          active: false,
+          port: 0,
+          secret: "",
+          proxy_link: "",
+          ...(statusOverride ?? {}),
+        };
+
   return {
-    status: null,
+    status,
     loading: false,
     error: null,
     installing: false,
@@ -24,170 +48,55 @@ function makeState(overrides?: Partial<MtProtoState>): MtProtoState {
     currentStep: 0,
     stepStatus: "active",
     steps: STEPS,
-    load: vi.fn(),
-    install: vi.fn(),
-    requestUninstall: vi.fn(),
+    load: vi.fn().mockResolvedValue(undefined),
+    install: vi.fn().mockResolvedValue(undefined),
+    requestUninstall: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn(),
-    sshParams: { host: "1.2.3.4", port: 22, user: "root", password: "pass", keyPath: "" },
-    ...overrides,
+    sshParams: SSH_PARAMS,
   } as unknown as MtProtoState;
 }
 
-// ─── Tests ──────────────────────────────────────────
+beforeEach(() => {
+  vi.clearAllMocks();
+  void i18n.changeLanguage("ru");
+  Object.assign(navigator, {
+    clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
+});
 
 describe("MtProtoSection", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    i18n.changeLanguage("ru");
-
-    // Mock clipboard API — writeText returns a resolved promise.
-    Object.assign(navigator, {
-      clipboard: {
-        writeText: vi.fn().mockResolvedValue(undefined),
-      },
-    });
+  it("renders Card with correct data-testid", () => {
+    const state = mkState({ installed: false, active: false });
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+    expect(screen.getByTestId("mtproto-section-card")).toBeVisible();
   });
 
-  it("renders not_installed state with port input and Install button (MTPROTO-01)", () => {
-    const state = makeState({
-      status: { installed: false, active: false, port: 0, secret: "", proxy_link: "" },
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    // Status pill shows "Не установлен"
-    expect(screen.getByText("Не установлен")).toBeVisible();
-    // Install CTA
-    expect(screen.getByRole("button", { name: "Установить" })).toBeVisible();
-    // Port input with placeholder hinting the 1024-65535 range
-    expect(screen.getByPlaceholderText("Случайный (1024-65535)")).toBeVisible();
+  it("not_installed state shows «Установить» button (primary)", () => {
+    const state = mkState({ installed: false, active: false });
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+    const btn = screen.getByTestId("mtproto-open-button");
+    expect(btn).toBeVisible();
+    expect(btn.textContent).toContain("Установить");
   });
 
-  it("renders installing state with StepProgress (MTPROTO-02)", () => {
-    const state = makeState({
-      status: { installed: false, active: false, port: 0, secret: "", proxy_link: "" },
-      installing: true,
-      currentStep: 1,
-      stepStatus: "active",
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    // Status label
-    expect(screen.getByText("Установка...")).toBeVisible();
-    // Every StepProgress label rendered (means StepProgress is mounted)
-    for (const step of STEPS) {
-      expect(screen.getByText(step.label)).toBeVisible();
-    }
-    // Install CTA is NOT shown while installing
-    expect(screen.queryByRole("button", { name: "Установить" })).not.toBeInTheDocument();
+  it("installed+active state shows «Настроить» button and success indicator", () => {
+    const state = mkState({ installed: true, active: true, port: 4443 });
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+    const btn = screen.getByTestId("mtproto-open-button");
+    expect(btn).toBeVisible();
+    expect(btn.textContent).toContain("Настроить");
+    // StatusIndicator should have success aria-label (содержит "Активен на порту 4443")
+    const indicator = screen.getByRole("img");
+    expect(indicator).toBeVisible();
+    expect(indicator.getAttribute("aria-label")).toContain("Активен на порту 4443");
   });
 
-  it("renders installed state with proxy_link and Copy button (MTPROTO-05, MTPROTO-06)", () => {
-    const proxyLink = "tg://proxy?server=1.2.3.4&port=8443&secret=ee00";
-    const state = makeState({
-      status: {
-        installed: true,
-        active: true,
-        port: 8443,
-        secret: "ee00",
-        proxy_link: proxyLink,
-      },
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    // Proxy link rendered verbatim
-    expect(screen.getByText(proxyLink)).toBeVisible();
-    // Copy button
-    expect(screen.getByRole("button", { name: "Скопировать" })).toBeVisible();
-    // Uninstall button
-    expect(screen.getByRole("button", { name: "Удалить" })).toBeVisible();
-    // Port display
-    expect(screen.getByText("Порт: 8443")).toBeVisible();
-  });
-
-  it("renders error state with error message and Retry button", () => {
-    const state = makeState({
-      status: { installed: false, active: false, port: 0, secret: "", proxy_link: "" },
-      error: "SSH connection refused",
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    expect(screen.getByText("SSH connection refused")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Повторить" })).toBeVisible();
-    // Status pill reflects the error
-    expect(screen.getByText("Ошибка")).toBeVisible();
-  });
-
-  it("Copy button writes proxy_link to clipboard", async () => {
-    const proxyLink = "tg://proxy?server=host&port=443&secret=ff";
-    const state = makeState({
-      status: {
-        installed: true,
-        active: true,
-        port: 443,
-        secret: "ff",
-        proxy_link: proxyLink,
-      },
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Скопировать" }));
-
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(proxyLink);
-    });
-  });
-
-  it("Uninstall button calls requestUninstall (MTPROTO-08)", () => {
-    const requestUninstall = vi.fn();
-    const state = makeState({
-      status: {
-        installed: true,
-        active: true,
-        port: 8443,
-        secret: "ee",
-        proxy_link: "tg://proxy?x=1",
-      },
-      requestUninstall,
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
-    expect(requestUninstall).toHaveBeenCalledTimes(1);
-  });
-
-  it("port input accepts values 1024-65535 (MTPROTO-03)", () => {
-    const state = makeState({
-      status: { installed: false, active: false, port: 0, secret: "", proxy_link: "" },
-    });
-
-    render(<MtProtoSection state={state} />);
-
-    const input = screen.getByPlaceholderText("Случайный (1024-65535)") as HTMLInputElement;
-
-    // NumberInput filters input to digits and exposes inputMode=numeric.
-    expect(input).toHaveAttribute("inputMode", "numeric");
-
-    // Valid port 1024 — no internal error surfaces on blur.
-    fireEvent.change(input, { target: { value: "1024" } });
-    fireEvent.blur(input);
-    expect(input.value).toBe("1024");
-    expect(screen.queryByText(/^Min:/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Max:/)).not.toBeInTheDocument();
-
-    // Out-of-range port 80 — NumberInput shows the Min: hint on blur.
-    fireEvent.change(input, { target: { value: "80" } });
-    fireEvent.blur(input);
-    expect(screen.getByText("Min: 1024")).toBeVisible();
-
-    // Above-max 70000 triggers Max hint.
-    fireEvent.change(input, { target: { value: "70000" } });
-    fireEvent.blur(input);
-    expect(screen.getByText("Max: 65535")).toBeVisible();
+  it("click button opens MtProtoModal (modal install button appears)", () => {
+    const state = mkState({ installed: false, active: false });
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+    const btn = screen.getByTestId("mtproto-open-button");
+    fireEvent.click(btn);
+    // After click, MtProtoModal renders install form — install button inside Modal appears
+    expect(screen.getByTestId("mtproto-install-button")).toBeInTheDocument();
   });
 });

@@ -1,154 +1,90 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Copy, Check, Trash2, Send } from "lucide-react";
-import { NumberInput } from "../../shared/ui";
+import { Send } from "lucide-react";
+import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { StepProgress } from "./StepProgress";
-import type { MtProtoState } from "./useMtProtoState";
+import { StatusIndicator } from "../../shared/ui/StatusIndicator";
+import { MtProtoModal } from "./MtProtoModal";
+import type { MtProtoState, SshParams } from "./useMtProtoState";
+
+/**
+ * MtProtoSection — Phase 17 Plan 04 (D-4.1).
+ *
+ * Card preview для MTProto Proxy в табе «Утилиты».
+ * Показывает StatusIndicator (active port / not installed) + кнопку «Установить» / «Настроить».
+ * Вся install/configure логика перенесена в MtProtoModal compound.
+ *
+ * Pattern: identical to SecuritySection Card-1 (Firewall) — Phase 16.
+ */
 
 interface MtProtoSectionProps {
   state: MtProtoState;
+  sshParams: SshParams;
 }
 
-export function MtProtoSection({ state }: MtProtoSectionProps) {
+export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
   const { t } = useTranslation();
-  const [portInput, setPortInput] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
 
-  const parsedPort = portInput ? parseInt(portInput, 10) : 0;
+  const installed = state.status?.installed ?? false;
+  const active = state.status?.active ?? false;
 
-  const handleInstall = () => {
-    state.install(parsedPort);
-  };
+  // StatusIndicator: success = installed && active, warning = installed && !active, danger = !installed
+  const indicatorStatus: "success" | "warning" | "danger" = installed && active
+    ? "success"
+    : installed
+      ? "warning"
+      : "danger";
 
-  const proxyLink = state.status?.proxy_link;
-  const handleCopy = useCallback(async () => {
-    if (!proxyLink) return;
-    await navigator.clipboard.writeText(proxyLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [proxyLink]);
-
-  const handleRetry = () => {
-    state.retry(parsedPort);
-  };
-
-  // Determine display state
-  const isInstalled = state.status?.installed ?? false;
-  const isActive = state.status?.active ?? false;
+  // Subtitle label describing current state
+  const subtitleLabel = installed && active
+    ? t("server.utilities.mtproto.card.active_on_port", { port: state.status?.port })
+    : installed
+      ? t("server.utilities.mtproto.card.installed_inactive")
+      : t("server.utilities.mtproto.card.not_installed");
 
   return (
-    <div className="pt-3 border-t space-y-2" style={{ borderColor: "var(--color-border)" }}>
-      {/* Title row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Send className="w-3 h-3" style={{ color: "var(--color-accent-400)" }} />
-          <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
-            {t("server.utilities.mtproto.title")}
-          </span>
-        </div>
-        <span className="text-xs font-mono" style={{
-          color: state.installing
-            ? "var(--color-text-muted)"
-            : state.error
-              ? "var(--color-danger-500)"
-              : isInstalled
-                ? isActive ? "var(--color-success-500)" : "var(--color-warning-500)"
-                : "var(--color-text-muted)"
-        }}>
-          {state.installing
-            ? t("server.utilities.mtproto.status.installing")
-            : state.error
-              ? t("server.utilities.mtproto.status.error")
-              : isInstalled
-                ? isActive ? t("server.utilities.mtproto.status.running") : t("server.utilities.mtproto.status.stopped")
-                : t("server.utilities.mtproto.status.not_installed")
-          }
-        </span>
-      </div>
-
-      {/* State: Installing -- show StepProgress */}
-      {state.installing && (
-        <StepProgress
-          steps={state.steps}
-          currentStep={state.currentStep}
-          status={state.stepStatus}
-        />
-      )}
-
-      {/* State: Error -- show error message + Retry */}
-      {!state.installing && state.error && (
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs flex-1 truncate" style={{ color: "var(--color-danger-500)" }}>
-            {state.error}
-          </span>
-          <Button variant="primary" size="sm" onClick={handleRetry}>
-            {t("server.utilities.mtproto.retry")}
-          </Button>
-        </div>
-      )}
-
-      {/* State: Installed -- show link + Copy + Uninstall */}
-      {!state.installing && !state.error && isInstalled && (
-        <>
-          {state.status?.proxy_link && (
-            <div
-              className="text-xs font-mono break-all line-clamp-2"
-              style={{ color: "var(--color-accent-400)" }}
-            >
-              {state.status.proxy_link}
-            </div>
-          )}
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
-              {t("server.utilities.mtproto.port_display", { port: state.status?.port })}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="primary"
+    <Card data-testid="mtproto-section-card">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <Send
+            className="w-5 h-5 shrink-0"
+            style={{ color: "var(--color-accent-interactive)" }}
+            aria-hidden="true"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-subtitle">{t("server.utilities.mtproto.card.title")}</h3>
+              <StatusIndicator
+                status={indicatorStatus}
                 size="sm"
-                icon={copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                onClick={() => void handleCopy()}
-                disabled={!state.status?.proxy_link}
-              >
-                {copied ? t("server.utilities.mtproto.copied") : t("server.utilities.mtproto.copy")}
-              </Button>
-              <Button
-                variant="danger-outline"
-                size="sm"
-                icon={state.uninstalling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                onClick={state.requestUninstall}
-                disabled={state.uninstalling}
-              >
-                {t("server.utilities.mtproto.uninstall")}
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* State: Not Installed -- show port input + Install */}
-      {!state.installing && !state.error && !isInstalled && (
-        <div className="space-y-2">
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {t("server.utilities.mtproto.empty_hint")}
-          </p>
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <NumberInput
-                value={portInput}
-                onChange={setPortInput}
-                min={1024}
-                max={65535}
-                placeholder={t("server.utilities.mtproto.port_placeholder")}
+                label={subtitleLabel}
               />
             </div>
-            <Button variant="primary" size="sm" onClick={handleInstall}>
-              {t("server.utilities.mtproto.install")}
-            </Button>
+            <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
+              {subtitleLabel}
+            </p>
           </div>
         </div>
-      )}
-    </div>
+        <Button
+          variant={installed ? "secondary" : "primary"}
+          size="sm"
+          onClick={() => setOpen(true)}
+          data-testid="mtproto-open-button"
+        >
+          {installed
+            ? t("server.utilities.mtproto.configure")
+            : t("server.utilities.mtproto.install")}
+        </Button>
+      </div>
+
+      {/* MtProtoModal always in JSX tree — T-03: NEVER {open && <MtProtoModal />} */}
+      <MtProtoModal
+        isOpen={open}
+        onClose={() => setOpen(false)}
+        state={state}
+        sshParams={sshParams}
+      />
+    </Card>
   );
 }
