@@ -38,6 +38,7 @@ function tsForFile(): string {
  *
  * Перенесено из LogsSection.tsx verbatim (D-2.2 — colorizeLogLine preserved).
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function colorizeLogLine(line: string): { color: string } {
   const lower = line.toLowerCase();
   if (
@@ -128,12 +129,15 @@ export function LogsViewerModal({
         : logs;
 
   // ─── Auto-load on first open (if no initial logs) ─────────────────────────
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // We intentionally only depend on isOpen to trigger the initial load.
+  // logs/loading/error are read inside the effect as a guard, not as triggers.
+  // handleRefresh is defined inline below (stable reference pattern not needed here).
+  const hasInitialLogsRef = { current: !!logs };
   useEffect(() => {
-    if (isOpen && !logs && !loading && !error && !_forceState) {
+    if (isOpen && !hasInitialLogsRef.current && !_forceState) {
       void handleRefresh();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   // ─── T-03 cleanup (200ms delay, keeps buffer for next open) ───────────────
@@ -172,7 +176,7 @@ export function LogsViewerModal({
     // D-29: лог только metadata (host=), НЕ password и НЕ logs content
     activityLog("USER", `logs.refresh host=${sshParams.host}`);
     try {
-      const result = await invoke<string>("server_get_logs", sshParams);
+      const result = await invoke<string>("server_get_logs", sshParams as unknown as Record<string, unknown>);
       setLogs(result);
       // D-29: лог только строки count, НЕ контент
       activityLog(

@@ -8,21 +8,23 @@ import { renderWithProviders as render } from "../../test/test-utils";
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
 // D-29: activityLogSpy — security assertion (password / full-log body NEVER logged)
-// Must be defined before vi.mock() calls (hoisting guard: use vi.hoisted or declare as var).
-let activityLogSpy: ReturnType<typeof vi.fn>;
-let invokeMock: ReturnType<typeof vi.fn>;
-let saveMock: ReturnType<typeof vi.fn>;
+// vi.hoisted ensures mocks are defined before module factory runs.
+const { activityLogSpy, invokeMock, saveMock } = vi.hoisted(() => ({
+  activityLogSpy: vi.fn(),
+  invokeMock: vi.fn(),
+  saveMock: vi.fn(),
+}));
 
 vi.mock("../../shared/hooks/useActivityLog", () => ({
-  useActivityLog: () => ({ log: (...args: unknown[]) => activityLogSpy(...args) }),
+  useActivityLog: () => ({ log: activityLogSpy }),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
+  invoke: invokeMock,
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
-  save: (...args: unknown[]) => saveMock(...args),
+  save: saveMock,
 }));
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -44,9 +46,6 @@ const SAMPLE_LOGS = [
 
 describe("LogsViewerModal", () => {
   beforeEach(() => {
-    activityLogSpy = vi.fn();
-    invokeMock = vi.fn();
-    saveMock = vi.fn();
     vi.clearAllMocks();
     i18n.changeLanguage("ru");
 
