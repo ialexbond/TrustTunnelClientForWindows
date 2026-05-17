@@ -62,16 +62,17 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
       setPortError(null);
     }, 200);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on close edge only
   }, [isOpen]);
 
   // ── Default port generation on first open when not installed ──
+  // portInput excluded from deps intentionally — fires only when isOpen/installed flips
+  // (the "initialize on open" pattern). Including portInput would re-fire on every keystroke.
   useEffect(() => {
     if (isOpen && !state.status?.installed && portInput === "") {
       const randomPort = 1024 + Math.floor(Math.random() * (65535 - 1024));
       setPortInput(String(randomPort));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes portInput
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, state.status?.installed]);
 
   // ── Handlers ──
