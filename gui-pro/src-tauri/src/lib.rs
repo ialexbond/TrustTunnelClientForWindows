@@ -83,6 +83,8 @@ pub fn run() {
             config_path: Arc::new(Mutex::new(None)),
             log_level: Arc::new(Mutex::new("info".to_string())),
             locale: Arc::new(Mutex::new("ru".to_string())),
+            // Phase 17: benchmark cancel channel (None = no benchmark running)
+            benchmark_cancel_tx: Arc::new(tokio::sync::Mutex::new(None)),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
