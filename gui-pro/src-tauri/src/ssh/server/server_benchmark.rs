@@ -90,7 +90,7 @@ pub fn parse_milestone(line: &str) -> Option<u8> {
     }
     // Header format: "N. " where N is 1..=6
     let section_byte = bytes[0];
-    if section_byte < b'1' || section_byte > b'6' {
+    if !(b'1'..=b'6').contains(&section_byte) {
         return None;
     }
     if bytes[1] != b'.' || bytes[2] != b' ' {
