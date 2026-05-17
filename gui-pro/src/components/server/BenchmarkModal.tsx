@@ -7,7 +7,7 @@
  *   completed → running  (re-run without unmounting)
  *
  * Key invariants:
- *  - T-03: NEVER `if (!isOpen) return null` before <Modal>. Parent passes isOpen as-is.
+ *  - T-03: Modal always rendered — no early null return before <Modal>. Parent passes isOpen as-is.
  *  - D-1.1: closeOnBackdrop=false + closeOnEscape=false while running/cancelling.
  *  - D-1.2: Stage labels LOCKED (2026-05-18) — backend emits stage in [0,4] via Strategy A.
  *  - B5: parseBenchmarkOutput called on raw_stdout in frontend ONLY.
@@ -42,7 +42,7 @@ import { Copy, Check } from "lucide-react";
 // ── Stage labels — B1 LOCKED 2026-05-18 under D-1.2 mapping ──
 // Five stages [0..4]. Backend (Plan 17-01) emits stage already in [0,4]
 // via Strategy A Risk merge. Frontend trusts the value — NO mapping here.
-// OLD labels («Проверяем сеть» / «Замеряем скорость» / «Завершаем») are REMOVED from canon.
+// OLD labels (network/speed/finish variants) are REMOVED from canon per D-1.2 update 2026-05-18.
 const STAGE_KEYS = [
   "server.utilities.benchmark.stages.ip",       // 0: «Получаем IP»  (section 1 Basic Information)
   "server.utilities.benchmark.stages.type",     // 1: «Определяем тип» (section 2 IP Type)
@@ -631,7 +631,7 @@ export function BenchmarkModal({
   const onCloseGuarded = isBlocking ? () => { /* no-op during running/cancelling */ } : onClose;
 
   return (
-    // T-03 invariant: Modal always rendered. Never `if (!isOpen) return null` before Modal.
+    // T-03 invariant: Modal always rendered — no early null return.
     <Modal
       isOpen={isOpen}
       onClose={onCloseGuarded}
