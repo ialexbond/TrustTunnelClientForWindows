@@ -77,7 +77,8 @@ const BENCHMARK_RESULT = {
 };
 
 // ─── Default render helper ────────────────────────────────────────────────────
-function renderModal(extras?: Parameters<typeof BenchmarkModal>[0]) {
+type PartialBenchmarkProps = Partial<Parameters<typeof BenchmarkModal>[0]>;
+function renderModal(extras?: PartialBenchmarkProps) {
   return render(
     <BenchmarkModal
       isOpen={true}
