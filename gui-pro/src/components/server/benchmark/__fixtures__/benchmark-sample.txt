@@ -1,0 +1,55 @@
+
+[1;32m==== IP QUALITY CHECK REPORT ====
+bash <(curl -sL https://IP.Check.Place) -l ru -E
+[0m
+
+########################################################################
+
+1. Basic Information
+
+IP:              1.2.3.4
+Country:         [32mGermany[0m
+ASN:             [32mAS13335 Cloudflare, Inc.[0m
+
+########################################################################
+
+2. IP Type
+
+Type:            [32mHosting/Datacenter[0m
+Organization:    Cloudflare Inc.
+iCloud Relay:    [32mNo[0m
+
+########################################################################
+
+3. Risk Score
+
+Score:           [33m42[0m / 100
+Risk Level:      [33mMedium[0m
+Proxy:           [32mNo[0m
+
+########################################################################
+
+4. Risk Factors
+
+Factors:         tor,proxy
+Blacklisted:     [32mNo[0m
+Fraud Score:     15
+
+########################################################################
+
+5. Accessibility check for media and AI services
+
+Netflix:         [32mYes[0m
+Disney+:         [33mRestricted[0m
+YouTube:         [33mOriginals Only[0m
+ChatGPT:         [31mNo[0m
+
+########################################################################
+
+6. Email service availability and blacklist detection
+
+SMTP:            [32mOpen[0m
+DNSBL:           [32mClean[0m
+Spam Score:      5
+
+########################################################################
