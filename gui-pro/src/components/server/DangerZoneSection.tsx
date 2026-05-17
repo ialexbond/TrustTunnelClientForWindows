@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Trash2,
+  PowerOff,
+  Power,
 } from "lucide-react";
 import { CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
@@ -25,7 +27,37 @@ export function DangerZoneSection({ state }: Props) {
     onSwitchToSetup,
     onClearConfig: _onClearConfig,
     setActionResult,
+    serverInfo,
+    actionLoading,
+    runAction,
   } = state;
+
+  // D-3.4 + W1 contrast: Stop is DESTRUCTIVE (disconnects all VPN clients) — variant: "danger".
+  // Contrast: Cancel benchmark in Plan 17-03 uses variant: "warning" (non-destructive).
+  const handleStopService = async () => {
+    const ok = await confirm({
+      title: t("server.danger.stop_title"),
+      message: t("server.danger.stop_message"),
+      variant: "danger",
+      confirmText: t("buttons.confirm"),
+      cancelText: t("buttons.cancel"),
+    });
+    if (!ok) return;
+    await runAction(
+      "stop",
+      () => invoke("server_stop_service", sshParams),
+      t("server.actions.success_stop"),
+    );
+  };
+
+  // D-3.3 — no confirm, recovery action (Start is not destructive)
+  const handleStartService = async () => {
+    await runAction(
+      "start",
+      () => invoke("server_start_service", sshParams),
+      t("server.actions.success_start"),
+    );
+  };
 
   const handleUninstall = async () => {
     const ok = await confirm({
@@ -85,7 +117,35 @@ export function DangerZoneSection({ state }: Props) {
         />
 
         <div className="flex flex-wrap gap-2">
+          {/* D-3.3: Stop — conditionally when service is active */}
+          {serverInfo?.serviceActive === true && (
+            <Button
+              data-testid="danger-zone-stop-button"
+              variant="danger-outline"
+              size="sm"
+              icon={<PowerOff className="w-3.5 h-3.5" />}
+              loading={actionLoading === "stop"}
+              onClick={() => void handleStopService()}
+            >
+              {t("server.actions.stop")}
+            </Button>
+          )}
+          {/* D-3.3: Start — conditionally when service is inactive (recovery, no confirm) */}
+          {serverInfo && !serverInfo.serviceActive && (
+            <Button
+              data-testid="danger-zone-start-button"
+              variant="primary"
+              size="sm"
+              icon={<Power className="w-3.5 h-3.5" />}
+              loading={actionLoading === "start"}
+              onClick={() => void handleStartService()}
+            >
+              {t("server.actions.start")}
+            </Button>
+          )}
+          {/* Existing Reinstall + Uninstall preserved (destructiveness order: Stop → Reinstall → Uninstall) */}
           <Button
+            data-testid="danger-zone-reinstall-button"
             variant="danger-outline"
             size="sm"
             icon={<RefreshCw className="w-3.5 h-3.5" />}
@@ -94,6 +154,7 @@ export function DangerZoneSection({ state }: Props) {
             {t("server.danger.reinstall")}
           </Button>
           <Button
+            data-testid="danger-zone-uninstall-button"
             variant="danger"
             size="sm"
             icon={<Trash2 className="w-3.5 h-3.5" />}
