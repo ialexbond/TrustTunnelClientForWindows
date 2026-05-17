@@ -81,6 +81,23 @@ impl ClientConfig {
     }
 }
 
+/// Write a string to a user-chosen destination path (for "Download logs" functionality).
+///
+/// The destination originates from the native `save()` dialog — the user explicitly
+/// chose the path. No app-path validation required (same rationale as copy_file).
+///
+/// D-29: this command receives raw log content — caller must NOT include passwords
+/// in the `content` string. Verified by LogsViewerModal.test.tsx spy assertions.
+#[tauri::command]
+pub async fn write_string_to_path(
+    content: String,
+    destination: String,
+) -> Result<(), String> {
+    tokio::fs::write(&destination, content.as_bytes())
+        .await
+        .map_err(|e| format!("WRITE_FAILED|{e}"))
+}
+
 /// Copy a file to a user-chosen destination (for "Save As" functionality).
 ///
 /// The source MUST be inside the app data directory — prevents the frontend
@@ -473,6 +490,33 @@ some_future_key = "value"
         let len = config.killswitch_allow_ports.len();
         config.ensure_dhcp_ports(); // call again
         assert_eq!(config.killswitch_allow_ports.len(), len); // no duplicates
+    }
+
+    #[tokio::test]
+    async fn write_string_to_path_creates_file() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("tt_test_write_{}.txt", std::process::id()));
+        let content = "hello from write_string_to_path\nline2";
+        write_string_to_path(content.to_string(), path.to_string_lossy().to_string())
+            .await
+            .expect("write should succeed");
+        assert!(path.exists(), "file should exist after write");
+        let read_back = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(read_back, content);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn write_string_to_path_overwrites_existing() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("tt_test_overwrite_{}.txt", std::process::id()));
+        std::fs::write(&path, "old content").unwrap();
+        write_string_to_path("new content".to_string(), path.to_string_lossy().to_string())
+            .await
+            .expect("overwrite should succeed");
+        let read_back = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(read_back, "new content");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

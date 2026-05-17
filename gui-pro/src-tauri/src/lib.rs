@@ -318,6 +318,7 @@ pub fn run() {
             commands::ssh_commands::check_process_conflict,
             commands::ssh_commands::kill_existing_process,
             commands::config::copy_file,
+            commands::config::write_string_to_path,
             commands::config::copy_config_to_app_dir,
             commands::config::auto_detect_config,
             commands::config::import_dropped_content,
