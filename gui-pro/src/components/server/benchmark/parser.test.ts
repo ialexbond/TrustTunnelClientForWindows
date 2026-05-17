@@ -1,14 +1,13 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, it, expect } from "vitest";
 import { parseBenchmarkOutput } from "./parser";
 
-const fixture = (name: string) =>
-  readFileSync(path.join(__dirname, "__fixtures__", name), "utf8");
+// Vite raw imports — loaded at bundle time, no Node.js fs required
+import benchmarkSample from "./__fixtures__/benchmark-sample.txt?raw";
+import benchmarkGarbled from "./__fixtures__/benchmark-garbled.txt?raw";
 
 describe("parseBenchmarkOutput", () => {
   it("parses_full_fixture — all 5 logical sections present", () => {
-    const result = parseBenchmarkOutput(fixture("benchmark-sample.txt"));
+    const result = parseBenchmarkOutput(benchmarkSample);
     expect(result.basic).toBeDefined();
     expect(result.ip_type).toBeDefined();
     expect(result.risk).toBeDefined();
@@ -19,7 +18,7 @@ describe("parseBenchmarkOutput", () => {
   });
 
   it("streaming_returns_array_of_service_status", () => {
-    const result = parseBenchmarkOutput(fixture("benchmark-sample.txt"));
+    const result = parseBenchmarkOutput(benchmarkSample);
     expect(Array.isArray(result.streaming)).toBe(true);
     expect(result.streaming!.length).toBeGreaterThanOrEqual(4);
     const first = result.streaming![0];
@@ -44,7 +43,7 @@ describe("parseBenchmarkOutput", () => {
   });
 
   it("tolerant_garbled_returns_empty_object", () => {
-    const result = parseBenchmarkOutput(fixture("benchmark-garbled.txt"));
+    const result = parseBenchmarkOutput(benchmarkGarbled);
     expect(Object.keys(result).length).toBe(0);
   });
 
@@ -77,7 +76,7 @@ describe("parseBenchmarkOutput", () => {
   });
 
   it("streaming_services_parsed_correctly — fixture Netflix/Disney+/YouTube/ChatGPT", () => {
-    const result = parseBenchmarkOutput(fixture("benchmark-sample.txt"));
+    const result = parseBenchmarkOutput(benchmarkSample);
     const services = result.streaming!.map((s) => s.service);
     expect(services).toContain("Netflix");
     expect(services).toContain("Disney+");
@@ -96,7 +95,7 @@ describe("parseBenchmarkOutput", () => {
   });
 
   it("risk_section_merges_both_score_and_factors_from_fixture", () => {
-    const result = parseBenchmarkOutput(fixture("benchmark-sample.txt"));
+    const result = parseBenchmarkOutput(benchmarkSample);
     // fixture has section 3 (Score, Risk Level, Proxy) and section 4 (Factors, Blacklisted, Fraud Score)
     expect(result.risk!["Score"]).toBeDefined();
     expect(result.risk!["Factors"]).toBeDefined();
