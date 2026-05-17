@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Shield, Key, FileKey, Upload } from "lucide-react";
+import { Shield, Key, FileKey } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
 import { PasswordInput } from "../../shared/ui/PasswordInput";
 import { Button } from "../../shared/ui/Button";
@@ -44,10 +44,9 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
   const [keyData, setKeyData] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("password");
   const [connecting, setConnecting] = useState(false);
-  // Phase 16 — auto-detect-once flag prevents repeat auto-connect attempts
-  // when host text changes mid-typing or after a fallback to password.
-  const [autoConnectAttempted, setAutoConnectAttempted] = useState(false);
-  const handleConnectRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  // P UAT 2026-05-04 — auto-detect через tt_auth_method_<host> УДАЛЁН вместе
+  // с SSH-key UI (хранение PEM в keyring). Если user хочет login по ключу —
+  // выбирает .pem file через picker или paste'ит OpenSSH PEM.
   const pushSuccess = useSnackBar();
 
   const handleSelectKey = async () => {
@@ -86,28 +85,14 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
         password: authMode === "password" ? password : "",
       };
       if (authMode === "key") {
+        // P UAT 2026-05-04: keyring fallback УДАЛЁН вместе с SSH-key UI.
+        // User обязан указать keyPath (.pem file) ИЛИ paste OpenSSH PEM.
         if (keyPath) {
           params.keyPath = keyPath;
         } else if (keyData.trim()) {
           params.keyData = keyData.trim();
-        } else {
-          // Phase 16 — Resolve plaintext PEM from Windows Credential Store
-          // (D-1.4). Backend reads keyring entry by host. Frontend never
-          // persists the PEM and only forwards it in-memory to connect_ssh.
-          try {
-            const pem = await invoke<string>("load_ssh_key_for_host", { host: trimmedHost });
-            if (pem) params.keyData = pem;
-          } catch (loadErr) {
-            const loadStr = formatError(loadErr);
-            if (loadStr.includes("KEY_NOT_FOUND")) {
-              pushSuccess(t("control.ssh_key_not_found"), "error");
-              setAuthMode("password");
-              setConnecting(false);
-              return;
-            }
-            throw loadErr;
-          }
         }
+        // isValid гарантирует что один из двух заполнен.
       }
 
       await invoke("check_server_installation", params);
@@ -130,37 +115,10 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
       onConnect(creds);
     } catch (e) {
       const errStr = formatError(e);
-      // Phase 16 — D-6.1: SSH key rejected → recovery flow.
-      //
-      // P UAT 2026-05-04 fix (CRITICAL — user locked out): раньше fallback
-      // выкидывал в password mode + clear localStorage flag. Но если user
-      // уже отключил password auth на server'е → password больше не
-      // работает → user locked out с no escape. Single escape hatch =
-      // backup .pem file (D-2.1 forced backup при disable PW).
-      //
-      // New flow: остаёмся в "key" mode, очищаем keyring data (на следующий
-      // attempt не пытаться снова через keyring), показываем prominent
-      // file picker через i18n сообщение. User loads .pem → params.keyPath
-      // → backend uses file directly (bypass keyring). После success
-      // keyring можно re-populate через import flow.
-      if (errStr.includes("PermissionDenied") || errStr.includes("SSH_KEY_REJECTED")) {
-        // Context-aware message:
-        // - keyPath set (.pem file selected via Обзор) → server reject'ит
-        //   key из файла → проблема на server-side (pubkey НЕ в
-        //   authorized_keys). Подсказка: серверная recovery нужна.
-        // - keyData/keyring → key из хранилища не подошёл, попробовать .pem.
-        const usingFileKey = !!keyPath;
-        const msgKey = usingFileKey
-          ? "control.ssh_key_file_rejected_server_side"
-          : "control.ssh_key_rejected_recovery";
-        pushSuccess(t(msgKey), "error");
-        setAuthMode("key"); // stay in key mode — password может быть disabled
-        setKeyData(""); // clear cached PEM from keyring (failed)
-        setAutoConnectAttempted(false);
-        setConnecting(false);
-        // НЕ clear localStorage flag — user всё равно должен использовать key
-        return;
-      }
+      // P UAT 2026-05-04: SSH-key recovery flow упрощён вместе с removal
+      // SSH-key UI. Если key auth fails — просто показываем error через
+      // translateSshError. User либо корректирует .pem path, либо
+      // переключается в password mode вручную.
       if (errStr.includes("HOST_KEY_CHANGED") || errStr.includes("Unknown server key")) {
         await invoke("forget_ssh_host_key", { host: host.trim(), port: parseInt(port) || 22 }).catch(() => {});
         pushSuccess(t("sshErrors.hostKeyReset", "Host key was reset. Press Connect again."));
@@ -172,58 +130,13 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
     }
   };
 
-  // Stable ref so the mount-effect can call latest handleConnect without
-  // re-firing when the closure identity changes.
-  handleConnectRef.current = handleConnect;
+  // P UAT 2026-05-04: useEffect auto-connect через tt_auth_method_<host>
+  // localStorage УДАЛЁН вместе с SSH-key UI (keyring auto-resolve больше
+  // не происходит).
 
-  // Phase 16 — REQ-16-SSH-AUTO-DETECT (D-1.4 + D-6.1): on first mount with a
-  // stable host, read tt_auth_method_<host> from localStorage. If "key", flip
-  // auth mode and trigger handleConnect (which resolves keyData via
-  // load_ssh_key_for_host). PermissionDenied path inside handleConnect clears
-  // the flag and falls back to password.
-  useEffect(() => {
-    if (autoConnectAttempted) return;
-    const trimmedHost = host.trim();
-    if (!trimmedHost) return;
-    const authMethod = localStorage.getItem(`tt_auth_method_${trimmedHost}`);
-    if (authMethod !== "key") return;
-    setAutoConnectAttempted(true);
-    setAuthMode("key");
-    // Defer one tick so latest state (host/port/user) is reflected.
-    void Promise.resolve().then(() => handleConnectRef.current());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host]);
-
-  // Phase 16 — REQ-16-SSH-IMPORT-RECOVERY (D-2.3): user picks a backup .pem,
-  // backend validates + writes it to the keyring entry for this host.
-  // Frontend persists the auth-method flag so future mounts auto-connect.
-  const handleImportKey = async () => {
-    const trimmedHost = host.trim();
-    if (!trimmedHost) {
-      pushSuccess(t("labels.server_address"), "error");
-      return;
-    }
-    let selected: string | string[] | null;
-    try {
-      selected = await open({
-        multiple: false,
-        filters: [{ name: t("control.key_file_label", "Файл ключа"), extensions: ["pem", "key"] }],
-      });
-    } catch {
-      // user cancelled
-      return;
-    }
-    if (!selected || Array.isArray(selected)) return;
-    try {
-      await invoke("security_import_ssh_key", { host: trimmedHost, pemPath: selected });
-      localStorage.setItem(`tt_auth_method_${trimmedHost}`, "key");
-      setAuthMode("key");
-      setAutoConnectAttempted(false); // allow auto-connect after import
-      pushSuccess(t("control.ssh_key_imported"));
-    } catch (e) {
-      pushSuccess(formatError(e), "error");
-    }
-  };
+  // P UAT 2026-05-04: handleImportKey УДАЛЁН — security_import_ssh_key
+  // не invoked из UI. User управляет .pem files стандартным flow
+  // (file picker в "key" mode segment).
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg-primary)]">
@@ -335,20 +248,9 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
                 )}
               </div>
 
-              {/* Phase 16 — Загрузить .pem из backup в Windows Credential Store
-                  (D-2.3 import recovery). При успехе SshConnectForm запоминает
-                  tt_auth_method_<host>=key, чтобы следующий mount подключился
-                  по ключу автоматически. */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleImportKey}
-                icon={<Upload className="w-3.5 h-3.5" />}
-                fullWidth
-              >
-                {t("control.ssh_key_load_button")}
-              </Button>
+              {/* P UAT 2026-05-04: «Загрузить из backup» button удалён
+                  вместе с SSH-key UI (security_import_ssh_key не invoked
+                  из UI; user управляет .pem files через file picker выше). */}
 
               {/* Разделитель */}
               <Separator label={t("control.or_separator", "или")} />

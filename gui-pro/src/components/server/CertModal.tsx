@@ -12,6 +12,9 @@ import type { ServerState } from "./useServerState";
 import type { useSecurityState } from "./useSecurityState";
 import { parseCertInfo, daysUntil, pluralRu, type CertInfo } from "./certUtils";
 
+// P UAT 2026-05-04 — formatDateHuman + formatDaysHuman moved to module-level
+// helpers (used in JSX inline для validity period text).
+
 /**
  * P1-9 + P1-10 #R+#3 — CertModal compound.
  *
@@ -112,29 +115,12 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     }
   };
 
-  const handleVerifyRenewal = async () => {
-    try {
-      await security.verifyCertbotRenewal();
-      // Success snack уже fired в hook
-    } catch (e) {
-      const raw = formatError(e);
-      // Translate cryptic backend codes
-      let msg: string;
-      if (raw.includes("CERTBOT_DRY_RUN_FAILED|124")) {
-        msg = t("server.cert.dry_run_timeout");
-      } else if (raw.includes("CERTBOT_DRY_RUN_FAILED")) {
-        const detail = raw.split("|").slice(2).join("|");
-        msg = t("server.cert.dry_run_failed", { detail });
-      } else {
-        msg = t("server.cert.error_generic", { detail: raw });
-      }
-      state.pushSuccess(msg, "error");
-    }
-  };
+  // P UAT 2026-05-04: handleVerifyRenewal removed — «Проверить» button удалён.
+  // Если auto-renewal toggle зелёный, значит systemd timer activated. Дополнительная
+  // dry-run кнопка дублирует уже видимый success state.
 
   // P UAT 2026-05-04: показываем certbot output (success + error) в Modal'е.
-  // User жаловался «посмотреть логи я не знаю где» — теперь expandable
-  // блок «Подробности» прямо под renew button.
+  // Default closed — user сам открывает «Подробности» если хочет посмотреть.
   const [renewOutput, setRenewOutput] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [renewDetailsOpen, setRenewDetailsOpen] = useState(false);
 
@@ -149,18 +135,20 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     if (!ok) return;
     setRenewLoading(true);
     setRenewOutput(null);
+    setRenewDetailsOpen(false);
     let succeeded = false;
     try {
       const output = await invoke<string>("server_renew_cert", sshParams);
       succeeded = true;
       setRenewOutput({ kind: "success", text: output || t("server.cert.no_output_placeholder") });
-      setRenewDetailsOpen(true);
+      // Default closed — user сам click'нёт «Подробности» если хочет посмотреть лог.
     } catch (e) {
       const raw = formatError(e);
       // Backend now returns "SSH_CERT_RENEW_FAILED|<code><output_tail>".
       // Separator  (Information Separator One) — ASCII 31.
-      let detailsText = "";
+      let detailsText: string;
       let toastMsg: string;
+      // eslint-disable-next-line no-control-regex -- ASCII 31 (Unit Separator) intentional delimiter
       const m = /SSH_CERT_RENEW_FAILED\|(-?\d+)\x1F([\s\S]*)$/.exec(raw);
       if (m) {
         const exitCode = m[1];
@@ -180,7 +168,7 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
       }
       state.pushSuccess(toastMsg, "error");
       setRenewOutput({ kind: "error", text: detailsText || raw });
-      setRenewDetailsOpen(true);
+      // Default closed — user click'ает «Подробности» если хочет посмотреть лог.
     } finally {
       await new Promise((r) => setTimeout(r, 2000));
       await loadCert();
@@ -190,8 +178,16 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
   };
 
   const daysLeft = certInfo?.notAfter ? daysUntil(certInfo.notAfter) : null;
-  const validityBadgeVariant: "success" | "warning" | "danger" =
-    daysLeft === null ? "warning" : daysLeft <= 7 ? "danger" : daysLeft <= 30 ? "warning" : "success";
+  // P UAT 2026-05-04: validity tone — color hint inline (green/orange/red text)
+  // вместо прежнего Badge. Дни рендерятся в одну строку с датами.
+  const validityTone: string =
+    daysLeft === null
+      ? "var(--color-text-muted)"
+      : daysLeft <= 7
+        ? "var(--color-status-error)"
+        : daysLeft <= 30
+          ? "var(--color-status-warning)"
+          : "var(--color-status-connected)";
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="md" className="relative">
@@ -225,7 +221,10 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
         </p>
       ) : (
         <div className="space-y-4">
-          {/* Block 1 — Issuer + Subject (compact) */}
+          {/* Block 1 — Issuer + Subject (compact). P UAT 2026-05-04: дублирующий
+              «Let's Encrypt» Badge удалён — issuer text уже несёт ту же информацию.
+              Self-signed + unknown остались как Badge (там это semantic warning,
+              не дубликат). */}
           <section>
             <div className="text-caption mb-1" style={{ color: "var(--color-text-secondary)" }}>
               {t("server.cert.block_issued_by")}
@@ -239,21 +238,22 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                 </span>
               ) : null}
             </div>
-            <div className="mt-1">
-              {certInfo.certType === "lets_encrypt" ? (
-                <Badge variant="success" size="sm">Let's Encrypt</Badge>
-              ) : certInfo.certType === "self_signed" ? (
-                <Badge variant="warning" size="sm">{t("server.cert.self_signed")}</Badge>
-              ) : (
-                <Badge variant="neutral" size="sm">{t("server.cert.unknown")}</Badge>
-              )}
-            </div>
+            {certInfo.certType !== "lets_encrypt" && (
+              <div className="mt-1">
+                {certInfo.certType === "self_signed" ? (
+                  <Badge variant="warning" size="sm">{t("server.cert.self_signed")}</Badge>
+                ) : (
+                  <Badge variant="neutral" size="sm">{t("server.cert.unknown")}</Badge>
+                )}
+              </div>
+            )}
           </section>
 
-          {/* Block 2 — Validity period (notBefore — notAfter + days remaining).
+          {/* Block 2 — Validity period (notBefore — notAfter • дни остались).
               BUG-12 fix: при missing notBefore (older backend, self-signed cert
               без этого field) показываем только notAfter с префиксом «до».
-              Раньше rendered «— — May 16, 2026» (двойной dash). */}
+              P UAT 2026-05-04: Badge удалён — дни рендерятся inline с датами,
+              цвет hint меняется (success/warning/error) per validityTone. */}
           <section
             className="border-t pt-3"
             style={{ borderColor: "var(--color-border)" }}
@@ -274,14 +274,12 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                   {formatDateHuman(certInfo.notAfter, i18n.language)}
                 </>
               )}
+              {daysLeft !== null && (
+                <span className="ml-2" style={{ color: validityTone }}>
+                  ({formatDaysHuman(daysLeft, i18n.language)})
+                </span>
+              )}
             </div>
-            {daysLeft !== null && (
-              <div className="mt-1">
-                <Badge variant={validityBadgeVariant} size="sm">
-                  {formatDaysHuman(daysLeft, i18n.language)}
-                </Badge>
-              </div>
-            )}
           </section>
 
           {/* P UAT 2026-05-04: SHA-256 fingerprint block убран — для end-user
@@ -299,29 +297,15 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
             </div>
             {security.certbotTimerStatus?.auto_renewal_active ? (
               <div
-                className="flex items-center justify-between gap-2"
+                className="flex items-center gap-2 text-body-sm"
+                style={{ color: "var(--color-status-connected)" }}
                 data-testid="auto-renewal-active"
               >
-                <div
-                  className="flex items-center gap-2 text-body-sm"
-                  style={{ color: "var(--color-status-connected)" }}
-                >
-                  <span aria-hidden="true">✓</span>
-                  <span>{t("server.cert.auto_renewal_enabled")}</span>
-                </div>
-                {/* P UAT 2026-05-04 — Verify button: certbot renew --dry-run
-                    fully simulates renewal без consume rate limit. User
-                    видит что auto-renewal реально работает. */}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleVerifyRenewal()}
-                  loading={security.isBusy("verify-certbot")}
-                  disabled={security.isBusy("verify-certbot")}
-                  data-testid="verify-renewal-button"
-                >
-                  {t("server.cert.verify_renewal_button")}
-                </Button>
+                <span aria-hidden="true">✓</span>
+                <span>{t("server.cert.auto_renewal_enabled")}</span>
+                {/* P UAT 2026-05-04: «Проверить» button удалён — если toggle
+                    зелёный, systemd timer activated. Дополнительный dry-run
+                    просто дублирует уже видимый success state. */}
               </div>
             ) : (
               <div className="flex items-center justify-between gap-2">

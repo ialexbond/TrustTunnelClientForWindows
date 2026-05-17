@@ -1093,14 +1093,16 @@ pub async fn install_fail2ban(
         return Err("SECURITY_F2B_INSTALL_FAILED".into());
     }
 
-    // Default jail.local — sshd enabled, conservative defaults.
-    // All duration keys live inside [sshd] so later updates via sed can find & replace them
-    // without needing to add missing keys.
+    // Default jail.local — sshd enabled, balanced preset defaults.
+    // P UAT 2026-05-04: install template aligned с frontend FAIL2BAN_PRESETS.balanced
+    // (maxretry=5, bantime=600s=10m, findtime=600s=10m). Раньше bantime=1h не совпадал
+    // с balanced preset (600s) → UI install snack «balanced» но settings показывали
+    // «custom» при открытии. Now post-install state matches presets.balanced exactly.
+    //
     // backend = auto: fail2ban auto-detects the best available backend.
     // On systems with python3-systemd -> uses journald. Without it -> falls back to
-    // polling /var/log/auth.log. The previous hardcoded `backend = systemd` crashed
-    // on servers without python3-systemd ("No module named 'systemd'").
-    let jail_local = "[DEFAULT]\nbackend  = auto\n\n[sshd]\nenabled  = true\nport     = ssh\nfilter   = sshd\nmaxretry = 5\nbantime  = 1h\nfindtime = 10m\n";
+    // polling /var/log/auth.log.
+    let jail_local = "[DEFAULT]\nbackend  = auto\n\n[sshd]\nenabled  = true\nport     = ssh\nfilter   = sshd\nmaxretry = 5\nbantime  = 10m\nfindtime = 10m\n";
     // Pipe heredoc directly to `tee` — no bash -c wrapping. The quoted delimiter 'F2BEOF'
     // disables parameter expansion inside the body, so arbitrary characters are safe.
     let cmd = format!(

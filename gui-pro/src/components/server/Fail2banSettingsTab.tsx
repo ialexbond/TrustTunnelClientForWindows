@@ -118,7 +118,6 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   // user'а не wipe'ается silently.
   useEffect(() => {
     if (!jail) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mirror of jail config primitives into draft state on backend refresh (only when actual values change)
     setCustom({
       maxretry: String(jail.maxretry),
       bantime: normalizeJailDuration(jail.bantime, "600"),
@@ -131,7 +130,6 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   // обновляем чтобы radio reflected real backend state на том же frame.
   useEffect(() => {
     if (selectedPreset && detectedPreset === selectedPreset) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- post-apply sync: backend caught up to optimistic selection, clear override on the same frame so derived state takes over
       setSelectedPreset(null);
     }
   }, [detectedPreset, selectedPreset]);
