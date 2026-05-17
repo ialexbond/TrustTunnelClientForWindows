@@ -312,11 +312,20 @@ pub async fn renew_cert(
     ).await;
 
     emit_log(app, "info", "Running certbot renew --force-renewal ...");
-    // timeout 120s prevents certbot from hanging indefinitely (e.g. DNS resolution,
-    // ACME server unreachable, rate-limit retry loops).
+    // P UAT 2026-05-06: добавлен --no-random-sleep-on-renew. Без него certbot
+    // в non-interactive режиме перед попыткой renewal делает random delay
+    // 0-720 секунд (см. /var/log/letsencrypt/letsencrypt.log: «Non-interactive
+    // renewal: random delay of 208.5 seconds»). При timeout 120 process
+    // killился ДО того как пройдёт задержка → user видит fail хотя cert не
+    // обновлялся reasons. Manual renewal через UI = explicit user action,
+    // delay не нужен (он создан для cron jobs чтобы distribute load на ACME).
+    //
+    // timeout 180s prevents certbot from hanging indefinitely (DNS resolution,
+    // ACME server unreachable, rate-limit retry loops). 180 hard cap > typical
+    // HTTP-01 challenge timing (5-30s) plus headroom для ACME slow responses.
     let renew_result = exec_command(
         handle, app,
-        &format!("{sudo}timeout 120 certbot renew --force-renewal"),
+        &format!("{sudo}timeout 180 certbot renew --force-renewal --no-random-sleep-on-renew"),
     ).await;
     let certbot_ok = renew_result.as_ref().map(|(_, code)| *code == 0).unwrap_or(false);
 

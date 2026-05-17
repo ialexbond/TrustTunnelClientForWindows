@@ -660,9 +660,16 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         ariaLabel={t("server.overview.cards.security")}
       >
         <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} clickable refreshAriaLabel={refreshAriaLabel} />
-        {security === null && securityLoading ? (
+        {/* P UAT 2026-05-04: Skeleton рендерится на ЛЮБОЙ securityLoading
+            (initial + refetch после tt:security-changed event), не только когда
+            security===null. Раньше после change в Security tab Overview показывал
+            stale state до завершения refetch — user видел «Активен» когда фактически
+            firewall уже был выключен. Теперь Skeleton покрывает window между
+            event dispatch и refetch completion. 3 cards: firewall+fail2ban+tls
+            (Phase 16 ssh-key card удалён). */}
+        {securityLoading ? (
           <div className="grid grid-cols-2 gap-2 mt-1">
-            {[1, 2, 3, 4].map((i) => (
+            {[1, 2, 3].map((i) => (
               <div key={i} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
                 <Skeleton variant="line" width={70} height={14} className="mb-1.5" />
                 <Skeleton variant="line" width={50} height={14} />
@@ -694,7 +701,6 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
                     ? t("server.overview.security.inactive")
                     : t("server.overview.security.placeholder"),
             },
-            { name: t("server.overview.security.sshKey"), ok: null as boolean | null, label: t("server.overview.security.placeholder"), tone: null as "ok" | "warning" | "danger" | null },
             { name: t("server.overview.security.tls"), ok: hasTls, label: tlsLabel, tone: tlsState },
           ].map((item) => {
             // tone — explicit 3-state (ok/warning/danger) for TLS; ok — boolean for firewall/fail2ban.

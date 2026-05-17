@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Shield, ShieldAlert, KeyRound } from "lucide-react";
+import { Shield, ShieldAlert } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
@@ -12,7 +12,6 @@ import { pluralRu } from "./certUtils";
 import { CertSection } from "./CertSection";
 import { FirewallModal } from "./FirewallModal";
 import { Fail2banModal } from "./Fail2banModal";
-import { SshKeyModal } from "./SshKeyModal";
 
 /**
  * P UAT 2026-04-30 — Skeleton placeholder для card во время initial load.
@@ -82,7 +81,6 @@ export function SecuritySection({ state }: Props) {
 
   const [firewallOpen, setFirewallOpen] = useState(false);
   const [fail2banOpen, setFail2banOpen] = useState(false);
-  const [sshKeyOpen, setSshKeyOpen] = useState(false);
 
   const fwInstalled = security.status?.firewall.installed ?? false;
   const fwActive = security.status?.firewall.active ?? false;
@@ -90,8 +88,6 @@ export function SecuritySection({ state }: Props) {
   const f2bInstalled = security.status?.fail2ban.installed ?? false;
   const f2bActive = security.status?.fail2ban.active ?? false;
   const sshdJail = security.status?.fail2ban.jails.find((j) => j.name === "sshd");
-  const sshKeyGenerated = security.status?.ssh_key?.generated ?? false;
-  const pwAuthDisabled = security.status?.ssh_key?.password_auth_disabled ?? false;
 
   const fwStatusText = !fwInstalled
     ? t("server.security.summary.status_not_installed")
@@ -104,12 +100,6 @@ export function SecuritySection({ state }: Props) {
     : f2bActive
       ? t("server.security.summary.status_active")
       : t("server.security.summary.status_inactive");
-
-  const sshKeyStatusText = pwAuthDisabled
-    ? t("server.security.ssh_key.status_pwauth_disabled")
-    : sshKeyGenerated
-      ? t("server.security.ssh_key.status_generated")
-      : t("server.security.ssh_key.status_not_generated");
 
   // P0-5 #1 — informative subtitles с реальными данными вместо пустых
   // «Защита от brute-force — Активен» (status дублирует StatusIndicator dot).
@@ -146,12 +136,6 @@ export function SecuritySection({ state }: Props) {
     });
   }, [f2bInstalled, f2bActive, sshdJail, t]);
 
-  const sshKeySubtitle = useMemo(() => {
-    if (!sshKeyGenerated) return t("server.security.summary.ssh_key_subtitle_not_generated");
-    if (pwAuthDisabled) return t("server.security.summary.ssh_key_subtitle_key_only");
-    return t("server.security.summary.ssh_key_subtitle_dual");
-  }, [sshKeyGenerated, pwAuthDisabled, t]);
-
   // P UAT 2026-04-30 — Show Skeleton placeholders во время initial fetch
   // (security.loading && нет ещё status snapshot). Subsequent refresh не
   // показывает Skeleton — это flicker от polling/refresh.
@@ -161,7 +145,6 @@ export function SecuritySection({ state }: Props) {
       <div aria-live="polite" className="space-y-3" data-testid="security-section-loading">
         <SecurityCardSkeleton testId="firewall-card-skeleton" />
         <SecurityCardSkeleton testId="fail2ban-card-skeleton" />
-        <SecurityCardSkeleton testId="ssh-key-card-skeleton" />
         <SecurityCardSkeleton testId="cert-card-skeleton" />
       </div>
     );
@@ -239,51 +222,13 @@ export function SecuritySection({ state }: Props) {
         </div>
       </Card>
 
-      {/* Card 3 — SSH-ключ summary (opens SshKeyModal). P3-18 #2 — subtitle
-          подсвечивается warning color когда pwAuthDisabled (lockout risk
-          если backup ключа нет). Status pill = warning при key_only, не
-          success — отражает что состояние требует внимания. */}
-      <Card data-testid="ssh-key-summary-card">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <KeyRound
-              className="w-5 h-5 shrink-0"
-              style={{ color: "var(--color-accent-interactive)" }}
-              aria-hidden="true"
-            />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-subtitle">{t("server.security.summary.ssh_key_card_title")}</h3>
-                <StatusIndicator
-                  status={pwAuthDisabled ? "warning" : sshKeyGenerated ? "success" : "neutral"}
-                  size="sm"
-                  label={sshKeyStatusText}
-                />
-              </div>
-              <p
-                className="text-caption"
-                style={{
-                  color: pwAuthDisabled
-                    ? "var(--color-status-warning)"
-                    : "var(--color-text-muted)",
-                }}
-              >
-                {sshKeySubtitle}
-              </p>
-            </div>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setSshKeyOpen(true)}
-            data-testid="ssh-key-configure-button"
-          >
-            {t("server.security.summary.configure_button")}
-          </Button>
-        </div>
-      </Card>
+      {/* P UAT 2026-05-04: Card 3 «SSH-ключ» УДАЛЁН из UI per user request —
+          фича работала плохо (false-positive uploads, lockout scenarios,
+          contradictory status display). Backend commands остаются (могут
+          вернуться в будущем после redesign). User управляет SSH auth через
+          стандартный flow login form (password или manual .pem file). */}
 
-      {/* Card 4 — TLS Сертификат (CertSection extended in Plan 16-05 Task 2) */}
+      {/* Card 3 (was 4) — TLS Сертификат */}
       <CertSection state={state} security={security} />
 
       {/* Modals managed at top level (T-03 — isOpen passed as-is, NEVER
@@ -304,18 +249,6 @@ export function SecuritySection({ state }: Props) {
         isOpen={fail2banOpen}
         onClose={() => setFail2banOpen(false)}
         state={security}
-        sshParams={state.sshParams}
-        onSecurityChanged={async () => {
-          await security.load();
-          // P UAT 2026-05-04 — broadcast event для cross-tab sync (Overview
-          // listens). Без этого Overview видит stale state пока user не
-          // переключится на него (visibility flip trigger).
-          window.dispatchEvent(new CustomEvent("tt:security-changed"));
-        }}
-      />
-      <SshKeyModal
-        isOpen={sshKeyOpen}
-        onClose={() => setSshKeyOpen(false)}
         sshParams={state.sshParams}
         onSecurityChanged={async () => {
           await security.load();

@@ -58,13 +58,15 @@ beforeEach(() => {
 });
 
 describe("SecuritySection Phase 16 Plan 05 layout", () => {
-  it("renders 4 cards: Firewall + Fail2Ban + SSH-ключ + CertSection", async () => {
+  // P UAT 2026-05-04: SSH-ключ card removed per user request — feature
+  // не работала надёжно (false-positive uploads, lockout scenarios). Layout
+  // now: Firewall + Fail2Ban + CertSection (3 cards).
+  it("renders 3 cards: Firewall + Fail2Ban + CertSection", async () => {
     render(<SecuritySection state={makeServerState()} />);
     expect(await screen.findByTestId("firewall-summary-card")).toBeVisible();
     expect(screen.getByTestId("fail2ban-summary-card")).toBeVisible();
-    expect(screen.getByTestId("ssh-key-summary-card")).toBeVisible();
+    // SSH-ключ card removed — see comment в SecuritySection.tsx
     // CertSection only renders when certRaw is provided. Passing null → no card.
-    // The 4th block presence is verified separately в next test.
   });
 
   it("renders CertSection card when certRaw provided (4th block)", async () => {
@@ -107,17 +109,7 @@ describe("SecuritySection Phase 16 Plan 05 layout", () => {
     );
   });
 
-  it("Configure button opens SshKeyModal", async () => {
-    render(<SecuritySection state={makeServerState()} />);
-    fireEvent.click(await screen.findByTestId("ssh-key-configure-button"));
-    // SshKeyModal title — "SSH-ключ"
-    await waitFor(() => {
-      // Тут несколько SSH-ключ текстов на странице (card title + modal title) —
-      // используем role=heading чтобы ограничить scope до Modal.
-      const modalHeading = screen.getAllByRole("heading", { name: /ssh-ключ/i });
-      expect(modalHeading.length).toBeGreaterThan(0);
-    });
-  });
+  // P UAT 2026-05-04: SSH-ключ Configure button test removed (card удалён из UI).
 
   it("aria-live wrapper preserved on root (screen-reader announce status changes)", async () => {
     render(<SecuritySection state={makeServerState()} />);

@@ -429,65 +429,12 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
   };
   const portBusy = isBusy("change-ssh-port");
 
-  // ── Phase 16 — SSH key actions ──
-  // Note: ConfirmDialog NOT here — SshKeyModal owns 2-step state machine
-  // with forced backup export gate (D-2.1).
-  const generateSshKey = async (): Promise<void> => {
-    void run(
-      "gen-ssh-key",
-      async () => {
-        const result = await invoke<{ fingerprint: string; generated: boolean }>(
-          "security_generate_ssh_key",
-          { ...sshParams, hostArg: sshParams.host },
-        );
-        // Persist localStorage flag for SshConnectForm auto-detect (D-1.4).
-        localStorage.setItem(`tt_auth_method_${sshParams.host}`, "key");
-        return result;
-      },
-      // Fingerprint substituted by component if it needs full snack with value;
-      // here we keep generic per run() contract (single string at action time).
-      t("server.security.ssh_key.generated_snack", { fingerprint: "" }),
-    );
-  };
-
-  const exportSshKeyBackup = async (destPath: string): Promise<void> => {
-    void run(
-      "export-ssh-key",
-      () => invoke("security_export_ssh_key_backup", { host: sshParams.host, destPath }),
-      t("server.security.ssh_key.backup_saved", { path: destPath }),
-    );
-  };
-
-  const disablePasswordAuth = async (): Promise<void> => {
-    void run(
-      "disable-pw",
-      () => invoke("security_disable_password_auth", sshParams),
-      t("server.security.ssh_key.pwauth_disabled_snack"),
-    );
-  };
-
-  // P0-3 #E — re-enable PasswordAuthentication (rollback companion).
-  // Use case: user disabled PW auth, потом понял что хочет dual-mode (key + pwd
-  // для recovery). Backend `security_enable_password_auth` mirrors disable
-  // protocol (backup → edit → sshd -t → restart → rollback on failure).
-  const enablePasswordAuth = async (): Promise<void> => {
-    void run(
-      "enable-pw",
-      () => invoke("security_enable_password_auth", sshParams),
-      t("server.security.ssh_key.pwauth_enabled_snack"),
-    );
-  };
-
-  const importSshKey = async (pemPath: string): Promise<void> => {
-    void run(
-      "import-ssh-key",
-      async () => {
-        await invoke("security_import_ssh_key", { host: sshParams.host, pemPath });
-        localStorage.setItem(`tt_auth_method_${sshParams.host}`, "key");
-      },
-      t("control.ssh_key_imported"),
-    );
-  };
+  // P UAT 2026-05-04 — SSH-key actions УДАЛЕНЫ из hook surface вместе с UI
+  // (generateSshKey/exportSshKeyBackup/disablePasswordAuth/enablePasswordAuth/
+  // importSshKey/getPubkeyForRecovery). Backend Tauri commands остаются как
+  // dead code (могут вернуться после redesign feature). UI-flow убран per
+  // user request — фича работала плохо (false-positive uploads, lockout
+  // scenarios, contradictory status display).
 
   // ── Phase 16 Plan 04 — Fail2Ban preset actions (D-4.2) ──
   // Backend command unchanged; frontend just constructs config from PRESETS map.
@@ -552,32 +499,10 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     await loadCertbotTimerStatus();
   };
 
-  // P UAT 2026-05-04 — get public key text for manual server-side recovery.
-  // Used когда server's authorized_keys потерял pubkey (false-positive
-  // upload, или пользователь deleted manually). User копирует pubkey текст
-  // и paste'ит через VPS web console в `~/.ssh/authorized_keys`.
-  const getPubkeyForRecovery = async (): Promise<string> => {
-    return await invoke<string>("security_get_pubkey_for_recovery", {
-      host: sshParams.host,
-    });
-  };
-
-  // P UAT 2026-05-04 — verify auto-renewal works through certbot dry-run.
-  // Returns success message OR throws с описанием failure для UI.
-  const verifyCertbotRenewal = async (): Promise<string> => {
-    setBusySet((p) => new Set(p).add("verify-certbot"));
-    try {
-      const msg = await invoke<string>("server_verify_certbot_renewal", sshParams);
-      pushSuccess(t("server.cert.snack.dry_run_succeeded"));
-      return msg;
-    } finally {
-      setBusySet((p) => {
-        const n = new Set(p);
-        n.delete("verify-certbot");
-        return n;
-      });
-    }
-  };
+  // P UAT 2026-05-04 — getPubkeyForRecovery + verifyCertbotRenewal удалены
+  // вместе с SSH-key UI и TLS «Проверить» button. Backend commands остаются
+  // available в Rust (security_get_pubkey_for_recovery + server_verify_certbot_renewal),
+  // но UI-flow убран per user request.
 
   return {
     // State
@@ -609,12 +534,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     deleteRule, addRule, loadFwLog,
     changeSshPort, portBusy,
 
-    // Phase 16 — SSH key actions
-    generateSshKey,
-    exportSshKeyBackup,
-    disablePasswordAuth,
-    enablePasswordAuth,
-    importSshKey,
+    // P UAT 2026-05-04 — SSH key actions removed (feature deleted from UI).
 
     // Phase 16 Plan 04 — Fail2Ban preset actions
     applyFail2banPreset,
@@ -624,8 +544,6 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     certbotTimerStatus,
     loadCertbotTimerStatus,
     enableCertbotTimer,
-    verifyCertbotRenewal,
-    getPubkeyForRecovery,
 
     // For sub-components that need to run arbitrary ops
     run,
@@ -635,7 +553,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
 }
 
 export type SecurityState = ReturnType<typeof useSecurityState>;
-// Phase 16 — alias for SshKeyModal/Fail2banModal/FirewallModal consumers per
+// Phase 16 — alias for Fail2banModal/FirewallModal consumers per
 // PATTERNS.md naming. SecurityState is the canonical name; Use*Return is
 // kept for plan compliance + new compound Modals reading hook surface.
 export type UseSecurityStateReturn = SecurityState;

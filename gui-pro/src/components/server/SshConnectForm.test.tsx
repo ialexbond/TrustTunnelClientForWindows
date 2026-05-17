@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import i18n from "../../shared/i18n";
 import { SshConnectForm } from "./SshConnectForm";
 import { renderWithProviders as render } from "../../test/test-utils";
@@ -201,95 +200,8 @@ describe("SshConnectForm", () => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// Phase 16 — auto-detect SSH key + import recovery + D-6.1 fallback
+// P UAT 2026-05-04: Phase 16 SSH-key auto-detect + import recovery
+// тесты УДАЛЕНЫ — feature убрана из UI per user request. Backend Tauri
+// commands (load_ssh_key_for_host, security_import_ssh_key) остаются как
+// dead code и не invoked из form.
 // ════════════════════════════════════════════════════════════════
-
-describe("SshConnectForm — Phase 16 auto-detect + import recovery", () => {
-  const onConnect = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.clear();
-    i18n.changeLanguage("ru");
-  });
-
-  it("auto-detects saved key on mount when localStorage has tt_auth_method_<host>=key", async () => {
-    localStorage.setItem("tt_auth_method_192.168.1.100", "key");
-    vi.mocked(invoke).mockImplementation(async (cmd) => {
-      if (cmd === "load_ssh_key_for_host")
-        return "-----BEGIN OPENSSH PRIVATE KEY-----\nFAKE\n-----END OPENSSH PRIVATE KEY-----";
-      if (cmd === "check_server_installation") return { installed: true };
-      return null;
-    });
-
-    render(<SshConnectForm onConnect={onConnect} initialHost="192.168.1.100" />);
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("load_ssh_key_for_host", {
-        host: "192.168.1.100",
-      });
-    });
-  });
-
-  it("KEEPS flag=key on PermissionDenied — recovery via .pem (UAT 2026-05-04)", async () => {
-    // Раньше после PermissionDenied flag clear'ился + switch в password mode.
-    // Но если password auth disabled на server'е → user locked out с no escape.
-    // New recovery flow: stay в key mode, clear cached PEM, user loads backup
-    // .pem file через «Обзор». localStorage flag preserved.
-    localStorage.setItem("tt_auth_method_192.168.1.100", "key");
-    vi.mocked(invoke).mockImplementation(async (cmd) => {
-      if (cmd === "load_ssh_key_for_host")
-        return "-----BEGIN OPENSSH PRIVATE KEY-----\nFAKE\n-----END OPENSSH PRIVATE KEY-----";
-      if (cmd === "check_server_installation")
-        throw "PermissionDenied: server rejected key";
-      return null;
-    });
-
-    render(<SshConnectForm onConnect={onConnect} initialHost="192.168.1.100" />);
-
-    // Wait for the connect attempt to complete (snackbar fires after fail).
-    // Check that flag PRESERVED (user всё ещё key mode для recovery).
-    await new Promise((r) => setTimeout(r, 100));
-    expect(localStorage.getItem("tt_auth_method_192.168.1.100")).toBe("key");
-  });
-
-  it("does not auto-connect if authMethod is password", async () => {
-    localStorage.setItem("tt_auth_method_192.168.1.100", "password");
-    render(<SshConnectForm onConnect={onConnect} initialHost="192.168.1.100" />);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(invoke).not.toHaveBeenCalledWith(
-      "load_ssh_key_for_host",
-      expect.any(Object),
-    );
-  });
-
-  it("does not auto-connect if no saved method", async () => {
-    render(<SshConnectForm onConnect={onConnect} initialHost="192.168.1.100" />);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(invoke).not.toHaveBeenCalledWith(
-      "load_ssh_key_for_host",
-      expect.any(Object),
-    );
-  });
-
-  it("import key button invokes security_import_ssh_key + sets localStorage flag (D-2.3)", async () => {
-    vi.mocked(openDialog).mockResolvedValueOnce("/tmp/restored-key.pem");
-    vi.mocked(invoke).mockResolvedValueOnce(undefined);
-
-    render(<SshConnectForm onConnect={onConnect} initialHost="192.168.1.100" />);
-
-    // Switch to key mode to expose the import button.
-    fireEvent.click(screen.getByRole("button", { name: /SSH-ключ/ }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: /загрузить ssh-ключ/i }),
-    );
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("security_import_ssh_key", {
-        host: "192.168.1.100",
-        pemPath: "/tmp/restored-key.pem",
-      });
-    });
-    expect(localStorage.getItem("tt_auth_method_192.168.1.100")).toBe("key");
-  });
-});
