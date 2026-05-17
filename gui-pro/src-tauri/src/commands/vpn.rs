@@ -21,6 +21,17 @@ pub struct AppState {
     pub log_level: Arc<Mutex<String>>,
     /// Current UI locale ("ru" or "en") for tray menu text.
     pub locale: Arc<Mutex<String>>,
+    /// Phase 17 — Server Benchmark single-flight cancel channel.
+    ///
+    /// Holds the sending half of the oneshot channel used to signal cancellation
+    /// to an in-progress `run_benchmark` call. `Some` while a benchmark is running,
+    /// `None` at rest. Uses `tokio::sync::Mutex` (NOT `std::sync::Mutex`) so it can
+    /// be `.lock().await`-ed inside async Tauri commands.
+    ///
+    /// Single-flight invariant: `server_run_benchmark` rejects concurrent calls with
+    /// `"BENCHMARK_ALREADY_RUNNING"` when this field is `Some`. Cleared to `None` on
+    /// ALL exit paths (success / cancel / error / watchdog-forced) in `server_run_benchmark`.
+    pub benchmark_cancel_tx: Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 #[derive(Clone, Serialize)]
