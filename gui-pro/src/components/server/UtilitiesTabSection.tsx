@@ -1,15 +1,27 @@
+/**
+ * UtilitiesTabSection — Phase 17 Plan 06 rewrite (D-4.3 canonical order).
+ *
+ * 5-block layout (per CONTROL-PANEL-SPEC.md §4.6):
+ *   1. BBR Toggle Card         (D-4.2 — plain Card, no Modal)
+ *   2. MTProto Card+Modal      (Plan 17-04 — Card preview + MtProtoModal trigger)
+ *   3. Benchmark Card+Modal    (Plan 17-03 — Card preview + BenchmarkModal trigger)
+ *   4. Logs Card+Modal         (Plan 17-05 — Card preview + LogsViewerModal trigger)
+ *   5. Danger Zone Accordion   (D-4.3 — closed by default, DangerZoneSection inside)
+ *
+ * Service Controls Card REMOVED (B6/SSOT): Restart lives in OverviewSection «Сервер»
+ * card per CONTROL-PANEL-SPEC.md §4.1 (Phase 17 D-3.1). W5 test-id anti-presence:
+ * data-testid="overview-restart-service-button" MUST NOT appear here.
+ */
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, PowerOff, Power, AlertTriangle, Zap } from "lucide-react";
-import { Card, CardHeader } from "../../shared/ui/Card";
-import { Button } from "../../shared/ui/Button";
+import { AlertTriangle, Zap, Loader2 } from "lucide-react";
+import { Card } from "../../shared/ui/Card";
 import { Toggle } from "../../shared/ui/Toggle";
 import { Accordion } from "../../shared/ui/Accordion";
-import { useConfirm } from "../../shared/ui/useConfirm";
 import type { ServerState } from "./useServerState";
 import { useBbrState } from "./useBbrState";
 import { useMtProtoState } from "./useMtProtoState";
 import { MtProtoSection } from "./MtProtoSection";
+import { BenchmarkSection } from "./BenchmarkSection";
 import { LogsSection } from "./LogsSection";
 import { DangerZoneSection } from "./DangerZoneSection";
 
@@ -19,116 +31,53 @@ interface Props {
 
 export function UtilitiesTabSection({ state }: Props) {
   const { t } = useTranslation();
-  const { serverInfo, actionLoading, sshParams, runAction, pushSuccess } = state;
-  const confirm = useConfirm();
+  const { sshParams, pushSuccess } = state;
 
   const bbr = useBbrState(sshParams, pushSuccess);
   const mtproto = useMtProtoState(sshParams, pushSuccess);
 
-  const handleStopService = async () => {
-    const ok = await confirm({
-      title: t("server.danger.stop_title"),
-      message: t("server.danger.stop_message"),
-      variant: "danger",
-      confirmText: t("buttons.confirm"),
-      cancelText: t("buttons.cancel"),
-    });
-    if (!ok) return;
-    runAction(
-      "stop",
-      () => invoke("server_stop_service", sshParams),
-      t("server.actions.success_stop"),
-    );
-  };
-
   return (
-    <div className="space-y-4">
-      {/* Block 1: Service Controls — перенесено из ServiceSection */}
-      <Card>
-        <CardHeader
-          title={t("server.service.controls_title")}
-          icon={<RefreshCw className="w-3.5 h-3.5" />}
-        />
-        <div className="flex flex-wrap gap-2">
-          {/* Restart (always available when server info is loaded) */}
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<RefreshCw className="w-3.5 h-3.5" />}
-            loading={actionLoading === "restart"}
-            onClick={() =>
-              runAction(
-                "restart",
-                () => invoke("server_restart_service", sshParams),
-                t("server.actions.success_restart")
-              )
-            }
-          >
-            {t("server.actions.restart")}
-          </Button>
-
-          {/* Stop (only when service is active) */}
-          {serverInfo?.serviceActive && (
-            <Button
-              variant="danger-outline"
-              size="sm"
-              icon={<PowerOff className="w-3.5 h-3.5" />}
-              loading={actionLoading === "stop"}
-              onClick={handleStopService}
-            >
-              {t("server.actions.stop")}
-            </Button>
-          )}
-
-          {/* Start (only when service is stopped) */}
-          {serverInfo && !serverInfo.serviceActive && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<Power className="w-3.5 h-3.5" />}
-              loading={actionLoading === "start"}
-              onClick={() =>
-                runAction(
-                  "start",
-                  () => invoke("server_start_service", sshParams),
-                  t("server.actions.success_start")
-                )
-              }
-            >
-              {t("server.actions.start")}
-            </Button>
+    <div aria-live="polite" className="space-y-4">
+      {/* Block 1 — BBR Toggle Card (D-4.2: single boolean switch, no Modal) */}
+      <Card data-testid="bbr-card">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <Zap
+              className="w-5 h-5 shrink-0"
+              style={{ color: "var(--color-accent-interactive)" }}
+              aria-hidden="true"
+            />
+            <div className="flex-1 min-w-0">
+              <h3 className="text-subtitle">{t("server.utilities.bbr.label")}</h3>
+              <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
+                {bbr.loading
+                  ? t("server.utilities.bbr.detecting")
+                  : t("server.utilities.bbr.description")}
+              </p>
+            </div>
+          </div>
+          {bbr.loading ? (
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Toggle
+              checked={bbr.enabled}
+              onChange={() => void bbr.toggle()}
+              aria-label={t("server.utilities.bbr.label")}
+            />
           )}
         </div>
-
       </Card>
 
-      {/* Block 2: BBR Toggle — перенесено из ServerSettingsSection */}
-      <Card>
-        <CardHeader
-          title={t("server.utilities.bbr.label")}
-          icon={<Zap className="w-3.5 h-3.5" />}
-        />
-        <Toggle
-          checked={bbr.enabled}
-          onChange={() => void bbr.toggle()}
-          label={t("server.utilities.bbr.label")}
-          description={
-            bbr.loading
-              ? t("server.utilities.bbr.detecting")
-              : t("server.utilities.bbr.description")
-          }
-          icon={<Zap className="w-3 h-3" />}
-          disabled={bbr.loading}
-        />
-      </Card>
+      {/* Block 2 — MTProto Card+Modal (Plan 17-04, D-4.1) */}
+      <MtProtoSection state={mtproto} sshParams={sshParams} />
 
-      {/* Block 3: MTProto — перенесено из ServerSettingsSection Advanced Accordion */}
-      {mtproto.status && <MtProtoSection state={mtproto} sshParams={sshParams} />}
+      {/* Block 3 — Benchmark Card+Modal (Plan 17-03) */}
+      <BenchmarkSection sshParams={sshParams} />
 
-      {/* Block 4: Logs — перенесено из ServiceSection */}
+      {/* Block 4 — Logs Card+Modal (Plan 17-05, D-2.4) */}
       <LogsSection state={state} />
 
-      {/* Block 5: DangerZone Accordion (T-12-07: closed by default + ConfirmDialog) */}
+      {/* Block 5 — Danger Zone Accordion (D-4.3: closed by default) */}
       <Accordion
         defaultOpen={[]}
         items={[
