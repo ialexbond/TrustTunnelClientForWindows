@@ -1403,6 +1403,18 @@
           "uninstalled": "MTProto прокси удалён",
           "install_error": "Не удалось установить MTProto: {{error}}",
           "uninstall_error": "Не удалось удалить MTProto: {{error}}"
+        },
+        "modal_title_install": "Установка MTProto Прокси",
+        "modal_title_configure": "Настройка MTProto Прокси",
+        "configure": "Настроить",
+        "port_label": "Порт",
+        "proxy_link_label": "Ссылка на прокси",
+        "port_validation_error": "Порт должен быть в диапазоне 1024–65535",
+        "card": {
+          "title": "MTProto Прокси",
+          "active_on_port": "Активен на порту {{port}}",
+          "installed_inactive": "Установлен, не запущен",
+          "not_installed": "Не установлен"
         }
       },
       "bbr": {

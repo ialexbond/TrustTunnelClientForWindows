@@ -1403,6 +1403,18 @@
           "uninstalled": "MTProto proxy removed",
           "install_error": "Failed to install MTProto: {{error}}",
           "uninstall_error": "Failed to remove MTProto: {{error}}"
+        },
+        "modal_title_install": "Install MTProto Proxy",
+        "modal_title_configure": "Configure MTProto Proxy",
+        "configure": "Configure",
+        "port_label": "Port",
+        "proxy_link_label": "Proxy link",
+        "port_validation_error": "Port must be in range 1024–65535",
+        "card": {
+          "title": "MTProto Proxy",
+          "active_on_port": "Active on port {{port}}",
+          "installed_inactive": "Installed, not running",
+          "not_installed": "Not installed"
         }
       },
       "bbr": {
