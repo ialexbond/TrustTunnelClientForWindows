@@ -25,7 +25,8 @@ const KEY_VALUE_RE = /^([\w\s/]+?):\s+(.+)$/;
 // Streaming service line: "Netflix: Yes", "Disney+: Restricted", etc.
 const STREAMING_LINE_RE = /^([\w\s+/]+):\s+(Yes|No|Originals Only|Restricted|Available|Blocked|.+?)$/i;
 
-// ANSI escape sequences (e.g., \x1b[32m ... \x1b[0m)
+// ANSI escape sequences (e.g., ESC[32m ... ESC[0m)
+// eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 // Section separator lines (72 '#' characters)
