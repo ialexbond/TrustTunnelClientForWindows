@@ -247,6 +247,90 @@ ssh_pool_command!(detect_bbr_status, ssh::detect_bbr_status);
 ssh_pool_command!(enable_bbr, ssh::enable_bbr);
 ssh_pool_command!(disable_bbr, ssh::disable_bbr);
 
+// ─── Server Benchmark (Phase 17) — streaming SSH execution ──────────
+
+/// Start an IP.Check.Place benchmark on the remote server.
+///
+/// Streaming command: emits `benchmark-progress` and `benchmark-stdout-chunk` Tauri events
+/// per chunk/milestone during execution (may run 1-3 minutes).
+///
+/// **B7 Tauri camelCase ↔ snake_case convention:**
+/// TypeScript caller sends `{ host, port, user, password, keyPath, keyData }` (camelCase).
+/// Tauri 2 default auto-rename converts to snake_case in this Rust signature.
+/// Matches existing `security_install_firewall` and `mtproto_install` patterns.
+///
+/// **Single-flight invariant (D-1.1):**
+/// Returns `Err("BENCHMARK_ALREADY_RUNNING")` immediately if another benchmark is in progress.
+/// The `benchmark_cancel_tx` slot in `AppState` is cleared on ALL exit paths.
+///
+/// **Cancel support:**
+/// `server_cancel_benchmark` sends a `()` through the oneshot channel stored in `AppState`,
+/// which triggers the biased cancel branch in `run_benchmark`.
+///
+/// **B5:** Returns `BenchmarkResult { raw_stdout, duration_seconds }` — NO parsed sections.
+/// Frontend TypeScript owns section parsing via `parseBenchmarkOutput()` (Plan 17-02).
+#[tauri::command]
+pub async fn server_run_benchmark(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    cancel_state: tauri::State<'_, crate::AppState>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+
+    // Single-flight guard: reject concurrent benchmark invocations (D-1.1 / T-17-01).
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    {
+        let mut guard = cancel_state.benchmark_cancel_tx.lock().await;
+        if guard.is_some() {
+            return Err("BENCHMARK_ALREADY_RUNNING".into());
+        }
+        *guard = Some(tx);
+    }
+
+    // Run the streaming benchmark (may take 1-3 minutes).
+    // run_benchmark is re-exported via ssh::server::mod.rs pub use server_benchmark::*
+    let result = ssh::run_benchmark(&app, &handle, rx).await;
+
+    // Cleanup on ALL exit paths: success / cancel / error / watchdog-forced (cleanup invariant).
+    *cancel_state.benchmark_cancel_tx.lock().await = None;
+
+    // Surface error to TypeScript (BENCHMARK_CANCELLED|dur=N or BENCHMARK_CANCELLED|dur=N|forced).
+    let res: ssh::BenchmarkResult = result?;
+    serde_json::to_value(&res).map_err(|e| format!("Serialize error: {e}"))
+}
+
+/// Cancel an in-progress benchmark by sending through the oneshot channel.
+///
+/// The `run_benchmark` loop observes the cancel signal via its biased `tokio::select!`
+/// branch, then sends `Sig::TERM` to the remote process group and drains remaining
+/// messages with a 5-second B8 watchdog timeout.
+///
+/// Safe to call when no benchmark is running — `guard.take()` on `None` is a no-op.
+#[tauri::command]
+pub async fn server_cancel_benchmark(
+    cancel_state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let mut guard = cancel_state.benchmark_cancel_tx.lock().await;
+    if let Some(tx) = guard.take() {
+        let _ = tx.send(());
+    }
+    Ok(())
+}
+
 // ─── Non-macro SSH commands ────────────────────────────────────────
 
 #[tauri::command]

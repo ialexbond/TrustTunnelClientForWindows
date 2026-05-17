@@ -395,6 +395,9 @@ pub fn run() {
             commands::ssh_commands::detect_bbr_status,
             commands::ssh_commands::enable_bbr,
             commands::ssh_commands::disable_bbr,
+            // Phase 17 — Server Benchmark IP.Check.Place (streaming)
+            commands::ssh_commands::server_run_benchmark,
+            commands::ssh_commands::server_cancel_benchmark,
             geodata::load_exclusion_list,
             geodata::save_exclusion_list,
             geodata::load_exclusion_json,
