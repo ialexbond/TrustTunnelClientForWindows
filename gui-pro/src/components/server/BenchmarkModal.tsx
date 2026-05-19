@@ -20,7 +20,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { Loader2, Copy, Check, ExternalLink } from "lucide-react";
+import { Copy, Check, ExternalLink } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Accordion } from "../../shared/ui/Accordion";
@@ -91,23 +91,48 @@ interface RunningViewProps {
 function RunningView({ isCancelling, onCancel }: RunningViewProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col items-center gap-5 py-8">
-      {/* Spinner */}
-      <Loader2
-        className="w-10 h-10 animate-spin"
-        style={{ color: "var(--color-accent-interactive)" }}
-        aria-hidden="true"
-      />
-
+    <div className="flex flex-col gap-5 py-6">
       {/* Running text */}
-      <p className="text-body" style={{ color: "var(--color-text-secondary)" }}>
-        {t("server.utilities.benchmark.running_text")}
-      </p>
+      <div className="flex flex-col items-center gap-2 text-center">
+        <p className="text-body font-medium" style={{ color: "var(--color-text-primary)" }}>
+          {t("server.utilities.benchmark.running_text")}
+        </p>
+        <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
+          {t("server.utilities.benchmark.hint_running")}
+        </p>
+      </div>
 
-      {/* Hint */}
-      <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
-        {t("server.utilities.benchmark.hint_running")}
-      </p>
+      {/* Indeterminate progress bar — sliding stripe (no real percent available since
+          backend no longer emits progress events). Visual signal that work is happening. */}
+      <div
+        className="relative w-full overflow-hidden rounded-full"
+        role="progressbar"
+        aria-busy="true"
+        aria-label={t("server.utilities.benchmark.running_text")}
+        style={{
+          height: 8,
+          background: "var(--color-bg-surface)",
+          border: "1px solid var(--color-border)",
+        }}
+      >
+        <span
+          className="absolute top-0 bottom-0"
+          style={{
+            background: "var(--color-accent-interactive)",
+            animation: "progress-indeterminate 2s ease-in-out infinite",
+            borderRadius: "inherit",
+          }}
+        />
+        <span
+          className="absolute top-0 bottom-0"
+          style={{
+            background: "var(--color-accent-interactive)",
+            opacity: 0.5,
+            animation: "progress-indeterminate-short 2s ease-in-out 1s infinite",
+            borderRadius: "inherit",
+          }}
+        />
+      </div>
 
       {/* Cancel button */}
       <div className="flex justify-end w-full">
