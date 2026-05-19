@@ -289,8 +289,10 @@ pub async fn run_benchmark(
     // Build command: set -m enables job control so SIGTERM propagates to process group.
     // stdbuf -oL forces line-buffered stdout for real-time streaming (A1).
     // URL changed to canonical https://Check.Place (A5); removed -l ru flag.
+    // Flags: -E English UI, -I IP detection mode (auto-selects menu item "1 Start Detection"),
+    // -y auto-yes (skip interactive confirms — REQUIRED otherwise script shows TUI menu and hangs).
     let cmd =
-        "set -m; echo $$ > /tmp/tt-benchmark.pid; exec stdbuf -oL bash <(curl -sL https://Check.Place) -EI 2>&1";
+        "set -m; echo $$ > /tmp/tt-benchmark.pid; exec stdbuf -oL bash <(curl -sL https://Check.Place) -EIy 2>&1";
     channel
         .exec(true, cmd.as_bytes())
         .await
