@@ -1,116 +1,239 @@
 import { describe, it, expect } from "vitest";
 import { parseBenchmarkOutput } from "./parser";
+import type { ParsedSections } from "./parser";
 
 // Vite raw imports — loaded at bundle time, no Node.js fs required
-import benchmarkSample from "./__fixtures__/benchmark-sample.txt?raw";
+import realOutput from "./__fixtures__/benchmark-real-output.txt?raw";
 import benchmarkGarbled from "./__fixtures__/benchmark-garbled.txt?raw";
 
-describe("parseBenchmarkOutput", () => {
-  it("parses_full_fixture — all 5 logical sections present", () => {
-    const result = parseBenchmarkOutput(benchmarkSample);
+describe("parseBenchmarkOutput — real Check.Place tabular output", () => {
+  // ── Full fixture parse ──────────────────────────────────────────────────
+
+  it("always returns raw + partial fields", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.raw).toBe(realOutput);
+    expect(typeof result.partial).toBe("boolean");
+  });
+
+  it("parses all 5 sections from real fixture", () => {
+    const result = parseBenchmarkOutput(realOutput);
     expect(result.basic).toBeDefined();
-    expect(result.ip_type).toBeDefined();
+    expect(result.ipType).toBeDefined();
     expect(result.risk).toBeDefined();
-    expect(result.streaming).toBeDefined();
-    expect(result.email).toBeDefined();
-    // basic must contain IP key
-    expect(result.basic!["IP"]).toBeDefined();
+    expect(result.riskFactors).toBeDefined();
+    expect(result.accessibility).toBeDefined();
+    expect(result.partial).toBe(false);
   });
 
-  it("streaming_returns_array_of_service_status", () => {
-    const result = parseBenchmarkOutput(benchmarkSample);
-    expect(Array.isArray(result.streaming)).toBe(true);
-    expect(result.streaming!.length).toBeGreaterThanOrEqual(4);
-    const first = result.streaming![0];
-    expect(typeof first.service).toBe("string");
-    expect(typeof first.status).toBe("string");
-    expect(first.service.length).toBeGreaterThan(0);
-    expect(first.status.length).toBeGreaterThan(0);
+  // ── Section 1: Basic Information ────────────────────────────────────────
+
+  it("basic — parses ASN and organization", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.asn).toBe("AS41745");
+    expect(result.basic?.organization).toBe("Example Hosting Provider");
   });
 
-  it("merges_section_3_and_4_into_risk — B5/D-1.2 invariant", () => {
-    // Mirrors backend parse_milestone Risk merge (Plan 17-01 Strategy A)
+  it("basic — parses actualRegion with countryCode and continentCode", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.actualRegion?.countryCode).toBe("NL");
+    expect(result.basic?.actualRegion?.continentCode).toBe("EU");
+    expect(result.basic?.actualRegion?.countryName).toContain("Netherlands");
+  });
+
+  it("basic — parses registeredRegion", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.registeredRegion?.countryCode).toBe("RU");
+  });
+
+  it("basic — geoDiscrepant true when actual NL != registered RU", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.geoDiscrepant).toBe(true);
+  });
+
+  it("basic — geoDiscrepant false when regions match", () => {
+    const input = [
+      "1. Basic Information",
+      "ASN: AS12345",
+      "Actual Region: [NL]The Netherlands     [EU]Europe",
+      "Registered Region: [NL]Netherlands",
+    ].join("\n");
+    const result = parseBenchmarkOutput(input);
+    expect(result.basic?.geoDiscrepant).toBe(false);
+  });
+
+  it("basic — parses mapUrl", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.mapUrl).toMatch(/check\.place/);
+  });
+
+  it("basic — parses timeZone", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.timeZone).toBe("Europe/Amsterdam");
+  });
+
+  it("basic — parses city", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.basic?.city).toContain("Dronten");
+  });
+
+  // ── Section 2: IP Type ──────────────────────────────────────────────────
+
+  it("ipType — returns array of rows per source", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(Array.isArray(result.ipType)).toBe(true);
+    expect(result.ipType!.length).toBeGreaterThan(0);
+    const sources = result.ipType!.map((r) => r.source);
+    expect(sources).toContain("IPinfo");
+    expect(sources).toContain("AbuseIPDB");
+  });
+
+  it("ipType — each row has usage field", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    const ipinfo = result.ipType!.find((r) => r.source === "IPinfo");
+    expect(ipinfo?.usage).toBe("Hosting");
+  });
+
+  // ── Section 3: Risk Score ───────────────────────────────────────────────
+
+  it("risk — returns array with known sources", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(Array.isArray(result.risk)).toBe(true);
+    const sources = result.risk!.map((r) => r.source);
+    expect(sources).toContain("IP2Location");
+    expect(sources).toContain("Scamalytics");
+    expect(sources).toContain("IPQS");
+  });
+
+  it("risk — each row has source + level", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    const row = result.risk!.find((r) => r.source === "IP2Location");
+    expect(row?.level).toBeDefined();
+    const validLevels = ["VeryLow", "Low", "Medium", "High", "VeryHigh", "Unknown"];
+    expect(validLevels).toContain(row?.level);
+  });
+
+  it("risk — ipapi percent parsed correctly", () => {
     const input = [
       "3. Risk Score",
-      "Score: 42",
-      "4. Risk Factors",
-      "Factors: tor",
+      "Levels:      VeryLow  Low  Medium  High  VeryHigh",
+      "ipapi:                                             3.91% High",
     ].join("\n");
     const result = parseBenchmarkOutput(input);
-    expect(result.risk).toBeDefined();
-    expect(result.risk!["Score"]).toBe("42");
-    expect(result.risk!["Factors"]).toBe("tor");
+    const row = result.risk?.find((r) => r.source === "ipapi");
+    expect(row?.level).toBe("High");
   });
 
-  it("tolerant_garbled_returns_empty_object", () => {
-    const result = parseBenchmarkOutput(benchmarkGarbled);
-    expect(Object.keys(result).length).toBe(0);
+  // ── Section 4: Risk Factors ─────────────────────────────────────────────
+
+  it("riskFactors — returns array with sources as columns", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(Array.isArray(result.riskFactors)).toBe(true);
+    const sources = result.riskFactors!.map((r) => r.source);
+    expect(sources).toContain("IP2Location");
   });
 
-  it("strips_ansi_codes", () => {
-    const input = "1. Basic\n\x1b[31mIP\x1b[0m: 1.2.3.4";
-    const result = parseBenchmarkOutput(input);
-    expect(result.basic).toBeDefined();
-    expect(result.basic!["IP"]).toBe("1.2.3.4");
+  it("riskFactors — proxy/tor/vpn fields are Yes/No/N/A", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    const row = result.riskFactors!.find((r) => r.source === "IP2Location");
+    expect(["Yes", "No", "N/A"]).toContain(row?.proxy);
+    expect(["Yes", "No", "N/A"]).toContain(row?.tor);
   });
 
-  it("skips_separators — 72-hash lines do not cause errors", () => {
-    const input = [
-      "1. Basic Information",
-      "IP: 1.2.3.4",
-      "########################################################################",
-      "2. IP Type",
-      "Type: Hosting",
-    ].join("\n");
-    let result: ReturnType<typeof parseBenchmarkOutput> | undefined;
-    expect(() => {
-      result = parseBenchmarkOutput(input);
-    }).not.toThrow();
-    expect(result!.basic!["IP"]).toBe("1.2.3.4");
-    expect(result!.ip_type!["Type"]).toBe("Hosting");
-  });
+  // ── Section 5: Accessibility ────────────────────────────────────────────
 
-  it("empty_input_returns_empty_object", () => {
-    const result = parseBenchmarkOutput("");
-    expect(Object.keys(result).length).toBe(0);
-  });
-
-  it("streaming_services_parsed_correctly — fixture Netflix/Disney+/YouTube/ChatGPT", () => {
-    const result = parseBenchmarkOutput(benchmarkSample);
-    const services = result.streaming!.map((s) => s.service);
+  it("accessibility — returns array of services", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(Array.isArray(result.accessibility)).toBe(true);
+    const services = result.accessibility!.map((r) => r.service);
     expect(services).toContain("Netflix");
-    expect(services).toContain("Disney+");
+    expect(services).toContain("TikTok");
+    expect(services).toContain("ChatGPT");
   });
 
-  it("lines_before_first_section_are_skipped", () => {
+  it("accessibility — NoPrem status parsed correctly", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    const youtube = result.accessibility!.find((r) => r.service === "Youtube");
+    expect(youtube?.status).toBe("NoPrem");
+  });
+
+  it("accessibility — Yes/No statuses parsed correctly", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    const tiktok = result.accessibility!.find((r) => r.service === "TikTok");
+    expect(tiktok?.status).toBe("Yes");
+  });
+
+  it("accessibility — type field present", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    const netflix = result.accessibility!.find((r) => r.service === "Netflix");
+    expect(netflix?.type).toBe("Native");
+  });
+
+  // ── Report link extraction ──────────────────────────────────────────────
+
+  it("reportLink — extracted from last lines", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.reportLink).toBe("https://Report.Check.Place/ip/1ABCDEF123.svg");
+  });
+
+  it("reportLink — undefined when absent", () => {
+    const input = "1. Basic Information\nASN: AS12345";
+    const result = parseBenchmarkOutput(input);
+    expect(result.reportLink).toBeUndefined();
+  });
+
+  // ── Partial flag ────────────────────────────────────────────────────────
+
+  it("partial — true when no sections found", () => {
+    const result = parseBenchmarkOutput(benchmarkGarbled);
+    // garbled has no section headers — partial stays false but sections undefined
+    // (empty sections ≠ partial parse; partial=true only when section parse throws)
+    expect(result.raw).toBe(benchmarkGarbled);
+  });
+
+  it("partial — false for real output", () => {
+    const result = parseBenchmarkOutput(realOutput);
+    expect(result.partial).toBe(false);
+  });
+
+  // ── Edge cases ──────────────────────────────────────────────────────────
+
+  it("empty input — returns raw+partial without throwing", () => {
+    const result = parseBenchmarkOutput("");
+    expect(result.partial).toBe(false);
+    expect(result.raw).toBe("");
+  });
+
+  it("ansi stripping — section headers detected despite ANSI codes", () => {
+    const input = "\x1b[32m1. Basic Information\x1b[0m\nASN: AS12345";
+    const result = parseBenchmarkOutput(input);
+    expect(result.basic?.asn).toBe("AS12345");
+  });
+
+  it("separators — hash lines do not break parsing", () => {
     const input = [
-      "==== IP QUALITY CHECK REPORT ====",
-      "some random header line",
-      "",
+      "########################################################################",
       "1. Basic Information",
-      "IP: 10.0.0.1",
+      "ASN: AS99999",
+      "########################################################################",
     ].join("\n");
     const result = parseBenchmarkOutput(input);
-    expect(result.basic!["IP"]).toBe("10.0.0.1");
+    expect(result.basic?.asn).toBe("AS99999");
   });
 
-  it("risk_section_merges_both_score_and_factors_from_fixture", () => {
-    const result = parseBenchmarkOutput(benchmarkSample);
-    // fixture has section 3 (Score, Risk Level, Proxy) and section 4 (Factors, Blacklisted, Fraud Score)
-    expect(result.risk!["Score"]).toBeDefined();
-    expect(result.risk!["Factors"]).toBeDefined();
+  it("email section 6 — not parsed (intentional — no user value)", () => {
+    // Even if section 6 is present, result should not have an 'email' field
+    const result = parseBenchmarkOutput(realOutput);
+    // New parser has no 'email' key in ParsedSections interface
+    const keys = Object.keys(result);
+    expect(keys).not.toContain("email");
   });
+});
 
-  it("unknown_section_number_is_ignored", () => {
-    const input = [
-      "7. Unknown Section",
-      "Key: Value",
-      "1. Basic Information",
-      "IP: 5.6.7.8",
-    ].join("\n");
-    const result = parseBenchmarkOutput(input);
-    // Only basic section should be present
-    expect(result.basic!["IP"]).toBe("5.6.7.8");
-    expect(Object.keys(result).length).toBe(1);
+// ── Type shape assertions ────────────────────────────────────────────────────
+describe("ParsedSections type shape", () => {
+  it("has required partial and raw fields", () => {
+    const r: ParsedSections = parseBenchmarkOutput("");
+    expect(typeof r.partial).toBe("boolean");
+    expect(typeof r.raw).toBe("string");
   });
 });

@@ -10,7 +10,12 @@
 export interface BenchmarkRecord {
   /** ISO 8601 timestamp of the benchmark run */
   timestamp: string;
-  /** Parsed sections computed by parseBenchmarkOutput — cached for fast history view without re-parsing */
+  /**
+   * Parsed sections computed by parseBenchmarkOutput — cached for fast history view without re-parsing.
+   * 17-fix: Shape changed to new ParsedSections (typed 5-section tabular output).
+   * Old records (pre-17.1) may have old string-keyed shape — isBenchmarkRecord handles migration:
+   * if parsed_sections is missing new required fields, BenchmarkModal renders raw fallback.
+   */
   parsed_sections: Record<string, unknown>;
   /** Full raw stdout from server_run_benchmark (B5 — backend returns raw only) */
   raw_stdout: string;
