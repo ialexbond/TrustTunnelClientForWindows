@@ -1459,13 +1459,6 @@
           "check_quality": "Проверить качество",
           "open_results": "Открыть результаты"
         },
-        "stages": {
-          "ip": "Получаем IP",
-          "type": "Определяем тип",
-          "risk": "Оцениваем риск",
-          "services": "Проверяем доступность сервисов",
-          "email": "Проверяем email"
-        },
         "hint_running": "Это может занять 1-3 минуты",
         "cancel_confirm_title": "Отменить проверку?",
         "cancel_confirm_message": "Текущая проверка будет прервана. Результат не сохранится.",
@@ -1482,82 +1475,7 @@
         "copy_raw": "Копировать",
         "copied_raw": "Скопировано!",
         "parser_fail_banner": "Не удалось распарсить вывод — показан полный текст",
-        "parser_partial_warning": "Парсер частично сработал — показан исходный вывод",
-        "report_link": "Открыть полный отчёт на check.place",
-        "section": {
-          "basic": "IP / Локация",
-          "ip_type": "Тип IP",
-          "risk": "Оценка риска",
-          "streaming": "Стриминг-сервисы",
-          "email": "Email / DNSBL"
-        },
-        "sections": {
-          "basic": {
-            "title": "Базовая информация",
-            "actual_region": "Actual Region",
-            "registered_region": "Registered Region",
-            "geo_discrepant_warning": "Geolocation does not match registration",
-            "timezone": "Time Zone",
-            "location": "Location",
-            "city": "City",
-            "asn": "ASN",
-            "organization": "Organization",
-            "map_link": "Открыть на карте"
-          },
-          "ip_type": {
-            "title": "Тип IP-адреса",
-            "usage": "Usage",
-            "company": "Company",
-            "database": "Database"
-          },
-          "risk": {
-            "title": "Оценка риска",
-            "level": {
-              "very_low": "Very Low",
-              "low": "Low",
-              "medium": "Medium",
-              "high": "High",
-              "very_high": "Very High"
-            }
-          },
-          "risk_factors": {
-            "title": "Факторы риска",
-            "region": "Region",
-            "proxy": "Proxy",
-            "tor": "Tor",
-            "vpn": "VPN",
-            "server": "Server",
-            "abuser": "Abuser",
-            "robot": "Robot",
-            "yes": "Yes",
-            "no": "No",
-            "na": "N/A"
-          },
-          "accessibility": {
-            "title": "Доступность сервисов",
-            "status": {
-              "yes": "Yes",
-              "no": "No",
-              "no_prem": "NoPrem",
-              "blocked": "Blocked"
-            }
-          }
-        },
-        "tail": {
-          "title": "Логи выполнения",
-          "pause": "Пауза",
-          "resume": "Возобновить"
-        },
-        "progress": {
-          "step": "Этап {{n}}/{{total}}",
-          "percent": "{{pct}}%"
-        },
-        "streaming_status": {
-          "available": "Доступен",
-          "restricted": "Ограничен",
-          "blocked": "Заблокирован",
-          "unknown": "Неизвестно"
-        },
+        "report_link": "Открыть полный отчёт на check.place ↗",
         "history": {
           "dropdown_label": "Предыдущие проверки",
           "current": "Текущая ({{time}})"
@@ -1567,7 +1485,9 @@
           "failed": "Ошибка проверки: {{error}}"
         },
         "empty_hint": "Нажмите «Проверить качество» для запуска проверки сервера.",
-        "error_prefix": "Ошибка:"
+        "error_prefix": "Ошибка:",
+        "running_text": "Проверка выполняется...",
+        "no_report_link_banner": "Ссылка на отчёт не найдена — показан исходный вывод"
       }
     },
     "danger": {
