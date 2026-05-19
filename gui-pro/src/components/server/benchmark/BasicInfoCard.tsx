@@ -16,10 +16,10 @@ interface BasicInfoCardProps {
 
 function LabelRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2 min-h-[22px]">
+    <div className="grid grid-cols-[200px_1fr] gap-2 items-start min-h-[22px]">
       <span
-        className="text-caption shrink-0"
-        style={{ color: "var(--color-text-muted)", minWidth: 150 }}
+        className="text-caption"
+        style={{ color: "var(--color-text-muted)" }}
       >
         {label}
       </span>
