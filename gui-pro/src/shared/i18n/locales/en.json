@@ -1538,7 +1538,7 @@
             "status": {
               "yes": "Available",
               "no": "Unavailable",
-              "no_prem": "No Premium (RU)",
+              "no_prem": "NoPrem",
               "blocked": "Blocked"
             }
           }

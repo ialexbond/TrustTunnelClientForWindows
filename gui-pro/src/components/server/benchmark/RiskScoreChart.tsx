@@ -113,11 +113,11 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
         ))}
       </div>
 
-      {/* Rows — grid full width: source label + bar (flex grows) + score-with-level text */}
+      {/* Rows — grid full width: source label + bar (1fr, fills) + score number (60px reserved for "100%") */}
       {rows.map((row) => (
         <div
           key={row.source}
-          className="grid grid-cols-[110px_1fr_120px] gap-3 items-center w-full"
+          className="grid grid-cols-[110px_1fr_60px] gap-3 items-center w-full"
           style={{ marginBottom: 6 }}
         >
           {/* Source label */}
@@ -128,7 +128,7 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
             {row.source}
           </span>
 
-          {/* Bar segments */}
+          {/* Bar segments — fills remaining space */}
           <div className="flex items-center gap-0.5">
             {LEVELS.map((level) => (
               <LevelSegment
@@ -139,20 +139,17 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
             ))}
           </div>
 
-          {/* Score + level */}
-          <div className="flex items-center gap-1 justify-start">
-            {row.score > 0 && (
-              <span className="text-mono-sm" style={{ color: "var(--color-text-primary)" }}>
-                {row.unit === "percent" ? `${row.score}%` : row.score}
-              </span>
-            )}
-            <span
-              className="text-caption"
-              style={{ color: SEGMENT_COLORS[row.level] }}
-            >
-              {t(levelI18nKey(row.level))}
-            </span>
-          </div>
+          {/* Numeric score only — right-aligned, fixed width slot for max "100%" */}
+          <span
+            className="text-mono-sm text-right"
+            style={{ color: SEGMENT_COLORS[row.level] }}
+          >
+            {row.score > 0
+              ? row.unit === "percent"
+                ? `${row.score}%`
+                : row.score
+              : "—"}
+          </span>
         </div>
       ))}
     </div>

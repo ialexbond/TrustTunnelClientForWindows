@@ -58,7 +58,7 @@ export function RiskFactorsTable({ rows }: RiskFactorsTableProps) {
   if (rows.length === 0) return null;
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto w-full">
       <table className="text-mono-sm w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr>

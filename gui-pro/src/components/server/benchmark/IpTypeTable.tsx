@@ -21,7 +21,7 @@ export function IpTypeTable({ rows }: IpTypeTableProps) {
   const hasCompany = rows.some((r) => r.company);
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto w-full">
       <table className="text-mono-sm w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr>
