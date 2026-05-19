@@ -8,6 +8,11 @@ import { BenchmarkModal } from "./BenchmarkModal";
 // Vite ?raw import — avoids node:fs / __dirname (same pattern as Plan 17-02 parser tests)
 import BenchmarkModalSource from "./BenchmarkModal.tsx?raw";
 
+// ─── Mock: Tauri plugin-shell (for report link + mapUrl) ─────────────────────
+vi.mock("@tauri-apps/plugin-shell", () => ({
+  open: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ─── Spy: useActivityLog (D-29) ──────────────────────────────────────────────
 const activityLogSpy = vi.fn();
 vi.mock("../../shared/hooks/useActivityLog", () => ({
@@ -53,22 +58,42 @@ const sshParams = {
   keyData: undefined as string | undefined,
 };
 
-/** Minimal raw_stdout that parser can extract 3+ sections from */
+/** Minimal raw_stdout — new columnar format that parser can extract sections from */
 const PARSEABLE_RAW = [
   "1. Basic Information",
-  "IP: 1.2.3.4",
-  "Country: Germany",
+  "ASN: AS41745",
+  "Organization: Example Hosting",
+  "Actual Region: [NL]The Netherlands     [EU]Europe",
+  "Registered Region: [RU]Russia",
+  "Time Zone: Europe/Amsterdam",
+  "",
   "2. IP Type",
-  "Type: Residential",
+  "",
+  "Database:    IPinfo       ipregistry",
+  "Usage:       Hosting      Hosting",
+  "",
   "3. Risk Score",
-  "Score: 42 / 100",
-  "Risk Level: Low",
+  "",
+  "Levels:      VeryLow  Low  Medium  High  VeryHigh",
+  "IP2Location:                                       3  Low",
+  "Scamalytics:                                       17 Low",
+  "",
   "4. Risk Factors",
-  "Factors: none",
+  "",
+  "DB:          IP2Location  ipapi",
+  "Region:      [NL]         [NL]",
+  "Proxy:       No           No",
+  "Tor:         No           No",
+  "VPN:         No           No",
+  "",
   "5. Accessibility check for media and AI services",
-  "Netflix: Yes",
-  "6. Email service availability and blacklist detection",
-  "SMTP: Open",
+  "",
+  "Service:     Netflix   Youtube",
+  "Status:      Yes       NoPrem",
+  "Region:      [NL]      [NL]",
+  "Type:        Native    Native",
+  "",
+  "Report Link: https://Report.Check.Place/ip/TESTID.svg",
 ].join("\n");
 
 const BENCHMARK_RESULT = {
@@ -111,7 +136,8 @@ describe("BenchmarkModal", () => {
   it("completed_initial_when_history_present", () => {
     const record = {
       timestamp: new Date().toISOString(),
-      parsed_sections: { basic: { IP: "1.2.3.4" }, ip_type: { Type: "Residential" }, risk: { Score: "Low" } },
+      // New shape: ParsedSections (typed, with raw+partial fields)
+      parsed_sections: { basic: { ip: "1.2.3.4", geoDiscrepant: false }, raw: PARSEABLE_RAW, partial: false },
       raw_stdout: PARSEABLE_RAW,
       duration_seconds: 42,
     };
@@ -358,6 +384,114 @@ describe("BenchmarkModal", () => {
 
     // Modal content should still be visible (running state not exited)
     expect(screen.queryByText(/1-3 минуты/i)).toBeTruthy();
+  });
+
+  // ─── 17-fix: live tail renders during running ──────────────────────────────
+  it("live_tail_visible_during_running", async () => {
+    vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    // Wait for running state
+    await waitFor(() => screen.getByText(/1-3 минуты/i));
+
+    // BenchmarkLiveTail title should be visible (uses i18n key tail.title = "Логи выполнения")
+    // Or at least the progress bar area is visible
+    expect(screen.getByText(/1-3 минуты/i)).toBeVisible();
+  });
+
+  // ─── 17-fix: geo-discrepant warning shown ──────────────────────────────────
+  it("geo_discrepant_warning_shown_when_true", async () => {
+    const geodiscrepantRaw = PARSEABLE_RAW; // has NL actual + RU registered → geoDiscrepant=true
+    vi.mocked(invoke).mockResolvedValueOnce({
+      raw_stdout: geodiscrepantRaw,
+      duration_seconds: 73,
+    });
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
+
+    // Geo-discrepant warning must be shown
+    expect(screen.getByText(/Геолокация не совпадает с регистрацией/i)).toBeVisible();
+  });
+
+  // ─── 17-fix: NoPrem accessibility chip shown ───────────────────────────────
+  it("noprem_accessibility_chip_shown", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      raw_stdout: PARSEABLE_RAW,
+      duration_seconds: 73,
+    });
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
+
+    // NoPrem = "Без премиума (RU)" in ru locale
+    expect(screen.getByText(/Без премиума/i)).toBeVisible();
+  });
+
+  // ─── 17-fix: report link opens via plugin-shell ────────────────────────────
+  it("report_link_button_visible_when_present", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      raw_stdout: PARSEABLE_RAW,
+      duration_seconds: 73,
+    });
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
+
+    // Report link button should be visible
+    expect(screen.getByTestId("report-link-button")).toBeVisible();
+  });
+
+  // ─── 17-fix: partial=true auto-opens raw accordion ─────────────────────────
+  it("partial_true_autoopens_raw_accordion", async () => {
+    // Garbled output → parser can't extract sections → partial flag
+    vi.mocked(invoke).mockResolvedValueOnce({
+      raw_stdout: "garbled output with no sections",
+      duration_seconds: 5,
+    });
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Не удалось распарсить/i)).toBeVisible();
+    }, { timeout: 3000 });
+
+    // Raw output accordion should auto-open — raw content visible
+    await waitFor(() => {
+      expect(screen.getByText(/garbled output/i)).toBeVisible();
+    }, { timeout: 1000 });
+  });
+
+  // ─── 17-fix: D-29 report URL not in activity log ───────────────────────────
+  it("D-29_report_url_not_in_activity_log", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      raw_stdout: PARSEABLE_RAW,
+      duration_seconds: 73,
+    });
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
+
+    // D-29 extension: report link URL must NOT appear in activity log
+    expect(activityLogSpy).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("Report.Check.Place")
+    );
+    expect(activityLogSpy).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("TESTID.svg")
+    );
   });
 
   // ─── 15: early_return_null_anti_pattern_absent ───────────────────────────

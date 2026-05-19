@@ -1,5 +1,5 @@
 /**
- * BenchmarkModal — compound state-machine Modal for Server Benchmark IP.Check.Place.
+ * BenchmarkModal — compound state-machine Modal for Server Benchmark Check.Place.
  *
  * State machine:
  *   idle → running → completed | cancelled | error
@@ -14,16 +14,19 @@
  *  - B7: invoke uses camelCase keys (keyPath / keyData) — Tauri 2 auto-renames to snake_case.
  *  - W1: cancel useConfirm uses variant:"warning" (non-destructive — can re-run).
  *  - D-29: activityLog NEVER receives raw_stdout content or sshParams.password.
+ *
+ * 17-fix: BenchmarkLiveTail + HorizontalProgressBar during running,
+ *         5-section CompletedView (BasicInfoCard, IpTypeTable, RiskScoreChart, RiskFactorsTable, AccessibilityTable),
+ *         reportLink footer button, parser partial fallback, history dropdown preserved.
  */
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
-import { StepProgress } from "./StepProgress";
 import { Accordion } from "../../shared/ui/Accordion";
-import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
@@ -37,7 +40,14 @@ import {
   loadHistory,
   type BenchmarkRecord,
 } from "./benchmark/history";
-import { Copy, Check } from "lucide-react";
+import { BenchmarkLiveTail } from "./benchmark/BenchmarkLiveTail";
+import { HorizontalProgressBar } from "./benchmark/HorizontalProgressBar";
+import { BasicInfoCard } from "./benchmark/BasicInfoCard";
+import { IpTypeTable } from "./benchmark/IpTypeTable";
+import { RiskScoreChart } from "./benchmark/RiskScoreChart";
+import { RiskFactorsTable } from "./benchmark/RiskFactorsTable";
+import { AccessibilityTable } from "./benchmark/AccessibilityTable";
+import { Copy, Check, ExternalLink } from "lucide-react";
 
 // ── Stage labels — B1 LOCKED 2026-05-18 under D-1.2 mapping ──
 // Five stages [0..4]. Backend (Plan 17-01) emits stage already in [0,4]
@@ -54,9 +64,9 @@ const STAGE_KEYS = [
 // ── State machine type ──
 type BenchmarkModalState =
   | { kind: "idle" }
-  | { kind: "running"; stage: number; lastLine: string; rawBuf: string }
+  | { kind: "running"; stage: number; percent?: number; activity?: string; rawBuf: string }
   | { kind: "cancelling"; rawBuf: string }
-  | { kind: "completed"; record: BenchmarkRecord }
+  | { kind: "completed"; record: BenchmarkRecord; parsed: ParsedSections }
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
 
@@ -98,34 +108,31 @@ function IdleView({ onStart }: IdleViewProps) {
 }
 
 interface RunningViewProps {
-  state: { kind: "running"; stage: number; lastLine: string; rawBuf: string } | { kind: "cancelling"; rawBuf: string };
+  state: { kind: "running"; stage: number; percent?: number; activity?: string; rawBuf: string } | { kind: "cancelling"; rawBuf: string };
   onCancel: () => void;
 }
 function RunningView({ state, onCancel }: RunningViewProps) {
   const { t } = useTranslation();
   const isCancelling = state.kind === "cancelling";
   const stage = state.kind === "running" ? state.stage : 4;
-
-  const steps = STAGE_KEYS.map((key, i) => ({ key: String(i), label: t(key) }));
+  const percent = state.kind === "running" ? state.percent : undefined;
+  const activity = state.kind === "running" ? state.activity : undefined;
+  const stageLabel = t(STAGE_KEYS[Math.min(stage, STAGE_KEYS.length - 1)]);
 
   return (
     <div className="flex flex-col gap-5 py-4">
-      <StepProgress
-        steps={steps}
-        currentStep={stage}
-        status={isCancelling ? "active" : "active"}
+      {/* Horizontal progress bar — replaces StepProgress */}
+      <HorizontalProgressBar
+        stage={stage}
+        totalStages={5}
+        percent={percent}
+        activity={activity}
+        stageLabel={stageLabel}
       />
-      {state.kind === "running" && state.lastLine && (
-        <p
-          className="text-mono-sm truncate"
-          style={{ color: "var(--color-text-muted)", maxWidth: "100%" }}
-          title={state.lastLine}
-        >
-          {state.lastLine.length > 80
-            ? state.lastLine.slice(0, 80) + "…"
-            : state.lastLine}
-        </p>
-      )}
+
+      {/* Live tail — only while running (not cancelling) */}
+      <BenchmarkLiveTail active={state.kind === "running"} />
+
       <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
         {t("server.utilities.benchmark.hint_running")}
       </p>
@@ -146,24 +153,35 @@ function RunningView({ state, onCancel }: RunningViewProps) {
 
 interface CompletedViewProps {
   record: BenchmarkRecord;
+  initialParsed: ParsedSections;
   host: string;
   onRerun: () => void;
   onClose: () => void;
 }
-function CompletedView({ record, host, onRerun, onClose }: CompletedViewProps) {
+function CompletedView({ record, initialParsed, host, onRerun, onClose }: CompletedViewProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [displayRecord, setDisplayRecord] = useState<BenchmarkRecord>(record);
 
-  // Parse the raw_stdout of the currently displayed record (B5 — frontend owns parsing)
-  const parsed = useMemo(
-    () => parseBenchmarkOutput(displayRecord.raw_stdout),
-    [displayRecord.raw_stdout]
+  // Parse the currently displayed record — re-parse only when switching history records
+  const parsed: ParsedSections = useMemo(
+    () =>
+      displayRecord === record
+        ? initialParsed // use already-parsed result for current record (no re-parse)
+        : parseBenchmarkOutput(displayRecord.raw_stdout),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayRecord]
   );
-  const parsedKeyCount = Object.keys(parsed).length;
-  const parserFailed = parsedKeyCount < 3;
 
-  // History for dropdown
+  const isPartial = parsed.partial;
+  // Section presence check: new typed shape
+  const hasBasic = !!parsed.basic;
+  const hasIpType = !!(parsed.ipType && parsed.ipType.length > 0);
+  const hasRisk = !!(parsed.risk && parsed.risk.length > 0);
+  const hasRiskFactors = !!(parsed.riskFactors && parsed.riskFactors.length > 0);
+  const hasAccessibility = !!(parsed.accessibility && parsed.accessibility.length > 0);
+  const hasAnySections = hasBasic || hasIpType || hasRisk || hasRiskFactors || hasAccessibility;
+
   const history = loadHistory(host);
 
   const handleCopyRaw = async () => {
@@ -176,23 +194,14 @@ function CompletedView({ record, host, onRerun, onClose }: CompletedViewProps) {
     }
   };
 
-  // Stream status → StatusIndicator variant
-  const streamingStatusVariant = (
-    status: string
-  ): "success" | "warning" | "danger" | "info" => {
-    const s = status.toLowerCase();
-    if (s.includes("yes") || s.includes("available")) return "success";
-    if (s.includes("restricted") || s.includes("originals only")) return "warning";
-    if (s.includes("no") || s.includes("blocked")) return "danger";
-    return "info";
-  };
-
-  const streamingStatusLabel = (status: string): string => {
-    const v = streamingStatusVariant(status);
-    if (v === "success") return t("server.utilities.benchmark.streaming_status.available");
-    if (v === "warning") return t("server.utilities.benchmark.streaming_status.restricted");
-    if (v === "danger") return t("server.utilities.benchmark.streaming_status.blocked");
-    return t("server.utilities.benchmark.streaming_status.unknown");
+  const handleReportLink = async () => {
+    if (parsed.reportLink) {
+      try {
+        await shellOpen(parsed.reportLink);
+      } catch {
+        // silent
+      }
+    }
   };
 
   const rawOutputAccordion = [
@@ -275,8 +284,21 @@ function CompletedView({ record, host, onRerun, onClose }: CompletedViewProps) {
         })}
       </p>
 
-      {/* Parser fail banner */}
-      {parserFailed && (
+      {/* Parser partial warning */}
+      {isPartial && (
+        <div
+          className="rounded-[var(--radius-md)] p-3 text-body-sm"
+          style={{
+            background: "var(--color-status-warning-bg)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          {t("server.utilities.benchmark.parser_partial_warning")}
+        </div>
+      )}
+
+      {/* Parser complete fail banner (no sections at all) */}
+      {!hasAnySections && (
         <div
           className="rounded-[var(--radius-md)] p-3 text-body-sm"
           style={{
@@ -288,74 +310,74 @@ function CompletedView({ record, host, onRerun, onClose }: CompletedViewProps) {
         </div>
       )}
 
-      {/* Parsed sections — only render when parser succeeded */}
-      {!parserFailed && (
-        <div className="flex flex-col gap-3">
-          {/* Basic */}
-          {parsed.basic && (
-            <SectionCard title={t("server.utilities.benchmark.section.basic")}>
-              <KVTable data={parsed.basic} />
+      {/* 5-section results */}
+      {hasAnySections && (
+        <div className="flex flex-col gap-4">
+          {/* Section 1 — Basic Information */}
+          {hasBasic && (
+            <SectionCard title={t("server.utilities.benchmark.sections.basic.title")}>
+              <BasicInfoCard data={parsed.basic!} />
             </SectionCard>
           )}
 
-          {/* IP Type */}
-          {parsed.ip_type && (
-            <SectionCard title={t("server.utilities.benchmark.section.ip_type")}>
-              <KVTable data={parsed.ip_type} />
+          {/* Section 2 — IP Type */}
+          {hasIpType && (
+            <SectionCard title={t("server.utilities.benchmark.sections.ip_type.title")}>
+              <IpTypeTable rows={parsed.ipType!} />
             </SectionCard>
           )}
 
-          {/* Risk */}
-          {parsed.risk && (
-            <SectionCard title={t("server.utilities.benchmark.section.risk")}>
-              <KVTable data={parsed.risk} />
+          {/* Section 3 — Risk Score (horizontal multi-bar chart) */}
+          {hasRisk && (
+            <SectionCard title={t("server.utilities.benchmark.sections.risk.title")}>
+              <RiskScoreChart rows={parsed.risk!} />
             </SectionCard>
           )}
 
-          {/* Streaming */}
-          {parsed.streaming && parsed.streaming.length > 0 && (
-            <SectionCard title={t("server.utilities.benchmark.section.streaming")}>
-              <div className="flex flex-col gap-1">
-                {parsed.streaming.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2">
-                    <span className="text-body-sm" style={{ color: "var(--color-text-primary)" }}>
-                      {item.service}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <StatusIndicator
-                        status={streamingStatusVariant(item.status)}
-                        size="sm"
-                        label={streamingStatusLabel(item.status)}
-                      />
-                      <span
-                        className="text-caption"
-                        style={{ color: "var(--color-text-secondary)" }}
-                      >
-                        {streamingStatusLabel(item.status)}
-                      </span>
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Section 4 — Risk Factors */}
+          {hasRiskFactors && (
+            <SectionCard title={t("server.utilities.benchmark.sections.risk_factors.title")}>
+              <RiskFactorsTable rows={parsed.riskFactors!} />
             </SectionCard>
           )}
 
-          {/* Email */}
-          {parsed.email && (
-            <SectionCard title={t("server.utilities.benchmark.section.email")}>
-              <KVTable data={parsed.email} />
+          {/* Section 5 — Accessibility (no Email) */}
+          {hasAccessibility && (
+            <SectionCard title={t("server.utilities.benchmark.sections.accessibility.title")}>
+              <AccessibilityTable rows={parsed.accessibility!} />
             </SectionCard>
           )}
         </div>
       )}
 
-      {/* Raw output accordion */}
+      {/* Raw output accordion (auto-open if partial) */}
       <Accordion
         items={rawOutputAccordion}
-        defaultOpen={parserFailed ? ["raw-output"] : []}
+        defaultOpen={isPartial || !hasAnySections ? ["raw-output"] : []}
       />
 
-      {/* Sticky action row */}
+      {/* Footer — report link */}
+      {parsed.reportLink && (
+        <button
+          type="button"
+          className="flex items-center gap-1.5 text-body-sm"
+          style={{
+            color: "var(--color-accent-interactive)",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            alignSelf: "flex-start",
+          }}
+          onClick={() => void handleReportLink()}
+          data-testid="report-link-button"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          {t("server.utilities.benchmark.report_link")}
+        </button>
+      )}
+
+      {/* Action row */}
       <div className="flex justify-between gap-2 pt-2">
         <Button variant="primary" onClick={onRerun}>
           {t("server.utilities.benchmark.rerun_button")}
@@ -375,31 +397,10 @@ function SectionCard({ title, children }: { title: string; children: React.React
       className="rounded-[var(--radius-md)] border border-[var(--color-border)] p-3"
       style={{ background: "var(--color-bg-surface)" }}
     >
-      <h4 className="text-body-sm font-semibold mb-2" style={{ color: "var(--color-text-primary)" }}>
+      <h4 className="text-title-sm mb-3" style={{ color: "var(--color-text-primary)" }}>
         {title}
       </h4>
       {children}
-    </div>
-  );
-}
-
-// Helper: key-value table
-function KVTable({ data }: { data: Record<string, string> }) {
-  return (
-    <div className="flex flex-col gap-1">
-      {Object.entries(data).map(([k, v]) => (
-        <div key={k} className="flex items-start gap-2">
-          <span
-            className="text-caption shrink-0"
-            style={{ color: "var(--color-text-muted)", minWidth: 100 }}
-          >
-            {k}:
-          </span>
-          <span className="text-mono-sm" style={{ color: "var(--color-text-primary)" }}>
-            {v}
-          </span>
-        </div>
-      ))}
     </div>
   );
 }
@@ -467,7 +468,11 @@ export function BenchmarkModal({
   const [state, setState] = useState<BenchmarkModalState>(() => {
     if (_forceState) return _forceState;
     const hist = loadHistory(sshParams.host);
-    if (hist.length > 0) return { kind: "completed", record: hist[hist.length - 1] };
+    if (hist.length > 0) {
+      const lastRecord = hist[hist.length - 1];
+      const parsed = parseBenchmarkOutput(lastRecord.raw_stdout);
+      return { kind: "completed", record: lastRecord, parsed };
+    }
     return { kind: "idle" };
   });
 
@@ -493,19 +498,27 @@ export function BenchmarkModal({
   }, [isOpen]);
 
   // ── Listen for benchmark-progress events (race-safe — Pitfall 8) ──
+  // Extends: now handles percent + activity from parse_signal
   useEffect(() => {
     if (state.kind !== "running") return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    listen<{ stage: number; label: string; current_line: string }>(
+    listen<{ stage: number; label: string; current_line: string; percent?: number; activity?: string }>(
       "benchmark-progress",
       (event) => {
         // Backend emits stage already in [0,4] per Strategy A — NO mapping here (D-1.2)
-        const { stage, current_line } = event.payload;
+        const { stage, current_line, percent, activity } = event.payload;
         setState((prev) => {
           if (prev.kind !== "running") return prev;
-          return { ...prev, stage, lastLine: current_line ?? "" };
+          return {
+            ...prev,
+            stage,
+            // Update percent/activity from signal (undefined = keep previous if not in this event)
+            ...(percent !== undefined ? { percent } : {}),
+            ...(activity !== undefined ? { activity } : {}),
+            lastLine: current_line ?? "",
+          };
         });
       }
     ).then((fn) => {
@@ -520,39 +533,11 @@ export function BenchmarkModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.kind === "running"]);
 
-  // ── Listen for benchmark-stdout-chunk events (race-safe) ──
-  useEffect(() => {
-    if (state.kind !== "running" && state.kind !== "cancelling") return;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    listen<string>("benchmark-stdout-chunk", (event) => {
-      setState((prev) => {
-        if (prev.kind === "running") {
-          return { ...prev, rawBuf: prev.rawBuf + event.payload };
-        }
-        if (prev.kind === "cancelling") {
-          return { ...prev, rawBuf: prev.rawBuf + event.payload };
-        }
-        return prev;
-      });
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.kind === "running" || state.kind === "cancelling"]);
-
   // ── handleStart — invoke server_run_benchmark (B7: camelCase keys) ──
   const handleStart = async () => {
     // D-29: log ONLY metadata — no password, no raw_stdout content
     activityLog("USER", `benchmark.start host=${sshParams.host}`);
-    setState({ kind: "running", stage: 0, lastLine: "", rawBuf: "" });
+    setState({ kind: "running", stage: 0, rawBuf: "" });
     try {
       // B7: camelCase keys — Tauri 2 auto-renames to snake_case in Rust (key_path / key_data)
       // B5: BenchmarkResult has only 2 fields (raw_stdout + duration_seconds)
@@ -572,14 +557,14 @@ export function BenchmarkModal({
       const parsed: ParsedSections = parseBenchmarkOutput(result.raw_stdout);
       const record: BenchmarkRecord = {
         timestamp: new Date().toISOString(),
-        parsed_sections: parsed as Record<string, unknown>,
+        parsed_sections: parsed as unknown as Record<string, unknown>,
         raw_stdout: result.raw_stdout,
         duration_seconds: result.duration_seconds,
       };
 
       // D-1.4: push on completion ONLY (not cancel/error)
       pushHistory(sshParams.host, record);
-      setState({ kind: "completed", record });
+      setState({ kind: "completed", record, parsed });
       // D-29: log only metadata — no raw_stdout, no duration that reveals content
       activityLog(
         "STATE",
@@ -652,6 +637,7 @@ export function BenchmarkModal({
       {state.kind === "completed" && (
         <CompletedView
           record={state.record}
+          initialParsed={state.parsed}
           host={sshParams.host}
           onRerun={() => void handleStart()}
           onClose={onClose}
