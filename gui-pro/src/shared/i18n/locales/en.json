@@ -1482,12 +1482,75 @@
         "copy_raw": "Copy",
         "copied_raw": "Copied!",
         "parser_fail_banner": "Could not parse output — showing full text",
+        "parser_partial_warning": "Parser partially succeeded — showing raw output",
+        "report_link": "Open full report on check.place",
         "section": {
           "basic": "IP / Location",
           "ip_type": "IP Type",
           "risk": "Risk Assessment",
           "streaming": "Streaming Services",
           "email": "Email / DNSBL"
+        },
+        "sections": {
+          "basic": {
+            "title": "Basic Information",
+            "actual_region": "Actual Region",
+            "registered_region": "Registered Region",
+            "geo_discrepant_warning": "Geolocation does not match registration",
+            "timezone": "Time Zone",
+            "location": "Coordinates",
+            "city": "City",
+            "asn": "ASN",
+            "organization": "Organization",
+            "map_link": "Open on map"
+          },
+          "ip_type": {
+            "title": "IP Address Type",
+            "usage": "Usage",
+            "company": "Company",
+            "database": "Database"
+          },
+          "risk": {
+            "title": "Risk Score",
+            "level": {
+              "very_low": "Very Low",
+              "low": "Low",
+              "medium": "Medium",
+              "high": "High",
+              "very_high": "Very High"
+            }
+          },
+          "risk_factors": {
+            "title": "Risk Factors",
+            "region": "Region",
+            "proxy": "Proxy",
+            "tor": "Tor",
+            "vpn": "VPN",
+            "server": "Server",
+            "abuser": "Abuser",
+            "robot": "Robot",
+            "yes": "Yes",
+            "no": "No",
+            "na": "N/A"
+          },
+          "accessibility": {
+            "title": "Service Accessibility",
+            "status": {
+              "yes": "Available",
+              "no": "Unavailable",
+              "no_prem": "No Premium (RU)",
+              "blocked": "Blocked"
+            }
+          }
+        },
+        "tail": {
+          "title": "Execution log",
+          "pause": "Pause",
+          "resume": "Resume"
+        },
+        "progress": {
+          "step": "Step {{n}}/{{total}}",
+          "percent": "{{pct}}%"
         },
         "streaming_status": {
           "available": "Available",

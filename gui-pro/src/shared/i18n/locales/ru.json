@@ -1482,12 +1482,75 @@
         "copy_raw": "Копировать",
         "copied_raw": "Скопировано!",
         "parser_fail_banner": "Не удалось распарсить вывод — показан полный текст",
+        "parser_partial_warning": "Парсер частично сработал — показан исходный вывод",
+        "report_link": "Открыть полный отчёт на check.place",
         "section": {
           "basic": "IP / Локация",
           "ip_type": "Тип IP",
           "risk": "Оценка риска",
           "streaming": "Стриминг-сервисы",
           "email": "Email / DNSBL"
+        },
+        "sections": {
+          "basic": {
+            "title": "Базовая информация",
+            "actual_region": "Фактический регион",
+            "registered_region": "Зарегистрированный регион",
+            "geo_discrepant_warning": "Геолокация не совпадает с регистрацией",
+            "timezone": "Часовой пояс",
+            "location": "Координаты",
+            "city": "Город",
+            "asn": "ASN",
+            "organization": "Организация",
+            "map_link": "Открыть на карте"
+          },
+          "ip_type": {
+            "title": "Тип IP-адреса",
+            "usage": "Использование",
+            "company": "Компания",
+            "database": "База"
+          },
+          "risk": {
+            "title": "Оценка риска",
+            "level": {
+              "very_low": "Очень низкий",
+              "low": "Низкий",
+              "medium": "Средний",
+              "high": "Высокий",
+              "very_high": "Очень высокий"
+            }
+          },
+          "risk_factors": {
+            "title": "Факторы риска",
+            "region": "Регион",
+            "proxy": "Прокси",
+            "tor": "Tor",
+            "vpn": "VPN",
+            "server": "Сервер",
+            "abuser": "Нарушитель",
+            "robot": "Бот",
+            "yes": "Да",
+            "no": "Нет",
+            "na": "N/A"
+          },
+          "accessibility": {
+            "title": "Доступность сервисов",
+            "status": {
+              "yes": "Доступен",
+              "no": "Недоступен",
+              "no_prem": "Без премиума (RU)",
+              "blocked": "Заблокировано"
+            }
+          }
+        },
+        "tail": {
+          "title": "Логи выполнения",
+          "pause": "Пауза",
+          "resume": "Возобновить"
+        },
+        "progress": {
+          "step": "Этап {{n}}/{{total}}",
+          "percent": "{{pct}}%"
         },
         "streaming_status": {
           "available": "Доступен",
