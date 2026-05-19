@@ -430,8 +430,8 @@ describe("BenchmarkModal", () => {
 
     await waitFor(() => screen.getByText(/Duration/i), { timeout: 3000 });
 
-    // NoPrem = "Без премиума (RU)" in ru locale
-    expect(screen.getByText(/No Premium/i)).toBeVisible();
+    // Raw enum value "NoPrem" rendered directly per UAT 2026-05-19 (no localization)
+    expect(screen.getByText(/^NoPrem$/)).toBeVisible();
   });
 
   // ─── 17-fix: report link opens via plugin-shell ────────────────────────────
