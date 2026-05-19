@@ -7,7 +7,7 @@
  * - Smooth CSS transition on width (transition-all duration-300 ease-out).
  * - Subtle pulse animation when activity for >2s without update (signals alive).
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 interface HorizontalProgressBarProps {
@@ -32,8 +32,6 @@ export function HorizontalProgressBar({
 }: HorizontalProgressBarProps) {
   const { t } = useTranslation();
   const [pulsing, setPulsing] = useState(false);
-  const lastUpdateRef = useRef<number>(Date.now());
-  const pulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Calculate fill percent
   const fillPct =
@@ -45,18 +43,15 @@ export function HorizontalProgressBar({
 
   // Pulse detection: if percent/activity don't change for 2s, start pulsing
   useEffect(() => {
-    lastUpdateRef.current = Date.now();
-    setPulsing(false);
-
-    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
-    pulseTimerRef.current = setTimeout(() => {
+    // Reset pulsing state on each update
+    const timer = setTimeout(() => {
       setPulsing(true);
     }, 2000);
 
     return () => {
-      if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+      clearTimeout(timer);
+      setPulsing(false);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [percent, activity, stage]);
 
   const stepText = t("server.utilities.benchmark.progress.step", {
