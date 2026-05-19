@@ -74,14 +74,16 @@ pub struct BenchmarkResult {
 // ─── Stage Labels (D-1.2 Strategy A mapping) ─────────────────────────────────
 
 /// Return the human-readable label for a given UI stage [0..4].
+/// English-only per UAT 2026-05-19 — benchmark output stays in English
+/// regardless of app language, since the underlying script is English.
 fn stage_label(stage: u8) -> &'static str {
     match stage {
-        0 => "Получаем IP",
-        1 => "Определяем тип",
-        2 => "Оцениваем риск",
-        3 => "Проверяем доступность сервисов",
-        4 => "Проверяем email",
-        _ => "Выполняем",
+        0 => "Getting IP",
+        1 => "Determining type",
+        2 => "Assessing risk",
+        3 => "Checking service accessibility",
+        4 => "Checking email",
+        _ => "Running",
     }
 }
 
@@ -196,12 +198,12 @@ pub fn parse_signal(line: &str) -> Option<BenchmarkSignal> {
 ///
 /// | Section | Header prefix | UI stage |
 /// |---------|---------------|----------|
-/// | 1       | "1. "         | 0 — "Получаем IP"                      |
-/// | 2       | "2. "         | 1 — "Определяем тип"                   |
-/// | 3       | "3. "         | 2 — "Оцениваем риск" (Risk Score)      |
-/// | 4       | "4. "         | 2 — "Оцениваем риск" (Risk Factors — **merged with 3**) |
-/// | 5       | "5. "         | 3 — "Проверяем доступность сервисов"   |
-/// | 6       | "6. "         | 4 — "Проверяем email"                  |
+/// | 1       | "1. "         | 0 — "Getting IP"                       |
+/// | 2       | "2. "         | 1 — "Determining type"                 |
+/// | 3       | "3. "         | 2 — "Assessing risk" (Risk Score)      |
+/// | 4       | "4. "         | 2 — "Assessing risk" (Risk Factors — **merged with 3**) |
+/// | 5       | "5. "         | 3 — "Checking service accessibility"   |
+/// | 6       | "6. "         | 4 — "Checking email"                   |
 ///
 /// Returns `None` for any line that is not a Check.Place section header.
 /// Section numbers 7+ yield `None` (out-of-range).
@@ -223,12 +225,12 @@ pub fn parse_milestone(line: &str) -> Option<u8> {
 
     // D-1.2 Strategy A merge: sections 1..6 → UI stages 0..4
     match section_num {
-        1 => Some(0), // Basic Information → "Получаем IP"
-        2 => Some(1), // IP Type → "Определяем тип"
-        3 => Some(2), // Risk Score → "Оцениваем риск" (merged with 4)
-        4 => Some(2), // Risk Factors → "Оцениваем риск" (merged with 3)
-        5 => Some(3), // Accessibility → "Проверяем доступность сервисов"
-        6 => Some(4), // Email → "Проверяем email"
+        1 => Some(0), // Basic Information → "Getting IP"
+        2 => Some(1), // IP Type → "Determining type"
+        3 => Some(2), // Risk Score → "Assessing risk" (merged with 4)
+        4 => Some(2), // Risk Factors → "Assessing risk" (merged with 3)
+        5 => Some(3), // Accessibility → "Checking service accessibility"
+        6 => Some(4), // Email → "Checking email"
         _ => None,
     }
 }
