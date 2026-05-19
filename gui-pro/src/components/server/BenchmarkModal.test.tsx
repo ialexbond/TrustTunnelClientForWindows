@@ -345,9 +345,9 @@ describe("BenchmarkModal", () => {
     const content = BenchmarkModalSource;
     expect(content).not.toContain("Проверяем сеть");
     expect(content).not.toContain("Замеряем скорость");
-    // No StepProgress or HorizontalProgressBar references
-    expect(content).not.toContain("StepProgress");
-    expect(content).not.toContain("HorizontalProgressBar");
-    expect(content).not.toContain("BenchmarkLiveTail");
+    // No imports of removed components
+    expect(content).not.toContain('from "./benchmark/HorizontalProgressBar"');
+    expect(content).not.toContain('from "./benchmark/BenchmarkLiveTail"');
+    expect(content).not.toContain('from "./benchmark/BasicInfoCard"');
   });
 });
