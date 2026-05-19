@@ -112,8 +112,8 @@ describe("BenchmarkModal", () => {
     expect(screen.getByText(/Длительность:/)).toBeVisible();
   });
 
-  // ─── 3: running_shows_spinner_and_hint ───────────────────────────────────
-  it("running_shows_spinner_and_hint", async () => {
+  // ─── 3: running_shows_progress_bar_and_hint ──────────────────────────────
+  it("running_shows_progress_bar_and_hint", async () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
@@ -122,8 +122,10 @@ describe("BenchmarkModal", () => {
     await waitFor(() => {
       expect(screen.getByText(/1-3 минуты/i)).toBeVisible();
     });
-    // Spinner should be in DOM (Loader2 with animate-spin)
-    expect(screen.getByText(/Проверка выполняется/i)).toBeVisible();
+    // Generic running text (no stage labels — indeterminate progress bar)
+    expect(screen.getByText(/Идёт проверка сервера/i)).toBeVisible();
+    // Indeterminate progress bar via role="progressbar" with aria-busy
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-busy", "true");
   });
 
   // ─── 4: invoke_uses_camelCase_keys (B7 explicit) ─────────────────────────
