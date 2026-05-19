@@ -1449,125 +1449,125 @@
         }
       },
       "benchmark": {
-        "modal_title": "Проверка качества сервера",
+        "modal_title": "Server Quality Check",
         "card": {
-          "title": "Проверка сервера",
-          "empty": "Проверка ещё не проводилась",
-          "last_run": "Последняя проверка: {{time}}"
+          "title": "Server Check",
+          "empty": "No check has been performed yet",
+          "last_run": "Last check: {{time}}"
         },
         "button": {
-          "check_quality": "Проверить качество",
-          "open_results": "Открыть результаты"
+          "check_quality": "Check Quality",
+          "open_results": "Open Results"
         },
         "stages": {
-          "ip": "Получаем IP",
-          "type": "Определяем тип",
-          "risk": "Оцениваем риск",
-          "services": "Проверяем доступность сервисов",
-          "email": "Проверяем email"
+          "ip": "Getting IP",
+          "type": "Identifying type",
+          "risk": "Assessing risk",
+          "services": "Checking service availability",
+          "email": "Checking email"
         },
-        "hint_running": "Это может занять 1-3 минуты",
-        "cancel_confirm_title": "Отменить проверку?",
-        "cancel_confirm_message": "Текущая проверка будет прервана. Результат не сохранится.",
-        "cancel_button": "Отменить",
-        "cancelling_button": "Отменяем...",
-        "cancelled_message": "Проверка была отменена.",
-        "restart_button": "Запустить снова",
-        "rerun_button": "Проверить ещё раз",
-        "close_button": "Закрыть",
-        "start_button": "Запустить проверку",
-        "retry_button": "Повторить",
-        "duration_label": "Длительность: {{seconds}}с",
-        "raw_output_title": "Вывод скрипта",
-        "copy_raw": "Копировать",
-        "copied_raw": "Скопировано!",
-        "parser_fail_banner": "Не удалось распарсить вывод — показан полный текст",
-        "parser_partial_warning": "Парсер частично сработал — показан исходный вывод",
-        "report_link": "Открыть полный отчёт на check.place",
+        "hint_running": "This may take 1-3 minutes",
+        "cancel_confirm_title": "Cancel check?",
+        "cancel_confirm_message": "The current check will be interrupted. Results will not be saved.",
+        "cancel_button": "Cancel",
+        "cancelling_button": "Cancelling...",
+        "cancelled_message": "The check was cancelled.",
+        "restart_button": "Run again",
+        "rerun_button": "Check again",
+        "close_button": "Close",
+        "start_button": "Start check",
+        "retry_button": "Retry",
+        "duration_label": "Duration: {{seconds}}s",
+        "raw_output_title": "Script output",
+        "copy_raw": "Copy",
+        "copied_raw": "Copied!",
+        "parser_fail_banner": "Could not parse output — showing full text",
+        "parser_partial_warning": "Parser partially succeeded — showing raw output",
+        "report_link": "Open full report on check.place",
         "section": {
-          "basic": "IP / Локация",
-          "ip_type": "Тип IP",
-          "risk": "Оценка риска",
-          "streaming": "Стриминг-сервисы",
+          "basic": "IP / Location",
+          "ip_type": "IP Type",
+          "risk": "Risk Assessment",
+          "streaming": "Streaming Services",
           "email": "Email / DNSBL"
         },
         "sections": {
           "basic": {
-            "title": "Базовая информация",
-            "actual_region": "Фактический регион",
-            "registered_region": "Зарегистрированный регион",
-            "geo_discrepant_warning": "Геолокация не совпадает с регистрацией",
-            "timezone": "Часовой пояс",
-            "location": "Координаты",
-            "city": "Город",
+            "title": "Basic Information",
+            "actual_region": "Actual Region",
+            "registered_region": "Registered Region",
+            "geo_discrepant_warning": "Geolocation does not match registration",
+            "timezone": "Time Zone",
+            "location": "Coordinates",
+            "city": "City",
             "asn": "ASN",
-            "organization": "Организация",
-            "map_link": "Открыть на карте"
+            "organization": "Organization",
+            "map_link": "Open on map"
           },
           "ip_type": {
-            "title": "Тип IP-адреса",
-            "usage": "Использование",
-            "company": "Компания",
-            "database": "База"
+            "title": "IP Address Type",
+            "usage": "Usage",
+            "company": "Company",
+            "database": "Database"
           },
           "risk": {
-            "title": "Оценка риска",
+            "title": "Risk Score",
             "level": {
-              "very_low": "Очень низкий",
-              "low": "Низкий",
-              "medium": "Средний",
-              "high": "Высокий",
-              "very_high": "Очень высокий"
+              "very_low": "Very Low",
+              "low": "Low",
+              "medium": "Medium",
+              "high": "High",
+              "very_high": "Very High"
             }
           },
           "risk_factors": {
-            "title": "Факторы риска",
-            "region": "Регион",
-            "proxy": "Прокси",
+            "title": "Risk Factors",
+            "region": "Region",
+            "proxy": "Proxy",
             "tor": "Tor",
             "vpn": "VPN",
-            "server": "Сервер",
-            "abuser": "Нарушитель",
-            "robot": "Бот",
-            "yes": "Да",
-            "no": "Нет",
+            "server": "Server",
+            "abuser": "Abuser",
+            "robot": "Robot",
+            "yes": "Yes",
+            "no": "No",
             "na": "N/A"
           },
           "accessibility": {
-            "title": "Доступность сервисов",
+            "title": "Service Accessibility",
             "status": {
-              "yes": "Доступен",
-              "no": "Недоступен",
-              "no_prem": "Без премиума (RU)",
-              "blocked": "Заблокировано"
+              "yes": "Available",
+              "no": "Unavailable",
+              "no_prem": "No Premium (RU)",
+              "blocked": "Blocked"
             }
           }
         },
         "tail": {
-          "title": "Логи выполнения",
-          "pause": "Пауза",
-          "resume": "Возобновить"
+          "title": "Execution log",
+          "pause": "Pause",
+          "resume": "Resume"
         },
         "progress": {
-          "step": "Этап {{n}}/{{total}}",
+          "step": "Step {{n}}/{{total}}",
           "percent": "{{pct}}%"
         },
         "streaming_status": {
-          "available": "Доступен",
-          "restricted": "Ограничен",
-          "blocked": "Заблокирован",
-          "unknown": "Неизвестно"
+          "available": "Available",
+          "restricted": "Restricted",
+          "blocked": "Blocked",
+          "unknown": "Unknown"
         },
         "history": {
-          "dropdown_label": "Предыдущие проверки",
-          "current": "Текущая ({{time}})"
+          "dropdown_label": "Previous checks",
+          "current": "Current ({{time}})"
         },
         "snack": {
-          "completed": "Проверка завершена",
-          "failed": "Ошибка проверки: {{error}}"
+          "completed": "Check completed",
+          "failed": "Check error: {{error}}"
         },
-        "empty_hint": "Нажмите «Проверить качество» для запуска проверки сервера.",
-        "error_prefix": "Ошибка:"
+        "empty_hint": "Click «Check Quality» to run a server quality check.",
+        "error_prefix": "Error:"
       }
     },
     "danger": {

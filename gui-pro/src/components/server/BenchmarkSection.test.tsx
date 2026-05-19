@@ -46,7 +46,7 @@ describe("BenchmarkSection", () => {
 
   it("empty_state_shows_check_button", () => {
     render(<BenchmarkSection sshParams={mockSshParams} />);
-    const btn = screen.getByRole("button", { name: /проверить качество/i });
+    const btn = screen.getByRole("button", { name: /check quality/i });
     expect(btn).toBeVisible();
   });
 
@@ -57,11 +57,11 @@ describe("BenchmarkSection", () => {
     render(<BenchmarkSection sshParams={mockSshParams} />);
 
     // Button should say "Open results"
-    const btn = screen.getByRole("button", { name: /открыть результаты/i });
+    const btn = screen.getByRole("button", { name: /open results/i });
     expect(btn).toBeVisible();
 
     // Subtitle should contain formatted time
-    const subtitle = screen.getByText(/последняя проверка/i);
+    const subtitle = screen.getByText(/last check/i);
     expect(subtitle).toBeVisible();
     // Time formatted as HH:MM DD.MM.YYYY — e.g. "17:30 18.05.2026"
     expect(subtitle.textContent).toMatch(/\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}/);
@@ -71,11 +71,11 @@ describe("BenchmarkSection", () => {
     const user = userEvent.setup();
     render(<BenchmarkSection sshParams={mockSshParams} />);
 
-    const btn = screen.getByRole("button", { name: /проверить качество/i });
+    const btn = screen.getByRole("button", { name: /check quality/i });
     await user.click(btn);
 
-    // Modal should appear — it renders the title
-    const modalTitle = screen.getByText(/проверка качества сервера/i);
+    // Modal should appear — it renders the title as <h2>
+    const modalTitle = screen.getByRole("heading", { level: 2, name: /server quality check/i });
     expect(modalTitle).toBeVisible();
   });
 
