@@ -251,8 +251,7 @@ ssh_pool_command!(disable_bbr, ssh::disable_bbr);
 
 /// Start an IP.Check.Place benchmark on the remote server.
 ///
-/// Streaming command: emits `benchmark-progress` and `benchmark-stdout-chunk` Tauri events
-/// per chunk/milestone during execution (may run 1-3 minutes).
+/// Collects full stdout and returns on completion (may run 1-3 minutes).
 ///
 /// **B7 Tauri camelCase ↔ snake_case convention:**
 /// TypeScript caller sends `{ host, port, user, password, keyPath, keyData }` (camelCase).
