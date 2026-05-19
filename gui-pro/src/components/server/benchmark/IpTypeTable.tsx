@@ -1,8 +1,8 @@
 /**
  * IpTypeTable — renders Section 2 (IP Type) from Check.Place output.
  *
- * Multi-source columnar table: sources as columns, database/usage/company as rows.
- * Horizontal scroll on narrow viewport.
+ * Pivoted layout (sources as rows, fields as columns) — fits narrow Modal viewport
+ * unlike the original sources-as-columns orientation, which truncated 5th column.
  */
 import { useTranslation } from "react-i18next";
 import type { IpTypeRow } from "./parser";
@@ -16,6 +16,10 @@ export function IpTypeTable({ rows }: IpTypeTableProps) {
 
   if (rows.length === 0) return null;
 
+  const hasDatabase = rows.some((r) => r.database);
+  const hasUsage = rows.some((r) => r.usage);
+  const hasCompany = rows.some((r) => r.company);
+
   return (
     <div className="overflow-x-auto">
       <table className="text-mono-sm w-full" style={{ borderCollapse: "collapse" }}>
@@ -27,88 +31,93 @@ export function IpTypeTable({ rows }: IpTypeTableProps) {
                 color: "var(--color-text-muted)",
                 fontFamily: "inherit",
                 fontWeight: "var(--font-weight-medium)",
-                padding: "4px 8px 4px 0",
-                minWidth: 100,
+                padding: "4px 12px 4px 0",
+                minWidth: 110,
               }}
             />
-            {rows.map((row) => (
+            {hasDatabase && (
               <th
-                key={row.source}
-                className="text-caption text-center"
+                className="text-caption text-left"
                 style={{
                   color: "var(--color-text-muted)",
                   fontFamily: "inherit",
                   fontWeight: "var(--font-weight-medium)",
-                  padding: "4px 8px",
-                  minWidth: 90,
+                  padding: "4px 12px",
+                  minWidth: 100,
                 }}
               >
-                {row.source}
+                {t("server.utilities.benchmark.sections.ip_type.database")}
               </th>
-            ))}
+            )}
+            {hasUsage && (
+              <th
+                className="text-caption text-left"
+                style={{
+                  color: "var(--color-text-muted)",
+                  fontFamily: "inherit",
+                  fontWeight: "var(--font-weight-medium)",
+                  padding: "4px 12px",
+                  minWidth: 100,
+                }}
+              >
+                {t("server.utilities.benchmark.sections.ip_type.usage")}
+              </th>
+            )}
+            {hasCompany && (
+              <th
+                className="text-caption text-left"
+                style={{
+                  color: "var(--color-text-muted)",
+                  fontFamily: "inherit",
+                  fontWeight: "var(--font-weight-medium)",
+                  padding: "4px 12px",
+                  minWidth: 100,
+                }}
+              >
+                {t("server.utilities.benchmark.sections.ip_type.company")}
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
-          {/* Database row */}
-          {rows.some((r) => r.database) && (
-            <tr>
+          {rows.map((row) => (
+            <tr key={row.source}>
               <td
                 className="text-caption"
-                style={{ color: "var(--color-text-muted)", padding: "3px 8px 3px 0" }}
+                style={{
+                  color: "var(--color-text-muted)",
+                  padding: "3px 12px 3px 0",
+                  whiteSpace: "nowrap",
+                }}
               >
-                {t("server.utilities.benchmark.sections.ip_type.database")}
+                {row.source}
               </td>
-              {rows.map((row) => (
+              {hasDatabase && (
                 <td
-                  key={row.source}
-                  className="text-center text-mono-sm"
-                  style={{ color: "var(--color-text-primary)", padding: "3px 8px" }}
+                  className="text-mono-sm"
+                  style={{ color: "var(--color-text-primary)", padding: "3px 12px" }}
                 >
                   {row.database ?? "—"}
                 </td>
-              ))}
-            </tr>
-          )}
-          {/* Usage row */}
-          {rows.some((r) => r.usage) && (
-            <tr>
-              <td
-                className="text-caption"
-                style={{ color: "var(--color-text-muted)", padding: "3px 8px 3px 0" }}
-              >
-                {t("server.utilities.benchmark.sections.ip_type.usage")}
-              </td>
-              {rows.map((row) => (
+              )}
+              {hasUsage && (
                 <td
-                  key={row.source}
-                  className="text-center text-mono-sm"
-                  style={{ color: "var(--color-text-primary)", padding: "3px 8px" }}
+                  className="text-mono-sm"
+                  style={{ color: "var(--color-text-primary)", padding: "3px 12px" }}
                 >
                   {row.usage ?? "—"}
                 </td>
-              ))}
-            </tr>
-          )}
-          {/* Company row */}
-          {rows.some((r) => r.company) && (
-            <tr>
-              <td
-                className="text-caption"
-                style={{ color: "var(--color-text-muted)", padding: "3px 8px 3px 0" }}
-              >
-                {t("server.utilities.benchmark.sections.ip_type.company")}
-              </td>
-              {rows.map((row) => (
+              )}
+              {hasCompany && (
                 <td
-                  key={row.source}
-                  className="text-center text-mono-sm"
-                  style={{ color: "var(--color-text-secondary)", padding: "3px 8px" }}
+                  className="text-mono-sm"
+                  style={{ color: "var(--color-text-secondary)", padding: "3px 12px" }}
                 >
                   {row.company ?? "—"}
                 </td>
-              ))}
+              )}
             </tr>
-          )}
+          ))}
         </tbody>
       </table>
     </div>

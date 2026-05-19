@@ -113,19 +113,23 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
         ))}
       </div>
 
-      {/* Rows */}
+      {/* Rows — grid layout with fixed source + score columns to keep bars vertically aligned */}
       {rows.map((row) => (
-        <div key={row.source} className="flex items-center gap-3" style={{ marginBottom: 6 }}>
+        <div
+          key={row.source}
+          className="grid grid-cols-[110px_1fr_140px] gap-3 items-center"
+          style={{ marginBottom: 6 }}
+        >
           {/* Source label */}
           <span
-            className="text-caption shrink-0"
-            style={{ color: "var(--color-text-secondary)", minWidth: 100, maxWidth: 120 }}
+            className="text-caption"
+            style={{ color: "var(--color-text-secondary)" }}
           >
             {row.source}
           </span>
 
           {/* Bar segments */}
-          <div className="flex items-center gap-0.5 flex-1" style={{ minWidth: 160 }}>
+          <div className="flex items-center gap-0.5">
             {LEVELS.map((level) => (
               <LevelSegment
                 key={level}
@@ -136,7 +140,7 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
           </div>
 
           {/* Score + level */}
-          <div className="flex items-center gap-1 shrink-0" style={{ minWidth: 80 }}>
+          <div className="flex items-center gap-1 justify-start">
             {row.score > 0 && (
               <span className="text-mono-sm" style={{ color: "var(--color-text-primary)" }}>
                 {row.unit === "percent" ? `${row.score}%` : row.score}
