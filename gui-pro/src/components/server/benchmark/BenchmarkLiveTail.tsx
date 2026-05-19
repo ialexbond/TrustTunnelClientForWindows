@@ -75,7 +75,6 @@ export function BenchmarkLiveTail({ active }: BenchmarkLiveTailProps) {
       cancelled = true;
       unlisten?.();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   // Auto-scroll to bottom when lines change and not paused

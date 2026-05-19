@@ -120,7 +120,7 @@ function isSeparator(line: string): boolean {
  */
 function parseActualRegion(s: string): BasicInfo["actualRegion"] {
   // Format: [CC]Country Name     [CC2]Continent Name
-  const re = /\[([A-Z]{2})\]([^\[]+)/g;
+  const re = /\[([A-Z]{2})\]([^[]+)/g;
   const parts: Array<{ code: string; name: string }> = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(s)) !== null) {
@@ -146,7 +146,7 @@ function parseActualRegion(s: string): BasicInfo["actualRegion"] {
 }
 
 function parseRegisteredRegion(s: string): BasicInfo["registeredRegion"] {
-  const m = s.match(/\[([A-Z]{2})\]([^\[]+)/);
+  const m = s.match(/\[([A-Z]{2})\]([^[]+)/);
   if (!m) return undefined;
   return { countryCode: m[1], countryName: m[2].trim() };
 }
