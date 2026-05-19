@@ -1,5 +1,5 @@
 /**
- * BenchmarkModal — compound state-machine Modal for Server Benchmark Check.Place.
+ * BenchmarkModal — simplified state-machine Modal for Server Benchmark Check.Place.
  *
  * State machine:
  *   idle → running → completed | cancelled | error
@@ -9,21 +9,18 @@
  * Key invariants:
  *  - T-03: Modal always rendered — no early null return before <Modal>. Parent passes isOpen as-is.
  *  - D-1.1: closeOnBackdrop=false + closeOnEscape=false while running/cancelling.
- *  - D-1.2: Stage labels LOCKED (2026-05-18) — backend emits stage in [0,4] via Strategy A.
- *  - B5: parseBenchmarkOutput called on raw_stdout in frontend ONLY.
  *  - B7: invoke uses camelCase keys (keyPath / keyData) — Tauri 2 auto-renames to snake_case.
  *  - W1: cancel useConfirm uses variant:"warning" (non-destructive — can re-run).
- *  - D-29: activityLog NEVER receives raw_stdout content or sshParams.password.
+ *  - D-29: activityLog NEVER receives raw_stdout content or sshParams.password or reportLink.
  *
- * 17-fix: BenchmarkLiveTail + HorizontalProgressBar during running,
- *         5-section CompletedView (BasicInfoCard, IpTypeTable, RiskScoreChart, RiskFactorsTable, AccessibilityTable),
- *         reportLink footer button, parser partial fallback, history dropdown preserved.
+ * UAT 2026-05-19 round 3: Simplified — spinner only during running, report link button on complete.
+ * No StepProgress, no HorizontalProgressBar, no BenchmarkLiveTail, no parsed sections.
  */
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { Loader2, Copy, Check, ExternalLink } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Accordion } from "../../shared/ui/Accordion";
@@ -40,32 +37,12 @@ import {
   loadHistory,
   type BenchmarkRecord,
 } from "./benchmark/history";
-import { BenchmarkLiveTail } from "./benchmark/BenchmarkLiveTail";
-import { HorizontalProgressBar } from "./benchmark/HorizontalProgressBar";
-import { BasicInfoCard } from "./benchmark/BasicInfoCard";
-import { IpTypeTable } from "./benchmark/IpTypeTable";
-import { RiskScoreChart } from "./benchmark/RiskScoreChart";
-import { RiskFactorsTable } from "./benchmark/RiskFactorsTable";
-import { AccessibilityTable } from "./benchmark/AccessibilityTable";
-import { Copy, Check, ExternalLink } from "lucide-react";
-
-// ── Stage labels — B1 LOCKED 2026-05-18 under D-1.2 mapping ──
-// Five stages [0..4]. Backend (Plan 17-01) emits stage already in [0,4]
-// via Strategy A Risk merge. Frontend trusts the value — NO mapping here.
-// OLD labels (network/speed/finish variants) are REMOVED from canon per D-1.2 update 2026-05-18.
-const STAGE_KEYS = [
-  "server.utilities.benchmark.stages.ip",       // 0: «Получаем IP»  (section 1 Basic Information)
-  "server.utilities.benchmark.stages.type",     // 1: «Определяем тип» (section 2 IP Type)
-  "server.utilities.benchmark.stages.risk",     // 2: «Оцениваем риск» (sections 3+4 Risk Score+Factors merged)
-  "server.utilities.benchmark.stages.services", // 3: «Проверяем доступность сервисов» (section 5)
-  "server.utilities.benchmark.stages.email",    // 4: «Проверяем email» (section 6)
-] as const;
 
 // ── State machine type ──
 type BenchmarkModalState =
   | { kind: "idle" }
-  | { kind: "running"; stage: number; percent?: number; activity?: string; rawBuf: string }
-  | { kind: "cancelling"; rawBuf: string }
+  | { kind: "running" }
+  | { kind: "cancelling" }
   | { kind: "completed"; record: BenchmarkRecord; parsed: ParsedSections }
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
@@ -108,35 +85,32 @@ function IdleView({ onStart }: IdleViewProps) {
 }
 
 interface RunningViewProps {
-  state: { kind: "running"; stage: number; percent?: number; activity?: string; rawBuf: string } | { kind: "cancelling"; rawBuf: string };
+  isCancelling: boolean;
   onCancel: () => void;
 }
-function RunningView({ state, onCancel }: RunningViewProps) {
+function RunningView({ isCancelling, onCancel }: RunningViewProps) {
   const { t } = useTranslation();
-  const isCancelling = state.kind === "cancelling";
-  const stage = state.kind === "running" ? state.stage : 4;
-  const percent = state.kind === "running" ? state.percent : undefined;
-  const activity = state.kind === "running" ? state.activity : undefined;
-  const stageLabel = t(STAGE_KEYS[Math.min(stage, STAGE_KEYS.length - 1)]);
-
   return (
-    <div className="flex flex-col gap-5 py-4">
-      {/* Horizontal progress bar — replaces StepProgress */}
-      <HorizontalProgressBar
-        stage={stage}
-        totalStages={5}
-        percent={percent}
-        activity={activity}
-        stageLabel={stageLabel}
+    <div className="flex flex-col items-center gap-5 py-8">
+      {/* Spinner */}
+      <Loader2
+        className="w-10 h-10 animate-spin"
+        style={{ color: "var(--color-accent-interactive)" }}
+        aria-hidden="true"
       />
 
-      {/* Live tail — only while running (not cancelling) */}
-      <BenchmarkLiveTail active={state.kind === "running"} />
+      {/* Running text */}
+      <p className="text-body" style={{ color: "var(--color-text-secondary)" }}>
+        {t("server.utilities.benchmark.running_text")}
+      </p>
 
+      {/* Hint */}
       <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
         {t("server.utilities.benchmark.hint_running")}
       </p>
-      <div className="flex justify-end">
+
+      {/* Cancel button */}
+      <div className="flex justify-end w-full">
         <Button
           variant="danger-outline"
           onClick={onCancel}
@@ -173,15 +147,6 @@ function CompletedView({ record, initialParsed, host, onRerun, onClose }: Comple
     [displayRecord]
   );
 
-  const isPartial = parsed.partial;
-  // Section presence check: new typed shape
-  const hasBasic = !!parsed.basic;
-  const hasIpType = !!(parsed.ipType && parsed.ipType.length > 0);
-  const hasRisk = !!(parsed.risk && parsed.risk.length > 0);
-  const hasRiskFactors = !!(parsed.riskFactors && parsed.riskFactors.length > 0);
-  const hasAccessibility = !!(parsed.accessibility && parsed.accessibility.length > 0);
-  const hasAnySections = hasBasic || hasIpType || hasRisk || hasRiskFactors || hasAccessibility;
-
   const history = loadHistory(host);
 
   const handleCopyRaw = async () => {
@@ -203,6 +168,8 @@ function CompletedView({ record, initialParsed, host, onRerun, onClose }: Comple
       }
     }
   };
+
+  const hasReportLink = !!parsed.reportLink;
 
   const rawOutputAccordion = [
     {
@@ -284,98 +251,36 @@ function CompletedView({ record, initialParsed, host, onRerun, onClose }: Comple
         })}
       </p>
 
-      {/* Parser partial warning */}
-      {isPartial && (
-        <div
-          className="rounded-[var(--radius-md)] p-3 text-body-sm"
-          style={{
-            background: "var(--color-status-warning-bg)",
-            color: "var(--color-text-primary)",
-          }}
-        >
-          {t("server.utilities.benchmark.parser_partial_warning")}
-        </div>
-      )}
-
-      {/* Parser complete fail banner (no sections at all) */}
-      {!hasAnySections && (
-        <div
-          className="rounded-[var(--radius-md)] p-3 text-body-sm"
-          style={{
-            background: "var(--color-status-warning-bg)",
-            color: "var(--color-text-primary)",
-          }}
-        >
-          {t("server.utilities.benchmark.parser_fail_banner")}
-        </div>
-      )}
-
-      {/* 5-section results */}
-      {hasAnySections && (
-        <div className="flex flex-col gap-4">
-          {/* Section 1 — Basic Information */}
-          {hasBasic && (
-            <SectionCard title={t("server.utilities.benchmark.sections.basic.title")}>
-              <BasicInfoCard data={parsed.basic!} />
-            </SectionCard>
-          )}
-
-          {/* Section 2 — IP Type */}
-          {hasIpType && (
-            <SectionCard title={t("server.utilities.benchmark.sections.ip_type.title")}>
-              <IpTypeTable rows={parsed.ipType!} />
-            </SectionCard>
-          )}
-
-          {/* Section 3 — Risk Score (horizontal multi-bar chart) */}
-          {hasRisk && (
-            <SectionCard title={t("server.utilities.benchmark.sections.risk.title")}>
-              <RiskScoreChart rows={parsed.risk!} />
-            </SectionCard>
-          )}
-
-          {/* Section 4 — Risk Factors */}
-          {hasRiskFactors && (
-            <SectionCard title={t("server.utilities.benchmark.sections.risk_factors.title")}>
-              <RiskFactorsTable rows={parsed.riskFactors!} />
-            </SectionCard>
-          )}
-
-          {/* Section 5 — Accessibility (no Email) */}
-          {hasAccessibility && (
-            <SectionCard title={t("server.utilities.benchmark.sections.accessibility.title")}>
-              <AccessibilityTable rows={parsed.accessibility!} />
-            </SectionCard>
-          )}
-        </div>
-      )}
-
-      {/* Raw output accordion (auto-open if partial) */}
-      <Accordion
-        items={rawOutputAccordion}
-        defaultOpen={isPartial || !hasAnySections ? ["raw-output"] : []}
-      />
-
-      {/* Footer — report link */}
-      {parsed.reportLink && (
-        <button
-          type="button"
-          className="flex items-center gap-1.5 text-body-sm"
-          style={{
-            color: "var(--color-accent-interactive)",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-            alignSelf: "flex-start",
-          }}
+      {/* Report link button — big primary button when link present */}
+      {hasReportLink && (
+        <Button
+          variant="primary"
           onClick={() => void handleReportLink()}
           data-testid="report-link-button"
         >
-          <ExternalLink className="w-3.5 h-3.5" />
+          <ExternalLink className="w-4 h-4" />
           {t("server.utilities.benchmark.report_link")}
-        </button>
+        </Button>
       )}
+
+      {/* No-link fallback banner */}
+      {!hasReportLink && (
+        <div
+          className="rounded-[var(--radius-md)] p-3 text-body-sm"
+          style={{
+            background: "var(--color-status-warning-bg)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          {t("server.utilities.benchmark.no_report_link_banner")}
+        </div>
+      )}
+
+      {/* Raw output accordion — auto-open when no report link */}
+      <Accordion
+        items={rawOutputAccordion}
+        defaultOpen={!hasReportLink ? ["raw-output"] : []}
+      />
 
       {/* Action row */}
       <div className="flex justify-between gap-2 pt-2">
@@ -386,21 +291,6 @@ function CompletedView({ record, initialParsed, host, onRerun, onClose }: Comple
           {t("server.utilities.benchmark.close_button")}
         </Button>
       </div>
-    </div>
-  );
-}
-
-// Helper: bordered card for a parsed section
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div
-      className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] p-3"
-      style={{ background: "var(--color-bg-surface)" }}
-    >
-      <h4 className="text-title-sm mb-3" style={{ color: "var(--color-text-primary)" }}>
-        {title}
-      </h4>
-      {children}
     </div>
   );
 }
@@ -497,47 +387,11 @@ export function BenchmarkModal({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
-  // ── Listen for benchmark-progress events (race-safe — Pitfall 8) ──
-  // Extends: now handles percent + activity from parse_signal
-  useEffect(() => {
-    if (state.kind !== "running") return;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    listen<{ stage: number; label: string; current_line: string; percent?: number; activity?: string }>(
-      "benchmark-progress",
-      (event) => {
-        // Backend emits stage already in [0,4] per Strategy A — NO mapping here (D-1.2)
-        const { stage, current_line, percent, activity } = event.payload;
-        setState((prev) => {
-          if (prev.kind !== "running") return prev;
-          return {
-            ...prev,
-            stage,
-            // Update percent/activity from signal (undefined = keep previous if not in this event)
-            ...(percent !== undefined ? { percent } : {}),
-            ...(activity !== undefined ? { activity } : {}),
-            lastLine: current_line ?? "",
-          };
-        });
-      }
-    ).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.kind === "running"]);
-
   // ── handleStart — invoke server_run_benchmark (B7: camelCase keys) ──
   const handleStart = async () => {
     // D-29: log ONLY metadata — no password, no raw_stdout content
     activityLog("USER", `benchmark.start host=${sshParams.host}`);
-    setState({ kind: "running", stage: 0, rawBuf: "" });
+    setState({ kind: "running" });
     try {
       // B7: camelCase keys — Tauri 2 auto-renames to snake_case in Rust (key_path / key_data)
       // B5: BenchmarkResult has only 2 fields (raw_stdout + duration_seconds)
@@ -565,7 +419,7 @@ export function BenchmarkModal({
       // D-1.4: push on completion ONLY (not cancel/error)
       pushHistory(sshParams.host, record);
       setState({ kind: "completed", record, parsed });
-      // D-29: log only metadata — no raw_stdout, no duration that reveals content
+      // D-29: log only metadata — no raw_stdout, no reportLink
       activityLog(
         "STATE",
         `benchmark.complete host=${sshParams.host} dur=${record.duration_seconds}s`
@@ -589,7 +443,7 @@ export function BenchmarkModal({
   };
 
   // ── handleCancel — W1: warning variant (non-destructive — can re-run) ──
-  // Contrast: Stop service (Plan 17-06) uses 'danger' (disconnects all clients).
+  // Contrast: Stop service uses 'danger' (disconnects all clients).
   const handleCancel = async () => {
     if (state.kind !== "running") return;
     // W1: Cancel benchmark is non-destructive — warning variant (not danger)
@@ -601,7 +455,7 @@ export function BenchmarkModal({
       cancelText: t("buttons.cancel"),
     });
     if (!ok) return;
-    setState({ kind: "cancelling", rawBuf: state.rawBuf });
+    setState({ kind: "cancelling" });
     try {
       await invoke("server_cancel_benchmark");
     } catch (e) {
@@ -632,7 +486,10 @@ export function BenchmarkModal({
         <IdleView onStart={() => void handleStart()} />
       )}
       {(state.kind === "running" || state.kind === "cancelling") && (
-        <RunningView state={state} onCancel={() => void handleCancel()} />
+        <RunningView
+          isCancelling={state.kind === "cancelling"}
+          onCancel={() => void handleCancel()}
+        />
       )}
       {state.kind === "completed" && (
         <CompletedView
