@@ -128,7 +128,7 @@ describe("BenchmarkModal", () => {
   it("idle_initial_when_no_history", () => {
     renderModal({ _forceState: { kind: "idle" } });
     // Should show start button
-    const startBtn = screen.getByRole("button", { name: /start check/i });
+    const startBtn = screen.getByRole("button", { name: /запустить проверку/i });
     expect(startBtn).toBeVisible();
   });
 
@@ -151,7 +151,7 @@ describe("BenchmarkModal", () => {
       />
     );
     // Completed view shows duration
-    expect(screen.getByText(/Duration:/)).toBeVisible();
+    expect(screen.getByText(/Длительность:/)).toBeVisible();
   });
 
   // ─── 3: starts_on_click_transitions_to_running ───────────────────────────
@@ -160,12 +160,12 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
-    const startBtn = screen.getByRole("button", { name: /start check/i });
+    const startBtn = screen.getByRole("button", { name: /запустить проверку/i });
     await userEvent.click(startBtn);
 
     // Should show running hint
     await waitFor(() => {
-      expect(screen.getByText(/1-3 minutes/i)).toBeVisible();
+      expect(screen.getByText(/1-3 минуты/i)).toBeVisible();
     });
   });
 
@@ -174,7 +174,7 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
-    const startBtn = screen.getByRole("button", { name: /start check/i });
+    const startBtn = screen.getByRole("button", { name: /запустить проверку/i });
     await userEvent.click(startBtn);
 
     // Wait for listen to register
@@ -184,8 +184,8 @@ describe("BenchmarkModal", () => {
     emit("benchmark-progress", { stage: 2, label: "Risk", current_line: "Risk factor check..." });
 
     await waitFor(() => {
-      // Stage label for index 2 is "Assessing risk" — rendered as step label in StepProgress
-      expect(screen.getByText(/Assessing risk/i)).toBeVisible();
+      // Stage label for index 2 is "Оцениваем риск" — rendered as step label in StepProgress
+      expect(screen.getByText(/Оцениваем риск/i)).toBeVisible();
     });
   });
 
@@ -194,7 +194,7 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
-    const startBtn = screen.getByRole("button", { name: /start check/i });
+    const startBtn = screen.getByRole("button", { name: /запустить проверку/i });
     await userEvent.click(startBtn);
 
     await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalled());
@@ -215,13 +215,13 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
-    const startBtn = screen.getByRole("button", { name: /start check/i });
+    const startBtn = screen.getByRole("button", { name: /запустить проверку/i });
     await userEvent.click(startBtn);
 
     // Wait for running state
-    await waitFor(() => screen.getByRole("button", { name: /Cancel/i }));
+    await waitFor(() => screen.getByRole("button", { name: /Отменить/i }));
 
-    const cancelBtn = screen.getByRole("button", { name: /Cancel/i });
+    const cancelBtn = screen.getByRole("button", { name: /Отменить/i });
     await userEvent.click(cancelBtn);
 
     // W1: confirm must be called with variant:"warning" (not "danger")
@@ -244,10 +244,10 @@ describe("BenchmarkModal", () => {
       .mockResolvedValueOnce(undefined); // server_cancel_benchmark
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByRole("button", { name: /Cancel/i }));
-    await userEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+    await waitFor(() => screen.getByRole("button", { name: /Отменить/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Отменить/i }));
 
     await waitFor(() => expect(confirmMock).toHaveBeenCalled());
 
@@ -255,7 +255,7 @@ describe("BenchmarkModal", () => {
     rejectMain("BENCHMARK_CANCELLED|dur=10");
 
     await waitFor(() => {
-      expect(screen.getByText(/cancelled/i)).toBeVisible();
+      expect(screen.getByText(/отменена/i)).toBeVisible();
     });
     // server_cancel_benchmark should have been called
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("server_cancel_benchmark");
@@ -267,11 +267,11 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockRejectedValueOnce("BENCHMARK_CANCELLED|dur=10|forced");
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
     await waitFor(() => {
       // Should transition to cancelled (not error) — same view as plain cancel
-      expect(screen.getByText(/cancelled/i)).toBeVisible();
+      expect(screen.getByText(/отменена/i)).toBeVisible();
     });
   });
 
@@ -280,11 +280,11 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockResolvedValueOnce(BENCHMARK_RESULT);
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
     // Wait for completed view
     await waitFor(() => {
-      expect(screen.getAllByText(/Duration/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Длительность/i).length).toBeGreaterThan(0);
     }, { timeout: 3000 });
 
     // History must be persisted (D-1.4 — pushHistory on completion)
@@ -305,10 +305,10 @@ describe("BenchmarkModal", () => {
       .mockReturnValueOnce(new Promise(() => {})); // second run (never resolves)
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Check again/i));
-    await userEvent.click(screen.getByRole("button", { name: /Check again/i }));
+    await waitFor(() => screen.getByText(/Проверить ещё раз/i));
+    await userEvent.click(screen.getByRole("button", { name: /Проверить ещё раз/i }));
 
     // invoke should have been called twice with server_run_benchmark
     await waitFor(() => {
@@ -328,10 +328,10 @@ describe("BenchmarkModal", () => {
     });
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Could not parse output/i)).toBeVisible();
+      expect(screen.getByText(/Не удалось распарсить/i)).toBeVisible();
     }, { timeout: 3000 });
   });
 
@@ -340,9 +340,9 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockResolvedValueOnce(BENCHMARK_RESULT);
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Duration/i));
+    await waitFor(() => screen.getByText(/Длительность/i));
 
     expect(activityLogSpy).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -355,9 +355,9 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockResolvedValueOnce(BENCHMARK_RESULT);
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Duration/i));
+    await waitFor(() => screen.getByText(/Длительность/i));
 
     // D-29: raw_stdout content (like "1. Basic Information" or IP data) must not be logged
     expect(activityLogSpy).not.toHaveBeenCalledWith(
@@ -375,15 +375,15 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/1-3 minutes/i));
+    await waitFor(() => screen.getByText(/1-3 минуты/i));
 
     // Attempt to close with Escape — should be blocked
     fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
 
     // Modal content should still be visible (running state not exited)
-    expect(screen.queryByText(/1-3 minutes/i)).toBeTruthy();
+    expect(screen.queryByText(/1-3 минуты/i)).toBeTruthy();
   });
 
   // ─── 17-fix: live tail renders during running ──────────────────────────────
@@ -391,14 +391,14 @@ describe("BenchmarkModal", () => {
     vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
     // Wait for running state
-    await waitFor(() => screen.getByText(/1-3 minutes/i));
+    await waitFor(() => screen.getByText(/1-3 минуты/i));
 
     // BenchmarkLiveTail title should be visible (uses i18n key tail.title = "Логи выполнения")
     // Or at least the progress bar area is visible
-    expect(screen.getByText(/1-3 minutes/i)).toBeVisible();
+    expect(screen.getByText(/1-3 минуты/i)).toBeVisible();
   });
 
   // ─── 17-fix: geo-discrepant warning shown ──────────────────────────────────
@@ -410,9 +410,9 @@ describe("BenchmarkModal", () => {
     });
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Duration/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
 
     // Geo-discrepant warning must be shown
     expect(screen.getByText(/Geolocation does not match registration/i)).toBeVisible();
@@ -426,9 +426,9 @@ describe("BenchmarkModal", () => {
     });
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Duration/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
 
     // Raw enum value "NoPrem" rendered directly per UAT 2026-05-19 (no localization)
     expect(screen.getByText(/^NoPrem$/)).toBeVisible();
@@ -442,9 +442,9 @@ describe("BenchmarkModal", () => {
     });
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Duration/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
 
     // Report link button should be visible
     expect(screen.getByTestId("report-link-button")).toBeVisible();
@@ -459,10 +459,10 @@ describe("BenchmarkModal", () => {
     });
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Could not parse output/i)).toBeVisible();
+      expect(screen.getByText(/Не удалось распарсить/i)).toBeVisible();
     }, { timeout: 3000 });
 
     // Raw output accordion should auto-open — raw content visible
@@ -479,9 +479,9 @@ describe("BenchmarkModal", () => {
     });
 
     renderModal({ _forceState: { kind: "idle" } });
-    await userEvent.click(screen.getByRole("button", { name: /start check/i }));
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
 
-    await waitFor(() => screen.getByText(/Duration/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
 
     // D-29 extension: report link URL must NOT appear in activity log
     expect(activityLogSpy).not.toHaveBeenCalledWith(
@@ -507,7 +507,7 @@ describe("BenchmarkModal", () => {
     // Use Vite ?raw import — same pattern as Plan 17-02 parser tests (avoids node:fs)
     const content = BenchmarkModalSource;
     // B1: old D-1.2 labels must NOT exist in source (replaced with i18n keys)
-    expect(content).not.toContain("Checking network");
-    expect(content).not.toContain("Measuring speed");
+    expect(content).not.toContain("Проверяем сеть");
+    expect(content).not.toContain("Замеряем скорость");
   });
 });

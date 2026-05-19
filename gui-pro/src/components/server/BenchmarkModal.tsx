@@ -394,7 +394,7 @@ function CompletedView({ record, initialParsed, host, onRerun, onClose }: Comple
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div
-      className="rounded-[var(--radius-md)] border border-[var(--color-border)] p-3"
+      className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] p-3"
       style={{ background: "var(--color-bg-surface)" }}
     >
       <h4 className="text-title-sm mb-3" style={{ color: "var(--color-text-primary)" }}>
