@@ -57,8 +57,8 @@ pub use server::{
     update_hosts_allowed_sni,
     // Phase 15.1 — generic per-file config save (REQ-15.0 + 15.7 + 15.8)
     save_config_file,
-    // Phase 17 — Server Benchmark IP.Check.Place streaming
-    run_benchmark, BenchmarkResult, BenchmarkProgress, parse_milestone,
+    // Phase 17 — Server Benchmark Check.Place streaming (17-fix: parse_signal + BenchmarkSignal)
+    run_benchmark, BenchmarkResult, BenchmarkProgress, parse_milestone, parse_signal, BenchmarkSignal,
 };
 // Phase 16 — SSH-key feature (D-1.1..D-2.3, REQ-16-SSH-KEY-*).
 // Re-exported under namespaced names so commands::ssh_commands может вызывать

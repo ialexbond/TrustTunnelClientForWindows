@@ -1,14 +1,14 @@
-//! Server Benchmark — streaming SSH execution of IP.Check.Place quality checker.
+//! Server Benchmark — streaming SSH execution of Check.Place quality checker.
 //!
 //! # Architecture
 //!
 //! - `run_benchmark` opens a single SSH channel via `open_session_with_retry`,
-//!   executes `bash <(curl -sL https://IP.Check.Place)` with `set -m;` prefix for
-//!   job-control (SIGTERM propagation), then streams stdout via `channel.wait()` loop.
+//!   executes `bash <(curl -sL https://Check.Place) -EI` with `stdbuf -oL` prefix
+//!   for line-buffered streaming and `set -m;` for job-control (SIGTERM propagation).
 //! - Two Tauri events are emitted per chunk/milestone:
-//!   - `"benchmark-stdout-chunk"` — raw `String` line (for Raw output Accordion).
-//!   - `"benchmark-progress"` — typed `BenchmarkProgress { stage, label, current_line }`
-//!     per section header detected by `parse_milestone`.
+//!   - `"benchmark-stdout-chunk"` — raw `String` line (for Raw output Accordion / live tail).
+//!   - `"benchmark-progress"` — typed `BenchmarkProgress { stage, label, current_line, percent, activity }`
+//!     per section header, percent marker, or activity line detected by `parse_signal`.
 //! - Cancellation is driven by a `tokio::sync::oneshot::Receiver<()>` passed in from
 //!   the Tauri command layer. On cancel: `channel.signal(Sig::TERM)` + `channel.eof()`.
 //! - B8 watchdog: after cancel signal sent, the loop wraps `channel.wait()` in a 5-second
@@ -25,7 +25,19 @@ use tokio::time::{timeout, Duration};
 
 // ─── Exported Types ───────────────────────────────────────────────────────────
 
-/// Progress event payload emitted per detected section milestone.
+/// Typed signal returned by `parse_signal` — extends `parse_milestone` with
+/// percent markers and activity labels from Check.Place stdout.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BenchmarkSignal {
+    /// Section header detected — UI stage [0, 4] (D-1.2 Strategy A Risk merge).
+    Section(u8),
+    /// Percent marker found in line (e.g. `"Loading database... 45%"` → `Percent(45)`).
+    Percent(u8),
+    /// Activity/step label (e.g. `"* Checking ASN database..."` → `Activity("Checking ASN database")`).
+    Activity(String),
+}
+
+/// Progress event payload emitted per detected section milestone, percent marker, or activity.
 ///
 /// `stage` is always in `[0, 4]` (D-1.2 Strategy A — sections 3+4 both map to stage 2).
 #[derive(Debug, Clone, Serialize)]
@@ -36,6 +48,14 @@ pub struct BenchmarkProgress {
     pub label: String,
     /// The raw line that triggered this milestone detection.
     pub current_line: String,
+    /// Percent completion [0, 100] extracted from stdout percent markers (e.g. `45%`).
+    /// `None` if not found in the triggering line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+    /// Current activity description extracted from bullet/arrow prefixes
+    /// (e.g. `"Checking ASN database"`). `None` if not detected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<String>,
 }
 
 /// Final return value from `run_benchmark`. Backend does NOT parse sections (B5).
@@ -65,9 +85,112 @@ fn stage_label(stage: u8) -> &'static str {
     }
 }
 
+// ─── Signal Parser ────────────────────────────────────────────────────────────
+
+/// Parse a Check.Place stdout line and return the most informative `BenchmarkSignal`.
+///
+/// Checks in order: Section header → Percent marker → Activity label.
+/// Returns `None` if the line carries no signal (plain data, empty, separator).
+///
+/// # Examples
+///
+/// ```
+/// use crate::ssh::server::server_benchmark::{parse_signal, BenchmarkSignal};
+/// assert_eq!(parse_signal("1. Basic Information"), Some(BenchmarkSignal::Section(0)));
+/// assert_eq!(parse_signal("Loading database... 45%"), Some(BenchmarkSignal::Percent(45)));
+/// assert_eq!(parse_signal("* Checking ASN database..."), Some(BenchmarkSignal::Activity("Checking ASN database".into())));
+/// ```
+pub fn parse_signal(line: &str) -> Option<BenchmarkSignal> {
+    // 1. Try section header first (highest priority).
+    if let Some(stage) = parse_milestone(line) {
+        return Some(BenchmarkSignal::Section(stage));
+    }
+
+    let trimmed = line.trim();
+
+    // 2. Percent marker: `\b\d{1,3}%` anywhere in line.
+    //    Extracts the LAST percent marker (most recent progress update).
+    {
+        let bytes = trimmed.as_bytes();
+        let mut i = 0;
+        let mut last_percent: Option<u8> = None;
+        while i < bytes.len() {
+            if bytes[i].is_ascii_digit() {
+                // Collect digit run.
+                let start = i;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+                // Check for trailing '%'
+                if i < bytes.len() && bytes[i] == b'%' {
+                    // Parse the number.
+                    if let Ok(s) = std::str::from_utf8(&bytes[start..i]) {
+                        if let Ok(n) = s.parse::<u16>() {
+                            if n <= 100 {
+                                last_percent = Some(n as u8);
+                            }
+                        }
+                    }
+                    i += 1; // skip '%'
+                }
+            } else {
+                i += 1;
+            }
+        }
+        if let Some(pct) = last_percent {
+            return Some(BenchmarkSignal::Percent(pct));
+        }
+    }
+
+    // 3. Activity label from bullet/arrow/check prefix patterns:
+    //    `^[•*▶►]\s+(.+?)` or `^Checking\s+(.+?)(?:\.\.\.|$)`
+    {
+        // Bullet / asterisk / arrow prefixes.
+        let (prefix_len, found_prefix) = if trimmed.starts_with("• ") || trimmed.starts_with("▶ ") || trimmed.starts_with("► ") {
+            (2, true) // 2-byte Unicode char + space... actually these are multi-byte
+        } else if trimmed.starts_with("* ") || trimmed.starts_with("- ") {
+            (2, true)
+        } else {
+            (0, false)
+        };
+
+        // Handle multi-byte Unicode bullet prefix.
+        let (real_prefix_len, real_found) = if trimmed.starts_with('•') || trimmed.starts_with('▶') || trimmed.starts_with('►') {
+            let ch = trimmed.chars().next().unwrap();
+            let ch_len = ch.len_utf8();
+            // After char must come a space.
+            if trimmed.len() > ch_len && trimmed.as_bytes()[ch_len] == b' ' {
+                (ch_len + 1, true)
+            } else {
+                (0, false)
+            }
+        } else {
+            (prefix_len, found_prefix)
+        };
+
+        if real_found && real_prefix_len < trimmed.len() {
+            let rest = trimmed[real_prefix_len..].trim_end_matches("...").trim_end_matches('…').trim();
+            if !rest.is_empty() {
+                return Some(BenchmarkSignal::Activity(rest.to_string()));
+            }
+        }
+
+        // `^Checking\s+...` pattern.
+        if trimmed.starts_with("Checking ") {
+            let rest = &trimmed["Checking ".len()..];
+            let cleaned = rest.trim_end_matches("...").trim_end_matches('…').trim();
+            if !cleaned.is_empty() {
+                return Some(BenchmarkSignal::Activity(format!("Checking {cleaned}")));
+            }
+        }
+    }
+
+    None
+}
+
 // ─── Milestone Parser ─────────────────────────────────────────────────────────
 
-/// Detect an IP.Check.Place section header and return the UI stage [0, 4].
+/// Detect a Check.Place section header and return the UI stage [0, 4].
 ///
 /// Implements **D-1.2 Strategy A (backend merges sections 3+4 → stage 2)**:
 ///
@@ -80,7 +203,7 @@ fn stage_label(stage: u8) -> &'static str {
 /// | 5       | "5. "         | 3 — "Проверяем доступность сервисов"   |
 /// | 6       | "6. "         | 4 — "Проверяем email"                  |
 ///
-/// Returns `None` for any line that is not an IP.Check.Place section header.
+/// Returns `None` for any line that is not a Check.Place section header.
 /// Section numbers 7+ yield `None` (out-of-range).
 pub fn parse_milestone(line: &str) -> Option<u8> {
     let trimmed = line.trim();
@@ -162,8 +285,10 @@ pub async fn run_benchmark(
         .map_err(|e| format!("SSH_CHANNEL_FAILED|{e}"))?;
 
     // Build command: set -m enables job control so SIGTERM propagates to process group.
+    // stdbuf -oL forces line-buffered stdout for real-time streaming (A1).
+    // URL changed to canonical https://Check.Place (A5); removed -l ru flag.
     let cmd =
-        "set -m; echo $$ > /tmp/tt-benchmark.pid; exec bash <(curl -sL https://IP.Check.Place) -l ru -E 2>&1";
+        "set -m; echo $$ > /tmp/tt-benchmark.pid; exec stdbuf -oL bash <(curl -sL https://Check.Place) -EI 2>&1";
     channel
         .exec(true, cmd.as_bytes())
         .await
@@ -173,6 +298,8 @@ pub async fn run_benchmark(
     let mut cancel_rx = Box::pin(cancel_rx);
     let mut cancelled = false;
     let mut forced = false;
+    // Track current stage for percent/activity events (inherit last known stage).
+    let mut current_stage: u8 = 0;
 
     // Main streaming loop with biased cancel-first select.
     loop {
@@ -209,11 +336,24 @@ pub async fn run_benchmark(
                             let line_str = line.to_string();
                             raw_buf.push_str(&line_str);
 
-                            // Emit raw chunk for live "Raw output" Accordion.
+                            // Emit raw chunk for live tail (BenchmarkLiveTail component).
                             app.emit("benchmark-stdout-chunk", &line_str).ok();
 
-                            // Detect section milestone and emit progress event.
-                            if let Some(stage) = parse_milestone(&line_str) {
+                            // Detect signal (section / percent / activity) and emit progress event.
+                            // Emit max 1 event per line (parse_signal returns most significant).
+                            if let Some(signal) = parse_signal(&line_str) {
+                                let (stage, percent, activity) = match signal {
+                                    BenchmarkSignal::Section(s) => {
+                                        current_stage = s;
+                                        (s, None, None)
+                                    }
+                                    BenchmarkSignal::Percent(pct) => {
+                                        (current_stage, Some(pct), None)
+                                    }
+                                    BenchmarkSignal::Activity(act) => {
+                                        (current_stage, None, Some(act))
+                                    }
+                                };
                                 let label = stage_label(stage).to_string();
                                 app.emit(
                                     "benchmark-progress",
@@ -221,6 +361,8 @@ pub async fn run_benchmark(
                                         stage,
                                         label,
                                         current_line: line_str.trim().to_string(),
+                                        percent,
+                                        activity,
                                     },
                                 ).ok();
                             }
@@ -271,6 +413,8 @@ pub async fn run_benchmark(
             stage: 4,
             label: "complete".into(),
             current_line: String::new(),
+            percent: None,
+            activity: None,
         },
     ).ok();
 
@@ -285,6 +429,80 @@ pub async fn run_benchmark(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── parse_signal tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_signal_detects_percent() {
+        assert_eq!(
+            parse_signal("Loading database... 45%"),
+            Some(BenchmarkSignal::Percent(45))
+        );
+        assert_eq!(
+            parse_signal("Progress: 100%"),
+            Some(BenchmarkSignal::Percent(100))
+        );
+        assert_eq!(
+            parse_signal("done 0%"),
+            Some(BenchmarkSignal::Percent(0))
+        );
+    }
+
+    #[test]
+    fn parse_signal_detects_activity_asterisk() {
+        assert_eq!(
+            parse_signal("* Checking ASN database..."),
+            Some(BenchmarkSignal::Activity("Checking ASN database".into()))
+        );
+        assert_eq!(
+            parse_signal("* Querying IP registry"),
+            Some(BenchmarkSignal::Activity("Querying IP registry".into()))
+        );
+    }
+
+    #[test]
+    fn parse_signal_detects_activity_checking_prefix() {
+        assert_eq!(
+            parse_signal("Checking IP type..."),
+            Some(BenchmarkSignal::Activity("Checking IP type".into()))
+        );
+        assert_eq!(
+            parse_signal("Checking risk factors"),
+            Some(BenchmarkSignal::Activity("Checking risk factors".into()))
+        );
+    }
+
+    #[test]
+    fn parse_signal_section_headers_unchanged() {
+        assert_eq!(
+            parse_signal("1. Basic Information"),
+            Some(BenchmarkSignal::Section(0))
+        );
+        assert_eq!(
+            parse_signal("3. Risk Score"),
+            Some(BenchmarkSignal::Section(2))
+        );
+        assert_eq!(
+            parse_signal("5. Accessibility check for media and AI services"),
+            Some(BenchmarkSignal::Section(3))
+        );
+    }
+
+    #[test]
+    fn parse_signal_section_takes_priority_over_percent_in_header() {
+        // Section header format: "N. Text" — parse_signal returns Section, NOT Percent
+        // even if there might be a number in the header.
+        let result = parse_signal("1. Basic Information");
+        assert!(matches!(result, Some(BenchmarkSignal::Section(0))));
+    }
+
+    #[test]
+    fn parse_signal_returns_none_for_plain_lines() {
+        assert_eq!(parse_signal(""), None);
+        assert_eq!(parse_signal("########"), None);
+        assert_eq!(parse_signal("some random data line"), None);
+        assert_eq!(parse_signal("IP: 192.168.1.1"), None);
+    }
 
     // ── parse_milestone: happy-path per section ──────────────────────────────
 
