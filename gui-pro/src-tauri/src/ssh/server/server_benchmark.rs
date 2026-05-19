@@ -1,9 +1,9 @@
-//! Server Benchmark — streaming SSH execution of Check.Place quality checker.
+//! Server Benchmark — streaming SSH execution of IP.Check.Place quality checker.
 //!
 //! # Architecture
 //!
 //! - `run_benchmark` opens a single SSH channel via `open_session_with_retry`,
-//!   executes `bash <(curl -sL https://Check.Place) -EI` with `stdbuf -oL` prefix
+//!   executes `bash <(curl -Ls https://IP.Check.Place) -l en` with `stdbuf -oL` prefix
 //!   for line-buffered streaming and `set -m;` for job-control (SIGTERM propagation).
 //! - Two Tauri events are emitted per chunk/milestone:
 //!   - `"benchmark-stdout-chunk"` — raw `String` line (for Raw output Accordion / live tail).
@@ -288,11 +288,13 @@ pub async fn run_benchmark(
 
     // Build command: set -m enables job control so SIGTERM propagates to process group.
     // stdbuf -oL forces line-buffered stdout for real-time streaming (A1).
-    // URL changed to canonical https://Check.Place (A5); removed -l ru flag.
-    // Flags: -E English UI, -I IP detection mode (auto-selects menu item "1 Start Detection"),
-    // -y auto-yes (skip interactive confirms — REQUIRED otherwise script shows TUI menu and hangs).
+    // Canonical endpoint IP.Check.Place runs IPQuality script directly (no menu wrapper).
+    // Endpoint: IP.Check.Place redirects directly to the IPQuality script (no menu wrapper).
+    // Flag: `-l en` sets script output language to English. The IPQuality script runs
+    // detection immediately on launch — no menu prompt, no -y needed (unlike the
+    // Check.Place menu wrapper which redirects to ScriptMenu/menu.sh).
     let cmd =
-        "set -m; echo $$ > /tmp/tt-benchmark.pid; exec stdbuf -oL bash <(curl -sL https://Check.Place) -EIy 2>&1";
+        "set -m; echo $$ > /tmp/tt-benchmark.pid; exec stdbuf -oL bash <(curl -Ls https://IP.Check.Place) -l en 2>&1";
     channel
         .exec(true, cmd.as_bytes())
         .await
