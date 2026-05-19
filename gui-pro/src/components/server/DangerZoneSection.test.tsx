@@ -36,12 +36,10 @@ describe("DangerZoneSection", () => {
     expect(screen.getByText(i18n.t("server.danger.title"))).toBeInTheDocument();
   });
 
-  it("shows reinstall button", () => {
+  it("does NOT show reinstall button (removed per UAT 2026-05-19)", () => {
     const state = makeState();
     render(<DangerZoneSection state={state} />);
-    expect(
-      screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.reinstall")) }),
-    ).toBeInTheDocument();
+    expect(screen.queryByTestId("danger-zone-reinstall-button")).not.toBeInTheDocument();
   });
 
   it("shows uninstall button", () => {
@@ -65,15 +63,6 @@ describe("DangerZoneSection", () => {
     expect(
       screen.getByText(i18n.t("server.danger.confirm_uninstall_message")),
     ).toBeInTheDocument();
-  });
-
-  it("clicking reinstall button calls onSwitchToSetup", () => {
-    const state = makeState();
-    render(<DangerZoneSection state={state} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.reinstall")) }),
-    );
-    expect(state.onSwitchToSetup).toHaveBeenCalled();
   });
 
   // ── Phase 17 Plan 06: Stop/Start conditional toggle (D-3.3) ──
@@ -132,13 +121,13 @@ describe("DangerZoneSection", () => {
     expect(screen.queryByText(i18n.t("server.danger.stop_title"))).not.toBeInTheDocument();
   });
 
-  it("existing_reinstall_uninstall_still_render in both states (backwards compat)", () => {
+  it("uninstall_button_renders_in_both_states (Reinstall removed per UAT 2026-05-19)", () => {
     // When service is active
     const stateActive = makeState({
       serverInfo: { installed: true, version: "1.0", serviceActive: true, users: [] } as ServerState["serverInfo"],
     });
     const { unmount } = render(<DangerZoneSection state={stateActive} />);
-    expect(screen.getByTestId("danger-zone-reinstall-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("danger-zone-reinstall-button")).not.toBeInTheDocument();
     expect(screen.getByTestId("danger-zone-uninstall-button")).toBeInTheDocument();
     unmount();
 
@@ -147,7 +136,7 @@ describe("DangerZoneSection", () => {
       serverInfo: { installed: true, version: "1.0", serviceActive: false, users: [] } as ServerState["serverInfo"],
     });
     render(<DangerZoneSection state={stateInactive} />);
-    expect(screen.getByTestId("danger-zone-reinstall-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("danger-zone-reinstall-button")).not.toBeInTheDocument();
     expect(screen.getByTestId("danger-zone-uninstall-button")).toBeInTheDocument();
   });
 });

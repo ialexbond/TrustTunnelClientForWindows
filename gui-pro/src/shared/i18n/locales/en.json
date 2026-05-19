@@ -1493,7 +1493,6 @@
     "danger": {
       "title": "Danger Zone",
       "tooltip": "Actions that may cause data loss or VPN disconnection.",
-      "reinstall": "Reinstall TrustTunnel",
       "uninstall": "Uninstall TrustTunnel",
       "confirm_reboot_title": "Reboot server?",
       "confirm_reboot_message": "The server will be completely rebooted. VPN connection will be interrupted during reboot.",

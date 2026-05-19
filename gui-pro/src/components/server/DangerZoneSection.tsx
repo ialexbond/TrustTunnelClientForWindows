@@ -1,12 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  AlertTriangle,
-  RefreshCw,
-  Trash2,
-  PowerOff,
-  Power,
-} from "lucide-react";
+import { AlertTriangle, Trash2, PowerOff, Power } from "lucide-react";
 import { CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { useConfirm } from "../../shared/ui/useConfirm";
@@ -24,7 +18,6 @@ export function DangerZoneSection({ state }: Props) {
     uninstallLoading,
     setUninstallLoading,
     sshParams,
-    onSwitchToSetup,
     onClearConfig: _onClearConfig,
     setActionResult,
     serverInfo,
@@ -80,23 +73,6 @@ export function DangerZoneSection({ state }: Props) {
     }
   };
 
-  const handleReinstall = () => {
-    // Pre-fill wizard with current SSH credentials and skip to endpoint step
-    try {
-      const existing = localStorage.getItem("trusttunnel_wizard");
-      const obj = existing ? JSON.parse(existing) : {};
-      obj.host = state.host;
-      obj.port = sshParams.port.toString();
-      obj.sshUser = sshParams.user;
-      obj.sshPassword = sshParams.password;
-      if (sshParams.keyPath) obj.sshKeyPath = sshParams.keyPath;
-      obj.wizardStep = "endpoint";
-      obj.wizardMode = "deploy";
-      localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
-    } catch { /* ignore */ }
-    onSwitchToSetup();
-  };
-
   return (
     <>
       <div
@@ -143,16 +119,7 @@ export function DangerZoneSection({ state }: Props) {
               {t("server.actions.start")}
             </Button>
           )}
-          {/* Existing Reinstall + Uninstall preserved (destructiveness order: Stop → Reinstall → Uninstall) */}
-          <Button
-            data-testid="danger-zone-reinstall-button"
-            variant="danger-outline"
-            size="sm"
-            icon={<RefreshCw className="w-3.5 h-3.5" />}
-            onClick={handleReinstall}
-          >
-            {t("server.danger.reinstall")}
-          </Button>
+          {/* Uninstall — destructive endpoint (Reinstall removed per UAT 2026-05-19) */}
           <Button
             data-testid="danger-zone-uninstall-button"
             variant="danger"
