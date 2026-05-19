@@ -93,9 +93,9 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 w-full">
       {/* Legend */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
         {LEVELS.map((level) => (
           <div key={level} className="flex items-center gap-1">
             <div
@@ -113,11 +113,11 @@ export function RiskScoreChart({ rows }: RiskScoreChartProps) {
         ))}
       </div>
 
-      {/* Rows — grid layout with fixed source + score columns to keep bars vertically aligned */}
+      {/* Rows — grid full width: source label + bar (flex grows) + score-with-level text */}
       {rows.map((row) => (
         <div
           key={row.source}
-          className="grid grid-cols-[110px_1fr_140px] gap-3 items-center"
+          className="grid grid-cols-[110px_1fr_120px] gap-3 items-center w-full"
           style={{ marginBottom: 6 }}
         >
           {/* Source label */}
