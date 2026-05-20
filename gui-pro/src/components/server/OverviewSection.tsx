@@ -19,7 +19,6 @@ import {
   ArrowUp,
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
-import { Button } from "../../shared/ui/Button";
 import { ProgressBar } from "../../shared/ui/ProgressBar";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { EcgSvg, ecgHeartbeat, ecgFlatline } from "../../shared/ui/EcgSvg";
@@ -577,32 +576,12 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
 
       {/* ── Row 2: IP | Country | Uptime | Version ── */}
 
-      {/* IP / Сервер — CONTROL-PANEL-SPEC §4.1: «Сервер» card contains IP + actions row.
-          Phase 17 D-3.1 SSOT — Restart lives here (per CONTROL-PANEL-SPEC.md §4.1), not in Utilities. */}
+      {/* IP / Сервер — CONTROL-PANEL-SPEC §4.1: «Сервер» card.
+          UAT 2026-05-20: Restart Service removed entirely (not needed in Overview). */}
       <Card padding="md" style={{ flex: "1 1 240px" }}>
         <Title icon={<Network className="w-5 h-5" />} text={t("server.overview.cards.ip")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
           <span className="font-mono" style={bigNum}>{state.host || "—"}</span>
-        </div>
-        {/* Кнопки действий: Только «Перезапустить сервис» (безопасное действие, per SPEC §4.1). */}
-        <div className="flex justify-end mt-2">
-          <Button
-            data-testid="overview-restart-service-button"
-            variant="ghost"
-            size="sm"
-            icon={<RefreshCw className="w-3.5 h-3.5" />}
-            loading={state.actionLoading === "restart"}
-            disabled={!state.serverInfo?.serviceActive}
-            onClick={() =>
-              state.runAction(
-                "restart",
-                () => invoke("server_restart_service", state.sshParams),
-                t("server.actions.success_restart"),
-              )
-            }
-          >
-            {t("server.actions.restart")}
-          </Button>
         </div>
       </Card>
 
