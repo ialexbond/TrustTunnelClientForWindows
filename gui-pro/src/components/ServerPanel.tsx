@@ -123,7 +123,7 @@ export function ServerPanel(props: ServerPanelProps) {
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
             {t("server.status.not_installed_desc", { host: state.host })}
           </p>
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex items-center justify-center gap-2 whitespace-nowrap">
             <Button
               variant="primary"
               icon={<Download className="w-4 h-4" />}
@@ -144,16 +144,16 @@ export function ServerPanel(props: ServerPanelProps) {
                 state.onSwitchToSetup();
               }}
             >
-              {t("server.actions.install")}
+              {t("buttons.install")}
             </Button>
-            {/* Phase 13.UAT G-04: Disconnect button для выхода на SshConnectForm
-                (ранее с этого экрана не было как уйти, только force-kill app). */}
+            {/* Phase 13.UAT G-04: «Выйти» — disconnect back to SshConnectForm.
+                (UAT 2026-05-20: tighter copy + nowrap container to keep 1 line). */}
             <Button
               variant="secondary"
               icon={<LogOut className="w-4 h-4" />}
               onClick={state.onDisconnect}
             >
-              {t("control.disconnect")}
+              {t("control.exit")}
             </Button>
           </div>
         </div>
