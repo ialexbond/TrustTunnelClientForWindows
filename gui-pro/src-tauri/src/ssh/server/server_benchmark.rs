@@ -12,7 +12,8 @@
 //!   `Err("BENCHMARK_CANCELLED|dur={N}|forced")`.
 //! - B5: Backend does NOT parse sections. `BenchmarkResult` contains only `raw_stdout` +
 //!   `duration_seconds`. Section parsing is frontend TS responsibility (`parseBenchmarkOutput()`).
-//! - No progress events emitted — simplified per UAT 2026-05-19 round 3.
+//! - Progress: emits `benchmark-progress { percent }` event on each stdout line that
+//!   contains a percent marker (`\d{1,3}%` or `[N/M]` counter pattern).
 
 use russh::{client, ChannelMsg, Sig};
 use serde::Serialize;
@@ -32,6 +33,104 @@ pub struct BenchmarkResult {
     pub raw_stdout: String,
     /// Wall-clock duration of the benchmark in seconds.
     pub duration_seconds: u64,
+}
+
+/// Tauri event payload emitted whenever a progress percent is detected in stdout.
+///
+/// Event name: `benchmark-progress`. Frontend subscribes while `state.kind === 'running'`.
+/// D-29: percent is a number (0-100) — no raw stdout content is included in this payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct BenchmarkProgress {
+    /// Completion percentage, 0–100, extracted from stdout markers.
+    pub percent: u8,
+}
+
+// ─── Percent Extraction Helper ────────────────────────────────────────────────
+
+/// Extracts a completion percentage from a single stdout line.
+///
+/// Supports two patterns:
+/// - `\b(\d{1,3})%\b` — explicit percent literal (e.g. "Loading database... 45%")
+/// - `\[(\d+)/(\d+)\]` — bracket counter (e.g. "[3/8]" → 37%)
+///
+/// Returns the **maximum** percent found on the line, capped to 100.
+/// Returns `None` if no pattern matches or denominator is zero.
+pub(crate) fn extract_percent(line: &str) -> Option<u8> {
+    // Strip ANSI escape codes before matching (script uses coloring).
+    // Simple inline strip: remove ESC [ ... m sequences.
+    let clean: std::borrow::Cow<str> = {
+        // Use a basic state machine — avoid regex crate dependency for a one-liner strip.
+        let mut out = String::new();
+        let mut chars = line.chars().peekable();
+        let mut in_esc = false;
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                in_esc = true;
+            } else if in_esc {
+                if c.is_ascii_alphabetic() {
+                    in_esc = false;
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        std::borrow::Cow::Owned(out)
+    };
+
+    let mut best: Option<u8> = None;
+
+    // Pattern 1: explicit `\b(\d{1,3})%` — scan for '%' preceded by digits
+    let bytes = clean.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i > 0 {
+            // Walk backwards to collect digits
+            let mut j = i - 1;
+            // Skip up to 3 digits before '%'
+            while j > 0 && bytes[j].is_ascii_digit() {
+                j -= 1;
+            }
+            // j now points to char before digits (or 0); adjust when digit found
+            let start = if bytes[j].is_ascii_digit() { j } else { j + 1 };
+            let digit_slice = &clean[start..i];
+            if !digit_slice.is_empty() && digit_slice.len() <= 3 {
+                if let Ok(n) = digit_slice.parse::<u8>() {
+                    let capped = n.min(100);
+                    best = Some(best.map_or(capped, |b: u8| b.max(capped)));
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // Pattern 2: `[N/M]` — bracket counter
+    let s = clean.as_ref();
+    let mut search = s;
+    while let Some(open) = search.find('[') {
+        let rest = &search[open + 1..];
+        if let Some(close) = rest.find(']') {
+            let inner = &rest[..close];
+            if let Some(slash) = inner.find('/') {
+                let num_str = &inner[..slash];
+                let den_str = &inner[slash + 1..];
+                if let (Ok(num), Ok(den)) = (
+                    num_str.trim().parse::<u32>(),
+                    den_str.trim().parse::<u32>(),
+                ) {
+                    if den > 0 {
+                        let pct = ((num as f64 / den as f64) * 100.0).round() as u8;
+                        let capped = pct.min(100);
+                        best = Some(best.map_or(capped, |b: u8| b.max(capped)));
+                    }
+                }
+            }
+            search = &rest[close + 1..];
+        } else {
+            break;
+        }
+    }
+
+    best
 }
 
 // ─── B8 Watchdog Helper ───────────────────────────────────────────────────────
@@ -74,7 +173,7 @@ async fn wait_with_watchdog(
 /// This function captures raw stdout into `BenchmarkResult.raw_stdout` only.
 /// Frontend TypeScript owns section parsing via `parseBenchmarkOutput()`.
 pub async fn run_benchmark(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     handle: &client::Handle<crate::ssh::SshHandler>,
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<BenchmarkResult, String> {
@@ -100,6 +199,8 @@ pub async fn run_benchmark(
     let mut cancel_rx = Box::pin(cancel_rx);
     let mut cancelled = false;
     let mut forced = false;
+    // Monotonic percent tracker — only emit increasing values to frontend.
+    let mut last_percent: u8 = 0;
 
     // Main streaming loop with biased cancel-first select.
     loop {
@@ -129,10 +230,27 @@ pub async fn run_benchmark(
                     // Channel closed — benchmark done.
                     Ok(None) => break,
 
-                    // Stdout data — accumulate.
+                    // Stdout data — accumulate + emit progress events per line.
                     Ok(Some(ChannelMsg::Data { ref data })) => {
                         let text = String::from_utf8_lossy(data);
                         raw_buf.push_str(&text);
+                        // Scan each line for percent markers. Emit benchmark-progress
+                        // events monotonically (never go backwards). D-29: payload
+                        // contains only a number — no raw text forwarded to frontend.
+                        if !cancelled {
+                            for line in text.lines() {
+                                if let Some(pct) = extract_percent(line) {
+                                    if pct > last_percent {
+                                        last_percent = pct;
+                                        let _ = tauri::Emitter::emit(
+                                            app,
+                                            "benchmark-progress",
+                                            BenchmarkProgress { percent: pct },
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // Stderr — accumulate (pipeline errors visible in Raw output).
@@ -178,6 +296,57 @@ pub async fn run_benchmark(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── extract_percent unit tests ────────────────────────────────────────────
+
+    #[test]
+    fn extract_percent_simple_percent() {
+        assert_eq!(extract_percent("Loading database... 45%"), Some(45));
+    }
+
+    #[test]
+    fn extract_percent_bracket_counter() {
+        // [3/8] → 37% (round(3/8 * 100))
+        assert_eq!(extract_percent("Checking [3/8] items"), Some(38));
+    }
+
+    #[test]
+    fn extract_percent_returns_none_on_no_match() {
+        assert_eq!(extract_percent("No progress here at all"), None);
+    }
+
+    #[test]
+    fn extract_percent_capped_at_100() {
+        // Edge: 100% exactly
+        assert_eq!(extract_percent("Complete 100%"), Some(100));
+    }
+
+    #[test]
+    fn extract_percent_picks_max_when_multiple() {
+        // Line has both "[2/10]" (20%) and "35%" → should return 35
+        assert_eq!(extract_percent("[2/10] done, total: 35%"), Some(35));
+    }
+
+    #[test]
+    fn extract_percent_ignores_zero_denominator() {
+        // [3/0] → invalid, should not panic, returns None (or simple percent)
+        assert_eq!(extract_percent("[3/0] edge case"), None);
+    }
+
+    #[test]
+    fn extract_percent_strips_ansi() {
+        // ESC[32m colored output with percent
+        assert_eq!(extract_percent("\x1b[32mDone 72%\x1b[0m"), Some(72));
+    }
+
+    #[test]
+    fn extract_percent_bracket_1_of_8_is_12() {
+        // [1/8] → round(12.5) → 13
+        let pct = extract_percent("[1/8]");
+        assert!(pct.is_some());
+        let v = pct.unwrap();
+        assert!(v >= 12 && v <= 13, "expected 12-13, got {v}");
+    }
 
     // ── BenchmarkResult shape assertion (B5) ─────────────────────────────────
 
