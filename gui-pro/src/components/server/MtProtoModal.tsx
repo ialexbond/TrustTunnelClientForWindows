@@ -4,7 +4,6 @@ import { Send, Copy, Check, Trash2 } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { NumberInput } from "../../shared/ui";
-import { StepProgress } from "./StepProgress";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import type { MtProtoState } from "./useMtProtoState";
 
@@ -158,13 +157,41 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             )}
           </div>
 
-          {/* StepProgress shown during installation */}
+          {/* Install progress — horizontal bar that advances with each stage
+              (UAT 2026-05-20: replaced StepProgress dots with linear bar). */}
           {state.installing && (
-            <StepProgress
-              steps={state.steps}
-              currentStep={state.currentStep}
-              status={state.stepStatus}
-            />
+            <div className="flex flex-col gap-2">
+              <div
+                className="relative w-full overflow-hidden rounded-full"
+                role="progressbar"
+                aria-valuenow={Math.round((state.currentStep / Math.max(state.steps.length - 1, 1)) * 100)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={state.steps[state.currentStep]?.label ?? ""}
+                style={{
+                  height: 8,
+                  background: "var(--color-bg-surface)",
+                  border: "1px solid var(--color-border)",
+                }}
+              >
+                <span
+                  className="absolute top-0 bottom-0 left-0 transition-all duration-500"
+                  style={{
+                    width: `${Math.round((state.currentStep / Math.max(state.steps.length - 1, 1)) * 100)}%`,
+                    background: "var(--color-accent-interactive)",
+                    borderRadius: "inherit",
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-caption" style={{ color: "var(--color-text-secondary)" }}>
+                  {state.steps[state.currentStep]?.label ?? ""}
+                </p>
+                <p className="text-caption text-right" style={{ color: "var(--color-text-muted)" }}>
+                  {Math.round((state.currentStep / Math.max(state.steps.length - 1, 1)) * 100)}%
+                </p>
+              </div>
+            </div>
           )}
 
           {/* Error state — show retry option */}
