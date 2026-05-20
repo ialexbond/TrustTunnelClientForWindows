@@ -160,6 +160,37 @@ pub async fn mtproto_install(
     let sudo = detect_sudo(&handle, app).await;
     check_cancel(&cancel_flag)?;
 
+    // ── Preflight cleanup (UAT 2026-05-20) ──
+    //
+    // Aggressively dispose of anything left over from a previous install
+    // attempt BEFORE we check the port for conflicts. Without this, a stale
+    // MTProxy unit/binary holds the user's chosen port and the install dies
+    // with `MTPROTO_PORT_BUSY` — leaving them to run cleanup commands by hand.
+    //
+    //   1) `systemctl stop MTProxy`     — graceful shutdown
+    //   2) `systemctl disable MTProxy`  — kill Restart=always auto-revive loop
+    //   3) `pkill -f mtproto-proxy`     — covers stale binaries that detached
+    //                                     from the unit (manual kill -9, etc.)
+    //   4) `rm -f /etc/systemd/system/MTProxy.service` + `daemon-reload`
+    //                                   — purge the old unit so the new
+    //                                     install starts from a clean slate
+    //
+    // Errors silenced (`|| true`) — preflight must never abort a fresh install.
+    exec_command(
+        &handle,
+        app,
+        &format!(
+            "{sudo}systemctl stop MTProxy 2>/dev/null; \
+             {sudo}systemctl disable MTProxy 2>/dev/null; \
+             {sudo}pkill -f /opt/MTProxy/mtproto-proxy 2>/dev/null; \
+             {sudo}rm -f /etc/systemd/system/MTProxy.service 2>/dev/null; \
+             {sudo}systemctl daemon-reload 2>/dev/null; \
+             true"
+        ),
+    )
+    .await
+    .ok();
+
     // ── Validate / resolve port ──
     let port: u16 = if mtproto_port == 0 {
         emit_mtproto_step(app, "download", "running", "Finding free port...");
@@ -194,11 +225,36 @@ pub async fn mtproto_install(
     // ── Step: download (install deps + clone + build) ──
     emit_mtproto_step(app, "download", "running", "");
 
-    // Install build dependencies
+    // Install build dependencies.
+    //
+    // UAT 2026-05-20 — wrapped in `bash -c` with explicit non-interactive envs
+    // because on Ubuntu 24.04 `needrestart` (pulled in transitively by
+    // build-essential) prints a TUI prompt asking which services to restart.
+    // Over SSH that prompt blocks stdin forever → russh sees no progress on
+    // the channel → SSH_CHANNEL_FAILED|Channel send error after ~60s timeout.
+    //
+    // sudo strips env vars by default (env_reset in sudoers), so setting
+    // DEBIAN_FRONTEND/NEEDRESTART_MODE before `{sudo}apt-get` doesn't reach
+    // dpkg. Doing `{sudo}bash -c '...'` first elevates, then exporting envs
+    // INSIDE the elevated shell — they propagate to every subsequent
+    // apt-get / dpkg invocation.
+    //
+    //   DEBIAN_FRONTEND=noninteractive — disable any debconf TUI prompts
+    //   NEEDRESTART_MODE=a              — auto-restart services, no prompt
+    //   NEEDRESTART_SUSPEND=1           — alt switch in case MODE is ignored
+    //   --force-confdef/--force-confold — keep existing config files, don't
+    //                                     ask user about changes
     let (deps_out, deps_code) = exec_command(
         &handle,
         app,
-        &format!("{sudo}apt-get update -qq && {sudo}apt-get install -y -qq git curl build-essential libssl-dev zlib1g-dev 2>&1 && echo DEPS_OK"),
+        &format!(
+            "{sudo}bash -c 'export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 APT_LISTCHANGES_FRONTEND=none; \
+             apt-get update -qq && \
+             apt-get install -y -qq \
+               -o Dpkg::Options::=\"--force-confdef\" \
+               -o Dpkg::Options::=\"--force-confold\" \
+               git curl build-essential libssl-dev zlib1g-dev 2>&1 && echo DEPS_OK'"
+        ),
     )
     .await?;
     if !deps_out.contains("DEPS_OK") {
@@ -425,12 +481,42 @@ pub async fn mtproto_uninstall(
     // Remove env config
     exec_command(&handle, app, &format!("{sudo}rm -f /etc/mtproxy.env")).await?;
 
-    // Close firewall port
+    // Close firewall port.
+    //
+    // UAT 2026-05-20 — switched from `ufw delete allow {port}/tcp` to
+    // delete-by-number because the spec form silently fails when the rule
+    // carries comment metadata (`ufw allow {port}/tcp comment 'MTProto'`
+    // is what install adds). Symptom: user uninstalls, reopens Брандмауэр
+    // modal, MTProto rule is still there.
+    //
+    // Approach:
+    //   1) Enumerate every rule whose `to` column matches `{port}/tcp` via
+    //      `ufw status numbered` (matches IPv4 + IPv6 pair, and rules with
+    //      `comment '...'` since grep doesn't care about trailing fields).
+    //   2) Sort numbers DESCENDING — deleting a rule renumbers everything
+    //      below it, so we work from the bottom up to keep indices stable.
+    //   3) `yes | ufw delete N` to bypass the interactive confirm prompt.
+    //   4) Belt-and-suspenders: also try `ufw delete allow {port}/tcp` as a
+    //      no-op fallback (covers edge cases where status output format
+    //      drifts between distros).
+    //
+    // `<<'UFWEOF'` (single-quoted heredoc terminator) prevents the OUTER
+    // shell from expanding $NUMBERS / $N — those get expanded by the bash
+    // instance that receives the heredoc body via stdin, at execution time.
     if port > 0 {
         exec_command(
             &handle,
             app,
-            &format!("{sudo}ufw delete allow {port}/tcp 2>/dev/null; echo FW_OK"),
+            &format!(
+                "{sudo}bash <<'UFWEOF'\n\
+NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
+for N in $NUMBERS; do\n\
+  yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
+done\n\
+{sudo}ufw delete allow {port}/tcp >/dev/null 2>&1 || true\n\
+echo FW_OK\n\
+UFWEOF\n"
+            ),
         )
         .await?;
     }
