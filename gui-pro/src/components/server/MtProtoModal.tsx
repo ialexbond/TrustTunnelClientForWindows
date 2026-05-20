@@ -194,23 +194,14 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             </div>
           )}
 
-          {/* Error state — show retry option */}
+          {/* Error state — show only the message; retry is folded into footer button */}
           {!state.installing && state.error && (
-            <div className="flex items-center gap-2">
-              <p
-                className="text-body-sm flex-1 truncate"
-                style={{ color: "var(--color-status-error)" }}
-              >
-                {state.error}
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => state.retry(parseInt(portInput, 10) || 0)}
-              >
-                {t("server.utilities.mtproto.retry")}
-              </Button>
-            </div>
+            <p
+              className="text-body-sm"
+              style={{ color: "var(--color-status-error)" }}
+            >
+              {state.error}
+            </p>
           )}
         </div>
       )}
@@ -277,7 +268,9 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
         </div>
       )}
 
-      {/* Footer — Install button (when !installed) or Close button */}
+      {/* Footer — Install / Retry button (when !installed) or Close button.
+          UAT 2026-05-20: when state.error present, primary button becomes
+          «Повторить» (calls state.retry); otherwise «Установить» (handleInstall). */}
       <div className="flex justify-end gap-2 mt-4">
         {!installed && (
           <Button
@@ -285,10 +278,18 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             size="sm"
             loading={state.installing}
             disabled={state.installing}
-            onClick={() => void handleInstall()}
+            onClick={() => {
+              if (state.error) {
+                void state.retry(parseInt(portInput, 10) || 0);
+              } else {
+                void handleInstall();
+              }
+            }}
             data-testid="mtproto-install-button"
           >
-            {t("server.utilities.mtproto.install")}
+            {state.error
+              ? t("server.utilities.mtproto.retry")
+              : t("server.utilities.mtproto.install")}
           </Button>
         )}
         <Button variant="ghost" size="sm" onClick={onClose}>
