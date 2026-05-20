@@ -1,8 +1,12 @@
 /**
  * Benchmark history localStorage helpers.
  *
- * Stores last N benchmark results per host under key `tt_benchmark_<host>`.
+ * Stores the LAST benchmark result per host under key `tt_benchmark_<host>`.
+ * Single-record storage — no eviction logic needed.
  * Key prefix strictly follows CLAUDE.md `tt_*` convention.
+ *
+ * Migration: if localStorage contains an old v17.x array, returns the first
+ * element (newest is stored at index 0 with `push + reverse`, or just take [0]).
  *
  * Pure module — no Tauri, no React, no DOM (only localStorage).
  */
@@ -22,9 +26,6 @@ export interface BenchmarkRecord {
   /** Duration in seconds */
   duration_seconds: number;
 }
-
-/** Maximum number of records stored per host (evict oldest on 6th push) */
-export const MAX_RECORDS = 5;
 
 const KEY_PREFIX = "tt_benchmark_";
 
@@ -54,36 +55,47 @@ function isBenchmarkRecord(x: unknown): x is BenchmarkRecord {
 }
 
 /**
- * Loads benchmark history for a given host.
- * Returns [] for: missing key, malformed JSON, non-array, or array with invalid records.
+ * Loads the last benchmark record for a given host.
+ * Returns null for: missing key, malformed JSON, or invalid record shape.
+ *
+ * Migration: if stored value is an array (old v17.x format), returns the first
+ * element (index 0 was the latest in push-to-front or push+bounded-array order).
  * Never throws.
  */
-export function loadHistory(host: string): BenchmarkRecord[] {
+export function loadLast(host: string): BenchmarkRecord | null {
   try {
     const raw = localStorage.getItem(safeKey(host));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isBenchmarkRecord);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+
+    // Migration path: old v17.x format stored an array of up to 5 records.
+    // Array[0] was the latest (records were appended and bounded to 5,
+    // so the 0th is the oldest push; take last element for newest).
+    if (Array.isArray(parsed)) {
+      // newest is last element (push appended to tail)
+      for (let i = parsed.length - 1; i >= 0; i--) {
+        if (isBenchmarkRecord(parsed[i])) return parsed[i] as BenchmarkRecord;
+      }
+      return null;
+    }
+
+    return isBenchmarkRecord(parsed) ? parsed : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
 /**
- * Pushes a new record to history, evicting the oldest when exceeding MAX_RECORDS.
- * After 6th push, length stays bounded to 5 (MAX_RECORDS).
+ * Saves the given record as the single last benchmark result for the host.
+ * Overwrites any previous record.
  */
-export function pushHistory(host: string, record: BenchmarkRecord): void {
-  const current = loadHistory(host);
-  current.push(record);
-  while (current.length > MAX_RECORDS) current.shift();
-  localStorage.setItem(safeKey(host), JSON.stringify(current));
+export function saveLast(host: string, record: BenchmarkRecord): void {
+  localStorage.setItem(safeKey(host), JSON.stringify(record));
 }
 
 /**
- * Removes all benchmark history for the given host.
+ * Removes the benchmark record for the given host.
  */
-export function clearHistory(host: string): void {
+export function clearLast(host: string): void {
   localStorage.removeItem(safeKey(host));
 }
