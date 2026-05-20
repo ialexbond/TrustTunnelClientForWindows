@@ -99,10 +99,10 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
   const { t } = useTranslation();
   const hasPercent = percent !== null && percent > 0;
 
-  // Modal primitive already provides p-[var(--space-6)] — no extra py needed.
-  // Section rhythm matches MtProtoModal `space-y-3` convention (12px between bands).
+  // py-4 matches IdleView/CompletedView convention — gives breathing room
+  // between Modal h2 and content, and below Cancel before Modal edge.
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 py-4">
       {/* Running text — gap-2 (8px) between title and hint for comfortable reading */}
       <div className="flex flex-col items-center gap-2 text-center">
         <p className="text-body font-medium" style={{ color: "var(--color-text-primary)" }}>
@@ -213,7 +213,7 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
   const hasReportLink = !!parsed.reportLink;
 
   return (
-    <div className="flex flex-col gap-4 py-2">
+    <div className="flex flex-col gap-4 py-4">
       {/* Duration */}
       <p className="text-mono-sm" style={{ color: "var(--color-text-muted)" }}>
         {t("server.utilities.benchmark.duration_label", {
