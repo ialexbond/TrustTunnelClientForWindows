@@ -1475,7 +1475,7 @@
         "copy_raw": "Copy",
         "copied_raw": "Copied!",
         "parser_fail_banner": "Could not parse output — showing full text",
-        "report_link": "Open full report on check.place ↗",
+        "report_link": "Open full report on check.place",
         "history": {
           "dropdown_label": "Previous checks",
           "current": "Current ({{time}})"
