@@ -1475,7 +1475,7 @@
         "copy_raw": "Копировать",
         "copied_raw": "Скопировано!",
         "parser_fail_banner": "Не удалось распарсить вывод — показан полный текст",
-        "report_link": "Открыть полный отчёт на check.place ↗",
+        "report_link": "Открыть полный отчёт на check.place",
         "history": {
           "dropdown_label": "Предыдущие проверки",
           "current": "Текущая ({{time}})"
