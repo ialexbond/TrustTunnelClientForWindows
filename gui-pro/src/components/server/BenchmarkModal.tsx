@@ -65,6 +65,8 @@ export interface BenchmarkModalProps {
   };
   /** Storybook escape hatch — overrides initial state. NEVER use in production. */
   _forceState?: BenchmarkModalState;
+  /** Storybook escape hatch — forces progress percent in running state. NEVER use in production. */
+  _forcePercent?: number;
 }
 
 // ── Subcomponents ──
@@ -97,10 +99,12 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
   const { t } = useTranslation();
   const hasPercent = percent !== null && percent > 0;
 
+  // Modal primitive already provides p-[var(--space-6)] — no extra py needed.
+  // Compact spacing matches MtProtoModal / FirewallModal / Fail2banModal conventions.
   return (
-    <div className="flex flex-col gap-4 py-6">
+    <div className="flex flex-col gap-3">
       {/* Running text */}
-      <div className="flex flex-col items-center gap-2 text-center">
+      <div className="flex flex-col items-center gap-1 text-center">
         <p className="text-body font-medium" style={{ color: "var(--color-text-primary)" }}>
           {t("server.utilities.benchmark.running_text")}
         </p>
@@ -169,10 +173,12 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
         )}
       </div>
 
-      {/* Cancel button — Modal footer convention: right-aligned with gap-2 mt-4 */}
-      <div className="flex justify-end gap-2 mt-2">
+      {/* Cancel button — Modal footer convention: right-aligned, gap-2.
+          mt-2 inherited from parent gap-3 — no extra spacing needed under bar. */}
+      <div className="flex justify-end gap-2">
         <Button
           variant="danger-outline"
+          size="sm"
           onClick={onCancel}
           disabled={isCancelling}
         >
@@ -306,6 +312,7 @@ export function BenchmarkModal({
   onClose,
   sshParams,
   _forceState,
+  _forcePercent,
 }: BenchmarkModalProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
@@ -493,7 +500,7 @@ export function BenchmarkModal({
       {(state.kind === "running" || state.kind === "cancelling") && (
         <RunningView
           isCancelling={state.kind === "cancelling"}
-          percent={percent}
+          percent={_forcePercent ?? percent}
           onCancel={() => void handleCancel()}
         />
       )}
