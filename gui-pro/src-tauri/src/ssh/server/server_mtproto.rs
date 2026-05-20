@@ -324,10 +324,24 @@ pub async fn mtproto_install(
     )
     .await?;
 
-    // Verify active
-    let (active_out, _) =
-        exec_command(&handle, app, &format!("{sudo}systemctl is-active MTProxy")).await?;
-    if active_out.trim() != "active" {
+    // Verify active — retry up to 6 times with 1s sleep between attempts.
+    // UAT 2026-05-20: `systemctl is-active` immediately after `start` often
+    // returns "activating" before the service binds to its port. Without
+    // retries we returned MTPROTO_START_FAILED even though the service was
+    // about to become healthy (reopening the modal showed it as installed).
+    let mut active = false;
+    for attempt in 0..6 {
+        let (active_out, _) =
+            exec_command(&handle, app, &format!("{sudo}systemctl is-active MTProxy")).await?;
+        if active_out.trim() == "active" {
+            active = true;
+            break;
+        }
+        if attempt < 5 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+    if !active {
         emit_mtproto_step(app, "start_service", "error", "Service failed to start");
         return Err("MTPROTO_START_FAILED".into());
     }

@@ -53,6 +53,44 @@ export function colorizeLogLine(line: string): { color: string } {
   return { color: "var(--color-text-muted)" };
 }
 
+/**
+ * renderHighlighted — wrap occurrences of `query` (case-insensitive) inside
+ * `line` in a <mark> span tinted with --color-warning-tint-25, preserving the
+ * surrounding text. Caller decides whether to call this (when query non-empty).
+ */
+function renderHighlighted(line: string, query: string): React.ReactNode[] {
+  const q = query.trim();
+  if (!q) return [line];
+  const lower = line.toLowerCase();
+  const qLower = q.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let i = 0;
+  let keyN = 0;
+  while (i < line.length) {
+    const idx = lower.indexOf(qLower, i);
+    if (idx === -1) {
+      parts.push(line.slice(i));
+      break;
+    }
+    if (idx > i) parts.push(line.slice(i, idx));
+    parts.push(
+      <mark
+        key={`hl-${keyN++}`}
+        style={{
+          background: "var(--color-warning-tint-25)",
+          color: "inherit",
+          borderRadius: 2,
+          padding: "0 1px",
+        }}
+      >
+        {line.slice(idx, idx + q.length)}
+      </mark>,
+    );
+    i = idx + q.length;
+  }
+  return parts;
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface SshParams {
@@ -305,7 +343,8 @@ export function LogsViewerModal({
             >
               {filteredLines.map((line, i) => (
                 <span key={i} style={colorizeLogLine(line)}>
-                  {line + "\n"}
+                  {searchQuery.trim() ? renderHighlighted(line, searchQuery) : line}
+                  {"\n"}
                 </span>
               ))}
             </pre>
