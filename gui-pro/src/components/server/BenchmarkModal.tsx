@@ -100,11 +100,11 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
   const hasPercent = percent !== null && percent > 0;
 
   // Modal primitive already provides p-[var(--space-6)] — no extra py needed.
-  // Compact spacing matches MtProtoModal / FirewallModal / Fail2banModal conventions.
+  // Section rhythm matches MtProtoModal `space-y-3` convention (12px between bands).
   return (
-    <div className="flex flex-col gap-3">
-      {/* Running text */}
-      <div className="flex flex-col items-center gap-1 text-center">
+    <div className="flex flex-col gap-4">
+      {/* Running text — gap-2 (8px) between title and hint for comfortable reading */}
+      <div className="flex flex-col items-center gap-2 text-center">
         <p className="text-body font-medium" style={{ color: "var(--color-text-primary)" }}>
           {t("server.utilities.benchmark.running_text")}
         </p>
