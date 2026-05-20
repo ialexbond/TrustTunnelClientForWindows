@@ -221,17 +221,24 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
         })}
       </p>
 
-      {/* Report link button — big primary button when link present */}
+      {/* Report link — plain clickable text (UAT 2026-05-20: not a button) */}
       {hasReportLink && (
-        <Button
-          variant="primary"
-          size="sm"
+        <button
+          type="button"
           onClick={() => void handleReportLink()}
           data-testid="report-link-button"
+          className="self-start inline-flex items-center gap-1.5 text-body-sm underline underline-offset-2 hover:opacity-80 transition-opacity"
+          style={{
+            color: "var(--color-accent-interactive)",
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+          }}
         >
-          <ExternalLink className="w-4 h-4" />
+          <ExternalLink className="w-3.5 h-3.5" />
           {t("server.utilities.benchmark.report_link")}
-        </Button>
+        </button>
       )}
 
       {/* No-link fallback banner — no raw output accordion */}
