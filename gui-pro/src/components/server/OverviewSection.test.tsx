@@ -100,49 +100,15 @@ describe("OverviewSection", () => {
     }
   });
 
-  it("does NOT render danger/action buttons (stop, reboot) — restart lives here per SSOT", () => {
+  it("does NOT render danger/action buttons (stop, reboot, restart) — UAT 2026-05-20: restart removed entirely", () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
-    // stop + reboot must NOT be in Overview
+    // stop + reboot + restart must NOT be in Overview
     expect(screen.queryByText(new RegExp(i18n.t("server.actions.stop")))).not.toBeInTheDocument();
     expect(
       screen.queryByText(new RegExp(i18n.t("server.actions.reboot_server"))),
     ).not.toBeInTheDocument();
-    // restart IS in Overview (B6 SSOT — it lives here per CONTROL-PANEL-SPEC §4.1)
-    expect(screen.getByTestId("overview-restart-service-button")).toBeInTheDocument();
-  });
-
-  // ── W5 bidirectional SSOT enforcement (Phase 17 Plan 06) ──
-  it("restart_button_test_id_present — W5 positive assertion (SSOT in IP card per SPEC §4.1)", () => {
-    const state = makeState();
-    render(<OverviewSection state={state} />);
-    expect(screen.getByTestId("overview-restart-service-button")).toBeInTheDocument();
-  });
-
-  it("restart_button_renders_and_invokes server_restart_service when clicked", async () => {
-    const runAction = vi.fn(async (_name: string, fn: () => Promise<unknown>) => { await fn(); });
-    const state = makeState({ runAction: runAction as unknown as ServerState["runAction"] });
-    render(<OverviewSection state={state} />);
-    const btn = screen.getByTestId("overview-restart-service-button");
-    expect(btn).toBeInTheDocument();
-    fireEvent.click(btn);
-    await waitFor(() => {
-      expect(runAction).toHaveBeenCalledWith("restart", expect.any(Function), expect.any(String));
-    });
-  });
-
-  it("restart_button_disabled_when_service_stopped", () => {
-    const state = makeState({
-      serverInfo: {
-        installed: true,
-        version: "1.0.20",
-        serviceActive: false,
-        users: [],
-      } as ServerState["serverInfo"],
-    });
-    render(<OverviewSection state={state} />);
-    const btn = screen.getByTestId("overview-restart-service-button");
-    expect(btn).toBeDisabled();
+    expect(screen.queryByTestId("overview-restart-service-button")).not.toBeInTheDocument();
   });
 
   it("shows host IP only in the dedicated IP card (DC-03 scope)", () => {
