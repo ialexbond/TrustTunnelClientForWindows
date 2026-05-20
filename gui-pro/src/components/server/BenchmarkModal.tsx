@@ -82,7 +82,7 @@ function IdleView({ onStart }: IdleViewProps) {
         {t("server.utilities.benchmark.empty_hint")}
       </p>
       <div className="flex justify-end">
-        <Button variant="primary" onClick={onStart}>
+        <Button variant="primary" size="sm" onClick={onStart}>
           {t("server.utilities.benchmark.start_button")}
         </Button>
       </div>
@@ -178,6 +178,7 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
       <div className="flex justify-end gap-2">
         <Button
           variant="danger-outline"
+          size="sm"
           onClick={onCancel}
           disabled={isCancelling}
         >
@@ -224,6 +225,7 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
       {hasReportLink && (
         <Button
           variant="primary"
+          size="sm"
           onClick={() => void handleReportLink()}
           data-testid="report-link-button"
         >
@@ -247,10 +249,10 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
 
       {/* Action row */}
       <div className="flex justify-between gap-2 pt-2">
-        <Button variant="primary" onClick={onRerun}>
+        <Button variant="primary" size="sm" onClick={onRerun}>
           {t("server.utilities.benchmark.rerun_button")}
         </Button>
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           {t("server.utilities.benchmark.close_button")}
         </Button>
       </div>
@@ -270,10 +272,10 @@ function CancelledView({ onRestart, onClose }: CancelledViewProps) {
         {t("server.utilities.benchmark.cancelled_message")}
       </p>
       <div className="flex justify-between gap-2">
-        <Button variant="primary" onClick={onRestart}>
+        <Button variant="primary" size="sm" onClick={onRestart}>
           {t("server.utilities.benchmark.restart_button")}
         </Button>
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           {t("server.utilities.benchmark.close_button")}
         </Button>
       </div>
@@ -294,10 +296,10 @@ function ErrorView({ message, onRetry, onClose }: ErrorViewProps) {
         {t("server.utilities.benchmark.error_prefix")} {message}
       </p>
       <div className="flex justify-between gap-2">
-        <Button variant="primary" onClick={onRetry}>
+        <Button variant="primary" size="sm" onClick={onRetry}>
           {t("server.utilities.benchmark.retry_button")}
         </Button>
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           {t("server.utilities.benchmark.close_button")}
         </Button>
       </div>
