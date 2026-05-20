@@ -374,14 +374,15 @@ describe("BenchmarkModal", () => {
     expect(content).not.toContain("rawOutputAccordion");
   });
 
-  // ─── 19: cancel_button_centered_layout ────────────────────────────────────
-  it("cancel_button_not_flex_justify_end", () => {
-    // The cancel button container must use justify-center (not justify-end)
-    // This is a layout regression guard per UAT 2026-05-20 round 4.
+  // ─── 19: cancel_button_follows_modal_footer_convention ────────────────────
+  it("cancel_button_follows_modal_footer_convention", () => {
+    // UAT 2026-05-20 round 5: design system Modal footer pattern is
+    // `flex justify-end gap-2 mt-N`. NOT justify-center (rejected as off-design).
     const content = BenchmarkModalSource;
-    // Check that the cancel block uses justify-center
-    expect(content).toContain("justify-center");
-    // The old broken pattern was "justify-end w-full" for the cancel button
+    expect(content).toContain("justify-end gap-2");
+    // Anti-presence: the previous justify-center attempt is gone.
+    expect(content).not.toMatch(/justify-center.*Cancel button/i);
+    // Anti-presence: also not the original "justify-end w-full" with extra empty space.
     expect(content).not.toContain("justify-end w-full");
   });
 });

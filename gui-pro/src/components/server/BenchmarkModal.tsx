@@ -169,8 +169,8 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
         )}
       </div>
 
-      {/* Cancel button — centered, close under bar */}
-      <div className="flex justify-center">
+      {/* Cancel button — Modal footer convention: right-aligned with gap-2 mt-4 */}
+      <div className="flex justify-end gap-2 mt-2">
         <Button
           variant="danger-outline"
           onClick={onCancel}
