@@ -223,7 +223,21 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
       <h3 className="text-subtitle mt-4 mb-2">
         {t("server.security.firewall.modal_summary_title")}
       </h3>
-      {!fwInstalled ? (
+      {state.loading ? (
+        /* UAT 2026-05-20 — visual feedback for refresh-on-open.
+           Without this the user sees stale rules → fresh rules without any
+           cue that data was refetched. The spinner is the loader-skeleton
+           equivalent for the rules table. */
+        <div
+          className="py-6 flex items-center justify-center gap-2 text-body-sm"
+          style={{ color: "var(--color-text-muted)" }}
+          data-testid="rules-loading"
+          aria-live="polite"
+        >
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>{t("server.security.firewall.loading_rules")}</span>
+        </div>
+      ) : !fwInstalled ? (
         <div
           className="py-3 text-center text-body-sm"
           style={{ color: "var(--color-text-muted)" }}

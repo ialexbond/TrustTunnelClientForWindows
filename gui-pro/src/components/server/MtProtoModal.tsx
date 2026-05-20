@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Copy, Check, Trash2 } from "lucide-react";
+import { Send, Copy, Check, Trash2, Loader2 } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { NumberInput } from "../../shared/ui";
@@ -51,6 +51,13 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
   const [portInput, setPortInput] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [portError, setPortError] = useState<string | null>(null);
+  // UAT 2026-05-20 — `cancelling` is local UX state that flips to true the
+  // moment the user clicks «Отменить», BEFORE waiting for the backend to
+  // observe the cancel flag at its next checkpoint. Without this the button
+  // looks dead for as long as the current `exec_command` keeps running
+  // (apt-get install can easily take 30–60s). It resets to false when
+  // state.installing flips off (cancel observed, install done, or error).
+  const [cancelling, setCancelling] = useState(false);
 
   // ── T-03: cleanup delayed by 200ms after close (matches Modal exit animation) ──
   useEffect(() => {
@@ -59,9 +66,17 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
       setPortInput("");
       setCopied(false);
       setPortError(null);
+      setCancelling(false);
     }, 200);
     return () => clearTimeout(timer);
   }, [isOpen]);
+
+  // Reset local cancelling state when install loop exits (cancel observed,
+  // install completed, or error). Prevents «Отменяем…» from getting stuck
+  // if the user reopens the modal during the same session.
+  useEffect(() => {
+    if (!state.installing) setCancelling(false);
+  }, [state.installing]);
 
   // ── Default port generation on first open when not installed ──
   // portInput excluded from deps intentionally — fires only when isOpen/installed flips
@@ -298,10 +313,17 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
           <Button
             variant="danger-outline"
             size="sm"
-            onClick={() => void state.cancelInstall()}
+            disabled={cancelling}
+            icon={cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
+            onClick={() => {
+              setCancelling(true);
+              void state.cancelInstall();
+            }}
             data-testid="mtproto-cancel-install-button"
           >
-            {t("server.utilities.mtproto.cancel_install")}
+            {cancelling
+              ? t("server.utilities.mtproto.cancelling")
+              : t("server.utilities.mtproto.cancel_install")}
           </Button>
         ) : (
           <Button variant="ghost" size="sm" onClick={onClose}>
