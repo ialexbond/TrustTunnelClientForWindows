@@ -375,7 +375,8 @@
     "deploying": {
       "title": "Installing TrustTunnel...",
       "description": "This may take a few minutes",
-      "cancelling": "Cancelling installation..."
+      "cancelling": "Cancelling installation...",
+      "overall_progress": "Overall progress"
     },
     "fetching": {
       "title": "Fetching config from server...",
@@ -399,6 +400,8 @@
       "hint_port_in_use": "Port 443 is already in use by another process. Open a terminal on the server and check who's listening: sudo ss -tlnp | grep :443 — then stop that service or use a separate VPS.",
       "hint_port_held_by": "Port 443 is held by «{{process}}» — TrustTunnel cannot run alongside it. Options: stop «{{process}}» (sudo systemctl stop {{process}}), move it to another port, or use a separate VPS for TrustTunnel.",
       "hint_port_80": "Port 80 must be open and not occupied by another service (nginx, apache) to obtain a certificate.",
+      "hint_port_80_refused": "Your VPS replied «Connection refused» on port 80 — the packet got through, but nothing is listening. Likely nginx/apache holds 443 with no forward on 80. Before certbot: sudo systemctl stop nginx (or apache2), then retry. After certbot succeeds you can bring nginx back up.",
+      "hint_port_80_timeout": "Let's Encrypt's external probe to your VPS on port 80 timed out — a firewall is dropping inbound packets. Check: (1) sudo ufw allow 80/tcp on the server, (2) iptables -L INPUT, (3) Inbound rules in your VPS provider panel (AWS Security Group / DigitalOcean / Selectel — port 80/tcp must be open for 0.0.0.0/0). This is NOT a Let's Encrypt rate limit — it's the server being unreachable from the internet.",
       "hint_unreachable": "Server unreachable. Verify the IP address is correct, the server is running and not blocking connections from your network.",
       "hint_auth_failed": "SSH authentication error. Check your username and password.",
       "show_logs": "Show logs",

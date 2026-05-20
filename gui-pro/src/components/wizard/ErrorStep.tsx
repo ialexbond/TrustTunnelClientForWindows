@@ -47,7 +47,15 @@ export function ErrorStep(w: WizardState) {
   if (certbotFailed) {
     if (!hints.length) hints.push(t('wizard.error.hint_letsencrypt'));
   }
-  if (allText.includes("port 80")) {
+  // UAT 2026-05-20 — certbot's challenge log carries the precise network
+  // diagnostic; surface it instead of the generic "port 80 should be open"
+  // line so the user knows whether to fix nginx (refused) or the upstream
+  // firewall / cloud security group (timeout).
+  if (allText.includes("timeout during connect") || (allText.includes("acme-challenge") && allText.includes("timeout"))) {
+    hints.push(t('wizard.error.hint_port_80_timeout'));
+  } else if (allText.includes("acme-challenge") && allText.includes("connection refused")) {
+    hints.push(t('wizard.error.hint_port_80_refused'));
+  } else if (allText.includes("port 80")) {
     hints.push(t('wizard.error.hint_port_80'));
   }
   if (allText.includes("connection refused") || allText.includes("connection timed out") || allText.includes("os error 10054") || allText.includes("os error 10060")) {
