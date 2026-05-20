@@ -1573,7 +1573,8 @@
     "select_key_title": "Выбор SSH-ключа",
     "browse": "Обзор",
     "key_from_file": "Файл",
-    "key_paste": "Вставить"
+    "key_paste": "Вставить",
+    "exit": "Выйти"
   },
   "sshErrors": {
     "timeout": "Не удалось подключиться к {{target}} — превышено время ожидания (15 сек)",

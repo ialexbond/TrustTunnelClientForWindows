@@ -1573,7 +1573,8 @@
     "select_key_title": "Select SSH Key",
     "browse": "Browse",
     "key_from_file": "File",
-    "key_paste": "Paste"
+    "key_paste": "Paste",
+    "exit": "Exit"
   },
   "sshErrors": {
     "timeout": "Could not connect to {{target}} — connection timed out (15s)",

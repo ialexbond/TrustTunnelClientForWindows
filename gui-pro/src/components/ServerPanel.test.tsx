@@ -214,7 +214,7 @@ describe("ServerPanel", () => {
       serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.install")) })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: new RegExp(i18n.t("buttons.install")) })).toBeInTheDocument();
   });
 
   it("install button updates localStorage and calls onSwitchToSetup", () => {
@@ -225,7 +225,7 @@ describe("ServerPanel", () => {
       serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
     };
     render(<ServerPanel {...defaultProps} />);
-    const installBtn = screen.getByRole("button", { name: new RegExp(i18n.t("server.actions.install")) });
+    const installBtn = screen.getByRole("button", { name: new RegExp(i18n.t("buttons.install")) });
     installBtn.click();
     const stored = JSON.parse(localStorage.getItem("trusttunnel_wizard") || "{}");
     expect(stored.host).toBe("10.0.0.1");

@@ -211,7 +211,11 @@ function App() {
                 setSettingsKey((k) => k + 1);
               }}
               onSwitchToSetup={() => {
+                // Remount wizard so it picks up freshly-written localStorage step/mode.
                 setWizardKey((k) => k + 1);
+                // Navigate to the wizard tab — otherwise user remains on "control" and
+                // nothing visibly happens (UAT 2026-05-20).
+                setActiveTab("connection");
               }}
               onNavigateToSettings={() => {
                 setActiveTab("settings");
