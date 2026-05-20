@@ -10,13 +10,41 @@ export function ErrorStep(w: WizardState) {
   const { t } = useTranslation();
   const showReinstallPrompt = w.isFetchMode && w.fetchRetryCount >= 2;
 
-  // Smart error hints based on error message and deploy logs
+  // Smart error hints based on error message and deploy logs.
+  //
+  // UAT 2026-05-20 — re-ordered: port-in-use is checked FIRST and short-circuits
+  // the letsencrypt hint. Old logic flagged letsencrypt on ANY certbot mention
+  // — even successful logs ("Account registered", "Successfully received
+  // certificate") — which then shadowed the real cause when the endpoint
+  // crashed binding to port 443 ("Address in use").
+  //
+  // Also tightened letsencrypt detection: only triggers on explicit failure
+  // keywords, not on background mentions of "certbot".
   const allText = [w.errorMessage, ...w.deployLogs.map(l => l.message)].join("\n").toLowerCase();
   const hints: string[] = [];
+  if (allText.includes("address in use") || allText.includes("os error 98")) {
+    // UAT 2026-05-20 — backend dumps `ss -tlnp` output when 443 is busy,
+    // e.g. `users:(("nginx",pid=163333,fd=5))`. Pull the process name out so
+    // we can blame the right culprit instead of the generic "old TrustTunnel"
+    // line. Match common web/proxy servers; fall back to generic if nothing
+    // recognised.
+    const portHolderMatch = allText.match(/users:\(\("([a-z0-9_.-]+)"/i);
+    const holder = portHolderMatch?.[1] ?? "";
+    if (holder && holder !== "trusttunnel_endpoint") {
+      hints.push(t('wizard.error.hint_port_held_by', { process: holder }));
+    } else {
+      hints.push(t('wizard.error.hint_port_in_use'));
+    }
+  }
   if (allText.includes("nxdomain") || (allText.includes("dns") && allText.includes("domain"))) {
     hints.push(t('wizard.error.hint_dns'));
   }
-  if (allText.includes("certbot") || allText.includes("letsencrypt") || allText.includes("let's encrypt")) {
+  const certbotFailed =
+    allText.includes("certbot failed") ||
+    allText.includes("challenge failed") ||
+    allText.includes("acme") && allText.includes("fail") ||
+    (allText.includes("letsencrypt") || allText.includes("let's encrypt")) && allText.includes("error");
+  if (certbotFailed) {
     if (!hints.length) hints.push(t('wizard.error.hint_letsencrypt'));
   }
   if (allText.includes("port 80")) {
