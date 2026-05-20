@@ -5,6 +5,7 @@ import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
 import StatusPanel from "./components/StatusPanel";
 import { ControlPanelPage } from "./components/ControlPanelPage";
+import SetupWizard from "./components/SetupWizard";
 import SettingsPanel from "./components/SettingsPanel";
 import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
@@ -58,10 +59,17 @@ function App() {
   });
 
   // ─── Panel remount keys ───
-  const [, setWizardKey] = useState(0);
+  const [wizardKey, setWizardKey] = useState(0);
   const [controlKey] = useState(0);
   const [settingsKey, setSettingsKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
+
+  // ─── Setup wizard overlay (UAT 2026-05-20) ───
+  // Mounted as fullscreen overlay when user clicks «Установить» on the
+  // not-installed screen. Wizard reads `trusttunnel_wizard` localStorage
+  // for initial step (set by ServerPanel install handler to step="endpoint",
+  // mode="deploy").
+  const [wizardActive, setWizardActive] = useState(false);
 
   // ─── External integrations ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
@@ -213,9 +221,9 @@ function App() {
               onSwitchToSetup={() => {
                 // Remount wizard so it picks up freshly-written localStorage step/mode.
                 setWizardKey((k) => k + 1);
-                // Navigate to the wizard tab — otherwise user remains on "control" and
-                // nothing visibly happens (UAT 2026-05-20).
-                setActiveTab("connection");
+                // Activate the wizard overlay (UAT 2026-05-20: «Установить»
+                // must actually launch the install flow, not just nav-noop).
+                setWizardActive(true);
               }}
               onNavigateToSettings={() => {
                 setActiveTab("settings");
@@ -354,6 +362,26 @@ function App() {
         <TabNavigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab)} />
       </div>
     </div>
+
+    {/* Setup wizard — fullscreen overlay activated by «Установить» on the
+        not-installed screen. Reads `trusttunnel_wizard` localStorage for initial
+        step/mode (set by ServerPanel install handler). UAT 2026-05-20. */}
+    {wizardActive && (
+      <div
+        className="fixed inset-0 z-[var(--z-modal)] overflow-y-auto"
+        style={{ background: "var(--color-bg-primary)" }}
+      >
+        <SetupWizard
+          key={wizardKey}
+          onSetupComplete={(configPath) => {
+            setConfig((prev) => ({ ...prev, configPath }));
+            if (configPath) localStorage.setItem("tt_config_path", configPath);
+            setWizardActive(false);
+            setActiveTab("control");
+          }}
+        />
+      </div>
+    )}
 
     <ConfirmDialog
       isOpen={hostKeyPending !== null}
