@@ -47,23 +47,34 @@ pub struct BenchmarkProgress {
 
 // ─── Percent Extraction Helper ────────────────────────────────────────────────
 
-/// Extracts a completion percentage from a single stdout line.
+/// Extracts a benchmark completion percentage from a single stdout line.
 ///
-/// Supports two patterns:
-/// - `\b(\d{1,3})%\b` — explicit percent literal (e.g. "Loading database... 45%")
-/// - `\[(\d+)/(\d+)\]` — bracket counter (e.g. "[3/8]" → 37%)
+/// **Section-header mapping (UAT 2026-05-20):**
+/// IPQuality script (xykt/IPQuality) does NOT emit explicit progress markers
+/// (`\d+%` literals or `[N/M]` counters) in its stdout. Free-form regex on `%`
+/// misfires on data values like "Fraud Score: 3.91%" — bar would jump randomly.
 ///
-/// Returns the **maximum** percent found on the line, capped to 100.
-/// Returns `None` if no pattern matches or denominator is zero.
+/// Instead, we detect numbered section headers that appear at predictable points
+/// during execution and map them to discrete progress steps:
+///
+/// | Header prefix            | Percent | Stage                         |
+/// |--------------------------|---------|-------------------------------|
+/// | `1. Basic Information`   | 20      | IP / location / ASN           |
+/// | `2. IP Type`             | 40      | Datacenter / residential      |
+/// | `3. Risk Score`          | 60      | Fraud / abuse databases       |
+/// | `4. Risk Factors`        | 75      | VPN / proxy / Tor detectors   |
+/// | `5. Accessibility…`      | 90      | Streaming services            |
+///
+/// Section 6 (Email — not rendered in UI) intentionally not mapped — leaving
+/// 90 → 100 transition for the frontend to do on completion.
+///
+/// Returns `None` for any line that is not a section header.
 pub(crate) fn extract_percent(line: &str) -> Option<u8> {
     // Strip ANSI escape codes before matching (script uses coloring).
-    // Simple inline strip: remove ESC [ ... m sequences.
-    let clean: std::borrow::Cow<str> = {
-        // Use a basic state machine — avoid regex crate dependency for a one-liner strip.
+    let clean: String = {
         let mut out = String::new();
-        let mut chars = line.chars().peekable();
         let mut in_esc = false;
-        while let Some(c) = chars.next() {
+        for c in line.chars() {
             if c == '\x1b' {
                 in_esc = true;
             } else if in_esc {
@@ -74,63 +85,30 @@ pub(crate) fn extract_percent(line: &str) -> Option<u8> {
                 out.push(c);
             }
         }
-        std::borrow::Cow::Owned(out)
+        out
     };
 
-    let mut best: Option<u8> = None;
-
-    // Pattern 1: explicit `\b(\d{1,3})%` — scan for '%' preceded by digits
-    let bytes = clean.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i > 0 {
-            // Walk backwards to collect digits
-            let mut j = i - 1;
-            // Skip up to 3 digits before '%'
-            while j > 0 && bytes[j].is_ascii_digit() {
-                j -= 1;
-            }
-            // j now points to char before digits (or 0); adjust when digit found
-            let start = if bytes[j].is_ascii_digit() { j } else { j + 1 };
-            let digit_slice = &clean[start..i];
-            if !digit_slice.is_empty() && digit_slice.len() <= 3 {
-                if let Ok(n) = digit_slice.parse::<u8>() {
-                    let capped = n.min(100);
-                    best = Some(best.map_or(capped, |b: u8| b.max(capped)));
-                }
-            }
-        }
-        i += 1;
+    let trimmed = clean.trim_start();
+    // Section header format: "N. ..." where N is 1..=5.
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 3 {
+        return None;
+    }
+    if !(b'1'..=b'5').contains(&bytes[0]) {
+        return None;
+    }
+    if bytes[1] != b'.' || bytes[2] != b' ' {
+        return None;
     }
 
-    // Pattern 2: `[N/M]` — bracket counter
-    let s = clean.as_ref();
-    let mut search = s;
-    while let Some(open) = search.find('[') {
-        let rest = &search[open + 1..];
-        if let Some(close) = rest.find(']') {
-            let inner = &rest[..close];
-            if let Some(slash) = inner.find('/') {
-                let num_str = &inner[..slash];
-                let den_str = &inner[slash + 1..];
-                if let (Ok(num), Ok(den)) = (
-                    num_str.trim().parse::<u32>(),
-                    den_str.trim().parse::<u32>(),
-                ) {
-                    if den > 0 {
-                        let pct = ((num as f64 / den as f64) * 100.0).round() as u8;
-                        let capped = pct.min(100);
-                        best = Some(best.map_or(capped, |b: u8| b.max(capped)));
-                    }
-                }
-            }
-            search = &rest[close + 1..];
-        } else {
-            break;
-        }
+    match bytes[0] {
+        b'1' => Some(20),
+        b'2' => Some(40),
+        b'3' => Some(60),
+        b'4' => Some(75),
+        b'5' => Some(90),
+        _ => None,
     }
-
-    best
 }
 
 // ─── B8 Watchdog Helper ───────────────────────────────────────────────────────
@@ -299,53 +277,70 @@ mod tests {
 
     // ── extract_percent unit tests ────────────────────────────────────────────
 
+    // Section-header → percent mapping tests (UAT 2026-05-20 round 5).
+
     #[test]
-    fn extract_percent_simple_percent() {
-        assert_eq!(extract_percent("Loading database... 45%"), Some(45));
+    fn extract_percent_section_1_is_20() {
+        assert_eq!(extract_percent("1. Basic Information"), Some(20));
+        assert_eq!(extract_percent("1. Basic Information (Maxmind Database)"), Some(20));
     }
 
     #[test]
-    fn extract_percent_bracket_counter() {
-        // [3/8] → 37% (round(3/8 * 100))
-        assert_eq!(extract_percent("Checking [3/8] items"), Some(38));
+    fn extract_percent_section_2_is_40() {
+        assert_eq!(extract_percent("2. IP Type"), Some(40));
     }
 
     #[test]
-    fn extract_percent_returns_none_on_no_match() {
+    fn extract_percent_section_3_is_60() {
+        assert_eq!(extract_percent("3. Risk Score"), Some(60));
+    }
+
+    #[test]
+    fn extract_percent_section_4_is_75() {
+        assert_eq!(extract_percent("4. Risk Factors"), Some(75));
+    }
+
+    #[test]
+    fn extract_percent_section_5_is_90() {
+        assert_eq!(
+            extract_percent("5. Accessibility check for media and AI services"),
+            Some(90)
+        );
+    }
+
+    #[test]
+    fn extract_percent_section_6_not_mapped() {
+        // Email section intentionally not rendered — no percent emitted (stays at 90 until completion).
+        assert_eq!(extract_percent("6. Email service availability and blacklist detection"), None);
+    }
+
+    #[test]
+    fn extract_percent_data_value_not_misfired() {
+        // Risk Score VALUE "3.91%" must NOT trigger any percent — only headers do.
+        assert_eq!(extract_percent("ipapi:                                             3.91% High"), None);
+        assert_eq!(extract_percent("Fraud Score: 42 / 100"), None);
+        assert_eq!(extract_percent("Loading database... 45%"), None);
+    }
+
+    #[test]
+    fn extract_percent_non_header_lines_return_none() {
         assert_eq!(extract_percent("No progress here at all"), None);
+        assert_eq!(extract_percent(""), None);
+        assert_eq!(extract_percent("   "), None);
+        assert_eq!(extract_percent("1.Basic"), None); // missing space after dot
+        assert_eq!(extract_percent("11. Bad section"), None); // two digits before dot
     }
 
     #[test]
-    fn extract_percent_capped_at_100() {
-        // Edge: 100% exactly
-        assert_eq!(extract_percent("Complete 100%"), Some(100));
-    }
-
-    #[test]
-    fn extract_percent_picks_max_when_multiple() {
-        // Line has both "[2/10]" (20%) and "35%" → should return 35
-        assert_eq!(extract_percent("[2/10] done, total: 35%"), Some(35));
-    }
-
-    #[test]
-    fn extract_percent_ignores_zero_denominator() {
-        // [3/0] → invalid, should not panic, returns None (or simple percent)
-        assert_eq!(extract_percent("[3/0] edge case"), None);
+    fn extract_percent_handles_leading_whitespace() {
+        assert_eq!(extract_percent("  1. Basic Information"), Some(20));
+        assert_eq!(extract_percent("\t2. IP Type"), Some(40));
     }
 
     #[test]
     fn extract_percent_strips_ansi() {
-        // ESC[32m colored output with percent
-        assert_eq!(extract_percent("\x1b[32mDone 72%\x1b[0m"), Some(72));
-    }
-
-    #[test]
-    fn extract_percent_bracket_1_of_8_is_12() {
-        // [1/8] → round(12.5) → 13
-        let pct = extract_percent("[1/8]");
-        assert!(pct.is_some());
-        let v = pct.unwrap();
-        assert!(v >= 12 && v <= 13, "expected 12-13, got {v}");
+        // ESC[1m bold section header
+        assert_eq!(extract_percent("\x1b[1m3. Risk Score\x1b[0m"), Some(60));
     }
 
     // ── BenchmarkResult shape assertion (B5) ─────────────────────────────────
