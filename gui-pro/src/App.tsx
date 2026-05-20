@@ -363,23 +363,37 @@ function App() {
       </div>
     </div>
 
-    {/* Setup wizard — fullscreen overlay activated by «Установить» on the
-        not-installed screen. Reads `trusttunnel_wizard` localStorage for initial
-        step/mode (set by ServerPanel install handler). UAT 2026-05-20. */}
+    {/* Setup wizard — overlay activated by «Установить» on the not-installed
+        screen. Reads `trusttunnel_wizard` localStorage for initial step/mode
+        (set by ServerPanel install handler).
+
+        UAT 2026-05-20 v2 — overlay layout adjustments:
+          • `top-[32px]` keeps TitleBar visible (drag region + window controls)
+          • `bottom-[64px]` keeps bottom TabNavigation visible AND clickable.
+            User can switch tabs while install runs in the background (the
+            other tab content stays under the overlay until cancel/close —
+            but the tab bar itself is no longer hidden).
+          • `flex flex-col` + child steps with `flex-1 items-center` → content
+            vertically centers in the middle band instead of sticking to top.
+          • `max-w-[600px] mx-auto` shrinks the canvas to a centered column —
+            stops form steps from spanning the full 1000px window width,
+            which is what made content look "stuck top-left". */}
     {wizardActive && (
       <div
-        className="fixed inset-0 z-[var(--z-modal)] overflow-y-auto"
+        className="fixed top-[32px] bottom-[64px] left-0 right-0 z-[var(--z-modal)] overflow-y-auto flex flex-col"
         style={{ background: "var(--color-bg-primary)" }}
       >
-        <SetupWizard
-          key={wizardKey}
-          onSetupComplete={(configPath) => {
-            setConfig((prev) => ({ ...prev, configPath }));
-            if (configPath) localStorage.setItem("tt_config_path", configPath);
-            setWizardActive(false);
-            setActiveTab("control");
-          }}
-        />
+        <div className="flex-1 flex flex-col w-full max-w-[600px] mx-auto">
+          <SetupWizard
+            key={wizardKey}
+            onSetupComplete={(configPath) => {
+              setConfig((prev) => ({ ...prev, configPath }));
+              if (configPath) localStorage.setItem("tt_config_path", configPath);
+              setWizardActive(false);
+              setActiveTab("control");
+            }}
+          />
+        </div>
       </div>
     )}
 
