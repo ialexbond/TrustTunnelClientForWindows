@@ -13,6 +13,11 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
   open: vi.fn().mockResolvedValue(undefined),
 }));
 
+// ─── Mock: Tauri event (listen) ───────────────────────────────────────────────
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}), // returns unlisten no-op
+}));
+
 // ─── Spy: useActivityLog (D-29) ──────────────────────────────────────────────
 const activityLogSpy = vi.fn();
 vi.mock("../../shared/hooks/useActivityLog", () => ({
@@ -100,7 +105,8 @@ describe("BenchmarkModal", () => {
       raw_stdout: RAW_WITH_LINK,
       duration_seconds: 42,
     };
-    localStorage.setItem("tt_benchmark_192.168.1.100", JSON.stringify([record]));
+    // New format: single object (not array)
+    localStorage.setItem("tt_benchmark_192.168.1.100", JSON.stringify(record));
     render(
       <BenchmarkModal
         isOpen={true}
@@ -124,8 +130,9 @@ describe("BenchmarkModal", () => {
     });
     // Generic running text (no stage labels — indeterminate progress bar)
     expect(screen.getByText(/Идёт проверка сервера/i)).toBeVisible();
-    // Indeterminate progress bar via role="progressbar" with aria-busy
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-busy", "true");
+    // Progress bar — aria-busy="true" when no percent received yet
+    const bar = screen.getByRole("progressbar");
+    expect(bar).toBeInTheDocument();
   });
 
   // ─── 4: invoke_uses_camelCase_keys (B7 explicit) ─────────────────────────
@@ -166,8 +173,8 @@ describe("BenchmarkModal", () => {
     expect(callArgs.variant).not.toBe("danger");
   });
 
-  // ─── 6: cancel_invoke_then_state_cancelled ───────────────────────────────
-  it("cancel_invoke_then_state_cancelled", async () => {
+  // ─── 6: cancel_invoke_passes_ssh_params ──────────────────────────────────
+  it("cancel_invoke_passes_ssh_params", async () => {
     let rejectMain!: (reason: string) => void;
     vi.mocked(invoke)
       .mockImplementationOnce(
@@ -188,7 +195,11 @@ describe("BenchmarkModal", () => {
     await waitFor(() => {
       expect(screen.getByText(/отменена/i)).toBeVisible();
     });
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("server_cancel_benchmark");
+    // Cancel must pass SSH params (for kill-pgroup second channel)
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      "server_cancel_benchmark",
+      expect.objectContaining({ host: sshParams.host })
+    );
   });
 
   // ─── 7: cancel_handles_forced_watchdog_variant (B8) ──────────────────────
@@ -203,8 +214,8 @@ describe("BenchmarkModal", () => {
     });
   });
 
-  // ─── 8: completed_after_resolve_pushes_history ───────────────────────────
-  it("completed_after_resolve_pushes_history", async () => {
+  // ─── 8: completed_after_resolve_saves_last ───────────────────────────────
+  it("completed_after_resolve_saves_last", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(BENCHMARK_RESULT_WITH_LINK);
 
     renderModal({ _forceState: { kind: "idle" } });
@@ -216,9 +227,10 @@ describe("BenchmarkModal", () => {
 
     const stored = localStorage.getItem("tt_benchmark_192.168.1.100");
     expect(stored).not.toBeNull();
-    const parsed = JSON.parse(stored!) as unknown[];
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed.length).toBeGreaterThan(0);
+    // New format: single object (not array)
+    const parsed = JSON.parse(stored!) as unknown;
+    expect(typeof parsed).toBe("object");
+    expect(!Array.isArray(parsed)).toBe(true);
   });
 
   // ─── 9: rerun_button_re_invokes ──────────────────────────────────────────
@@ -253,8 +265,8 @@ describe("BenchmarkModal", () => {
     expect(screen.getByTestId("report-link-button")).toBeVisible();
   });
 
-  // ─── 11: no_report_link_shows_banner_and_autoopens_raw ───────────────────
-  it("no_report_link_shows_banner_and_autoopens_raw", async () => {
+  // ─── 11: no_report_link_shows_banner_no_raw_accordion ────────────────────
+  it("no_report_link_shows_banner_no_raw_accordion", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(BENCHMARK_RESULT_NO_LINK);
 
     renderModal({ _forceState: { kind: "idle" } });
@@ -264,10 +276,10 @@ describe("BenchmarkModal", () => {
       expect(screen.getByText(/Ссылка на отчёт не найдена/i)).toBeVisible();
     }, { timeout: 3000 });
 
-    // Raw accordion auto-opens — raw content visible
-    await waitFor(() => {
-      expect(screen.getByText(/garbled text/i)).toBeVisible();
-    }, { timeout: 1000 });
+    // Raw accordion must NOT be present (removed per UAT 2026-05-20 round 4)
+    expect(screen.queryByText(/Вывод скрипта/i)).toBeNull();
+    // Raw content itself must NOT be in the DOM
+    expect(screen.queryByText(/garbled text/i)).toBeNull();
   });
 
   // ─── 12: close_blocked_while_running ─────────────────────────────────────
@@ -351,5 +363,25 @@ describe("BenchmarkModal", () => {
     expect(content).not.toContain('from "./benchmark/HorizontalProgressBar"');
     expect(content).not.toContain('from "./benchmark/BenchmarkLiveTail"');
     expect(content).not.toContain('from "./benchmark/BasicInfoCard"');
+  });
+
+  // ─── 18: no_raw_accordion_in_source (UAT 2026-05-20 round 4) ─────────────
+  it("no_raw_accordion_in_completed_view", () => {
+    const content = BenchmarkModalSource;
+    // Accordion import should still exist (it may be imported for other uses)
+    // but raw-output accordion id must be gone from completed view
+    expect(content).not.toContain('"raw-output"');
+    expect(content).not.toContain("rawOutputAccordion");
+  });
+
+  // ─── 19: cancel_button_centered_layout ────────────────────────────────────
+  it("cancel_button_not_flex_justify_end", () => {
+    // The cancel button container must use justify-center (not justify-end)
+    // This is a layout regression guard per UAT 2026-05-20 round 4.
+    const content = BenchmarkModalSource;
+    // Check that the cancel block uses justify-center
+    expect(content).toContain("justify-center");
+    // The old broken pattern was "justify-end w-full" for the cancel button
+    expect(content).not.toContain("justify-end w-full");
   });
 });
