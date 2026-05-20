@@ -60,7 +60,13 @@ function App() {
 
   // ─── Panel remount keys ───
   const [wizardKey, setWizardKey] = useState(0);
-  const [controlKey] = useState(0);
+  // UAT 2026-05-20 — `controlKey` is now writable so SetupWizard's
+  // onSetupComplete can bump it. Remounting ControlPanelPage forces
+  // `useServerState.loadServerInfo()` to re-run with the existing
+  // sshParams — otherwise the cached `installed=false` from the pre-
+  // install panel load sticks around and the user sees the «Установить
+  // / Выйти» screen even after a successful deploy.
+  const [controlKey, setControlKey] = useState(0);
   const [settingsKey, setSettingsKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
 
@@ -391,6 +397,13 @@ function App() {
               if (configPath) localStorage.setItem("tt_config_path", configPath);
               setWizardActive(false);
               setActiveTab("control");
+              // UAT 2026-05-20 — force ControlPanelPage remount so
+              // useServerState.loadServerInfo() re-fetches
+              // check_server_installation and detects the newly-installed
+              // endpoint. Without this bump the cached pre-install
+              // `installed=false` keeps the «Установить / Выйти» screen
+              // visible after a successful deploy.
+              setControlKey((k) => k + 1);
             }}
           />
         </div>
