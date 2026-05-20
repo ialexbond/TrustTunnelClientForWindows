@@ -174,11 +174,10 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
       </div>
 
       {/* Cancel button — Modal footer convention: right-aligned, gap-2.
-          mt-2 inherited from parent gap-3 — no extra spacing needed under bar. */}
+          Default size matches CompletedView "Закрыть" / "Проверить ещё раз". */}
       <div className="flex justify-end gap-2">
         <Button
           variant="danger-outline"
-          size="sm"
           onClick={onCancel}
           disabled={isCancelling}
         >
