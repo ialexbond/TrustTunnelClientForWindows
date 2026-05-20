@@ -312,9 +312,10 @@ export function LogsViewerModal({
           )}
         </div>
 
-        {/* Action row — left-aligned to keep vertical line with search/log area.
-            UAT 2026-05-20: «вертикальная линия слева должна сохраняться». */}
-        <div className="flex flex-wrap justify-start gap-2 mt-2">
+        {/* Action row — spans full Modal width to maintain BOTH left and right
+            vertical lines with the search input and log box above.
+            UAT 2026-05-20: «кнопки должны быть по ширине этого блока». */}
+        <div className="flex flex-wrap justify-between gap-2 mt-2">
           <Button
             variant="ghost"
             size="sm"
