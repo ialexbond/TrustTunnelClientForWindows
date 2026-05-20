@@ -396,6 +396,8 @@
       "possible_cause": "Possible cause",
       "hint_dns": "The DNS record (A record) for the domain does not point to the server IP address. Add an A record in your domain control panel and wait 5–10 minutes.",
       "hint_letsencrypt": "Let's Encrypt could not issue a certificate. Make sure the domain points to the server and port 80 is open.",
+      "hint_port_in_use": "Port 443 is already in use by another process. Open a terminal on the server and check who's listening: sudo ss -tlnp | grep :443 — then stop that service or use a separate VPS.",
+      "hint_port_held_by": "Port 443 is held by «{{process}}» — TrustTunnel cannot run alongside it. Options: stop «{{process}}» (sudo systemctl stop {{process}}), move it to another port, or use a separate VPS for TrustTunnel.",
       "hint_port_80": "Port 80 must be open and not occupied by another service (nginx, apache) to obtain a certificate.",
       "hint_unreachable": "Server unreachable. Verify the IP address is correct, the server is running and not blocking connections from your network.",
       "hint_auth_failed": "SSH authentication error. Check your username and password.",
@@ -1299,7 +1301,8 @@
         "install_confirm_message": "UFW will be installed and activated. SSH port ({{ssh}}) will remain open, other incoming traffic will be blocked by default.",
         "delete_rule_confirm_title": "Delete rule?",
         "delete_rule_confirm_message": "Rule #{{n}} will be removed. Related traffic will fall through to remaining rules or default policy.",
-        "rules_hidden_inactive": "Rules are hidden while the firewall is disabled. They are saved and will apply when enabled. To add or edit rules — enable the firewall first."
+        "rules_hidden_inactive": "Rules are hidden while the firewall is disabled. They are saved and will apply when enabled. To add or edit rules — enable the firewall first.",
+        "loading_rules": "Loading current rules…"
       },
       "summary": {
         "configure_button": "Configure",
@@ -1403,6 +1406,7 @@
         },
         "install": "Install",
         "cancel_install": "Cancel",
+        "cancelling": "Cancelling…",
         "port_placeholder": "Random (1024-65535)",
         "copy": "Copy",
         "copied": "Copied!",
