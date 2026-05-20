@@ -1487,7 +1487,7 @@
         "empty_hint": "Click «Check Quality» to run a server quality check.",
         "error_prefix": "Error:",
         "running_text": "Server quality check in progress, please wait",
-        "no_report_link_banner": "Report link not found — showing raw output"
+        "no_report_link_banner": "Report link not found. Please restart the check."
       }
     },
     "danger": {

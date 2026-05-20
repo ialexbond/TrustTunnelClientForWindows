@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { Activity } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
-import { loadHistory } from "./benchmark/history";
+import { loadLast } from "./benchmark/history";
 import { BenchmarkModal } from "./BenchmarkModal";
 
 /** Formats ISO timestamp as "HH:MM DD.MM.YYYY" */
@@ -37,8 +37,7 @@ export function BenchmarkSection({ sshParams }: BenchmarkSectionProps) {
   const [open, setOpen] = useState(false);
 
   // Synchronous read from localStorage — no suspense needed
-  const history = loadHistory(sshParams.host);
-  const lastRun = history.length > 0 ? history[history.length - 1] : undefined;
+  const lastRun = loadLast(sshParams.host) ?? undefined;
 
   return (
     <>
