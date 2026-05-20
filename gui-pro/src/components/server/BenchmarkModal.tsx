@@ -490,7 +490,10 @@ export function BenchmarkModal({
       closeOnEscape={closeOnEscape}
       size="lg"
     >
-      <h2 className="text-title" style={{ color: "var(--color-text-primary)" }}>
+      <h2
+        className="text-title mb-4"
+        style={{ color: "var(--color-text-primary)" }}
+      >
         {t("server.utilities.benchmark.modal_title")}
       </h2>
 
