@@ -312,21 +312,89 @@ pub async fn server_run_benchmark(
     serde_json::to_value(&res).map_err(|e| format!("Serialize error: {e}"))
 }
 
-/// Cancel an in-progress benchmark by sending through the oneshot channel.
+/// Cancel an in-progress benchmark by sending through the oneshot channel AND
+/// opening a second SSH channel to kill the remote process group via PID file.
 ///
-/// The `run_benchmark` loop observes the cancel signal via its biased `tokio::select!`
-/// branch, then sends `Sig::TERM` to the remote process group and drains remaining
-/// messages with a 5-second B8 watchdog timeout.
+/// Two-layer kill strategy:
+/// 1. Send `()` through the oneshot → `run_benchmark` sends `Sig::TERM` + `Sig::INT`
+///    to the bash entry-point (effective when script is simple, may not reach subprocesses).
+/// 2. Open a second SSH channel → `kill -TERM -- -$PID` → kills the entire process
+///    group including curl/dig/traceroute spawned by the IPQuality script.
+///    `set -m` in the run command makes $$ the PGID leader. The PID file is written
+///    as the very first command before exec: `echo $$ > /tmp/tt-benchmark.pid`.
+///
+/// SSH params are passed from the frontend (same params used in server_run_benchmark),
+/// so the pool can reuse the existing connection for the kill channel.
+///
+/// Best-effort: errors from the second channel are silently ignored (PID file may
+/// already be gone if the benchmark finished on its own before cancel arrived).
 ///
 /// Safe to call when no benchmark is running — `guard.take()` on `None` is a no-op.
 #[tauri::command]
 pub async fn server_cancel_benchmark(
+    pool: tauri::State<'_, crate::ssh::SshPool>,
     cancel_state: tauri::State<'_, crate::AppState>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
 ) -> Result<(), String> {
-    let mut guard = cancel_state.benchmark_cancel_tx.lock().await;
-    if let Some(tx) = guard.take() {
-        let _ = tx.send(());
+    // Step 1: Signal the oneshot to trigger Sig::TERM in the streaming loop.
+    {
+        let mut guard = cancel_state.benchmark_cancel_tx.lock().await;
+        if let Some(tx) = guard.take() {
+            let _ = tx.send(());
+        }
     }
+
+    // Step 2: Open a second SSH channel and kill the process group.
+    // Best-effort: silently ignore errors — benchmark may already be terminating.
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+
+    let kill_result: Result<(), String> = async {
+        let handle = pool.acquire(&params, None).await
+            .map_err(|e| format!("kill_channel_acquire: {e}"))?;
+        let mut kill_chan = crate::ssh::open_session_with_retry(&handle).await
+            .map_err(|e| format!("kill_channel_open: {e}"))?;
+        // Read PID from file, send SIGTERM to process group (-PGID), wait 1s,
+        // then SIGKILL the group, and clean up the PID file.
+        let kill_cmd = "PID=$(cat /tmp/tt-benchmark.pid 2>/dev/null); \
+            [ -n \"$PID\" ] && kill -TERM -- -$PID 2>/dev/null; \
+            sleep 1; \
+            [ -n \"$PID\" ] && kill -KILL -- -$PID 2>/dev/null; \
+            rm -f /tmp/tt-benchmark.pid";
+        kill_chan
+            .exec(true, kill_cmd.as_bytes())
+            .await
+            .map_err(|e| format!("kill_exec: {e}"))?;
+        // Drain channel to completion (best-effort, 3s timeout).
+        let _ = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            async {
+                while kill_chan.wait().await.is_some() {
+                    // drain
+                }
+            },
+        )
+        .await;
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = kill_result {
+        // Non-fatal: log to stderr but do not surface to frontend.
+        eprintln!("[benchmark_cancel] kill-pgroup best-effort failed: {e}");
+    }
+
     Ok(())
 }
 

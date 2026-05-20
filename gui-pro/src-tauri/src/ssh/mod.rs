@@ -481,7 +481,7 @@ static CHANNEL_OPEN_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(
 ///      вернул transient failure (gate не защищает от sshd-side race).
 ///      6 attempts × (50/100/200/400/800 ms + 0-99ms jitter) = up to ~1.8s
 ///      total retry window — достаточно для cold fork latency recovery.
-pub(super) async fn open_session_with_retry(
+pub(crate) async fn open_session_with_retry(
     handle: &client::Handle<SshHandler>,
 ) -> Result<russh::Channel<russh::client::Msg>, russh::Error> {
     const MAX_ATTEMPTS: u32 = 6; // 1 initial try + 5 retries
