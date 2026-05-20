@@ -77,7 +77,7 @@ interface IdleViewProps {
 function IdleView({ onStart }: IdleViewProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-4 py-4">
+    <div className="flex flex-col gap-4">
       <p className="text-body" style={{ color: "var(--color-text-secondary)" }}>
         {t("server.utilities.benchmark.empty_hint")}
       </p>
@@ -99,12 +99,12 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
   const { t } = useTranslation();
   const hasPercent = percent !== null && percent > 0;
 
-  // py-4 matches IdleView/CompletedView convention — gives breathing room
-  // between Modal h2 and content, and below Cancel before Modal edge.
+  // No outer py — Modal primitive already provides p-[var(--space-6)] = 24px
+  // around the entire dialog. Adding py here doubles the bottom gap under Cancel.
   return (
-    <div className="flex flex-col gap-4 py-4">
-      {/* Running text — gap-2 (8px) between title and hint for comfortable reading */}
-      <div className="flex flex-col items-center gap-2 text-center">
+    <div className="flex flex-col gap-4">
+      {/* Running text — left-aligned (matches IdleView empty_hint), gap-2 between paragraphs */}
+      <div className="flex flex-col gap-2">
         <p className="text-body font-medium" style={{ color: "var(--color-text-primary)" }}>
           {t("server.utilities.benchmark.running_text")}
         </p>
@@ -213,7 +213,7 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
   const hasReportLink = !!parsed.reportLink;
 
   return (
-    <div className="flex flex-col gap-4 py-4">
+    <div className="flex flex-col gap-4">
       {/* Duration */}
       <p className="text-mono-sm" style={{ color: "var(--color-text-muted)" }}>
         {t("server.utilities.benchmark.duration_label", {
