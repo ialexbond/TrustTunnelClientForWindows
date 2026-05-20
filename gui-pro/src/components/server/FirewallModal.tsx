@@ -64,6 +64,19 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
     return () => clearTimeout(timer);
   }, [isOpen]);
 
+  // UAT 2026-05-20 — refresh rules on every open.
+  //
+  // Without this, `state.status` is loaded once when ServerPanel mounts and is
+  // never refetched. If something outside Firewall UI mutates ufw (e.g. MTProto
+  // install runs `ufw allow {port}/tcp`), the rules list shown in this modal
+  // keeps the stale snapshot from initial load. Calling state.load() on every
+  // open ensures the user always sees ground truth.
+  useEffect(() => {
+    if (!isOpen) return;
+    void state.load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fires only on open edge
+  }, [isOpen]);
+
   // T-03 — cleanup form state after close (matches Modal exit animation 200ms).
   useEffect(() => {
     if (isOpen) return;
