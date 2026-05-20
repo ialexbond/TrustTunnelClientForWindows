@@ -232,13 +232,10 @@ export function LogsViewerModal({
     <Modal isOpen={isOpen} onClose={onClose} size="lg">
       <div className="flex flex-col gap-3">
         {/* Title */}
-        <h2 className="text-title">{t("server.logs.modal.title")}</h2>
+        <h2 className="text-title mb-1">{t("server.logs.modal.title")}</h2>
 
-        {/* Sticky search input */}
-        <div
-          className="sticky top-0 z-10 pb-2"
-          style={{ background: "var(--color-bg-elevated)" }}
-        >
+        {/* Search input (no sticky — Modal content fits without internal sticking) */}
+        <div className="pb-1">
           <Input
             type="text"
             value={searchQuery}
@@ -315,11 +312,9 @@ export function LogsViewerModal({
           )}
         </div>
 
-        {/* Sticky action row */}
-        <div
-          className="sticky bottom-0 flex flex-wrap justify-end gap-2 pt-2"
-          style={{ background: "var(--color-bg-elevated)" }}
-        >
+        {/* Action row — Modal footer convention: flex justify-end gap-2 mt-2.
+            No sticky/bg banding — clean alignment with Modal surface. */}
+        <div className="flex flex-wrap justify-end gap-2 mt-2">
           <Button
             variant="ghost"
             size="sm"
@@ -345,7 +340,7 @@ export function LogsViewerModal({
             {copied ? t("server.logs.modal.copied") : t("server.logs.modal.copy")}
           </Button>
           <Button
-            variant="secondary"
+            variant="ghost"
             size="sm"
             icon={<Download className="w-3.5 h-3.5" />}
             loading={effectiveDownloading}
