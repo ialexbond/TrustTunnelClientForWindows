@@ -36,7 +36,10 @@ pub use server::{
     get_certbot_timer_status, enable_certbot_timer, verify_certbot_renewal,
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,
-    // MtProtoStatus, MtProtoInstallStep are re-exported via commands
+    // UAT 2026-05-20 — re-export MtProtoStatus so the manual #[tauri::command]
+    // for `mtproto_install` in commands/ssh_commands.rs can name its return type.
+    MtProtoStatus,
+    // MtProtoInstallStep is internal-only (emitted via app.emit, not used in signatures)
     detect_bbr_status, enable_bbr, disable_bbr,
     // Phase 14.1 — advanced user config
     server_rotate_user_password, server_add_user_advanced,

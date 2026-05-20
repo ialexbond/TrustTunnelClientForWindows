@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 use tauri::Emitter;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -32,6 +33,14 @@ pub struct AppState {
     /// `"BENCHMARK_ALREADY_RUNNING"` when this field is `Some`. Cleared to `None` on
     /// ALL exit paths (success / cancel / error / watchdog-forced) in `server_run_benchmark`.
     pub benchmark_cancel_tx: Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    /// Phase 17 UAT 2026-05-20 — cooperative MTProto install cancel flag.
+    ///
+    /// Set to `true` by `mtproto_cancel_install` Tauri command; checked between
+    /// each `exec_command` call inside `ssh::server::server_mtproto::mtproto_install`.
+    /// Reset to `false` on every install start AND every exit path. AtomicBool
+    /// (not oneshot) because checks are sync between awaits — no need to .await
+    /// the cancel signal.
+    pub mtproto_install_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Serialize)]

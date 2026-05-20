@@ -1402,6 +1402,7 @@
           "error": "Error"
         },
         "install": "Install",
+        "cancel_install": "Cancel",
         "port_placeholder": "Random (1024-65535)",
         "copy": "Copy",
         "copied": "Copied!",
@@ -1421,6 +1422,7 @@
         "snack": {
           "installed": "MTProto proxy installed",
           "uninstalled": "MTProto proxy removed",
+          "cancelled": "Installation cancelled",
           "install_error": "Failed to install MTProto: {{error}}",
           "uninstall_error": "Failed to remove MTProto: {{error}}"
         },
