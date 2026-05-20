@@ -122,6 +122,30 @@ fi
 {sudo}pkill -9 certbot 2>/dev/null || true
 {sudo}rm -f /tmp/.certbot.lock 2>/dev/null || true
 sleep 1
+
+# UAT 2026-05-20 — open 80/443 BEFORE certbot. Without this, a VPS with
+# ufw=active + default deny INPUT (or upstream iptables policy DROP from
+# cloud-init / provider preconfig) makes Let's Encrypt's external probe
+# time out → `Timeout during connect` in challenge log → install fails.
+# User-facing complaint: «домен правильный, я не спамлю Let's Encrypt,
+# почему не работает». Answer: VPS firewall was silently dropping inbound 80.
+#
+# All ops are idempotent — safe to run on already-open ports:
+#   • `ufw allow 80/tcp` writes the rule whether ufw is enabled or not.
+#   • `iptables -C ... || -I ...` only inserts if the exact rule isn't
+#     already present, so we don't grow the chain on every install retry.
+#
+# 443 is opened alongside because the endpoint will need it post-install
+# (TLS listener) and we'd hit the same firewall on first connect anyway.
+if command -v ufw >/dev/null 2>&1; then
+  {sudo}ufw allow 80/tcp comment 'trusttunnel-acme' >/dev/null 2>&1 || true
+  {sudo}ufw allow 443/tcp comment 'trusttunnel-tls' >/dev/null 2>&1 || true
+fi
+if command -v iptables >/dev/null 2>&1; then
+  {sudo}iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || {sudo}iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+  {sudo}iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || {sudo}iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+fi
+
 {sudo}certbot certonly --standalone -d {hostname} --non-interactive --agree-tos {email_flag} --http-01-port 80
 {sudo}mkdir -p {dir}/certs
 {sudo}cp /etc/letsencrypt/live/{hostname}/fullchain.pem {dir}/certs/cert.pem
