@@ -272,12 +272,18 @@ async fn deploy_update_packages(
 ) -> Result<(), String> {
     emit_step(app, "update", "progress", "Updating system packages...");
 
+    // UAT 2026-05-20 — `export VAR && {sudo}apt-get ...` does NOT propagate
+    // VAR through sudo (env_reset strips it). On Ubuntu 24.04 that means
+    // needrestart's TUI prompt fires and hangs the SSH channel → install
+    // dies with SSH_CHANNEL_FAILED|Channel send error. Fix: elevate via
+    // `{sudo}bash -c '...'` FIRST, then export envs inside the elevated
+    // shell so they reach every apt-get / dpkg invocation.
     let update_cmd = format!(
         "if command -v apt-get >/dev/null 2>&1; then \
-             export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a && \
-             {sudo}apt-get update -qq && \
-             {sudo}apt-get -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' upgrade && \
-             {sudo}apt-get -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' install curl iptables; \
+             {sudo}bash -c 'export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 APT_LISTCHANGES_FRONTEND=none; \
+                apt-get update -qq && \
+                apt-get -y -qq -o Dpkg::Options::=\"--force-confdef\" -o Dpkg::Options::=\"--force-confold\" upgrade && \
+                apt-get -y -qq -o Dpkg::Options::=\"--force-confdef\" -o Dpkg::Options::=\"--force-confold\" install curl iptables'; \
          elif command -v dnf >/dev/null 2>&1; then \
              {sudo}dnf upgrade -y -q && \
              {sudo}dnf install -y -q curl iptables; \
@@ -423,10 +429,35 @@ async fn deploy_start_service(
 ) -> Result<(), String> {
     emit_step(app, "service", "progress", "Starting service...");
 
-    // Stop existing service first, then copy template and restart
-    let service_cmds = format!(
+    // UAT 2026-05-20 — `systemctl stop` alone is NOT enough on retry:
+    //   1) `systemctl enable --now` re-enables auto-start on daemon-reload, and
+    //      if the previous install left the unit `Restart=on-failure RestartSec=3`,
+    //      the old binary is back inside 3s — still holding port 443.
+    //   2) A stale endpoint process can outlive the unit (e.g. crash-loop kill -9).
+    //
+    // Result: new install boots, tries to bind 443 → "Address in use (os error 98)"
+    // → systemd reports failure → wrapper mis-translates this as «Let's Encrypt
+    // не смог выпустить сертификат» even though certbot succeeded earlier.
+    //
+    // Hard reset before install:
+    //   • `stop` + `disable` the unit (kills auto-restart loop)
+    //   • `pkill` any stale endpoint binary (in case it detached)
+    //   • Poll `ss` until port 443 is actually free (max 5s)
+    let preflight = format!(
         "{sudo}systemctl stop trusttunnel 2>/dev/null; \
-         cd {dir} && \
+         {sudo}systemctl disable trusttunnel 2>/dev/null; \
+         {sudo}pkill -f trusttunnel_endpoint 2>/dev/null; \
+         for i in 1 2 3 4 5; do \
+           {sudo}ss -tlnp 2>/dev/null | grep -qE ':443[[:space:]]' || break; \
+           sleep 1; \
+         done; \
+         true"
+    );
+    exec_command(handle, app, &preflight).await.ok();
+
+    // Now copy template and start fresh.
+    let service_cmds = format!(
+        "cd {dir} && \
          {sudo}cp -f trusttunnel.service.template /etc/systemd/system/trusttunnel.service 2>/dev/null; \
          {sudo}systemctl daemon-reload && \
          {sudo}systemctl enable --now trusttunnel",
@@ -458,6 +489,31 @@ async fn deploy_start_service(
         emit_log(app, "error", &format!("Service failed to start. Status: {}", svc_status.trim()));
         for line in journal.lines().take(30) {
             emit_log(app, "warn", line);
+        }
+
+        // UAT 2026-05-20 — port-conflict diagnostic.
+        //
+        // If endpoint died with "Address in use (os error 98)" the journal
+        // tells us 443 is busy but NOT what's holding it. Without this the
+        // ErrorStep hint can only guess "old TrustTunnel" — which is dead
+        // wrong when the real culprit is nginx / apache / caddy.
+        //
+        // `ss -tlnp` output looks like:
+        //   LISTEN 0  511  1.2.3.4:443  0.0.0.0:*  users:(("nginx",pid=163333,fd=5))
+        // We emit it as `error` so ErrorStep's allText match catches the
+        // process name and shows a tailored hint.
+        let journal_lower = journal.to_lowercase();
+        if journal_lower.contains("address in use") || journal_lower.contains("os error 98") {
+            let (ss_out, _) = exec_command(
+                handle, app,
+                &format!("{sudo}ss -tlnp 2>/dev/null | grep -E ':(80|443)[[:space:]]' | head -10")
+            ).await.unwrap_or((String::new(), -1));
+            if !ss_out.trim().is_empty() {
+                emit_log(app, "error", "Port-conflict diagnostic — process holding 80/443:");
+                for line in ss_out.lines().take(10) {
+                    emit_log(app, "error", line);
+                }
+            }
         }
 
         // Also check the service file contents for debugging
