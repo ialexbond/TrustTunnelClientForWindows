@@ -265,7 +265,7 @@ interface CancelledViewProps {
 function CancelledView({ onRestart, onClose }: CancelledViewProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-4 py-4">
+    <div className="flex flex-col gap-4">
       <p className="text-body" style={{ color: "var(--color-text-secondary)" }}>
         {t("server.utilities.benchmark.cancelled_message")}
       </p>
@@ -289,7 +289,7 @@ interface ErrorViewProps {
 function ErrorView({ message, onRetry, onClose }: ErrorViewProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-4 py-4">
+    <div className="flex flex-col gap-4">
       <p className="text-body-sm" style={{ color: "var(--color-status-error)" }}>
         {t("server.utilities.benchmark.error_prefix")} {message}
       </p>
