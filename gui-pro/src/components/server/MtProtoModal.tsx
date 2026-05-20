@@ -269,15 +269,17 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
       )}
 
       {/* Footer — Install / Retry button (when !installed) or Close button.
-          UAT 2026-05-20: when state.error present, primary button becomes
-          «Повторить» (calls state.retry); otherwise «Установить» (handleInstall). */}
+          UAT 2026-05-20:
+            — state.error → primary becomes «Повторить» (state.retry),
+            — state.installing → primary hidden, secondary becomes «Отменить»
+              (state.cancelInstall — sets backend AppState flag, install loop
+              returns at next checkpoint),
+            — otherwise → «Установить» (handleInstall). */}
       <div className="flex justify-end gap-2 mt-4">
-        {!installed && (
+        {!installed && !state.installing && (
           <Button
             variant="primary"
             size="sm"
-            loading={state.installing}
-            disabled={state.installing}
             onClick={() => {
               if (state.error) {
                 void state.retry(parseInt(portInput, 10) || 0);
@@ -292,9 +294,20 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               : t("server.utilities.mtproto.install")}
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          {t("buttons.close")}
-        </Button>
+        {state.installing ? (
+          <Button
+            variant="danger-outline"
+            size="sm"
+            onClick={() => void state.cancelInstall()}
+            data-testid="mtproto-cancel-install-button"
+          >
+            {t("server.utilities.mtproto.cancel_install")}
+          </Button>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            {t("buttons.close")}
+          </Button>
+        )}
       </div>
     </Modal>
   );

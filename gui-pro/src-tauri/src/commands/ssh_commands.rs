@@ -220,7 +220,56 @@ pub async fn security_change_ssh_port(
 
 // ─── MTProto proxy commands ──────────────────────────────────────
 
-ssh_command!(mtproto_install, ssh::mtproto_install, mtproto_port: u16);
+// UAT 2026-05-20 — `mtproto_install` is cancellable. Replaces `ssh_command!` macro
+// (which can't reach AppState) so we can read the shared `mtproto_install_cancel`
+// flag and reset it on every exit path. See `mtproto_cancel_install` below.
+#[tauri::command]
+pub async fn mtproto_install(
+    app: tauri::AppHandle,
+    cancel_state: tauri::State<'_, crate::AppState>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+    mtproto_port: u16,
+) -> Result<crate::ssh::MtProtoStatus, String> {
+    use std::sync::atomic::Ordering;
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+    // Reset cancel flag at start (in case it was left set by a previous cancel
+    // before this install kicked off). The reset gives a clean slate per-attempt.
+    cancel_state.mtproto_install_cancel.store(false, Ordering::SeqCst);
+    let flag = cancel_state.mtproto_install_cancel.clone();
+    let result = ssh::mtproto_install(&app, params, mtproto_port, flag).await;
+    // Cleanup on every exit path (success / cancel / error) so a subsequent
+    // install isn't pre-cancelled by stale state.
+    cancel_state.mtproto_install_cancel.store(false, Ordering::SeqCst);
+    result
+}
+
+/// UAT 2026-05-20 — request cancellation of an in-progress MTProto install.
+///
+/// Sets the shared AppState flag; the install loop checks it between each
+/// `exec_command` and returns `"MTPROTO_INSTALL_CANCELLED"` at the next
+/// checkpoint. Safe to call when no install is running — the flag will be
+/// reset by the next install start.
+#[tauri::command]
+pub async fn mtproto_cancel_install(
+    cancel_state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    cancel_state.mtproto_install_cancel.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
 ssh_command!(mtproto_uninstall, ssh::mtproto_uninstall);
 
 // mtproto_get_status needs host for proxy link construction -- manual command like security_get_status

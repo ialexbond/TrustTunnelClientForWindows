@@ -1,6 +1,23 @@
 use super::super::*;
 use russh::client;
 use serde::Serialize;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// UAT 2026-05-20 — cancel checkpoint for MTProto install.
+///
+/// Returns `Err("MTPROTO_INSTALL_CANCELLED")` if the cancel flag is set.
+/// Called between each `exec_command` step in `mtproto_install` so the user's
+/// «Отменить» click during install reacts as soon as the current ssh command
+/// returns (typical latency: ≤ duration of one step like `apt-get install`).
+#[inline]
+fn check_cancel(flag: &AtomicBool) -> Result<(), String> {
+    if flag.load(Ordering::SeqCst) {
+        Err("MTPROTO_INSTALL_CANCELLED".into())
+    } else {
+        Ok(())
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //   Data structures (mirrored on TS side)
@@ -137,9 +154,11 @@ pub async fn mtproto_install(
     app: &tauri::AppHandle,
     params: SshParams,
     mtproto_port: u16,
+    cancel_flag: Arc<AtomicBool>,
 ) -> Result<MtProtoStatus, String> {
     let handle = params.connect_with_app(app.clone()).await?;
     let sudo = detect_sudo(&handle, app).await;
+    check_cancel(&cancel_flag)?;
 
     // ── Validate / resolve port ──
     let port: u16 = if mtproto_port == 0 {
@@ -186,6 +205,7 @@ pub async fn mtproto_install(
         emit_mtproto_step(app, "download", "error", "Failed to install build dependencies");
         return Err(format!("MTPROTO_DEPS_FAILED|{}", deps_code));
     }
+    check_cancel(&cancel_flag)?;
 
     // Clone and build MTProxy
     let (build_out, _) = exec_command(
@@ -208,6 +228,7 @@ pub async fn mtproto_install(
         return Err("MTPROTO_BUILD_FAILED".into());
     }
     emit_mtproto_step(app, "download", "done", "");
+    check_cancel(&cancel_flag)?;
 
     // ── Step: configure (download proxy-secret + proxy-multi.conf) ──
     emit_mtproto_step(app, "configure", "running", "");
@@ -230,6 +251,7 @@ pub async fn mtproto_install(
         return Err("MTPROTO_CONFIG_DOWNLOAD_FAILED".into());
     }
     emit_mtproto_step(app, "configure", "done", "");
+    check_cancel(&cancel_flag)?;
 
     // ── Step: generate_secret ──
     emit_mtproto_step(app, "generate_secret", "running", "");
@@ -277,6 +299,7 @@ pub async fn mtproto_install(
     )
     .await?;
     emit_mtproto_step(app, "generate_secret", "done", "");
+    check_cancel(&cancel_flag)?;
 
     // ── Step: start_service (create systemd unit + firewall + start) ──
     emit_mtproto_step(app, "start_service", "running", "");

@@ -85,6 +85,8 @@ pub fn run() {
             locale: Arc::new(Mutex::new("ru".to_string())),
             // Phase 17: benchmark cancel channel (None = no benchmark running)
             benchmark_cancel_tx: Arc::new(tokio::sync::Mutex::new(None)),
+            // Phase 17 UAT 2026-05-20: MTProto install cancel flag (false = no install running / not cancelled)
+            mtproto_install_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
@@ -391,6 +393,7 @@ pub fn run() {
             commands::ssh_commands::server_enable_certbot_timer,
             commands::ssh_commands::server_verify_certbot_renewal,
             commands::ssh_commands::mtproto_install,
+            commands::ssh_commands::mtproto_cancel_install,
             commands::ssh_commands::mtproto_get_status,
             commands::ssh_commands::mtproto_uninstall,
             commands::ssh_commands::detect_bbr_status,

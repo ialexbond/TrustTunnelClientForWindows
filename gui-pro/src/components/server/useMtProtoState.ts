@@ -190,11 +190,30 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       pushSuccess(t("server.utilities.mtproto.snack.installed"));
     } catch (e) {
       const msg = formatError(e);
-      setError(msg);
       setInstalling(false);
+      // UAT 2026-05-20 — explicit cancel is NOT an error: don't set error state,
+      // don't show a red toast. The user knowingly cancelled; we just reset UI.
+      if (msg.includes("MTPROTO_INSTALL_CANCELLED")) {
+        setError(null);
+        pushSuccess(t("server.utilities.mtproto.snack.cancelled"));
+        return;
+      }
+      setError(msg);
       pushSuccess(t("server.utilities.mtproto.snack.install_error", { error: msg }), "error");
     }
   };
+
+  // ── Cancel install (UAT 2026-05-20) ──
+  // Sets the AppState flag; the next exec_command checkpoint inside
+  // server_mtproto.rs returns "MTPROTO_INSTALL_CANCELLED", which the catch
+  // above swallows quietly. Safe to call multiple times.
+  const cancelInstall = useCallback(async () => {
+    try {
+      await invoke("mtproto_cancel_install");
+    } catch {
+      /* noop — best-effort */
+    }
+  }, []);
 
   // ── Uninstall (per D-10, D-11, MTPROTO-08) ──
   const requestUninstall = async () => {
@@ -246,6 +265,7 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     steps,
     load,
     install,
+    cancelInstall,
     requestUninstall,
     retry,
     sshParams,

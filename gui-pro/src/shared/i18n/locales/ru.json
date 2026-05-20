@@ -1402,6 +1402,7 @@
           "error": "Ошибка"
         },
         "install": "Установить",
+        "cancel_install": "Отменить",
         "port_placeholder": "Случайный (1024-65535)",
         "copy": "Скопировать",
         "copied": "Скопировано!",
@@ -1421,6 +1422,7 @@
         "snack": {
           "installed": "MTProto прокси установлен",
           "uninstalled": "MTProto прокси удалён",
+          "cancelled": "Установка отменена",
           "install_error": "Не удалось установить MTProto: {{error}}",
           "uninstall_error": "Не удалось удалить MTProto: {{error}}"
         },
