@@ -312,9 +312,9 @@ export function LogsViewerModal({
           )}
         </div>
 
-        {/* Action row — Modal footer convention: flex justify-end gap-2 mt-2.
-            No sticky/bg banding — clean alignment with Modal surface. */}
-        <div className="flex flex-wrap justify-end gap-2 mt-2">
+        {/* Action row — left-aligned to keep vertical line with search/log area.
+            UAT 2026-05-20: «вертикальная линия слева должна сохраняться». */}
+        <div className="flex flex-wrap justify-start gap-2 mt-2">
           <Button
             variant="ghost"
             size="sm"
