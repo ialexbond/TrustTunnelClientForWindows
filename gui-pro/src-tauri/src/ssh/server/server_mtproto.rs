@@ -162,6 +162,22 @@ fn parse_telemt_toml_minimal(raw: &str) -> (u16, String) {
     (port, secret)
 }
 
+/// Phase 17.1 post-UAT — extract `[censorship] tls_domain` value from telemt.toml.
+///
+/// Используется в `mtproto_get_status` чтобы передать домен/IP в `fetch_proxy_link`
+/// для UX rewrite `server=IP` → `server=domain` когда есть Let's Encrypt FQDN.
+///
+/// Returns `None` если файл пустой, malformed, либо tls_domain отсутствует.
+#[allow(dead_code)]
+fn parse_telemt_tls_domain_from_toml(raw: &str) -> Option<String> {
+    let doc = raw.parse::<toml::Value>().ok()?;
+    doc.get("censorship")
+        .and_then(|c| c.get("tls_domain"))
+        .and_then(|d| d.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 /// Phase 17.1 — extract `tg://proxy?...` link from telemt admin API JSON response.
 ///
 /// Expected JSON shape per telemt CONFIG_PARAMS docs:
@@ -176,33 +192,58 @@ fn parse_telemt_toml_minimal(raw: &str) -> (u16, String) {
 /// D-1.9 primary path: backend calls `curl -s http://127.0.0.1:9091/v1/users`
 /// over SSH and passes raw body здесь. Returns `None` on malformed JSON,
 /// missing fields, or empty links array — caller falls back to journalctl.
-/// Phase 17.1 — true когда `tg://proxy?server=...` содержит placeholder IP:
-/// `0.0.0.0` (IPv4 any) либо `[::]` (IPv6 any). Telemt сразу после `systemctl start`
-/// какое-то время отдаёт ссылку с этими placeholder'ами пока IP detection не
-/// завершится (Telegram backend ping). Через ~5-15 секунд telemt подтягивает
-/// real public IP и обновляет ссылки. Caller (fetch_proxy_link) использует
-/// этот filter для retry — ждём пока telemt отдаст финальную ссылку.
+/// Phase 17.1 — true когда `tg://proxy?server=...` содержит placeholder IP.
+///
+/// Telemt сразу после `systemctl start` отдаёт ссылку с placeholder'ом пока
+/// IP detection не завершится (Telegram backend ping ~5-15 секунд). Через
+/// несколько секунд telemt подтягивает real public IP и обновляет ссылки.
+///
+/// Известные placeholder форматы (post-UAT 2026-05-21):
+/// - `server=0.0.0.0` — IPv4 any-address (bind на все интерфейсы)
+/// - `server=[::]` — IPv6 any-address с квадратными скобками
+/// - `server=::` — IPv6 any-address БЕЗ скобок (telemt-specific format)
+///
+/// Caller (fetch_proxy_link) использует этот filter для retry — ждём пока
+/// telemt отдаст финальную ссылку с реальным IP.
 #[allow(dead_code)]
 fn is_placeholder_server_link(s: &str) -> bool {
-    s.contains("server=0.0.0.0&")
-        || s.contains("server=0.0.0.0\"")
-        || s.contains("server=0.0.0.0,")
-        || s.ends_with("server=0.0.0.0")
-        || s.contains("server=[::]&")
-        || s.contains("server=[::]\"")
-        || s.contains("server=[::],")
-        || s.ends_with("server=[::]")
+    // Helper: проверяет что после `server=` стоит placeholder, оканчивающийся
+    // на `&` (следующий query param), `"` (конец JSON-string), `,` (массив),
+    // или конец строки.
+    let check = |placeholder: &str| -> bool {
+        let needle = format!("server={placeholder}");
+        if let Some(idx) = s.find(&needle) {
+            let after = &s[idx + needle.len()..];
+            after.is_empty()
+                || after.starts_with('&')
+                || after.starts_with('"')
+                || after.starts_with(',')
+                || after.starts_with(' ')
+        } else {
+            false
+        }
+    };
+    check("0.0.0.0") || check("[::]") || check("::")
 }
 
 #[allow(dead_code)] // Wave 2 (mtproto_get_status proxy_link extraction) — foundation.
 fn parse_proxy_link_from_api_json(json: &str) -> Option<String> {
+    parse_proxy_link_from_api_json_filtered(json, None)
+}
+
+/// Phase 17.1 post-UAT fix #2 (2026-05-21) — variant с фильтром по expected port.
+///
+/// Telemt admin API после restart может на мгновение отдать ссылки от ПРЕДЫДУЩЕГО
+/// сессии (cached state). Если caller знает что прямо сейчас config содержит
+/// port=N, можно пропускать ссылки с другим port (значит они от прошлого запуска).
+///
+/// `expected_port = None` — отключает port-фильтр (поведение совместимо с
+/// `parse_proxy_link_from_api_json`).
+#[allow(dead_code)]
+fn parse_proxy_link_from_api_json_filtered(json: &str, expected_port: Option<u16>) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
     let arr = v.get("data")?.as_array()?;
-    // Phase 17.1 post-UAT fix: при первой post-install выборке telemt admin API
-    // может отдать link с `server=0.0.0.0` (placeholder перед IP detection).
-    // Сначала ищем НЕ-placeholder ссылку; если все link'и в этом payload — placeholder,
-    // возвращаем None чтобы caller сделал retry.
-    let mut placeholder_fallback: Option<String> = None;
+    let port_needle = expected_port.map(|p| format!("port={}", p));
     for user in arr {
         if let Some(links) = user
             .get("links")
@@ -211,23 +252,16 @@ fn parse_proxy_link_from_api_json(json: &str) -> Option<String> {
         {
             for link in links {
                 if let Some(s) = link.as_str() {
-                    if s.starts_with("tg://proxy?") {
-                        if !is_placeholder_server_link(s) {
-                            return Some(s.to_string());
-                        }
-                        if placeholder_fallback.is_none() {
-                            placeholder_fallback = Some(s.to_string());
-                        }
+                    if s.starts_with("tg://proxy?")
+                        && !is_placeholder_server_link(s)
+                        && port_needle.as_deref().is_none_or(|p| s.contains(p))
+                    {
+                        return Some(s.to_string());
                     }
                 }
             }
         }
     }
-    // Все link'и были placeholder'ами — возвращаем None чтобы caller сделал retry.
-    // Если retries исчерпаны и user может видеть placeholder'ную ссылку — лучше
-    // показать что-то чем пусто, fall-back на placeholder_fallback на самом
-    // верхнем уровне (fetch_proxy_link).
-    let _ = placeholder_fallback;
     None
 }
 
@@ -241,18 +275,32 @@ fn parse_proxy_link_from_api_json(json: &str) -> Option<String> {
 /// Sanity check: link must be >20 chars (минимум `tg://proxy?server=&port=&secret=` shell).
 #[allow(dead_code)] // Wave 2 (mtproto_get_status journalctl fallback) — foundation.
 fn parse_proxy_link_from_journalctl(log_lines: &str) -> Option<String> {
-    // Phase 17.1 post-UAT fix: telemt при первом старте пишет в log ссылку
-    // с `server=0.0.0.0` (placeholder), а через несколько секунд обновляет с
-    // реальным IP. Reverse-iterate и SKIP placeholder'ы — берём latest НЕ-placeholder.
+    parse_proxy_link_from_journalctl_filtered(log_lines, None)
+}
+
+/// Phase 17.1 post-UAT fix #2 (2026-05-21) — variant с фильтром по expected port.
+///
+/// journalctl содержит логи **всех запусков** telemt — uninstall удаляет файлы,
+/// но не чистит system journal. После переустановки в логе остаются СТАРЫЕ ссылки
+/// от прошлой инсталляции (с другим port'ом). Если caller знает expected port
+/// (из current `/etc/telemt/telemt.toml`) — пропускаем ссылки с другим port.
+///
+/// `expected_port = None` — отключает port-фильтр (совместимо с `parse_proxy_link_from_journalctl`).
+#[allow(dead_code)]
+fn parse_proxy_link_from_journalctl_filtered(log_lines: &str, expected_port: Option<u16>) -> Option<String> {
+    let port_needle = expected_port.map(|p| format!("port={}", p));
+    // Reverse-iterate — берём latest подходящую ссылку.
     for line in log_lines.lines().rev() {
         if let Some(start) = line.find("tg://proxy?") {
             let tail = &line[start..];
-            // Stop at first whitespace, quote, or end-of-line.
             let end = tail
                 .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '`')
                 .unwrap_or(tail.len());
             let link = &tail[..end];
-            if link.len() > 20 && !is_placeholder_server_link(link) {
+            if link.len() > 20
+                && !is_placeholder_server_link(link)
+                && port_needle.as_deref().is_none_or(|p| link.contains(p))
+            {
                 return Some(link.to_string());
             }
         }
@@ -398,12 +446,17 @@ pub async fn mtproto_get_status(
     )
     .await?;
     let (port, secret) = parse_telemt_toml_minimal(&toml_out);
+    let tls_domain = parse_telemt_tls_domain_from_toml(&toml_out);
 
     // ─── Fetch proxy_link только если активен ──────────────────
     // Если сервис не запущен — admin API недоступен и journalctl может
     // содержать stale ссылку (от прошлого запуска); proxy_link = "" честнее.
+    // Передаём tls_domain — если это FQDN, fetch_proxy_link перепишет
+    // `server=IP` на `server=domain` для UX (telemt by-design отдаёт IP).
     let proxy_link = if active {
-        fetch_proxy_link(handle, app, sudo).await
+        // expected_port = port из current config; фильтрует stale ссылки от прошлых install'ов
+        let expected_port = if port > 0 { Some(port) } else { None };
+        fetch_proxy_link(handle, app, sudo, tls_domain.as_deref(), expected_port).await
     } else {
         String::new()
     };
@@ -769,7 +822,12 @@ async fn start_telemt_and_wait(
     app: &tauri::AppHandle,
     sudo: &str,
 ) -> Result<bool, String> {
-    exec_command(handle, app, &format!("{sudo}systemctl start telemt")).await?;
+    // Post-UAT 2026-05-21: `systemctl start` is a NO-OP if telemt already
+    // running — old config (port/secret/tls_domain) stays in memory, new
+    // /etc/telemt/telemt.toml не подхватывается (inotify hot-reload does not
+    // re-bind socket для смены порта). Используем `restart` чтобы pipeline
+    // повторного install реально применил новый config.
+    exec_command(handle, app, &format!("{sudo}systemctl restart telemt")).await?;
     for attempt in 0..6 {
         let (out, _) = exec_command(
             handle,
@@ -804,6 +862,54 @@ async fn open_telemt_firewall(
     Ok(())
 }
 
+/// Phase 17.1 post-UAT — true когда `target_host` похож на FQDN (домен), а не
+/// на IPv4/IPv6 адрес. Используется в `fetch_proxy_link` чтобы решить — стоит
+/// ли переписать `server=IP` на `server=domain` в извлечённой ссылке.
+///
+/// Logic:
+/// - пусто → false
+/// - содержит `:` (IPv6) → false
+/// - все символы `[0-9.]` (IPv4) → false
+/// - содержит `.` (типа `example.com`) → true
+/// - иначе → false (одиночные имена типа `localhost`)
+#[allow(dead_code)]
+fn looks_like_hostname(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    if s.contains(':') {
+        return false;
+    }
+    if s.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return false;
+    }
+    s.contains('.')
+}
+
+/// Phase 17.1 post-UAT — переписать `server=<old>` на `server=<new_server>` в
+/// `tg://proxy?...` ссылке. Используется чтобы показать домен Let's Encrypt
+/// вместо raw IP (UX improvement) — telemt by-design отдаёт IP, но если у
+/// сервера есть FQDN — лучше показывать его.
+///
+/// `secret` query param не трогается — он содержит hex-encoded tls_domain
+/// независимо от server поля.
+#[allow(dead_code)]
+fn rewrite_link_server(link: &str, new_server: &str) -> String {
+    if let Some(server_start) = link.find("server=") {
+        let value_start = server_start + "server=".len();
+        let after = &link[value_start..];
+        // Server value ends at `&` (следующий query param) или конец строки.
+        let value_end = after.find('&').unwrap_or(after.len());
+        return format!(
+            "{}server={}{}",
+            &link[..server_start],
+            new_server,
+            &after[value_end..]
+        );
+    }
+    link.to_string()
+}
+
 /// Phase 17.1 — fetch `tg://proxy?...` link via primary API path, fallback journalctl.
 ///
 /// Per researcher §Code Examples 4-5 + D-1.9. PRIMARY: `curl 127.0.0.1:9091/v1/users`
@@ -811,24 +917,73 @@ async fn open_telemt_firewall(
 ///   `journalctl -u telemt -n 200` + reverse-iterate substring search (Plan 01
 ///   `parse_proxy_link_from_journalctl`).
 ///
-/// **Post-UAT fix (2026-05-21):** telemt сразу после `systemctl start` отдаёт
-/// ссылку с `server=0.0.0.0` placeholder пока IP detection не завершилась
-/// (Telegram backend ping ~5-15 сек). Оба parser'а отфильтровывают placeholder
-/// ссылки → возвращают None. Этот helper делает retry-loop до 20×500ms = 10 сек,
-/// проверяя поочерёдно API + journalctl.
+/// **Post-UAT fix (2026-05-21):**
+/// - Telemt сразу после `systemctl start` отдаёт ссылку с placeholder'ами
+///   (`server=0.0.0.0`, `server=[::]`, `server=::`) пока IP detection не
+///   завершилась (Telegram backend ping ~5-30 сек на медленных сетях). Оба
+///   parser'а отфильтровывают placeholder ссылки → возвращают None. Этот
+///   helper делает retry-loop до 60×500ms = 30 сек, проверяя поочерёдно
+///   API + journalctl.
+/// - Если `target_host` is FQDN (домен Let's Encrypt) — переписываем
+///   `server=IP` на `server=domain` для UX (короче, переживёт смену IP).
 ///
-/// Returns empty string если за 10 сек так и не появилась НЕ-placeholder ссылка.
-/// Caller (mtproto_install / mtproto_get_status) accepts `proxy_link = ""` как
-/// degraded state ("installed but no link, проверь journalctl").
+/// Returns empty string если за 30 сек так и не появилась НЕ-placeholder ссылка.
+/// Frontend useMtProtoState делает background polling каждые 3 сек и подтянет
+/// ссылку когда она в итоге появится.
 async fn fetch_proxy_link(
     handle: &client::Handle<SshHandler>,
     app: &tauri::AppHandle,
     sudo: &str,
+    _target_host: Option<&str>,
+    expected_port: Option<u16>,
 ) -> String {
-    // Retry loop: telemt admin API + journalctl могут отдавать `server=0.0.0.0`
-    // placeholder в первые 5-15 секунд после старта. Парсеры (Plan 01)
-    // фильтруют placeholder'ы → возвращают None. Ждём до 10 сек.
-    for attempt in 0..20 {
+    // Post-UAT 2026-05-21: двухуровневый фильтр stale ссылок.
+    // (1) `expected_port` — отсекает ссылки с другим port'ом.
+    // (2) `--since "@<systemd_active_timestamp>"` — отсекает записи journal
+    //     из ПРЕДЫДУЩИХ запусков сервиса (uninstall чистит /etc/telemt/,
+    //     но не system journal). Берём timestamp когда telemt стал active.
+    //
+    // Если переустанавливаем с тем же port'ом — timestamp filter всё равно
+    // различает старые и новые ссылки. Belt-and-suspenders defence.
+
+    // Get telemt ActiveEnterTimestamp как Unix epoch. Если получить не вышло —
+    // journalctl команда выполнится без --since (fallback на port-only фильтр).
+    let since_epoch: String = {
+        let (raw, _) = exec_command(
+            handle,
+            app,
+            &format!(
+                "{sudo}systemctl show telemt --property=ActiveEnterTimestamp --value 2>/dev/null"
+            ),
+        )
+        .await
+        .unwrap_or_default();
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            String::new()
+        } else {
+            // Format example: "Thu 2026-05-21 14:57:10 UTC". Convert → Unix epoch.
+            let (epoch, _) = exec_command(
+                handle,
+                app,
+                &format!("{sudo}date -d \"{ts}\" +%s 2>/dev/null", ts = trimmed),
+            )
+            .await
+            .unwrap_or_default();
+            epoch.trim().to_string()
+        }
+    };
+    let journal_since_arg = if since_epoch.chars().all(|c| c.is_ascii_digit()) && !since_epoch.is_empty() {
+        format!(" --since '@{}'", since_epoch)
+    } else {
+        String::new()
+    };
+
+    // Retry loop: telemt admin API + journalctl могут отдавать placeholder
+    // server в первые 5-30 секунд после старта (IP detection через Telegram
+    // backend ping медленный на slow networks / медленных DC). Парсеры
+    // фильтруют placeholder'ы + не-target port → возвращают None. Ждём до 30 сек.
+    for attempt in 0..60 {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
@@ -841,25 +996,29 @@ async fn fetch_proxy_link(
         )
         .await
         .unwrap_or_default();
-        if let Some(link) = parse_proxy_link_from_api_json(&api_out) {
+        if let Some(link) = parse_proxy_link_from_api_json_filtered(&api_out, expected_port) {
             return link;
         }
 
-        // Fallback: journalctl.
+        // Fallback: journalctl. Filtered by --since (timestamp) + expected_port.
         let (log_out, _) = exec_command(
             handle,
             app,
-            &format!("{sudo}journalctl -u telemt -n 200 --no-pager -o cat 2>/dev/null"),
+            &format!(
+                "{sudo}journalctl -u telemt{since} -n 200 --no-pager -o cat 2>/dev/null",
+                since = journal_since_arg
+            ),
         )
         .await
         .unwrap_or_default();
-        if let Some(link) = parse_proxy_link_from_journalctl(&log_out) {
+        if let Some(link) = parse_proxy_link_from_journalctl_filtered(&log_out, expected_port) {
             return link;
         }
     }
-    // 10 секунд retry'я telemt всё ещё не отдал НЕ-placeholder ссылку —
-    // возвращаем пустую строку. UI покажет «установлен, ссылка пока не доступна»,
-    // следующий refresh (mtproto_get_status) подхватит когда telemt подтянет real IP.
+    // 30 секунд retry'я telemt всё ещё не отдал НЕ-placeholder ссылку —
+    // возвращаем пустую строку. UI покажет skeleton с «Получаем ссылку…» +
+    // background polling в useMtProtoState каждые 3 сек подтянет когда telemt
+    // в итоге определит real IP.
     String::new()
 }
 
@@ -1089,11 +1248,14 @@ pub async fn mtproto_install(
         // ─── STEP 6: complete (fetch proxy_link) ──────────────────
         //
         // fetch_proxy_link сам делает 20×500ms = 10 сек retry с фильтром
-        // placeholder ссылок (`server=0.0.0.0` / `[::]`). Достаточно для
-        // telemt IP detection (Telegram backend ping ~5-15 сек).
+        // placeholder ссылок (`server=0.0.0.0` / `[::]` / `::`). Достаточно
+        // для telemt IP detection (Telegram backend ping ~5-15 сек).
+        // Передаём tls_domain — если FQDN, rewrite `server=IP` на `server=domain`.
         // Post-UAT fix 2026-05-21: убран внешний retry — он суммировался с
         // internal'ным и давал 30 сек worst case (UX было слишком долго).
-        let proxy_link = fetch_proxy_link(&handle, app, sudo).await;
+        // expected_port = user-provided port — отфильтровывает stale ссылки
+        // от ПРЕДЫДУЩЕЙ установки которые остались в journalctl history.
+        let proxy_link = fetch_proxy_link(&handle, app, sudo, Some(&tls_domain), Some(port)).await;
         // Если link всё ещё пуст после 10 сек retry — caller получит
         // proxy_link = "", UI отрендерит «installed but link не извлечена»
         // (acceptable degradation per researcher §Open Q5). Следующий refresh
@@ -1585,6 +1747,86 @@ port = 9443
     fn journalctl_returns_none_when_only_placeholder() {
         let log = "10:01:00 telemt: link tg://proxy?server=0.0.0.0&port=8443&secret=eeAAAA\n";
         assert!(parse_proxy_link_from_journalctl(log).is_none());
+    }
+
+    #[test]
+    fn placeholder_filter_detects_ipv6_bare() {
+        // `server=::` без квадратных скобок — telemt-specific placeholder format
+        assert!(is_placeholder_server_link(
+            "tg://proxy?server=::&port=8443&secret=ee0123"
+        ));
+    }
+
+    // ─── looks_like_hostname / rewrite_link_server / parse_telemt_tls_domain_from_toml ─
+
+    #[test]
+    fn hostname_check_distinguishes_fqdn_from_ip() {
+        assert!(looks_like_hostname("getstarted.neuralslop.ru"));
+        assert!(looks_like_hostname("example.com"));
+        assert!(looks_like_hostname("a.b.c"));
+        // IP — false
+        assert!(!looks_like_hostname("198.51.100.34"));
+        assert!(!looks_like_hostname("192.168.1.1"));
+        assert!(!looks_like_hostname("2001:db8:5:21::1"));
+        assert!(!looks_like_hostname("::"));
+        // Edge cases — false
+        assert!(!looks_like_hostname(""));
+        assert!(!looks_like_hostname("localhost")); // no dot → не FQDN
+    }
+
+    #[test]
+    fn rewrite_link_server_replaces_ip_with_domain() {
+        let link = "tg://proxy?server=198.51.100.34&port=8443&secret=ee0123";
+        let rewritten = rewrite_link_server(link, "getstarted.neuralslop.ru");
+        assert_eq!(
+            rewritten,
+            "tg://proxy?server=getstarted.neuralslop.ru&port=8443&secret=ee0123"
+        );
+    }
+
+    #[test]
+    fn rewrite_link_server_preserves_rest_of_query() {
+        // Secret и port не должны быть тронуты
+        let link = "tg://proxy?server=1.2.3.4&port=8443&secret=eedeadbeef676574";
+        let rewritten = rewrite_link_server(link, "example.com");
+        assert!(rewritten.contains("port=8443"));
+        assert!(rewritten.contains("secret=eedeadbeef676574"));
+        assert!(rewritten.contains("server=example.com"));
+        assert!(!rewritten.contains("server=1.2.3.4"));
+    }
+
+    #[test]
+    fn parse_telemt_tls_domain_extracts_value() {
+        let toml = r#"
+[server]
+port = 8443
+
+[censorship]
+tls_domain = "getstarted.neuralslop.ru"
+mask = true
+"#;
+        assert_eq!(
+            parse_telemt_tls_domain_from_toml(toml),
+            Some("getstarted.neuralslop.ru".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_telemt_tls_domain_returns_none_on_missing() {
+        let toml = r#"
+[server]
+port = 8443
+"#;
+        assert!(parse_telemt_tls_domain_from_toml(toml).is_none());
+    }
+
+    #[test]
+    fn parse_telemt_tls_domain_returns_none_on_empty_string() {
+        let toml = r#"
+[censorship]
+tls_domain = ""
+"#;
+        assert!(parse_telemt_tls_domain_from_toml(toml).is_none());
     }
 
     // ─── render_telemt_systemd_unit ───────────────────────────
