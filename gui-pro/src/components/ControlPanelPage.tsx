@@ -1,8 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { UpdateBanner } from "./update/UpdateBanner";
+import { UpdateProgressModal } from "./update/UpdateProgressModal";
+import { useUpdateChecker } from "../shared/hooks/useUpdateChecker";
+import { useSnackBar } from "../shared/ui/SnackBarContext";
 
 async function readStoredCredentials(): Promise<SshCredentials | null> {
   try {
@@ -236,6 +241,8 @@ interface Props {
 }
 
 export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigateToSettings }: Props) {
+  const { t } = useTranslation();
+  const pushSnack = useSnackBar();
   const [creds, setCreds] = useState<SshCredentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -243,6 +250,13 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
 
   // First-connect skeleton state (D-07/D-08/D-09)
   const [isFirstConnect, setIsFirstConnect] = useState(false);
+
+  // Phase 18 Plan 06 — UpdateProgressModal open state (toggled от UpdateBanner click)
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+
+  // Phase 18 Plan 04 — sidecar update detection (Stage 2 triggered after SSH connect)
+  const { updateInfo, checkSidecarForServer, dismissSidecarUpdate } =
+    useUpdateChecker();
 
   // Persisted last SSH host/user/port (D-10/D-11) — restored on next visit
   const [lastHost, setLastHost] = useState<string>(
@@ -321,6 +335,45 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     }
   }, [creds]);
 
+  // ── Phase 18 Plan 06 — UpdateBanner handlers ──
+  const handleUpdateClick = useCallback(() => {
+    setUpdateModalOpen(true);
+  }, []);
+
+  const handleUpdateBannerDismiss = useCallback(() => {
+    const version = updateInfo.sidecarLatestVersion ?? "";
+    if (version) dismissSidecarUpdate(version);
+  }, [dismissSidecarUpdate, updateInfo.sidecarLatestVersion]);
+
+  const handleUpdateSuccess = useCallback(() => {
+    const toVersion = updateInfo.sidecarLatestVersion ?? "";
+    pushSnack(t("app.update.snack.success", { to: toVersion }), "success");
+    // Phase 18 Plan 04 contract — re-trigger Stage 2 detection (sidecarAvailable
+    // flips back to false когда current_version обновляется до latest).
+    if (creds) {
+      void checkSidecarForServer({
+        host: creds.host,
+        port: parseInt(creds.port, 10),
+        user: creds.user,
+        password: creds.password,
+        keyPath: creds.keyPath,
+      });
+    }
+  }, [pushSnack, t, updateInfo.sidecarLatestVersion, checkSidecarForServer, creds]);
+
+  // ── Phase 18 Plan 04 — Stage 2 detection trigger after SSH connect ──
+  // (sidecar version check requires active SSH credentials, OQ-5)
+  useEffect(() => {
+    if (!creds) return;
+    void checkSidecarForServer({
+      host: creds.host,
+      port: parseInt(creds.port, 10),
+      user: creds.user,
+      password: creds.password,
+      keyPath: creds.keyPath,
+    });
+  }, [creds, checkSidecarForServer]);
+
   const handleDisconnect = useCallback(async () => {
     // WR-09 fix: await keyring cleanup before clearing state. Previously the
     // un-awaited invoke could race the 2s polling interval: user clicks
@@ -352,6 +405,15 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         <>
           {isFirstConnect && <ServerPanelSkeleton />}
           <div style={{ display: isFirstConnect ? "none" : "flex", flexDirection: "column", height: "100%" }}>
+            {/* Phase 18 Plan 06 — sidecar UpdateBanner appears между TitleBar и ServerTabs
+                когда detected новая sidecar version + dismissal flag still false */}
+            {updateInfo.sidecarAvailable && !updateInfo.sidecarDismissed && updateInfo.sidecarLatestVersion ? (
+              <UpdateBanner
+                version={updateInfo.sidecarLatestVersion}
+                onUpdate={handleUpdateClick}
+                onDismiss={handleUpdateBannerDismiss}
+              />
+            ) : null}
             <ServerPanel
               key={refreshKey}
               host={creds.host}
@@ -370,6 +432,24 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
               }}
             />
           </div>
+          {/* Phase 18 Plan 06 — UpdateProgressModal mounted UNCONDITIONALLY (T-03
+              invariant: НЕ обворачиваем в `if (!isOpen) return null` — Modal
+              primitive управляет 200ms exit animation сам). isOpen прокидывается
+              как есть. */}
+          <UpdateProgressModal
+            isOpen={updateModalOpen}
+            onClose={() => setUpdateModalOpen(false)}
+            sshParams={{
+              host: creds.host,
+              port: parseInt(creds.port, 10),
+              user: creds.user,
+              password: creds.password,
+              keyPath: creds.keyPath,
+            }}
+            fromVersion={updateInfo.sidecarCurrentVersion ?? ""}
+            toVersion={updateInfo.sidecarLatestVersion ?? ""}
+            onSuccess={handleUpdateSuccess}
+          />
         </>
       )}
     </div>

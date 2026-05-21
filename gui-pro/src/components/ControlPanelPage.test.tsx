@@ -3,6 +3,14 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import { ControlPanelPage } from "./ControlPanelPage";
+import { SnackBarProvider } from "../shared/ui/SnackBarContext";
+
+// Phase 18 Plan 06 — ControlPanelPage uses useSnackBar() для update success
+// notification. Wrap render в SnackBarProvider чтобы тесты не падали с
+// «useSnackBar must be used within SnackBarProvider».
+function renderWithProviders(ui: React.ReactNode) {
+  return render(<SnackBarProvider>{ui}</SnackBarProvider>);
+}
 
 // Mock child components to isolate ControlPanelPage logic
 vi.mock("./ServerPanel", () => ({
@@ -84,7 +92,7 @@ describe("ControlPanelPage", () => {
 
   it("renders SSH connect form when no creds", async () => {
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
     expect(screen.queryByTestId("server-panel")).not.toBeInTheDocument();
@@ -98,7 +106,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("ssh-connect-form")).not.toBeInTheDocument();
@@ -112,7 +120,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     const btn = screen.getByTestId("mock-disconnect-btn");
     expect(btn).toBeInTheDocument();
@@ -126,7 +134,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
 
     const btn = screen.getByTestId("mock-disconnect-btn");
@@ -140,7 +148,7 @@ describe("ControlPanelPage", () => {
 
   it("connecting via SshConnectForm shows ServerPanel", async () => {
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
 
@@ -162,7 +170,7 @@ describe("ControlPanelPage", () => {
       password: "pass123",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
@@ -174,7 +182,7 @@ describe("ControlPanelPage", () => {
       return null as any;
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
@@ -187,7 +195,7 @@ describe("ControlPanelPage", () => {
       return null as any;
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
@@ -200,7 +208,7 @@ describe("ControlPanelPage", () => {
       return null as any;
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
@@ -211,7 +219,7 @@ describe("ControlPanelPage", () => {
       keyPath: "/home/.ssh/id_rsa",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
@@ -222,7 +230,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
   });
@@ -236,7 +244,7 @@ describe("ControlPanelPage", () => {
     });
     localStorage.setItem("trusttunnel_control_refresh", "12345");
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
 
     await act(async () => {
@@ -252,7 +260,7 @@ describe("ControlPanelPage", () => {
   it("picks up new creds when trusttunnel_control_refresh changes", async () => {
     vi.useRealTimers();
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
 
@@ -273,7 +281,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
 
@@ -294,7 +302,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
 
     fireEvent.click(screen.getByTestId("mock-export-btn"));
@@ -310,7 +318,7 @@ describe("ControlPanelPage", () => {
     });
     const props = { onConfigExported: vi.fn(), onSwitchToSetup: vi.fn() };
     await act(async () => {
-      render(<ControlPanelPage {...props} />);
+      renderWithProviders(<ControlPanelPage {...props} />);
     });
 
     fireEvent.click(screen.getByTestId("mock-export-btn"));
@@ -326,7 +334,7 @@ describe("ControlPanelPage", () => {
       password: "secret",
     });
     await act(async () => {
-      render(<ControlPanelPage {...defaultProps} />);
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
     });
 
     await act(async () => {
