@@ -74,24 +74,30 @@ function saveCache(host: string, status: MtProtoStatus): void {
 
 // ═══════════════════════════════════════════════════════
 // Step definitions for StepProgress component
-// 5 steps: download, configure, generate_secret, start_service, complete
+// Phase 17.1 (D-5.5): 7 steps under telemt backend rewrite —
+//   cleanup_legacy, download_binary, create_user, configure_telemt,
+//   start_service, open_firewall, complete
 // ═══════════════════════════════════════════════════════
 
 const INSTALL_STEPS = [
-  { key: "download", labelKey: "server.utilities.mtproto.step.download" },
-  { key: "configure", labelKey: "server.utilities.mtproto.step.configure" },
-  { key: "generate_secret", labelKey: "server.utilities.mtproto.step.secret" },
-  { key: "start_service", labelKey: "server.utilities.mtproto.step.service" },
+  { key: "cleanup_legacy", labelKey: "server.utilities.mtproto.step.cleanup_legacy" },
+  { key: "download_binary", labelKey: "server.utilities.mtproto.step.download_binary" },
+  { key: "create_user", labelKey: "server.utilities.mtproto.step.create_user" },
+  { key: "configure_telemt", labelKey: "server.utilities.mtproto.step.configure_telemt" },
+  { key: "start_service", labelKey: "server.utilities.mtproto.step.start_service" },
+  { key: "open_firewall", labelKey: "server.utilities.mtproto.step.open_firewall" },
   { key: "complete", labelKey: "server.utilities.mtproto.step.complete" },
 ];
 
 // Map backend step names to StepProgress indices
 const STEP_INDEX: Record<string, number> = {
-  download: 0,
-  configure: 1,
-  generate_secret: 2,
-  start_service: 3,
-  complete: 4,
+  cleanup_legacy: 0,
+  download_binary: 1,
+  create_user: 2,
+  configure_telemt: 3,
+  start_service: 4,
+  open_firewall: 5,
+  complete: 6,
 };
 
 // ═══════════════════════════════════════════════════════
@@ -127,6 +133,13 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   // ── Uninstall state ──
   const [uninstalling, setUninstalling] = useState(false);
 
+  // ── Phase 17.1 D-4.3 / Option B (researcher §Migration Plan) ──
+  // legacyMigrationNote стартует null. Устанавливается из event listener когда
+  // backend emit'ит step="cleanup_legacy" с непустым `message` (Wave 2 backend
+  // рендерит локализованный текст про обнаруженный старый MTProxy). НЕ
+  // расширяем MtProtoStatus — это event-based, чтобы не ломать frozen API.
+  const [legacyMigrationNote, setLegacyMigrationNote] = useState<string | null>(null);
+
   const confirm = useConfirm();
 
   const { host, port, user, password, keyPath } = sshParams;
@@ -154,12 +167,19 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   useEffect(() => { void load(); }, [load]);
 
   // ── Listen for install step events ──
+  // Phase 17.1 D-4.3: при step="cleanup_legacy" с непустым message —
+  // сохраняем текст в legacyMigrationNote (Option B event mechanism).
+  // Backend сам решает emit'ить этот event только если legacy MTProxy найден,
+  // поэтому frontend trust'ит наличие message как сигнал «миграция была».
   useEffect(() => {
     if (!installing) return;
     const unlisten = listen<MtProtoInstallStep>("mtproto-install-step", (event) => {
-      const { step, status: stepSt } = event.payload;
+      const { step, status: stepSt, message } = event.payload;
       const idx = STEP_INDEX[step] ?? 0;
       setCurrentStep(idx);
+      if (step === "cleanup_legacy" && message && message.trim().length > 0) {
+        setLegacyMigrationNote(message);
+      }
       if (stepSt === "error") {
         setStepStatus("error");
       } else if (stepSt === "done" && step === "complete") {
@@ -176,6 +196,7 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     setInstalling(true);
     setCurrentStep(0);
     setStepStatus("active");
+    setLegacyMigrationNote(null); // Phase 17.1 — reset перед свежим install
     setError(null);
     try {
       // NOTE: param name is mtprotoPort (camelCase) which Tauri serde maps to mtproto_port (snake_case) on Rust side
@@ -283,6 +304,9 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       setStatus(notInstalled);
       // Clear localStorage cache per MTPROTO-06
       saveCache(host, notInstalled);
+      // Phase 17.1 — после успешного uninstall миграционная заметка теряет
+      // смысл (старого MTProxy и так нет, telemt тоже снесён).
+      setLegacyMigrationNote(null);
       pushSuccess(t("server.utilities.mtproto.snack.uninstalled"));
     } catch (e) {
       const msg = formatError(e);
@@ -320,6 +344,10 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     requestUninstall,
     retry,
     sshParams,
+    // Phase 17.1 — additive, не breaking (D-5.1 frozen API + Option B per
+    // researcher §Migration Plan: event-based, без contract change на
+    // MtProtoStatus). null когда миграция не была обнаружена.
+    legacyMigrationNote,
   };
 }
 

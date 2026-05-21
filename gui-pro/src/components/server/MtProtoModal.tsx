@@ -4,6 +4,7 @@ import { Send, Copy, Check, Trash2, Loader2, Play, Square } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { NumberInput } from "../../shared/ui";
+import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import type { MtProtoState } from "./useMtProtoState";
 
@@ -137,6 +138,21 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             : t("server.utilities.mtproto.modal_title_install")}
         </h2>
       </div>
+
+      {/* Phase 17.1 D-4.3 — legacy migration banner (Option B per researcher).
+          Backend emit'ил `mtproto-install-step` step="cleanup_legacy" с
+          непустым `message` → hook сохранил его в legacyMigrationNote.
+          Banner информативный, не блокирующий. Рендерится в обоих ветках
+          (install + configured), чтобы пользователь увидел сообщение и в
+          процессе установки, и сразу после её завершения. */}
+      {state.legacyMigrationNote && (
+        <ErrorBanner
+          severity="info"
+          message={state.legacyMigrationNote}
+          className="mb-3"
+          data-testid="mtproto-legacy-banner"
+        />
+      )}
 
       {/* Install flow — shown when !installed */}
       {!installed && (
