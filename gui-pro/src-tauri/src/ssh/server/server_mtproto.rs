@@ -36,7 +36,10 @@ pub struct MtProtoStatus {
 
 #[derive(Clone, Serialize)]
 pub struct MtProtoInstallStep {
-    pub step: String,   // "download" | "configure" | "generate_secret" | "start_service" | "complete"
+    // Phase 17.1 — 7 step keys for telemt install pipeline (D-5.5):
+    // "cleanup_legacy" | "download_binary" | "create_user" |
+    // "configure_telemt" | "start_service" | "open_firewall" | "complete"
+    pub step: String,
     pub status: String, // "running" | "done" | "error"
     pub message: String,
 }
@@ -56,28 +59,6 @@ fn emit_mtproto_step(app: &tauri::AppHandle, step: &str, status: &str, msg: &str
         },
     )
     .ok();
-}
-
-/// Parse MTProxy environment file to extract secret and port.
-/// Format: KEY=VALUE lines (SECRET=..., PORT=..., TAG=...)
-fn parse_mtproxy_env(raw: &str) -> (String, u16) {
-    let mut secret = String::new();
-    let mut port: u16 = 0;
-    for line in raw.lines() {
-        let line = line.trim();
-        if let Some(val) = line.strip_prefix("SECRET=") {
-            secret = val.trim().to_string();
-        }
-        if let Some(val) = line.strip_prefix("PORT=") {
-            port = val.trim().parse().unwrap_or(0);
-        }
-    }
-    (secret, port)
-}
-
-/// Build tg:// proxy link with dd prefix for random padding (anti-DPI).
-fn build_proxy_link(host: &str, port: u16, secret: &str) -> String {
-    format!("tg://proxy?server={host}&port={port}&secret=dd{secret}")
 }
 
 /// Validate hex secret format (32 hex chars = 16 bytes).
@@ -1171,9 +1152,35 @@ pub async fn mtproto_stop(
 }
 
 // ═══════════════════════════════════════════════════════════════
-//   mtproto_uninstall — direct connect
+//   mtproto_uninstall — direct connect, surgical telemt cleanup
 // ═══════════════════════════════════════════════════════════════
 
+/// Phase 17.1 — Surgical uninstall (D-3.7).
+///
+/// Removes ONLY telemt-related files:
+///   - systemd unit `/etc/systemd/system/telemt.service`
+///   - binary `/bin/telemt`
+///   - config dir `/etc/telemt/` (incl. telemt.toml)
+///   - working dir `/opt/telemt/` (создаётся `useradd -m`)
+///   - system user `telemt` (`userdel -r` удаляет home dir + mail spool)
+///   - ufw rule for proxy port (by-number — Phase 17 fix-marathon pattern)
+///
+/// Also opportunistically cleans up leftover legacy MTProxy artifacts via
+/// `cleanup_legacy_mtproxy` — per D-3.7 «параллельно зачищает остатки
+/// старого MTProxy». Best-effort; failures silenced.
+///
+/// DOES NOT TOUCH (D-3.7 invariant — protocol must keep working):
+///   - `/etc/letsencrypt/` (Let's Encrypt certs)
+///   - `/opt/trusttunnel/` (protocol state + credentials.toml + hosts.toml)
+///   - `/etc/trusttunnel/` (protocol config)
+///   - `/usr/local/bin/trusttunnel_endpoint` (sidecar binary)
+///   - `certbot.timer` (certificate auto-renewal)
+///   - ufw rules для портов 443 / 80 / ssh (протокол firewall)
+///
+/// D-29: `_secret` local variable named with underscore prefix — Rust
+/// convention для intentionally unused. Compiler не warns. Variable lives
+/// in stack — никаких logs, no copy в structured outputs. Eventually goes
+/// out of scope без leaking secret в emit_log/activity_log channels.
 pub async fn mtproto_uninstall(
     app: &tauri::AppHandle,
     params: SshParams,
@@ -1181,76 +1188,89 @@ pub async fn mtproto_uninstall(
     let handle = params.connect_with_app(app.clone()).await?;
     let sudo = detect_sudo(&handle, app).await;
 
-    // Read env config to get port for firewall cleanup
-    let (cfg_out, _) = exec_command(
+    // ─── Read telemt.toml для port перед удалением config'а ────
+    // Нужен для ufw cleanup-by-number. _secret не используется и не
+    // передаётся ни в emit_log, ни в activity_log (D-29).
+    let (toml_out, _) = exec_command(
         &handle,
         app,
-        "cat /etc/mtproxy.env 2>/dev/null || echo ''",
+        &format!("{sudo}cat /etc/telemt/telemt.toml 2>/dev/null || echo ''"),
     )
     .await?;
-    let (_, port) = parse_mtproxy_env(&cfg_out);
+    let (port, _secret) = parse_telemt_toml_minimal(&toml_out);
 
-    // Stop and disable service
+    // ─── Surgical telemt cleanup (bulk, best-effort) ───────────
+    //
+    // UUID heredoc delimiter (S-04 invariant) — defence in depth, даже
+    // если содержимое статично, namespace UUID гарантирует невозможность
+    // содержимого-collision с EOF substring.
+    //
+    // `userdel -r telemt` удаляет также home dir (/opt/telemt) и mail
+    // spool — cleanup полный без отдельного `rm -rf /opt/telemt`. Но
+    // оставляем `rm -rf /opt/telemt` для случая когда userdel не успел
+    // отработать (race) либо home dir был изменён.
+    let cleanup_delim = format!("CLEANEOF_{}", uuid::Uuid::new_v4().simple());
     exec_command(
         &handle,
         app,
-        &format!("{sudo}systemctl stop MTProxy 2>/dev/null; {sudo}systemctl disable MTProxy 2>/dev/null; echo STOP_OK"),
+        &format!(
+            "{sudo}bash <<'{cleanup_delim}'\n\
+systemctl stop telemt 2>/dev/null || true\n\
+systemctl disable telemt 2>/dev/null || true\n\
+pkill -f /bin/telemt 2>/dev/null || true\n\
+rm -f /etc/systemd/system/telemt.service 2>/dev/null\n\
+systemctl daemon-reload 2>/dev/null || true\n\
+rm -f /bin/telemt 2>/dev/null\n\
+rm -rf /etc/telemt /opt/telemt 2>/dev/null\n\
+userdel -r telemt 2>/dev/null || true\n\
+echo TELEMT_CLEANUP_OK\n\
+{cleanup_delim}",
+            sudo = sudo, cleanup_delim = cleanup_delim,
+        ),
     )
     .await?;
 
-    // Remove systemd unit
-    exec_command(
-        &handle,
-        app,
-        &format!("{sudo}rm -f /etc/systemd/system/MTProxy.service && {sudo}systemctl daemon-reload"),
-    )
-    .await?;
-
-    // Remove MTProxy directory (source + binary)
-    exec_command(&handle, app, &format!("{sudo}rm -rf /opt/MTProxy")).await?;
-
-    // Remove env config
-    exec_command(&handle, app, &format!("{sudo}rm -f /etc/mtproxy.env")).await?;
-
-    // Close firewall port.
+    // ─── ufw cleanup by-number (Phase 17 fix-marathon pattern) ──
     //
     // UAT 2026-05-20 — switched from `ufw delete allow {port}/tcp` to
     // delete-by-number because the spec form silently fails when the rule
-    // carries comment metadata (`ufw allow {port}/tcp comment 'MTProto'`
-    // is what install adds). Symptom: user uninstalls, reopens Брандмауэр
-    // modal, MTProto rule is still there.
+    // carries comment metadata. Symptom: user uninstalls, reopens
+    // «Брандмауэр» modal, MTProto rule is still there.
     //
     // Approach:
     //   1) Enumerate every rule whose `to` column matches `{port}/tcp` via
-    //      `ufw status numbered` (matches IPv4 + IPv6 pair, and rules with
-    //      `comment '...'` since grep doesn't care about trailing fields).
-    //   2) Sort numbers DESCENDING — deleting a rule renumbers everything
-    //      below it, so we work from the bottom up to keep indices stable.
-    //   3) `yes | ufw delete N` to bypass the interactive confirm prompt.
-    //   4) Belt-and-suspenders: also try `ufw delete allow {port}/tcp` as a
-    //      no-op fallback (covers edge cases where status output format
-    //      drifts between distros).
-    //
-    // `<<'UFWEOF'` (single-quoted heredoc terminator) prevents the OUTER
-    // shell from expanding $NUMBERS / $N — those get expanded by the bash
-    // instance that receives the heredoc body via stdin, at execution time.
+    //      `ufw status numbered` (matches IPv4 + IPv6 pair + comment rules).
+    //   2) Sort numbers DESCENDING — deleting renumbers everything below.
+    //   3) `yes | ufw delete N` to bypass interactive confirm prompt.
+    //   4) Belt-and-suspenders: also try `ufw delete allow {port}/tcp` as
+    //      no-op fallback (covers edge cases where status output drifts).
     if port > 0 {
+        let ufw_delim = format!("UFWEOF_{}", uuid::Uuid::new_v4().simple());
         exec_command(
             &handle,
             app,
             &format!(
-                "{sudo}bash <<'UFWEOF'\n\
+                "{sudo}bash <<'{ufw_delim}'\n\
 NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
 for N in $NUMBERS; do\n\
   yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
 done\n\
 {sudo}ufw delete allow {port}/tcp >/dev/null 2>&1 || true\n\
 echo FW_OK\n\
-UFWEOF\n"
+{ufw_delim}",
+                sudo = sudo, ufw_delim = ufw_delim, port = port,
             ),
         )
         .await?;
     }
+
+    // ─── Parallel migration cleanup — wipe MTProxy artifacts (D-3.7) ──
+    //
+    // Best-effort; failures swallowed. Any leftover MTProxy from a
+    // corrupted upgrade (например install сломался на step 3 без
+    // успешного uninstall) zip'нет здесь, не блокирует uninstall flow.
+    // Если MTProxy не installed — детект negative, helper rapidly no-op'нет.
+    cleanup_legacy_mtproxy(&handle, app, sudo).await.ok();
 
     Ok(())
 }
