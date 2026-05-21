@@ -47,7 +47,11 @@ export function DoneStep(w: WizardState) {
               fullWidth
               icon={<Plug className="w-4 h-4" />}
               onClick={() => {
-                localStorage.setItem("tt_navigate_after_setup", "settings");
+                // UAT 2026-05-21 — was "settings" (wrong target). Button label
+                // is «Перейти к подключению», AppTab union has a "connection"
+                // member. App.tsx reads this key in onSetupComplete and
+                // switches activeTab accordingly.
+                localStorage.setItem("tt_navigate_after_setup", "connection");
                 w.setWizardStep("welcome");
                 w.onSetupComplete(w.configPath);
               }}

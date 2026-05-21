@@ -54,47 +54,72 @@ export function DeployingStep(w: WizardState) {
     return "";
   }, [w.deployLogs]);
 
-  // ── Per-step percent parsed from backend stdout (apt / dpkg / certbot) ──
+  // ── Per-step percent (real % parse + pseudo-progress fallback) ──
   //
-  // Scan the last 20 log lines for the freshest `N%` token. Why 20: dpkg's
-  // "Reading database ... 25%" output is often immediately followed by
-  // "Setting up libfoo:amd64 ..." (no percent) — without lookback we'd
-  // briefly show null between percent ticks.
+  // Two-source progress for the active step:
   //
-  // `stickyPercentRef` keeps the value monotonic INSIDE a step. dpkg restarts
-  // its 0-100% cycle on every package; without sticky we'd flicker "99% → 5%
-  // → 30% → 5% → 60%" as packages roll. Resets to 0 when the active step
-  // changes (different step has its own progress scale).
+  //   (A) REAL — scan the last 20 log lines for the freshest `N%` token.
+  //       apt/dpkg/certbot stream "Reading database ... 25%", "Unpacking
+  //       systemd ... 60%" into deployLogs. When found, this is the source
+  //       of truth.
+  //
+  //   (B) PSEUDO — for steps where backend doesn't print %% (tarball
+  //       download/unpack, config writes, systemd setup) — count how many
+  //       log lines the backend has emitted SINCE the step started, and
+  //       map that to a 5-95% pseudo-progress (5% per line, clamped).
+  //       Each new log line bumps the bar a bit. Capped at 95% to avoid
+  //       showing 100% before the step actually flips to status="ok".
+  //
+  //   Display = max(real, pseudo). They merge monotonically — real %% can
+  //   only push the displayed value UP, never down (dpkg resets 0→100%
+  //   on every package, so without sticky we'd flicker 99→5→30→5→60).
+  //
+  // `stickyPercentRef` holds the displayed value across renders. Resets
+  // when the active step changes (different step = different scale).
+  // `stepBaseLogCountRef` records `deployLogs.length` when the step
+  // became active — pseudo-progress is computed from the delta.
   const stickyPercentRef = useRef<{ stepId: string | null; value: number }>({
     stepId: null,
     value: 0,
   });
+  const stepBaseLogCountRef = useRef<{ stepId: string | null; baseCount: number }>({
+    stepId: null,
+    baseCount: 0,
+  });
   const stepPercent = useMemo<number | null>(() => {
-    // Step changed — reset sticky.
+    // Step changed — reset both refs.
     if (stickyPercentRef.current.stepId !== inFlightStepId) {
       stickyPercentRef.current = { stepId: inFlightStepId, value: 0 };
+      stepBaseLogCountRef.current = { stepId: inFlightStepId, baseCount: w.deployLogs.length };
     }
     if (!inFlightStepId) return null;
 
+    // (A) Try to parse a real % from the latest 20 log lines.
+    let realParsed: number | null = null;
     const window = w.deployLogs.slice(-20);
-    let parsed: number | null = null;
     for (let i = window.length - 1; i >= 0; i -= 1) {
       const m = window[i].message.match(/\b(\d{1,3})\s*%/);
       if (m) {
         const n = parseInt(m[1], 10);
         if (n >= 0 && n <= 100) {
-          parsed = n;
+          realParsed = Math.min(n, 99); // never 100 until step status flips to "ok"
           break;
         }
       }
     }
-    if (parsed == null) {
-      // No fresh percent in the live window — keep showing the sticky one.
-      return stickyPercentRef.current.value > 0 ? stickyPercentRef.current.value : null;
-    }
-    // Clamp at 99 to avoid showing 100% before step actually flips to "ok".
-    const clamped = Math.min(parsed, 99);
-    const next = Math.max(stickyPercentRef.current.value, clamped);
+
+    // (B) Pseudo-progress = 5% per log line since step started, capped at 95.
+    // Always at least 5% the moment a step becomes active, so user sees
+    // movement immediately instead of an empty slot.
+    const linesSinceStart = Math.max(
+      0,
+      w.deployLogs.length - stepBaseLogCountRef.current.baseCount,
+    );
+    const pseudo = Math.min(95, Math.max(5, linesSinceStart * 5));
+
+    // Merge: take the higher of real / pseudo / previous sticky value.
+    const candidate = Math.max(realParsed ?? 0, pseudo);
+    const next = Math.max(stickyPercentRef.current.value, candidate);
     stickyPercentRef.current = { stepId: inFlightStepId, value: next };
     return next;
   }, [w.deployLogs, inFlightStepId]);
