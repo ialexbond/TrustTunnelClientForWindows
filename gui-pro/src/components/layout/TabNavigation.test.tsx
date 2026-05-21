@@ -100,4 +100,77 @@ describe("TabNavigation", () => {
     const tablist = container.querySelector('[role="tablist"]');
     expect(tablist).toBeInTheDocument();
   });
+
+  // ─── Phase 18 — Update dot indicator (REQ-18-UPDATE-DETECTION-04) ─────────
+
+  describe("hasUpdate dot indicator", () => {
+    it("hasUpdate=true рендерит dot внутри settings tab pill", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      expect(dot).toBeInTheDocument();
+    });
+
+    it("hasUpdate=false (default) — dot НЕ рендерится", () => {
+      render(<TabNavigation {...defaultProps} />);
+      expect(screen.queryByTestId("settings-update-dot")).toBeNull();
+    });
+
+    it("hasUpdate=false explicit — dot НЕ рендерится", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate={false} />);
+      expect(screen.queryByTestId("settings-update-dot")).toBeNull();
+    });
+
+    it("dot имеет aria-label «Доступно обновление» (RU локаль)", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      expect(dot).toHaveAttribute("aria-label", "Доступно обновление");
+    });
+
+    it("dot имеет role=status (semantic для screen reader)", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      expect(dot).toHaveAttribute("role", "status");
+    });
+
+    it("dot живёт внутри settings tab button (НЕ на других tabs)", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      const parentTabButton = dot.closest('[role="tab"]');
+      expect(parentTabButton).toBeTruthy();
+      // settings tab имеет id="tab-settings" через getTabButtonId
+      expect(parentTabButton?.getAttribute("id")).toBe("tab-settings");
+    });
+
+    it("dot static — нет animate-* class или CSS animation inline style (D-DECISION-UI-2.1)", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      expect(dot.className).not.toMatch(/animate/);
+      // jsdom canonicalize CSS property names — check both inline `style` attr and computed style
+      const styleAttr = dot.getAttribute("style") || "";
+      expect(styleAttr).not.toMatch(/animation/i);
+      expect(dot.style.animation).toBe("");
+    });
+
+    it("dot uses CSS token (--color-accent-interactive), no hardcoded hex", () => {
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      const styleAttr = dot.getAttribute("style") || "";
+      expect(styleAttr).toMatch(/var\(--color-accent-interactive\)/);
+      expect(styleAttr).not.toMatch(/#[0-9a-fA-F]{3,6}/);
+    });
+
+    it("dot switches aria-label on i18n.changeLanguage('en')", async () => {
+      await i18n.changeLanguage("en");
+      render(<TabNavigation {...defaultProps} hasUpdate />);
+      const dot = screen.getByTestId("settings-update-dot");
+      expect(dot).toHaveAttribute("aria-label", "Update available");
+    });
+
+    it("dot не появляется на других табах (control / connection / routing / about) когда hasUpdate=true", () => {
+      const { container } = render(<TabNavigation {...defaultProps} hasUpdate />);
+      // только один dot с этим test-id, и он именно на settings (verified выше)
+      const dots = container.querySelectorAll('[data-testid="settings-update-dot"]');
+      expect(dots).toHaveLength(1);
+    });
+  });
 });

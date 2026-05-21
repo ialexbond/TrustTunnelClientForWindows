@@ -7,6 +7,13 @@ import type { AppTab } from "../../shared/types";
 interface TabNavigationProps {
   activeTab: AppTab;
   onTabChange: (tab: AppTab) => void;
+  /**
+   * Когда `true` — на pill «Настройки» рендерится absolute dot 8×8px в top-right
+   * corner для индикации доступного обновления (Phase 18, REQ-18-UPDATE-DETECTION-04).
+   * Static, no animation (D-DECISION-UI-2.1) — accent через colour, не motion.
+   * Default: `false` (backwards-compat).
+   */
+  hasUpdate?: boolean;
 }
 
 interface TabDef {
@@ -29,7 +36,7 @@ const TABS: TabDef[] = [
  * Roving focus: only active tab in tab order, arrow keys move focus cyclically.
  * Pill indicator: absolutely positioned div animated via translateX (D-01, NAV-01).
  */
-export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
+export function TabNavigation({ activeTab, onTabChange, hasUpdate = false }: TabNavigationProps) {
   const { t } = useTranslation();
   const navRef = useRef<HTMLElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -167,6 +174,25 @@ export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
                   {t(tab.labelKey)}
                 </span>
               </span>
+              {/* Phase 18 — Update dot indicator на «Настройки» pill (REQ-18-UPDATE-DETECTION-04).
+                  Static, no animation (D-DECISION-UI-2.1). Position: absolute top-right relative
+                  to button (button уже имеет position: relative выше). */}
+              {hasUpdate && tab.id === "settings" && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    backgroundColor: "var(--color-accent-interactive)",
+                  }}
+                  role="status"
+                  aria-label={t("app.update.dot_aria")}
+                  data-testid="settings-update-dot"
+                />
+              )}
             </button>
           );
         })}
