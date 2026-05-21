@@ -215,6 +215,54 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     }
   }, []);
 
+  // ── Start / Stop (UAT 2026-05-21) ──
+  // Toggle the systemd unit without uninstalling. Both backend verbs
+  // re-read full MtProtoStatus before returning, so we can update local
+  // state directly without a follow-up load() call.
+  const [toggling, setToggling] = useState(false);
+  const start = useCallback(async () => {
+    setToggling(true);
+    setError(null);
+    try {
+      const s = await invoke<MtProtoStatus>("mtproto_start", {
+        host, port, user, password, keyPath,
+      });
+      setStatus(s);
+      saveCache(host, s);
+      if (s.active) {
+        pushSuccess(t("server.utilities.mtproto.snack.started"));
+      } else {
+        // Service didn't reach 'active' after 6 retries — point user at journal.
+        pushSuccess(t("server.utilities.mtproto.snack.start_failed"), "error");
+      }
+    } catch (e) {
+      const msg = formatError(e);
+      setError(msg);
+      pushSuccess(t("server.utilities.mtproto.snack.start_error", { error: msg }), "error");
+    } finally {
+      setToggling(false);
+    }
+  }, [host, port, user, password, keyPath, pushSuccess, t]);
+
+  const stop = useCallback(async () => {
+    setToggling(true);
+    setError(null);
+    try {
+      const s = await invoke<MtProtoStatus>("mtproto_stop", {
+        host, port, user, password, keyPath,
+      });
+      setStatus(s);
+      saveCache(host, s);
+      pushSuccess(t("server.utilities.mtproto.snack.stopped"));
+    } catch (e) {
+      const msg = formatError(e);
+      setError(msg);
+      pushSuccess(t("server.utilities.mtproto.snack.stop_error", { error: msg }), "error");
+    } finally {
+      setToggling(false);
+    }
+  }, [host, port, user, password, keyPath, pushSuccess, t]);
+
   // ── Uninstall (per D-10, D-11, MTPROTO-08) ──
   const requestUninstall = async () => {
     const ok = await confirm({
@@ -260,12 +308,15 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     error,
     installing,
     uninstalling,
+    toggling,
     currentStep,
     stepStatus,
     steps,
     load,
     install,
     cancelInstall,
+    start,
+    stop,
     requestUninstall,
     retry,
     sshParams,

@@ -36,6 +36,8 @@ pub use server::{
     get_certbot_timer_status, enable_certbot_timer, verify_certbot_renewal,
     NewFirewallRule, JailConfigUpdate,
     mtproto_install, mtproto_get_status, mtproto_uninstall,
+    // UAT 2026-05-21 — pooled toggle verbs for the new Start/Stop buttons.
+    mtproto_start, mtproto_stop,
     // UAT 2026-05-20 — re-export MtProtoStatus so the manual #[tauri::command]
     // for `mtproto_install` in commands/ssh_commands.rs can name its return type.
     MtProtoStatus,

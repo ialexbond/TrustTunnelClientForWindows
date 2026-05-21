@@ -290,6 +290,43 @@ pub async fn mtproto_get_status(
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
 }
 
+// UAT 2026-05-21 — Start/Stop verbs for the MtProtoModal toggle.
+// Same pooled pattern as `mtproto_get_status` (host is needed to rebuild
+// the proxy_link in the returned MtProtoStatus).
+#[tauri::command]
+pub async fn mtproto_start(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    let result = ssh::mtproto_start(&app, &handle, &host).await?;
+    serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+}
+
+#[tauri::command]
+pub async fn mtproto_stop(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    let result = ssh::mtproto_stop(&app, &handle, &host).await?;
+    serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+}
+
 // ─── BBR optimization commands ───────────────────────────────────────
 
 ssh_pool_command!(detect_bbr_status, ssh::detect_bbr_status);

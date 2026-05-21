@@ -440,6 +440,56 @@ pub async fn mtproto_install(
 }
 
 // ═══════════════════════════════════════════════════════════════
+//   mtproto_start / mtproto_stop — pooled, quick state toggles
+// ═══════════════════════════════════════════════════════════════
+//
+// UAT 2026-05-21 — user sees status «Установлен, не запущен» after
+// install (or after a reboot / crash-loop give-up by systemd). Without
+// a Start button in the modal there's no recovery path — they'd have
+// to ssh in and run `systemctl start MTProxy` by hand. These two verbs
+// expose the toggle. Both pull a fresh MtProtoStatus on return so the
+// caller can immediately re-render (no extra get_status round-trip).
+
+pub async fn mtproto_start(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    host: &str,
+) -> Result<MtProtoStatus, String> {
+    let sudo = detect_sudo(handle, app).await;
+    // `systemctl start` is fire-and-forget; service may take a beat to
+    // bind its port. Same 6×1s retry pattern as install — accommodates
+    // Ubuntu 24.04's «activating» → «active» window without flagging a
+    // false START_FAILED for a service that's actually about to come up.
+    exec_command(handle, app, &format!("{sudo}systemctl start MTProxy")).await?;
+    for attempt in 0..6 {
+        let (out, _) = exec_command(
+            handle,
+            app,
+            &format!("{sudo}systemctl is-active MTProxy"),
+        )
+        .await?;
+        if out.trim() == "active" {
+            break;
+        }
+        if attempt < 5 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+    // Re-read full status (port + secret + proxy_link).
+    mtproto_get_status(app, handle, host).await
+}
+
+pub async fn mtproto_stop(
+    app: &tauri::AppHandle,
+    handle: &client::Handle<SshHandler>,
+    host: &str,
+) -> Result<MtProtoStatus, String> {
+    let sudo = detect_sudo(handle, app).await;
+    exec_command(handle, app, &format!("{sudo}systemctl stop MTProxy 2>/dev/null; echo STOP_OK")).await?;
+    mtproto_get_status(app, handle, host).await
+}
+
+// ═══════════════════════════════════════════════════════════════
 //   mtproto_uninstall — direct connect
 // ═══════════════════════════════════════════════════════════════
 
