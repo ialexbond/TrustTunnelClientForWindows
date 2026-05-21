@@ -315,6 +315,32 @@ pub fn validate_fqdn_sni(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Phase 17.1 — TLS domain validator (S-02 char-whitelist).
+///
+/// Accepts: domain (`[a-zA-Z0-9.-]+` 1-253 chars) OR IPv4 (`[0-9.]+`).
+/// Rejects: empty (telemt requires non-empty), slashes, spaces, shell metachars
+/// (`'`, `"`, `` ` ``, `$`, `\`, `;`, `|`, `&` и т.д.).
+///
+/// Maps to telemt's `tls_domain` constraint per CONFIG_PARAMS.ru.md:
+/// "Не должно быть пустым. Не должно содержать пробелы или `/`."
+///
+/// Unlike `validate_fqdn_sni` (which permits empty), this validator REJECTS empty
+/// because telemt requires `[censorship] tls_domain = "..."` to be non-empty for
+/// TLS-camouflage mode. Char-whitelist mirrors `validate_fqdn_sni`: only
+/// alphanumeric + `-` + `.` allowed.
+pub fn validate_tls_domain(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Err("tls_domain must be non-empty".into());
+    }
+    if s.len() > 253 {
+        return Err("tls_domain too long (max 253 chars)".into());
+    }
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.')) {
+        return Err("tls_domain contains invalid characters (only a-z, A-Z, 0-9, '-', '.' allowed)".into());
+    }
+    Ok(())
+}
+
 /// Log level enum: trace / debug / info / warn / error.
 /// Empty string accepted (means "use default"). Case-sensitive (matches upstream CONFIGURATION.md).
 ///
@@ -689,6 +715,54 @@ mod tests {
         assert!(validate_fqdn_sni("example.com; ls").is_err());
         assert!(validate_fqdn_sni("ex ample.com").is_err());
         assert!(validate_fqdn_sni("example`com`").is_err());
+    }
+
+    // ─── Phase 17.1: tls_domain ───────────────────────
+
+    #[test]
+    fn validate_tls_domain_accepts_domain() {
+        assert!(validate_tls_domain("example.com").is_ok());
+        assert!(validate_tls_domain("vpn.example.com").is_ok());
+        assert!(validate_tls_domain("a-b.c-d.example.org").is_ok());
+    }
+
+    #[test]
+    fn validate_tls_domain_accepts_ipv4() {
+        assert!(validate_tls_domain("1.2.3.4").is_ok());
+        assert!(validate_tls_domain("192.168.1.100").is_ok());
+        assert!(validate_tls_domain("8.8.8.8").is_ok());
+    }
+
+    #[test]
+    fn validate_tls_domain_rejects_empty() {
+        // telemt CONFIG_PARAMS: "Не должно быть пустым" — unlike validate_fqdn_sni
+        // which permits empty, validate_tls_domain REJECTS empty.
+        let err = validate_tls_domain("").unwrap_err();
+        assert!(err.contains("non-empty"), "Got: {err}");
+    }
+
+    #[test]
+    fn validate_tls_domain_rejects_too_long() {
+        let long = "a".repeat(254);
+        let err = validate_tls_domain(&long).unwrap_err();
+        assert!(err.contains("too long"), "Got: {err}");
+    }
+
+    #[test]
+    fn validate_tls_domain_rejects_shell_metachars() {
+        assert!(validate_tls_domain("evil.com; rm -rf /").is_err());
+        assert!(validate_tls_domain("$(whoami).com").is_err());
+        assert!(validate_tls_domain("test`id`.com").is_err());
+        assert!(validate_tls_domain("name'sq").is_err());
+        assert!(validate_tls_domain("name|pipe").is_err());
+    }
+
+    #[test]
+    fn validate_tls_domain_rejects_slashes_and_spaces() {
+        // telemt CONFIG_PARAMS: "Не должно содержать пробелы или `/`"
+        assert!(validate_tls_domain("example.com/path").is_err());
+        assert!(validate_tls_domain("ex ample.com").is_err());
+        assert!(validate_tls_domain("test\\back").is_err());
     }
 
     // ─── Phase 16: Ed25519 armored pubkey (S-02 + V13) ─
