@@ -396,7 +396,19 @@ function App() {
               setConfig((prev) => ({ ...prev, configPath }));
               if (configPath) localStorage.setItem("tt_config_path", configPath);
               setWizardActive(false);
-              setActiveTab("control");
+              // UAT 2026-05-21 — honour DoneStep navigation intent. DoneStep
+              // writes `tt_navigate_after_setup` = "connection" (or "settings",
+              // "routing") when the user clicks a tab-specific CTA. Without
+              // this read, both DoneStep buttons («Перейти в панель
+              // управления» + «Перейти к подключению») landed on the same
+              // control tab — bug reported by user.
+              const VALID_TABS: AppTab[] = ["control", "connection", "routing", "settings", "about"];
+              const intent = localStorage.getItem("tt_navigate_after_setup");
+              localStorage.removeItem("tt_navigate_after_setup");
+              const targetTab: AppTab = VALID_TABS.includes(intent as AppTab)
+                ? (intent as AppTab)
+                : "control";
+              setActiveTab(targetTab);
               // UAT 2026-05-20 — force ControlPanelPage remount so
               // useServerState.loadServerInfo() re-fetches
               // check_server_installation and detects the newly-installed
