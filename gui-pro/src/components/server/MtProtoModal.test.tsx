@@ -35,11 +35,16 @@ const SSH_PARAMS: SshParams = {
   password: "testpass-MTProto-XYZ",
 };
 
+// Phase 17.1 D-5.5 — 7-step fixture (telemt). Labels берутся из ru.json
+// (i18n активирован в beforeEach). STEPS здесь — это уже "translated" array
+// который реальный hook возвращает в `steps` поле.
 const STEPS = [
-  { key: "download", label: "Скачивание" },
-  { key: "configure", label: "Настройка" },
-  { key: "generate_secret", label: "Генерация ключа" },
+  { key: "cleanup_legacy", label: "Очистка старого MTProxy" },
+  { key: "download_binary", label: "Скачивание бинаря telemt" },
+  { key: "create_user", label: "Создание пользователя" },
+  { key: "configure_telemt", label: "Настройка telemt.toml" },
   { key: "start_service", label: "Запуск сервиса" },
+  { key: "open_firewall", label: "Открытие порта firewall" },
   { key: "complete", label: "Готово" },
 ];
 
@@ -53,6 +58,7 @@ function mkState(statusOverride?: Partial<MtProtoStatus> | null, extras?: Partia
   install: ReturnType<typeof vi.fn>;
   requestUninstall: ReturnType<typeof vi.fn>;
   retry: ReturnType<typeof vi.fn>;
+  legacyMigrationNote: string | null;
 }>): MtProtoState {
   const status: MtProtoStatus | null =
     statusOverride === null
@@ -80,6 +86,8 @@ function mkState(statusOverride?: Partial<MtProtoStatus> | null, extras?: Partia
     requestUninstall: extras?.requestUninstall ?? vi.fn().mockResolvedValue(undefined),
     retry: extras?.retry ?? vi.fn(),
     sshParams: SSH_PARAMS,
+    // Phase 17.1 — additive поле в hook return type, опциональное в test fixture.
+    legacyMigrationNote: extras?.legacyMigrationNote ?? null,
   } as unknown as MtProtoState;
 }
 

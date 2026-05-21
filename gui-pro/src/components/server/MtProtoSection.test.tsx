@@ -18,15 +18,21 @@ const SSH_PARAMS: SshParams = {
   password: "test-section-pass",
 };
 
+// Phase 17.1 D-5.5 — 7-step list (telemt rewrite).
 const STEPS = [
-  { key: "download", label: "Скачивание" },
-  { key: "configure", label: "Настройка" },
-  { key: "generate_secret", label: "Генерация ключа" },
+  { key: "cleanup_legacy", label: "Очистка старого MTProxy" },
+  { key: "download_binary", label: "Скачивание бинаря telemt" },
+  { key: "create_user", label: "Создание пользователя" },
+  { key: "configure_telemt", label: "Настройка telemt.toml" },
   { key: "start_service", label: "Запуск сервиса" },
+  { key: "open_firewall", label: "Открытие порта firewall" },
   { key: "complete", label: "Готово" },
 ];
 
-function mkState(statusOverride?: Partial<MtProtoStatus> | null): MtProtoState {
+function mkState(
+  statusOverride?: Partial<MtProtoStatus> | null,
+  extras?: Partial<{ legacyMigrationNote: string | null }>,
+): MtProtoState {
   const status: MtProtoStatus | null =
     statusOverride === null
       ? null
@@ -53,6 +59,8 @@ function mkState(statusOverride?: Partial<MtProtoStatus> | null): MtProtoState {
     requestUninstall: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn(),
     sshParams: SSH_PARAMS,
+    // Phase 17.1 — additive поле (Option B per researcher §Migration Plan).
+    legacyMigrationNote: extras?.legacyMigrationNote ?? null,
   } as unknown as MtProtoState;
 }
 

@@ -4,6 +4,7 @@ import { Send } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
+import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { MtProtoModal } from "./MtProtoModal";
 import type { MtProtoState, SshParams } from "./useMtProtoState";
 
@@ -77,6 +78,19 @@ export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
             : t("server.utilities.mtproto.install")}
         </Button>
       </div>
+
+      {/* Phase 17.1 D-4.3 — legacy migration banner (Option B). Показываем
+          в Card-уровне когда modal закрыт но миграция была — пользователь
+          снова видит сводку при beглом взгляде на таб «Утилиты». */}
+      {state.legacyMigrationNote && (
+        <div className="mt-[var(--space-3)]">
+          <ErrorBanner
+            severity="info"
+            message={state.legacyMigrationNote}
+            data-testid="mtproto-section-legacy-banner"
+          />
+        </div>
+      )}
 
       {/* MtProtoModal always in JSX tree — T-03: NEVER {open && <MtProtoModal />} */}
       <MtProtoModal

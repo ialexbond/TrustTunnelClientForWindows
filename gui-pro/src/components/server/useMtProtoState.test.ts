@@ -299,3 +299,209 @@ describe("useMtProtoState", () => {
     );
   });
 });
+
+// ─── Phase 17.1 — legacyMigrationNote (Option B event-based) ─────────
+//
+// Plan 17.1-02 Task 2: при step="cleanup_legacy" с непустым `message`
+// backend сигнализирует что был обнаружен и удалён старый MTProxy.
+// Frontend hook сохраняет текст в additive поле `legacyMigrationNote`
+// (НЕ ломая frozen public API). Эти тесты — реальная интеграция через
+// мок `listen()`, который вызывает callback с настроенными payloads.
+
+describe("useMtProtoState — Phase 17.1 legacyMigrationNote (Option B)", () => {
+  type StepEvent = { step: string; status: string; message: string };
+  type Listener = (ev: { payload: StepEvent }) => void;
+
+  let listeners: Listener[];
+  let triggerStep: (payload: StepEvent) => void;
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    mockConfirm.mockResolvedValue(true);
+
+    // По умолчанию `mtproto_get_status` возвращает not-installed (чтобы install
+    // мог быть инициирован) и `mtproto_install` зависает — это даёт нам
+    // окно во времени когда `installing===true` и listener подписан.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "mtproto_get_status") {
+        return { installed: false, active: false, port: 0, secret: "", proxy_link: "" };
+      }
+      if (cmd === "mtproto_install") {
+        // Зависающий promise — listener остаётся подписан пока тест эмитит шаги.
+        return new Promise(() => {});
+      }
+      return null;
+    });
+
+    // Сохраняем callbacks из listen() — затем `triggerStep` зовёт их вручную.
+    listeners = [];
+    mockListen.mockImplementation(async (eventName: string, callback: Listener) => {
+      if (eventName === "mtproto-install-step") {
+        listeners.push(callback);
+      }
+      return () => {
+        const idx = listeners.indexOf(callback);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    });
+    triggerStep = (payload: StepEvent) => {
+      for (const cb of listeners) cb({ payload });
+    };
+  });
+
+  it("starts with legacyMigrationNote === null on mount", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.legacyMigrationNote).toBeNull();
+  });
+
+  it("captures legacyMigrationNote from cleanup_legacy event with non-empty message", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    // Запускаем install — hook подписывается на mtproto-install-step.
+    act(() => {
+      void result.current.install(8443);
+    });
+    await vi.waitFor(() => {
+      expect(listeners.length).toBeGreaterThan(0);
+    });
+
+    // Backend сообщил что нашёл и удалил старый MTProxy.
+    act(() => {
+      triggerStep({
+        step: "cleanup_legacy",
+        status: "running",
+        message: "Старый MTProxy был обнаружен и удалён в процессе установки",
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.legacyMigrationNote).toContain("MTProxy");
+    });
+  });
+
+  it("does NOT set legacyMigrationNote when cleanup_legacy emits empty message", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      void result.current.install(8443);
+    });
+    await vi.waitFor(() => {
+      expect(listeners.length).toBeGreaterThan(0);
+    });
+
+    // legacy не найден → backend всё равно emit'ит этап но без message.
+    act(() => {
+      triggerStep({ step: "cleanup_legacy", status: "done", message: "" });
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.legacyMigrationNote).toBeNull();
+  });
+
+  it("does NOT set legacyMigrationNote when cleanup_legacy emits whitespace-only message", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      void result.current.install(8443);
+    });
+    await vi.waitFor(() => {
+      expect(listeners.length).toBeGreaterThan(0);
+    });
+
+    act(() => {
+      triggerStep({ step: "cleanup_legacy", status: "done", message: "   \t\n  " });
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.legacyMigrationNote).toBeNull();
+  });
+
+  it("ignores message on non-cleanup_legacy steps (e.g. start_service)", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      void result.current.install(8443);
+    });
+    await vi.waitFor(() => {
+      expect(listeners.length).toBeGreaterThan(0);
+    });
+
+    // start_service несёт message, но это не сигнал миграции.
+    act(() => {
+      triggerStep({
+        step: "start_service",
+        status: "running",
+        message: "Сервис запускается",
+      });
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.legacyMigrationNote).toBeNull();
+  });
+
+  it("STEP_INDEX wiring: emit configure_telemt → currentStep === 3", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      void result.current.install(8443);
+    });
+    await vi.waitFor(() => {
+      expect(listeners.length).toBeGreaterThan(0);
+    });
+
+    act(() => {
+      triggerStep({ step: "configure_telemt", status: "running", message: "" });
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.currentStep).toBe(3);
+    });
+  });
+
+  it("STEP_INDEX wiring: emit open_firewall → currentStep === 5", async () => {
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      void result.current.install(8443);
+    });
+    await vi.waitFor(() => {
+      expect(listeners.length).toBeGreaterThan(0);
+    });
+
+    act(() => {
+      triggerStep({ step: "open_firewall", status: "running", message: "" });
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.currentStep).toBe(5);
+    });
+  });
+});
