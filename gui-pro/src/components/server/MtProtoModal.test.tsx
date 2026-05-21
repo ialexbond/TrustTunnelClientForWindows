@@ -112,7 +112,7 @@ describe("MtProtoModal", () => {
     render(
       <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
     );
-    expect(screen.getByPlaceholderText("Случайный (1024-65535)")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("8443")).toBeInTheDocument();
     expect(screen.getByTestId("mtproto-install-button")).toBeInTheDocument();
   });
 
@@ -138,16 +138,14 @@ describe("MtProtoModal", () => {
     expect(screen.getByRole("button", { name: /удалить/i })).toBeInTheDocument();
   });
 
-  // Test 3: default port generated on open
-  it("default_port_generated_on_open — port input has value in 1024-65535 range", () => {
+  // Test 3: default port on open = 8443 (Phase 17.1 D-2.3 / D-2.4)
+  it("default_port_on_open — port input initialized с 8443 (telemt default)", () => {
     const state = mkState({ installed: false });
     render(
       <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
     );
-    const input = screen.getByPlaceholderText("Случайный (1024-65535)") as HTMLInputElement;
-    const val = parseInt(input.value, 10);
-    expect(val).toBeGreaterThanOrEqual(1024);
-    expect(val).toBeLessThanOrEqual(65535);
+    const input = screen.getByPlaceholderText("8443") as HTMLInputElement;
+    expect(input.value).toBe("8443");
   });
 
   // Test 4: install click calls state.install with port number
@@ -157,7 +155,7 @@ describe("MtProtoModal", () => {
     render(
       <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
     );
-    const input = screen.getByPlaceholderText("Случайный (1024-65535)") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("8443") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "5555" } });
     fireEvent.click(screen.getByTestId("mtproto-install-button"));
     await waitFor(() => {
@@ -225,7 +223,7 @@ describe("MtProtoModal", () => {
         sshParams={SSH_PARAMS}
       />,
     );
-    const input = screen.getByPlaceholderText("Случайный (1024-65535)") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("8443") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "4443" } });
     fireEvent.click(screen.getByTestId("mtproto-install-button"));
     await waitFor(() => expect(installFn).toHaveBeenCalled());
@@ -299,7 +297,7 @@ describe("MtProtoModal", () => {
     render(
       <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
     );
-    const input = screen.getByPlaceholderText("Случайный (1024-65535)") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("8443") as HTMLInputElement;
     // Enter out-of-range port
     fireEvent.change(input, { target: { value: "100" } });
     fireEvent.click(screen.getByTestId("mtproto-install-button"));

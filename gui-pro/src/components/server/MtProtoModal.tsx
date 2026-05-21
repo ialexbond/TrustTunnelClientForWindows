@@ -79,13 +79,15 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
     if (!state.installing) setCancelling(false);
   }, [state.installing]);
 
-  // ── Default port generation on first open when not installed ──
+  // ── Default port on first open when not installed ──
+  // Phase 17.1 (D-2.3 / D-2.4): default 8443 per mtproto-org/proxy guide.
+  // 443 занят sidecar TrustTunnel; 8443 — стандартный TLS-camouflage port для telemt.
+  // Пользователь может ввести свой port (validation 1024-65535 в backend).
   // portInput excluded from deps intentionally — fires only when isOpen/installed flips
   // (the "initialize on open" pattern). Including portInput would re-fire on every keystroke.
   useEffect(() => {
     if (isOpen && !state.status?.installed && portInput === "") {
-      const randomPort = 1024 + Math.floor(Math.random() * (65535 - 1024));
-      setPortInput(String(randomPort));
+      setPortInput("8443");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, state.status?.installed]);

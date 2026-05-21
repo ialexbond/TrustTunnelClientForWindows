@@ -1413,7 +1413,7 @@
         "start": "Start",
         "stop": "Stop",
         "stopped_hint": "The service is installed but not running. Click «Start» to bring telemt up. If it dies again — check the journal (sudo journalctl -u telemt -n 50).",
-        "port_placeholder": "Random (1024-65535)",
+        "port_placeholder": "8443",
         "copy": "Copy",
         "copied": "Copied!",
         "uninstall": "Uninstall",
