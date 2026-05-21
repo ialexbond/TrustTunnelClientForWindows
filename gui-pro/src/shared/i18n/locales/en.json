@@ -1728,6 +1728,16 @@
       "next": "Next",
       "start": "Get started",
       "skip": "Skip"
+    },
+    "update": {
+      "dot_aria": "Update available",
+      "tab_aria_suffix": ", update available",
+      "banner": {
+        "message": "Protocol update available",
+        "update_button": "Update",
+        "dismiss_aria": "Dismiss",
+        "aria": "Update notification"
+      }
     }
   }
 }
