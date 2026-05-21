@@ -1412,7 +1412,7 @@
         "cancelling": "Cancelling…",
         "start": "Start",
         "stop": "Stop",
-        "stopped_hint": "The service is installed but not running. Click «Start» to bring MTProxy up. If it dies again — check the journal (sudo journalctl -u MTProxy -n 50).",
+        "stopped_hint": "The service is installed but not running. Click «Start» to bring telemt up. If it dies again — check the journal (sudo journalctl -u telemt -n 50).",
         "port_placeholder": "Random (1024-65535)",
         "copy": "Copy",
         "copied": "Copied!",
@@ -1421,11 +1421,17 @@
         "port_display": "Port: {{port}}",
         "empty_hint": "Install MTProto proxy to access Telegram through your server.",
         "step": {
+          "cleanup_legacy": "Cleaning up legacy MTProxy",
+          "download_binary": "Downloading telemt binary",
+          "create_user": "Creating system user",
+          "configure_telemt": "Configuring telemt",
+          "start_service": "Starting service",
+          "open_firewall": "Opening firewall port",
+          "complete": "Complete",
           "download": "Downloading",
           "configure": "Configuring",
           "secret": "Generating secret",
-          "service": "Starting service",
-          "complete": "Complete"
+          "service": "Starting service"
         },
         "confirm_uninstall_title": "Remove MTProto Proxy?",
         "confirm_uninstall_message": "The proxy will be completely removed: service stopped, binary deleted, firewall port closed. The proxy link will stop working.",
@@ -1435,7 +1441,7 @@
           "cancelled": "Installation cancelled",
           "started": "MTProto proxy started",
           "stopped": "MTProto proxy stopped",
-          "start_failed": "Service did not reach 'active' state. Check sudo journalctl -u MTProxy -n 50",
+          "start_failed": "Service did not reach 'active' state. Check sudo journalctl -u telemt -n 50",
           "install_error": "Failed to install MTProto: {{error}}",
           "uninstall_error": "Failed to remove MTProto: {{error}}",
           "start_error": "Failed to start MTProto: {{error}}",
@@ -1452,6 +1458,9 @@
           "active_on_port": "Active on port {{port}}",
           "installed_inactive": "Installed, not running",
           "not_installed": "Not installed"
+        },
+        "banner": {
+          "legacy_migrated": "An old MTProxy installation was detected and removed during install. The server now runs telemt — the modern, maintained MTProto Proxy implementation."
         }
       },
       "bbr": {
