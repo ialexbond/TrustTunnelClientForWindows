@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "../../shared/ui/Button";
@@ -44,15 +44,16 @@ export function DeployingStep(w: WizardState) {
   }, [w.deploySteps, inFlightStepId]);
 
   // ── Last info/warn log line (live tail) ──
-  const lastLogLine = useMemo(() => {
-    for (let i = w.deployLogs.length - 1; i >= 0; i -= 1) {
-      const entry = w.deployLogs[i];
-      if (entry.level === "info" || entry.level === "warn") {
-        return entry.message.trim();
-      }
+  // No manual useMemo — React Compiler memoizes automatically and complains
+  // when an existing useMemo can't be preserved (`react-hooks/preserve-manual-memoization`).
+  let lastLogLine = "";
+  for (let i = w.deployLogs.length - 1; i >= 0; i -= 1) {
+    const entry = w.deployLogs[i];
+    if (entry.level === "info" || entry.level === "warn") {
+      lastLogLine = entry.message.trim();
+      break;
     }
-    return "";
-  }, [w.deployLogs]);
+  }
 
   // ── Per-step percent (real % parse + pseudo-progress fallback) ──
   //
@@ -70,31 +71,37 @@ export function DeployingStep(w: WizardState) {
   //       Each new log line bumps the bar a bit. Capped at 95% to avoid
   //       showing 100% before the step actually flips to status="ok".
   //
-  //   Display = max(real, pseudo). They merge monotonically — real %% can
-  //   only push the displayed value UP, never down (dpkg resets 0→100%
-  //   on every package, so without sticky we'd flicker 99→5→30→5→60).
+  //   Display = max(real, pseudo, previous). Monotonic inside a step —
+  //   dpkg resets 0→100% on every package, so without sticky we'd flicker
+  //   99→5→30→5→60.
   //
-  // `stickyPercentRef` holds the displayed value across renders. Resets
-  // when the active step changes (different step = different scale).
-  // `stepBaseLogCountRef` records `deployLogs.length` when the step
-  // became active — pseudo-progress is computed from the delta.
-  const stickyPercentRef = useRef<{ stepId: string | null; value: number }>({
-    stepId: null,
-    value: 0,
-  });
-  const stepBaseLogCountRef = useRef<{ stepId: string | null; baseCount: number }>({
+  // State (`stepPercent`) holds the displayed value; ref (`stepBaselineRef`)
+  // remembers the step entry baseline (stepId + log-count at that moment).
+  // All mutation lives in an effect so render itself reads no refs and the
+  // React 19 `react-hooks/refs` lint stays happy.
+  const [stepPercent, setStepPercent] = useState<number | null>(null);
+  const stepBaselineRef = useRef<{ stepId: string | null; baseCount: number }>({
     stepId: null,
     baseCount: 0,
   });
-  const stepPercent = useMemo<number | null>(() => {
-    // Step changed — reset both refs.
-    if (stickyPercentRef.current.stepId !== inFlightStepId) {
-      stickyPercentRef.current = { stepId: inFlightStepId, value: 0 };
-      stepBaseLogCountRef.current = { stepId: inFlightStepId, baseCount: w.deployLogs.length };
+  useEffect(() => {
+    // No active step → clear display.
+    if (!inFlightStepId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived from inFlightStepId; reset is the whole point
+      setStepPercent(null);
+      return;
     }
-    if (!inFlightStepId) return null;
 
-    // (A) Try to parse a real % from the latest 20 log lines.
+    // Step changed — reset baseline so pseudo math is relative to step entry.
+    const stepChanged = stepBaselineRef.current.stepId !== inFlightStepId;
+    if (stepChanged) {
+      stepBaselineRef.current = {
+        stepId: inFlightStepId,
+        baseCount: w.deployLogs.length,
+      };
+    }
+
+    // (A) Real % from latest 20 log lines.
     let realParsed: number | null = null;
     const window = w.deployLogs.slice(-20);
     for (let i = window.length - 1; i >= 0; i -= 1) {
@@ -102,26 +109,28 @@ export function DeployingStep(w: WizardState) {
       if (m) {
         const n = parseInt(m[1], 10);
         if (n >= 0 && n <= 100) {
-          realParsed = Math.min(n, 99); // never 100 until step status flips to "ok"
+          realParsed = Math.min(n, 99); // never 100 until status flips to "ok"
           break;
         }
       }
     }
 
-    // (B) Pseudo-progress = 5% per log line since step started, capped at 95.
-    // Always at least 5% the moment a step becomes active, so user sees
-    // movement immediately instead of an empty slot.
+    // (B) Pseudo-progress = 5% per log line since step start, clamped 5-95.
     const linesSinceStart = Math.max(
       0,
-      w.deployLogs.length - stepBaseLogCountRef.current.baseCount,
+      w.deployLogs.length - stepBaselineRef.current.baseCount,
     );
     const pseudo = Math.min(95, Math.max(5, linesSinceStart * 5));
 
-    // Merge: take the higher of real / pseudo / previous sticky value.
     const candidate = Math.max(realParsed ?? 0, pseudo);
-    const next = Math.max(stickyPercentRef.current.value, candidate);
-    stickyPercentRef.current = { stepId: inFlightStepId, value: next };
-    return next;
+
+    // Single functional setState — reset to candidate on step change, merge
+    // monotonically otherwise. Computed deterministically from deployLogs +
+    // inFlightStepId; never produces a value smaller than the previous so
+    // no oscillation.
+    setStepPercent((prev) =>
+      stepChanged ? candidate : Math.max(prev ?? 0, candidate),
+    );
   }, [w.deployLogs, inFlightStepId]);
 
   return (

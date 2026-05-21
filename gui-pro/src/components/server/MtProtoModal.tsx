@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Copy, Check, Trash2, Loader2 } from "lucide-react";
+import { Send, Copy, Check, Trash2, Loader2, Play, Square } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { NumberInput } from "../../shared/ui";
@@ -224,6 +224,27 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
       {/* Configured view — shown when installed */}
       {installed && (
         <div className="space-y-3">
+          {/* Status row — UAT 2026-05-21: when service installed but not active,
+              show «Сервис остановлен» banner with diagnostic hint above port row. */}
+          {!state.status?.active && (
+            <div
+              className="flex items-start gap-2 p-3 rounded-[var(--radius-md)] text-body-sm"
+              style={{
+                backgroundColor: "var(--color-warning-tint-08)",
+                border: "1px solid var(--color-status-connecting-border)",
+                color: "var(--color-text-secondary)",
+              }}
+              data-testid="mtproto-stopped-banner"
+            >
+              <Square
+                className="w-4 h-4 shrink-0 mt-0.5"
+                style={{ color: "var(--color-warning-500)" }}
+                aria-hidden="true"
+              />
+              <span>{t("server.utilities.mtproto.stopped_hint")}</span>
+            </div>
+          )}
+
           {/* Port display row */}
           <div
             className="flex items-center justify-between gap-3 py-2 border-b"
@@ -258,8 +279,35 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             </div>
           )}
 
-          {/* Actions row */}
-          <div className="flex items-center gap-2">
+          {/* Actions row — UAT 2026-05-21: Start/Stop toggle prepended.
+              Start = primary accent (call to action when not active);
+              Stop = secondary (less prominent when service is fine). */}
+          <div className="flex flex-wrap items-center gap-2">
+            {state.status?.active ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Square className="w-3.5 h-3.5" />}
+                loading={state.toggling}
+                disabled={state.toggling || state.uninstalling}
+                onClick={() => void state.stop()}
+                data-testid="mtproto-stop-button"
+              >
+                {t("server.utilities.mtproto.stop")}
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Play className="w-3.5 h-3.5" />}
+                loading={state.toggling}
+                disabled={state.toggling || state.uninstalling}
+                onClick={() => void state.start()}
+                data-testid="mtproto-start-button"
+              >
+                {t("server.utilities.mtproto.start")}
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="sm"
@@ -274,7 +322,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               size="sm"
               icon={<Trash2 className="w-3.5 h-3.5" />}
               loading={state.uninstalling}
-              disabled={state.uninstalling}
+              disabled={state.uninstalling || state.toggling}
               onClick={() => void handleUninstall()}
             >
               {t("server.utilities.mtproto.uninstall")}

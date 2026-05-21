@@ -396,6 +396,8 @@ pub fn run() {
             commands::ssh_commands::mtproto_cancel_install,
             commands::ssh_commands::mtproto_get_status,
             commands::ssh_commands::mtproto_uninstall,
+            commands::ssh_commands::mtproto_start,
+            commands::ssh_commands::mtproto_stop,
             commands::ssh_commands::detect_bbr_status,
             commands::ssh_commands::enable_bbr,
             commands::ssh_commands::disable_bbr,
