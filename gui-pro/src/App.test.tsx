@@ -1361,4 +1361,60 @@ describe("App", () => {
       expect(aboutPanelProps.updateInfo?.downloadUrl).toBe("https://example.com/Pro-setup.exe");
     });
   });
+
+  // ─── Phase 18 — Welcome tour mount logic (REQ-18-ONBOARDING-01..04) ───
+
+  describe("Welcome tour", () => {
+    it("first-run user (нет tt_welcome_completed + нет tt_ssh_last_host) видит WelcomeTour", async () => {
+      localStorage.clear();
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(screen.getByTestId("welcome-tour-overlay")).toBeVisible();
+      // Active screen — Screen 1.
+      expect(screen.getByTestId("welcome-tour-screen-1")).toBeVisible();
+    });
+
+    it("existing user (tt_ssh_last_host есть) НЕ видит WelcomeTour даже без tt_welcome_completed (REQ-18-ONBOARDING-04, Pitfall 8)", async () => {
+      localStorage.setItem("tt_ssh_last_host", "1.2.3.4");
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(screen.queryByTestId("welcome-tour-overlay")).not.toBeInTheDocument();
+    });
+
+    it("completed user (tt_welcome_completed === \"true\") НЕ видит WelcomeTour", async () => {
+      localStorage.setItem("tt_welcome_completed", "true");
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(screen.queryByTestId("welcome-tour-overlay")).not.toBeInTheDocument();
+    });
+
+    it("после complete() WelcomeTour unmount-ится (state flip)", async () => {
+      localStorage.clear();
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      // Тур видим.
+      expect(screen.getByTestId("welcome-tour-overlay")).toBeVisible();
+
+      // Skip → complete writes localStorage + onComplete callback flips state.
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("welcome-tour-skip"));
+      });
+
+      // Overlay больше не в DOM.
+      expect(screen.queryByTestId("welcome-tour-overlay")).not.toBeInTheDocument();
+      expect(localStorage.getItem("tt_welcome_completed")).toBe("true");
+    });
+  });
 });

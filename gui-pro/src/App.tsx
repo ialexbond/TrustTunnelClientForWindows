@@ -29,6 +29,8 @@ import { useAppShellActions } from "./shared/hooks/useAppShellActions";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { EmptyState } from "./shared/ui/EmptyState";
 import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
+import { WelcomeTour } from "./components/welcome/WelcomeTour";
+import { useWelcomeTour } from "./shared/hooks/useWelcomeTour";
 import { Settings } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
 
@@ -76,6 +78,19 @@ function App() {
   // for initial step (set by ServerPanel install handler to step="endpoint",
   // mode="deploy").
   const [wizardActive, setWizardActive] = useState(false);
+
+  // ─── Welcome onboarding tour (Phase 18, REQ-18-ONBOARDING-01..04) ───
+  // First-run пользователи (нет `tt_welcome_completed` И нет
+  // `tt_ssh_last_host`) видят 3-step intro overlay. Existing users (хотя бы
+  // одно SSH-подключение делалось) пропускают тур автоматически — Pitfall 8
+  // mitigation. `tt_ssh_last_host` capturedшаредно на mount чтобы переход
+  // в connection flow после welcome не «перезакрыл» тур.
+  const { completed: welcomeCompleted, complete: completeWelcome } = useWelcomeTour();
+  const hasExistingCredentials = useMemo(
+    () => Boolean(localStorage.getItem("tt_ssh_last_host")),
+    [],
+  );
+  const showWelcomeTour = !welcomeCompleted && !hasExistingCredentials;
 
   // ─── External integrations ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
@@ -368,6 +383,18 @@ function App() {
         <TabNavigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab)} />
       </div>
     </div>
+
+    {/* Welcome onboarding tour — full-screen overlay для first-run users
+        (Phase 18, REQ-18-ONBOARDING-01..04). Mount ДО wizardActive: если
+        оба бы оказались true (теоретически только когда пользователь
+        вручную почистил localStorage сразу после install), Welcome
+        первичен — пользователь увидит intro потом продолжит к шеллу.
+        `onComplete` дёргает hook'овский complete() (уже сохранён в
+        localStorage) — `welcomeCompleted` обновится на следующем render
+        и overlay unmount-ится. */}
+    {showWelcomeTour && (
+      <WelcomeTour onComplete={completeWelcome} />
+    )}
 
     {/* Setup wizard — overlay activated by «Установить» on the not-installed
         screen. Reads `trusttunnel_wizard` localStorage for initial step/mode
