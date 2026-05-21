@@ -272,6 +272,66 @@ pub async fn mtproto_cancel_install(
 
 ssh_command!(mtproto_uninstall, ssh::mtproto_uninstall);
 
+// ─── Phase 18 — sidecar update commands (Plan 18-05) ──────────────
+
+/// Phase 18 — atomic-swap sidecar update entry point (REQ-18-UPDATE-FLOW-03..07).
+///
+/// Mirrors Phase 17.1 `mtproto_install` cancel-flag wiring: AppState owns
+/// `update_sidecar_cancel: Arc<AtomicBool>`; reset to `false` на start, передаётся
+/// в `ssh::update_sidecar`, и обязательно reset обратно на каждом exit path
+/// (success / cancel / error) чтобы следующий update не получил stale `true`.
+///
+/// **Single-flight guard:** check current flag value перед reset. Если flag уже `true`,
+/// значит кто-то отменил previous update которая ещё не cleaned up — допускаем
+/// fresh run (reset cleans). Если concurrent invocation реально нужна — этот
+/// guard расширится в Plan 18-06 frontend через UI disable button-while-running.
+#[tauri::command]
+pub async fn update_sidecar(
+    app: tauri::AppHandle,
+    cancel_state: tauri::State<'_, crate::AppState>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+    target_version: String,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    let params = ssh::SshParams {
+        host,
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+    // Reset cancel flag at start (in case it was left set by a previous cancel
+    // before this update kicked off). The reset gives a clean slate per-attempt.
+    cancel_state.update_sidecar_cancel.store(false, Ordering::SeqCst);
+    let flag = cancel_state.update_sidecar_cancel.clone();
+    let result = ssh::update_sidecar(&app, params, target_version, flag).await;
+    // Cleanup on every exit path (success / cancel / error) so a subsequent
+    // update isn't pre-cancelled by stale state.
+    cancel_state.update_sidecar_cancel.store(false, Ordering::SeqCst);
+    result
+}
+
+/// Phase 18 — request cancellation of an in-progress sidecar update (REQ-18-UPDATE-FLOW-07).
+///
+/// Sets the shared AppState flag; the update pipeline checks it between each
+/// step AND inside `restart_trusttunnel_and_wait` 12s verify retry loop (PLAN-REVIEW
+/// Blocker #4 fix). Returns `"UPDATE_CANCELLED"` at the next checkpoint.
+///
+/// Safe to call when no update is running — the flag will be reset by the next update start.
+#[tauri::command]
+pub async fn cancel_update_sidecar(
+    cancel_state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    ssh::update_sidecar_cancel(&cancel_state.update_sidecar_cancel);
+    Ok(())
+}
+
 // mtproto_get_status needs host for proxy link construction -- manual command like security_get_status
 #[tauri::command]
 pub async fn mtproto_get_status(
