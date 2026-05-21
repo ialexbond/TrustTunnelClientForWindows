@@ -32,6 +32,115 @@ fn validate_download_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Phase 18: Sidecar + app version detection helpers ────────────────────
+//
+// Pure helpers (no I/O) для check_sidecar_version / check_app_update_info.
+// Wrapped Tauri commands ниже. Все три функции testable изолированно через
+// `#[cfg(test)] mod sidecar_version_tests`.
+
+/// Strip "v" prefix + extract first `N.N.N` SemVer sequence from raw output.
+///
+/// Tolerates множество форматов которые может вернуть `trusttunnel_endpoint --version`:
+/// - `"1.0.33"` → `"1.0.33"`
+/// - `"v1.0.33\n"` → `"1.0.33"`
+/// - `"trusttunnel 1.0.33\n"` → `"1.0.33"`
+/// - `"trusttunnel-endpoint 1.0.33 (release)\n"` → `"1.0.33"`
+/// - empty / "unknown" / "no-version-here" → `"unknown"`
+///
+/// Manual scan (no regex crate dep) — finds first `\d+\.\d+\.\d+` sequence
+/// validated через `u32::parse` for each segment.
+fn parse_version_from_output(raw: &str) -> String {
+    let cleaned = raw.trim();
+    if cleaned.is_empty() || cleaned == "unknown" {
+        return "unknown".to_string();
+    }
+    let bytes = cleaned.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            let mut dots = 0;
+            let mut j = i;
+            while j < bytes.len() {
+                let c = bytes[j];
+                if c.is_ascii_digit() {
+                    j += 1;
+                } else if c == b'.' && dots < 2 {
+                    dots += 1;
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if dots == 2 {
+                let candidate = &cleaned[start..j];
+                if candidate.split('.').all(|p| p.parse::<u32>().is_ok()) {
+                    return candidate.to_string();
+                }
+            }
+            i = j.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+    "unknown".to_string()
+}
+
+/// Compare semver-ish strings. Returns -1 if a < b, 0 if equal, 1 if a > b.
+///
+/// Strips "v" prefix + pre-release suffix (`-beta.1`). Numeric comparison
+/// (`1.10.0 > 1.9.0`), not lexicographic. Missing segments treated as 0
+/// (`"1.0" == "1.0.0"`). Non-numeric segments default to 0 для defence —
+/// upstream callers must `validate_version` перед использованием.
+fn compare_semver(a: &str, b: &str) -> i32 {
+    let clean = |s: &str| -> Vec<u32> {
+        s.trim_start_matches('v')
+            .split('-').next().unwrap_or("") // strip "-beta.1"
+            .split('.')
+            .map(|p| p.parse::<u32>().unwrap_or(0))
+            .collect()
+    };
+    let pa = clean(a);
+    let pb = clean(b);
+    for i in 0..pa.len().max(pb.len()) {
+        let na = pa.get(i).copied().unwrap_or(0);
+        let nb = pb.get(i).copied().unwrap_or(0);
+        if na > nb { return 1; }
+        if na < nb { return -1; }
+    }
+    0
+}
+
+/// Select sidecar tarball asset from release JSON `assets[]` array.
+///
+/// Pattern: `trusttunnel-v{TAG}-linux-{arch}.tar.gz`, EXCLUDES `-dbgsym.tar.gz`
+/// (10× size: 107 MB vs 10.7 MB на v1.0.33 per 18-RESEARCH.md §Finding 1).
+///
+/// Returns `(download_url, size_bytes)` или `None` если asset не найден
+/// (например unsupported arch).
+fn select_sidecar_asset(assets: &[serde_json::Value], arch: &str) -> Option<(String, u64)> {
+    let pattern_substring = format!("-linux-{arch}.tar.gz");
+    for asset in assets {
+        let name = asset.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        if name.ends_with(&pattern_substring)
+            && !name.contains("-dbgsym")
+            && name.starts_with("trusttunnel-v")
+        {
+            let url = asset.get("browser_download_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let size = asset.get("size")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if !url.is_empty() {
+                return Some((url, size));
+            }
+        }
+    }
+    None
+}
+
 /// Self-update: download NSIS setup.exe, verify checksum, launch silent install, restart.
 #[tauri::command]
 pub async fn self_update(
@@ -271,4 +380,77 @@ del "{vbs_str}" >nul 2>&1
     app.exit(0);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod sidecar_version_tests {
+    use super::*;
+
+    #[test]
+    fn parse_version_extracts_semver_from_plain() {
+        assert_eq!(parse_version_from_output("1.0.33"), "1.0.33");
+        assert_eq!(parse_version_from_output("v1.0.33\n"), "1.0.33");
+        assert_eq!(parse_version_from_output("trusttunnel 1.0.33\n"), "1.0.33");
+        assert_eq!(parse_version_from_output("trusttunnel-endpoint 1.0.33 (release)\n"), "1.0.33");
+    }
+
+    #[test]
+    fn parse_version_handles_empty_and_unknown() {
+        assert_eq!(parse_version_from_output(""), "unknown");
+        assert_eq!(parse_version_from_output("unknown"), "unknown");
+        assert_eq!(parse_version_from_output("\n\n"), "unknown");
+        assert_eq!(parse_version_from_output("no-version-here"), "unknown");
+    }
+
+    #[test]
+    fn compare_semver_orders_correctly() {
+        assert_eq!(compare_semver("1.0.0", "1.0.1"), -1);
+        assert_eq!(compare_semver("1.0.1", "1.0.0"), 1);
+        assert_eq!(compare_semver("1.0.0", "1.0.0"), 0);
+        assert_eq!(compare_semver("v1.0.0", "1.0.0"), 0);
+        assert_eq!(compare_semver("1.0.0-beta.1", "1.0.0"), 0); // pre-release stripped
+        assert_eq!(compare_semver("0.9.99", "1.0.0"), -1);
+        assert_eq!(compare_semver("1.10.0", "1.9.0"), 1); // numeric, not lexicographic
+    }
+
+    #[test]
+    fn select_asset_picks_correct_arch_and_excludes_dbgsym() {
+        let assets = serde_json::json!([
+            { "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+              "browser_download_url": "https://github.com/x/y/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+              "size": 10700000_u64 },
+            { "name": "trusttunnel-v1.0.33-linux-x86_64-dbgsym.tar.gz",
+              "browser_download_url": "https://github.com/x/y/dbg.tar.gz",
+              "size": 107000000_u64 },
+            { "name": "trusttunnel-v1.0.33-linux-aarch64.tar.gz",
+              "browser_download_url": "https://github.com/x/y/aarch64.tar.gz",
+              "size": 9600000_u64 },
+        ]);
+        let arr = assets.as_array().unwrap();
+        let (url, size) = select_sidecar_asset(arr, "x86_64").expect("should find x86_64");
+        assert!(url.contains("x86_64"));
+        assert!(!url.contains("dbgsym"));
+        assert_eq!(size, 10_700_000);
+
+        let (url_arm, _) = select_sidecar_asset(arr, "aarch64").expect("should find aarch64");
+        assert!(url_arm.contains("aarch64"));
+    }
+
+    #[test]
+    fn select_asset_returns_none_for_unknown_arch() {
+        let assets = serde_json::json!([
+            { "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+              "browser_download_url": "https://x.com/y.tar.gz",
+              "size": 100_u64 }
+        ]);
+        assert!(select_sidecar_asset(assets.as_array().unwrap(), "mips").is_none());
+    }
+
+    #[test]
+    fn validate_download_url_rejects_non_github() {
+        assert!(validate_download_url("https://evil.com/setup.exe").is_err());
+        assert!(validate_download_url("http://github.com/file").is_err()); // not HTTPS
+        assert!(validate_download_url("https://github.com/x/y/releases/download/v1/file.tar.gz").is_ok());
+        assert!(validate_download_url("https://objects.githubusercontent.com/x/y").is_ok());
+    }
 }
