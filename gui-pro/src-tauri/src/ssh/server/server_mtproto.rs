@@ -323,24 +323,38 @@ fn extract_process_name_from_ss(line: &str) -> Option<String> {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//   mtproto_get_status — pooled, quick status check
+//   mtproto_get_status — pooled, quick status check (Phase 17.1 telemt)
 // ═══════════════════════════════════════════════════════════════
+//
+// Phase 17.1 rewrite — три источника правды:
+//   1. `test -f /bin/telemt` — installed flag
+//   2. `systemctl is-active telemt` — active flag
+//   3. `cat /etc/telemt/telemt.toml` → parse_telemt_toml_minimal → (port, secret)
+//   4. Если active=true — `fetch_proxy_link` (admin API → journalctl fallback)
+//
+// Phase 17 строил `tg://proxy` link manually через `build_proxy_link(host, port,
+// secret)` с `dd`-префиксом. Telemt использует формат `ee{secret}{hex_domain}`
+// который мы НЕ строим manually (researcher §Anti-Pattern «Building tg://proxy
+// link manually in Rust») — единственный источник правды это сам telemt.
+// `host` параметр сохранён в signature (frontend invoke его передаёт), но
+// больше не используется в теле — `let _ = host;` подавляет unused_variables.
 
 pub async fn mtproto_get_status(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
     host: &str,
 ) -> Result<MtProtoStatus, String> {
+    let _ = host; // IPC signature compat (Phase 17 строил dd-link через host)
     let sudo = detect_sudo(handle, app).await;
 
-    // Check binary
-    let (out, _) = exec_command(
+    // ─── Installed check ───────────────────────────────────────
+    let (installed_out, _) = exec_command(
         handle,
         app,
-        "test -f /opt/MTProxy/mtproto-proxy && echo INSTALLED || echo NOT_INSTALLED",
+        "test -f /bin/telemt && echo INSTALLED || echo NOT_INSTALLED",
     )
     .await?;
-    if out.trim().contains("NOT_INSTALLED") {
+    if installed_out.trim().contains("NOT_INSTALLED") {
         return Ok(MtProtoStatus {
             installed: false,
             active: false,
@@ -350,27 +364,29 @@ pub async fn mtproto_get_status(
         });
     }
 
-    // Check service active
+    // ─── Service active check ──────────────────────────────────
     let (svc_out, _) = exec_command(
         handle,
         app,
-        &format!("{sudo}systemctl is-active MTProxy 2>/dev/null || echo inactive"),
+        &format!("{sudo}systemctl is-active telemt 2>/dev/null || echo inactive"),
     )
     .await?;
     let active = svc_out.trim() == "active";
 
-    // Read env config
-    let (cfg_out, _) = exec_command(
+    // ─── Read telemt.toml для port + secret ────────────────────
+    let (toml_out, _) = exec_command(
         handle,
         app,
-        "cat /etc/mtproxy.env 2>/dev/null || echo ''",
+        &format!("{sudo}cat /etc/telemt/telemt.toml 2>/dev/null || echo ''"),
     )
     .await?;
-    let (secret, port) = parse_mtproxy_env(&cfg_out);
+    let (port, secret) = parse_telemt_toml_minimal(&toml_out);
 
-    // Build link
-    let proxy_link = if is_valid_hex_secret(&secret) && port > 0 {
-        build_proxy_link(host, port, &secret)
+    // ─── Fetch proxy_link только если активен ──────────────────
+    // Если сервис не запущен — admin API недоступен и journalctl может
+    // содержать stale ссылку (от прошлого запуска); proxy_link = "" честнее.
+    let proxy_link = if active {
+        fetch_proxy_link(handle, app, sudo).await
     } else {
         String::new()
     };
@@ -1101,9 +1117,13 @@ pub async fn mtproto_install(
 // UAT 2026-05-21 — user sees status «Установлен, не запущен» after
 // install (or after a reboot / crash-loop give-up by systemd). Without
 // a Start button in the modal there's no recovery path — they'd have
-// to ssh in and run `systemctl start MTProxy` by hand. These two verbs
+// to ssh in and run `systemctl start telemt` by hand. These two verbs
 // expose the toggle. Both pull a fresh MtProtoStatus on return so the
 // caller can immediately re-render (no extra get_status round-trip).
+//
+// Phase 17.1 — logic 1:1 Phase 17, только unit name `MTProxy` → `telemt`.
+// `Restart=on-failure` (render_telemt_systemd_unit per Plan 01) гарантирует
+// что `systemctl stop` НЕ триггерит auto-restart loop (Pitfall 4 mitigation).
 
 pub async fn mtproto_start(
     app: &tauri::AppHandle,
@@ -1112,15 +1132,16 @@ pub async fn mtproto_start(
 ) -> Result<MtProtoStatus, String> {
     let sudo = detect_sudo(handle, app).await;
     // `systemctl start` is fire-and-forget; service may take a beat to
-    // bind its port. Same 6×1s retry pattern as install — accommodates
-    // Ubuntu 24.04's «activating» → «active» window without flagging a
-    // false START_FAILED for a service that's actually about to come up.
-    exec_command(handle, app, &format!("{sudo}systemctl start MTProxy")).await?;
+    // bind its port and complete TLS init. Same 6×1s retry pattern as
+    // install — accommodates Ubuntu 24.04's «activating» → «active»
+    // window without flagging a false START_FAILED for a service that's
+    // actually about to come up.
+    exec_command(handle, app, &format!("{sudo}systemctl start telemt")).await?;
     for attempt in 0..6 {
         let (out, _) = exec_command(
             handle,
             app,
-            &format!("{sudo}systemctl is-active MTProxy"),
+            &format!("{sudo}systemctl is-active telemt"),
         )
         .await?;
         if out.trim() == "active" {
@@ -1140,7 +1161,12 @@ pub async fn mtproto_stop(
     host: &str,
 ) -> Result<MtProtoStatus, String> {
     let sudo = detect_sudo(handle, app).await;
-    exec_command(handle, app, &format!("{sudo}systemctl stop MTProxy 2>/dev/null; echo STOP_OK")).await?;
+    exec_command(
+        handle,
+        app,
+        &format!("{sudo}systemctl stop telemt 2>/dev/null; echo STOP_OK"),
+    )
+    .await?;
     mtproto_get_status(app, handle, host).await
 }
 
