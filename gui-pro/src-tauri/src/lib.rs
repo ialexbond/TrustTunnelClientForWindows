@@ -436,6 +436,9 @@ pub fn run() {
             commands::network::speedtest_run,
             commands::geoip::get_server_geoip,
             commands::updater::self_update,
+            // Phase 18 — dual update detection (REQ-18-UPDATE-DETECTION-01..02)
+            commands::updater::check_sidecar_version,
+            commands::updater::check_app_update_info,
             commands::deeplink::decode_deeplink,
             commands::deeplink::import_config_from_string,
             commands::protocol::register_url_protocols,

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::Emitter;
 use tauri::Manager;
@@ -6,6 +6,7 @@ use tauri::Manager;
 use std::os::windows::process::CommandExt;
 
 use super::vpn::{AppState, kill_sidecar_from_state};
+use crate::ssh;
 
 #[derive(Clone, Serialize)]
 struct UpdateProgress {
@@ -139,6 +140,254 @@ fn select_sidecar_asset(assets: &[serde_json::Value], arch: &str) -> Option<(Str
         }
     }
     None
+}
+
+// ─── Phase 18: Sidecar + app version Tauri commands ──────────────────────
+
+/// REQ-18-UPDATE-DETECTION-02 — Sidecar version probe result.
+///
+/// Returned from `check_sidecar_version`. Frontend Plan 18-04 useUpdateChecker
+/// hook aggregates это с `AppUpdateInfo` → `{ appUpdate, sidecarUpdate }`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SidecarVersionInfo {
+    pub current_version: String,      // "3.0.0" либо "unknown"
+    pub latest_version: String,       // "1.0.33"
+    pub latest_tag: String,           // "v1.0.33"
+    pub available: bool,              // current < latest AND current != "unknown"
+    pub asset_download_url: String,   // https://github.com/.../trusttunnel-v1.0.33-linux-x86_64.tar.gz
+    pub asset_size_bytes: u64,
+}
+
+/// REQ-18-UPDATE-DETECTION-02 — Sidecar version probe (SSH + GitHub API).
+///
+/// 1. SSH connect → `{ENDPOINT_BINARY} --version` (REUSE pattern из `server_install.rs:23-26`)
+/// 2. GitHub API `releases/latest` для `TrustTunnel/TrustTunnel` repo
+/// 3. validate_version(tag) + validate_download_url(asset_url) — S-02 + V9 invariants
+/// 4. Asset filter `trusttunnel-v{TAG}-linux-x86_64.tar.gz`, EXCLUDES `-dbgsym`
+///
+/// Errors: `UPDATE_CHECK_FAILED` (silent failure per D-2.x — GitHub API down /
+/// rate-limit / parse failure → frontend swallows). SSH-level errors bubble через
+/// existing SshParams::connect_with_app error contract.
+///
+/// PLAN-REVIEW Blocker #1 fix: individual fields (per Phase 17.1 `mtproto_install`
+/// precedent в commands/ssh_commands.rs); Plan 18-04 frontend invokes
+/// `invoke("check_sidecar_version", { host, port, user, password, keyPath, keyData })`
+/// — Tauri auto-maps camelCase → snake_case на frontend boundary.
+///
+/// D-29 invariant: only host + version + error code logged (eprintln debug-only,
+/// NOT activity_log / emit_log). Password parameter NEVER reaches log channel.
+#[tauri::command]
+pub async fn check_sidecar_version(
+    app: tauri::AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+) -> Result<SidecarVersionInfo, String> {
+    use ssh::ENDPOINT_BINARY;
+
+    // Reconstruct SshParams (matches Phase 17.1 mtproto_install pattern).
+    let params = ssh::SshParams {
+        host: host.clone(),
+        port,
+        ssh_user: user,
+        ssh_password: password,
+        key_path,
+        key_data,
+    };
+
+    // 1. SSH probe for current version (REUSE pattern из server_install.rs:23-26)
+    let handle = params.connect_with_app(app.clone()).await?;
+    let (ver_out, _) = ssh::exec_command(
+        &handle,
+        &app,
+        &format!("{bin} --version 2>/dev/null || echo unknown", bin = ENDPOINT_BINARY),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("[check_sidecar_version] SSH probe failed: {e}");
+        ("unknown".to_string(), 1)
+    });
+    handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
+
+    let current_version = parse_version_from_output(&ver_out);
+
+    // 2. GitHub API — latest release (TrustTunnel/TrustTunnel repo, verified §Finding 1)
+    let client = reqwest::Client::new();
+    let res = client
+        .get("https://api.github.com/repos/TrustTunnel/TrustTunnel/releases/latest")
+        .header("User-Agent", "TrustTunnel-UpdateChecker")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| {
+            eprintln!("[check_sidecar_version] GitHub API request failed: {e}");
+            "UPDATE_CHECK_FAILED".to_string()
+        })?;
+
+    if !res.status().is_success() {
+        eprintln!("[check_sidecar_version] GitHub API status {}", res.status());
+        return Err("UPDATE_CHECK_FAILED".into());
+    }
+
+    let data: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    let latest_tag = data
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if latest_tag.is_empty() {
+        return Err("UPDATE_CHECK_FAILED".into());
+    }
+
+    // S-02 — defence-in-depth: GitHub tag might in future embed в shell heredoc
+    // (Plan 18-05 update_sidecar pipeline). Reject anything outside char-whitelist
+    // (`[A-Za-z0-9.+-]`) до того как value покинет команду.
+    ssh::sanitize::validate_version(&latest_tag)
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    let latest_version = latest_tag.trim_start_matches('v').to_string();
+
+    // 3. Asset selection (default x86_64 — researcher §Pitfall 4: arch detect
+    // adds complexity, ARM64 future enhancement за пределами Phase 18 first ship)
+    let assets = data
+        .get("assets")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (asset_download_url, asset_size_bytes) = select_sidecar_asset(&assets, "x86_64")
+        .ok_or_else(|| "UPDATE_CHECK_FAILED".to_string())?;
+
+    // V9 — validate download URL whitelist (github.com / objects.githubusercontent.com)
+    validate_download_url(&asset_download_url)
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    let available = current_version != "unknown"
+        && compare_semver(&current_version, &latest_version) < 0;
+
+    Ok(SidecarVersionInfo {
+        current_version,
+        latest_version,
+        latest_tag,
+        available,
+        asset_download_url,
+        asset_size_bytes,
+    })
+}
+
+/// REQ-18-UPDATE-DETECTION-01 — App version check result (Windows installer).
+///
+/// Backend mirror existing frontend `useUpdateChecker.ts` GitHub API call —
+/// optional convenience для consistent error handling + future caching.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AppUpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub latest_tag: String,
+    pub available: bool,
+    pub download_url: String,    // installer .exe URL либо html_url fallback
+    pub release_notes: String,
+}
+
+/// REQ-18-UPDATE-DETECTION-01 — App version probe (GitHub API).
+///
+/// Reads current version из Tauri `package_info()` (synced from `tauri.conf.json`).
+/// GitHub repo — `ialexbond/TrustTunnelClientForWindows` (verified существующий
+/// `useUpdateChecker.ts:36` использует тот же endpoint per PLAN-REVIEW Blocker #2).
+///
+/// Asset filter: `Pro*setup*.exe$`. Если asset не найден — `download_url` fallback
+/// на `html_url` (release page) per OQ-5 — пользователь всё равно может перейти.
+///
+/// Errors: `UPDATE_CHECK_FAILED` (silent fail per D-2.x).
+#[tauri::command]
+pub async fn check_app_update_info(
+    app: tauri::AppHandle,
+) -> Result<AppUpdateInfo, String> {
+    let current_version = app.package_info().version.to_string();
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get("https://api.github.com/repos/ialexbond/TrustTunnelClientForWindows/releases/latest")
+        .header("User-Agent", "TrustTunnel-UpdateChecker")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    if !res.status().is_success() {
+        return Err("UPDATE_CHECK_FAILED".into());
+    }
+
+    let data: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    let latest_tag = data
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if latest_tag.is_empty() {
+        return Err("UPDATE_CHECK_FAILED".into());
+    }
+
+    ssh::sanitize::validate_version(&latest_tag)
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    let latest_version = latest_tag.trim_start_matches('v').to_string();
+    let release_notes = data
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let html_url = data
+        .get("html_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Asset selection — Pro installer pattern `Pro.*setup.*\.exe$`
+    let assets = data
+        .get("assets")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let download_url = assets
+        .iter()
+        .filter_map(|a| {
+            let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let url = a.get("browser_download_url").and_then(|v| v.as_str()).unwrap_or("");
+            if name.contains("Pro") && name.contains("setup") && name.ends_with(".exe") {
+                Some(url.to_string())
+            } else {
+                None
+            }
+        })
+        .next()
+        .unwrap_or(html_url);
+
+    if !download_url.is_empty() {
+        validate_download_url(&download_url)
+            .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+    }
+
+    let available = compare_semver(&current_version, &latest_version) < 0;
+
+    Ok(AppUpdateInfo {
+        current_version,
+        latest_version,
+        latest_tag,
+        available,
+        download_url,
+        release_notes,
+    })
 }
 
 /// Self-update: download NSIS setup.exe, verify checksum, launch silent install, restart.
@@ -452,5 +701,64 @@ mod sidecar_version_tests {
         assert!(validate_download_url("http://github.com/file").is_err()); // not HTTPS
         assert!(validate_download_url("https://github.com/x/y/releases/download/v1/file.tar.gz").is_ok());
         assert!(validate_download_url("https://objects.githubusercontent.com/x/y").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod d29_invariant_tests {
+    /// D-29 invariant — check_sidecar_version + check_app_update_info MUST NOT
+    /// call activity_log / emit_log channels.
+    ///
+    /// Rationale: эти команды получают `password: String` parameter (SSH probe)
+    /// и binary paths (ENDPOINT_BINARY). Логирование в activity.log таких
+    /// metadata = D-29 invariant violation. Debug-only `eprintln!` ok (stderr,
+    /// not persisted log file).
+    ///
+    /// Static-grep approach — читает source файл и проверяет тело каждой
+    /// функции. Aligns с Phase 17.1 surgical invariant test pattern
+    /// (server_mtproto.rs::uninstall body grep). CI catches regression при
+    /// добавлении emit_log в новую функцию.
+    fn function_body(source: &str, signature: &str) -> String {
+        let after_sig = source.split(signature).nth(1).unwrap_or("");
+        // function body ends at next `pub async fn`, `pub fn`, или конце модуля.
+        let body_until_next = after_sig
+            .split("\npub async fn ")
+            .next()
+            .unwrap_or("")
+            .split("\npub fn ")
+            .next()
+            .unwrap_or("")
+            .split("\nfn ")
+            .next()
+            .unwrap_or("");
+        body_until_next.to_string()
+    }
+
+    #[test]
+    fn check_sidecar_version_does_not_call_activity_log_or_emit_log() {
+        let source = include_str!("./updater.rs");
+        let body = function_body(source, "pub async fn check_sidecar_version");
+        assert!(
+            !body.contains("activity_log"),
+            "D-29: check_sidecar_version must NOT call activity_log"
+        );
+        assert!(
+            !body.contains("emit_log("),
+            "D-29: check_sidecar_version must NOT call emit_log (use eprintln! for debug only)"
+        );
+    }
+
+    #[test]
+    fn check_app_update_info_does_not_call_activity_log_or_emit_log() {
+        let source = include_str!("./updater.rs");
+        let body = function_body(source, "pub async fn check_app_update_info");
+        assert!(
+            !body.contains("activity_log"),
+            "D-29: check_app_update_info must NOT call activity_log"
+        );
+        assert!(
+            !body.contains("emit_log("),
+            "D-29: check_app_update_info must NOT call emit_log (use eprintln! for debug only)"
+        );
     }
 }
