@@ -1737,6 +1737,27 @@
         "update_button": "Update",
         "dismiss_aria": "Dismiss",
         "aria": "Update notification"
+      },
+      "modal": {
+        "title_active": "Updating protocol",
+        "title_error": "Protocol update failed",
+        "step_download": "Downloading new version",
+        "step_backup": "Backing up current version",
+        "step_apply": "Applying update",
+        "step_verify": "Verifying",
+        "step_counter": "Step {{current}} of 4 · {{label}}",
+        "version_transition": "v{{from}} → v{{to}}",
+        "error_line_1": "An error occurred while applying the new version.",
+        "error_line_2": "Automatic rollback to the previous version completed.",
+        "error_line_3": "Server continues running on v{{from}}.",
+        "cancelled_line_1": "Update cancelled by user.",
+        "cancelled_line_2": "Rollback to previous version completed.",
+        "cancelled_line_3": "Server continues running on v{{from}}.",
+        "close": "Close"
+      },
+      "snack": {
+        "success": "Protocol updated to v{{to}}",
+        "rollback": "Update failed — rollback applied"
       }
     }
   }
