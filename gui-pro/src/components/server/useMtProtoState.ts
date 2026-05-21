@@ -166,6 +166,45 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   // Auto-load on sshParams change (per D-08)
   useEffect(() => { void load(); }, [load]);
 
+  // ── Phase 17.1 post-UAT (2026-05-21): background polling для proxy_link ──
+  //
+  // Telemt при первом старте может потратить до 30 сек на определение публичного
+  // IP (Telegram backend ping). Backend retry в fetch_proxy_link ловит это за
+  // один install-call, но в edge cases (slow DC ping, network hiccup) ссылка
+  // приходит ПОСЛЕ возврата install'а. Чтобы UI не показывал пустую ссылку:
+  // когда status = installed && active && proxy_link пустой — polling каждые
+  // 3 сек до получения непустой ссылки (или max 20 попыток = 60 сек).
+  // Останавливается автоматически когда proxy_link становится непустым либо
+  // status меняется (uninstall / service stop).
+  useEffect(() => {
+    if (!status?.installed || !status?.active) return;
+    if (status?.proxy_link && status.proxy_link.length > 0) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      if (attempts > 20) return; // 20 × 3s = 60s max polling
+      try {
+        const s = await invoke<MtProtoStatus>("mtproto_get_status", {
+          host, port, user, password, keyPath,
+        });
+        if (cancelled) return;
+        setStatus(s);
+        saveCache(host, s);
+        if (s.proxy_link && s.proxy_link.length > 0) return; // got link — stop
+      } catch {
+        // best-effort polling; ignore transient errors
+      }
+      if (!cancelled) setTimeout(() => void tick(), 3000);
+    };
+    const initial = setTimeout(() => void tick(), 3000);
+    return () => {
+      cancelled = true;
+      clearTimeout(initial);
+    };
+  }, [status?.installed, status?.active, status?.proxy_link, host, port, user, password, keyPath]);
+
   // ── Listen for install step events ──
   // Phase 17.1 D-4.3: при step="cleanup_legacy" с непустым message —
   // сохраняем текст в legacyMigrationNote (Option B event mechanism).

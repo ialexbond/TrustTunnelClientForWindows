@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Copy, Check, Trash2, Loader2, Play, Square } from "lucide-react";
+import { Send, Trash2, Loader2, Play, Square } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
-import { NumberInput } from "../../shared/ui";
+import { NumberInput, Skeleton } from "../../shared/ui";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
+import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import type { MtProtoState } from "./useMtProtoState";
 
@@ -47,10 +48,10 @@ export interface MtProtoModalProps {
 export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModalProps) {
   const { t } = useTranslation();
   const { log } = useActivityLog();
+  const pushSnack = useSnackBar();
 
   // ── Local form state ──
   const [portInput, setPortInput] = useState<string>("");
-  const [copied, setCopied] = useState(false);
   const [portError, setPortError] = useState<string | null>(null);
   // UAT 2026-05-20 — `cancelling` is local UX state that flips to true the
   // moment the user clicks «Отменить», BEFORE waiting for the backend to
@@ -65,7 +66,6 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
     if (isOpen) return;
     const timer = setTimeout(() => {
       setPortInput("");
-      setCopied(false);
       setPortError(null);
       setCancelling(false);
     }, 200);
@@ -115,12 +115,15 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
   const handleCopy = useCallback(async () => {
     const link = state.status?.proxy_link;
     if (!link) return;
-    await navigator.clipboard.writeText(link);
-    // D-29: log only event metadata — NEVER log proxy_link (contains MTProto secret)
-    log("USER", `mtproto.link.copied host=${sshParams.host}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [state.status?.proxy_link, sshParams.host, log]);
+    try {
+      await navigator.clipboard.writeText(link);
+      // D-29: log only event metadata — NEVER log proxy_link (contains MTProto secret)
+      log("USER", `mtproto.link.copied host=${sshParams.host}`);
+      pushSnack(t("server.users.link_copied"));
+    } catch {
+      // clipboard write may fail in restrictive WebView contexts; silent.
+    }
+  }, [state.status?.proxy_link, sshParams.host, log, pushSnack, t]);
 
   const installed = state.status?.installed ?? false;
 
@@ -276,8 +279,11 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             </span>
           </div>
 
-          {/* Proxy link display */}
-          {state.status?.proxy_link && (
+          {/* Proxy link display — Phase 17.1 post-UAT 2026-05-21:
+              clickable area, click → copy + snackbar. Copy button removed.
+              Если ссылка ещё не получена (telemt подтягивает IP) — skeleton
+              с подсказкой, фоновый polling в useMtProtoState подхватит её. */}
+          {state.status?.active && (
             <div>
               <p
                 className="text-caption mb-1"
@@ -285,118 +291,146 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               >
                 {t("server.utilities.mtproto.proxy_link_label")}
               </p>
-              <code
-                className="text-mono-sm break-all block py-2 px-3 rounded-[var(--radius-md)]"
-                style={{
-                  color: "var(--color-accent-interactive)",
-                  backgroundColor: "var(--color-bg-secondary)",
-                }}
-              >
-                {state.status.proxy_link}
-              </code>
+              {state.status?.proxy_link ? (
+                <code
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t("server.utilities.mtproto.copy")}
+                  onClick={() => void handleCopy()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void handleCopy();
+                    }
+                  }}
+                  className="text-mono-sm break-all block py-2 px-3 rounded-[var(--radius-md)] cursor-pointer transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)]"
+                  style={{
+                    color: "var(--color-accent-interactive)",
+                    backgroundColor: "var(--color-bg-secondary)",
+                  }}
+                  data-testid="mtproto-proxy-link"
+                >
+                  {state.status.proxy_link}
+                </code>
+              ) : (
+                <div
+                  className="block py-2 px-3 rounded-[var(--radius-md)] space-y-1.5"
+                  style={{ backgroundColor: "var(--color-bg-secondary)" }}
+                  data-testid="mtproto-proxy-link-skeleton"
+                  aria-busy="true"
+                  aria-live="polite"
+                >
+                  <Skeleton variant="line" width="92%" height={14} />
+                  <Skeleton variant="line" width="78%" height={14} />
+                  <p
+                    className="text-caption mt-1"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {t("server.utilities.mtproto.fetching_link")}
+                  </p>
+                </div>
+              )}
             </div>
           )}
-
-          {/* Actions row — UAT 2026-05-21: Start/Stop toggle prepended.
-              Start = primary accent (call to action when not active);
-              Stop = secondary (less prominent when service is fine). */}
-          <div className="flex flex-wrap items-center gap-2">
-            {state.status?.active ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<Square className="w-3.5 h-3.5" />}
-                loading={state.toggling}
-                disabled={state.toggling || state.uninstalling}
-                onClick={() => void state.stop()}
-                data-testid="mtproto-stop-button"
-              >
-                {t("server.utilities.mtproto.stop")}
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                size="sm"
-                icon={<Play className="w-3.5 h-3.5" />}
-                loading={state.toggling}
-                disabled={state.toggling || state.uninstalling}
-                onClick={() => void state.start()}
-                data-testid="mtproto-start-button"
-              >
-                {t("server.utilities.mtproto.start")}
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              onClick={() => void handleCopy()}
-              disabled={!state.status?.proxy_link}
-            >
-              {copied ? t("server.utilities.mtproto.copied") : t("server.utilities.mtproto.copy")}
-            </Button>
-            <Button
-              variant="danger-outline"
-              size="sm"
-              icon={<Trash2 className="w-3.5 h-3.5" />}
-              loading={state.uninstalling}
-              disabled={state.uninstalling || state.toggling}
-              onClick={() => void handleUninstall()}
-            >
-              {t("server.utilities.mtproto.uninstall")}
-            </Button>
-          </div>
         </div>
       )}
 
-      {/* Footer — Install / Retry button (when !installed) or Close button.
-          UAT 2026-05-20:
-            — state.error → primary becomes «Повторить» (state.retry),
-            — state.installing → primary hidden, secondary becomes «Отменить»
-              (state.cancelInstall — sets backend AppState flag, install loop
-              returns at next checkpoint),
-            — otherwise → «Установить» (handleInstall). */}
-      <div className="flex justify-end gap-2 mt-4">
-        {!installed && !state.installing && (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              if (state.error) {
-                void state.retry(parseInt(portInput, 10) || 0);
-              } else {
-                void handleInstall();
-              }
-            }}
-            data-testid="mtproto-install-button"
-          >
-            {state.error
-              ? t("server.utilities.mtproto.retry")
-              : t("server.utilities.mtproto.install")}
-          </Button>
-        )}
-        {state.installing ? (
+      {/* Footer — Phase 17.1 post-UAT 2026-05-21:
+          - installed (configured view): 3 кнопки в одну строку на всю ширину
+            (Удалить | Start/Stop | Закрыть) — user-requested order 2026-05-21
+          - !installed: Install/Retry + Close (или Cancel пока installing) */}
+      {installed ? (
+        <div className="grid grid-cols-3 gap-2 mt-4">
           <Button
             variant="danger-outline"
             size="sm"
-            disabled={cancelling}
-            icon={cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
-            onClick={() => {
-              setCancelling(true);
-              void state.cancelInstall();
-            }}
-            data-testid="mtproto-cancel-install-button"
+            icon={<Trash2 className="w-3.5 h-3.5" />}
+            loading={state.uninstalling}
+            disabled={state.uninstalling || state.toggling}
+            onClick={() => void handleUninstall()}
+            className="w-full"
           >
-            {cancelling
-              ? t("server.utilities.mtproto.cancelling")
-              : t("server.utilities.mtproto.cancel_install")}
+            {t("server.utilities.mtproto.uninstall")}
           </Button>
-        ) : (
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          {state.status?.active ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Square className="w-3.5 h-3.5" />}
+              loading={state.toggling}
+              disabled={state.toggling || state.uninstalling}
+              onClick={() => void state.stop()}
+              data-testid="mtproto-stop-button"
+              className="w-full"
+            >
+              {t("server.utilities.mtproto.stop")}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Play className="w-3.5 h-3.5" />}
+              loading={state.toggling}
+              disabled={state.toggling || state.uninstalling}
+              onClick={() => void state.start()}
+              data-testid="mtproto-start-button"
+              className="w-full"
+            >
+              {t("server.utilities.mtproto.start")}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="w-full"
+          >
             {t("buttons.close")}
           </Button>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex justify-end gap-2 mt-4">
+          {!state.installing && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                if (state.error) {
+                  void state.retry(parseInt(portInput, 10) || 0);
+                } else {
+                  void handleInstall();
+                }
+              }}
+              data-testid="mtproto-install-button"
+            >
+              {state.error
+                ? t("server.utilities.mtproto.retry")
+                : t("server.utilities.mtproto.install")}
+            </Button>
+          )}
+          {state.installing ? (
+            <Button
+              variant="danger-outline"
+              size="sm"
+              disabled={cancelling}
+              icon={cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
+              onClick={() => {
+                setCancelling(true);
+                void state.cancelInstall();
+              }}
+              data-testid="mtproto-cancel-install-button"
+            >
+              {cancelling
+                ? t("server.utilities.mtproto.cancelling")
+                : t("server.utilities.mtproto.cancel_install")}
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              {t("buttons.close")}
+            </Button>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
