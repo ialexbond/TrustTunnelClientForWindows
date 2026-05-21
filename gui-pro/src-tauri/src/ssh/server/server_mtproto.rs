@@ -1,8 +1,10 @@
 use super::super::*;
+use super::super::sanitize::validate_tls_domain;
 use russh::client;
 use serde::Serialize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// UAT 2026-05-20 — cancel checkpoint for MTProto install.
 ///
@@ -383,8 +385,485 @@ pub async fn mtproto_get_status(
 }
 
 // ═══════════════════════════════════════════════════════════════
-//   mtproto_install — direct connect, long-running
-//   Uses official TelegramMessenger/MTProxy (C implementation)
+//   Phase 17.1 — Async install helpers (telemt pipeline)
+//
+//   Each helper performs ONE step of the 7-step install flow.
+//   Helpers are private (module-scope), tested via integration on UAT —
+//   pure parsing logic lives in Plan 01 helpers (render_telemt_toml,
+//   parse_telemt_toml_minimal, parse_proxy_link_from_*, etc.).
+//
+//   Cancel checkpoints: каждый helper that issues exec_command is
+//   followed in mtproto_install body by `check_cancel(&cancel_flag)?`.
+// ═══════════════════════════════════════════════════════════════
+
+/// Phase 17.1 — detect remote architecture (`uname -m`) and libc flavor
+/// (`musl` if `ldd --version` mentions musl, else `gnu`).
+///
+/// Defaults to `("x86_64", "gnu")` if parsing fails — sane fallback for
+/// every TrustTunnel-supported Ubuntu/Debian VPS. Per researcher §Pitfall 6
+/// we deliberately do NOT detect x86_64-v3 (AVX2+BMI2) — basic x86_64
+/// variant works on all hardware, premature optimization for narrow CPU
+/// support window не оправдан.
+async fn detect_arch_and_libc(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+) -> (String, String) {
+    let (uname_out, _) = exec_command(handle, app, "uname -m")
+        .await
+        .unwrap_or_default();
+    let arch = match uname_out.trim() {
+        "x86_64" | "amd64" => "x86_64".to_string(),
+        "aarch64" | "arm64" => "aarch64".to_string(),
+        _ => "x86_64".to_string(), // fallback
+    };
+
+    let (libc_out, _) = exec_command(
+        handle,
+        app,
+        "ldd --version 2>&1 | grep -iq musl && echo musl || echo gnu",
+    )
+    .await
+    .unwrap_or_default();
+    let libc = match libc_out.trim() {
+        "musl" => "musl".to_string(),
+        _ => "gnu".to_string(),
+    };
+
+    (arch, libc)
+}
+
+/// Phase 17.1 — resolve `tls_domain` через hostname-resolution chain.
+///
+/// Source pattern: `server_config.rs:456-477` (deeplink export Phase 14).
+///
+/// 1. `grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml | head -1`
+///    → если результат непустой И `!= "trusttunnel.local"` → use as-is.
+/// 2. Иначе fallback на `fallback_host` (`params.host` — IP или domain user typed для SSH).
+///
+/// NO magic default (`petrovich.ru` etc.) — researcher §Open Q5, user confirmed
+/// 2026-05-21 per CONTEXT.md D-2.2 option (a): для IP-only установок используем
+/// IP-адрес, accepted tradeoff с weak DPI camouflage.
+///
+/// **S-02 critical:** последняя операция — `validate_tls_domain(&result)?`
+/// перед embed в heredoc.
+async fn read_trusttunnel_hostname_or_ip(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+    fallback_host: &str,
+) -> Result<String, String> {
+    let (hostname_raw, _) = exec_command(
+        handle,
+        app,
+        &format!(
+            r#"{sudo}grep -oP 'hostname\s*=\s*"\K[^"]+' /opt/trusttunnel/hosts.toml 2>/dev/null | head -1"#
+        ),
+    )
+    .await
+    .unwrap_or_default();
+    let endpoint_hostname = hostname_raw.trim();
+
+    let resolved = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
+        endpoint_hostname.to_string()
+    } else {
+        fallback_host.trim().to_string()
+    };
+
+    // S-02 — char-whitelist validation BEFORE embedding в shell heredoc body.
+    validate_tls_domain(&resolved)?;
+
+    Ok(resolved)
+}
+
+/// Phase 17.1 — preflight cleanup before fresh install: stop our own zombies
+/// (previous telemt process from a crashed install attempt) + wait для port release.
+///
+/// Modeled on Phase 17 preflight pattern (server_mtproto.rs:179-192 в текущей
+/// MTProxy реализации). Errors silenced (`|| true`) — preflight must NEVER
+/// abort a fresh install. Best-effort.
+async fn telemt_preflight_cleanup(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+    port: u16,
+) {
+    let cmd = format!(
+        "{sudo}systemctl stop telemt 2>/dev/null; \
+         {sudo}systemctl disable telemt 2>/dev/null; \
+         {sudo}pkill -f /bin/telemt 2>/dev/null; \
+         for i in 1 2 3 4 5; do \
+           {sudo}ss -tlnp 2>/dev/null | grep -q ':{port} ' || break; \
+           sleep 1; \
+         done; \
+         true"
+    );
+    exec_command(handle, app, &cmd).await.ok();
+}
+
+/// Phase 17.1 — detect legacy MTProxy via three independent paths.
+///
+/// Runs ONE SSH command with 3 file existence checks (`test -f ...`) → parses
+/// multi-line stdout через Plan 01 helper `detect_legacy_mtproxy_from_outputs`.
+/// D-4.1 — миграция тихая, ЛЮБАЯ из 3 улик достаточна для cleanup.
+async fn detect_legacy_mtproxy(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> bool {
+    let cmd = format!(
+        r#"{sudo}bash -c 'echo "binary=$(test -f /opt/MTProxy/mtproto-proxy && echo FOUND || echo NONE)"; \
+                          echo "unit=$(test -f /etc/systemd/system/MTProxy.service && echo FOUND || echo NONE)"; \
+                          echo "env=$(test -f /etc/mtproxy.env && echo FOUND || echo NONE)"'"#
+    );
+    let (out, _) = exec_command(handle, app, &cmd).await.unwrap_or_default();
+    detect_legacy_mtproxy_from_outputs(&out)
+}
+
+/// Phase 17.1 — bulk cleanup of legacy MTProxy installation.
+///
+/// Reads old `PORT=...` from `/etc/mtproxy.env` (for ufw cleanup-by-number),
+/// then bulk-stops / disables / removes binaries / unit file / env config.
+/// Errors silenced (`|| true`) — best-effort per D-4.4. ufw cleanup via
+/// delete-by-number (Phase 17 fix-marathon pattern — `ufw delete allow N/tcp`
+/// silently failed для rules with comment metadata).
+async fn cleanup_legacy_mtproxy(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<(), String> {
+    // 1) Read old port for firewall cleanup.
+    let (port_out, _) = exec_command(
+        handle,
+        app,
+        r#"grep -oP 'PORT=\K\d+' /etc/mtproxy.env 2>/dev/null || echo 0"#,
+    )
+    .await
+    .unwrap_or_default();
+    let old_port: u16 = port_out.trim().parse().unwrap_or(0);
+
+    // 2) Bulk cleanup (best-effort).
+    let cleanup_cmd = format!(
+        "{sudo}systemctl stop MTProxy 2>/dev/null; \
+         {sudo}systemctl disable MTProxy 2>/dev/null; \
+         {sudo}pkill -f /opt/MTProxy/mtproto-proxy 2>/dev/null; \
+         {sudo}rm -f /etc/systemd/system/MTProxy.service 2>/dev/null; \
+         {sudo}systemctl daemon-reload 2>/dev/null; \
+         {sudo}rm -rf /opt/MTProxy 2>/dev/null; \
+         {sudo}rm -f /etc/mtproxy.env 2>/dev/null; \
+         true"
+    );
+    exec_command(handle, app, &cleanup_cmd).await.ok();
+
+    // 3) ufw cleanup-by-number если знаем старый порт.
+    if old_port > 0 {
+        let delim = format!("UFWLEG_EOF_{}", uuid::Uuid::new_v4().simple());
+        let ufw_cmd = format!(
+            "{sudo}bash <<'{delim}'\n\
+NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
+for N in $NUMBERS; do\n\
+  yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
+done\n\
+true\n\
+{delim}",
+            sudo = sudo,
+            delim = delim,
+            port = old_port,
+        );
+        exec_command(handle, app, &ufw_cmd).await.ok();
+    }
+
+    Ok(())
+}
+
+/// Phase 17.1 — download telemt binary via wget, validate size, extract, install.
+///
+/// URL pattern: `https://github.com/telemt/telemt/releases/latest/download/telemt-{arch}-linux-{libc}.tar.gz`.
+/// Per researcher §Version Pinning — `latest` (no version pin) для security updates +
+/// stable URL pattern. SHA256 verify DEFERRED per planner decision (Phase 17.2 polish) —
+/// HTTPS-from-github.com baseline trust acceptable.
+///
+/// Sanity check: tar.gz size > 1 MB (corrupt downloads typically < 100 KB).
+async fn download_telemt(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+    arch: &str,
+    libc: &str,
+) -> Result<(), String> {
+    let delim = format!("DL_EOF_{}", uuid::Uuid::new_v4().simple());
+    let cmd = format!(
+        "{sudo}bash <<'{delim}'\n\
+set -e\n\
+URL=\"https://github.com/telemt/telemt/releases/latest/download/telemt-{arch}-linux-{libc}.tar.gz\"\n\
+wget -q -O /tmp/telemt.tar.gz \"$URL\"\n\
+test -s /tmp/telemt.tar.gz\n\
+SIZE=$(stat -c%s /tmp/telemt.tar.gz 2>/dev/null || echo 0)\n\
+if [ \"$SIZE\" -lt 1000000 ]; then\n\
+  echo DOWNLOAD_TOO_SMALL\n\
+  exit 1\n\
+fi\n\
+tar -xzf /tmp/telemt.tar.gz -C /tmp\n\
+test -f /tmp/telemt\n\
+mv /tmp/telemt /bin/telemt\n\
+chmod +x /bin/telemt\n\
+rm -f /tmp/telemt.tar.gz\n\
+echo DOWNLOAD_OK\n\
+{delim}",
+        sudo = sudo,
+        delim = delim,
+        arch = arch,
+        libc = libc,
+    );
+    let (out, _) = exec_command(handle, app, &cmd).await?;
+    if !out.contains("DOWNLOAD_OK") {
+        return Err("TELEMT_DOWNLOAD_FAILED".into());
+    }
+    Ok(())
+}
+
+/// Phase 17.1 — create `telemt` system user + group, prepare `/etc/telemt`
+/// и `/opt/telemt` directories.
+///
+/// Idempotent — `getent passwd telemt` skip path для re-installs. Per
+/// researcher §Pitfall 8: user create MUST precede chown of /etc/telemt,
+/// иначе `chown root:telemt` fails with `invalid user`.
+async fn create_telemt_user(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<(), String> {
+    let cmd = format!(
+        "{sudo}bash -c 'getent passwd telemt >/dev/null 2>&1 || useradd -d /opt/telemt -m -r -U telemt; \
+         mkdir -p /etc/telemt && mkdir -p /opt/telemt && \
+         chown -R telemt:telemt /etc/telemt /opt/telemt && \
+         echo USER_OK'"
+    );
+    let (out, _) = exec_command(handle, app, &cmd).await?;
+    if !out.contains("USER_OK") {
+        return Err("TELEMT_USER_CREATE_FAILED".into());
+    }
+    Ok(())
+}
+
+/// Phase 17.1 — write `/etc/telemt/telemt.toml` через UUID-randomized heredoc (S-04).
+///
+/// PRECONDITION (verified at каждом call site по защите в depth):
+///  - `secret` — `is_valid_hex_secret(secret) == true`
+///  - `tls_domain` — `validate_tls_domain(tls_domain) == Ok(())`
+///  - `port` in 1024..=65535
+///
+/// Двойной heredoc (researcher §Pattern 1): OUTER wraps `bash -c` elevation,
+/// INNER wraps TOML body — UUID-randomized delimiter защищает от content-injection
+/// даже если TOML body содержит `EOF` substring (defence in depth — render_telemt_toml
+/// output никогда не содержит EOF, но invariant preserved).
+async fn write_telemt_config(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+    port: u16,
+    secret: &str,
+    tls_domain: &str,
+) -> Result<(), String> {
+    let toml_content = render_telemt_toml(port, secret, tls_domain);
+    let outer = format!("CFG_OUTER_{}", uuid::Uuid::new_v4().simple());
+    let inner = format!("CFG_INNER_{}", uuid::Uuid::new_v4().simple());
+    let cmd = format!(
+        "{sudo}bash <<'{outer}'\n\
+cat > /etc/telemt/telemt.toml <<'{inner}'\n\
+{content}\n\
+{inner}\n\
+chown root:telemt /etc/telemt/telemt.toml\n\
+chmod 640 /etc/telemt/telemt.toml\n\
+echo CONFIG_OK\n\
+{outer}",
+        sudo = sudo,
+        outer = outer,
+        inner = inner,
+        content = toml_content,
+    );
+    let (out, _) = exec_command(handle, app, &cmd).await?;
+    if !out.contains("CONFIG_OK") {
+        return Err("TELEMT_CONFIG_WRITE_FAILED".into());
+    }
+    Ok(())
+}
+
+/// Phase 17.1 — write `/etc/systemd/system/telemt.service` + daemon-reload + enable.
+///
+/// Static content из Plan 01 `render_telemt_systemd_unit()` — Restart=on-failure
+/// (NOT always — Pitfall 4 trap avoided), User=telemt, NoNewPrivileges=true,
+/// CAP_NET_BIND_SERVICE + CAP_NET_ADMIN. UUID heredoc per S-04 invariant
+/// (although static content not strictly required — uniformity с config write).
+async fn install_telemt_systemd_unit(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<(), String> {
+    let unit_content = render_telemt_systemd_unit();
+    let outer = format!("UNIT_OUTER_{}", uuid::Uuid::new_v4().simple());
+    let inner = format!("UNIT_INNER_{}", uuid::Uuid::new_v4().simple());
+    let cmd = format!(
+        "{sudo}bash <<'{outer}'\n\
+cat > /etc/systemd/system/telemt.service <<'{inner}'\n\
+{content}\n\
+{inner}\n\
+chmod 644 /etc/systemd/system/telemt.service\n\
+systemctl daemon-reload\n\
+systemctl enable telemt\n\
+echo UNIT_OK\n\
+{outer}",
+        sudo = sudo,
+        outer = outer,
+        inner = inner,
+        content = unit_content,
+    );
+    let (out, _) = exec_command(handle, app, &cmd).await?;
+    if !out.contains("UNIT_OK") {
+        return Err("TELEMT_UNIT_INSTALL_FAILED".into());
+    }
+    Ok(())
+}
+
+/// Phase 17.1 — `systemctl start telemt` + retry-loop 6×1s до `is-active`.
+///
+/// Per researcher §Service Startup Timing — telemt cold start ~200-500ms
+/// (Rust+Tokio fast), TLS emulation init (`tls_fetch` HTTPS request) ~1-5s.
+/// Typical total: 1-3s, max ~6s. Reuse Phase 17 pattern (6×1s) unchanged.
+///
+/// Returns `Ok(true)` если service active в 6s window, иначе `Ok(false)`.
+async fn start_telemt_and_wait(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> Result<bool, String> {
+    exec_command(handle, app, &format!("{sudo}systemctl start telemt")).await?;
+    for attempt in 0..6 {
+        let (out, _) = exec_command(
+            handle,
+            app,
+            &format!("{sudo}systemctl is-active telemt"),
+        )
+        .await?;
+        if out.trim() == "active" {
+            return Ok(true);
+        }
+        if attempt < 5 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+    Ok(false)
+}
+
+/// Phase 17.1 — `ufw allow {port}/tcp` (idempotent через ufw native deduplication).
+///
+/// Best-effort — ufw может отсутствовать (acceptable per researcher §Environment
+/// Availability). `|| true` swallows missing-command exit code.
+async fn open_telemt_firewall(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+    port: u16,
+) -> Result<(), String> {
+    let cmd = format!(
+        "{sudo}ufw allow {port}/tcp comment 'TrustTunnel MTProto' 2>/dev/null || true; echo FW_OK"
+    );
+    let (_out, _) = exec_command(handle, app, &cmd).await?;
+    Ok(())
+}
+
+/// Phase 17.1 — fetch `tg://proxy?...` link via primary API path, fallback journalctl.
+///
+/// Per researcher §Code Examples 4-5 + D-1.9. PRIMARY: `curl 127.0.0.1:9091/v1/users`
+/// + serde JSON parse (Plan 01 `parse_proxy_link_from_api_json`). FALLBACK:
+///   `journalctl -u telemt -n 200` + reverse-iterate substring search (Plan 01
+///   `parse_proxy_link_from_journalctl`).
+///
+/// Returns empty string если оба пути fail — caller (mtproto_install) accepts
+/// `MtProtoStatus.proxy_link = ""` как degraded state ("installed but no link").
+async fn fetch_proxy_link(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+) -> String {
+    // Primary: telemt admin API.
+    let (api_out, _) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}curl -fsS -m 10 http://127.0.0.1:9091/v1/users 2>/dev/null"),
+    )
+    .await
+    .unwrap_or_default();
+    if let Some(link) = parse_proxy_link_from_api_json(&api_out) {
+        return link;
+    }
+
+    // Fallback: journalctl.
+    let (log_out, _) = exec_command(
+        handle,
+        app,
+        &format!("{sudo}journalctl -u telemt -n 200 --no-pager -o cat 2>/dev/null"),
+    )
+    .await
+    .unwrap_or_default();
+    parse_proxy_link_from_journalctl(&log_out).unwrap_or_default()
+}
+
+/// Phase 17.1 — full rollback on cancel path (D-3.4).
+///
+/// Best-effort cleanup (errors silenced):
+/// - stop + disable telemt service
+/// - remove systemd unit file + daemon-reload
+/// - remove `/bin/telemt` binary
+/// - remove `/etc/telemt` + `/opt/telemt` directories
+/// - remove `telemt` system user (`userdel -r` removes home dir)
+/// - if `port_opt` provided — ufw delete-by-number for that port
+///
+/// Called ONLY when `install_inner_result == Err("MTPROTO_INSTALL_CANCELLED")`.
+/// NOT called для TELEMT_DOWNLOAD_FAILED / TELEMT_START_FAILED — partial state
+/// preserved for idempotent retry (researcher §Open Q5, MTPROTO-07 pattern).
+async fn rollback_telemt_install(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    sudo: &str,
+    port_opt: Option<u16>,
+) -> Result<(), String> {
+    let cleanup_cmd = format!(
+        "{sudo}systemctl stop telemt 2>/dev/null || true; \
+         {sudo}systemctl disable telemt 2>/dev/null || true; \
+         {sudo}rm -f /etc/systemd/system/telemt.service 2>/dev/null; \
+         {sudo}systemctl daemon-reload 2>/dev/null; \
+         {sudo}rm -f /bin/telemt 2>/dev/null; \
+         {sudo}rm -rf /etc/telemt /opt/telemt 2>/dev/null; \
+         {sudo}userdel -r telemt 2>/dev/null || true; \
+         true"
+    );
+    exec_command(handle, app, &cleanup_cmd).await.ok();
+
+    if let Some(port) = port_opt {
+        let delim = format!("UFWRB_EOF_{}", uuid::Uuid::new_v4().simple());
+        let ufw_cmd = format!(
+            "{sudo}bash <<'{delim}'\n\
+NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
+for N in $NUMBERS; do\n\
+  yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
+done\n\
+true\n\
+{delim}",
+            sudo = sudo,
+            delim = delim,
+            port = port,
+        );
+        exec_command(handle, app, &ufw_cmd).await.ok();
+    }
+
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   mtproto_install — direct connect, long-running (Phase 17.1 rewrite)
+//   Pipeline: cleanup_legacy → download_binary → create_user →
+//             configure_telemt → start_service → open_firewall → complete
+//   Uses telemt 3.4.x (Rust + Tokio + TLS-camouflage mode).
 // ═══════════════════════════════════════════════════════════════
 
 pub async fn mtproto_install(
@@ -393,287 +872,226 @@ pub async fn mtproto_install(
     mtproto_port: u16,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<MtProtoStatus, String> {
+    // ── 1. Early port validation (S-02 surface defence) ──
+    if mtproto_port < 1024 {
+        return Err(format!("MTPROTO_INVALID_PORT|{mtproto_port}"));
+    }
+    let port = mtproto_port;
+
     let handle = params.connect_with_app(app.clone()).await?;
     let sudo = detect_sudo(&handle, app).await;
     check_cancel(&cancel_flag)?;
 
-    // ── Preflight cleanup (UAT 2026-05-20) ──
-    //
-    // Aggressively dispose of anything left over from a previous install
-    // attempt BEFORE we check the port for conflicts. Without this, a stale
-    // MTProxy unit/binary holds the user's chosen port and the install dies
-    // with `MTPROTO_PORT_BUSY` — leaving them to run cleanup commands by hand.
-    //
-    //   1) `systemctl stop MTProxy`     — graceful shutdown
-    //   2) `systemctl disable MTProxy`  — kill Restart=always auto-revive loop
-    //   3) `pkill -f mtproto-proxy`     — covers stale binaries that detached
-    //                                     from the unit (manual kill -9, etc.)
-    //   4) `rm -f /etc/systemd/system/MTProxy.service` + `daemon-reload`
-    //                                   — purge the old unit so the new
-    //                                     install starts from a clean slate
-    //
-    // Errors silenced (`|| true`) — preflight must never abort a fresh install.
-    exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}systemctl stop MTProxy 2>/dev/null; \
-             {sudo}systemctl disable MTProxy 2>/dev/null; \
-             {sudo}pkill -f /opt/MTProxy/mtproto-proxy 2>/dev/null; \
-             {sudo}rm -f /etc/systemd/system/MTProxy.service 2>/dev/null; \
-             {sudo}systemctl daemon-reload 2>/dev/null; \
-             true"
-        ),
-    )
-    .await
-    .ok();
+    let host_for_link = params.host.clone();
+    let install_started_port = port;
 
-    // ── Validate / resolve port ──
-    let port: u16 = if mtproto_port == 0 {
-        emit_mtproto_step(app, "download", "running", "Finding free port...");
-        let (port_out, _) = exec_command(
-            &handle,
-            app,
-            "port=0; for i in $(shuf -i 10000-60000 -n 20); do ss -tlnp | grep -q \":$i \" || { port=$i; break; }; done; echo $port",
-        )
-        .await?;
-        let auto_port: u16 = port_out.trim().parse().unwrap_or(0);
-        if auto_port == 0 || auto_port < 1024 {
-            emit_mtproto_step(app, "download", "error", "No free port found");
-            return Err("MTPROTO_NO_FREE_PORT".into());
+    // ── Async block для всей pipeline — ловит errors в `install_inner_result`,
+    //    позволяет rollback path после блока. ──
+    let install_inner_result: Result<MtProtoStatus, String> = async {
+        // ─── STEP 0: cleanup_legacy ───────────────────────────────
+        emit_mtproto_step(app, "cleanup_legacy", "running", "");
+        let has_legacy = detect_legacy_mtproxy(&handle, app, sudo).await;
+        if has_legacy {
+            cleanup_legacy_mtproxy(&handle, app, sudo).await.ok();
+            emit_mtproto_step(
+                app,
+                "cleanup_legacy",
+                "done",
+                "Старый MTProxy был обнаружен и удалён в процессе установки",
+            );
+        } else {
+            emit_mtproto_step(app, "cleanup_legacy", "done", "");
         }
-        auto_port
-    } else {
-        if mtproto_port < 1024 {
-            return Err(format!("MTPROTO_INVALID_PORT|{mtproto_port}"));
-        }
+        check_cancel(&cancel_flag)?;
+
+        // ─── Preflight cleanup (silent — own zombies) ─────────────
+        telemt_preflight_cleanup(&handle, app, sudo, port).await;
+        check_cancel(&cancel_flag)?;
+
+        // ─── Port conflict check (after own preflight) ────────────
         let (busy_out, _) = exec_command(
             &handle,
             app,
-            &format!("ss -tlnp | grep -q ':{mtproto_port} ' && echo BUSY || echo FREE"),
+            &format!(
+                "{sudo}ss -tlnp 2>/dev/null | awk -v port=:{port} '$0 ~ port {{print $0}}' | head -1"
+            ),
         )
         .await?;
-        if busy_out.trim().contains("BUSY") {
-            return Err(format!("MTPROTO_PORT_BUSY|{mtproto_port}"));
+        if !busy_out.trim().is_empty() {
+            // Parse process name from `ss` output (Phase 17 fix-marathon pattern).
+            let proc_name = extract_process_name_from_ss(&busy_out)
+                .unwrap_or_else(|| "(неизвестный)".to_string());
+            emit_mtproto_step(
+                app,
+                "start_service",
+                "error",
+                &format!("Порт {port} занят сервисом «{proc_name}»"),
+            );
+            return Err(format!("MTPROTO_PORT_BUSY|{port}|{proc_name}"));
         }
-        mtproto_port
-    };
 
-    // ── Step: download (install deps + clone + build) ──
-    emit_mtproto_step(app, "download", "running", "");
+        // ─── STEP 1: download_binary ──────────────────────────────
+        emit_mtproto_step(app, "download_binary", "running", "");
+        let (arch, libc) = detect_arch_and_libc(&handle, app).await;
+        if let Err(e) = download_telemt(&handle, app, sudo, &arch, &libc).await {
+            emit_mtproto_step(app, "download_binary", "error", "Не удалось скачать telemt");
+            return Err(e);
+        }
+        emit_mtproto_step(app, "download_binary", "done", "");
+        check_cancel(&cancel_flag)?;
 
-    // Install build dependencies.
-    //
-    // UAT 2026-05-20 — wrapped in `bash -c` with explicit non-interactive envs
-    // because on Ubuntu 24.04 `needrestart` (pulled in transitively by
-    // build-essential) prints a TUI prompt asking which services to restart.
-    // Over SSH that prompt blocks stdin forever → russh sees no progress on
-    // the channel → SSH_CHANNEL_FAILED|Channel send error after ~60s timeout.
-    //
-    // sudo strips env vars by default (env_reset in sudoers), so setting
-    // DEBIAN_FRONTEND/NEEDRESTART_MODE before `{sudo}apt-get` doesn't reach
-    // dpkg. Doing `{sudo}bash -c '...'` first elevates, then exporting envs
-    // INSIDE the elevated shell — they propagate to every subsequent
-    // apt-get / dpkg invocation.
-    //
-    //   DEBIAN_FRONTEND=noninteractive — disable any debconf TUI prompts
-    //   NEEDRESTART_MODE=a              — auto-restart services, no prompt
-    //   NEEDRESTART_SUSPEND=1           — alt switch in case MODE is ignored
-    //   --force-confdef/--force-confold — keep existing config files, don't
-    //                                     ask user about changes
-    let (deps_out, deps_code) = exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}bash -c 'export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 APT_LISTCHANGES_FRONTEND=none; \
-             apt-get update -qq && \
-             apt-get install -y -qq \
-               -o Dpkg::Options::=\"--force-confdef\" \
-               -o Dpkg::Options::=\"--force-confold\" \
-               git curl build-essential libssl-dev zlib1g-dev 2>&1 && echo DEPS_OK'"
-        ),
-    )
-    .await?;
-    if !deps_out.contains("DEPS_OK") {
-        emit_mtproto_step(app, "download", "error", "Failed to install build dependencies");
-        return Err(format!("MTPROTO_DEPS_FAILED|{}", deps_code));
-    }
-    check_cancel(&cancel_flag)?;
+        // ─── STEP 2: create_user ──────────────────────────────────
+        emit_mtproto_step(app, "create_user", "running", "");
+        if let Err(e) = create_telemt_user(&handle, app, sudo).await {
+            emit_mtproto_step(
+                app,
+                "create_user",
+                "error",
+                "Не удалось создать пользователя telemt",
+            );
+            return Err(e);
+        }
+        emit_mtproto_step(app, "create_user", "done", "");
+        check_cancel(&cancel_flag)?;
 
-    // Clone and build MTProxy
-    let (build_out, _) = exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}bash -c 'set -e; \
-             rm -rf /opt/MTProxy && \
-             git clone https://github.com/TelegramMessenger/MTProxy.git /opt/MTProxy && \
-             cd /opt/MTProxy && \
-             make -j$(nproc) 2>&1 && \
-             test -f /opt/MTProxy/objs/bin/mtproto-proxy && \
-             ln -sf /opt/MTProxy/objs/bin/mtproto-proxy /opt/MTProxy/mtproto-proxy && \
-             echo BUILD_OK'"
-        ),
-    )
-    .await?;
-    if !build_out.contains("BUILD_OK") {
-        emit_mtproto_step(app, "download", "error", "Build failed");
-        return Err("MTPROTO_BUILD_FAILED".into());
-    }
-    emit_mtproto_step(app, "download", "done", "");
-    check_cancel(&cancel_flag)?;
+        // ─── STEP 3: configure_telemt ─────────────────────────────
+        emit_mtproto_step(app, "configure_telemt", "running", "");
 
-    // ── Step: configure (download proxy-secret + proxy-multi.conf) ──
-    emit_mtproto_step(app, "configure", "running", "");
+        // Resolve tls_domain (read_trusttunnel_hostname_or_ip uses validate_tls_domain).
+        let tls_domain =
+            read_trusttunnel_hostname_or_ip(&handle, app, sudo, &host_for_link).await?;
 
-    let (cfg_ok, _) = exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}bash -c 'set -e; \
-             curl -s https://core.telegram.org/getProxySecret -o /opt/MTProxy/proxy-secret && \
-             curl -s https://core.telegram.org/getProxyConfig -o /opt/MTProxy/proxy-multi.conf && \
-             test -s /opt/MTProxy/proxy-secret && \
-             test -s /opt/MTProxy/proxy-multi.conf && \
-             echo CONFIG_OK'"
-        ),
-    )
-    .await?;
-    if !cfg_ok.contains("CONFIG_OK") {
-        emit_mtproto_step(app, "configure", "error", "Failed to download Telegram configs");
-        return Err("MTPROTO_CONFIG_DOWNLOAD_FAILED".into());
-    }
-    emit_mtproto_step(app, "configure", "done", "");
-    check_cancel(&cancel_flag)?;
-
-    // ── Step: generate_secret ──
-    emit_mtproto_step(app, "generate_secret", "running", "");
-
-    // Check existing env for secret reuse (MTPROTO-07)
-    let (env_out, _) = exec_command(
-        &handle,
-        app,
-        "cat /etc/mtproxy.env 2>/dev/null || echo ''",
-    )
-    .await?;
-    let (existing_secret, _) = parse_mtproxy_env(&env_out);
-
-    let secret = if is_valid_hex_secret(&existing_secret) {
-        existing_secret
-    } else {
-        // Generate new 16-byte hex secret (openssl is always available, xxd may not be)
-        let (secret_out, _) = exec_command(
+        // Secret: reuse existing valid (D-3.6 idempotency / MTPROTO-07 pattern) либо generate new.
+        let (existing_toml, _) = exec_command(
             &handle,
             app,
-            "openssl rand -hex 16",
+            &format!("{sudo}cat /etc/telemt/telemt.toml 2>/dev/null || echo ''"),
         )
         .await?;
-        let gen_secret = secret_out.trim().to_string();
-        if !is_valid_hex_secret(&gen_secret) {
-            emit_mtproto_step(app, "generate_secret", "error", "Invalid secret generated");
-            return Err("MTPROTO_SECRET_INVALID".into());
-        }
-        gen_secret
-    };
+        let (_existing_port, existing_secret) = parse_telemt_toml_minimal(&existing_toml);
+        let secret = if is_valid_hex_secret(&existing_secret) {
+            existing_secret
+        } else {
+            let (gen_out, _) = exec_command(&handle, app, "openssl rand -hex 16").await?;
+            let gen = gen_out.trim().to_string();
+            if !is_valid_hex_secret(&gen) {
+                emit_mtproto_step(
+                    app,
+                    "configure_telemt",
+                    "error",
+                    "Не удалось сгенерировать корректный secret",
+                );
+                return Err("TELEMT_SECRET_INVALID".into());
+            }
+            gen
+        };
 
-    // Final validation guard: secret may come from existing env file (user-editable),
-    // so re-validate right before embedding in shell heredoc to prevent injection.
-    if !is_valid_hex_secret(&secret) {
-        return Err("MTPROTO_SECRET_INVALID".into());
+        // Defensive re-check (Phase 17 paranoia preserved) — secret may come from
+        // user-edited file, validate immediately before embedding в shell heredoc.
+        if !is_valid_hex_secret(&secret) {
+            return Err("TELEMT_SECRET_INVALID".into());
+        }
+
+        if let Err(e) =
+            write_telemt_config(&handle, app, sudo, port, &secret, &tls_domain).await
+        {
+            emit_mtproto_step(
+                app,
+                "configure_telemt",
+                "error",
+                "Не удалось записать telemt.toml",
+            );
+            return Err(e);
+        }
+        emit_mtproto_step(app, "configure_telemt", "done", "");
+        check_cancel(&cancel_flag)?;
+
+        // ─── STEP 4: start_service ────────────────────────────────
+        emit_mtproto_step(app, "start_service", "running", "");
+        if let Err(e) = install_telemt_systemd_unit(&handle, app, sudo).await {
+            emit_mtproto_step(app, "start_service", "error", "Не удалось установить systemd unit");
+            return Err(e);
+        }
+        let active = start_telemt_and_wait(&handle, app, sudo).await?;
+        if !active {
+            emit_mtproto_step(
+                app,
+                "start_service",
+                "error",
+                "Сервис не вышел в состояние active за 6 секунд",
+            );
+            return Err("TELEMT_START_FAILED".into());
+        }
+        emit_mtproto_step(app, "start_service", "done", "");
+        check_cancel(&cancel_flag)?;
+
+        // ─── STEP 5: open_firewall ────────────────────────────────
+        emit_mtproto_step(app, "open_firewall", "running", "");
+        open_telemt_firewall(&handle, app, sudo, port).await.ok();
+        emit_mtproto_step(app, "open_firewall", "done", "");
+        check_cancel(&cancel_flag)?;
+
+        // ─── STEP 6: complete (fetch proxy_link) ──────────────────
+        //
+        // Retry: telemt admin API может не быть ready immediately after
+        // systemctl start (TLS emulation init still completing). 3×500ms =
+        // max 1.5s extra wait — достаточно для TLS init без блокировки UI.
+        // Per Plan-check advisory #7 — progressive retry instead of single sleep.
+        let mut proxy_link = String::new();
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            proxy_link = fetch_proxy_link(&handle, app, sudo).await;
+            if !proxy_link.is_empty() {
+                break;
+            }
+        }
+        // Если link всё ещё пуст после 3 retries — caller получит
+        // proxy_link = "", UI отрендерит «installed but link не извлечена»
+        // (acceptable degradation per researcher §Open Q5).
+        emit_mtproto_step(app, "complete", "done", "");
+
+        Ok(MtProtoStatus {
+            installed: true,
+            active: true,
+            port,
+            secret,     // D-29: returns в Tauri response, но НЕ через emit_log/emit_mtproto_step
+            proxy_link, // D-29: returns в response, но НЕ через emit_log/emit_mtproto_step
+        })
+    }
+    .await;
+
+    // ─── Cancel/error rollback ────────────────────────────────────
+    //
+    // ASYMMETRY by design (per Plan-check advisory #6 — accepted tradeoff):
+    //
+    // - `MTPROTO_INSTALL_CANCELLED` → FULL rollback (D-3.4 «прервать и откатить»).
+    //   User explicitly clicked Cancel → expects clean server state.
+    //
+    // - `TELEMT_DOWNLOAD_FAILED` / `TELEMT_START_FAILED` / `MTPROTO_PORT_BUSY` /
+    //   other errors → NO rollback. Partial state remains on server.
+    //
+    // Why no rollback on non-cancel errors:
+    //   1. Idempotent retry — next `mtproto_install` detects partial state
+    //      (existing `telemt.toml` with valid secret, existing user, existing
+    //      unit), reuses secret через `parse_telemt_toml_minimal` (D-3.6
+    //      idempotency / MTPROTO-07 pattern), and re-runs all steps без поломки.
+    //   2. User может want диагностировать (e.g. `journalctl -u telemt` после
+    //      `TELEMT_START_FAILED`) — rollback бы стёр evidence.
+    //   3. Researcher §Open Q5 explicit recommendation: silent restart accepted.
+    //
+    // If user wants clean state — they click «Удалить» (`mtproto_uninstall` —
+    // surgical cleanup per D-3.7, Plan 04 переписывает под telemt).
+    if let Err(ref err) = install_inner_result {
+        if err == "MTPROTO_INSTALL_CANCELLED" {
+            rollback_telemt_install(&handle, app, sudo, Some(install_started_port))
+                .await
+                .ok();
+        }
     }
 
-    // Save env config for persistence
-    exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}bash -c 'cat > /etc/mtproxy.env << ENVEOF\nSECRET={secret}\nPORT={port}\nENVEOF'"
-        ),
-    )
-    .await?;
-    emit_mtproto_step(app, "generate_secret", "done", "");
-    check_cancel(&cancel_flag)?;
-
-    // ── Step: start_service (create systemd unit + firewall + start) ──
-    emit_mtproto_step(app, "start_service", "running", "");
-
-    // Create systemd unit
-    exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}bash -c 'cat > /etc/systemd/system/MTProxy.service << MTGEOF\n\
-             [Unit]\n\
-             Description=Telegram MTProxy\n\
-             After=network.target\n\
-             \n\
-             [Service]\n\
-             Type=simple\n\
-             WorkingDirectory=/opt/MTProxy\n\
-             ExecStart=/opt/MTProxy/mtproto-proxy -u nobody -p 8888 -H {port} -S {secret} --aes-pwd /opt/MTProxy/proxy-secret /opt/MTProxy/proxy-multi.conf -M 1\n\
-             Restart=always\n\
-             RestartSec=3\n\
-             LimitNOFILE=65536\n\
-             \n\
-             [Install]\n\
-             WantedBy=multi-user.target\n\
-             MTGEOF'"
-        ),
-    )
-    .await?;
-
-    // Open firewall port
-    exec_command(
-        &handle,
-        app,
-        &format!("{sudo}ufw allow {port}/tcp comment 'MTProto' 2>/dev/null; echo FW_OK"),
-    )
-    .await?;
-
-    // Enable and start service
-    exec_command(
-        &handle,
-        app,
-        &format!(
-            "{sudo}systemctl daemon-reload && {sudo}systemctl enable MTProxy && {sudo}systemctl start MTProxy"
-        ),
-    )
-    .await?;
-
-    // Verify active — retry up to 6 times with 1s sleep between attempts.
-    // UAT 2026-05-20: `systemctl is-active` immediately after `start` often
-    // returns "activating" before the service binds to its port. Without
-    // retries we returned MTPROTO_START_FAILED even though the service was
-    // about to become healthy (reopening the modal showed it as installed).
-    let mut active = false;
-    for attempt in 0..6 {
-        let (active_out, _) =
-            exec_command(&handle, app, &format!("{sudo}systemctl is-active MTProxy")).await?;
-        if active_out.trim() == "active" {
-            active = true;
-            break;
-        }
-        if attempt < 5 {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
-    }
-    if !active {
-        emit_mtproto_step(app, "start_service", "error", "Service failed to start");
-        return Err("MTPROTO_START_FAILED".into());
-    }
-    emit_mtproto_step(app, "start_service", "done", "");
-
-    // ── Step: complete ──
-    emit_mtproto_step(app, "complete", "done", "");
-
-    let proxy_link = build_proxy_link(&params.host, port, &secret);
-    Ok(MtProtoStatus {
-        installed: true,
-        active: true,
-        port,
-        secret,
-        proxy_link,
-    })
+    install_inner_result
 }
 
 // ═══════════════════════════════════════════════════════════════
