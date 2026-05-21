@@ -18,6 +18,7 @@ cmake/conan_provider.cmake
 
 # Build artifacts
 *.zip
+*.tgz
 webview_data/
 geodata/
 routing_rules.json
