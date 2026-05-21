@@ -64,6 +64,8 @@ pub use server::{
     save_config_file,
     // Phase 17 — Server Benchmark Check.Place (simplified: no parse_signal/BenchmarkProgress)
     run_benchmark, BenchmarkResult,
+    // Phase 18 — sidecar update flow (Plan 18-05, REQ-18-UPDATE-FLOW-03..07)
+    update_sidecar, update_sidecar_cancel, UpdateStep, BackupStatus,
 };
 // Phase 16 — SSH-key feature (D-1.1..D-2.3, REQ-16-SSH-KEY-*).
 // Re-exported under namespaced names so commands::ssh_commands может вызывать

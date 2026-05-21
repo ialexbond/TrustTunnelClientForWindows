@@ -87,6 +87,8 @@ pub fn run() {
             benchmark_cancel_tx: Arc::new(tokio::sync::Mutex::new(None)),
             // Phase 17 UAT 2026-05-20: MTProto install cancel flag (false = no install running / not cancelled)
             mtproto_install_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Phase 18 Plan 05 — sidecar update cancel flag (REQ-18-UPDATE-FLOW-07)
+            update_sidecar_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
@@ -398,6 +400,9 @@ pub fn run() {
             commands::ssh_commands::mtproto_uninstall,
             commands::ssh_commands::mtproto_start,
             commands::ssh_commands::mtproto_stop,
+            // Phase 18 — sidecar atomic-swap update flow (Plan 18-05, REQ-18-UPDATE-FLOW-03..07)
+            commands::ssh_commands::update_sidecar,
+            commands::ssh_commands::cancel_update_sidecar,
             commands::ssh_commands::detect_bbr_status,
             commands::ssh_commands::enable_bbr,
             commands::ssh_commands::disable_bbr,

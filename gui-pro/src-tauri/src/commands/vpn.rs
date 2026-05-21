@@ -41,6 +41,15 @@ pub struct AppState {
     /// (not oneshot) because checks are sync between awaits — no need to .await
     /// the cancel signal.
     pub mtproto_install_cancel: Arc<AtomicBool>,
+    /// Phase 18 — cooperative sidecar-update cancel flag (REQ-18-UPDATE-FLOW-07).
+    ///
+    /// Set to `true` by `cancel_update_sidecar` Tauri command; checked between
+    /// each pipeline step inside `ssh::server::server_update::update_sidecar`
+    /// AND inside `restart_trusttunnel_and_wait` 12s verify retry loop
+    /// (PLAN-REVIEW Blocker #4 — без этого user Cancel click в verify window dead).
+    /// Reset to `false` on every install start AND every exit path. AtomicBool
+    /// pattern mirror Phase 17.1 `mtproto_install_cancel` precedent.
+    pub update_sidecar_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Serialize)]

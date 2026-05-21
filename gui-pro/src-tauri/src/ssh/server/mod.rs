@@ -9,6 +9,8 @@ mod server_mtproto;
 pub mod server_rules;
 pub mod server_ssh_key;
 mod server_security;
+// Phase 18 — atomic-swap sidecar update pipeline (Plan 18-05, REQ-18-UPDATE-FLOW-03..07)
+mod server_update;
 mod server_uptime;
 mod server_version;
 pub mod cert_probe;
@@ -23,6 +25,8 @@ pub use server_install::*;
 pub use server_lifecycle::*;
 pub use server_monitoring::*;
 pub use server_mtproto::*;
+// Phase 18 — Plan 18-05 (server_update.rs) re-exports follow at module bottom.
+pub use server_update::{update_sidecar, update_sidecar_cancel, BackupStatus, UpdateStep};
 pub use server_security::*;
 pub use server_uptime::*;
 pub use server_version::*;
