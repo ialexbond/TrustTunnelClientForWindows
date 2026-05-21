@@ -1704,5 +1704,30 @@
   "confirmDialog": {
     "confirm": "Confirm",
     "cancel": "Cancel"
+  },
+  "app": {
+    "welcome": {
+      "screen1": {
+        "heading": "Welcome to TrustTunnel",
+        "description": "Your own VPN server in minutes. Traffic indistinguishable from regular HTTPS — invisible to ISPs and DPI."
+      },
+      "screen2": {
+        "heading": "How it works",
+        "description": "Install TrustTunnel on your VPS — the client connects via secure channel and routes traffic through your server.",
+        "block_pc": "Your PC",
+        "block_vps": "Your VPS",
+        "block_internet": "Internet",
+        "arrow_encrypted": "via encrypted channel",
+        "arrow_secure": "secure exit"
+      },
+      "screen3": {
+        "heading": "Let's go!",
+        "description": "Install TrustTunnel on your VPS and connect — it takes 2 minutes."
+      },
+      "back": "Back",
+      "next": "Next",
+      "start": "Get started",
+      "skip": "Skip"
+    }
   }
 }

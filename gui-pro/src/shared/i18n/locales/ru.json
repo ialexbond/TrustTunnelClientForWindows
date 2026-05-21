@@ -1704,5 +1704,30 @@
   "confirmDialog": {
     "confirm": "Подтвердить",
     "cancel": "Отмена"
+  },
+  "app": {
+    "welcome": {
+      "screen1": {
+        "heading": "Добро пожаловать в TrustTunnel",
+        "description": "Свой VPN-сервер за пару минут. Трафик неотличим от обычного HTTPS — провайдеры и DPI его не видят."
+      },
+      "screen2": {
+        "heading": "Как это работает",
+        "description": "Установите TrustTunnel на свой VPS — клиент подключится по защищённому каналу и пропустит трафик через ваш сервер.",
+        "block_pc": "Ваш ПК",
+        "block_vps": "Ваш VPS",
+        "block_internet": "Интернет",
+        "arrow_encrypted": "по шифрованному каналу",
+        "arrow_secure": "защищённый выход"
+      },
+      "screen3": {
+        "heading": "Поехали!",
+        "description": "Установите TrustTunnel на свой VPS и подключайтесь — это занимает 2 минуты."
+      },
+      "back": "Назад",
+      "next": "Далее",
+      "start": "Начать",
+      "skip": "Пропустить"
+    }
   }
 }
