@@ -1412,7 +1412,7 @@
         "cancelling": "Отменяем…",
         "start": "Запустить",
         "stop": "Остановить",
-        "stopped_hint": "Сервис установлен, но не запущен. Нажмите «Запустить», чтобы поднять MTProxy. Если сервис снова упадёт — проверьте журнал (sudo journalctl -u MTProxy -n 50).",
+        "stopped_hint": "Сервис установлен, но не запущен. Нажмите «Запустить», чтобы поднять telemt. Если сервис снова упадёт — проверьте журнал (sudo journalctl -u telemt -n 50).",
         "port_placeholder": "Случайный (1024-65535)",
         "copy": "Скопировать",
         "copied": "Скопировано!",
@@ -1421,11 +1421,17 @@
         "port_display": "Порт: {{port}}",
         "empty_hint": "Установите MTProto прокси для доступа к Telegram через ваш сервер.",
         "step": {
+          "cleanup_legacy": "Очистка старого MTProxy",
+          "download_binary": "Скачивание бинаря telemt",
+          "create_user": "Создание пользователя",
+          "configure_telemt": "Настройка telemt.toml",
+          "start_service": "Запуск сервиса",
+          "open_firewall": "Открытие порта firewall",
+          "complete": "Готово",
           "download": "Скачивание",
           "configure": "Настройка",
           "secret": "Генерация ключа",
-          "service": "Запуск сервиса",
-          "complete": "Готово"
+          "service": "Запуск сервиса"
         },
         "confirm_uninstall_title": "Удалить MTProto Прокси?",
         "confirm_uninstall_message": "Прокси будет полностью удалён: сервис остановлен, бинарник удалён, порт файрвола закрыт. Ссылка на прокси перестанет работать.",
@@ -1435,7 +1441,7 @@
           "cancelled": "Установка отменена",
           "started": "MTProto прокси запущен",
           "stopped": "MTProto прокси остановлен",
-          "start_failed": "Сервис не вышел в состояние active. Проверьте sudo journalctl -u MTProxy -n 50",
+          "start_failed": "Сервис не вышел в состояние active. Проверьте sudo journalctl -u telemt -n 50",
           "install_error": "Не удалось установить MTProto: {{error}}",
           "uninstall_error": "Не удалось удалить MTProto: {{error}}",
           "start_error": "Не удалось запустить MTProto: {{error}}",
@@ -1452,6 +1458,9 @@
           "active_on_port": "Активен на порту {{port}}",
           "installed_inactive": "Установлен, не запущен",
           "not_installed": "Не установлен"
+        },
+        "banner": {
+          "legacy_migrated": "Старый MTProxy был обнаружен и удалён в процессе установки. На сервере теперь работает telemt — новая поддерживаемая реализация MTProto Proxy."
         }
       },
       "bbr": {
