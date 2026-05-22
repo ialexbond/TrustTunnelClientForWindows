@@ -12,7 +12,7 @@ import {
 /**
  * UpdateProgressModal — Phase 18 Plan 06.
  *
- * Modal compound для UpdateBanner-triggered sidecar update flow.
+ * Modal compound для ProtocolUpdateSection-triggered sidecar update flow (Phase 19).
  * Pattern reference: MtProtoModal (Phase 17). T-03 invariant strict.
  *
  * Backend контракт (Plan 18-05):

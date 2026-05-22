@@ -63,7 +63,7 @@ function compareVersions(a: string, b: string): number {
  * - Stage 2 (user connects к server): `checkSidecarForServer(sshParams)` →
  *   `sidecarAvailable`
  *
- * UpdateBanner показывается ТОЛЬКО когда `sidecarAvailable && !sidecarDismissed`.
+ * ProtocolUpdateSection Badge показывается ТОЛЬКО когда `sidecarAvailable && !sidecarDismissed` (Phase 19).
  * Dot indicator показывается когда `appAvailable || sidecarAvailable` (D-2.5).
  *
  * Per-version dismissal (REQ-18-UPDATE-FLOW-02):
@@ -220,8 +220,7 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
    * flips state.sidecarDismissed = true. НЕ trigger refetch GitHub —
    * флаг живёт до выхода более новой версии.
    *
-   * Caller — обычно UpdateBanner X-крестик через parent (Plan 18-02 banner
-   * имеет `onDismiss` callback; wire-up в Plan 18-06 либо отдельный wire task).
+   * Caller — обычно ProtocolUpdateSection (Phase 19) через ServiceTabSection prop drilling.
    */
   const dismissSidecarUpdate = useCallback((version: string) => {
     const key = `tt_dismissed_update_${version}`;
