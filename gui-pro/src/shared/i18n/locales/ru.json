@@ -1404,7 +1404,7 @@
         "title": "Обновление протокола",
         "card_description": "Установите свежую версию протокола TrustTunnel на сервере либо выберите другую релизную версию.",
         "current_label_prefix": "Текущая версия:",
-        "current_label_suffix_active": "(актуальная)",
+        "current_label_suffix_active": "(установлена)",
         "current_label_suffix_new": "(новая)",
         "last_check": "Последняя проверка: {{ago}}",
         "dropdown_label": "Выбрать версию протокола",

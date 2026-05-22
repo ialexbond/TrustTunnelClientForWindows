@@ -1404,7 +1404,7 @@
         "title": "Protocol update",
         "card_description": "Install the latest version of TrustTunnel protocol on the server or select another released version.",
         "current_label_prefix": "Current version:",
-        "current_label_suffix_active": "(current)",
+        "current_label_suffix_active": "(installed)",
         "current_label_suffix_new": "(new)",
         "last_check": "Last check: {{ago}}",
         "dropdown_label": "Select protocol version",

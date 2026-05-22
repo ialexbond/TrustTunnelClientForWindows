@@ -275,7 +275,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   // visibility flag — lifted to App via `onSidecarUpdateChange` for the
   // bottom-bar dot, and forwarded down via `ServerPanel` props for the
   // OverviewSection Card #8 ArrowUp + ServiceTabSection ProtocolUpdateSection.
-  const { updateInfo: sidecarInfo, checkSidecarForServer } = useUpdateChecker();
+  const { updateInfo: sidecarInfo, checkSidecarForServer, dismissSidecarUpdate } = useUpdateChecker();
   useEffect(() => {
     if (!creds) return;
     void checkSidecarForServer({
@@ -307,6 +307,24 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
       keyPath: creds.keyPath,
     });
   }, [creds, checkSidecarForServer]);
+
+  // Auto-dismiss точек когда пользователь зашёл на Service tab.
+  // UX-логика: точку на bottom-tab «Панель управления» показываем один раз —
+  // пользователь увидел, дошёл до Service tab → точку гасим (записываем
+  // `tt_dismissed_update_<version>=true`). Бейдж «Доступно новое обновление»
+  // внутри карточки `ProtocolUpdateSection` НЕ зависит от dismissed-флага и
+  // продолжает гореть пока не нажмут Install.
+  // Per-version key — если выйдет новый релиз, ключа для него не будет,
+  // точка снова появится автоматически (Phase 18 dismissal pattern).
+  const handleSidecarUpdateSeen = useCallback(() => {
+    if (sidecarInfo.sidecarAvailable && sidecarInfo.sidecarLatestVersion) {
+      dismissSidecarUpdate(sidecarInfo.sidecarLatestVersion);
+    }
+  }, [
+    sidecarInfo.sidecarAvailable,
+    sidecarInfo.sidecarLatestVersion,
+    dismissSidecarUpdate,
+  ]);
   const sidecarUpdateVisible =
     Boolean(sidecarInfo.sidecarAvailable) && !sidecarInfo.sidecarDismissed;
   useEffect(() => {
@@ -427,6 +445,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
               sidecarAvailable={sidecarInfo.sidecarAvailable}
               latestVersion={sidecarInfo.sidecarLatestVersion}
               onSidecarUpdateApplied={handleSidecarUpdateApplied}
+              onSidecarUpdateSeen={handleSidecarUpdateSeen}
               onConfigExported={(path) => {
                 onConfigExported(path);
                 if (onNavigateToSettings) onNavigateToSettings();

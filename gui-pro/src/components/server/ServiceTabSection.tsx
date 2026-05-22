@@ -26,6 +26,7 @@
  * worktree mount race), ProtocolUpdateSection still mounts but its internal
  * useSidecarVersions hook short-circuits (null params).
  */
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Zap, Loader2 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
@@ -62,6 +63,15 @@ interface Props {
    * post-update value pulled via SSH.
    */
   onSidecarUpdateApplied?: () => void;
+  /**
+   * One-shot mount-time signal — fired on the first render of the Service tab
+   * whenever a sidecar update is available, so the parent can dismiss the
+   * bottom-tab «Панель управления» pill dot. Logic lives in
+   * `ControlPanelPage.handleSidecarUpdateSeen` (writes
+   * `tt_dismissed_update_<version>=true` via `dismissSidecarUpdate`). Badge
+   * inside `ProtocolUpdateSection` is NOT affected (it ignores dismissed).
+   */
+  onSidecarUpdateSeen?: () => void;
 }
 
 export function ServiceTabSection({
@@ -70,12 +80,24 @@ export function ServiceTabSection({
   sidecarAvailable,
   latestVersion,
   onSidecarUpdateApplied,
+  onSidecarUpdateSeen,
 }: Props) {
   const { t } = useTranslation();
   const { sshParams, pushSuccess } = state;
 
   const bbr = useBbrState(sshParams, pushSuccess);
   const mtproto = useMtProtoState(sshParams, pushSuccess);
+
+  // One-shot signal к parent: пользователь добрался до Service tab и видит
+  // карточку с Badge + dropdown. Bottom-tab pill dot на «Панель управления»
+  // можно гасить (parent перевернёт `tt_dismissed_update_<version>=true`).
+  // Fires только если есть available + valid latestVersion — иначе нечего
+  // dismiss'ить. Re-fires при изменении latestVersion (новый release вышел).
+  useEffect(() => {
+    if (sidecarAvailable && latestVersion) {
+      onSidecarUpdateSeen?.();
+    }
+  }, [sidecarAvailable, latestVersion, onSidecarUpdateSeen]);
 
   return (
     <div aria-live="polite" className="space-y-4">

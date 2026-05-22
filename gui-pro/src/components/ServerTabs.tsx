@@ -118,6 +118,12 @@ interface ServerTabsProps {
    * the parent can re-probe `sidecarCurrentVersion` via SSH.
    */
   onSidecarUpdateApplied?: () => void;
+  /**
+   * One-shot: fires on Service tab first mount with sidecar update available.
+   * Parent flips `tt_dismissed_update_<version>` so the bottom-tab pill dot
+   * stops nagging after the user has already seen the indication.
+   */
+  onSidecarUpdateSeen?: () => void;
 }
 
 export function ServerTabs({
@@ -127,6 +133,7 @@ export function ServerTabs({
   sidecarAvailable,
   latestVersion,
   onSidecarUpdateApplied,
+  onSidecarUpdateSeen,
 }: ServerTabsProps) {
   const { t } = useTranslation();
   const { log: activityLog } = useActivityLog();
@@ -368,6 +375,7 @@ export function ServerTabs({
                     sidecarAvailable={sidecarAvailable}
                     latestVersion={latestVersion}
                     onSidecarUpdateApplied={onSidecarUpdateApplied}
+                    onSidecarUpdateSeen={onSidecarUpdateSeen}
                   />
                 )}
               </>
