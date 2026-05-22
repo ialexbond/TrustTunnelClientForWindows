@@ -762,3 +762,255 @@ mod d29_invariant_tests {
         );
     }
 }
+
+// ─── Phase 19: list_sidecar_versions tests (RED phase — written first) ─────
+//
+// Tests written before implementation per TDD discipline. Reference the pure
+// helper `parse_releases_to_info` (extracted from `list_sidecar_versions` for
+// testability) — this lets us validate parsing logic against fixture JSON
+// without HTTP mocking. The Tauri command itself just wraps an HTTP fetch +
+// `parse_releases_to_info(...)`.
+#[cfg(test)]
+mod list_sidecar_versions_tests {
+    use super::*;
+
+    /// Test 1 — cap respected: max_count caps result length and backend cap=10
+    /// blocks oversized frontend requests.
+    #[test]
+    fn cap_max_count_clamps_to_backend_cap() {
+        // Construct fixture with 12 release entries (more than backend cap=10).
+        let mut releases = Vec::new();
+        for i in 0..12 {
+            releases.push(serde_json::json!({
+                "tag_name": format!("v1.0.{}", 33 - i),
+                "prerelease": false,
+                "published_at": format!("2026-05-{:02}T12:00:00Z", 22 - i.min(20)),
+                "assets": [
+                    {
+                        "name": format!("trusttunnel-v1.0.{}-linux-x86_64.tar.gz", 33 - i),
+                        "browser_download_url": format!(
+                            "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.{}/trusttunnel-v1.0.{}-linux-x86_64.tar.gz",
+                            33 - i,
+                            33 - i
+                        ),
+                        "size": 10_700_000_u64,
+                    }
+                ],
+            }));
+        }
+        // Frontend asks for 4 → should get 4
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 4, "cap=4 should clamp result to 4 entries");
+
+        // Frontend asks for 50 → backend cap=10 still applies. parse_releases_to_info
+        // honors `cap` it's given, but the wrapping Tauri command must enforce
+        // backend cap upstream. Verify the helper respects its own cap.
+        let res_capped = parse_releases_to_info(&releases, 10);
+        assert_eq!(res_capped.len(), 10, "cap=10 should clamp result to 10 entries");
+    }
+
+    /// Test 2 — prerelease entries are filtered out.
+    #[test]
+    fn filters_prereleases_from_result() {
+        let releases = vec![
+            serde_json::json!({
+                "tag_name": "v1.0.34-beta",
+                "prerelease": true,
+                "published_at": "2026-05-22T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.34-beta-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.34-beta/trusttunnel-v1.0.34-beta-linux-x86_64.tar.gz",
+                        "size": 10_000_000_u64,
+                    }
+                ],
+            }),
+            serde_json::json!({
+                "tag_name": "v1.0.33",
+                "prerelease": false,
+                "published_at": "2026-05-20T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "size": 10_700_000_u64,
+                    }
+                ],
+            }),
+        ];
+
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 1, "prerelease should be filtered, only 1 entry remains");
+        assert_eq!(res[0].version, "1.0.33");
+        assert_eq!(res[0].tag, "v1.0.33");
+    }
+
+    /// Test 3 — dbgsym assets are excluded via select_sidecar_asset reuse.
+    #[test]
+    fn excludes_dbgsym_assets() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "v1.0.33",
+            "prerelease": false,
+            "published_at": "2026-05-20T12:00:00Z",
+            "assets": [
+                {
+                    "name": "trusttunnel-v1.0.33-linux-x86_64-dbgsym.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64-dbgsym.tar.gz",
+                    "size": 107_000_000_u64,
+                },
+                {
+                    "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "size": 10_700_000_u64,
+                },
+            ],
+        })];
+
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 1);
+        assert!(
+            !res[0].asset_download_url.contains("dbgsym"),
+            "dbgsym asset must be excluded; got URL: {}",
+            res[0].asset_download_url
+        );
+        assert_eq!(res[0].asset_size_bytes, 10_700_000);
+    }
+
+    /// Test 4 (D-29 invariant) — static-grep the `list_sidecar_versions` function
+    /// body in source. NO emit_log / activity_log / vpn-log / log_message_i18n.
+    ///
+    /// Pattern reference: Phase 18 `check_sidecar_version_does_not_call_activity_log_or_emit_log`
+    /// (mod d29_invariant_tests above) uses identical body-extraction technique.
+    #[test]
+    fn list_versions_no_emit_log_d29_static_grep() {
+        let source = include_str!("./updater.rs");
+        // Extract body span: from `pub async fn list_sidecar_versions` to the
+        // next `pub fn` / `pub async fn` / `fn ` / `#[cfg(test)]` / EOF.
+        let span = source.split("pub async fn list_sidecar_versions").nth(1).unwrap_or("");
+        let body = span
+            .split("\npub async fn ")
+            .next()
+            .unwrap_or("")
+            .split("\npub fn ")
+            .next()
+            .unwrap_or("")
+            .split("\nfn ")
+            .next()
+            .unwrap_or("")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+
+        assert!(
+            !body.contains("activity_log"),
+            "D-29: list_sidecar_versions must NOT call activity_log"
+        );
+        assert!(
+            !body.contains("emit_log"),
+            "D-29: list_sidecar_versions must NOT call emit_log (asset URLs / tags MUST NOT leak)"
+        );
+        assert!(
+            !body.contains("vpn-log"),
+            "D-29: list_sidecar_versions must NOT emit vpn-log event"
+        );
+        assert!(
+            !body.contains("log_message_i18n"),
+            "D-29: list_sidecar_versions must NOT call log_message_i18n"
+        );
+    }
+
+    /// Test 5 — S-02 invariant: tags that fail `validate_version` (shell
+    /// metacharacters) are skipped. Defends against a hostile/compromised
+    /// GitHub Releases API response.
+    #[test]
+    fn skips_releases_with_invalid_version_tag() {
+        let releases = vec![
+            serde_json::json!({
+                "tag_name": "v1.0.33; rm -rf /",  // shell-injection attempt
+                "prerelease": false,
+                "published_at": "2026-05-22T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "size": 10_700_000_u64,
+                    }
+                ],
+            }),
+            serde_json::json!({
+                "tag_name": "v1.0.32",
+                "prerelease": false,
+                "published_at": "2026-05-15T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.32-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.32/trusttunnel-v1.0.32-linux-x86_64.tar.gz",
+                        "size": 10_600_000_u64,
+                    }
+                ],
+            }),
+        ];
+
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(
+            res.len(),
+            1,
+            "malicious tag should be skipped; only v1.0.32 survives"
+        );
+        assert_eq!(res[0].tag, "v1.0.32");
+    }
+
+    /// Bonus — empty tag name handled gracefully (skipped, not error).
+    #[test]
+    fn skips_releases_with_empty_tag() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "",
+            "prerelease": false,
+            "published_at": "2026-05-22T12:00:00Z",
+            "assets": [],
+        })];
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 0);
+    }
+
+    /// Bonus — release without assets (or missing asset for x86_64) is skipped.
+    #[test]
+    fn skips_release_with_missing_x86_64_asset() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "v1.0.33",
+            "prerelease": false,
+            "published_at": "2026-05-22T12:00:00Z",
+            "assets": [
+                {
+                    "name": "trusttunnel-v1.0.33-linux-aarch64.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-aarch64.tar.gz",
+                    "size": 9_600_000_u64,
+                }
+            ],
+        })];
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 0, "no x86_64 asset → release skipped");
+    }
+
+    /// Bonus — version field strips the leading `v` from tag.
+    #[test]
+    fn version_field_strips_v_prefix() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "v1.0.33",
+            "prerelease": false,
+            "published_at": "2026-05-22T12:00:00Z",
+            "assets": [
+                {
+                    "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "size": 10_700_000_u64,
+                }
+            ],
+        })];
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].version, "1.0.33", "version strips leading v");
+        assert_eq!(res[0].tag, "v1.0.33", "tag keeps original v prefix");
+        assert_eq!(res[0].published_at, "2026-05-22T12:00:00Z");
+    }
+}
