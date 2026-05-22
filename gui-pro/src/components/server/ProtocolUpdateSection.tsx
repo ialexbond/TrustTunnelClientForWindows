@@ -140,7 +140,17 @@ export function ProtocolUpdateSection({
   // instance — we don't read state here.
   void useUpdateProgress();
 
-  // Dropdown selected version — defaults to currentVersion, syncs on prop change.
+  // Three distinct states for `currentVersion`:
+  //   - `""` (empty string) — `useUpdateChecker` initial value, before SSH probe
+  //     completes (or after a failed probe). Treat as "loading current" — show
+  //     a Skeleton in the caption row instead of an empty "Текущая версия: ".
+  //   - `"unknown"` — sidecar binary missing on the server (State G).
+  //   - otherwise — real semver like `"1.0.31"`.
+  const isUnknown = currentVersion === "unknown";
+  const isCurrentLoading = !isUnknown && !currentVersion;
+
+  // Dropdown selected version — defaults to currentVersion (or latest from
+  // GitHub when current is still loading). Re-syncs on either prop change.
   const [selectedVersion, setSelectedVersion] = useState<string>(currentVersion);
   // Local modal control — open when Install clicked, closed on success (300ms delay) / Close.
   const [modalOpen, setModalOpen] = useState(false);
@@ -150,14 +160,21 @@ export function ProtocolUpdateSection({
   useEffect(() => {
     // Re-sync selectedVersion whenever currentVersion prop changes (e.g. after
     // successful update completion — parent re-fetches sidecar version).
-    setSelectedVersion(currentVersion);
-  }, [currentVersion]);
+    // While currentVersion is still loading (""), fall back to the newest
+    // version from GitHub so the dropdown shows a sensible default instead of
+    // an empty Select placeholder ("Выберите...").
+    if (currentVersion) {
+      setSelectedVersion(currentVersion);
+    } else if (versions.length > 0) {
+      setSelectedVersion(versions[0].version);
+    }
+  }, [currentVersion, versions]);
 
-  // Build dropdown options — current (always, unless "unknown") + last 3 from
-  // GitHub, dedup, max 4, then **sort descending by semver** so the newest
-  // release sits at the top of the menu (not the installed version).
-  // Previously installed-first sticky behaviour confused users — they expected
-  // the dropdown to be ordered by recency, like a release feed.
+  // Build dropdown options — current (when known) + last 3 from GitHub, dedup,
+  // sorted descending by semver so the newest release sits at the top.
+  // When `currentVersion` is `""` (still loading) we just rely on the GitHub
+  // versions list — the installed slot will be added once it arrives via
+  // prop refresh.
   const dropdownOptions = useMemo<SidecarReleaseInfo[]>(() => {
     const map = new Map<string, SidecarReleaseInfo>();
     if (currentVersion && currentVersion !== "unknown") {
@@ -181,9 +198,11 @@ export function ProtocolUpdateSection({
 
   // Install button enable rule:
   //   - State G (unknown current): enabled if any version is selected
+  //   - Loading current (""): enabled if any version is selected — user can
+  //     still kick off an install even if we haven't yet pinned what's running
   //   - Normal: enabled if selected !== current AND not currently updating
-  const isUnknown = currentVersion === "unknown";
-  const isSelectedCurrent = !isUnknown && selectedVersion === currentVersion;
+  const isSelectedCurrent =
+    !isUnknown && !isCurrentLoading && selectedVersion === currentVersion;
   const installEnabled = !isSelectedCurrent && !!selectedVersion && !modalOpen;
 
   // Refresh handler with Pitfall 3 re-entry guard.
@@ -275,7 +294,7 @@ export function ProtocolUpdateSection({
        * dismissed-флага точек: пользователь увидел индикаторы один раз →
        * точки погасли, но Badge продолжает сигналить «у тебя не latest».
        */}
-      <div className="text-caption flex items-baseline flex-wrap gap-x-2 gap-y-1 mb-3">
+      <div className="text-caption flex items-center flex-wrap gap-x-2 gap-y-1 mb-3">
         {isUnknown ? (
           <span style={{ color: "var(--color-text-muted)" }}>
             {t("server.service.protocol.not_installed_label")}
@@ -285,12 +304,17 @@ export function ProtocolUpdateSection({
             <span style={{ color: "var(--color-text-muted)" }}>
               {t("server.service.protocol.current_label_prefix")}
             </span>
-            <span
-              className="text-mono-sm"
-              style={{ color: "var(--color-text-primary)" }}
-            >
-              {currentVersion}
-            </span>
+            {isCurrentLoading ? (
+              // SSH probe in flight — show a Skeleton instead of an empty gap.
+              <Skeleton className="h-4 w-16" />
+            ) : (
+              <span
+                className="text-mono-sm"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                {currentVersion}
+              </span>
+            )}
             {sidecarAvailable && (
               <Badge
                 variant="success"
