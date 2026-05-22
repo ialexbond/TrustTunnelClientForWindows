@@ -12,6 +12,7 @@ import {
   Heart,
   ExternalLink,
   FileText,
+  Sparkles,
 } from "lucide-react";
 import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
@@ -23,6 +24,8 @@ interface AboutPanelProps {
   updateInfo: UpdateInfo;
   onCheckUpdates: () => void;
   onOpenDownload: () => void;
+  /** Опционально: показать Welcome tour ещё раз (manual re-preview, не сбрасывает `tt_welcome_completed`). */
+  onReplayWelcome?: () => void;
 }
 
 interface UpdateProgressPayload {
@@ -31,7 +34,7 @@ interface UpdateProgressPayload {
   message: string;
 }
 
-function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
+function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, onReplayWelcome }: AboutPanelProps) {
   const { t } = useTranslation();
   // Theme-swapped logo через CSS-classes (.only-dark / .only-light)
   // вместо per-component useTheme. useTheme хранил local state на каждый
@@ -282,7 +285,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
         </div>
 
         {/* Footer links */}
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-3 flex-wrap">
           <button
             onClick={() => open("https://github.com/ialexbond/TrustTunnelClient")}
             className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
@@ -292,6 +295,19 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             GitHub
             <ExternalLink className="w-2.5 h-2.5 opacity-50" />
           </button>
+          {onReplayWelcome && (
+            <>
+              <span style={{ color: "var(--color-border)" }}>·</span>
+              <button
+                onClick={onReplayWelcome}
+                className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                <Sparkles className="w-3 h-3" />
+                {t("about.replay_welcome")}
+              </button>
+            </>
+          )}
           <span style={{ color: "var(--color-border)" }}>·</span>
           <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
             {t("about.copyright", { year: new Date().getFullYear() })}
