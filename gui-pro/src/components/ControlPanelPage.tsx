@@ -299,13 +299,22 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   // pre-update comparison until the user manually disconnects + reconnects.
   const handleSidecarUpdateApplied = useCallback(() => {
     if (!creds) return;
-    void checkSidecarForServer({
+    const sshParams = {
       host: creds.host,
       port: parseInt(creds.port, 10),
       user: creds.user,
       password: creds.password,
       keyPath: creds.keyPath,
-    });
+    };
+    // Immediate probe + retry after 2.5s. Right after `update_sidecar` the
+    // restarted `trusttunnel_endpoint` may need a moment before it answers
+    // `--version` over SSH again. Without the retry the cascade gets stuck
+    // on the pre-update value if the first probe lands during the restart
+    // window. Two-shot pattern is cheap and idempotent.
+    void checkSidecarForServer(sshParams);
+    window.setTimeout(() => {
+      void checkSidecarForServer(sshParams);
+    }, 2500);
   }, [creds, checkSidecarForServer]);
 
   // Auto-dismiss точек когда пользователь зашёл на Service tab.
