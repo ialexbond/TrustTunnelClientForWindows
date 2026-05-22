@@ -43,6 +43,16 @@ interface ServerPanelProps {
   currentVersion?: string;
   sidecarAvailable?: boolean;
   latestVersion?: string;
+  /**
+   * Phase 19 cascade fix — fired after `ProtocolUpdateSection` successfully
+   * runs `update_sidecar`. Parent (`ControlPanelPage`) re-invokes
+   * `checkSidecarForServer` so `useUpdateChecker.sidecarCurrentVersion`
+   * picks up the live post-update value via SSH — without this callback the
+   * cached pre-update version sticks and all cascade indicators
+   * (Overview Card #8 ArrowUp, bottom-tab dots, ServerTabs dot, Badge)
+   * keep reflecting the stale comparison.
+   */
+  onSidecarUpdateApplied?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -227,6 +237,7 @@ export function ServerPanel(props: ServerPanelProps) {
       currentVersion={props.currentVersion}
       sidecarAvailable={props.sidecarAvailable}
       latestVersion={props.latestVersion}
+      onSidecarUpdateApplied={props.onSidecarUpdateApplied}
     />
   );
 }

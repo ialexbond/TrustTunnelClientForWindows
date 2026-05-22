@@ -112,6 +112,12 @@ interface ServerTabsProps {
   currentVersion?: string;
   sidecarAvailable?: boolean;
   latestVersion?: string;
+  /**
+   * Phase 19 cascade fix — passed down to `ServiceTabSection` →
+   * `ProtocolUpdateSection`. Fires after a successful `update_sidecar` run so
+   * the parent can re-probe `sidecarCurrentVersion` via SSH.
+   */
+  onSidecarUpdateApplied?: () => void;
 }
 
 export function ServerTabs({
@@ -120,6 +126,7 @@ export function ServerTabs({
   currentVersion,
   sidecarAvailable,
   latestVersion,
+  onSidecarUpdateApplied,
 }: ServerTabsProps) {
   const { t } = useTranslation();
   const { log: activityLog } = useActivityLog();
@@ -360,6 +367,7 @@ export function ServerTabs({
                     currentVersion={currentVersion}
                     sidecarAvailable={sidecarAvailable}
                     latestVersion={latestVersion}
+                    onSidecarUpdateApplied={onSidecarUpdateApplied}
                   />
                 )}
               </>
