@@ -526,6 +526,9 @@
     "up_to_date": "You are running the latest version",
     "update_available": "Version {{version}} is available",
     "replay_welcome": "Show onboarding",
+    "debug_update_on": "Show update flow",
+    "debug_update_off": "Hide update flow",
+    "debug_update_hint": "Debug: forces updateInfo.sidecarAvailable=true to render banner + dot + Modal for UAT",
     "copyright": "Protocol © AdGuard · Client © {{year}} ialexbond"
   },
   "update": {
