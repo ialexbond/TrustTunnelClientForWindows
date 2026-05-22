@@ -146,7 +146,11 @@ export function useSidecarVersions(
         maxCount: 3,
       });
       if (cancelledRef.current) return;
-      setVersions(result);
+      // Defensive: mocked/unknown backends may return null/undefined; coerce to [].
+      // Without this, downstream `versions[0]` would throw "Cannot read property
+      // '0' of null" — happens e.g. in ControlPanelPage tests whose default invoke
+      // mock returns null for unrecognised commands.
+      setVersions(Array.isArray(result) ? result : []);
     } catch (e) {
       if (cancelledRef.current) return;
       // D-29 invariant: only the opaque error code is logged. The backend
