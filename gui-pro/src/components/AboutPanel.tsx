@@ -13,7 +13,6 @@ import {
   ExternalLink,
   FileText,
   Sparkles,
-  Bug,
 } from "lucide-react";
 import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
@@ -37,25 +36,6 @@ interface UpdateProgressPayload {
 
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, onReplayWelcome }: AboutPanelProps) {
   const { t } = useTranslation();
-  // Debug toggle для UAT preview — переключает fake sidecar update flag в
-  // localStorage и dispatch'ит event чтобы все instances useUpdateChecker
-  // переключились live без reload.
-  const [debugUpdateActive, setDebugUpdateActive] = useState<boolean>(
-    () => localStorage.getItem("tt_debug_force_sidecar_update") === "true",
-  );
-  const toggleDebugUpdate = useCallback(() => {
-    const next = !debugUpdateActive;
-    if (next) {
-      localStorage.setItem("tt_debug_force_sidecar_update", "true");
-    } else {
-      localStorage.removeItem("tt_debug_force_sidecar_update");
-      // Clear any per-version dismiss каждого fake update чтобы banner
-      // вернулся после toggle off → on.
-      localStorage.removeItem("tt_dismissed_update_3.0.1");
-    }
-    setDebugUpdateActive(next);
-    window.dispatchEvent(new CustomEvent("tt-debug-update-toggle"));
-  }, [debugUpdateActive]);
   // Theme-swapped logo через CSS-classes (.only-dark / .only-light)
   // вместо per-component useTheme. useTheme хранил local state на каждый
   // компонент — переключение темы в Settings не re-render'ило AboutPanel
@@ -328,22 +308,6 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, onReplayWelcom
               </button>
             </>
           )}
-          <span style={{ color: "var(--color-border)" }}>·</span>
-          <button
-            onClick={toggleDebugUpdate}
-            className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
-            style={{
-              color: debugUpdateActive
-                ? "var(--color-accent-interactive)"
-                : "var(--color-text-muted)",
-            }}
-            title={t("about.debug_update_hint")}
-          >
-            <Bug className="w-3 h-3" />
-            {debugUpdateActive
-              ? t("about.debug_update_off")
-              : t("about.debug_update_on")}
-          </button>
           <span style={{ color: "var(--color-border)" }}>·</span>
           <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>
             {t("about.copyright", { year: new Date().getFullYear() })}

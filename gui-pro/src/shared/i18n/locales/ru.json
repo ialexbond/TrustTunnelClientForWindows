@@ -526,9 +526,6 @@
     "up_to_date": "У вас установлена актуальная версия",
     "update_available": "Доступна версия {{version}}",
     "replay_welcome": "Посмотреть онбординг",
-    "debug_update_on": "Показать update flow",
-    "debug_update_off": "Скрыть update flow",
-    "debug_update_hint": "Debug: подменяет updateInfo.sidecarAvailable=true чтобы показать banner + dot + Modal для UAT",
     "copyright": "Протокол © AdGuard · Клиент © {{year}} ialexbond"
   },
   "update": {

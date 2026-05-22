@@ -100,41 +100,33 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
         <X size={20} />
       </button>
 
-      {/* Left arrow — Instagram-style floating navigation. Скрыт на S1. */}
+      {/* Left arrow — плоский ChevronLeft. Без bg/shadow/border/hover-scale.
+          Padding 12px на каждой стороне даёт расширенную click area без
+          visible button chrome. */}
       {canGoBack && (
         <button
           type="button"
           onClick={handleBack}
           aria-label={t("app.welcome.back")}
           data-testid="welcome-tour-arrow-left"
-          className="absolute left-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110"
-          style={{
-            backgroundColor: "var(--color-bg-elevated)",
-            color: "var(--color-text-primary)",
-            boxShadow: "var(--shadow-md)",
-            border: "1px solid var(--color-border)",
-          }}
+          className="absolute left-3 top-1/2 -translate-y-1/2 p-3 flex items-center justify-center"
+          style={{ color: "var(--color-text-secondary)" }}
         >
-          <ChevronLeft size={22} />
+          <ChevronLeft size={28} />
         </button>
       )}
 
-      {/* Right arrow — Instagram-style floating navigation. Скрыт на S3. */}
+      {/* Right arrow — плоский ChevronRight. Скрыт на S3. */}
       {canGoNext && (
         <button
           type="button"
           onClick={handleNext}
           aria-label={t("app.welcome.next")}
           data-testid="welcome-tour-arrow-right"
-          className="absolute right-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110"
-          style={{
-            backgroundColor: "var(--color-bg-elevated)",
-            color: "var(--color-text-primary)",
-            boxShadow: "var(--shadow-md)",
-            border: "1px solid var(--color-border)",
-          }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 p-3 flex items-center justify-center"
+          style={{ color: "var(--color-text-secondary)" }}
         >
-          <ChevronRight size={22} />
+          <ChevronRight size={28} />
         </button>
       )}
 
