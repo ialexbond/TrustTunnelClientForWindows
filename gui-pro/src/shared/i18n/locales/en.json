@@ -16,7 +16,7 @@
     "security": "Security",
     "overview": "Overview",
     "configuration": "Configuration",
-    "utilities": "Utilities"
+    "service": "Service"
   },
   "status": {
     "connected": "Connected",
@@ -1393,11 +1393,31 @@
         "reset_port_message": "Reset SSH port to the default value 22? The same safe process will be used (backup, firewall, validation)."
       }
     },
-    "utilities": {
+    "service": {
       "title": "Utilities",
       "tooltip": "Server utilities: proxy and network optimization tools.",
       "loading": "Loading utilities status...",
       "refresh": "Refresh",
+      "controls_title": "Service Control",
+      "tab_update_available_aria": "Protocol update available",
+      "protocol": {
+        "title": "Protocol update",
+        "card_description": "Install the latest version of TrustTunnel protocol on the server or select another released version.",
+        "current_label_prefix": "Current version:",
+        "current_label_suffix_active": "(current)",
+        "current_label_suffix_new": "(new)",
+        "last_check": "Last check: {{ago}}",
+        "dropdown_label": "Select protocol version",
+        "install_button": "Install",
+        "install_disabled_current": "Current version selected — no update needed",
+        "update_available_badge": "New update available",
+        "check_update_aria": "Check for updates",
+        "refreshing": "Checking...",
+        "install_success": "Protocol updated to v{{to}}",
+        "up_to_date": "Latest version installed",
+        "no_versions": "Versions unavailable",
+        "not_installed_label": "Protocol not installed"
+      },
       "mtproto": {
         "title": "MTProto Proxy",
         "status": {
@@ -1534,9 +1554,6 @@
       "delete_title": "Delete TrustTunnel?",
       "delete_message": "VPN will be completely removed from the server. This action is irreversible.",
       "uninstalled": "VPN removed from server"
-    },
-    "service": {
-      "controls_title": "Service Control"
     },
     "overview": {
       "version": "Version",
