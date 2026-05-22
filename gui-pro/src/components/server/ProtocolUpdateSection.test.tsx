@@ -74,6 +74,10 @@ const RELEASES: SidecarReleaseInfo[] = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Wipe useSidecarVersions localStorage cache so each test starts with an
+  // empty initial state — otherwise tests that need a refresh-fired invoke
+  // get a cache short-circuit and the mock is never called.
+  localStorage.removeItem("tt_sidecar_versions_cache");
   void i18n.changeLanguage("ru");
   // Default: list_sidecar_versions returns RELEASES.
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -510,8 +514,32 @@ describe("ProtocolUpdateSection", () => {
     expect(refresh).toBeDisabled();
   });
 
-  // ─── 17: State F — error «Версии недоступны» fallback ───
-  it("error_no_versions_label — State F shows fallback label after error", async () => {
+  // ─── 17: State F — when GitHub fails AND current is unknown → fallback shown ───
+  it("error_no_versions_label — State F shows fallback label when current unknown AND fetch fails", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sidecar_versions") throw "UPDATE_CHECK_FAILED";
+      return null;
+    });
+
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="unknown"
+        sidecarAvailable={false}
+        latestVersion=""
+      />,
+    );
+
+    // Fallback shows only when we have absolutely nothing to put in the
+    // dropdown — i.e. no GitHub list and no installed current version.
+    await waitFor(() => {
+      expect(screen.getByText(/версии недоступны/i)).toBeVisible();
+    });
+  });
+
+  // ─── 17b: when current IS known but GitHub fetch fails, dropdown still
+  //         renders with the installed option — no «Версии недоступны» ───
+  it("error_with_known_current — dropdown still usable, no fallback label", async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "list_sidecar_versions") throw "UPDATE_CHECK_FAILED";
       return null;
@@ -526,10 +554,12 @@ describe("ProtocolUpdateSection", () => {
       />,
     );
 
-    // Wait for error to settle
+    // Wait for the failed fetch to settle, then assert UX fallback:
+    // the dropdown wrapper is rendered (not the «Версии недоступны» label).
     await waitFor(() => {
-      expect(screen.getByText(/версии недоступны/i)).toBeVisible();
+      expect(screen.getByTestId("protocol-version-select")).toBeInTheDocument();
     });
+    expect(screen.queryByText(/версии недоступны/i)).toBeNull();
   });
 
   // ─── 18: refresh re-entry guard (Pitfall 3) ───

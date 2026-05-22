@@ -55,6 +55,10 @@ const RELEASES_OK: SidecarReleaseInfo[] = [
 describe("useSidecarVersions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Wipe the 10-min localStorage cache between tests so each scenario
+    // starts from a clean slate — otherwise the first test's successful
+    // fetch would short-circuit refresh in later tests.
+    localStorage.removeItem("tt_sidecar_versions_cache");
   });
 
   afterEach(() => {
