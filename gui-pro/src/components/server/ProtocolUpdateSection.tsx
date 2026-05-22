@@ -65,6 +65,16 @@ export interface ProtocolUpdateSectionProps {
   sidecarAvailable: boolean;
   /** From `useUpdateChecker.sidecarLatestVersion`; may equal currentVersion. */
   latestVersion: string;
+  /**
+   * Phase 19 cascade fix — called after `update_sidecar` succeeds. Parent
+   * (`ControlPanelPage` via prop-drill) re-invokes `checkSidecarForServer`
+   * so `useUpdateChecker.sidecarCurrentVersion` reflects the live post-update
+   * value via SSH probe. Without this, Overview Card #8 / bottom-tab dots /
+   * ServerTabs dot / Badge all keep showing the stale pre-update comparison
+   * because the frontend has no other trigger to re-probe the server's
+   * `trusttunnel_endpoint --version`.
+   */
+  onSidecarUpdateApplied?: () => void;
 }
 
 /**
@@ -110,6 +120,7 @@ export function ProtocolUpdateSection({
   currentVersion,
   sidecarAvailable,
   latestVersion: _latestVersion,
+  onSidecarUpdateApplied,
 }: ProtocolUpdateSectionProps) {
   const { t } = useTranslation();
   const { versions, loading, error, refresh } = useSidecarVersions(sshParams);
@@ -186,12 +197,18 @@ export function ProtocolUpdateSection({
   }, []);
 
   const handleModalSuccess = useCallback(() => {
-    // Modal closes itself after 300ms (Phase 18 D-DECISION-UI-4.4). Parent
-    // (ControlPanelPage) will re-run `checkSidecarForServer` on next visibility
-    // change; we trigger a local versions refresh so the dropdown reflects the
-    // new "(актуальная)" label position immediately after upgrade.
+    // Modal closes itself after 300ms (Phase 18 D-DECISION-UI-4.4).
+    // Phase 19 cascade fix: trigger TWO re-fetches in parallel —
+    //   1. `refresh()` re-fetches the GitHub releases list so the dropdown
+    //      label «(актуальная)» moves to the newly-installed version.
+    //   2. `onSidecarUpdateApplied?.()` lets `ControlPanelPage` re-invoke
+    //      `checkSidecarForServer({...})` so `useUpdateChecker` re-probes the
+    //      sidecar's live version via SSH. Without (2), Overview Card #8 /
+    //      bottom-tab dots / ServerTabs dot / Badge all stay stale because
+    //      `sidecarCurrentVersion` is cached from the initial connect.
     void refresh();
-  }, [refresh]);
+    onSidecarUpdateApplied?.();
+  }, [refresh, onSidecarUpdateApplied]);
 
   // Determine if Action Row should render Skeletons (State A — initial loading).
   const showLoadingSkeleton = loading && versions.length === 0 && !error;

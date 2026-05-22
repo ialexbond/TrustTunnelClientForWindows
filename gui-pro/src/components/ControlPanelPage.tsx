@@ -286,6 +286,27 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
       keyPath: creds.keyPath,
     });
   }, [creds, checkSidecarForServer]);
+
+  // Phase 19 cascade fix — fired by `ProtocolUpdateSection.handleModalSuccess`
+  // after `update_sidecar` completes. Re-probe sidecar's `--version` over SSH
+  // so `sidecarInfo.sidecarCurrentVersion` reflects the post-update value,
+  // which in turn propagates through every cascade indicator:
+  //   - Overview Card #8 «Версия протокола» — text + ArrowUp visibility
+  //   - Bottom-tab «Панель управления» pill dot (via App.tsx hasSidecarUpdate)
+  //   - ServerTabs «Сервис» pill dot
+  //   - ProtocolUpdateSection Badge «Доступно новое обновление»
+  // Without this callback, all four indicators keep showing the stale
+  // pre-update comparison until the user manually disconnects + reconnects.
+  const handleSidecarUpdateApplied = useCallback(() => {
+    if (!creds) return;
+    void checkSidecarForServer({
+      host: creds.host,
+      port: parseInt(creds.port, 10),
+      user: creds.user,
+      password: creds.password,
+      keyPath: creds.keyPath,
+    });
+  }, [creds, checkSidecarForServer]);
   const sidecarUpdateVisible =
     Boolean(sidecarInfo.sidecarAvailable) && !sidecarInfo.sidecarDismissed;
   useEffect(() => {
@@ -405,6 +426,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
               currentVersion={sidecarInfo.sidecarCurrentVersion}
               sidecarAvailable={sidecarInfo.sidecarAvailable}
               latestVersion={sidecarInfo.sidecarLatestVersion}
+              onSidecarUpdateApplied={handleSidecarUpdateApplied}
               onConfigExported={(path) => {
                 onConfigExported(path);
                 if (onNavigateToSettings) onNavigateToSettings();

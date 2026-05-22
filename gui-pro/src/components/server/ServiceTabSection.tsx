@@ -55,6 +55,13 @@ interface Props {
   currentVersion?: string;
   sidecarAvailable?: boolean;
   latestVersion?: string;
+  /**
+   * Phase 19 cascade fix — invoked by `ProtocolUpdateSection` after a
+   * successful `update_sidecar`. `ControlPanelPage` then re-runs
+   * `checkSidecarForServer({...})` so `sidecarCurrentVersion` reflects the
+   * post-update value pulled via SSH.
+   */
+  onSidecarUpdateApplied?: () => void;
 }
 
 export function ServiceTabSection({
@@ -62,6 +69,7 @@ export function ServiceTabSection({
   currentVersion,
   sidecarAvailable,
   latestVersion,
+  onSidecarUpdateApplied,
 }: Props) {
   const { t } = useTranslation();
   const { sshParams, pushSuccess } = state;
@@ -116,6 +124,7 @@ export function ServiceTabSection({
         currentVersion={currentVersion ?? "unknown"}
         sidecarAvailable={sidecarAvailable ?? false}
         latestVersion={latestVersion ?? ""}
+        onSidecarUpdateApplied={onSidecarUpdateApplied}
       />
 
       {/* Block 5 — Logs Card+Modal (Plan 17-05, D-2.4) */}
