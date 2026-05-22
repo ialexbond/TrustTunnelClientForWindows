@@ -90,7 +90,17 @@ function App() {
     () => Boolean(localStorage.getItem("tt_ssh_last_host")),
     [],
   );
-  const showWelcomeTour = !welcomeCompleted && !hasExistingCredentials;
+  // Manual re-preview из AboutPanel — НЕ нарушает D-1.1 (auto-show только first-run);
+  // existing users могут пересмотреть intro без потери credentials. Не пишет в localStorage.
+  const [forceShowWelcome, setForceShowWelcome] = useState(false);
+  const showWelcomeTour = (!welcomeCompleted && !hasExistingCredentials) || forceShowWelcome;
+  const handleWelcomeComplete = useCallback(() => {
+    if (forceShowWelcome) {
+      setForceShowWelcome(false);
+    } else {
+      completeWelcome();
+    }
+  }, [forceShowWelcome, completeWelcome]);
 
   // ─── External integrations ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
@@ -374,6 +384,7 @@ function App() {
             onOpenDownload={() => {
               if (updateInfo.downloadUrl) open(updateInfo.downloadUrl);
             }}
+            onReplayWelcome={() => setForceShowWelcome(true)}
           />
         </div>
       </div>
@@ -393,7 +404,7 @@ function App() {
         localStorage) — `welcomeCompleted` обновится на следующем render
         и overlay unmount-ится. */}
     {showWelcomeTour && (
-      <WelcomeTour onComplete={completeWelcome} />
+      <WelcomeTour onComplete={handleWelcomeComplete} />
     )}
 
     {/* Setup wizard — overlay activated by «Установить» on the not-installed
