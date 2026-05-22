@@ -90,25 +90,18 @@ function App() {
     () => Boolean(localStorage.getItem("tt_ssh_last_host")),
     [],
   );
-  // Manual re-preview из AboutPanel — НЕ нарушает D-1.1 (auto-show только first-run);
-  // existing users могут пересмотреть intro без потери credentials. Не пишет в localStorage.
-  const [forceShowWelcome, setForceShowWelcome] = useState(false);
-  const showWelcomeTour = (!welcomeCompleted && !hasExistingCredentials) || forceShowWelcome;
+  const showWelcomeTour = !welcomeCompleted && !hasExistingCredentials;
   // Intent-based completion: 'start' → navigate to connection tab, 'skip' (X corner)
   // → stay where we are. WelcomeTour hook сам пишет localStorage; здесь только
   // re-render + conditional navigate.
   const handleWelcomeComplete = useCallback(
     (intent: "skip" | "start") => {
-      if (forceShowWelcome) {
-        setForceShowWelcome(false);
-      } else {
-        completeWelcome();
-      }
+      completeWelcome();
       if (intent === "start") {
         setActiveTab("connection");
       }
     },
-    [forceShowWelcome, completeWelcome],
+    [completeWelcome],
   );
 
   // ─── External integrations ───
@@ -393,7 +386,6 @@ function App() {
             onOpenDownload={() => {
               if (updateInfo.downloadUrl) open(updateInfo.downloadUrl);
             }}
-            onReplayWelcome={() => setForceShowWelcome(true)}
           />
         </div>
       </div>
