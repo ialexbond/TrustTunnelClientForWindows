@@ -106,6 +106,21 @@ function App() {
 
   // ─── External integrations ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
+
+  // ─── Phase 19 (UI-SPEC §Block 1) — sidecar-update lifted from ControlPanelPage.
+  //
+  // The ControlPanelPage owns SSH credentials and runs Stage 2 detection via
+  // `useUpdateChecker(sshParams).checkSidecarForServer(...)`. It lifts the
+  // resulting flag here via `onSidecarUpdateChange` so the bottom
+  // TabNavigation can render the dot on «Панель управления». Per-version
+  // dismissal is honoured by the child (`sidecarAvailable && !sidecarDismissed`
+  // → caller propagates only the net visibility).
+  const [hasSidecarUpdate, setHasSidecarUpdate] = useState(false);
+
+  // App-level update flag derives from the Stage 1 `useUpdateChecker()` call
+  // above. `appAvailable` is the Phase 18 dual-detection field — falls back to
+  // legacy `available` alias so AboutPanel test surface stays untouched.
+  const hasAppUpdate = updateInfo.appAvailable ?? updateInfo.available;
   const { pending: hostKeyPending, respond: hostKeyRespond } = useHostKeyVerification();
   const reconnectResolve = useRef<(() => void) | null>(null);
   const pushSuccess = useSnackBar();
@@ -261,6 +276,7 @@ function App() {
               onNavigateToSettings={() => {
                 setActiveTab("settings");
               }}
+              onSidecarUpdateChange={setHasSidecarUpdate}
             />
           </PanelErrorBoundary>
         </div>
@@ -392,7 +408,12 @@ function App() {
 
       {/* Bottom tab navigation — wrapped in same maxWidth as content area so it aligns with the rest of the UI */}
       <div style={{ maxWidth: 1000, width: "100%", margin: "0 auto", flexShrink: 0 }}>
-        <TabNavigation activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab)} />
+        <TabNavigation
+          activeTab={activeTab}
+          onTabChange={(tab) => setActiveTab(tab)}
+          hasAppUpdate={hasAppUpdate}
+          hasSidecarUpdate={hasSidecarUpdate}
+        />
       </div>
     </div>
 

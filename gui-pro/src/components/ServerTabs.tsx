@@ -25,9 +25,10 @@ import {
 // ServerSettingsSection removed (was Phase 11 baseline) — replaced by
 // ConfigurationTab (Phase 15.1 schema-driven editor).
 import { SecurityTabSection } from "./server/SecurityTabSection";
-import { UtilitiesTabSection } from "./server/UtilitiesTabSection";
+import { ServiceTabSection } from "./server/ServiceTabSection";
+import type { ServerTabId } from "../shared/types";
 
-type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
+type TabId = ServerTabId;
 
 /**
  * localStorage key для persist активного таба (CLAUDE.md — `tt_active_tab`).
@@ -50,11 +51,17 @@ const VALID_TAB_IDS: readonly TabId[] = [
   "users",
   "configuration",
   "security",
-  "utilities",
+  "service",
 ];
 function loadActiveTab(): TabId {
   try {
     const raw = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+    // Phase 19 migration: legacy "utilities" persisted value → "service".
+    // Single mapping branch, no separate migration storage write — the next
+    // saveActiveTab() call (на любой tab switch) перепишет storage свежим id.
+    if (raw === "utilities") {
+      return "service";
+    }
     if (raw && (VALID_TAB_IDS as readonly string[]).includes(raw)) {
       return raw as TabId;
     }
@@ -83,14 +90,37 @@ const tabs: Tab[] = [
   { id: "users",          labelKey: "tabs.users",          fallback: "Пользователи",  icon: <Users className="w-4 h-4" /> },
   { id: "configuration",  labelKey: "tabs.configuration",  fallback: "Конфигурация",  icon: <SlidersHorizontal className="w-4 h-4" /> },
   { id: "security",       labelKey: "tabs.security",       fallback: "Безопасность",  icon: <Shield className="w-4 h-4" /> },
-  { id: "utilities",      labelKey: "tabs.utilities",      fallback: "Утилиты",       icon: <Wrench className="w-4 h-4" /> },
+  { id: "service",        labelKey: "tabs.service",        fallback: "Сервис",        icon: <Wrench className="w-4 h-4" /> },
 ];
 
 interface ServerTabsProps {
   state: ServerState;
+  /**
+   * Phase 19 Plan 19-04 cascade props (UI-SPEC §Block 1+2+3).
+   *
+   * `hasSidecarUpdate` drives:
+   *   - a static 8×8 accent dot on the «Сервис» pill (top-right) when truthy
+   *     AND `activeTab !== "service"` (dot hides when user is already на табе).
+   *   - the «Версия протокола» Overview Card #8 ArrowUp icon — passed through
+   *     to `OverviewSection` via prop.
+   *
+   * The remaining three (`currentVersion` / `sidecarAvailable` / `latestVersion`)
+   * forward to `ServiceTabSection` for the `ProtocolUpdateSection` Card-4 mount.
+   * Pattern mirrors Phase 18 dot-indicator wiring (App.tsx → TabNavigation).
+   */
+  hasSidecarUpdate?: boolean;
+  currentVersion?: string;
+  sidecarAvailable?: boolean;
+  latestVersion?: string;
 }
 
-export function ServerTabs({ state }: ServerTabsProps) {
+export function ServerTabs({
+  state,
+  hasSidecarUpdate = false,
+  currentVersion,
+  sidecarAvailable,
+  latestVersion,
+}: ServerTabsProps) {
   const { t } = useTranslation();
   const { log: activityLog } = useActivityLog();
   const confirm = useConfirm();
@@ -188,31 +218,49 @@ export function ServerTabs({ state }: ServerTabsProps) {
         className="flex items-center gap-1"
         style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
       >
-        {tabs.map((tab, idx) => (
-          <button
-            key={tab.id}
-            role="tab"
-            id={`tab-${tab.id}`}
-            aria-selected={activeTab === tab.id}
-            aria-controls={`panel-${tab.id}`}
-            tabIndex={activeTab === tab.id ? 0 : -1}
-            onClick={async () => {
-              await setActiveTab(tab.id);
-              activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
-            }}
-            onKeyDown={(e) => handleTabKeyDown(e, idx)}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors rounded-[var(--radius-md)]",
-              "focus-visible:shadow-[var(--focus-ring)] outline-none",
-              activeTab === tab.id
-                ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-[var(--shadow-xs)]"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
-            )}
-          >
-            {tab.icon}
-            <span>{t(tab.labelKey, tab.fallback)}</span>
-          </button>
-        ))}
+        {tabs.map((tab, idx) => {
+          // Phase 19 — dot indicator on «Сервис» pill (UI-SPEC §Block 1 §A.2).
+          // Visible when sidecar update detected AND user not currently on the
+          // «Сервис» tab (D-DECISION-UI-2.1: 10% accent rule — dot disappears
+          // once the user navigates here, since they already see the
+          // ProtocolUpdateSection Badge inside).
+          const showSidecarDot =
+            hasSidecarUpdate && tab.id === "service" && activeTab !== "service";
+          return (
+            <button
+              key={tab.id}
+              role="tab"
+              id={`tab-${tab.id}`}
+              aria-selected={activeTab === tab.id}
+              aria-controls={`panel-${tab.id}`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              onClick={async () => {
+                await setActiveTab(tab.id);
+                activityLog("USER", `tab.switch target="${tab.id}"`, "ServerTabs");
+              }}
+              onKeyDown={(e) => handleTabKeyDown(e, idx)}
+              className={cn(
+                "relative flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors rounded-[var(--radius-md)]",
+                "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                activeTab === tab.id
+                  ? "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-[var(--shadow-xs)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+              )}
+            >
+              {tab.icon}
+              <span>{t(tab.labelKey, tab.fallback)}</span>
+              {showSidecarDot && (
+                <span
+                  className="absolute top-2 right-2 w-2 h-2 rounded-full"
+                  style={{ backgroundColor: "var(--color-accent-interactive)" }}
+                  role="status"
+                  aria-label={t("server.service.tab_update_available_aria")}
+                  data-testid="service-tab-update-dot"
+                />
+              )}
+            </button>
+          );
+        })}
 
         {/* Separator + Disconnect icon (semi-destructive action — hover красным). */}
         <Divider orientation="vertical" className="shrink-0 mx-2 my-1.5" />
@@ -287,6 +335,7 @@ export function ServerTabs({ state }: ServerTabsProps) {
                   <OverviewSection
                     state={state}
                     activeServerTab={activeTab}
+                    sidecarAvailable={sidecarAvailable}
                     onNavigate={(nextTab) => {
                       void setActiveTab(nextTab);
                       activityLog(
@@ -305,7 +354,14 @@ export function ServerTabs({ state }: ServerTabsProps) {
                   />
                 )}
                 {tab.id === "security" && <SecurityTabSection state={state} />}
-                {tab.id === "utilities" && <UtilitiesTabSection state={state} />}
+                {tab.id === "service" && (
+                  <ServiceTabSection
+                    state={state}
+                    currentVersion={currentVersion}
+                    sidecarAvailable={sidecarAvailable}
+                    latestVersion={latestVersion}
+                  />
+                )}
               </>
             )}
           </div>

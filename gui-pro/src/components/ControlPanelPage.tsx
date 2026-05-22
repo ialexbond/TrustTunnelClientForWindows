@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { useUpdateChecker } from "../shared/hooks/useUpdateChecker";
 
 async function readStoredCredentials(): Promise<SshCredentials | null> {
   try {
@@ -233,9 +234,17 @@ interface Props {
   onConfigExported: (configPath: string) => void;
   onSwitchToSetup: () => void;
   onNavigateToSettings?: () => void;
+  /**
+   * Phase 19 (UI-SPEC §Block 1) — lift sidecar-update flag to `App` so the
+   * bottom TabNavigation can render the dot on «Панель управления».
+   *
+   * Receives `sidecarAvailable && !sidecarDismissed` (already collapsed —
+   * caller does not need to apply dismissal logic itself).
+   */
+  onSidecarUpdateChange?: (hasUpdate: boolean) => void;
 }
 
-export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigateToSettings }: Props) {
+export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigateToSettings, onSidecarUpdateChange }: Props) {
   const [creds, setCreds] = useState<SshCredentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -254,6 +263,34 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   const [lastPort, setLastPort] = useState<string>(
     () => localStorage.getItem("tt_ssh_last_port") ?? "22"
   );
+
+  // ─── Phase 19 (UI-SPEC §Block 1+2+3) — sidecar update detection ───
+  //
+  // ControlPanelPage owns SSH credentials, so it owns Stage 2 of the dual-
+  // detection contract (REQ-18-UPDATE-DETECTION-02). On every `creds` change
+  // we re-invoke `checkSidecarForServer` so server-bound version info refreshes
+  // when the user reconnects or switches hosts.
+  //
+  // `updateInfo.sidecarAvailable && !updateInfo.sidecarDismissed` is the net
+  // visibility flag — lifted to App via `onSidecarUpdateChange` for the
+  // bottom-bar dot, and forwarded down via `ServerPanel` props for the
+  // OverviewSection Card #8 ArrowUp + ServiceTabSection ProtocolUpdateSection.
+  const { updateInfo: sidecarInfo, checkSidecarForServer } = useUpdateChecker();
+  useEffect(() => {
+    if (!creds) return;
+    void checkSidecarForServer({
+      host: creds.host,
+      port: parseInt(creds.port, 10),
+      user: creds.user,
+      password: creds.password,
+      keyPath: creds.keyPath,
+    });
+  }, [creds, checkSidecarForServer]);
+  const sidecarUpdateVisible =
+    Boolean(sidecarInfo.sidecarAvailable) && !sidecarInfo.sidecarDismissed;
+  useEffect(() => {
+    if (onSidecarUpdateChange) onSidecarUpdateChange(sidecarUpdateVisible);
+  }, [sidecarUpdateVisible, onSidecarUpdateChange]);
 
   useEffect(() => {
     readStoredCredentials().then((c) => {
@@ -364,6 +401,10 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
               onDisconnect={handleDisconnect}
               onPortChanged={handlePortChanged}
               onPanelReady={() => setIsFirstConnect(false)}
+              hasSidecarUpdate={sidecarUpdateVisible}
+              currentVersion={sidecarInfo.sidecarCurrentVersion}
+              sidecarAvailable={sidecarInfo.sidecarAvailable}
+              latestVersion={sidecarInfo.sidecarLatestVersion}
               onConfigExported={(path) => {
                 onConfigExported(path);
                 if (onNavigateToSettings) onNavigateToSettings();
