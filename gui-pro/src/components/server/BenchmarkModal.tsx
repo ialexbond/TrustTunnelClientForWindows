@@ -79,11 +79,11 @@ function IdleView({ onStart }: IdleViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-body" style={{ color: "var(--color-text-secondary)" }}>
-        {t("server.utilities.benchmark.empty_hint")}
+        {t("server.service.benchmark.empty_hint")}
       </p>
       <div className="flex justify-end">
         <Button variant="primary" size="sm" onClick={onStart}>
-          {t("server.utilities.benchmark.start_button")}
+          {t("server.service.benchmark.start_button")}
         </Button>
       </div>
     </div>
@@ -106,10 +106,10 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
       {/* Running text — left-aligned (matches IdleView empty_hint), gap-2 between paragraphs */}
       <div className="flex flex-col gap-2">
         <p className="text-body font-medium" style={{ color: "var(--color-text-primary)" }}>
-          {t("server.utilities.benchmark.running_text")}
+          {t("server.service.benchmark.running_text")}
         </p>
         <p className="text-caption" style={{ color: "var(--color-text-muted)" }}>
-          {t("server.utilities.benchmark.hint_running")}
+          {t("server.service.benchmark.hint_running")}
         </p>
       </div>
 
@@ -122,7 +122,7 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
           aria-valuenow={hasPercent ? percent! : undefined}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-label={t("server.utilities.benchmark.running_text")}
+          aria-label={t("server.service.benchmark.running_text")}
           style={{
             height: 8,
             background: "var(--color-bg-surface)",
@@ -183,8 +183,8 @@ function RunningView({ isCancelling, percent, onCancel }: RunningViewProps) {
           disabled={isCancelling}
         >
           {isCancelling
-            ? t("server.utilities.benchmark.cancelling_button")
-            : t("server.utilities.benchmark.cancel_button")}
+            ? t("server.service.benchmark.cancelling_button")
+            : t("server.service.benchmark.cancel_button")}
         </Button>
       </div>
     </div>
@@ -216,7 +216,7 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
     <div className="flex flex-col gap-4">
       {/* Duration */}
       <p className="text-mono-sm" style={{ color: "var(--color-text-muted)" }}>
-        {t("server.utilities.benchmark.duration_label", {
+        {t("server.service.benchmark.duration_label", {
           seconds: record.duration_seconds,
         })}
       </p>
@@ -237,7 +237,7 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
           }}
         >
           <ExternalLink className="w-3.5 h-3.5" />
-          {t("server.utilities.benchmark.report_link")}
+          {t("server.service.benchmark.report_link")}
         </button>
       )}
 
@@ -250,17 +250,17 @@ function CompletedView({ record, parsed, onRerun, onClose }: CompletedViewProps)
             color: "var(--color-text-primary)",
           }}
         >
-          {t("server.utilities.benchmark.no_report_link_banner")}
+          {t("server.service.benchmark.no_report_link_banner")}
         </div>
       )}
 
       {/* Action row */}
       <div className="flex justify-between gap-2 pt-2">
         <Button variant="primary" size="sm" onClick={onRerun}>
-          {t("server.utilities.benchmark.rerun_button")}
+          {t("server.service.benchmark.rerun_button")}
         </Button>
         <Button variant="ghost" size="sm" onClick={onClose}>
-          {t("server.utilities.benchmark.close_button")}
+          {t("server.service.benchmark.close_button")}
         </Button>
       </div>
     </div>
@@ -276,14 +276,14 @@ function CancelledView({ onRestart, onClose }: CancelledViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-body" style={{ color: "var(--color-text-secondary)" }}>
-        {t("server.utilities.benchmark.cancelled_message")}
+        {t("server.service.benchmark.cancelled_message")}
       </p>
       <div className="flex justify-between gap-2">
         <Button variant="primary" size="sm" onClick={onRestart}>
-          {t("server.utilities.benchmark.restart_button")}
+          {t("server.service.benchmark.restart_button")}
         </Button>
         <Button variant="ghost" size="sm" onClick={onClose}>
-          {t("server.utilities.benchmark.close_button")}
+          {t("server.service.benchmark.close_button")}
         </Button>
       </div>
     </div>
@@ -300,14 +300,14 @@ function ErrorView({ message, onRetry, onClose }: ErrorViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-body-sm" style={{ color: "var(--color-status-error)" }}>
-        {t("server.utilities.benchmark.error_prefix")} {message}
+        {t("server.service.benchmark.error_prefix")} {message}
       </p>
       <div className="flex justify-between gap-2">
         <Button variant="primary" size="sm" onClick={onRetry}>
-          {t("server.utilities.benchmark.retry_button")}
+          {t("server.service.benchmark.retry_button")}
         </Button>
         <Button variant="ghost" size="sm" onClick={onClose}>
-          {t("server.utilities.benchmark.close_button")}
+          {t("server.service.benchmark.close_button")}
         </Button>
       </div>
     </div>
@@ -436,7 +436,7 @@ export function BenchmarkModal({
         "STATE",
         `benchmark.complete host=${sshParams.host} dur=${record.duration_seconds}s`
       );
-      pushSnack(t("server.utilities.benchmark.snack.completed"));
+      pushSnack(t("server.service.benchmark.snack.completed"));
     } catch (e) {
       const msg = formatError(e);
       // Handles BOTH plain `BENCHMARK_CANCELLED|dur=N` AND B8 watchdog `BENCHMARK_CANCELLED|dur=N|forced`
@@ -449,7 +449,7 @@ export function BenchmarkModal({
       } else {
         setState({ kind: "error", message: msg });
         activityLog("ERROR", `benchmark.failed host=${sshParams.host} err=${msg}`);
-        pushSnack(t("server.utilities.benchmark.snack.failed", { error: msg }), "error");
+        pushSnack(t("server.service.benchmark.snack.failed", { error: msg }), "error");
       }
     }
   };
@@ -460,8 +460,8 @@ export function BenchmarkModal({
     if (state.kind !== "running") return;
     // W1: Cancel benchmark is non-destructive — warning variant (not danger)
     const ok = await confirm({
-      title: t("server.utilities.benchmark.cancel_confirm_title"),
-      message: t("server.utilities.benchmark.cancel_confirm_message"),
+      title: t("server.service.benchmark.cancel_confirm_title"),
+      message: t("server.service.benchmark.cancel_confirm_message"),
       variant: "warning",
       confirmText: t("buttons.confirm"),
       cancelText: t("buttons.cancel"),
@@ -502,7 +502,7 @@ export function BenchmarkModal({
         className="text-title mb-4"
         style={{ color: "var(--color-text-primary)" }}
       >
-        {t("server.utilities.benchmark.modal_title")}
+        {t("server.service.benchmark.modal_title")}
       </h2>
 
       {state.kind === "idle" && (

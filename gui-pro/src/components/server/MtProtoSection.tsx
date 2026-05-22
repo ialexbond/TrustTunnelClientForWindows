@@ -39,10 +39,10 @@ export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
 
   // Subtitle label describing current state
   const subtitleLabel = installed && active
-    ? t("server.utilities.mtproto.card.active_on_port", { port: state.status?.port })
+    ? t("server.service.mtproto.card.active_on_port", { port: state.status?.port })
     : installed
-      ? t("server.utilities.mtproto.card.installed_inactive")
-      : t("server.utilities.mtproto.card.not_installed");
+      ? t("server.service.mtproto.card.installed_inactive")
+      : t("server.service.mtproto.card.not_installed");
 
   return (
     <Card data-testid="mtproto-section-card">
@@ -55,7 +55,7 @@ export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="text-subtitle">{t("server.utilities.mtproto.card.title")}</h3>
+              <h3 className="text-subtitle">{t("server.service.mtproto.card.title")}</h3>
               <StatusIndicator
                 status={indicatorStatus}
                 size="sm"
@@ -74,8 +74,8 @@ export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
           data-testid="mtproto-open-button"
         >
           {installed
-            ? t("server.utilities.mtproto.configure")
-            : t("server.utilities.mtproto.install")}
+            ? t("server.service.mtproto.configure")
+            : t("server.service.mtproto.install")}
         </Button>
       </div>
 
