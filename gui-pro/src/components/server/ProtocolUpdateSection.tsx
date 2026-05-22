@@ -246,7 +246,14 @@ export function ProtocolUpdateSection({
   //     placeholder so the user knows work is happening.
   const showLoadingSkeleton =
     (loading && versions.length === 0 && !error) || modalOpen;
-  const showErrorFallback = !!error && versions.length === 0;
+  // Error fallback shows ONLY when we have nothing to display at all —
+  // no GitHub list AND no installed version to populate the dropdown with.
+  // If the user is on a known version (e.g. 1.0.33) but GitHub is unreachable
+  // (rate-limit, offline), still render the dropdown with just the installed
+  // option so the section doesn't read as broken — the Refresh button lets
+  // them retry once the limit resets.
+  const showErrorFallback =
+    !!error && versions.length === 0 && (isUnknown || isCurrentLoading);
 
   return (
     <Card data-testid="protocol-update-card">

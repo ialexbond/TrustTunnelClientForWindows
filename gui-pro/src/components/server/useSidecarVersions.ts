@@ -109,10 +109,67 @@ export interface UseSidecarVersionsResult {
  * const { versions, loading, error, refresh } = useSidecarVersions(sshParams);
  * ```
  */
+/**
+ * localStorage cache for the GitHub releases list.
+ *
+ * GitHub unauthenticated rate-limit is 60 req/hour per IP. Without caching,
+ * every mount of `ProtocolUpdateSection`/`ControlPanelPage`/`OverviewSection`
+ * would burn a request — chains of reconnects + tab switches blow through
+ * the limit in minutes, after which every consumer gets `"Версии недоступны"`.
+ *
+ * 10-minute TTL is the sweet spot: short enough that a fresh release shows
+ * up within the next session, long enough to survive normal navigation and
+ * the post-update re-probe storm.
+ */
+const CACHE_KEY = "tt_sidecar_versions_cache";
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+interface CacheEntry {
+  fetchedAt: number;
+  versions: SidecarReleaseInfo[];
+}
+
+function readCache(): SidecarReleaseInfo[] | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as CacheEntry;
+    if (
+      !entry ||
+      typeof entry.fetchedAt !== "number" ||
+      !Array.isArray(entry.versions)
+    ) {
+      return null;
+    }
+    if (Date.now() - entry.fetchedAt > CACHE_TTL_MS) return null;
+    return entry.versions;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(versions: SidecarReleaseInfo[]): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const entry: CacheEntry = { fetchedAt: Date.now(), versions };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(entry));
+  } catch {
+    // localStorage quota / private-mode: silent fail, hook still works
+    // without persistent cache.
+  }
+}
+
 export function useSidecarVersions(
   sshParams: SshParams | null,
 ): UseSidecarVersionsResult {
-  const [versions, setVersions] = useState<SidecarReleaseInfo[]>([]);
+  // Seed initial state from cache so the dropdown is usable instantly on
+  // remount without re-hitting GitHub. If the cache is fresh, the initial
+  // fetch effect will skip altogether.
+  const cachedOnMount = readCache();
+  const [versions, setVersions] = useState<SidecarReleaseInfo[]>(
+    cachedOnMount ?? [],
+  );
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -150,7 +207,9 @@ export function useSidecarVersions(
       // Without this, downstream `versions[0]` would throw "Cannot read property
       // '0' of null" — happens e.g. in ControlPanelPage tests whose default invoke
       // mock returns null for unrecognised commands.
-      setVersions(Array.isArray(result) ? result : []);
+      const coerced = Array.isArray(result) ? result : [];
+      setVersions(coerced);
+      if (coerced.length > 0) writeCache(coerced);
     } catch (e) {
       if (cancelledRef.current) return;
       // D-29 invariant: only the opaque error code is logged. The backend
@@ -170,12 +229,18 @@ export function useSidecarVersions(
     }
   }, []);
 
-  // Initial fetch on mount (when connected). Re-runs only if connected status
-  // flips — actual sshParams field changes do NOT re-fire because the GitHub
-  // API call is server-independent. Per-host caching (deferred) would change this.
+  // Initial fetch on mount (when connected). Skip if we already have a fresh
+  // cache hit on mount — prevents wasted GitHub calls when the user navigates
+  // between tabs / reconnects within the TTL window.
   useEffect(() => {
     if (!connected) return;
+    if (cachedOnMount && cachedOnMount.length > 0) return;
     void refresh();
+    // `cachedOnMount` reference is stable for the lifetime of the hook instance —
+    // captured at mount, not a reactive value, so we intentionally exclude it
+    // from the dep list to avoid re-running on every render. eslint disagrees
+    // because the rule can't see the at-mount semantics.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, refresh]);
 
   return { versions, loading, error, refresh };
