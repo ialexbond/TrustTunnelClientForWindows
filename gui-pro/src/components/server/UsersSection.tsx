@@ -15,6 +15,7 @@ import { UserConfigModal } from "./UserConfigModal";
 import { UserModal } from "./UserModal";
 import { parseCertInfo } from "./certUtils";
 import type { ServerState } from "./useServerState";
+import type { ServerTabId } from "../../shared/types";
 
 interface Props {
   state: ServerState;
@@ -25,8 +26,10 @@ interface Props {
    * кнопки Refresh. Cross-fade между табами не unmount'ит секцию, поэтому
    * без этого сигнала юзер видит кэшированное состояние пока не передёрнет
    * коннект.
+   *
+   * Phase 19 rename: `"utilities"` → `"service"` via shared `ServerTabId`.
    */
-  activeServerTab?: "overview" | "users" | "configuration" | "security" | "utilities";
+  activeServerTab?: ServerTabId;
 }
 
 /**

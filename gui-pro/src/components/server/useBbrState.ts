@@ -43,16 +43,16 @@ export function useBbrState(sshParams: SshParams, pushSuccess: PushSuccess) {
       if (wasEnabled) {
         await invoke<boolean>("disable_bbr", { host, port, user, password, keyPath });
         setEnabled(false);
-        pushSuccess(t("server.utilities.bbr.snack.disabled"));
+        pushSuccess(t("server.service.bbr.snack.disabled"));
       } else {
         await invoke<boolean>("enable_bbr", { host, port, user, password, keyPath });
         setEnabled(true);
-        pushSuccess(t("server.utilities.bbr.snack.enabled"));
+        pushSuccess(t("server.service.bbr.snack.enabled"));
       }
     } catch (e) {
       const msg = formatError(e);
       pushSuccess(
-        t(wasEnabled ? "server.utilities.bbr.snack.disable_error" : "server.utilities.bbr.snack.enable_error", { error: msg }),
+        t(wasEnabled ? "server.service.bbr.snack.disable_error" : "server.service.bbr.snack.enable_error", { error: msg }),
         "error"
       );
       // Re-detect actual server state on error

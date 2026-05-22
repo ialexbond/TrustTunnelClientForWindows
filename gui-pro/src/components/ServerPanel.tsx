@@ -28,6 +28,21 @@ interface ServerPanelProps {
   onConfigExported: (configPath: string) => void;
   onPortChanged?: (newPort: number) => void;
   onPanelReady?: () => void;  // called when panelDataLoaded becomes true
+  /**
+   * Phase 19 (UI-SPEC §Block 2+3) cascade — sidecar update info sourced from
+   * `useUpdateChecker(sshParams)` in `ControlPanelPage`. Forwards to
+   * `ServerTabs` so OverviewSection Card #8 + ServiceTabSection Block 4 +
+   * the «Сервис» pill dot all share a single source of truth.
+   *
+   * `hasSidecarUpdate` is the net visibility (`sidecarAvailable &&
+   * !sidecarDismissed` collapsed by the parent). The remaining three carry
+   * raw `useUpdateChecker` fields needed by `ProtocolUpdateSection`'s
+   * frozen contract (Plan 19-03).
+   */
+  hasSidecarUpdate?: boolean;
+  currentVersion?: string;
+  sidecarAvailable?: boolean;
+  latestVersion?: string;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -205,5 +220,13 @@ export function ServerPanel(props: ServerPanelProps) {
   }
 
   // ─── Main panel — tabbed layout ───
-  return <ServerTabs state={state} />;
+  return (
+    <ServerTabs
+      state={state}
+      hasSidecarUpdate={props.hasSidecarUpdate}
+      currentVersion={props.currentVersion}
+      sidecarAvailable={props.sidecarAvailable}
+      latestVersion={props.latestVersion}
+    />
+  );
 }

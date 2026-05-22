@@ -43,4 +43,18 @@ export interface LogEntry {
 
 export type AppTab = "control" | "connection" | "routing" | "settings" | "about";
 
+/**
+ * Server-panel tab identifiers — used by `ServerTabs.tsx` and consumed by
+ * `OverviewSection` / `UsersSection` for drill-down navigation.
+ *
+ * Phase 19 rename: `"utilities"` → `"service"` (D-04 + UI-SPEC §Block 3 §A —
+ * server section becomes «Сервис» to fit Protocol Update Card semantics).
+ */
+export type ServerTabId =
+  | "overview"
+  | "users"
+  | "configuration"
+  | "security"
+  | "service";
+
 export type ThemeMode = "system" | "dark" | "light";

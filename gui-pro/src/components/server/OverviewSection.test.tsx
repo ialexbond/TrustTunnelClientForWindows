@@ -424,7 +424,7 @@ describe("OverviewSection", () => {
       expect(onNavigate).toHaveBeenCalledWith("users");
     });
 
-    it("drill-down: calls onNavigate('configuration') on Enter key on Protocol version card", async () => {
+    it("drill-down: calls onNavigate('service') on Enter key on Protocol version card (Phase 19 — target moved from configuration to service)", async () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={onNavigate} />);
@@ -434,7 +434,37 @@ describe("OverviewSection", () => {
       expect(card).not.toBeNull();
 
       fireEvent.keyDown(card!, { key: "Enter" });
-      expect(onNavigate).toHaveBeenCalledWith("configuration");
+      expect(onNavigate).toHaveBeenCalledWith("service");
+    });
+
+    it("Phase 19 — Protocol version card shows ArrowUp icon when sidecarAvailable=true", () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(
+        <OverviewSection
+          state={state}
+          onNavigate={onNavigate}
+          sidecarAvailable={true}
+        />,
+      );
+
+      // ArrowUp icon should be present next to the version
+      const arrow = screen.queryByTestId("overview-protocol-update-arrow");
+      expect(arrow).not.toBeNull();
+    });
+
+    it("Phase 19 — Protocol version card HIDES ArrowUp icon when sidecarAvailable=false", () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(
+        <OverviewSection
+          state={state}
+          onNavigate={onNavigate}
+          sidecarAvailable={false}
+        />,
+      );
+
+      expect(screen.queryByTestId("overview-protocol-update-arrow")).toBeNull();
     });
 
     it("drill-down: calls onNavigate('security') on Space key on Security card", async () => {
