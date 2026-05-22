@@ -1410,7 +1410,7 @@
         "dropdown_label": "Select protocol version",
         "install_button": "Install",
         "install_disabled_current": "Current version selected — no update needed",
-        "update_available_badge": "New update available",
+        "update_available_badge": "Update available",
         "check_update_aria": "Check for updates",
         "refreshing": "Checking...",
         "install_success": "Protocol updated to v{{to}}",

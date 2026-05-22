@@ -356,7 +356,7 @@ describe("ProtocolUpdateSection", () => {
     );
 
     expect(screen.getByTestId("protocol-update-badge")).toBeVisible();
-    expect(screen.getByText(/доступно новое обновление/i)).toBeVisible();
+    expect(screen.getByText(/доступно обновление/i)).toBeVisible();
   });
 
   // ─── 10: badge hidden when not available ───
