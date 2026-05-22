@@ -525,7 +525,6 @@
     "vibe_coding": "Built with vibe coding — an AI assistant writes code based on natural language task descriptions.",
     "up_to_date": "You are running the latest version",
     "update_available": "Version {{version}} is available",
-    "replay_welcome": "Show onboarding",
     "copyright": "Protocol © AdGuard · Client © {{year}} ialexbond"
   },
   "update": {
