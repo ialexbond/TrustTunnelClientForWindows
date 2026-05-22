@@ -1713,6 +1713,7 @@
     "welcome": {
       "screen1": {
         "heading": "Добро пожаловать в TrustTunnel",
+        "heading_prefix": "Добро пожаловать в",
         "description": "Свой VPN-сервер за пару минут. Трафик неотличим от обычного HTTPS — провайдеры и DPI его не видят."
       },
       "screen2": {

@@ -25,7 +25,7 @@ describe("WelcomeTour", () => {
     expect(screen.getByTestId("welcome-tour-arrow-right")).toBeInTheDocument();
   });
 
-  it("clicking правая стрелочка на S1 → S2 (visibility, not DOM)", async () => {
+  it("clicking правая стрелочка на S1 → S2", async () => {
     const user = userEvent.setup();
     const onComplete = vi.fn();
     render(<WelcomeTour onComplete={onComplete} />);
@@ -60,7 +60,7 @@ describe("WelcomeTour", () => {
     expect(screen.getByTestId("welcome-tour-screen-2")).not.toBeVisible();
   });
 
-  it("S3 показывает только левую стрелочку + кнопку «Начать»", async () => {
+  it("S3 показывает только левую стрелочку + кнопку «Начать» внутри слайда", async () => {
     const user = userEvent.setup();
     const onComplete = vi.fn();
     render(<WelcomeTour onComplete={onComplete} />);
@@ -74,7 +74,7 @@ describe("WelcomeTour", () => {
     expect(screen.getByTestId("welcome-tour-start")).toBeInTheDocument();
   });
 
-  it("X corner close на S1 calls onComplete + пишет tt_welcome_completed = «true»", async () => {
+  it("X corner close на S1 calls onComplete('skip') + пишет tt_welcome_completed", async () => {
     const user = userEvent.setup();
     const onComplete = vi.fn();
     render(<WelcomeTour onComplete={onComplete} />);
@@ -82,10 +82,11 @@ describe("WelcomeTour", () => {
     await user.click(screen.getByTestId("welcome-tour-close"));
 
     expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith("skip");
     expect(localStorage.getItem("tt_welcome_completed")).toBe("true");
   });
 
-  it("X corner close на S2 тоже completes", async () => {
+  it("X corner close на S2 тоже completes с intent='skip'", async () => {
     const user = userEvent.setup();
     const onComplete = vi.fn();
     render(<WelcomeTour onComplete={onComplete} />);
@@ -94,10 +95,11 @@ describe("WelcomeTour", () => {
     await user.click(screen.getByTestId("welcome-tour-close"));
 
     expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith("skip");
     expect(localStorage.getItem("tt_welcome_completed")).toBe("true");
   });
 
-  it("clicking «Начать» на S3 completes (same as X close)", async () => {
+  it("clicking «Начать» на S3 completes с intent='start' (navigate signal)", async () => {
     const user = userEvent.setup();
     const onComplete = vi.fn();
     render(<WelcomeTour onComplete={onComplete} />);
@@ -107,6 +109,7 @@ describe("WelcomeTour", () => {
     await user.click(screen.getByTestId("welcome-tour-start"));
 
     expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith("start");
     expect(localStorage.getItem("tt_welcome_completed")).toBe("true");
   });
 
@@ -159,9 +162,16 @@ describe("WelcomeTour", () => {
     render(<WelcomeTour onComplete={onComplete} />);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: /Добро пожаловать/i }),
+      screen.getByRole("heading", { level: 1, name: /Добро пожаловать в.*Trust.*Tunnel/i }),
     ).toBeVisible();
     expect(screen.getByText(/Свой VPN-сервер за пару минут/i)).toBeVisible();
+  });
+
+  it("Screen 1: heading имеет PRO badge", () => {
+    const onComplete = vi.fn();
+    render(<WelcomeTour onComplete={onComplete} />);
+
+    expect(screen.getByText("PRO")).toBeVisible();
   });
 
   it("Screen 2 на русском показывает 3-block diagram labels", async () => {
@@ -184,7 +194,7 @@ describe("WelcomeTour", () => {
     render(<WelcomeTour onComplete={onComplete} />);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: /Welcome to TrustTunnel/i }),
+      screen.getByRole("heading", { level: 1, name: /Welcome to.*Trust.*Tunnel/i }),
     ).toBeVisible();
   });
 

@@ -1407,9 +1407,9 @@ describe("App", () => {
       // Тур видим.
       expect(screen.getByTestId("welcome-tour-overlay")).toBeVisible();
 
-      // Skip → complete writes localStorage + onComplete callback flips state.
+      // X corner close → complete writes localStorage + onComplete('skip') flips state.
       await act(async () => {
-        fireEvent.click(screen.getByTestId("welcome-tour-skip"));
+        fireEvent.click(screen.getByTestId("welcome-tour-close"));
       });
 
       // Overlay больше не в DOM.
