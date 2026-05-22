@@ -444,6 +444,8 @@ pub fn run() {
             // Phase 18 — dual update detection (REQ-18-UPDATE-DETECTION-01..02)
             commands::updater::check_sidecar_version,
             commands::updater::check_app_update_info,
+            // Phase 19 — sidecar version listing for dropdown (REQ-19-LIST-VERSIONS-CMD)
+            commands::updater::list_sidecar_versions,
             commands::deeplink::decode_deeplink,
             commands::deeplink::import_config_from_string,
             commands::protocol::register_url_protocols,
