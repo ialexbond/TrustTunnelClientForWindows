@@ -8,12 +8,23 @@ interface TabNavigationProps {
   activeTab: AppTab;
   onTabChange: (tab: AppTab) => void;
   /**
-   * Когда `true` — на pill «Настройки» рендерится absolute dot 8×8px в top-right
-   * corner для индикации доступного обновления (Phase 18, REQ-18-UPDATE-DETECTION-04).
-   * Static, no animation (D-DECISION-UI-2.1) — accent через colour, не motion.
-   * Default: `false` (backwards-compat).
+   * Phase 19 split (UI-SPEC §Block 1) — replaces the Phase 18 `hasUpdate` prop.
+   *
+   * `hasAppUpdate` — when `true`, an 8×8 accent dot appears top-right on the
+   * «О программе» pill (was «Настройки» in Phase 18; moved per UI-SPEC §Block 1
+   * §A.1 — the About page is the canonical destination for app-update CTA).
+   *
+   * `hasSidecarUpdate` — when `true`, an 8×8 accent dot appears top-right on
+   * the «Панель управления» pill (UI-SPEC §Block 1 §A.2). Sidecar updates are
+   * server-bound, so the dot lives on the entry-point pill that opens the
+   * Server panel; the inner «Сервис» tab carries its own dot via `ServerTabs`.
+   *
+   * Both dots are static (D-DECISION-UI-2.1 — 10% accent rule, no motion).
+   * Default: `false` (backwards-compat — App.tsx pre-Phase 19 callers receive
+   * no dots until they opt-in via the new props).
    */
-  hasUpdate?: boolean;
+  hasAppUpdate?: boolean;
+  hasSidecarUpdate?: boolean;
 }
 
 interface TabDef {
@@ -36,7 +47,12 @@ const TABS: TabDef[] = [
  * Roving focus: only active tab in tab order, arrow keys move focus cyclically.
  * Pill indicator: absolutely positioned div animated via translateX (D-01, NAV-01).
  */
-export function TabNavigation({ activeTab, onTabChange, hasUpdate = false }: TabNavigationProps) {
+export function TabNavigation({
+  activeTab,
+  onTabChange,
+  hasAppUpdate = false,
+  hasSidecarUpdate = false,
+}: TabNavigationProps) {
   const { t } = useTranslation();
   const navRef = useRef<HTMLElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -174,10 +190,13 @@ export function TabNavigation({ activeTab, onTabChange, hasUpdate = false }: Tab
                   {t(tab.labelKey)}
                 </span>
               </span>
-              {/* Phase 18 — Update dot indicator на «Настройки» pill (REQ-18-UPDATE-DETECTION-04).
-                  Static, no animation (D-DECISION-UI-2.1). Position: absolute top-right relative
-                  to button (button уже имеет position: relative выше). */}
-              {hasUpdate && tab.id === "settings" && (
+              {/* Phase 19 (UI-SPEC §Block 1) — two independent update dots.
+                  Both static (D-DECISION-UI-2.1, no motion). Position relative
+                  to the button (already position: relative above).
+                    • App-update dot   → «О программе» (about) pill
+                    • Sidecar-update dot → «Панель управления» (control) pill
+                  Phase 18 dot was on «Настройки» (settings) — moved per UI-SPEC. */}
+              {hasAppUpdate && tab.id === "about" && (
                 <span
                   style={{
                     position: "absolute",
@@ -190,7 +209,23 @@ export function TabNavigation({ activeTab, onTabChange, hasUpdate = false }: Tab
                   }}
                   role="status"
                   aria-label={t("app.update.dot_aria")}
-                  data-testid="settings-update-dot"
+                  data-testid="about-update-dot"
+                />
+              )}
+              {hasSidecarUpdate && tab.id === "control" && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    backgroundColor: "var(--color-accent-interactive)",
+                  }}
+                  role="status"
+                  aria-label={t("app.update.dot_aria")}
+                  data-testid="control-sidecar-update-dot"
                 />
               )}
             </button>
