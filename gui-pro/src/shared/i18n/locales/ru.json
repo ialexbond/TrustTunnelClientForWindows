@@ -16,7 +16,7 @@
     "security": "Безопасность",
     "overview": "Обзор",
     "configuration": "Конфигурация",
-    "utilities": "Утилиты"
+    "service": "Сервис"
   },
   "status": {
     "connected": "Подключен",
@@ -1393,11 +1393,31 @@
         "reset_port_message": "Вернуть SSH-порт на стандартный 22? Будет использован тот же безопасный процесс (бэкап, firewall, валидация)."
       }
     },
-    "utilities": {
+    "service": {
       "title": "Утилиты",
       "tooltip": "Серверные утилиты: прокси и инструменты оптимизации сети.",
       "loading": "Загрузка статуса утилит...",
       "refresh": "Обновить",
+      "controls_title": "Управление сервисом",
+      "tab_update_available_aria": "Доступно обновление протокола",
+      "protocol": {
+        "title": "Обновление протокола",
+        "card_description": "Установите свежую версию протокола TrustTunnel на сервере либо выберите другую релизную версию.",
+        "current_label_prefix": "Текущая версия:",
+        "current_label_suffix_active": "(актуальная)",
+        "current_label_suffix_new": "(новая)",
+        "last_check": "Последняя проверка: {{ago}}",
+        "dropdown_label": "Выбрать версию протокола",
+        "install_button": "Установить",
+        "install_disabled_current": "Выбрана текущая версия — обновление не требуется",
+        "update_available_badge": "Доступно новое обновление",
+        "check_update_aria": "Проверить обновления",
+        "refreshing": "Проверяем...",
+        "install_success": "Протокол обновлён до v{{to}}",
+        "up_to_date": "Установлена актуальная версия",
+        "no_versions": "Версии недоступны",
+        "not_installed_label": "Протокол не установлен"
+      },
       "mtproto": {
         "title": "MTProto Proxy",
         "status": {
@@ -1534,9 +1554,6 @@
       "delete_title": "Удалить TrustTunnel?",
       "delete_message": "VPN будет полностью удалён с сервера. Это действие необратимо.",
       "uninstalled": "VPN удалён с сервера"
-    },
-    "service": {
-      "controls_title": "Управление сервисом"
     },
     "overview": {
       "version": "Версия",
