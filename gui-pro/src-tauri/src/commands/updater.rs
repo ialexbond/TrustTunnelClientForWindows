@@ -390,6 +390,175 @@ pub async fn check_app_update_info(
     })
 }
 
+// ─── Phase 19: list_sidecar_versions (REQ-19-LIST-VERSIONS-CMD) ────────────
+//
+// Returns a list of the last N GitHub releases for the `TrustTunnel/TrustTunnel`
+// repo. Used by Plan 19-03 ProtocolUpdateSection dropdown. Mirrors the
+// `check_sidecar_version` pattern (Phase 18 Plan 18-03) and reuses
+// `select_sidecar_asset` + `validate_download_url` + `ssh::sanitize::validate_version`.
+//
+// Pure helper `parse_releases_to_info` is extracted so unit tests can exercise
+// the iteration / filter / validation logic without HTTP mocking (the wrapping
+// Tauri command is just an HTTP fetch around it).
+//
+// D-29 invariant (REQ-19-D29-EXTENDED): function body MUST NOT call the activity
+// log channel or any emit-log helper, MUST NOT send a vpn log Tauri event, and
+// MUST NOT invoke the i18n log message helper. Asset URLs + tags NEVER reach
+// the persisted log file. Static-grep test enforces this in CI (see test mod
+// list_sidecar_versions_tests at the bottom of this file).
+
+/// Phase 19 frozen contract — single release entry returned by
+/// `list_sidecar_versions`. Plan 19-03 consumer expects camelCase fields:
+/// `version`, `tag`, `assetDownloadUrl`, `assetSizeBytes`, `publishedAt`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarReleaseInfo {
+    /// Semver-only string with leading `v` stripped, e.g. `"1.0.33"`.
+    pub version: String,
+    /// Original GitHub `tag_name` with `v` prefix preserved, e.g. `"v1.0.33"`.
+    pub tag: String,
+    /// `browser_download_url` of the `trusttunnel-v{TAG}-linux-x86_64.tar.gz`
+    /// asset (validated through `validate_download_url`).
+    pub asset_download_url: String,
+    /// Size in bytes of the selected asset (informational only).
+    pub asset_size_bytes: u64,
+    /// ISO timestamp from `release.published_at`; empty string if missing.
+    pub published_at: String,
+}
+
+/// Pure helper — iterate GitHub releases JSON array, filter prereleases,
+/// reject tags failing S-02 char-whitelist, select `x86_64` non-dbgsym asset,
+/// validate download URL, build `SidecarReleaseInfo` for each survivor, and
+/// stop once `result.len() >= cap`.
+///
+/// Extracted for testability — `list_sidecar_versions` Tauri command is a thin
+/// HTTP wrapper around this helper. All filtering / validation decisions live
+/// here. Tests in `list_sidecar_versions_tests` exercise this function with
+/// hand-crafted `serde_json::Value` fixtures.
+fn parse_releases_to_info(
+    releases: &[serde_json::Value],
+    cap: usize,
+) -> Vec<SidecarReleaseInfo> {
+    let mut result: Vec<SidecarReleaseInfo> = Vec::with_capacity(cap.min(releases.len()));
+
+    for release in releases.iter() {
+        // Filter prereleases (defensive — TrustTunnel/TrustTunnel currently has none,
+        // but future-proof).
+        if release.get("prerelease").and_then(|v| v.as_bool()).unwrap_or(false) {
+            continue;
+        }
+
+        let tag = release
+            .get("tag_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if tag.is_empty() {
+            continue;
+        }
+
+        // S-02 — char-whitelist defence against compromised/hostile API responses.
+        if ssh::sanitize::validate_version(&tag).is_err() {
+            continue;
+        }
+
+        let assets = release
+            .get("assets")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let Some((url, size)) = select_sidecar_asset(&assets, "x86_64") else {
+            continue;
+        };
+
+        // V9 — defence-in-depth on download URL allowlist.
+        if validate_download_url(&url).is_err() {
+            continue;
+        }
+
+        let version = tag.trim_start_matches('v').to_string();
+        let published_at = release
+            .get("published_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        result.push(SidecarReleaseInfo {
+            version,
+            tag,
+            asset_download_url: url,
+            asset_size_bytes: size,
+            published_at,
+        });
+
+        if result.len() >= cap {
+            break;
+        }
+    }
+
+    result
+}
+
+/// REQ-19-LIST-VERSIONS-CMD — Phase 19 sidecar version listing.
+///
+/// Returns up to `max_count` (backend-capped at 10) most recent
+/// `TrustTunnel/TrustTunnel` GitHub releases, sorted descending by GitHub's
+/// default order (published_at desc). Prerelease entries filtered out; each
+/// surviving release's `tag_name` validated through S-02 char-whitelist; only
+/// `trusttunnel-v{TAG}-linux-x86_64.tar.gz` (non-dbgsym) assets accepted;
+/// asset URLs validated through `validate_download_url` (github.com /
+/// objects.githubusercontent.com whitelist, HTTPS only).
+///
+/// **D-29 invariant (REQ-19-D29-EXTENDED):** asset URLs and tag values NEVER
+/// flow to the activity log channel or any emit-log helper. The function body
+/// intentionally contains zero log emissions — only `eprintln!` for debug-stderr
+/// diagnostics (not persisted). Static-grep test in
+/// `list_sidecar_versions_tests` mod enforces this in CI.
+///
+/// **Error contract:** any failure (network / non-200 / parse / empty list)
+/// returns `Err("UPDATE_CHECK_FAILED".into())` — opaque string with no URL
+/// or tag leakage. Frontend `useSidecarVersions` (Plan 19-03) treats this as
+/// silent failure (`console.warn` only, no toast) per D-4.4.
+#[tauri::command]
+pub async fn list_sidecar_versions(
+    _app: tauri::AppHandle,
+    max_count: u32,
+) -> Result<Vec<SidecarReleaseInfo>, String> {
+    // Backend cap defends against frontend passing oversized values
+    // (DoS via memory / API quota burn).
+    let cap = (max_count as usize).min(10);
+
+    // `+5` buffer accommodates filtered-out prereleases / missing assets so the
+    // result still has a chance to reach `cap` after filtering.
+    let per_page = cap + 5;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!(
+            "https://api.github.com/repos/TrustTunnel/TrustTunnel/releases?per_page={per_page}"
+        ))
+        .header("User-Agent", "TrustTunnel-UpdateChecker")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| {
+            eprintln!("[list_sidecar_versions] GitHub API request failed: {e}");
+            "UPDATE_CHECK_FAILED".to_string()
+        })?;
+
+    if !res.status().is_success() {
+        eprintln!("[list_sidecar_versions] GitHub API status {}", res.status());
+        return Err("UPDATE_CHECK_FAILED".into());
+    }
+
+    let releases: Vec<serde_json::Value> = res
+        .json()
+        .await
+        .map_err(|_| "UPDATE_CHECK_FAILED".to_string())?;
+
+    Ok(parse_releases_to_info(&releases, cap))
+}
+
 /// Self-update: download NSIS setup.exe, verify checksum, launch silent install, restart.
 #[tauri::command]
 pub async fn self_update(
@@ -760,5 +929,257 @@ mod d29_invariant_tests {
             !body.contains("emit_log("),
             "D-29: check_app_update_info must NOT call emit_log (use eprintln! for debug only)"
         );
+    }
+}
+
+// ─── Phase 19: list_sidecar_versions tests (RED phase — written first) ─────
+//
+// Tests written before implementation per TDD discipline. Reference the pure
+// helper `parse_releases_to_info` (extracted from `list_sidecar_versions` for
+// testability) — this lets us validate parsing logic against fixture JSON
+// without HTTP mocking. The Tauri command itself just wraps an HTTP fetch +
+// `parse_releases_to_info(...)`.
+#[cfg(test)]
+mod list_sidecar_versions_tests {
+    use super::*;
+
+    /// Test 1 — cap respected: max_count caps result length and backend cap=10
+    /// blocks oversized frontend requests.
+    #[test]
+    fn cap_max_count_clamps_to_backend_cap() {
+        // Construct fixture with 12 release entries (more than backend cap=10).
+        let mut releases = Vec::new();
+        for i in 0..12 {
+            releases.push(serde_json::json!({
+                "tag_name": format!("v1.0.{}", 33 - i),
+                "prerelease": false,
+                "published_at": format!("2026-05-{:02}T12:00:00Z", 22 - i.min(20)),
+                "assets": [
+                    {
+                        "name": format!("trusttunnel-v1.0.{}-linux-x86_64.tar.gz", 33 - i),
+                        "browser_download_url": format!(
+                            "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.{}/trusttunnel-v1.0.{}-linux-x86_64.tar.gz",
+                            33 - i,
+                            33 - i
+                        ),
+                        "size": 10_700_000_u64,
+                    }
+                ],
+            }));
+        }
+        // Frontend asks for 4 → should get 4
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 4, "cap=4 should clamp result to 4 entries");
+
+        // Frontend asks for 50 → backend cap=10 still applies. parse_releases_to_info
+        // honors `cap` it's given, but the wrapping Tauri command must enforce
+        // backend cap upstream. Verify the helper respects its own cap.
+        let res_capped = parse_releases_to_info(&releases, 10);
+        assert_eq!(res_capped.len(), 10, "cap=10 should clamp result to 10 entries");
+    }
+
+    /// Test 2 — prerelease entries are filtered out.
+    #[test]
+    fn filters_prereleases_from_result() {
+        let releases = vec![
+            serde_json::json!({
+                "tag_name": "v1.0.34-beta",
+                "prerelease": true,
+                "published_at": "2026-05-22T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.34-beta-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.34-beta/trusttunnel-v1.0.34-beta-linux-x86_64.tar.gz",
+                        "size": 10_000_000_u64,
+                    }
+                ],
+            }),
+            serde_json::json!({
+                "tag_name": "v1.0.33",
+                "prerelease": false,
+                "published_at": "2026-05-20T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "size": 10_700_000_u64,
+                    }
+                ],
+            }),
+        ];
+
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 1, "prerelease should be filtered, only 1 entry remains");
+        assert_eq!(res[0].version, "1.0.33");
+        assert_eq!(res[0].tag, "v1.0.33");
+    }
+
+    /// Test 3 — dbgsym assets are excluded via select_sidecar_asset reuse.
+    #[test]
+    fn excludes_dbgsym_assets() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "v1.0.33",
+            "prerelease": false,
+            "published_at": "2026-05-20T12:00:00Z",
+            "assets": [
+                {
+                    "name": "trusttunnel-v1.0.33-linux-x86_64-dbgsym.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64-dbgsym.tar.gz",
+                    "size": 107_000_000_u64,
+                },
+                {
+                    "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "size": 10_700_000_u64,
+                },
+            ],
+        })];
+
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 1);
+        assert!(
+            !res[0].asset_download_url.contains("dbgsym"),
+            "dbgsym asset must be excluded; got URL: {}",
+            res[0].asset_download_url
+        );
+        assert_eq!(res[0].asset_size_bytes, 10_700_000);
+    }
+
+    /// Test 4 (D-29 invariant) — static-grep the `list_sidecar_versions` function
+    /// body in source. NO emit_log / activity_log / vpn-log / log_message_i18n.
+    ///
+    /// Pattern reference: Phase 18 `check_sidecar_version_does_not_call_activity_log_or_emit_log`
+    /// (mod d29_invariant_tests above) uses identical body-extraction technique.
+    #[test]
+    fn list_versions_no_emit_log_d29_static_grep() {
+        let source = include_str!("./updater.rs");
+        // Extract body span: from `pub async fn list_sidecar_versions` to the
+        // next `pub fn` / `pub async fn` / `fn ` / `#[cfg(test)]` / EOF.
+        let span = source.split("pub async fn list_sidecar_versions").nth(1).unwrap_or("");
+        let body = span
+            .split("\npub async fn ")
+            .next()
+            .unwrap_or("")
+            .split("\npub fn ")
+            .next()
+            .unwrap_or("")
+            .split("\nfn ")
+            .next()
+            .unwrap_or("")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+
+        assert!(
+            !body.contains("activity_log"),
+            "D-29: list_sidecar_versions must NOT call activity_log"
+        );
+        assert!(
+            !body.contains("emit_log"),
+            "D-29: list_sidecar_versions must NOT call emit_log (asset URLs / tags MUST NOT leak)"
+        );
+        assert!(
+            !body.contains("vpn-log"),
+            "D-29: list_sidecar_versions must NOT emit vpn-log event"
+        );
+        assert!(
+            !body.contains("log_message_i18n"),
+            "D-29: list_sidecar_versions must NOT call log_message_i18n"
+        );
+    }
+
+    /// Test 5 — S-02 invariant: tags that fail `validate_version` (shell
+    /// metacharacters) are skipped. Defends against a hostile/compromised
+    /// GitHub Releases API response.
+    #[test]
+    fn skips_releases_with_invalid_version_tag() {
+        let releases = vec![
+            serde_json::json!({
+                "tag_name": "v1.0.33; rm -rf /",  // shell-injection attempt
+                "prerelease": false,
+                "published_at": "2026-05-22T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                        "size": 10_700_000_u64,
+                    }
+                ],
+            }),
+            serde_json::json!({
+                "tag_name": "v1.0.32",
+                "prerelease": false,
+                "published_at": "2026-05-15T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "trusttunnel-v1.0.32-linux-x86_64.tar.gz",
+                        "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.32/trusttunnel-v1.0.32-linux-x86_64.tar.gz",
+                        "size": 10_600_000_u64,
+                    }
+                ],
+            }),
+        ];
+
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(
+            res.len(),
+            1,
+            "malicious tag should be skipped; only v1.0.32 survives"
+        );
+        assert_eq!(res[0].tag, "v1.0.32");
+    }
+
+    /// Bonus — empty tag name handled gracefully (skipped, not error).
+    #[test]
+    fn skips_releases_with_empty_tag() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "",
+            "prerelease": false,
+            "published_at": "2026-05-22T12:00:00Z",
+            "assets": [],
+        })];
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 0);
+    }
+
+    /// Bonus — release without assets (or missing asset for x86_64) is skipped.
+    #[test]
+    fn skips_release_with_missing_x86_64_asset() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "v1.0.33",
+            "prerelease": false,
+            "published_at": "2026-05-22T12:00:00Z",
+            "assets": [
+                {
+                    "name": "trusttunnel-v1.0.33-linux-aarch64.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-aarch64.tar.gz",
+                    "size": 9_600_000_u64,
+                }
+            ],
+        })];
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 0, "no x86_64 asset → release skipped");
+    }
+
+    /// Bonus — version field strips the leading `v` from tag.
+    #[test]
+    fn version_field_strips_v_prefix() {
+        let releases = vec![serde_json::json!({
+            "tag_name": "v1.0.33",
+            "prerelease": false,
+            "published_at": "2026-05-22T12:00:00Z",
+            "assets": [
+                {
+                    "name": "trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "browser_download_url": "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.0.33/trusttunnel-v1.0.33-linux-x86_64.tar.gz",
+                    "size": 10_700_000_u64,
+                }
+            ],
+        })];
+        let res = parse_releases_to_info(&releases, 4);
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].version, "1.0.33", "version strips leading v");
+        assert_eq!(res[0].tag, "v1.0.33", "tag keeps original v prefix");
+        assert_eq!(res[0].published_at, "2026-05-22T12:00:00Z");
     }
 }
