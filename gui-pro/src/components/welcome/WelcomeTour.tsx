@@ -138,10 +138,7 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
         </button>
       )}
 
-      <div
-        className="max-w-[480px] w-full mx-auto px-6 flex-1 flex flex-col items-center justify-center"
-        style={{ gap: 32, paddingBottom: 56 }}
-      >
+      <div className="max-w-[480px] w-full mx-auto px-6 flex-1 flex flex-col items-center justify-center">
         {/* Crossfade container — все 3 screens render simultaneously,
             видна только active. Фиксированный minHeight чтобы Start-кнопка
             внутри Screen 3 не прыгала layout при S2→S3. */}
@@ -159,7 +156,13 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
             <WelcomeScreen3 onStart={handleStart} />
           </ScreenSlot>
         </div>
+      </div>
 
+      {/* Dot indicator зафиксирован в нижней части overlay'я (вне flex
+          contentaaa). bottom=80px = ~16px над линией где была бы верхняя
+          грань нижней TabNavigation (64px), чтобы визуально совпадало с
+          edge tab bar'а независимо от высоты content area. */}
+      <div className="absolute inset-x-0 flex justify-center" style={{ bottom: 80 }}>
         <WelcomeDotIndicator currentStep={currentStep} />
       </div>
     </div>
