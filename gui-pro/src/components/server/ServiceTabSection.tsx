@@ -26,7 +26,7 @@
  * worktree mount race), ProtocolUpdateSection still mounts but its internal
  * useSidecarVersions hook short-circuits (null params).
  */
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Zap, Loader2 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
@@ -146,6 +146,26 @@ export function ServiceTabSection({
     }
   }, [computedSidecarAvailable, latestFromGitHub, onSidecarUpdateSeen]);
 
+  // ─── After-update version refresh ───────────────────────────────────────
+  //
+  // Since we switched the source of truth to `state.serverInfo.version`
+  // (populated by `check_server_installation`), after `update_sidecar`
+  // succeeds we MUST re-probe that command — otherwise Overview Card #8
+  // and the Service tab caption keep showing the pre-update version
+  // forever. Parent (`ControlPanelPage`) also re-probes its own pipeline
+  // via `onSidecarUpdateApplied`; here we additionally trigger the panel
+  // state reload so `serverInfo.version` picks up the new value.
+  //
+  // 0ms + 2500ms two-shot — same window as the parent retry; matches
+  // the time `trusttunnel_endpoint` needs to restart and answer `--version`.
+  const handleAppliedWithRefresh = useCallback(() => {
+    onSidecarUpdateApplied?.();
+    void state.loadServerInfo(true);
+    window.setTimeout(() => {
+      void state.loadServerInfo(true);
+    }, 2500);
+  }, [onSidecarUpdateApplied, state]);
+
   return (
     <div aria-live="polite" className="space-y-4">
       {/* Block 1 — BBR Toggle Card (D-4.2: single boolean switch, no Modal) */}
@@ -193,7 +213,7 @@ export function ServiceTabSection({
         currentVersion={computedCurrentVersion}
         sidecarAvailable={computedSidecarAvailable}
         latestVersion={latestFromGitHub}
-        onSidecarUpdateApplied={onSidecarUpdateApplied}
+        onSidecarUpdateApplied={handleAppliedWithRefresh}
       />
 
       {/* Block 5 — Logs Card+Modal (Plan 17-05, D-2.4) */}
