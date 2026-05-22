@@ -17,6 +17,7 @@ import {
   ChevronRight,
   ArrowDown,
   ArrowUp,
+  ArrowUpCircle,
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { ProgressBar } from "../../shared/ui/ProgressBar";
@@ -659,11 +660,15 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         ariaLabel={t("server.overview.cards.protocolVersion")}
       >
         <Title icon={<Package className="w-5 h-5" />} text={t("server.overview.cards.protocolVersion")} clickable refreshAriaLabel={refreshAriaLabel} />
-        <div className="flex items-center justify-center py-2 gap-2">
+        <div className="flex items-center justify-center gap-3 py-2">
           <span className="font-mono" style={bigNum}>{version}</span>
           {sidecarAvailable && (
-            <ArrowUp
-              className="w-5 h-5 shrink-0"
+            // Phase 19: дизайн-спека (Storybook «8b. Версия — обновление»)
+            // предписывает `ArrowUpCircle` w-6 h-6 warning-500 — стрелка в
+            // круглой обводке, как пиктограмма уведомления. Раньше тут была
+            // голая `ArrowUp` без круга — мискомпонент vs спека.
+            <ArrowUpCircle
+              className="w-6 h-6 shrink-0"
               style={{ color: "var(--color-warning-500)" }}
               aria-label={t("server.service.protocol.update_available_badge")}
               data-testid="overview-protocol-update-arrow"
