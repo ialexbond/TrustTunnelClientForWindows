@@ -139,20 +139,22 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
       )}
 
       <div className="max-w-[480px] w-full mx-auto px-6 flex-1 flex flex-col items-center justify-center">
-        {/* Crossfade container — все 3 screens render simultaneously,
-            видна только active. Фиксированный minHeight чтобы Start-кнопка
-            внутри Screen 3 не прыгала layout при S2→S3. */}
+        {/* Horizontal slide carousel — все 3 slot'а live в DOM. Active
+            slot transform: translateX(0), off-screen left = translateX(-100%),
+            right = translateX(+100%). overflow:hidden на parent скрывает
+            off-screen контент. transition 300ms cubic-bezier даёт smooth
+            push-pull slide эффект (Instagram-style). */}
         <div
-          className="w-full flex items-center justify-center relative"
-          style={{ minHeight: 360 }}
+          className="w-full relative"
+          style={{ minHeight: 360, overflow: "hidden" }}
         >
-          <ScreenSlot visible={currentStep === 0}>
+          <ScreenSlot offset={0 - currentStep}>
             <WelcomeScreen1 />
           </ScreenSlot>
-          <ScreenSlot visible={currentStep === 1}>
+          <ScreenSlot offset={1 - currentStep}>
             <WelcomeScreen2 />
           </ScreenSlot>
-          <ScreenSlot visible={currentStep === 2}>
+          <ScreenSlot offset={2 - currentStep}>
             <WelcomeScreen3 onStart={handleStart} />
           </ScreenSlot>
         </div>
@@ -170,23 +172,23 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
 }
 
 function ScreenSlot({
-  visible,
+  offset,
   children,
 }: {
-  visible: boolean;
+  /** offset = (slotIndex - currentStep). 0 = active (centered), <0 = left
+   *  off-screen, >0 = right off-screen. Width transition 300ms. */
+  offset: number;
   children: React.ReactNode;
 }) {
-  // Все слоты absolute-позиционированы поверх друг друга, opacity управляет
-  // видимостью. 200ms transition matches Modal primitive timing.
+  const active = offset === 0;
   return (
     <div
-      aria-hidden={!visible}
+      aria-hidden={!active}
       className="absolute inset-0 flex items-center justify-center"
       style={{
-        opacity: visible ? 1 : 0,
-        visibility: visible ? "visible" : "hidden",
-        transition: "opacity 200ms",
-        pointerEvents: visible ? "auto" : "none",
+        transform: `translateX(${offset * 100}%)`,
+        transition: "transform 300ms cubic-bezier(0.4, 0, 0.2, 1)",
+        pointerEvents: active ? "auto" : "none",
       }}
     >
       {children}

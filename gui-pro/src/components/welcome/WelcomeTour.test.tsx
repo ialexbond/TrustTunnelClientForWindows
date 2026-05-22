@@ -13,9 +13,9 @@ describe("WelcomeTour", () => {
   it("renders Screen 1 by default (initial mount)", () => {
     const onComplete = vi.fn();
     render(<WelcomeTour onComplete={onComplete} />);
-    expect(screen.getByTestId("welcome-tour-screen-1")).toBeVisible();
-    expect(screen.getByTestId("welcome-tour-screen-2")).not.toBeVisible();
-    expect(screen.getByTestId("welcome-tour-screen-3")).not.toBeVisible();
+    expect(screen.getByTestId("welcome-tour-screen-1").parentElement).toHaveAttribute("aria-hidden", "false");
+    expect(screen.getByTestId("welcome-tour-screen-2").parentElement).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("welcome-tour-screen-3").parentElement).toHaveAttribute("aria-hidden", "true");
   });
 
   it("S1 показывает только правую стрелочку (нет левой)", () => {
@@ -32,9 +32,9 @@ describe("WelcomeTour", () => {
 
     await user.click(screen.getByTestId("welcome-tour-arrow-right"));
 
-    expect(screen.getByTestId("welcome-tour-screen-1")).not.toBeVisible();
-    expect(screen.getByTestId("welcome-tour-screen-2")).toBeVisible();
-    expect(screen.getByTestId("welcome-tour-screen-3")).not.toBeVisible();
+    expect(screen.getByTestId("welcome-tour-screen-1").parentElement).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("welcome-tour-screen-2").parentElement).toHaveAttribute("aria-hidden", "false");
+    expect(screen.getByTestId("welcome-tour-screen-3").parentElement).toHaveAttribute("aria-hidden", "true");
   });
 
   it("S2 показывает обе стрелочки (back + next)", async () => {
@@ -53,11 +53,11 @@ describe("WelcomeTour", () => {
     render(<WelcomeTour onComplete={onComplete} />);
 
     await user.click(screen.getByTestId("welcome-tour-arrow-right")); // → S2
-    expect(screen.getByTestId("welcome-tour-screen-2")).toBeVisible();
+    expect(screen.getByTestId("welcome-tour-screen-2").parentElement).toHaveAttribute("aria-hidden", "false");
 
     await user.click(screen.getByTestId("welcome-tour-arrow-left"));
-    expect(screen.getByTestId("welcome-tour-screen-1")).toBeVisible();
-    expect(screen.getByTestId("welcome-tour-screen-2")).not.toBeVisible();
+    expect(screen.getByTestId("welcome-tour-screen-1").parentElement).toHaveAttribute("aria-hidden", "false");
+    expect(screen.getByTestId("welcome-tour-screen-2").parentElement).toHaveAttribute("aria-hidden", "true");
   });
 
   it("S3 показывает только левую стрелочку + кнопку «Начать» внутри слайда", async () => {
@@ -68,7 +68,7 @@ describe("WelcomeTour", () => {
     await user.click(screen.getByTestId("welcome-tour-arrow-right")); // → S2
     await user.click(screen.getByTestId("welcome-tour-arrow-right")); // → S3
 
-    expect(screen.getByTestId("welcome-tour-screen-3")).toBeVisible();
+    expect(screen.getByTestId("welcome-tour-screen-3").parentElement).toHaveAttribute("aria-hidden", "false");
     expect(screen.getByTestId("welcome-tour-arrow-left")).toBeInTheDocument();
     expect(screen.queryByTestId("welcome-tour-arrow-right")).not.toBeInTheDocument();
     expect(screen.getByTestId("welcome-tour-start")).toBeInTheDocument();

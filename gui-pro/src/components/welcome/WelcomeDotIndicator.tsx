@@ -55,12 +55,13 @@ export function WelcomeDotIndicator({ currentStep }: WelcomeDotIndicatorProps) {
               aria-hidden="true"
               data-testid={`welcome-dot-${i}`}
               data-active={isActive ? "true" : "false"}
-              className="rounded-full"
               style={{
-                width: 8,
+                width: isActive ? 24 : 8,
                 height: 8,
+                borderRadius: 4,
                 backgroundColor: dotColor,
-                transition: "background-color var(--transition-fast)",
+                transition:
+                  "width 300ms cubic-bezier(0.4, 0, 0.2, 1), background-color 300ms ease",
               }}
             />
           </Fragment>
