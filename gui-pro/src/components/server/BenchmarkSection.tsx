@@ -51,17 +51,17 @@ export function BenchmarkSection({ sshParams }: BenchmarkSectionProps) {
             />
             <div className="flex-1 min-w-0">
               <h3 className="text-subtitle">
-                {t("server.utilities.benchmark.card.title")}
+                {t("server.service.benchmark.card.title")}
               </h3>
               <p
                 className="text-caption"
                 style={{ color: "var(--color-text-muted)" }}
               >
                 {lastRun
-                  ? t("server.utilities.benchmark.card.last_run", {
+                  ? t("server.service.benchmark.card.last_run", {
                       time: formatTime(lastRun.timestamp),
                     })
-                  : t("server.utilities.benchmark.card.empty")}
+                  : t("server.service.benchmark.card.empty")}
               </p>
             </div>
           </div>
@@ -71,8 +71,8 @@ export function BenchmarkSection({ sshParams }: BenchmarkSectionProps) {
             onClick={() => setOpen(true)}
           >
             {lastRun
-              ? t("server.utilities.benchmark.button.open_results")
-              : t("server.utilities.benchmark.button.check_quality")}
+              ? t("server.service.benchmark.button.open_results")
+              : t("server.service.benchmark.button.check_quality")}
           </Button>
         </div>
       </Card>

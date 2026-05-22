@@ -97,7 +97,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
   const handleInstall = useCallback(async () => {
     const parsed = parseInt(portInput, 10);
     if (isNaN(parsed) || parsed < 1024 || parsed > 65535) {
-      setPortError(t("server.utilities.mtproto.port_validation_error"));
+      setPortError(t("server.service.mtproto.port_validation_error"));
       return;
     }
     setPortError(null);
@@ -139,8 +139,8 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
         />
         <h2 className="text-title">
           {installed
-            ? t("server.utilities.mtproto.modal_title_configure")
-            : t("server.utilities.mtproto.modal_title_install")}
+            ? t("server.service.mtproto.modal_title_configure")
+            : t("server.service.mtproto.modal_title_install")}
         </h2>
       </div>
 
@@ -163,7 +163,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
       {!installed && (
         <div className="space-y-3">
           <p className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>
-            {t("server.utilities.mtproto.empty_hint")}
+            {t("server.service.mtproto.empty_hint")}
           </p>
 
           <div>
@@ -171,16 +171,16 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               className="text-caption block mb-1"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {t("server.utilities.mtproto.port_label")}
+              {t("server.service.mtproto.port_label")}
             </label>
             <NumberInput
               value={portInput}
               onChange={setPortInput}
               min={1024}
               max={65535}
-              placeholder={t("server.utilities.mtproto.port_placeholder")}
+              placeholder={t("server.service.mtproto.port_placeholder")}
               disabled={state.installing}
-              aria-label={t("server.utilities.mtproto.port_label")}
+              aria-label={t("server.service.mtproto.port_label")}
             />
             {portError && (
               <p
@@ -262,7 +262,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                 style={{ color: "var(--color-warning-500)" }}
                 aria-hidden="true"
               />
-              <span>{t("server.utilities.mtproto.stopped_hint")}</span>
+              <span>{t("server.service.mtproto.stopped_hint")}</span>
             </div>
           )}
 
@@ -272,7 +272,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             style={{ borderColor: "var(--color-border)" }}
           >
             <span className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>
-              {t("server.utilities.mtproto.port_label")}
+              {t("server.service.mtproto.port_label")}
             </span>
             <span className="text-mono-sm" style={{ color: "var(--color-text-primary)" }}>
               {state.status?.port}
@@ -289,13 +289,13 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                 className="text-caption mb-1"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                {t("server.utilities.mtproto.proxy_link_label")}
+                {t("server.service.mtproto.proxy_link_label")}
               </p>
               {state.status?.proxy_link ? (
                 <code
                   role="button"
                   tabIndex={0}
-                  aria-label={t("server.utilities.mtproto.copy")}
+                  aria-label={t("server.service.mtproto.copy")}
                   onClick={() => void handleCopy()}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -326,7 +326,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                     className="text-caption mt-1"
                     style={{ color: "var(--color-text-muted)" }}
                   >
-                    {t("server.utilities.mtproto.fetching_link")}
+                    {t("server.service.mtproto.fetching_link")}
                   </p>
                 </div>
               )}
@@ -350,7 +350,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             onClick={() => void handleUninstall()}
             className="w-full"
           >
-            {t("server.utilities.mtproto.uninstall")}
+            {t("server.service.mtproto.uninstall")}
           </Button>
           {state.status?.active ? (
             <Button
@@ -363,7 +363,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               data-testid="mtproto-stop-button"
               className="w-full"
             >
-              {t("server.utilities.mtproto.stop")}
+              {t("server.service.mtproto.stop")}
             </Button>
           ) : (
             <Button
@@ -376,7 +376,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               data-testid="mtproto-start-button"
               className="w-full"
             >
-              {t("server.utilities.mtproto.start")}
+              {t("server.service.mtproto.start")}
             </Button>
           )}
           <Button
@@ -404,8 +404,8 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               data-testid="mtproto-install-button"
             >
               {state.error
-                ? t("server.utilities.mtproto.retry")
-                : t("server.utilities.mtproto.install")}
+                ? t("server.service.mtproto.retry")
+                : t("server.service.mtproto.install")}
             </Button>
           )}
           {state.installing ? (
@@ -421,8 +421,8 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               data-testid="mtproto-cancel-install-button"
             >
               {cancelling
-                ? t("server.utilities.mtproto.cancelling")
-                : t("server.utilities.mtproto.cancel_install")}
+                ? t("server.service.mtproto.cancelling")
+                : t("server.service.mtproto.cancel_install")}
             </Button>
           ) : (
             <Button variant="ghost" size="sm" onClick={onClose}>
