@@ -5,6 +5,7 @@ import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { Skeleton } from "../../shared/ui/Skeleton";
+import { Select } from "../../shared/ui/Select";
 import { UpdateProgressModal } from "../update/UpdateProgressModal";
 // Phase 18 hook — eagerly mounted via `useEffect` listener subscription inside
 // `useUpdateProgress`. The component itself does NOT consume the returned state
@@ -27,8 +28,8 @@ import {
  *     («Доступно новое обновление», visible only when `sidecarAvailable`)
  *     + Refresh icon button (RefreshCw → Loader2 spinner during fetch)
  *   - **Caption row** — «Текущая версия: {version}» with mono version inline
- *   - **Action row** — `<select>` dropdown (max 4 options: current + last 3)
- *     and «Установить» button (disabled when selected === current)
+ *   - **Action row** — `Select` dropdown from design system (max 4 options:
+ *     current + last 3) and «Установить» button (disabled when selected === current)
  *   - **State A (Loading)** — Skeleton placeholders for dropdown + button
  *   - **State F (Error)** — «Версии недоступны» caption fallback
  *   - **State G (Not installed)** — «Протокол не установлен» caption
@@ -269,8 +270,8 @@ export function ProtocolUpdateSection({
       {/* ─── Action row: dropdown + install button (or Skeletons / fallback) ─── */}
       {showLoadingSkeleton ? (
         <div className="flex items-center gap-3">
-          <Skeleton className="flex-1 h-10" />
-          <Skeleton className="w-[120px] h-10" />
+          <Skeleton className="flex-1 h-8" />
+          <Skeleton className="w-[120px] h-8" />
         </div>
       ) : showErrorFallback ? (
         <span
@@ -281,30 +282,39 @@ export function ProtocolUpdateSection({
         </span>
       ) : (
         <div className="flex items-center gap-3">
-          <select
-            value={selectedVersion}
-            onChange={(e) => setSelectedVersion(e.target.value)}
-            disabled={loading || modalOpen}
+          {/*
+           * Design-system `Select` (portal listbox + keyboard nav + tokens).
+           * Wrapper carries `data-testid` + `role="group"` so existing tests
+           * locate the dropdown unit; opening the listbox surfaces the options
+           * (role="option") via portal. Phase 14 finding #10 T-03 doesn't
+           * apply here — Select primitive owns its own open/close lifecycle.
+           */}
+          <div
+            className="flex-1"
+            role="group"
             aria-label={t("server.service.protocol.dropdown_label")}
             data-testid="protocol-version-select"
-            className="flex-1 h-10 px-3 rounded-[var(--radius-md)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)] border border-[var(--color-input-border)] focus-visible:shadow-[var(--focus-ring)] outline-none disabled:opacity-50 disabled:cursor-not-allowed text-body-sm"
           >
-            {dropdownOptions.map((opt) => (
-              <option key={opt.version} value={opt.version}>
-                {formatOptionLabel(
+            <Select
+              value={selectedVersion}
+              onChange={(e) => setSelectedVersion(e.target.value)}
+              disabled={loading || modalOpen}
+              options={dropdownOptions.map((opt) => ({
+                value: opt.version,
+                label: formatOptionLabel(
                   opt,
                   currentVersion,
                   t("server.service.protocol.current_label_suffix_active"),
                   t("server.service.protocol.current_label_suffix_new"),
                   allVersionStrings,
-                )}
-              </option>
-            ))}
-          </select>
+                ),
+              }))}
+            />
+          </div>
 
           <Button
             variant="primary"
-            size="md"
+            size="sm"
             onClick={handleInstall}
             disabled={!installEnabled}
             title={

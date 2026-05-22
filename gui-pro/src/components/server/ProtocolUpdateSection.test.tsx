@@ -106,6 +106,7 @@ describe("ProtocolUpdateSection", () => {
 
   // ─── 2: dropdown options merge ───
   it("dropdown_options_merge — current + 3 versions (4 total when current not in list)", async () => {
+    const user = userEvent.setup();
     render(
       <ProtocolUpdateSection
         sshParams={SSH_PARAMS}
@@ -119,17 +120,25 @@ describe("ProtocolUpdateSection", () => {
       expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 });
     });
 
-    const select = await screen.findByTestId("protocol-version-select");
-    const options = within(select).getAllByRole("option");
+    // Design-system Select renders options in a portal listbox — open it first.
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    const combobox = within(wrapper).getByRole("combobox");
+    await user.click(combobox);
+
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
     // current (1.0.20) + 3 from RELEASES (1.0.34, 1.0.33, 1.0.31) = 4
     expect(options).toHaveLength(4);
-    expect(options.map((o) => o.getAttribute("value"))).toEqual(
+    // Select primitive surfaces version via option label text — extract leading semver.
+    const versions = options.map((o) => (o.textContent ?? "").trim().split(/\s+/)[0]);
+    expect(versions).toEqual(
       expect.arrayContaining(["1.0.20", "1.0.34", "1.0.33", "1.0.31"]),
     );
   });
 
   // ─── 3: dropdown dedup ───
   it("dropdown_dedup — current matches one of releases → no duplicate", async () => {
+    const user = userEvent.setup();
     render(
       <ProtocolUpdateSection
         sshParams={SSH_PARAMS}
@@ -139,18 +148,22 @@ describe("ProtocolUpdateSection", () => {
       />,
     );
 
-    const select = await screen.findByTestId("protocol-version-select");
+    // Wait for fetch first
     await waitFor(() => {
-      // Wait for fetch to complete and options to populate.
-      const opts = within(select).getAllByRole("option");
-      expect(opts.length).toBeGreaterThanOrEqual(3);
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 });
     });
-    const options = within(select).getAllByRole("option");
+
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    const combobox = within(wrapper).getByRole("combobox");
+    await user.click(combobox);
+
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
     // current (1.0.33) is already in RELEASES → dedup to 3 entries
-    const values = options.map((o) => o.getAttribute("value") ?? "");
-    expect(values).toEqual(expect.arrayContaining(["1.0.34", "1.0.33", "1.0.31"]));
+    const versions = options.map((o) => (o.textContent ?? "").trim().split(/\s+/)[0]);
+    expect(versions).toEqual(expect.arrayContaining(["1.0.34", "1.0.33", "1.0.31"]));
     // No duplicate 1.0.33
-    const occurrences = values.filter((v) => v === "1.0.33");
+    const occurrences = versions.filter((v) => v === "1.0.33");
     expect(occurrences).toHaveLength(1);
   });
 
@@ -161,6 +174,7 @@ describe("ProtocolUpdateSection", () => {
       return null;
     });
 
+    const user = userEvent.setup();
     render(
       <ProtocolUpdateSection
         sshParams={SSH_PARAMS}
@@ -174,15 +188,15 @@ describe("ProtocolUpdateSection", () => {
       expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 });
     });
 
-    // After loading completes, just 1 option (current).
-    await waitFor(() => {
-      const select = screen.queryByTestId("protocol-version-select");
-      // In error/no-versions state with current still present, dropdown shows 1 option.
-      if (!select) return; // Component may be in error state, no select
-      const options = within(select).getAllByRole("option");
-      expect(options).toHaveLength(1);
-      expect(options[0].getAttribute("value")).toBe("1.0.33");
-    });
+    // After loading completes, open the listbox and verify 1 option (current).
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    const combobox = within(wrapper).getByRole("combobox");
+    await user.click(combobox);
+
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect((options[0].textContent ?? "").trim().split(/\s+/)[0]).toBe("1.0.33");
   });
 
   // ─── 5: install disabled when selected === current ───
@@ -219,13 +233,22 @@ describe("ProtocolUpdateSection", () => {
       />,
     );
 
-    const select = await screen.findByTestId("protocol-version-select");
+    // Wait for versions fetch
     await waitFor(() => {
-      expect(within(select).getAllByRole("option").length).toBeGreaterThan(1);
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 });
     });
 
-    // Change to 1.0.34
-    await user.selectOptions(select, "1.0.34");
+    // Open Select listbox + click 1.0.34 option
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    const combobox = within(wrapper).getByRole("combobox");
+    await user.click(combobox);
+
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.34"));
+    expect(option).toBeDefined();
+    await user.click(option!);
 
     const install = screen.getByTestId("protocol-install-button");
     expect(install).not.toBeDisabled();
@@ -250,13 +273,23 @@ describe("ProtocolUpdateSection", () => {
       />,
     );
 
-    const select = await screen.findByTestId("protocol-version-select");
+    // Wait for versions fetch
     await waitFor(() => {
-      expect(within(select).getAllByRole("option").length).toBeGreaterThan(1);
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 });
     });
 
-    // Select newer version → enable install
-    await user.selectOptions(select, "1.0.34");
+    // Open Select listbox + click 1.0.34 option
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    const combobox = within(wrapper).getByRole("combobox");
+    await user.click(combobox);
+
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.34"));
+    expect(option).toBeDefined();
+    await user.click(option!);
+
     const install = screen.getByTestId("protocol-install-button");
     expect(install).not.toBeDisabled();
 
