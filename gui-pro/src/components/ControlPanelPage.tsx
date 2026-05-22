@@ -1,9 +1,25 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ServerPanel } from "./ServerPanel";
 import { SshConnectForm, type SshCredentials } from "./server/SshConnectForm";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { useUpdateChecker } from "../shared/hooks/useUpdateChecker";
+import { useSidecarVersions } from "./server/useSidecarVersions";
+
+/** Compare semver-ish strings descending. Negative when a > b. */
+function compareSemverDescCP(a: string, b: string): number {
+  const parts = (s: string): number[] =>
+    s.replace(/^v/, "").split("-")[0].split(".").map((p) => parseInt(p, 10) || 0);
+  const pa = parts(a);
+  const pb = parts(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na !== nb) return nb - na;
+  }
+  return 0;
+}
 
 async function readStoredCredentials(): Promise<SshCredentials | null> {
   try {
@@ -275,7 +291,7 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   // visibility flag — lifted to App via `onSidecarUpdateChange` for the
   // bottom-bar dot, and forwarded down via `ServerPanel` props for the
   // OverviewSection Card #8 ArrowUp + ServiceTabSection ProtocolUpdateSection.
-  const { updateInfo: sidecarInfo, checkSidecarForServer, dismissSidecarUpdate } = useUpdateChecker();
+  const { checkSidecarForServer, dismissSidecarUpdate } = useUpdateChecker();
   useEffect(() => {
     if (!creds) return;
     void checkSidecarForServer({
@@ -286,6 +302,57 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
       keyPath: creds.keyPath,
     });
   }, [creds, checkSidecarForServer]);
+
+  // ─── Local sidecar-update probe (parallel/replacement of useUpdateChecker) ──
+  //
+  // Phase 18 useUpdateChecker.checkSidecarForServer hits Tauri command
+  // `check_sidecar_version` whose SSH-probe step is fragile — when it fails
+  // the catch in useUpdateChecker silently keeps `sidecarCurrentVersion=""`
+  // and `sidecarAvailable=false` forever, so neither the bottom-tab pill dot
+  // nor Overview Card #8 ArrowUp ever lights up. This local probe runs
+  // `check_server_installation` (battle-tested, same call useServerState
+  // uses inside ServerPanel) and pulls the GitHub releases list via
+  // `useSidecarVersions`. Computed `localSidecarAvailable` becomes the
+  // source of truth for the dot + arrow.
+  const sshParamsForLocal = useMemo(
+    () =>
+      creds
+        ? {
+            host: creds.host,
+            port: parseInt(creds.port, 10),
+            user: creds.user,
+            password: creds.password,
+            keyPath: creds.keyPath,
+          }
+        : null,
+    [creds],
+  );
+  const [localInstalledVersion, setLocalInstalledVersion] = useState("");
+  const probeLocalVersion = useCallback(async () => {
+    if (!sshParamsForLocal) return;
+    try {
+      const info = await invoke<{ installed: boolean; version: string }>(
+        "check_server_installation",
+        sshParamsForLocal,
+      );
+      if (info.installed && info.version) setLocalInstalledVersion(info.version);
+    } catch {
+      // Silent — same posture as Phase 18 useUpdateChecker. The dot just
+      // stays dark; user can manually refresh via the Service tab.
+    }
+  }, [sshParamsForLocal]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async network probe + setState is the canonical effect-usage pattern; cannot be replaced by event handlers or render-time computation because the probe must fire when sshParams becomes available.
+    void probeLocalVersion();
+  }, [probeLocalVersion]);
+  const { versions: githubReleasesCP } = useSidecarVersions(sshParamsForLocal);
+  // Defensive null-guard — `useSidecarVersions` now coerces to [] but keep the
+  // optional chain in case the hook contract loosens later.
+  const latestFromGitHubCP = githubReleasesCP?.[0]?.version ?? "";
+  const localSidecarAvailable =
+    !!localInstalledVersion &&
+    !!latestFromGitHubCP &&
+    compareSemverDescCP(localInstalledVersion, latestFromGitHubCP) > 0;
 
   // Phase 19 cascade fix — fired by `ProtocolUpdateSection.handleModalSuccess`
   // after `update_sidecar` completes. Re-probe sidecar's `--version` over SSH
@@ -312,10 +379,12 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
     // on the pre-update value if the first probe lands during the restart
     // window. Two-shot pattern is cheap and idempotent.
     void checkSidecarForServer(sshParams);
+    void probeLocalVersion();
     window.setTimeout(() => {
       void checkSidecarForServer(sshParams);
+      void probeLocalVersion();
     }, 2500);
-  }, [creds, checkSidecarForServer]);
+  }, [creds, checkSidecarForServer, probeLocalVersion]);
 
   // Auto-dismiss точек когда пользователь зашёл на Service tab.
   // UX-логика: точку на bottom-tab «Панель управления» показываем один раз —
@@ -325,17 +394,20 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
   // продолжает гореть пока не нажмут Install.
   // Per-version key — если выйдет новый релиз, ключа для него не будет,
   // точка снова появится автоматически (Phase 18 dismissal pattern).
+  // Dismiss key matches what `handleSidecarUpdateSeen` writes — use the
+  // GitHub-derived latestFromGitHubCP (local probe), NOT the unreliable
+  // useUpdateChecker.sidecarLatestVersion which may stay empty.
   const handleSidecarUpdateSeen = useCallback(() => {
-    if (sidecarInfo.sidecarAvailable && sidecarInfo.sidecarLatestVersion) {
-      dismissSidecarUpdate(sidecarInfo.sidecarLatestVersion);
+    if (localSidecarAvailable && latestFromGitHubCP) {
+      dismissSidecarUpdate(latestFromGitHubCP);
     }
-  }, [
-    sidecarInfo.sidecarAvailable,
-    sidecarInfo.sidecarLatestVersion,
-    dismissSidecarUpdate,
-  ]);
-  const sidecarUpdateVisible =
-    Boolean(sidecarInfo.sidecarAvailable) && !sidecarInfo.sidecarDismissed;
+  }, [localSidecarAvailable, latestFromGitHubCP, dismissSidecarUpdate]);
+
+  const localDismissed =
+    !!latestFromGitHubCP &&
+    typeof localStorage !== "undefined" &&
+    localStorage.getItem(`tt_dismissed_update_${latestFromGitHubCP}`) === "true";
+  const sidecarUpdateVisible = localSidecarAvailable && !localDismissed;
   useEffect(() => {
     if (onSidecarUpdateChange) onSidecarUpdateChange(sidecarUpdateVisible);
   }, [sidecarUpdateVisible, onSidecarUpdateChange]);
@@ -450,9 +522,9 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
               onPortChanged={handlePortChanged}
               onPanelReady={() => setIsFirstConnect(false)}
               hasSidecarUpdate={sidecarUpdateVisible}
-              currentVersion={sidecarInfo.sidecarCurrentVersion}
-              sidecarAvailable={sidecarInfo.sidecarAvailable}
-              latestVersion={sidecarInfo.sidecarLatestVersion}
+              currentVersion={localInstalledVersion}
+              sidecarAvailable={localSidecarAvailable}
+              latestVersion={latestFromGitHubCP}
               onSidecarUpdateApplied={handleSidecarUpdateApplied}
               onSidecarUpdateSeen={handleSidecarUpdateSeen}
               onConfigExported={(path) => {
