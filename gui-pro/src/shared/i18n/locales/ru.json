@@ -1410,7 +1410,7 @@
         "dropdown_label": "Выбрать версию протокола",
         "install_button": "Установить",
         "install_disabled_current": "Выбрана текущая версия — обновление не требуется",
-        "update_available_badge": "Доступно новое обновление",
+        "update_available_badge": "Доступно обновление",
         "check_update_aria": "Проверить обновления",
         "refreshing": "Проверяем...",
         "install_success": "Протокол обновлён до v{{to}}",

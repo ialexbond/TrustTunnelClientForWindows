@@ -319,6 +319,11 @@ export function ProtocolUpdateSection({
               <Badge
                 variant="success"
                 size="sm"
+                // Override default uppercase + wide tracking — для inline-badge
+                // рядом с caption-текстом этот стиль был слишком громоздкий,
+                // буквы шире чем «Текущая версия:» слева. Normal case +
+                // обычный трекинг делают бейдж пропорциональным окружению.
+                className="normal-case tracking-normal"
                 data-testid="protocol-update-badge"
               >
                 {t("server.service.protocol.update_available_badge")}
