@@ -28,8 +28,12 @@ import { useServerGeoIp } from "./useServerGeoIp";
 import { formatServerUptime } from "../../shared/utils/uptime";
 import { parseCertInfo, daysUntil } from "./certUtils";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
+import type { ServerTabId } from "../../shared/types";
 
-type TabId = "overview" | "users" | "configuration" | "security" | "utilities";
+// Re-export ServerTabId as TabId here so this component keeps its existing
+// public `TabId` type-alias (consumed by ServerTabs.tsx via re-export). Phase
+// 19 rename: "utilities" → "service" (D-04 + UI-SPEC §Block 3 §A).
+type TabId = ServerTabId;
 
 /* ═══════════════════════════════════════════════════════
    OverviewSection — 10 карточек обзора сервера
@@ -40,6 +44,13 @@ interface Props {
   state: ServerState;
   activeServerTab?: TabId;
   onNavigate?: (tab: TabId) => void;
+  /**
+   * Phase 19 (UI-SPEC §Block 3): when truthy, Card #8 «Версия протокола»
+   * shows an ArrowUp icon (warning-500) next to the version label to hint
+   * that an update is available. Clicking the card now navigates to the
+   * «Сервис» tab (not «Конфигурация») — drill-down bug fix per UI-SPEC.
+   */
+  sidecarAvailable?: boolean;
 }
 
 export type { TabId };
@@ -139,7 +150,7 @@ function getLocalizedCountry(countryCode: string, fallback: string, locale: stri
   }
 }
 
-export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
+export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAvailable = false }: Props) {
   const { t, i18n } = useTranslation();
   const { log: activityLog } = useActivityLog();
   const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
@@ -638,15 +649,26 @@ export function OverviewSection({ state, activeServerTab, onNavigate }: Props) {
         </div>
       </Card>
 
-      {/* Protocol version — drill-down (D-11) */}
+      {/* Protocol version — drill-down (D-11). Phase 19: target is «Сервис» tab
+          (was «Конфигурация» — bug fix per UI-SPEC §Block 3 §B). ArrowUp icon
+          appears next to the version when `sidecarAvailable` is truthy
+          (warning-500 colour, matches «Доступно новое обновление» Badge tone). */}
       <ClickableCard
         style={{ flex: "1 1 220px" }}
-        onClick={() => onNavigate?.("configuration")}
+        onClick={() => onNavigate?.("service")}
         ariaLabel={t("server.overview.cards.protocolVersion")}
       >
         <Title icon={<Package className="w-5 h-5" />} text={t("server.overview.cards.protocolVersion")} clickable refreshAriaLabel={refreshAriaLabel} />
-        <div className="flex items-center justify-center py-2">
+        <div className="flex items-center justify-center py-2 gap-2">
           <span className="font-mono" style={bigNum}>{version}</span>
+          {sidecarAvailable && (
+            <ArrowUp
+              className="w-5 h-5 shrink-0"
+              style={{ color: "var(--color-warning-500)" }}
+              aria-label={t("server.service.protocol.update_available_badge")}
+              data-testid="overview-protocol-update-arrow"
+            />
+          )}
         </div>
       </ClickableCard>
 

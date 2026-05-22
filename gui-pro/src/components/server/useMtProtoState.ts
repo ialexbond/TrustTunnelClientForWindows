@@ -80,13 +80,13 @@ function saveCache(host: string, status: MtProtoStatus): void {
 // ═══════════════════════════════════════════════════════
 
 const INSTALL_STEPS = [
-  { key: "cleanup_legacy", labelKey: "server.utilities.mtproto.step.cleanup_legacy" },
-  { key: "download_binary", labelKey: "server.utilities.mtproto.step.download_binary" },
-  { key: "create_user", labelKey: "server.utilities.mtproto.step.create_user" },
-  { key: "configure_telemt", labelKey: "server.utilities.mtproto.step.configure_telemt" },
-  { key: "start_service", labelKey: "server.utilities.mtproto.step.start_service" },
-  { key: "open_firewall", labelKey: "server.utilities.mtproto.step.open_firewall" },
-  { key: "complete", labelKey: "server.utilities.mtproto.step.complete" },
+  { key: "cleanup_legacy", labelKey: "server.service.mtproto.step.cleanup_legacy" },
+  { key: "download_binary", labelKey: "server.service.mtproto.step.download_binary" },
+  { key: "create_user", labelKey: "server.service.mtproto.step.create_user" },
+  { key: "configure_telemt", labelKey: "server.service.mtproto.step.configure_telemt" },
+  { key: "start_service", labelKey: "server.service.mtproto.step.start_service" },
+  { key: "open_firewall", labelKey: "server.service.mtproto.step.open_firewall" },
+  { key: "complete", labelKey: "server.service.mtproto.step.complete" },
 ];
 
 // Map backend step names to StepProgress indices
@@ -247,7 +247,7 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       setInstalling(false);
       // Persist to localStorage per MTPROTO-06
       saveCache(host, result);
-      pushSuccess(t("server.utilities.mtproto.snack.installed"));
+      pushSuccess(t("server.service.mtproto.snack.installed"));
     } catch (e) {
       const msg = formatError(e);
       setInstalling(false);
@@ -255,11 +255,11 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       // don't show a red toast. The user knowingly cancelled; we just reset UI.
       if (msg.includes("MTPROTO_INSTALL_CANCELLED")) {
         setError(null);
-        pushSuccess(t("server.utilities.mtproto.snack.cancelled"));
+        pushSuccess(t("server.service.mtproto.snack.cancelled"));
         return;
       }
       setError(msg);
-      pushSuccess(t("server.utilities.mtproto.snack.install_error", { error: msg }), "error");
+      pushSuccess(t("server.service.mtproto.snack.install_error", { error: msg }), "error");
     }
   };
 
@@ -290,15 +290,15 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       setStatus(s);
       saveCache(host, s);
       if (s.active) {
-        pushSuccess(t("server.utilities.mtproto.snack.started"));
+        pushSuccess(t("server.service.mtproto.snack.started"));
       } else {
         // Service didn't reach 'active' after 6 retries — point user at journal.
-        pushSuccess(t("server.utilities.mtproto.snack.start_failed"), "error");
+        pushSuccess(t("server.service.mtproto.snack.start_failed"), "error");
       }
     } catch (e) {
       const msg = formatError(e);
       setError(msg);
-      pushSuccess(t("server.utilities.mtproto.snack.start_error", { error: msg }), "error");
+      pushSuccess(t("server.service.mtproto.snack.start_error", { error: msg }), "error");
     } finally {
       setToggling(false);
     }
@@ -313,11 +313,11 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       });
       setStatus(s);
       saveCache(host, s);
-      pushSuccess(t("server.utilities.mtproto.snack.stopped"));
+      pushSuccess(t("server.service.mtproto.snack.stopped"));
     } catch (e) {
       const msg = formatError(e);
       setError(msg);
-      pushSuccess(t("server.utilities.mtproto.snack.stop_error", { error: msg }), "error");
+      pushSuccess(t("server.service.mtproto.snack.stop_error", { error: msg }), "error");
     } finally {
       setToggling(false);
     }
@@ -326,8 +326,8 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   // ── Uninstall (per D-10, D-11, MTPROTO-08) ──
   const requestUninstall = async () => {
     const ok = await confirm({
-      title: t("server.utilities.mtproto.confirm_uninstall_title"),
-      message: t("server.utilities.mtproto.confirm_uninstall_message"),
+      title: t("server.service.mtproto.confirm_uninstall_title"),
+      message: t("server.service.mtproto.confirm_uninstall_message"),
       variant: "warning",
     });
     if (!ok) return;
@@ -346,11 +346,11 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       // Phase 17.1 — после успешного uninstall миграционная заметка теряет
       // смысл (старого MTProxy и так нет, telemt тоже снесён).
       setLegacyMigrationNote(null);
-      pushSuccess(t("server.utilities.mtproto.snack.uninstalled"));
+      pushSuccess(t("server.service.mtproto.snack.uninstalled"));
     } catch (e) {
       const msg = formatError(e);
       setError(msg);
-      pushSuccess(t("server.utilities.mtproto.snack.uninstall_error", { error: msg }), "error");
+      pushSuccess(t("server.service.mtproto.snack.uninstall_error", { error: msg }), "error");
     } finally {
       setUninstalling(false);
     }

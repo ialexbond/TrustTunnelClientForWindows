@@ -83,7 +83,7 @@ describe("ServerSettingsSection", () => {
     // BBR and the network_title heading were relocated to UtilitiesTabSection's
     // "BBR Toggle" block in Phase 11 (4-tab restructure). The feature-toggles
     // area remains here but no longer contains BBR.
-    expect(screen.queryByText(i18n.t("server.utilities.bbr.label"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("server.service.bbr.label"))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t("server.config.network_title"))).not.toBeInTheDocument();
     // Sanity: feature toggles title still rendered by this section.
     expect(screen.getByText(i18n.t("server.config.toggles_title"))).toBeInTheDocument();

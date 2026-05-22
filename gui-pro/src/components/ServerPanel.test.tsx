@@ -21,8 +21,8 @@ vi.mock("./server/useServerState", () => ({
   useServerState: () => mockState,
 }));
 
-// Mock child sections (5-tab structure per Phase 11: overview / users /
-// configuration / security / utilities).
+// Mock child sections (5-tab structure: overview / users / configuration /
+// security / service — Phase 19 renamed utilities → service per UI-SPEC §A).
 vi.mock("./server/OverviewSection", () => ({
   OverviewSection: () => <div data-testid="overview-section">OverviewSection</div>,
 }));
@@ -35,8 +35,8 @@ vi.mock("./server/ServerSettingsSection", () => ({
 vi.mock("./server/SecurityTabSection", () => ({
   SecurityTabSection: () => <div data-testid="security-section">SecurityTabSection</div>,
 }));
-vi.mock("./server/UtilitiesTabSection", () => ({
-  UtilitiesTabSection: () => <div data-testid="utilities-section">UtilitiesTabSection</div>,
+vi.mock("./server/ServiceTabSection", () => ({
+  ServiceTabSection: () => <div data-testid="service-section">ServiceTabSection</div>,
 }));
 
 describe("ServerPanel", () => {
@@ -140,7 +140,7 @@ describe("ServerPanel", () => {
     expect(screen.getByRole("tab", { name: /Пользователи/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Конфигурация/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Безопасность/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Утилиты/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Сервис/i })).toBeInTheDocument();
   });
 
   it("shows rebooting state", () => {
