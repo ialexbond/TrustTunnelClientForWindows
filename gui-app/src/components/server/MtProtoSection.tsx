@@ -21,12 +21,18 @@ export function MtProtoSection({ state }: MtProtoSectionProps) {
     state.install(parsedPort);
   };
 
+  // Extract proxy_link в локальную const — React Compiler infers `state.status`
+  // как dependency когда optional chain `state.status?.proxy_link` появляется
+  // в теле callback'а, что конфликтует с manually указанным
+  // [state.status?.proxy_link] (more specific). Pulling the value out
+  // resolves the mismatch: dep = `proxyLink` (resolved value, не chain).
+  const proxyLink = state.status?.proxy_link;
   const handleCopy = useCallback(async () => {
-    if (!state.status?.proxy_link) return;
-    await navigator.clipboard.writeText(state.status.proxy_link);
+    if (!proxyLink) return;
+    await navigator.clipboard.writeText(proxyLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [state.status?.proxy_link]);
+  }, [proxyLink]);
 
   const handleRetry = () => {
     state.retry(parsedPort);
