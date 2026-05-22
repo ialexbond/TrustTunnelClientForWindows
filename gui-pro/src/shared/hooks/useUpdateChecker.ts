@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import type { UpdateInfo } from "../types";
@@ -238,43 +238,5 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
     return () => clearInterval(interval);
   }, [checkForUpdates]);
 
-  // ─── Debug override (for UAT visual preview only) ─────────────────────
-  // Toggleable через AboutPanel → «Force показать update flow». Слушает
-  // custom event `tt-debug-update-toggle` чтобы все instances hook'а
-  // переключались live без reload. localStorage hydration на mount —
-  // если флаг включён до restart, banner отобразится сразу.
-  const [debugForceSidecar, setDebugForceSidecar] = useState<boolean>(
-    () => localStorage.getItem("tt_debug_force_sidecar_update") === "true",
-  );
-  useEffect(() => {
-    const handler = () => {
-      setDebugForceSidecar(
-        localStorage.getItem("tt_debug_force_sidecar_update") === "true",
-      );
-    };
-    window.addEventListener("tt-debug-update-toggle", handler);
-    return () => window.removeEventListener("tt-debug-update-toggle", handler);
-  }, []);
-
-  const effectiveUpdateInfo = useMemo<UpdateInfo>(() => {
-    if (!debugForceSidecar) return updateInfo;
-    return {
-      ...updateInfo,
-      sidecarAvailable: true,
-      sidecarCurrentVersion: updateInfo.sidecarCurrentVersion || "3.0.0",
-      sidecarLatestVersion: updateInfo.sidecarLatestVersion || "3.0.1",
-      sidecarLatestTag: updateInfo.sidecarLatestTag || "v3.0.1",
-      sidecarDownloadUrl:
-        updateInfo.sidecarDownloadUrl ||
-        "https://github.com/TrustTunnel/TrustTunnel/releases/download/v3.0.1/trusttunnel-v3.0.1-linux-x86_64.tar.gz",
-      sidecarDismissed: false,
-    };
-  }, [updateInfo, debugForceSidecar]);
-
-  return {
-    updateInfo: effectiveUpdateInfo,
-    checkForUpdates,
-    checkSidecarForServer,
-    dismissSidecarUpdate,
-  };
+  return { updateInfo, checkForUpdates, checkSidecarForServer, dismissSidecarUpdate };
 }
