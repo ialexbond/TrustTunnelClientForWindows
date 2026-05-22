@@ -53,6 +53,14 @@ interface ServerPanelProps {
    * keep reflecting the stale comparison.
    */
   onSidecarUpdateApplied?: () => void;
+  /**
+   * Auto-dismiss дотлет точки на bottom-tab «Панель управления» когда
+   * пользователь добрался до Service tab. Один-shot signal — после первого
+   * mount Service tab записывается `tt_dismissed_update_<version>=true` и
+   * `sidecarUpdateVisible` flip'ается в false. Badge внутри
+   * `ProtocolUpdateSection` НЕ зависит от dismissed и продолжает гореть.
+   */
+  onSidecarUpdateSeen?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -238,6 +246,7 @@ export function ServerPanel(props: ServerPanelProps) {
       sidecarAvailable={props.sidecarAvailable}
       latestVersion={props.latestVersion}
       onSidecarUpdateApplied={props.onSidecarUpdateApplied}
+      onSidecarUpdateSeen={props.onSidecarUpdateSeen}
     />
   );
 }

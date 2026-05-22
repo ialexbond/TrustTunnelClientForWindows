@@ -78,38 +78,47 @@ export interface ProtocolUpdateSectionProps {
 }
 
 /**
- * Format a dropdown option label per UI-SPEC §Block 2 §Action Row:
+ * Compare semver-ish strings numerically. Returns negative if `a < b`,
+ * positive if `a > b`, zero if equal. Numeric — `"1.10.0" > "1.9.0"`,
+ * not lexicographic. Missing segments treated as 0.
+ */
+function compareSemverDesc(a: string, b: string): number {
+  const parts = (s: string): number[] =>
+    s.replace(/^v/, "").split("-")[0].split(".").map((p) => parseInt(p, 10) || 0);
+  const pa = parts(a);
+  const pb = parts(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na !== nb) return nb - na; // desc — bigger first
+  }
+  return 0;
+}
+
+/**
+ * Format a dropdown option label per the updated UX (label semantics):
  *
- *   - selected version === current → `"1.0.33 (актуальная)"`
- *   - newer than current (compare desc index in array) → `"1.0.34 (новая)"`
- *   - everything else (downgrade target) → bare version `"1.0.29"`
+ *   - opt is the currently INSTALLED version → `"1.0.31 (установлена)"`
+ *   - opt is newer than installed (per semver) → `"1.0.33 (новая)"`
+ *   - everything else (older / downgrade target) → bare `"1.0.29"`
  *
- * NOTE: this function lives outside the component so it can be unit-tested if
- * we ever need to. For Plan 19-03 first ship the labels are tested
- * end-to-end via component option text assertions.
+ * NOTE: «установлена» != «актуальная». «Актуальная» semantically means
+ * «latest on GitHub», not «what's running on the server». Earlier this label
+ * was on the installed version, which is misleading (e.g. when installed
+ * 1.0.31 was tagged «актуальная» while GitHub already had 1.0.33).
  */
 function formatOptionLabel(
   opt: SidecarReleaseInfo,
   currentVersion: string,
-  suffixActive: string,
+  suffixInstalled: string,
   suffixNew: string,
-  allVersions: string[],
 ): string {
   if (opt.version === currentVersion) {
-    return `${opt.version} ${suffixActive}`;
+    return `${opt.version} ${suffixInstalled}`;
   }
-  // "новая" applies only to releases newer than current. Backend returns
-  // releases sorted desc by published_at, so anything before currentVersion's
-  // index in allVersions is newer. If current is not in the list (State G or
-  // backend-current-not-in-latest-3), only the literal latest in array is "новая".
-  const currentIdx = allVersions.indexOf(currentVersion);
-  const optIdx = allVersions.indexOf(opt.version);
-  if (currentIdx === -1) {
-    // current not present in releases — only the first/latest entry is "new"
-    if (optIdx === 0) return `${opt.version} ${suffixNew}`;
-    return opt.version;
-  }
-  if (optIdx >= 0 && optIdx < currentIdx) {
+  if (compareSemverDesc(opt.version, currentVersion) < 0) {
+    // opt is newer than currentVersion (desc compare: newer comes earlier → negative)
     return `${opt.version} ${suffixNew}`;
   }
   return opt.version;
@@ -144,7 +153,11 @@ export function ProtocolUpdateSection({
     setSelectedVersion(currentVersion);
   }, [currentVersion]);
 
-  // Build dropdown options — current (always, unless "unknown") + last 3, dedup, max 4.
+  // Build dropdown options — current (always, unless "unknown") + last 3 from
+  // GitHub, dedup, max 4, then **sort descending by semver** so the newest
+  // release sits at the top of the menu (not the installed version).
+  // Previously installed-first sticky behaviour confused users — they expected
+  // the dropdown to be ordered by recency, like a release feed.
   const dropdownOptions = useMemo<SidecarReleaseInfo[]>(() => {
     const map = new Map<string, SidecarReleaseInfo>();
     if (currentVersion && currentVersion !== "unknown") {
@@ -161,13 +174,10 @@ export function ProtocolUpdateSection({
         map.set(v.version, v);
       }
     });
-    return Array.from(map.values());
+    return Array.from(map.values()).sort((a, b) =>
+      compareSemverDesc(a.version, b.version),
+    );
   }, [versions, currentVersion]);
-
-  const allVersionStrings = useMemo(
-    () => dropdownOptions.map((o) => o.version),
-    [dropdownOptions],
-  );
 
   // Install button enable rule:
   //   - State G (unknown current): enabled if any version is selected
@@ -210,13 +220,18 @@ export function ProtocolUpdateSection({
     onSidecarUpdateApplied?.();
   }, [refresh, onSidecarUpdateApplied]);
 
-  // Determine if Action Row should render Skeletons (State A — initial loading).
-  const showLoadingSkeleton = loading && versions.length === 0 && !error;
+  // Skeletons cover two cases:
+  //   - State A: initial fetch in flight, no versions yet, no error
+  //   - During an in-flight `update_sidecar` (modal open) — instead of a
+  //     `disabled` dropdown that looks half-dead, show a clean Skeleton
+  //     placeholder so the user knows work is happening.
+  const showLoadingSkeleton =
+    (loading && versions.length === 0 && !error) || modalOpen;
   const showErrorFallback = !!error && versions.length === 0;
 
   return (
     <Card data-testid="protocol-update-card">
-      {/* ─── Header row: icon + title + Badge + Refresh button ─── */}
+      {/* ─── Header row: icon + title + Refresh button ─── */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <Package
@@ -224,22 +239,9 @@ export function ProtocolUpdateSection({
             style={{ color: "var(--color-accent-interactive)" }}
             aria-hidden="true"
           />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-subtitle">
-                {t("server.service.protocol.title")}
-              </h3>
-              {sidecarAvailable && (
-                <Badge
-                  variant="success"
-                  size="sm"
-                  data-testid="protocol-update-badge"
-                >
-                  {t("server.service.protocol.update_available_badge")}
-                </Badge>
-              )}
-            </div>
-          </div>
+          <h3 className="text-subtitle">
+            {t("server.service.protocol.title")}
+          </h3>
         </div>
         <button
           type="button"
@@ -263,7 +265,16 @@ export function ProtocolUpdateSection({
         </button>
       </div>
 
-      {/* ─── Caption row: current version state ─── */}
+      {/*
+       * Caption row: current version + Badge «Доступно новое обновление».
+       *
+       * Badge переехал сюда (был в header рядом с заголовком). UX-причина:
+       * пользователь видит «Установлена 1.0.31 [Доступно новое обновление]» —
+       * понятно что обновление относится к текущей версии, а не к карточке
+       * целиком. Бейдж рендерится при `sidecarAvailable` независимо от
+       * dismissed-флага точек: пользователь увидел индикаторы один раз →
+       * точки погасли, но Badge продолжает сигналить «у тебя не latest».
+       */}
       <div className="text-caption flex items-baseline flex-wrap gap-x-2 gap-y-1 mb-3">
         {isUnknown ? (
           <span style={{ color: "var(--color-text-muted)" }}>
@@ -280,6 +291,15 @@ export function ProtocolUpdateSection({
             >
               {currentVersion}
             </span>
+            {sidecarAvailable && (
+              <Badge
+                variant="success"
+                size="sm"
+                data-testid="protocol-update-badge"
+              >
+                {t("server.service.protocol.update_available_badge")}
+              </Badge>
+            )}
           </>
         )}
       </div>
@@ -323,7 +343,6 @@ export function ProtocolUpdateSection({
                   currentVersion,
                   t("server.service.protocol.current_label_suffix_active"),
                   t("server.service.protocol.current_label_suffix_new"),
-                  allVersionStrings,
                 ),
               }))}
             />
