@@ -40,6 +40,27 @@ import { BenchmarkSection } from "./BenchmarkSection";
 import { LogsSection } from "./LogsSection";
 import { DangerZoneSection } from "./DangerZoneSection";
 import { ProtocolUpdateSection } from "./ProtocolUpdateSection";
+import { useSidecarVersions } from "./useSidecarVersions";
+
+/**
+ * Compare semver-ish strings descending. Negative when `a` > `b`, positive
+ * when `a` < `b`, zero when equal. Duplicated locally (same shape lives
+ * inside `ProtocolUpdateSection`) so this file has no fragile cross-import
+ * dependency on the dropdown component for a 4-line numeric comparison.
+ */
+function compareSemverDesc(a: string, b: string): number {
+  const parts = (s: string): number[] =>
+    s.replace(/^v/, "").split("-")[0].split(".").map((p) => parseInt(p, 10) || 0);
+  const pa = parts(a);
+  const pb = parts(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na !== nb) return nb - na;
+  }
+  return 0;
+}
 
 interface Props {
   state: ServerState;
@@ -76,9 +97,9 @@ interface Props {
 
 export function ServiceTabSection({
   state,
-  currentVersion,
-  sidecarAvailable,
-  latestVersion,
+  currentVersion: _propCurrentVersion,
+  sidecarAvailable: _propSidecarAvailable,
+  latestVersion: _propLatestVersion,
   onSidecarUpdateApplied,
   onSidecarUpdateSeen,
 }: Props) {
@@ -88,16 +109,42 @@ export function ServiceTabSection({
   const bbr = useBbrState(sshParams, pushSuccess);
   const mtproto = useMtProtoState(sshParams, pushSuccess);
 
+  // ─── Sidecar version — local source of truth ────────────────────────────
+  //
+  // The old wiring pulled `currentVersion / sidecarAvailable / latestVersion`
+  // from `useUpdateChecker.checkSidecarForServer` via `ControlPanelPage` props.
+  // That path was unreliable in production — when the SSH probe inside
+  // `check_sidecar_version` failed or never completed, every consumer below
+  // stayed pinned to the initial empty string. UI symptoms: bottomless
+  // Skeleton, dropdown without «(установлена)» suffix, every option labelled
+  // «(новая)» (because `compareSemverDesc(anything, "")` is always negative),
+  // bare Install button.
+  //
+  // Switch: read the installed version straight from `state.serverInfo.version`
+  // (already populated by `check_server_installation` — the same call that
+  // drives Overview Card #8, which always works) and pull the GitHub releases
+  // list locally via `useSidecarVersions(sshParams)`. Compute `available`
+  // here too. Props from `ControlPanelPage` are kept on the interface for
+  // backwards compatibility but ignored — the underscore prefix marks intent.
+  const serverInfoVersion = state.serverInfo?.version ?? "";
+  const { versions: githubReleases } = useSidecarVersions(sshParams);
+  const latestFromGitHub = githubReleases[0]?.version ?? "";
+  const computedCurrentVersion = serverInfoVersion || "unknown";
+  const computedSidecarAvailable =
+    !!serverInfoVersion &&
+    !!latestFromGitHub &&
+    compareSemverDesc(serverInfoVersion, latestFromGitHub) > 0;
+
   // One-shot signal к parent: пользователь добрался до Service tab и видит
   // карточку с Badge + dropdown. Bottom-tab pill dot на «Панель управления»
   // можно гасить (parent перевернёт `tt_dismissed_update_<version>=true`).
   // Fires только если есть available + valid latestVersion — иначе нечего
   // dismiss'ить. Re-fires при изменении latestVersion (новый release вышел).
   useEffect(() => {
-    if (sidecarAvailable && latestVersion) {
+    if (computedSidecarAvailable && latestFromGitHub) {
       onSidecarUpdateSeen?.();
     }
-  }, [sidecarAvailable, latestVersion, onSidecarUpdateSeen]);
+  }, [computedSidecarAvailable, latestFromGitHub, onSidecarUpdateSeen]);
 
   return (
     <div aria-live="polite" className="space-y-4">
@@ -143,9 +190,9 @@ export function ServiceTabSection({
           (defensive — should not occur in production wiring). */}
       <ProtocolUpdateSection
         sshParams={sshParams}
-        currentVersion={currentVersion ?? "unknown"}
-        sidecarAvailable={sidecarAvailable ?? false}
-        latestVersion={latestVersion ?? ""}
+        currentVersion={computedCurrentVersion}
+        sidecarAvailable={computedSidecarAvailable}
+        latestVersion={latestFromGitHub}
         onSidecarUpdateApplied={onSidecarUpdateApplied}
       />
 
