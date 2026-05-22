@@ -1,20 +1,26 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X, ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "../../shared/ui/Button";
 import { useWelcomeTour } from "../../shared/hooks/useWelcomeTour";
 import { WelcomeScreen1 } from "./screens/WelcomeScreen1";
 import { WelcomeScreen2 } from "./screens/WelcomeScreen2";
 import { WelcomeScreen3 } from "./screens/WelcomeScreen3";
 import { WelcomeDotIndicator } from "./WelcomeDotIndicator";
 
+/** Intent contract: parent узнаёт КАК тур был закрыт чтобы решить навигацию. */
+export type WelcomeTourCompleteIntent = "skip" | "start";
+
 export interface WelcomeTourProps {
   /**
    * Вызывается когда тур завершён или пропущен. Hook `useWelcomeTour.complete()`
    * уже отметит флаг в localStorage — callback нужен parent'у для триггера
-   * re-render (unmount overlay).
+   * re-render (unmount overlay) И для conditional navigate.
+   *
+   * Intent:
+   * - `'skip'` → user закрыл через X corner — остаёмся где были
+   * - `'start'` → user нажал «Начать» на S3 — parent navigates на connection
    */
-  onComplete: () => void;
+  onComplete: (intent: WelcomeTourCompleteIntent) => void;
 }
 
 /**
@@ -24,16 +30,18 @@ export interface WelcomeTourProps {
  * 32px TitleBar видимым (drag region + window controls). Mirror pattern с
  * Setup Wizard (post-UAT 2026-05-20 v2). Background — solid `--color-bg-primary`.
  *
- * 3 экрана с **200ms crossfade** через opacity + visibility (D-DECISION-UI-1.4,
- * pattern из App.tsx tabpanel:213-216). НЕ slide left/right — tooling tone, не
- * marketing. Все 3 screens render simultaneously, only one visible.
+ * Все 3 screens render simultaneously, видна только active через
+ * opacity+visibility 200ms crossfade. ScreenSlot имеет фиксированный
+ * minHeight 360px — layout не «прыгает» при переходе S2 → S3 (Start кнопка
+ * живёт внутри Screen 3 контейнера).
  *
  * Navigation:
- * - **X corner close** (top-right) — везде, mark completed + unmount.
+ * - **X corner close** (top-right) → `onComplete('skip')` — mark completed,
+ *   parent остаётся на текущей вкладке.
  * - **Стрелочки слева/справа посередине** (Instagram-carousel pattern):
- *   - S1: только правая (вперёд)
- *   - S2: обе
- *   - S3: только левая (назад) + «Начать» в footer
+ *   S1 только правая · S2 обе · S3 только левая.
+ * - **«Начать» внутри Screen 3** → `onComplete('start')` — mark completed,
+ *   parent navigates на connection вкладку.
  *
  * ARIA: `role="dialog"` `aria-modal="true"` `aria-labelledby="welcome-heading"`.
  * Escape **НЕ** закрывает overlay (D-DECISION-UI-1.2).
@@ -43,15 +51,15 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
   const { complete } = useWelcomeTour();
   const [currentStep, setCurrentStep] = useState<0 | 1 | 2>(0);
 
-  const handleFinish = useCallback(() => {
+  const handleClose = useCallback(() => {
     complete();
-    onComplete();
+    onComplete("skip");
   }, [complete, onComplete]);
 
-  // Close (X) и Start ведут в один и тот же exit-path (D-1.4): отметить
-  // completed и unmount overlay.
-  const handleClose = handleFinish;
-  const handleStart = handleFinish;
+  const handleStart = useCallback(() => {
+    complete();
+    onComplete("start");
+  }, [complete, onComplete]);
 
   const handleBack = useCallback(() => {
     setCurrentStep((step) => (step > 0 ? ((step - 1) as 0 | 1) : step));
@@ -130,12 +138,16 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
         </button>
       )}
 
-      <div className="max-w-[480px] w-full mx-auto px-6 flex-1 flex flex-col items-center justify-center gap-6">
+      <div
+        className="max-w-[480px] w-full mx-auto px-6 flex-1 flex flex-col items-center justify-center"
+        style={{ gap: 32, paddingBottom: 56 }}
+      >
         {/* Crossfade container — все 3 screens render simultaneously,
-            видна только active. Visibility:hidden prevents focus traps. */}
+            видна только active. Фиксированный minHeight чтобы Start-кнопка
+            внутри Screen 3 не прыгала layout при S2→S3. */}
         <div
-          className="flex-1 w-full flex items-center justify-center relative"
-          style={{ minHeight: 280 }}
+          className="w-full flex items-center justify-center relative"
+          style={{ minHeight: 360 }}
         >
           <ScreenSlot visible={currentStep === 0}>
             <WelcomeScreen1 />
@@ -144,26 +156,11 @@ export function WelcomeTour({ onComplete }: WelcomeTourProps) {
             <WelcomeScreen2 />
           </ScreenSlot>
           <ScreenSlot visible={currentStep === 2}>
-            <WelcomeScreen3 />
+            <WelcomeScreen3 onStart={handleStart} />
           </ScreenSlot>
         </div>
 
         <WelcomeDotIndicator currentStep={currentStep} />
-
-        {/* Footer: «Начать» только на S3. S1/S2 footer пустой — navigation
-            идёт через side-arrows + X corner. */}
-        {currentStep === 2 && (
-          <div className="flex items-center justify-center w-full">
-            <Button
-              variant="primary"
-              size="md"
-              onClick={handleStart}
-              data-testid="welcome-tour-start"
-            >
-              {t("app.welcome.start")}
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   );

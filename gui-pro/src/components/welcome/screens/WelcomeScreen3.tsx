@@ -1,5 +1,12 @@
 import { Rocket } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "../../../shared/ui/Button";
+
+export interface WelcomeScreen3Props {
+  /** Triggered кликом «Начать» внутри слайда — handler в WelcomeTour mark
+   *  completed и просит parent navigate на connection tab. */
+  onStart: () => void;
+}
 
 /**
  * Phase 18 — Welcome Screen 3 («Поехали!»).
@@ -9,10 +16,10 @@ import { useTranslation } from "react-i18next";
  * description `text-body` secondary.
  *
  * Кнопка «Начать» — primary accent (Button primary остаётся accent — 10%
- * accent rule preserved). Success-themed только icon container; CTA продолжает
- * accent flow.
+ * accent rule preserved). Кнопка живёт ВНУТРИ слайда (между description и
+ * dot indicator), чтобы layout не «прыгал» при переходе S2 → S3.
  */
-export function WelcomeScreen3() {
+export function WelcomeScreen3({ onStart }: WelcomeScreen3Props) {
   const { t } = useTranslation();
   return (
     <div
@@ -44,6 +51,14 @@ export function WelcomeScreen3() {
           {t("app.welcome.screen3.description")}
         </p>
       </div>
+      <Button
+        variant="primary"
+        size="md"
+        onClick={onStart}
+        data-testid="welcome-tour-start"
+      >
+        {t("app.welcome.start")}
+      </Button>
     </div>
   );
 }

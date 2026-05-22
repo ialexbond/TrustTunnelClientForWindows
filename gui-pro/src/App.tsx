@@ -94,13 +94,22 @@ function App() {
   // existing users могут пересмотреть intro без потери credentials. Не пишет в localStorage.
   const [forceShowWelcome, setForceShowWelcome] = useState(false);
   const showWelcomeTour = (!welcomeCompleted && !hasExistingCredentials) || forceShowWelcome;
-  const handleWelcomeComplete = useCallback(() => {
-    if (forceShowWelcome) {
-      setForceShowWelcome(false);
-    } else {
-      completeWelcome();
-    }
-  }, [forceShowWelcome, completeWelcome]);
+  // Intent-based completion: 'start' → navigate to connection tab, 'skip' (X corner)
+  // → stay where we are. WelcomeTour hook сам пишет localStorage; здесь только
+  // re-render + conditional navigate.
+  const handleWelcomeComplete = useCallback(
+    (intent: "skip" | "start") => {
+      if (forceShowWelcome) {
+        setForceShowWelcome(false);
+      } else {
+        completeWelcome();
+      }
+      if (intent === "start") {
+        setActiveTab("connection");
+      }
+    },
+    [forceShowWelcome, completeWelcome],
+  );
 
   // ─── External integrations ───
   const { updateInfo, checkForUpdates } = useUpdateChecker();
