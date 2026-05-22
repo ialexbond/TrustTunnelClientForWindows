@@ -76,7 +76,7 @@ describe("AboutPanel", () => {
         updateInfo={{ ...defaultProps.updateInfo, currentVersion: "" }}
       />
     );
-    expect(screen.getByText(/v2\.1\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/v3\.0\.0/)).toBeInTheDocument();
   });
 
   // ─── No update available ───

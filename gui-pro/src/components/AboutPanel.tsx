@@ -84,7 +84,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload, onReplayWelcom
     }
   };
 
-  const version = updateInfo.currentVersion || "2.1.0";
+  const version = updateInfo.currentVersion || "3.0.0";
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">

@@ -229,6 +229,22 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
     setUpdateInfo(prev => ({ ...prev, sidecarDismissed: true }));
   }, []);
 
+  // Resolve current app version EARLY (Tauri-only, без сети) чтобы AboutPanel
+  // / About tab никогда не падали на fallback при offline / GitHub timeout.
+  // `getVersion()` читает Cargo.toml/package.json через Tauri runtime, no API.
+  useEffect(() => {
+    let cancelled = false;
+    getVersion()
+      .then((v) => {
+        if (cancelled) return;
+        setUpdateInfo((prev) => (prev.currentVersion ? prev : { ...prev, currentVersion: v }));
+      })
+      .catch((e) => console.warn("getVersion() failed:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Check on startup + periodic background check every 24 hours
   // (REQ-18-UPDATE-DETECTION-03). Sidecar check НЕ included здесь — он
   // server-aware и зависит от sshParams (Stage 2 detection, OQ-5).
