@@ -176,7 +176,9 @@ function ScreenSlot({
   children,
 }: {
   /** offset = (slotIndex - currentStep). 0 = active (centered), <0 = left
-   *  off-screen, >0 = right off-screen. Width transition 300ms. */
+   *  off-screen, >0 = right off-screen. Transform 300ms slide + opacity
+   *  fade — opacity:0 предотвращает subpixel-leak краёв off-screen content
+   *  через overflow:hidden parent (Tauri WebView2 subpixel artifact). */
   offset: number;
   children: React.ReactNode;
 }) {
@@ -187,7 +189,9 @@ function ScreenSlot({
       className="absolute inset-0 flex items-center justify-center"
       style={{
         transform: `translateX(${offset * 100}%)`,
-        transition: "transform 300ms cubic-bezier(0.4, 0, 0.2, 1)",
+        opacity: active ? 1 : 0,
+        transition:
+          "transform 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease",
         pointerEvents: active ? "auto" : "none",
       }}
     >
