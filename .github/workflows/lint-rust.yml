@@ -6,7 +6,9 @@ env:
 on:
   push:
     branches:
-      - "*"
+      # `**` not `*` — single-star does NOT match `/` in branch refs.
+      # See frontend.yml header for the regression that exposed this.
+      - "**"
     paths:
       - '**.rs'
       - '**/Cargo.toml'

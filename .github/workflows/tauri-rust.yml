@@ -38,7 +38,11 @@ env:
 on:
   push:
     branches:
-      - "*"
+      # `**` not `*` — single-star does NOT match `/` in branch refs, so
+      # any push to `release/*` or `claude/*` would silently skip the
+      # gate. Existing workflows had the same latent bug; this one ships
+      # with the fix from day one.
+      - "**"
     paths:
       - "gui-pro/src-tauri/**/*.rs"
       - "gui-pro/src-tauri/Cargo.toml"
