@@ -87,6 +87,26 @@ jobs:
           # with each other's artifacts and slow cold-start.
           shared-key: tauri-rust-gui-pro
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gui-pro/package-lock.json
+
+      - name: npm ci (gui-pro)
+        working-directory: gui-pro
+        run: npm ci --legacy-peer-deps
+
+      - name: Build frontend (Vite -> gui-pro/dist)
+        working-directory: gui-pro
+        # tauri::generate_context!() at compile time validates the
+        # `frontendDist` path declared in tauri.conf.json ("../dist").
+        # Without the Vite build, clippy on the lib crate panics with
+        # "frontendDist `../dist` doesn't exist". Vite production build
+        # is ~3-5 s after the npm cache is warm.
+        run: npm run build
+
       - name: Stub Tauri externalBin + resources
         shell: pwsh
         # build.rs calls `tauri_build::try_build(attrs)` which validates
