@@ -112,8 +112,12 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
     }
   }, [isOpen, initialUrl]);
 
-  if (!isOpen) return null;
-
+  // G-10 — do NOT early-return null before <Modal>. The Modal primitive
+  // owns its mount/animating lifecycle (200ms exit transition), and an
+  // early return here kills the exit animation by unmounting the subtree
+  // before Modal can fade. Parent passes isOpen as-is. State cleanup
+  // happens in handleClose() via resetState() before onClose() fires.
+  // See CLAUDE.md §Gotchas + memory/v3/design-system/known-issues.md#10.
   return (
     <>
     <Modal isOpen={isOpen} onClose={handleClose} closeOnBackdrop={false}>
