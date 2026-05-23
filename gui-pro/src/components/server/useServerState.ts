@@ -8,7 +8,6 @@ import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { useUsersState, type UsersState } from "./useUsersState";
 import { useVersionsState, type VersionsState } from "./useVersionsState";
 import { useLogsState, type LogsState } from "./useLogsState";
-import { useDiagnosticsState, type DiagnosticsState } from "./useDiagnosticsState";
 import { useDangerZoneState, type DangerZoneState } from "./useDangerZoneState";
 
 // ═══════════════════════════════════════════════════════
@@ -53,7 +52,6 @@ export type ActionResult = { type: "ok" | "error"; message: string } | null;
  *   - useUsersState      (selectedUser, newUsername, newPassword, etc.)
  *   - useVersionsState   (availableVersions, selectedVersion, ...)
  *   - useLogsState       (serverLogs, showLogs, logsLoading)
- *   - useDiagnosticsState (diagResult, showDiag, diagLoading)
  *   - useDangerZoneState (rebooting, uninstallLoading)
  *
  * This keeps ServerPanelProps stable (D-06) while collapsing useServerState
@@ -81,7 +79,6 @@ export function useServerState(props: ServerPanelProps) {
   const users = useUsersState();
   const versions = useVersionsState(serverInfo);
   const logs = useLogsState();
-  const diagnostics = useDiagnosticsState();
   const dangerZone = useDangerZoneState();
 
   // ─── SSH params shorthand ───
@@ -237,7 +234,6 @@ export function useServerState(props: ServerPanelProps) {
     ...users,
     ...versions,
     ...logs,
-    ...diagnostics,
     ...dangerZone,
 
     // Helpers
@@ -266,4 +262,4 @@ export function useServerState(props: ServerPanelProps) {
 export type ServerState = ReturnType<typeof useServerState>;
 
 // Re-export domain state types for consumers that want to depend on slices.
-export type { UsersState, VersionsState, LogsState, DiagnosticsState, DangerZoneState };
+export type { UsersState, VersionsState, LogsState, DangerZoneState };
