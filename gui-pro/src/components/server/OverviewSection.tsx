@@ -225,12 +225,14 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
 
-  // P UAT 2026-05-04 fix: re-fetch на каждый flip `isOverviewVisible` +
-  // window event listener — когда user сделал change в Security tab
-  // (включил/выключил брандмауэр / F2B / SSH-key), Security tab dispatch'ит
-  // 'tt:security-changed' event → Overview re-fetch'ит немедленно (даже если
-  // user уже на Overview — но обычно user ещё переключает tab, тогда
-  // visibility flip триггерит). Двойная защита от stale state.
+  // UAT 2026-05-23 revision: refresh strategy is now event-driven only.
+  // Previously this card re-fetched on every flip of `isOverviewVisible`
+  // (i.e. every Overview tab visit), which the user reported as
+  // unnecessary churn — firewall / fail2ban / SSH-key state doesn't
+  // change behind the back of this app. The window listener for
+  // 'tt:security-changed' (below) is the canonical source of refresh
+  // signals; SecuritySection / FirewallModal / Fail2banModal dispatch
+  // it after every toggle. Tab switches no longer cause a refetch.
   const refetchSecurity = () => {
     if (!serverInfo?.serviceActive || rebooting) return;
     setSecurityLoading(true);
@@ -254,10 +256,14 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   };
 
   useEffect(() => {
-    if (!isOverviewVisible) return;
+    // UAT 2026-05-23: dropped `isOverviewVisible` from the deps and the
+    // early-return guard. Refetches now fire only when the underlying
+    // SSH context changes (host / serviceActive / rebooting) — not on
+    // every tab switch. Cross-component changes flow through the
+    // 'tt:security-changed' window event (effect below).
     refetchSecurity();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional minimal deps
-  }, [sshParams.host, serverInfo?.serviceActive, rebooting, isOverviewVisible]);
+  }, [sshParams.host, serverInfo?.serviceActive, rebooting]);
 
   // Listen to cross-component «security state changed» events from
   // SecuritySection / FirewallModal / Fail2banModal. Even when user is
