@@ -1097,6 +1097,12 @@ pub async fn write_vpn_toml_raw(
 // NOTE: This function does NOT trigger systemctl restart automatically. The
 // Configuration tab orchestrates batch save + single restart via the existing
 // `server_restart_service` command (D-4.1 unified batch flow).
+
+// Discriminator tuple for save_config_file: (filename on disk, heredoc prefix,
+// validator fn). Extracted to a named alias to satisfy `clippy::type_complexity`
+// (Phase 19 post-ship regression — single-site signature, fields stable per D-2.1).
+type ConfigFileSpec = (&'static str, &'static str, fn(&str) -> Result<(), String>);
+
 pub async fn save_config_file(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
@@ -1105,7 +1111,7 @@ pub async fn save_config_file(
 ) -> Result<(), String> {
     // Step 1: validate file_name whitelist (V13 trust boundary).
     // Tuple maps file_name → (filename on disk, heredoc prefix, validator).
-    let (filename, prefix, validator): (&str, &str, fn(&str) -> Result<(), String>) =
+    let (filename, prefix, validator): ConfigFileSpec =
         match file_name.as_str() {
             "vpn" => (
                 "vpn.toml",
