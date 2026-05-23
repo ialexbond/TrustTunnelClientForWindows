@@ -857,22 +857,13 @@ ssh_pool_command!(
     new_password: String
 );
 
+// Audit CQ-4 (ln-624): 12 individual extras → single typed `req: AddUserRequest`.
+// The struct lives in `ssh::server::server_install` and is re-exported through
+// `ssh::mod.rs`. Frontend sends `{ ...sshParams, req: { camelCaseFields... } }`.
 ssh_pool_command!(
     server_add_user_advanced,
     ssh::server_add_user_advanced,
-    vpn_username: String,
-    vpn_password: String,
-    anti_dpi: bool,
-    prefix_length: Option<u32>,
-    prefix_percent: Option<u32>,
-    cidr: Option<String>,
-    custom_sni: Option<String>,
-    name: Option<String>,
-    upstream_protocol: Option<String>,
-    skip_verification: bool,
-    // CR-01: Base64-encoded DER bytes (string), not Vec<u8>. See cert_probe.rs.
-    pin_certificate_der: Option<String>,
-    dns_upstreams: Vec<String>
+    req: ssh::AddUserRequest
 );
 
 ssh_pool_command!(

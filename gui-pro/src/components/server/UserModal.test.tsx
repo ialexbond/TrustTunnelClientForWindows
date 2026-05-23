@@ -116,10 +116,15 @@ describe("UserModal — Add mode", () => {
     });
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
+      // Audit CQ-4 (ln-624): business fields are now grouped under `req`
+      // (matches Rust AddUserRequest struct, serde rename_all = camelCase).
+      // SSH params remain at the top level of the invoke payload.
       expect(invoke).toHaveBeenCalledWith("server_add_user_advanced", expect.objectContaining({
-        vpnUsername: "testuser",
-        vpnPassword: "TestPass123",
-        antiDpi: true,
+        req: expect.objectContaining({
+          vpnUsername: "testuser",
+          vpnPassword: "TestPass123",
+          antiDpi: true,
+        }),
       }));
     });
   });

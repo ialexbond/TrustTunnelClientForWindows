@@ -408,23 +408,51 @@ os.replace(tmp, path)
 /// DER leaf certificate. Tauri+serde serialize `Vec<u8>` as an array of numbers, which the
 /// frontend cannot produce from the `leaf_der_b64` string returned by
 /// `server_fetch_endpoint_cert`. Base64 is the canonical wire format; we decode locally.
-#[allow(clippy::too_many_arguments)]
+///
+/// Audit CQ-4 (ln-624): the 12 business-logic args were collected into
+/// `AddUserRequest` to satisfy `clippy::too_many_arguments` and to give
+/// the Tauri command a single typed payload instead of an opaque arg list.
+/// `app` and `handle` remain separate because they are SSH-pool/runtime
+/// infrastructure, not business inputs.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddUserRequest {
+    pub vpn_username: String,
+    pub vpn_password: String,
+    pub anti_dpi: bool,
+    pub prefix_length: Option<u32>,
+    pub prefix_percent: Option<u32>,
+    pub cidr: Option<String>,
+    pub custom_sni: Option<String>,
+    pub name: Option<String>,
+    pub upstream_protocol: Option<String>,
+    pub skip_verification: bool,
+    pub pin_certificate_der: Option<String>,
+    pub dns_upstreams: Vec<String>,
+}
+
 pub async fn server_add_user_advanced(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
-    vpn_username: String,
-    vpn_password: String,
-    anti_dpi: bool,
-    prefix_length: Option<u32>,
-    prefix_percent: Option<u32>,
-    cidr: Option<String>,
-    custom_sni: Option<String>,
-    name: Option<String>,
-    upstream_protocol: Option<String>,
-    skip_verification: bool,
-    pin_certificate_der: Option<String>,
-    dns_upstreams: Vec<String>,
+    req: AddUserRequest,
 ) -> Result<String, String> {
+    // Destructure the request — every subsequent reference still uses the
+    // same identifiers the body was written against, so the change is
+    // signature-only (single Layer-2 safe refactor per ln-624 brief).
+    let AddUserRequest {
+        vpn_username,
+        vpn_password,
+        anti_dpi,
+        prefix_length,
+        prefix_percent,
+        cidr,
+        custom_sni,
+        name,
+        upstream_protocol,
+        skip_verification,
+        pin_certificate_der,
+        dns_upstreams,
+    } = req;
     validate_vpn_username(&vpn_username)?;
     validate_vpn_password(&vpn_password)?;
     if let Some(c) = &cidr {
