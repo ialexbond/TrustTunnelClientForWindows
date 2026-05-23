@@ -65,3 +65,5 @@ exclusions.json
 gui-pro/coverage/
 .planning/
 AGENTS.md
+GEMINI.md
+.hex-skills/
