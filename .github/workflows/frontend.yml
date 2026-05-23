@@ -3,7 +3,11 @@ name: Frontend Quality
 on:
   push:
     branches:
-      - "*"
+      # `**` not `*` — single-star does NOT match `/` in branch refs, so
+      # pushes to `release/*` or `claude/*` would silently skip the gate
+      # (this exact bug let TD-05 prerelease regression live undetected
+      # until manually surfaced 2026-05-23).
+      - "**"
     paths:
       - "gui-pro/src/**"
       - "gui-pro/package.json"
