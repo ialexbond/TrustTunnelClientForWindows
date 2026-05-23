@@ -122,7 +122,12 @@ describe("DoneStep", () => {
     });
     render(<DoneStep {...w} />);
     fireEvent.click(screen.getByText(i18n.t("wizard.done.go_to_connection")));
-    expect(localStorage.getItem("tt_navigate_after_setup")).toBe("settings");
+    // Phase 17 fix-marathon (commit ~e5af18ea..9a11bb0a) bug-fixed
+    // DoneStep "Go to connection" to actually route to the `connection`
+    // tab instead of `settings` (the old value silently broke navigation
+    // because App.tsx validated the target against the AppTab union and
+    // rejected anything not in the union).
+    expect(localStorage.getItem("tt_navigate_after_setup")).toBe("connection");
     expect(setWizardStep).toHaveBeenCalledWith("welcome");
     expect(onSetupComplete).toHaveBeenCalledWith("/tmp/c.toml");
   });
