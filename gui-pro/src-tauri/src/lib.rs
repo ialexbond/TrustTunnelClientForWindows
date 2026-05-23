@@ -45,6 +45,12 @@ fn get_start_minimized() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install the global panic hook FIRST — before Tauri builder runs.
+    // Any panic from this point on (including during Tauri init / setup)
+    // is routed through log_app + the default handler. See logging.rs
+    // §install_panic_hook for rationale and audit reference (M-627-01).
+    logging::install_panic_hook();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // Second instance launched — focus existing window
