@@ -292,6 +292,14 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                 {t("server.service.mtproto.proxy_link_label")}
               </p>
               {state.status?.proxy_link ? (
+                // UAT 2026-05-23: aligned the readonly-link block with the
+                // canonical copyable-link pattern from UserConfigModal —
+                // neutral input-style surface (input-bg + input-border) with
+                // text-primary content, instead of the accent-tinted look
+                // that was reading as a status/success colour. Still
+                // click-anywhere-to-copy (preserves the multi-line wrap UX
+                // that a single-line <input> can't give for the long
+                // tg://proxy?... payload).
                 <code
                   role="button"
                   tabIndex={0}
@@ -303,10 +311,11 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                       void handleCopy();
                     }
                   }}
-                  className="text-mono-sm break-all block py-2 px-3 rounded-[var(--radius-md)] cursor-pointer transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)]"
+                  className="text-mono-sm break-all block py-2 px-3 rounded-[var(--radius-md)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)]"
                   style={{
-                    color: "var(--color-accent-interactive)",
-                    backgroundColor: "var(--color-bg-secondary)",
+                    color: "var(--color-text-primary)",
+                    backgroundColor: "var(--color-input-bg)",
+                    border: "1px solid var(--color-input-border)",
                   }}
                   data-testid="mtproto-proxy-link"
                 >
