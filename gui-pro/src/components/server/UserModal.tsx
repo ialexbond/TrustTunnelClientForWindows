@@ -747,37 +747,43 @@ export function UserModal({
       // user filled every field, got back a deeplink with only username +
       // password. Propagate the string through onUserAdded so UsersSection
       // can preload UserConfigModal with the REAL thing.
+      // Audit CQ-4 (ln-624): the 12 business-logic fields are wrapped into
+      // a single `req` object matching the Rust `AddUserRequest` struct
+      // (serde rename_all = camelCase). SSH params remain top-level extras
+      // consumed by the ssh_pool_command macro.
       const generatedDeeplink = await invoke<string>("server_add_user_advanced", {
         ...sshParams,
-        vpnUsername: trimmedUsername,
-        vpnPassword: trimmedPassword,
-        antiDpi: deeplink.antiDpi,
-        // WR-02: anti-DPI prefix length / freq% are still backend defaults (4 bytes / 70%)
-        // until UI controls land. Pass null so the Rust side keeps using its defaults.
-        prefixLength: null,
-        prefixPercent: null,
-        cidr: deeplink.cidr || null,
-        // Deeplink TLV params
-        // WR-01: backend parameter is `name` (not `display_name`). Tauri rewrites the
-        // camelCase value to snake_case, but the snake_case key MUST match the Rust arg.
-        // Sending `displayName` produced `display_name`, which Rust ignored entirely.
-        name: deeplink.displayName || null,
-        customSni: deeplink.customSni || null,
-        upstreamProtocol: deeplink.upstreamProtocol !== "auto" ? deeplink.upstreamProtocol : null,
-        skipVerification: deeplink.skipVerification,
-        // CR-01: backend now expects pinCertificateDer (Base64 string), not certDerB64.
-        // FIX-OO-7: skip embedding the cert when the platform verifier
-        // already trusts the chain (Let's Encrypt etc.). A 3 KB chain
-        // blows past QR code binary-mode capacity (~2.3 KB at ECC-M) and
-        // qrcode.react throws "Data too long". The sidecar's own
-        // platform verifier picks up the handshake anyway — no security
-        // lost, just no TLV 0x08 payload.
-        pinCertificateDer:
-          deeplink.pinCert && !deeplink.certIsSystemVerifiable
-            ? deeplink.certDerB64
-            : null,
-        // Backend signature is Vec<String> — empty array on no DNS, NOT null.
-        dnsUpstreams: deeplink.dnsUpstreams,
+        req: {
+          vpnUsername: trimmedUsername,
+          vpnPassword: trimmedPassword,
+          antiDpi: deeplink.antiDpi,
+          // WR-02: anti-DPI prefix length / freq% are still backend defaults (4 bytes / 70%)
+          // until UI controls land. Pass null so the Rust side keeps using its defaults.
+          prefixLength: null,
+          prefixPercent: null,
+          cidr: deeplink.cidr || null,
+          // Deeplink TLV params
+          // WR-01: the Rust field is `name` (not `display_name`). With serde
+          // rename_all = camelCase the JS key stays `name`. Sending `displayName`
+          // would land on a missing field and serde-default to None.
+          name: deeplink.displayName || null,
+          customSni: deeplink.customSni || null,
+          upstreamProtocol: deeplink.upstreamProtocol !== "auto" ? deeplink.upstreamProtocol : null,
+          skipVerification: deeplink.skipVerification,
+          // CR-01: backend expects pinCertificateDer (Base64 string), not certDerB64.
+          // FIX-OO-7: skip embedding the cert when the platform verifier
+          // already trusts the chain (Let's Encrypt etc.). A 3 KB chain
+          // blows past QR code binary-mode capacity (~2.3 KB at ECC-M) and
+          // qrcode.react throws "Data too long". The sidecar's own
+          // platform verifier picks up the handshake anyway — no security
+          // lost, just no TLV 0x08 payload.
+          pinCertificateDer:
+            deeplink.pinCert && !deeplink.certIsSystemVerifiable
+              ? deeplink.certDerB64
+              : null,
+          // Backend signature is Vec<String> — empty array on no DNS, NOT null.
+          dnsUpstreams: deeplink.dnsUpstreams,
+        },
       });
       activityLog(
         "STATE",

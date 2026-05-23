@@ -44,7 +44,7 @@ pub use server::{
     // MtProtoInstallStep is internal-only (emitted via app.emit, not used in signatures)
     detect_bbr_status, enable_bbr, disable_bbr,
     // Phase 14.1 — advanced user config
-    server_rotate_user_password, server_add_user_advanced,
+    server_rotate_user_password, server_add_user_advanced, AddUserRequest,
     server_update_user_config, server_regenerate_client_prefix,
     server_fetch_endpoint_cert, server_get_user_config,
     export_config_deeplink_advanced,
