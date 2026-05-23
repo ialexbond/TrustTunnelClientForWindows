@@ -315,6 +315,54 @@ pub fn log_sidecar(line: &str) {
     }
 }
 
+/// Install a global panic hook that routes Rust panics through `log_app`
+/// (after `init_logging()`) and the default panic handler (always).
+///
+/// Audit M-627-01 (ln-627 observability) — without this hook, a Rust
+/// panic on a Tauri command thread silently kills the worker, the
+/// frontend sees a one-shot IPC error with no stderr trail, and there
+/// is no on-disk record of where the panic originated.
+///
+/// Design notes:
+/// - Install BEFORE `tauri::Builder::default()` so panics during early
+///   init are also captured.
+/// - Run the previous (default) hook first so stderr / Windows debugger
+///   integration keep working — we only ADD a file log line.
+/// - Sanitize the payload before persisting (same SENSITIVE_KEYS +
+///   IPv4 mask used everywhere else) so a panic that includes
+///   `password = "..."` in the message never lands in app.log.
+/// - If `init_logging()` has not run yet (panic during very early
+///   startup), `log_app` is a no-op — the default hook still prints
+///   to stderr, and Windows event log keeps the trail.
+/// - Hook must never panic. Use `unwrap_or_else(|e| e.into_inner())`
+///   pattern that already protects every other lock in this module.
+pub fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Format: "PANIC at {location} | thread={name}: {message}"
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<non-string payload>");
+        let line = format!("PANIC at {location} | thread={thread}: {message}");
+        let sanitized = sanitize(&line);
+        log_app("error", &sanitized);
+        // Run the previous (default) hook so stderr + Windows debugger
+        // integration stay intact.
+        previous(info);
+    }));
+}
+
 // ─── Tauri Commands ───
 
 #[tauri::command]
