@@ -344,26 +344,25 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                 </Button>
               </div>
 
-              {/* P UAT 2026-05-04: expandable «Подробности» — certbot output после
-                  renewal (success ИЛИ error). User'у нужно видеть что именно
-                  произошло (rate limit, port conflict, DNS issue). */}
-              {renewOutput && (
+              {/* UAT 2026-05-23: expandable «Подробности» shows certbot output
+                  ONLY for the ERROR case. The success path used to render the
+                  same toggle ("server.cert.renew_success_details_label") but
+                  (a) the i18n key was never localized and leaked as a raw
+                  string, and (b) the certbot success log is unrelated noise
+                  to the user (they see the new validity period in the card
+                  above). Errors still need the details — that's where the
+                  user finds rate-limit / DNS / port-conflict diagnostics. */}
+              {renewOutput && renewOutput.kind === "error" && (
                 <div className="mt-3" data-testid="cert-renew-details">
                   <button
                     type="button"
                     className="text-caption flex items-center gap-1.5"
-                    style={{
-                      color: renewOutput.kind === "error"
-                        ? "var(--color-status-danger)"
-                        : "var(--color-text-secondary)",
-                    }}
+                    style={{ color: "var(--color-status-danger)" }}
                     onClick={() => setRenewDetailsOpen((v) => !v)}
                     aria-expanded={renewDetailsOpen}
                   >
                     <span aria-hidden="true">{renewDetailsOpen ? "▾" : "▸"}</span>
-                    {renewOutput.kind === "error"
-                      ? t("server.cert.renew_error_details_label")
-                      : t("server.cert.renew_success_details_label")}
+                    {t("server.cert.renew_error_details_label")}
                   </button>
                   {renewDetailsOpen && (
                     <pre
