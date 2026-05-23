@@ -434,7 +434,10 @@ async fn download_single_attempt(
         downloaded += chunk.len() as u64;
         buffer.extend_from_slice(&chunk);
 
-        let percent = if total > 0 { (downloaded * 100 / total) as u8 } else { 0 };
+        // checked_div: clippy 1.95 `manual_checked_ops` flagged the prior
+        // `if total > 0 { ... }` form as a re-implementation of `checked_div`.
+        // Semantics preserved — `None` (total == 0) maps to 0% progress.
+        let percent = (downloaded * 100).checked_div(total).unwrap_or(0) as u8;
         if percent != last_percent || percent == 0 {
             last_percent = percent;
             let mb = downloaded as f64 / 1024.0 / 1024.0;
