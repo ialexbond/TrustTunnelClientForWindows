@@ -1,14 +1,11 @@
 name: Run tests
 
 # Inherited upstream workflow for the C++ sidecar (`trusttunnel/setup_wizard`)
-# and the `dns-libs` Conan dependency. All three jobs (Linux / MacOS /
-# Windows) are gated to the upstream repository `TrustTunnel/TrustTunnelClient`
-# via `if: github.repository == 'TrustTunnel/TrustTunnelClient'` — the
-# `ialexbond/TrustTunnelClientForWindows` fork iterates on the Tauri client
-# (gui-pro + gui-light), not on the upstream C++ sidecar / dns-libs, so
-# these jobs would only fail on tag drift in the upstream submodules
-# (e.g. dns-libs v2.8.42 missing — observed in run 26305126658). The file
-# is kept (rather than deleted) so upstream merges land cleanly.
+# and the `dns-libs` Conan dependency. The upstream-only repository gate
+# was rolled back 2026-05-24 — the underlying tag drift was fixed at the
+# conanfile.py level (dns-libs 2.8.42 -> 2.8.44, native_libs_common 8.0.27
+# -> 8.1.27), so jobs run normally on the fork again and stay green
+# instead of reporting `skipped`.
 
 env:
   CONAN_VER: 2.12
@@ -20,8 +17,6 @@ on:
     branches:
       # `**` not `*` — matches release/* and claude/* worktree branches
       # too (same fix as in tauri-rust.yml / frontend.yml / lint-rust.yml).
-      # In practice all jobs short-circuit on the fork via the repository
-      # gate above; this is just kept consistent for the upstream side.
       - "**"
     paths-ignore:
       - '**/README.md'
@@ -36,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_MAJOR_VER: 21
-    if: ${{ github.repository == 'TrustTunnel/TrustTunnelClient' && !startsWith(github.event.head_commit.message, 'skipci:') }}
+    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -133,7 +128,7 @@ jobs:
 
   MacOS:
     runs-on: macos-latest
-    if: ${{ github.repository == 'TrustTunnel/TrustTunnelClient' && !startsWith(github.event.head_commit.message, 'skipci:') }}
+    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -227,7 +222,7 @@ jobs:
     env:
       MSVC_VER: 17
       MSVC_YEAR: 2022
-    if: ${{ github.repository == 'TrustTunnel/TrustTunnelClient' && !startsWith(github.event.head_commit.message, 'skipci:') }}
+    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
