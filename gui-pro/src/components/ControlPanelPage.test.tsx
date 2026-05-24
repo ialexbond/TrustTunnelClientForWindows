@@ -12,16 +12,73 @@ function renderWithProviders(ui: React.ReactNode) {
   return render(<SnackBarProvider>{ui}</SnackBarProvider>);
 }
 
+// Module-scope ref for Phase 19 cascade-fix tests — captures latest props received by the mock ServerPanel
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let serverPanelLastProps: any = null;
+
 // Mock child components to isolate ControlPanelPage logic
 vi.mock("./ServerPanel", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ServerPanel: (props: any) => (
-    <div data-testid="server-panel">
-      ServerPanel host={props.host}
-      <button data-testid="mock-export-btn" onClick={() => props.onConfigExported("/exported/config.toml")}>Export</button>
-      <button data-testid="mock-disconnect-btn" onClick={props.onDisconnect}>Disconnect</button>
-    </div>
-  ),
+  ServerPanel: (props: any) => {
+    serverPanelLastProps = props;
+    return (
+      <div data-testid="server-panel">
+        ServerPanel host={props.host}
+        <span data-testid="mock-sidecar-available">{String(props.sidecarAvailable)}</span>
+        <button
+          data-testid="mock-emit-version"
+          onClick={() => props.onServerInfoVersionChange?.("1.0.31")}
+        >
+          EmitVersion1031
+        </button>
+        <button
+          data-testid="mock-emit-version-latest"
+          onClick={() => props.onServerInfoVersionChange?.("1.0.33")}
+        >
+          EmitVersion1033
+        </button>
+        <button data-testid="mock-export-btn" onClick={() => props.onConfigExported("/exported/config.toml")}>Export</button>
+        <button data-testid="mock-disconnect-btn" onClick={props.onDisconnect}>Disconnect</button>
+      </div>
+    );
+  },
+}));
+
+// Phase 19 cascade-fix tests — pin latestFromGitHubCP = "1.0.33" deterministically
+vi.mock("./server/useSidecarVersions", () => ({
+  useSidecarVersions: () => ({
+    versions: [
+      {
+        version: "1.0.33",
+        tag: "v1.0.33",
+        assetDownloadUrl: "",
+        assetSizeBytes: 0,
+        publishedAt: "",
+      },
+    ],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));
+
+// Phase 19 cascade-fix tests — stub useUpdateChecker to prevent real GitHub calls
+vi.mock("../shared/hooks/useUpdateChecker", () => ({
+  useUpdateChecker: () => ({
+    checkSidecarForServer: vi.fn(),
+    dismissSidecarUpdate: vi.fn(),
+    updateInfo: {
+      appAvailable: false,
+      sidecarAvailable: false,
+      sidecarCurrentVersion: "",
+      sidecarLatestVersion: "",
+      sidecarLatestTag: "",
+      sidecarDownloadUrl: "",
+      sidecarDismissed: false,
+      sidecarChecking: false,
+      lastChecked: null,
+    },
+  }),
 }));
 
 vi.mock("./server/SshConnectForm", () => ({
@@ -343,5 +400,62 @@ describe("ControlPanelPage", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith("clear_ssh_credentials");
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
+  });
+
+  // ── Phase 19 cascade fix — sidecarAvailable single source of truth ──
+
+  it("Phase 19 cascade fix — sidecarAvailable flips false→true on serverInfo.version downgrade", async () => {
+    mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
+    await act(async () => {
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
+    });
+    // ServerPanel must be mounted (creds loaded)
+    expect(screen.getByTestId("server-panel")).toBeInTheDocument();
+
+    // Initially: no version known → sidecarAvailable=false
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
+    });
+
+    // Simulate ServerPanel emitting latest version (same as latestFromGitHub=1.0.33)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-emit-version-latest"));
+    });
+    // 1.0.33 === latest → no update available
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
+    });
+
+    // Simulate downgrade: ServerPanel emits "1.0.31" (below 1.0.33 → update available)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-emit-version"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("true");
+    });
+  });
+
+  it("Phase 19 cascade fix — sidecarAvailable flips true→false on upgrade to latest (mirror direction)", async () => {
+    mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
+    await act(async () => {
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
+    });
+    expect(screen.getByTestId("server-panel")).toBeInTheDocument();
+
+    // Set version to 1.0.31 → sidecarAvailable should be true (1.0.31 < 1.0.33)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-emit-version"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("true");
+    });
+
+    // Upgrade to latest: emit "1.0.33" → sidecarAvailable should flip to false
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-emit-version-latest"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
+    });
   });
 });
