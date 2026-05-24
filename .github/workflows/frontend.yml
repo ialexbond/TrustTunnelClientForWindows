@@ -9,18 +9,17 @@ on:
       # until manually surfaced 2026-05-23).
       - "**"
     paths:
+      # gui-light is parked until its dedicated redesign milestone (user
+      # direction 2026-05-23); its paths are intentionally omitted from
+      # the trigger so the now-out-of-scope edition can drift without
+      # blocking gui-pro releases. Re-add when the redesign milestone
+      # starts and the edition is rebuilt.
       - "gui-pro/src/**"
       - "gui-pro/package.json"
       - "gui-pro/package-lock.json"
       - "gui-pro/tsconfig.json"
       - "gui-pro/vite.config.ts"
       - "gui-pro/eslint.config.js"
-      - "gui-light/src/**"
-      - "gui-light/package.json"
-      - "gui-light/package-lock.json"
-      - "gui-light/tsconfig.json"
-      - "gui-light/vite.config.ts"
-      - "gui-light/eslint.config.js"
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
@@ -54,27 +53,9 @@ jobs:
       - name: Vitest
         run: npm run test
 
-  gui-light:
-    runs-on: ubuntu-latest
-    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
-    defaults:
-      run:
-        working-directory: gui-light
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: gui-light/package-lock.json
-
-      - run: npm ci --legacy-peer-deps
-
-      - name: TypeScript check
-        run: npm run typecheck
-
-      - name: ESLint
-        run: npm run lint
+  # gui-light job removed 2026-05-23 — the Light edition is out of scope
+  # until its dedicated redesign milestone. Last on-fork typecheck failed
+  # with a Tooltip `position` prop drift in WindowControls.tsx that the
+  # gui-pro Tooltip primitive no longer accepts. Re-add the job when the
+  # Light redesign milestone starts and the edition's TS/lint debt is
+  # cleaned up; reference: ln-622 audit finding (build), CONCERNS.md.

@@ -1,5 +1,15 @@
 name: Run tests
 
+# Inherited upstream workflow for the C++ sidecar (`trusttunnel/setup_wizard`)
+# and the `dns-libs` Conan dependency. All three jobs (Linux / MacOS /
+# Windows) are gated to the upstream repository `TrustTunnel/TrustTunnelClient`
+# via `if: github.repository == 'TrustTunnel/TrustTunnelClient'` — the
+# `ialexbond/TrustTunnelClientForWindows` fork iterates on the Tauri client
+# (gui-pro + gui-light), not on the upstream C++ sidecar / dns-libs, so
+# these jobs would only fail on tag drift in the upstream submodules
+# (e.g. dns-libs v2.8.42 missing — observed in run 26305126658). The file
+# is kept (rather than deleted) so upstream merges land cleanly.
+
 env:
   CONAN_VER: 2.12
   CLANG_FORMAT_VER: 21.1.8
@@ -8,7 +18,11 @@ env:
 on:
   push:
     branches:
-      - "*"
+      # `**` not `*` — matches release/* and claude/* worktree branches
+      # too (same fix as in tauri-rust.yml / frontend.yml / lint-rust.yml).
+      # In practice all jobs short-circuit on the fork via the repository
+      # gate above; this is just kept consistent for the upstream side.
+      - "**"
     paths-ignore:
       - '**/README.md'
       - 'bamboo-specs/**'
@@ -22,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_MAJOR_VER: 21
-    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
+    if: ${{ github.repository == 'TrustTunnel/TrustTunnelClient' && !startsWith(github.event.head_commit.message, 'skipci:') }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -119,7 +133,7 @@ jobs:
 
   MacOS:
     runs-on: macos-latest
-    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
+    if: ${{ github.repository == 'TrustTunnel/TrustTunnelClient' && !startsWith(github.event.head_commit.message, 'skipci:') }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -213,7 +227,7 @@ jobs:
     env:
       MSVC_VER: 17
       MSVC_YEAR: 2022
-    if: "!startsWith(github.event.head_commit.message, 'skipci:')"
+    if: ${{ github.repository == 'TrustTunnel/TrustTunnelClient' && !startsWith(github.event.head_commit.message, 'skipci:') }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
