@@ -94,6 +94,15 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
 
   // ── Handlers ──
 
+  // Extract optional-chain reads to a local const so the React Compiler
+  // dep inference matches the manually-specified useCallback deps below.
+  // Mirrors commit 586110cf (`fix(lint): MtProtoSection — extract proxyLink
+  // to match React Compiler dep`) which solved the exact same
+  // `react-hooks/preserve-manual-memoization` conflict in the section.
+  // Keeps the deps array a single token list (`[proxyLink, ...]`) instead
+  // of the chain `[state.status?.proxy_link, ...]`.
+  const proxyLink = state.status?.proxy_link;
+
   const handleInstall = useCallback(async () => {
     const parsed = parseInt(portInput, 10);
     if (isNaN(parsed) || parsed < 1024 || parsed > 65535) {
@@ -113,17 +122,16 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
   }, [sshParams.host, state, log]);
 
   const handleCopy = useCallback(async () => {
-    const link = state.status?.proxy_link;
-    if (!link) return;
+    if (!proxyLink) return;
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(proxyLink);
       // D-29: log only event metadata — NEVER log proxy_link (contains MTProto secret)
       log("USER", `mtproto.link.copied host=${sshParams.host}`);
       pushSnack(t("server.users.link_copied"));
     } catch {
       // clipboard write may fail in restrictive WebView contexts; silent.
     }
-  }, [state.status?.proxy_link, sshParams.host, log, pushSnack, t]);
+  }, [proxyLink, sshParams.host, log, pushSnack, t]);
 
   const installed = state.status?.installed ?? false;
 
@@ -291,7 +299,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               >
                 {t("server.service.mtproto.proxy_link_label")}
               </p>
-              {state.status?.proxy_link ? (
+              {proxyLink ? (
                 // UAT 2026-05-23: aligned the readonly-link block with the
                 // canonical copyable-link pattern from UserConfigModal —
                 // neutral input-style surface (input-bg + input-border) with
@@ -319,7 +327,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                   }}
                   data-testid="mtproto-proxy-link"
                 >
-                  {state.status.proxy_link}
+                  {proxyLink}
                 </code>
               ) : (
                 <div
