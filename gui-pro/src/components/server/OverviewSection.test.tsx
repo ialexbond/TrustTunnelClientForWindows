@@ -467,6 +467,52 @@ describe("OverviewSection", () => {
       expect(screen.queryByTestId("overview-protocol-update-arrow")).toBeNull();
     });
 
+    it("Phase 19 cascade fix — ArrowUpCircle becomes visible WITHOUT remount when sidecarAvailable flips false→true", () => {
+      const onNavigate = vi.fn();
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.33",
+          serviceActive: true,
+          users: ["u1"],
+          protocol: "WireGuard",
+          listenPort: 51820,
+        } as ServerState["serverInfo"],
+      });
+      const { rerender } = render(
+        <OverviewSection
+          state={state}
+          onNavigate={onNavigate}
+          sidecarAvailable={false}
+        />,
+      );
+
+      // Initially: no arrow (sidecarAvailable=false)
+      expect(screen.queryByTestId("overview-protocol-update-arrow")).toBeNull();
+
+      // Simulate post-downgrade cascade: sidecarAvailable flips to true (same component instance, no remount)
+      const stateAfterDowngrade = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.31",
+          serviceActive: true,
+          users: ["u1"],
+          protocol: "WireGuard",
+          listenPort: 51820,
+        } as ServerState["serverInfo"],
+      });
+      rerender(
+        <OverviewSection
+          state={stateAfterDowngrade}
+          onNavigate={onNavigate}
+          sidecarAvailable={true}
+        />,
+      );
+
+      // ArrowUpCircle must now be visible without any unmount/remount
+      expect(screen.queryByTestId("overview-protocol-update-arrow")).not.toBeNull();
+    });
+
     it("drill-down: calls onNavigate('security') on Space key on Security card", async () => {
       const onNavigate = vi.fn();
       const state = makeState();
