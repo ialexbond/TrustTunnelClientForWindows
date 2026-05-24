@@ -2,7 +2,9 @@ name: Lint Markdown
 on:
   push:
     branches:
-      - "*"
+      # `**` not `*` (same fix as the other workflows — `*` excluded
+      # release/* and claude/* because the wildcard doesn't match `/`).
+      - "**"
     paths:
       - '**.md'
       - '.markdown-lint.json'
