@@ -12,15 +12,10 @@ function renderWithProviders(ui: React.ReactNode) {
   return render(<SnackBarProvider>{ui}</SnackBarProvider>);
 }
 
-// Module-scope ref for Phase 19 cascade-fix tests — captures latest props received by the mock ServerPanel
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let serverPanelLastProps: any = null;
-
 // Mock child components to isolate ControlPanelPage logic
 vi.mock("./ServerPanel", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ServerPanel: (props: any) => {
-    serverPanelLastProps = props;
     return (
       <div data-testid="server-panel">
         ServerPanel host={props.host}
@@ -405,6 +400,8 @@ describe("ControlPanelPage", () => {
   // ── Phase 19 cascade fix — sidecarAvailable single source of truth ──
 
   it("Phase 19 cascade fix — sidecarAvailable flips false→true on serverInfo.version downgrade", async () => {
+    // Use real timers — fake timers block waitFor's async state flush in this scenario
+    vi.useRealTimers();
     mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
     await act(async () => {
       renderWithProviders(<ControlPanelPage {...defaultProps} />);
@@ -413,29 +410,29 @@ describe("ControlPanelPage", () => {
     expect(screen.getByTestId("server-panel")).toBeInTheDocument();
 
     // Initially: no version known → sidecarAvailable=false
-    await waitFor(() => {
-      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
-    });
+    expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
 
     // Simulate ServerPanel emitting latest version (same as latestFromGitHub=1.0.33)
     await act(async () => {
       fireEvent.click(screen.getByTestId("mock-emit-version-latest"));
     });
     // 1.0.33 === latest → no update available
-    await waitFor(() => {
-      expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
-    });
+    expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
 
     // Simulate downgrade: ServerPanel emits "1.0.31" (below 1.0.33 → update available)
     await act(async () => {
       fireEvent.click(screen.getByTestId("mock-emit-version"));
     });
+    // After the callback fires, ControlPanelPage re-derives localSidecarAvailable
+    // from the lifted serverInfoVersion — must now be true
     await waitFor(() => {
       expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("true");
-    });
+    }, { timeout: 3000 });
   });
 
   it("Phase 19 cascade fix — sidecarAvailable flips true→false on upgrade to latest (mirror direction)", async () => {
+    // Use real timers — fake timers block waitFor's async state flush in this scenario
+    vi.useRealTimers();
     mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
     await act(async () => {
       renderWithProviders(<ControlPanelPage {...defaultProps} />);
@@ -448,7 +445,7 @@ describe("ControlPanelPage", () => {
     });
     await waitFor(() => {
       expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("true");
-    });
+    }, { timeout: 3000 });
 
     // Upgrade to latest: emit "1.0.33" → sidecarAvailable should flip to false
     await act(async () => {
@@ -456,6 +453,6 @@ describe("ControlPanelPage", () => {
     });
     await waitFor(() => {
       expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
-    });
+    }, { timeout: 3000 });
   });
 });
