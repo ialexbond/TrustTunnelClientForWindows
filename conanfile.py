@@ -29,8 +29,15 @@ class VpnLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
-        self.requires("dns-libs/2.8.42@adguard/oss", transitive_headers=True)
-        self.requires("native_libs_common/8.0.27@adguard/oss", transitive_headers=True)
+        # 2026-05-24: bumped from 2.8.42 / 8.0.27 — both upstream tags were
+        # removed from AdguardTeam/{DnsLibs,NativeLibsCommon}, so the
+        # `bootstrap_conan_deps.py` git-checkout step started failing in CI
+        # ("pathspec 'v2.8.42' did not match any file(s) known to git"). The
+        # closest still-available tags are v2.8.44 / v8.1.27 — patch / minor
+        # bump respectively. Adjust further if Conan resolution surfaces an
+        # incompatibility with the rest of the recipe.
+        self.requires("dns-libs/2.8.44@adguard/oss", transitive_headers=True)
+        self.requires("native_libs_common/8.1.27@adguard/oss", transitive_headers=True)
 
         self.requires("brotli/1.1.0", transitive_headers=True)
         self.requires("cxxopts/3.1.1", transitive_headers=True)
