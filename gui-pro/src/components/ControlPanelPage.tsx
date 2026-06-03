@@ -327,43 +327,34 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
         : null,
     [creds],
   );
-  const [localInstalledVersion, setLocalInstalledVersion] = useState("");
-  const probeLocalVersion = useCallback(async () => {
-    if (!sshParamsForLocal) return;
-    try {
-      const info = await invoke<{ installed: boolean; version: string }>(
-        "check_server_installation",
-        sshParamsForLocal,
-      );
-      if (info.installed && info.version) setLocalInstalledVersion(info.version);
-    } catch {
-      // Silent — same posture as Phase 18 useUpdateChecker. The dot just
-      // stays dark; user can manually refresh via the Service tab.
-    }
-  }, [sshParamsForLocal]);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async network probe + setState is the canonical effect-usage pattern; cannot be replaced by event handlers or render-time computation because the probe must fire when sshParams becomes available.
-    void probeLocalVersion();
-  }, [probeLocalVersion]);
+  // Phase 19-06 cascade fix — lifted from ServerPanel via
+  // onServerInfoVersionChange callback. Single source of truth shared with
+  // Card #8 text + ProtocolUpdateSection Badge + dropdown «(установлена)»
+  // label. Replaces the parallel localInstalledVersion + probeLocalVersion
+  // pair (see 19-DIAGNOSIS-card8-arrow.md §4 Option A for rationale).
+  const [serverInfoVersion, setServerInfoVersion] = useState("");
   const { versions: githubReleasesCP } = useSidecarVersions(sshParamsForLocal);
   // Defensive null-guard — `useSidecarVersions` now coerces to [] but keep the
   // optional chain in case the hook contract loosens later.
   const latestFromGitHubCP = githubReleasesCP?.[0]?.version ?? "";
   const localSidecarAvailable =
-    !!localInstalledVersion &&
+    !!serverInfoVersion &&
     !!latestFromGitHubCP &&
-    compareSemverDescCP(localInstalledVersion, latestFromGitHubCP) > 0;
+    compareSemverDescCP(serverInfoVersion, latestFromGitHubCP) > 0;
 
-  // Phase 19 cascade fix — fired by `ProtocolUpdateSection.handleModalSuccess`
-  // after `update_sidecar` completes. Re-probe sidecar's `--version` over SSH
-  // so `sidecarInfo.sidecarCurrentVersion` reflects the post-update value,
-  // which in turn propagates through every cascade indicator:
-  //   - Overview Card #8 «Версия протокола» — text + ArrowUp visibility
-  //   - Bottom-tab «Панель управления» pill dot (via App.tsx hasSidecarUpdate)
-  //   - ServerTabs «Сервис» pill dot
-  //   - ProtocolUpdateSection Badge «Доступно новое обновление»
-  // Without this callback, all four indicators keep showing the stale
-  // pre-update comparison until the user manually disconnects + reconnects.
+  // Phase 19-06 cascade fix — after `update_sidecar` succeeds,
+  // `ServiceTabSection.handleAppliedWithRefresh` calls
+  // `state.loadServerInfo(true)` (0ms + 2.5s retry) which updates
+  // `state.serverInfo.version` in useServerState. ServerPanel's
+  // useEffect on `state.serverInfo?.version` then fires our
+  // `onServerInfoVersionChange` callback which updates the lifted
+  // `serverInfoVersion` here. No parallel probe needed — the same
+  // refresh path that updates Card text now also drives every
+  // cascade indicator (ArrowUpCircle, bottom-tab dot, ServerTabs dot).
+  //
+  // `checkSidecarForServer` is kept to refresh Phase 18 AboutPanel
+  // slots (`updateInfo.sidecarLatestVersion` etc.) which feed
+  // unrelated UI surfaces out of scope here.
   const handleSidecarUpdateApplied = useCallback(() => {
     if (!creds) return;
     const sshParams = {
@@ -373,18 +364,11 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
       password: creds.password,
       keyPath: creds.keyPath,
     };
-    // Immediate probe + retry after 2.5s. Right after `update_sidecar` the
-    // restarted `trusttunnel_endpoint` may need a moment before it answers
-    // `--version` over SSH again. Without the retry the cascade gets stuck
-    // on the pre-update value if the first probe lands during the restart
-    // window. Two-shot pattern is cheap and idempotent.
     void checkSidecarForServer(sshParams);
-    void probeLocalVersion();
     window.setTimeout(() => {
       void checkSidecarForServer(sshParams);
-      void probeLocalVersion();
     }, 2500);
-  }, [creds, checkSidecarForServer, probeLocalVersion]);
+  }, [creds, checkSidecarForServer]);
 
   // Auto-dismiss точек когда пользователь зашёл на Service tab.
   // UX-логика: точку на bottom-tab «Панель управления» показываем один раз —
@@ -521,8 +505,9 @@ export function ControlPanelPage({ onConfigExported, onSwitchToSetup, onNavigate
               onDisconnect={handleDisconnect}
               onPortChanged={handlePortChanged}
               onPanelReady={() => setIsFirstConnect(false)}
+              onServerInfoVersionChange={setServerInfoVersion}
               hasSidecarUpdate={sidecarUpdateVisible}
-              currentVersion={localInstalledVersion}
+              currentVersion={serverInfoVersion}
               sidecarAvailable={localSidecarAvailable}
               latestVersion={latestFromGitHubCP}
               onSidecarUpdateApplied={handleSidecarUpdateApplied}

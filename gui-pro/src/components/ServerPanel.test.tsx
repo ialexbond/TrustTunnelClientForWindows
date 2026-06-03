@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import i18n from "../shared/i18n";
 import { ServerPanel } from "./ServerPanel";
 import { renderWithProviders as render } from "../test/test-utils";
@@ -290,6 +290,34 @@ describe("ServerPanel", () => {
     const { container } = render(<ServerPanel {...defaultProps} />);
     // SnackBar renders in the DOM
     expect(container.innerHTML).toBeTruthy();
+  });
+
+  it("Phase 19 cascade fix — onServerInfoVersionChange callback fires with current state.serverInfo.version on mount + every change", async () => {
+    // First mount: serverInfo.version = "1.0.33"
+    const cb1 = vi.fn();
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.33", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: true,
+    };
+    const { unmount } = render(<ServerPanel {...defaultProps} onServerInfoVersionChange={cb1} />);
+    await waitFor(() => {
+      expect(cb1).toHaveBeenCalledWith("1.0.33");
+    });
+    unmount();
+
+    // Second mount: serverInfo.version = "1.0.31" — callback fires with new value
+    const cb2 = vi.fn();
+    mockState = {
+      ...mockState,
+      serverInfo: { installed: true, version: "1.0.31", serviceActive: true, users: ["u1"] },
+    };
+    render(<ServerPanel {...defaultProps} onServerInfoVersionChange={cb2} />);
+    await waitFor(() => {
+      expect(cb2).toHaveBeenCalledWith("1.0.31");
+    });
   });
 
 });

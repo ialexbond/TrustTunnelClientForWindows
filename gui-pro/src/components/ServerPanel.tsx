@@ -61,6 +61,15 @@ interface ServerPanelProps {
    * `ProtocolUpdateSection` НЕ зависит от dismissed и продолжает гореть.
    */
   onSidecarUpdateSeen?: () => void;
+  /**
+   * Phase 19-06 cascade fix — emits `state.serverInfo.version` on mount
+   * + every change. Lifts the single source of truth up to ControlPanelPage
+   * so the Card #8 ArrowUpCircle, bottom-tab pill dot, and ServerTabs
+   * pill dot stop depending on a parallel SSH probe that could fall stale
+   * after an in-session sidecar downgrade. See
+   * `.planning/phases/19-utilities-service-rename-update-section/19-DIAGNOSIS-card8-arrow.md`.
+   */
+  onServerInfoVersionChange?: (version: string) => void;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -70,7 +79,17 @@ interface ServerPanelProps {
 export function ServerPanel(props: ServerPanelProps) {
   const { t } = useTranslation();
   const state = useServerState(props);
-  const { onPanelReady } = props;
+  const { onPanelReady, onServerInfoVersionChange } = props;
+
+  // Phase 19-06 cascade fix — lift state.serverInfo.version to ControlPanelPage.
+  // Fires on mount and every time state.serverInfo.version changes (e.g. after
+  // ServiceTabSection.handleAppliedWithRefresh calls state.loadServerInfo(true)
+  // post-update). ControlPanelPage uses the lifted value to derive
+  // localSidecarAvailable (the single source of truth for ArrowUpCircle,
+  // bottom-tab dot, ServerTabs pill dot).
+  useEffect(() => {
+    onServerInfoVersionChange?.(state.serverInfo?.version ?? "");
+  }, [state.serverInfo?.version, onServerInfoVersionChange]);
 
   // Signal to parent when panel data is loaded (for skeleton dismissal)
   useEffect(() => {
