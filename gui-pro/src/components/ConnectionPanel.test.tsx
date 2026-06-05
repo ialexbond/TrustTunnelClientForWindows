@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
-import SettingsPanel from "./SettingsPanel";
+import ConnectionPanel from "./ConnectionPanel";
 import { renderWithProviders as render } from "../test/test-utils";
 import type { VpnStatus } from "../shared/types";
 
@@ -33,7 +33,7 @@ const mockConfig = {
   dns_upstreams: ["1.1.1.1"],
 };
 
-describe("SettingsPanel", () => {
+describe("ConnectionPanel", () => {
   const defaultProps = {
     configPath: "/test/config.toml",
     onConfigChange: vi.fn(),
@@ -55,21 +55,21 @@ describe("SettingsPanel", () => {
   // ─── All sections rendered ───
 
   it("loads and displays connection section", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Подключение")).toBeInTheDocument();
     });
   });
 
   it("renders config file label", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Файл конфигурации")).toBeInTheDocument();
     });
   });
 
   it("shows security section with toggles after config loads", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Безопасность")).toBeInTheDocument();
     });
@@ -79,14 +79,14 @@ describe("SettingsPanel", () => {
   });
 
   it("shows tunnel section after config loads", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Туннель")).toBeInTheDocument();
     });
   });
 
   it("shows network section after config loads", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Сеть")).toBeInTheDocument();
     });
@@ -95,7 +95,7 @@ describe("SettingsPanel", () => {
   // ─── Save button ───
 
   it("shows save button with correct label", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(
         screen.getByText("Сохранить и переподключить")
@@ -104,7 +104,7 @@ describe("SettingsPanel", () => {
   });
 
   it("save button is disabled when VPN is disconnected", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(screen.getByText("Подключение")).toBeInTheDocument();
     });
@@ -116,7 +116,7 @@ describe("SettingsPanel", () => {
 
   it("save button is disabled when VPN is connected but not dirty", async () => {
     render(
-      <SettingsPanel {...defaultProps} status={"connected" as VpnStatus} />
+      <ConnectionPanel {...defaultProps} status={"connected" as VpnStatus} />
     );
     await waitFor(() => {
       expect(screen.getByText("Подключение")).toBeInTheDocument();
@@ -130,14 +130,14 @@ describe("SettingsPanel", () => {
   // ─── Loading / no config state ───
 
   it("shows placeholder text when configPath is empty", () => {
-    render(<SettingsPanel {...defaultProps} configPath="" />);
+    render(<ConnectionPanel {...defaultProps} configPath="" />);
     expect(
       screen.getByText("Укажите путь к конфигу...")
     ).toBeInTheDocument();
   });
 
   it("does not show sections when configPath is empty", () => {
-    render(<SettingsPanel {...defaultProps} configPath="" />);
+    render(<ConnectionPanel {...defaultProps} configPath="" />);
     expect(screen.queryByText("Подключение")).not.toBeInTheDocument();
     expect(screen.queryByText("Безопасность")).not.toBeInTheDocument();
     expect(screen.queryByText("Туннель")).not.toBeInTheDocument();
@@ -148,7 +148,7 @@ describe("SettingsPanel", () => {
 
   it("shows placeholder when config loading fails (config stays null)", async () => {
     vi.mocked(invoke).mockRejectedValue("Failed to read config file");
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     // Config stays null after error, so the placeholder message is shown
     await waitFor(() => {
       expect(
@@ -167,7 +167,7 @@ describe("SettingsPanel", () => {
       return null;
     });
     render(
-      <SettingsPanel {...defaultProps} status={"connected" as VpnStatus} />
+      <ConnectionPanel {...defaultProps} status={"connected" as VpnStatus} />
     );
     await waitFor(() => {
       expect(screen.getByText("Подключение")).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe("SettingsPanel", () => {
 
   it("renders statusPanel when provided", async () => {
     render(
-      <SettingsPanel
+      <ConnectionPanel
         {...defaultProps}
         statusPanel={<div data-testid="status-panel">Status Here</div>}
       />
@@ -193,7 +193,7 @@ describe("SettingsPanel", () => {
 
   it("save button is rendered when VPN is connected", async () => {
     render(
-      <SettingsPanel {...defaultProps} status={"connected" as VpnStatus} />
+      <ConnectionPanel {...defaultProps} status={"connected" as VpnStatus} />
     );
     await waitFor(() => {
       expect(screen.getByText("Подключение")).toBeInTheDocument();
@@ -205,7 +205,7 @@ describe("SettingsPanel", () => {
 
   it("save button is rendered when VPN is connecting", async () => {
     render(
-      <SettingsPanel {...defaultProps} status={"connecting" as VpnStatus} />
+      <ConnectionPanel {...defaultProps} status={"connecting" as VpnStatus} />
     );
     await waitFor(() => {
       expect(screen.getByText("Подключение")).toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("SettingsPanel", () => {
   // ─── invoke called correctly ───
 
   it("calls read_client_config with correct path on mount", async () => {
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("read_client_config", {
         configPath: "/test/config.toml",
@@ -227,7 +227,7 @@ describe("SettingsPanel", () => {
   });
 
   it("does not call read_client_config when configPath is empty", () => {
-    render(<SettingsPanel {...defaultProps} configPath="" />);
+    render(<ConnectionPanel {...defaultProps} configPath="" />);
     expect(invoke).not.toHaveBeenCalledWith(
       "read_client_config",
       expect.anything()

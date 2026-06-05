@@ -199,19 +199,27 @@ describe("UsersSection (Phase 14 redesign)", () => {
     });
   });
 
-  it("D-03: FileText click uses stopPropagation — does NOT call setSelectedUser", () => {
+  // FIX (false green :213): the old test asserted `setSelectedUser` was never
+  // called — but that prop is NEVER wired into UsersSection (row selection was
+  // removed when Continue-as went away), so the assertion was tautologically
+  // green regardless of behavior. Replace with the REAL observable effect of a
+  // FileText click: the inline-icon activity-log entry that fires on open.
+  it("D-03: FileText click logs user.config.modal_opened source=inline_icon (real inline-icon effect)", async () => {
     vi.mocked(invoke).mockResolvedValue("tt://example.com/config?user=alice");
-    const setSelectedUser = vi.fn();
-    const state = makeState({ setSelectedUser });
+    const state = makeState();
     render(<UsersSection state={state} />);
 
     const showConfigBtns = screen.getAllByRole("button", {
       name: i18n.t("server.users.show_config_tooltip"),
     });
-    fireEvent.click(showConfigBtns[0]);
+    fireEvent.click(showConfigBtns[0]); // alice (first row)
 
-    // stopPropagation должна предотвратить клик по row
-    expect(setSelectedUser).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "USER",
+        "user.config.modal_opened user=alice source=inline_icon",
+      );
+    });
   });
 
   // ══════════════════════════════════════════════════════
@@ -361,14 +369,23 @@ describe("UsersSection (Phase 14 redesign)", () => {
   // D-16 inline-form tests moved to UserModal.test.tsx
   // ══════════════════════════════════════════════════════
 
-  it("D-2 (Phase 14.1 post-review): Bottom add button is the sole entry point to UserModal Add", () => {
+  // FIX (false green :371): the old test's only positive proof was the bottom
+  // button; its closing assertion negated `users-add-btn` — a testid that has
+  // NEVER existed in the component, so it was green by construction and proved
+  // nothing about "single entry point". Replace with a real uniqueness check:
+  // exactly ONE button carries the add_title accessible name, and it is the
+  // bottom button.
+  it("D-2 (Phase 14.1 post-review): exactly one «Add user» button exists and it is the bottom button", () => {
     const state = makeState();
     render(<UsersSection state={state} />);
+    const addBtns = screen.getAllByRole("button", {
+      name: i18n.t("server.users.add_title"),
+    });
+    // Single entry point — no duplicate header plus-icon.
+    expect(addBtns).toHaveLength(1);
     const addBtnBottom = screen.getByTestId("users-add-btn-bottom");
-    expect(addBtnBottom).toBeInTheDocument();
+    expect(addBtns[0]).toBe(addBtnBottom);
     expect(addBtnBottom).not.toBeDisabled();
-    // No header plus-icon — removed per post-review feedback
-    expect(screen.queryByTestId("users-add-btn")).not.toBeInTheDocument();
   });
 
   it("D-3 (Phase 14.1): Gear icon per row opens UserModal in Edit mode", () => {
@@ -578,5 +595,131 @@ describe("UsersSection (Phase 14 redesign)", () => {
     for (const btn of buttons) {
       expect(btn).not.toBeDisabled();
     }
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: display_name alias rendering (users-advanced.toml → row label)
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: row shows display_name alias as the primary label with username muted alongside", async () => {
+    // refreshDisplayNames runs on mount and calls server_list_user_advanced.
+    // Returning a display_name for alice means the row renders "Alice Cooper"
+    // as the label, with the raw username "alice" shown muted beside it.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "server_list_user_advanced") {
+        return [
+          { username: "alice", display_name: "Alice Cooper" },
+          { username: "bob", display_name: "" }, // empty → falls back to username
+        ];
+      }
+      return undefined;
+    });
+    const state = makeState();
+    render(<UsersSection state={state} />);
+
+    const items = screen.getAllByRole("listitem");
+    const aliceRow = items.find((el) => el.textContent?.includes("alice"))!;
+    await waitFor(() => {
+      expect(within(aliceRow).getByText("Alice Cooper")).toBeInTheDocument();
+    });
+    // Raw username still present (muted alias) so the operator can correlate.
+    expect(aliceRow).toHaveTextContent("alice");
+
+    // bob has an empty display_name → only the username renders, no alias span.
+    const bobRow = items.find((el) => el.textContent?.includes("bob"))!;
+    expect(bobRow).toHaveTextContent("bob");
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: empty-state and the bottom add-button render together
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: empty-state and the bottom add-button are shown together (add path reachable with zero users)", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: [],
+      },
+    });
+    render(<UsersSection state={state} />);
+    // EmptyState heading present...
+    expect(
+      screen.getByText(i18n.t("server.users.empty_heading")),
+    ).toBeInTheDocument();
+    // ...AND the bottom add button is still there so the user can add the
+    // first user (it lives below the Divider, outside the list/empty branch).
+    const addBtn = screen.getByTestId("users-add-btn-bottom");
+    expect(addBtn).toBeInTheDocument();
+    expect(addBtn).not.toBeDisabled();
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: auto-open UserConfigModal after a successful add (preloadedDeeplink)
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: after UserModal reports a successful add, UserConfigModal auto-opens for the new user", async () => {
+    // Drive the real handleUserAdded callback by submitting through UserModal
+    // (opened via the bottom add button). server_add_user_advanced returns the
+    // generated deeplink; UsersSection then auto-opens UserConfigModal with the
+    // preloaded deeplink and logs source=add.
+    vi.mocked(invoke).mockResolvedValue("tt://preloaded-after-add");
+    const state = makeState();
+    render(<UsersSection state={state} />);
+
+    fireEvent.click(screen.getByTestId("users-add-btn-bottom"));
+    // UserModal Add form pre-fills a username + password; submit straight away.
+    const submit = await screen.findByTestId("user-modal-submit");
+    fireEvent.click(submit);
+
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "USER",
+        expect.stringContaining("user.config.modal_opened"),
+      );
+    });
+    // The auto-open log carries source=add (distinct from inline_icon).
+    const autoOpenLogged = activityLogSpy.mock.calls.some((call: unknown[]) => {
+      const msg = call[1];
+      return (
+        typeof msg === "string" &&
+        msg.includes("user.config.modal_opened") &&
+        msg.includes("source=add")
+      );
+    });
+    expect(autoOpenLogged).toBe(true);
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: tab-activation refresh (M-04 / M-11)
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: re-activating the «users» tab triggers a silent refresh + reconcile (server_reconcile_users_advanced)", async () => {
+    vi.mocked(invoke).mockResolvedValue(0);
+    const loadServerInfo = vi.fn().mockResolvedValue(undefined);
+    const state = makeState({ loadServerInfo } as Partial<ServerState>);
+    // First mount with activeServerTab="users" is the bootstrap render — the
+    // effect skips it (firstTabActivationRef). Re-activation (off→on) fires it.
+    const { rerender } = render(
+      <UsersSection state={state} activeServerTab="users" />,
+    );
+    rerender(<UsersSection state={state} activeServerTab="service" />);
+    rerender(<UsersSection state={state} activeServerTab="users" />);
+
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "USER",
+        "users.tab.activated refresh=triggered",
+      );
+    });
+    // Silent reload (silent=true) + best-effort reconcile invoke fire.
+    expect(loadServerInfo).toHaveBeenCalledWith(true);
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_reconcile_users_advanced",
+        expect.anything(),
+      );
+    });
   });
 });

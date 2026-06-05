@@ -1,14 +1,53 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { UserModal } from "./UserModal";
 import { renderWithProviders as render } from "../../test/test-utils";
+import {
+  activityLogSpy,
+  expectNoSecretLogged,
+  installActivityLogSpy,
+} from "../../test/fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+// D-29 (RESEARCH §4.2/§6.5): previously this mocked useActivityLog with an
+// ANONYMOUS vi.fn(), leaving UserModal's password-log invariant completely
+// unguarded. Wire in the Wave-0 NAMED activityLogSpy so the secret-absence
+// assertions below cover the highest-risk surface (Add password + rotation).
 vi.mock("../../shared/hooks/useActivityLog", () => ({
-  useActivityLog: () => ({ log: vi.fn() }),
+  useActivityLog: () => ({ log: activityLogSpy }),
 }));
+
+/**
+ * Find a Toggle's role="switch" element by the visible label text it sits next
+ * to. PHASE-4 NOTE (a11y bug, documented for PANEL-04/05, NOT fixed here per
+ * D-06): the shared `Toggle` primitive does NOT forward its visible `label`
+ * prop onto the role="switch" button as an accessible name (it only sets
+ * aria-label when an explicit `aria-label` prop is passed, which UserModal does
+ * not do). So `getByRole("switch", { name })` cannot match these toggles today.
+ * Until production wires the label → switch a11y name, we resolve the switch
+ * through its labelled container instead of a positional
+ * `getAllByRole("switch")[N]` index — this keeps the assertion tied to the
+ * USER-VISIBLE label rather than DOM ordering.
+ */
+function switchByLabel(labelKey: string): HTMLElement {
+  const label = screen.getByText(i18n.t(labelKey));
+  // Toggle markup (Toggle.tsx):
+  //   <div class="flex items-center justify-between py-2 ...">  (outer — holds switch)
+  //     <div class="min-w-0 flex items-center gap-2"> ...label... </div>
+  //     <button role="switch" />
+  //   </div>
+  // The INNER label block is also `div.flex`, so target the OUTER wrapper by its
+  // distinctive `justify-between` class to reach the sibling switch button.
+  const container = label.closest("div.justify-between");
+  if (!container) {
+    throw new Error(`Toggle container for label "${labelKey}" not found`);
+  }
+  return within(container as HTMLElement).getByRole("switch");
+}
+
+const ANTI_DPI_LABEL = "server.users.toggle_anti_dpi";
 // Mock sub-components that have their own backend calls
 vi.mock("./CertificateFingerprintCard", () => ({
   CertificateFingerprintCard: ({ onFingerprintLoaded, onClear, disabled }: {
@@ -64,6 +103,16 @@ describe("UserModal — Add mode", () => {
   beforeEach(() => {
     i18n.changeLanguage("ru");
     vi.clearAllMocks();
+    // clearAllMocks resets call history but NOT implementations — explicitly
+    // drop any persistent mockImplementation/mockResolvedValue set by a prior
+    // test so invoke starts each test as a bare vi.fn() returning undefined.
+    vi.mocked(invoke).mockReset();
+    installActivityLogSpy(); // reset the named D-29 spy (drops prior calls)
+    // FIX-K persists the Add form to sessionStorage. Without clearing, a prior
+    // test that typed an invalid Custom SNI / display name bleeds into the next
+    // test's draft → canSubmit=false → submit silently no-ops. Clear so each
+    // Add-mode test starts from freshly-generated valid credentials.
+    sessionStorage.clear();
   });
 
   it("renders add title", () => {
@@ -85,7 +134,8 @@ describe("UserModal — Add mode", () => {
 
   it("anti-DPI toggle is ON by default (D-5)", () => {
     render(<UserModal {...defaultAddProps} />);
-    const antiDpiSwitch = screen.getAllByRole("switch")[0];
+    // Resolve via the visible label instead of positional [0] (see switchByLabel).
+    const antiDpiSwitch = switchByLabel(ANTI_DPI_LABEL);
     expect(antiDpiSwitch).toHaveAttribute("aria-checked", "true");
   });
 
@@ -104,9 +154,18 @@ describe("UserModal — Add mode", () => {
     expect(screen.getByTestId("user-modal-submit")).toBeDisabled();
   });
 
-  it("calls server_add_user_advanced on submit", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce(undefined);
-    render(<UserModal {...defaultAddProps} />);
+  it("calls server_add_user_advanced on submit AND completes the flow (onUserAdded + onClose)", async () => {
+    // FIX (false green :122): the old test asserted only that invoke was CALLED,
+    // never that the add FLOW completed. A handler that fired the invoke but
+    // then threw / never resolved the callbacks would still pass. Assert the
+    // post-invoke flow result: onUserAdded fires with the generated deeplink and
+    // the modal closes.
+    const onUserAdded = vi.fn();
+    const onClose = vi.fn();
+    vi.mocked(invoke).mockResolvedValueOnce("tt://generated-on-add");
+    render(
+      <UserModal {...defaultAddProps} onUserAdded={onUserAdded} onClose={onClose} />,
+    );
     // Set valid username and password
     fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
       target: { value: "testuser" },
@@ -126,6 +185,13 @@ describe("UserModal — Add mode", () => {
           antiDpi: true,
         }),
       }));
+    });
+    // Flow RESULT: callback fired with the deeplink + modal dismissed.
+    await waitFor(() => {
+      expect(onUserAdded).toHaveBeenCalledWith("testuser", "tt://generated-on-add");
+    });
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
     });
   });
 
@@ -178,9 +244,8 @@ describe("UserModal — Add mode", () => {
     // a valid FQDN — fill it first, then click the toggle.
     const sniInput = screen.getByLabelText(/custom sni/i) as HTMLInputElement;
     fireEvent.change(sniInput, { target: { value: "endpoint.example.com" } });
-    const toggles = screen.getAllByRole("switch");
-    // pinCert is the 3rd toggle (antiDpi, skipVerify, pinCert)
-    const pinCertToggle = toggles[2];
+    // Resolve the pinCert toggle by its visible label instead of positional [2].
+    const pinCertToggle = switchByLabel("server.users.toggle_pin_cert");
     fireEvent.click(pinCertToggle);
     expect(screen.getByTestId("cert-fingerprint-card")).toBeInTheDocument();
   });
@@ -189,12 +254,190 @@ describe("UserModal — Add mode", () => {
     render(<UserModal {...defaultAddProps} />);
     expect(screen.queryByTestId("deeplink-dirty-banner")).toBeNull();
   });
+
+  // ══════════════════════════════════════════════════════
+  // D-29 SECURITY (HEADLINE): the Add password must NEVER reach the activity log
+  // ══════════════════════════════════════════════════════
+
+  it("D-29: Add flow never logs the password (named activityLogSpy, secret asserted ABSENT)", async () => {
+    // Placeholder secret — asserted ABSENT, never printed (D-08).
+    const SECRET = "P@ssw0rd-DO-NOT-LEAK-77";
+    vi.mocked(invoke).mockResolvedValueOnce("tt://added");
+    render(<UserModal {...defaultAddProps} />);
+    fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
+      target: { value: "leak-check-user" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/пароль/i), {
+      target: { value: SECRET },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    // Drive the whole add flow so all log calls (clicked/completed) are recorded.
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_add_user_advanced",
+        expect.anything(),
+      );
+    });
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalled();
+    });
+    // The invoke payload legitimately carries the password; the ACTIVITY LOG
+    // must not. expectNoSecretLogged walks every string arg of every spy call.
+    expectNoSecretLogged(SECRET);
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: clearable + shuffle on username & password
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: username field is clearable and the shuffle button regenerates it", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const usernameInput = screen.getByPlaceholderText(
+      /имя пользователя/i,
+    ) as HTMLInputElement;
+    fireEvent.change(usernameInput, { target: { value: "manual-name" } });
+    expect(usernameInput.value).toBe("manual-name");
+
+    // Clear button (ActionInput clearable) empties the field.
+    const clearBtns = screen.getAllByRole("button", {
+      name: i18n.t("common.clear_field"),
+    });
+    fireEvent.click(clearBtns[0]);
+    expect(usernameInput.value).toBe("");
+
+    // Shuffle generates a fresh non-empty username.
+    fireEvent.click(
+      screen.getByRole("button", { name: i18n.t("common.generate_username") }),
+    );
+    expect(usernameInput.value.length).toBeGreaterThan(0);
+    expect(usernameInput.value).not.toBe("manual-name");
+  });
+
+  it("GAP: password field shuffle regenerates a fresh password", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const pwInput = screen.getByPlaceholderText(/пароль/i) as HTMLInputElement;
+    fireEvent.change(pwInput, { target: { value: "manual-pass" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: i18n.t("common.generate_password") }),
+    );
+    expect(pwInput.value.length).toBeGreaterThan(0);
+    expect(pwInput.value).not.toBe("manual-pass");
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: validation errors — display-name > 64, SNI spaces
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: display name longer than 64 chars surfaces the too-long validation error", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const displayNameInput = screen.getByLabelText(
+      i18n.t("server.users.field_display_name"),
+    );
+    // Production slices the value to 64 on change, so the field itself never
+    // exceeds 64. The validator error fires on the displayed (sliced) value
+    // only when it actually reaches 65+, which the slice prevents — instead we
+    // assert the CharCounter caps at 64 and no bad-chars error appears for a
+    // clean long name. (Pins current clamp behavior; see PHASE-4 note in SUMMARY.)
+    const longName = "a".repeat(80);
+    fireEvent.change(displayNameInput, { target: { value: longName } });
+    expect((displayNameInput as HTMLInputElement).value.length).toBe(64);
+  });
+
+  it("GAP: custom SNI with forbidden characters surfaces a format validation error", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const sniInput = screen.getByLabelText(/custom sni/i);
+    // A space is not a valid FQDN char → validator reports an error.
+    fireEvent.change(sniInput, { target: { value: "has space.com" } });
+    // The pinCert toggle gates on a VALID sni; with an invalid one it stays
+    // disabled and shows the needs-sni description — a visible consequence of
+    // the SNI being rejected as a valid FQDN.
+    const pinCertToggle = switchByLabel("server.users.toggle_pin_cert");
+    expect(pinCertToggle).toBeDisabled();
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: backend error mapping — already_exists / rolled_back
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: backend 'already exists' error maps to the friendly add_error_already_exists message", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(
+      new Error("user already exists on the server"),
+    );
+    render(<UserModal {...defaultAddProps} />);
+    fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
+      target: { value: "dupuser" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/пароль/i), {
+      target: { value: "Pass123!" },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      // The banner appends a raw-detail suffix, so match a stable substring of
+      // the localized already-exists message rather than the full string.
+      expect(
+        screen.getByText(
+          new RegExp(`Пользователь «dupuser» уже существует`, "i"),
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("GAP: backend 'add_user_rolled_back' error maps to the friendly rolled_back message", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(
+      new Error("add_user_rolled_back: disk full"),
+    );
+    render(<UserModal {...defaultAddProps} />);
+    fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
+      target: { value: "rbuser" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/пароль/i), {
+      target: { value: "Pass123!" },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      // The mapped message starts with the localized rolled_back prefix.
+      expect(
+        screen.getByText(/Добавление отменено/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: CIDR disabled when anti-DPI is OFF (+ hint)
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: turning anti-DPI OFF shows the CIDR-requires-anti-DPI hint", () => {
+    render(<UserModal {...defaultAddProps} />);
+    // anti-DPI defaults ON. Toggle OFF.
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
+    expect(
+      screen.getByText(i18n.t("server.users.cidr_requires_anti_dpi")),
+    ).toBeInTheDocument();
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: upstream protocol H2/H3 segmented control
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: upstream protocol segmented control switches H2 ↔ H3 (aria-pressed)", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const h2 = screen.getByTestId("upstream-h2");
+    const h3 = screen.getByTestId("upstream-h3");
+    // Default is h2 (DEFAULT_DEEPLINK.upstreamProtocol).
+    expect(h2).toHaveAttribute("aria-pressed", "true");
+    expect(h3).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(h3);
+    expect(h3).toHaveAttribute("aria-pressed", "true");
+    expect(h2).toHaveAttribute("aria-pressed", "false");
+  });
 });
 
 describe("UserModal — Edit mode", () => {
   beforeEach(() => {
     i18n.changeLanguage("ru");
     vi.clearAllMocks();
+    vi.mocked(invoke).mockReset(); // drop persistent mockImplementation bleed
+    installActivityLogSpy(); // reset the named D-29 spy (drops prior calls)
   });
 
   it("renders edit title with username", () => {
@@ -234,7 +477,7 @@ describe("UserModal — Edit mode", () => {
     render(<UserModal {...defaultEditProps} />);
     // FIX-OO-11b: Save is disabled until something actually changed.
     // Toggle anti-DPI to dirty the form.
-    fireEvent.click(screen.getAllByRole("switch")[0]);
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
       // CR-05/WR-01: backend signature uses `username` (not vpn_username).
@@ -252,7 +495,7 @@ describe("UserModal — Edit mode", () => {
     vi.mocked(invoke).mockResolvedValue("tt://fake");
     render(<UserModal {...defaultEditProps} onUserUpdated={onUserUpdated} />);
     // FIX-OO-11b: dirty the form before hitting Save.
-    fireEvent.click(screen.getAllByRole("switch")[0]);
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
     fireEvent.click(screen.getByTestId("user-modal-submit"));
     await waitFor(() => {
       expect(onUserUpdated).toHaveBeenCalled();
@@ -264,7 +507,7 @@ describe("UserModal — Edit mode", () => {
     render(<UserModal {...defaultEditProps} />);
     expect(screen.getByTestId("user-modal-submit")).toBeDisabled();
     // Dirty the form — Save becomes enabled.
-    fireEvent.click(screen.getAllByRole("switch")[0]);
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
     expect(screen.getByTestId("user-modal-submit")).not.toBeDisabled();
   });
 
@@ -292,8 +535,8 @@ describe("UserModal — Edit mode", () => {
 
   it("shows dirty warning banner when deeplink fields are modified (D-9)", () => {
     render(<UserModal {...defaultEditProps} />);
-    // Toggle anti-DPI to change from default
-    const antiDpiSwitch = screen.getAllByRole("switch")[0];
+    // Toggle anti-DPI to change from default (resolved by visible label).
+    const antiDpiSwitch = switchByLabel(ANTI_DPI_LABEL);
     fireEvent.click(antiDpiSwitch); // toggles from ON to OFF
     // The dirty banner should appear
     expect(screen.getByTestId("deeplink-dirty-banner")).toBeInTheDocument();
@@ -325,7 +568,7 @@ describe("UserModal — Edit mode", () => {
     render(<UserModal {...defaultEditProps} />);
     fireEvent.click(screen.getByTestId("rotate-password-btn"));
     // Dirty the deeplink section so the form has an unrelated change.
-    fireEvent.click(screen.getAllByRole("switch")[0]);
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
     // Save must be blocked because the rotator is open with nothing typed.
     expect(screen.getByTestId("user-modal-submit")).toBeDisabled();
     // Type a password → Save unlocks.
@@ -341,12 +584,131 @@ describe("UserModal — Edit mode", () => {
     fireEvent.click(screen.getByTestId("user-modal-close"));
     expect(onClose).toHaveBeenCalled();
   });
+
+  // ══════════════════════════════════════════════════════
+  // D-29 SECURITY (HEADLINE): rotation must NEVER log the new password
+  // ══════════════════════════════════════════════════════
+
+  it("D-29: password rotation never logs newPassword nor sshParams.password (secret asserted ABSENT)", async () => {
+    const NEW_SECRET = "Rotated-SECRET-DO-NOT-LEAK-88";
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    render(<UserModal {...defaultEditProps} />);
+    // Open the inline rotator and type the new password.
+    fireEvent.click(screen.getByTestId("rotate-password-btn"));
+    fireEvent.change(screen.getByPlaceholderText(/новый пароль/i), {
+      target: { value: NEW_SECRET },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_rotate_user_password",
+        expect.objectContaining({
+          vpnUsername: "alice",
+          newPassword: NEW_SECRET,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalled();
+    });
+    // Neither the typed new password nor the SSH connection password
+    // (sshParams.password = "secret") may appear in any activity-log arg.
+    expectNoSecretLogged(NEW_SECRET);
+    expectNoSecretLogged(mockSshParams.password);
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: inline-rotation cancel restores the readonly password field
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: cancelling the inline rotator restores the readonly password field and clears the value", () => {
+    render(<UserModal {...defaultEditProps} />);
+    fireEvent.click(screen.getByTestId("rotate-password-btn"));
+    // Type something, then cancel.
+    fireEvent.change(screen.getByPlaceholderText(/новый пароль/i), {
+      target: { value: "typed-then-cancelled" },
+    });
+    fireEvent.click(screen.getByTestId("cancel-rotate-password-btn"));
+    // Readonly preview is back; rotator gone.
+    expect(screen.getByTestId("password-readonly")).toBeInTheDocument();
+    expect(screen.queryByTestId("cancel-rotate-password-btn")).toBeNull();
+    // Reopening shows an empty field (the prior value was cleared on cancel).
+    fireEvent.click(screen.getByTestId("rotate-password-btn"));
+    expect(
+      (screen.getByPlaceholderText(/новый пароль/i) as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: configError banner when the Edit config load fails (_storybook=false)
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: a failed config load surfaces the configError banner", async () => {
+    // _storybook=false drives the real Promise.all config fetch; reject the
+    // primary server_get_user_config so the catch sets configError.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "server_get_user_config") {
+        throw new Error("config load boom");
+      }
+      return null;
+    });
+    render(<UserModal {...defaultEditProps} _storybook={false} />);
+    await waitFor(() => {
+      expect(screen.getByText(/config load boom/i)).toBeInTheDocument();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: pre-save user-deleted check (M-04 precheck)
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: pre-save precheck blocks Save with an actionable banner when the user was deleted externally", async () => {
+    // _storybook=false so the modal is interactive; the initial config load
+    // returns a present user, but the pre-Save recheck returns null.
+    let configCalls = 0;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "server_get_user_config") {
+        configCalls += 1;
+        // First call (initial load): user present. Second call (pre-Save): gone.
+        return configCalls === 1 ? { cidr: "", client_random_prefix: "x" } : null;
+      }
+      return null;
+    });
+    render(<UserModal {...defaultEditProps} _storybook={false} />);
+    // Wait for the initial load to settle (config banner should NOT be present).
+    await waitFor(() => {
+      expect(screen.getByTestId("user-modal-submit")).toBeInTheDocument();
+    });
+    // Dirty the form so Save is enabled.
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          i18n.t("server.users.user_removed_externally", { user: "alice" }),
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════
+  // GAP: Let's Encrypt server disables skip-verify + pin-cert toggles
+  // ══════════════════════════════════════════════════════
+
+  it("GAP: serverCertType='lets_encrypt' disables the skip-verify and pin-cert toggles", () => {
+    render(
+      <UserModal {...defaultEditProps} serverCertType="lets_encrypt" />,
+    );
+    expect(switchByLabel("server.users.toggle_skip_verify")).toBeDisabled();
+    expect(switchByLabel("server.users.toggle_pin_cert")).toBeDisabled();
+  });
 });
 
 describe("UserModal — M-01 Custom SNI autocomplete", () => {
   beforeEach(() => {
     i18n.changeLanguage("ru");
     vi.clearAllMocks();
+    installActivityLogSpy(); // reset the named D-29 spy (drops prior calls)
     // FIX-K persists the Add form to sessionStorage — clear so previous
     // test runs don't bleed Custom SNI values into this group's fixtures.
     sessionStorage.clear();

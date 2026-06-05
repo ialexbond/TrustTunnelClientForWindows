@@ -38,13 +38,13 @@ vi.mock("./components/ControlPanelPage", () => ({
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let settingsPanelProps: any = {};
-vi.mock("./components/SettingsPanel", () => ({
+let connectionPanelProps: any = {};
+vi.mock("./components/ConnectionPanel", () => ({
   __esModule: true,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
-    settingsPanelProps = props;
-    return <div data-testid="settings-panel">SettingsPanel</div>;
+    connectionPanelProps = props;
+    return <div data-testid="connection-panel">ConnectionPanel</div>;
   },
 }));
 
@@ -215,7 +215,69 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
-    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-panel")).toBeInTheDocument();
+  });
+
+  // ─── In-window log overlay (Plan 02-16) ───
+  // The title-bar Terminal button toggles an IN-WINDOW LogPanel overlay (the
+  // safe replacement for the old separate-webview log window that froze the
+  // app). No second window is created — the LogPanel mock renders inline.
+
+  it("does not render the log overlay until the title-bar button is clicked", async () => {
+    await act(async () => {
+      render(<App />);
+    });
+    // The toggle button is present (aria-label from logs.toggle_aria) but the
+    // LogPanel is not mounted yet.
+    expect(
+      screen.getByRole("button", { name: i18n.t("logs.toggle_aria") }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("log-panel")).not.toBeInTheDocument();
+  });
+
+  it("toggles the in-window LogPanel overlay open and closed via the title-bar button", async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    const toggle = screen.getByRole("button", {
+      name: i18n.t("logs.toggle_aria"),
+    });
+
+    // Open
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.getByTestId("log-panel")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    // Close via the same button
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.queryByTestId("log-panel")).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("closes the log overlay via its close (X) button", async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("logs.toggle_aria") }),
+      );
+    });
+    expect(screen.getByTestId("log-panel")).toBeInTheDocument();
+
+    // The overlay header has a close button labelled logs.close_aria.
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("logs.close_aria") }),
+      );
+    });
+    expect(screen.queryByTestId("log-panel")).not.toBeInTheDocument();
   });
 
   // ─── Theme management ───
@@ -315,11 +377,13 @@ describe("App", () => {
     expect(listenCallbacks["vpn-log"]).toBeDefined();
   });
 
-  it("calls check_vpn_status on mount", async () => {
+  it("calls check_vpn_status_full on mount", async () => {
+    // Phase 1 (Codex MEDIUM): the mount snapshot now uses check_vpn_status_full so
+    // a late-mounting window recovers BOTH status and error, not just status.
     await act(async () => {
       render(<App />);
     });
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("check_vpn_status");
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("check_vpn_status_full");
   });
 
   // ─── VPN connect/disconnect flow ───
@@ -393,7 +457,7 @@ describe("App", () => {
     expect(statusPanelProps.error).toBe("Connection failed");
   });
 
-  it("vpn-status recovering → disconnected is suppressed", async () => {
+  it("vpn-status recovering → disconnected resolves to Disconnected (terminal NoConfig — F0)", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "check_vpn_status") return "disconnected";
@@ -407,19 +471,50 @@ describe("App", () => {
       render(<App />);
     });
 
-    // Simulate internet loss → recovering
+    // 02-20: the AUTHORITATIVE status now comes from vpn-status (the internet-status
+    // handler no longer sets status). The backend drives «Восстановление» on a local-net
+    // loss via a vpn-status "recovering" event.
     await act(async () => {
-      emitEvent("internet-status", { online: false, action: "disconnect" });
+      emitEvent("vpn-status", { status: "recovering" });
     });
-
-    // Status should be "recovering"
     expect(statusPanelProps.status).toBe("recovering");
 
-    // Now vpn-status fires "disconnected" — should be suppressed
+    // F0 (Codex M1): from «Восстановление» a "disconnected" is TERMINAL — the network
+    // came back but there is no saved config to reconnect to (WR-03), or a give-up
+    // cleanup resolved to Disconnected. It must NOT be suppressed; the old no-dwell guard
+    // hid it and stuck the UI on red «Восстановление» forever.
     await act(async () => {
       emitEvent("vpn-status", { status: "disconnected" });
     });
-    expect(statusPanelProps.status).toBe("recovering");
+    expect(statusPanelProps.status).toBe("disconnected");
+  });
+
+  it("vpn-status reconnecting → disconnected is suppressed (manual save+reconnect flash)", async () => {
+    localStorage.setItem("tt_config_path", "/config.json");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "vpn_disconnect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // A manual «Сохранить и переподключить» sets the status to "reconnecting" up-front.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "reconnecting" });
+    });
+    expect(statusPanelProps.status).toBe("reconnecting");
+
+    // The teardown emits a transient "disconnected" — the no-dwell guard keeps the
+    // «Переподключение» label continuous (no «Отключено» flash) until the re-connect.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+    });
+    expect(statusPanelProps.status).toBe("reconnecting");
   });
 
   it("handleConnect invokes vpn_connect with config", async () => {
@@ -449,19 +544,13 @@ describe("App", () => {
     });
   });
 
-  it("handleConnect sets error when configPath is empty", async () => {
-    // No config path set
-    await act(async () => {
-      render(<App />);
-    });
-
-    // Navigate to a page that shows StatusPanel
-    // Actually StatusPanel isn't rendered when no config, so let's set config then clear it
-    // Use dashboardPanelProps.onConnect instead
-    localStorage.setItem("tt_config_path", "");
-    // The statusPanelProps.onConnect won't be available since no config
-    // Let's test via dashboardPanelProps instead — dashboard always renders
-  });
+  // IN-04: removed the "handleConnect sets error when configPath is empty"
+  // placeholder — it contained no `expect`, so it always passed regardless of
+  // behaviour and gave false coverage confidence for the empty-config-path
+  // branch. The empty-path branch is not reachable through any prop exposed to
+  // this test, so rather than assert nothing we drop the test; if that branch
+  // becomes testable (e.g. via an injectable prop) it should be re-added with a
+  // real assertion.
 
   it("handleConnect fails with error when invoke rejects", async () => {
     localStorage.setItem("tt_config_path", "/my/config.json");
@@ -510,15 +599,26 @@ describe("App", () => {
     expect(statusPanelProps.status).toBe("disconnecting");
   });
 
-  // ─── Internet status / auto-reconnect ───
+  // ─── Internet status (DISPLAY-ONLY — reconnect is driven in Rust) ───
+  //
+  // Plan 02-04 deleted the frontend-driven reconnect: the window-independent Rust
+  // supervisor (connectivity.rs) is now the SOLE owner of auto-reconnect, and the
+  // internet-status listener in useVpnEvents only DISPLAYS the recovering label /
+  // give-up message — it never invokes vpn_disconnect or vpn_connect. These tests
+  // assert that current reality. Plan 02-12 removed the previous three tests that
+  // still asserted the deleted `action === "reconnect"` reconnect (they expected
+  // the frontend to invoke vpn_connect / vpn_disconnect on an internet-status
+  // event, behaviour that no longer exists) and replaced them with the display-only
+  // contract below.
 
-  it("internet-status disconnect sets recovering state", async () => {
+  it("internet-status disconnect sets the recovering BANNER but NOT the status, and invokes no VPN commands (02-20: vpn-status owns status)", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
+      if (cmd === "vpn_connect") return null;
       return null;
     });
 
@@ -530,11 +630,19 @@ describe("App", () => {
       emitEvent("internet-status", { online: false, action: "disconnect" });
     });
 
-    expect(statusPanelProps.status).toBe("recovering");
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_disconnect");
+    // 02-20 conflict fix: the handler shows the descriptive banner …
+    expect(statusPanelProps.error).toBe(i18n.t("errors.internet_lost_disconnecting"));
+    // … but does NOT set the status — the authoritative vpn-status event owns it now
+    // (forcing recovering here would clobber a backend tunnel-lost `reconnecting`).
+    // The status stays at the pre-event value (initial "disconnected").
+    expect(statusPanelProps.status).toBe("disconnected");
+    // … and it must NOT drive recovery from the frontend — the Rust supervisor owns
+    // that now, and a frontend disconnect/connect would fight it (Plan 02-04).
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
   });
 
-  it("internet-status reconnect triggers vpn_connect", async () => {
+  it("internet-status reconnect action is IGNORED by the frontend (no vpn_connect) — Rust owns reconnect", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_log_level", "info");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -554,35 +662,15 @@ describe("App", () => {
       emitEvent("internet-status", { online: true, action: "reconnect" });
     });
 
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
-      configPath: "/config.json",
-      logLevel: "info",
-    });
+    // The `action === "reconnect"` branch was DELETED in Plan 02-04 — the frontend
+    // must NOT invoke vpn_connect on this event anymore (no double-reconnect window).
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
   });
 
-  it("internet-status reconnect failure sets error status", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      if (cmd === "vpn_connect") throw new Error("Reconnect failed");
-      if (cmd === "vpn_disconnect") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("internet-status", { online: true, action: "reconnect" });
-    });
-
-    expect(statusPanelProps.status).toBe("error");
-  });
-
-  it("internet-status give_up sets disconnected", async () => {
+  it("internet-status give_up shows the recovery-timeout banner but no longer forces the status (02-20)", async () => {
+    // 02-20: the give_up branch keeps surfacing the friendly message, but no longer
+    // sets the status — the terminal STATUS (error) arrives via the vpn-status event
+    // carrying the `recovery-timeout` reason code (the single status owner, D-01).
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "check_vpn_status") return "disconnected";
@@ -600,6 +688,9 @@ describe("App", () => {
       emitEvent("internet-status", { online: false, action: "give_up" });
     });
 
+    // The friendly message is surfaced …
+    expect(statusPanelProps.error).toBe(i18n.t("errors.network_recovery_timeout"));
+    // … but the status is untouched by this handler (stays at the initial value).
     expect(statusPanelProps.status).toBe("disconnected");
   });
 
@@ -744,7 +835,7 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "connected";
+      if (cmd === "check_vpn_status_full") return { status: "connected", error: null };
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -762,7 +853,7 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "connecting";
+      if (cmd === "check_vpn_status_full") return { status: "connecting", error: null };
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -773,6 +864,30 @@ describe("App", () => {
     });
 
     expect(statusPanelProps.status).toBe("connecting");
+    expect(statusPanelProps.connectedSince).toBeNull();
+  });
+
+  it("syncs to error status AND restores the reason on late mount", async () => {
+    // Phase 1 (Codex MEDIUM): a window that mounts AFTER an error event must
+    // recover BOTH the status and the backend's (sanitized) reason via the
+    // check_vpn_status_full snapshot — not render "error" with no detail.
+    localStorage.setItem("tt_config_path", "/config.json");
+
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status_full") {
+        return { status: "error", error: "Configuration parse error. Check your config file." };
+      }
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(statusPanelProps.status).toBe("error");
+    expect(statusPanelProps.error).toBe("Configuration parse error. Check your config file.");
     expect(statusPanelProps.connectedSince).toBeNull();
   });
 
@@ -840,7 +955,7 @@ describe("App", () => {
       render(<App />);
     });
 
-    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-panel")).toBeInTheDocument();
   });
 
   it("persists active page to localStorage on change", async () => {
@@ -966,7 +1081,49 @@ describe("App", () => {
 
   // vpn-log tests removed — LogPanel no longer rendered in App.tsx (D-05: logs folded into connection tab)
 
-  it("vpn-log detects Authorization Required error", async () => {
+  // STATUS-03 / D-07: the frontend no longer infers status from vpn-log text.
+  // A fatal log line still enriches the user-facing error MESSAGE (setError),
+  // but the error STATUS now arrives via the authoritative backend "vpn-status"
+  // event (emitted by sidecar.rs for these same markers in plan 01-01). These
+  // tests assert the new contract: message yes, status-from-log no.
+  const FATAL_LOG_MARKERS: Array<[string, string]> = [
+    ["Authorization Required", "Authorization Required"],
+    ["WintunCreateAdapter", "WintunCreateAdapter cannot find module"],
+    ["Failed to create listener", "Failed to create listener on port 1080"],
+    ["Connection refused", "Connection refused by remote host"],
+    ["adapter setup timeout", "Failed to setup adapter: Timed out"],
+  ];
+
+  it.each(FATAL_LOG_MARKERS)(
+    "vpn-log %s sets a friendly error message but does NOT set status (D-07)",
+    async (_name, line) => {
+      localStorage.setItem("tt_config_path", "/config.json");
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      await act(async () => {
+        emitEvent("vpn-log", { message: line, source: "stderr" });
+      });
+
+      // Friendly message still surfaces …
+      expect(statusPanelProps.error).toBeTruthy();
+      // … but status is NOT inferred from the log line — it stays disconnected
+      // (snapshot-on-mount value) until a real vpn-status event changes it.
+      expect(statusPanelProps.status).not.toBe("error");
+      expect(statusPanelProps.status).toBe("disconnected");
+    },
+  );
+
+  it("error STATUS now arrives only via the backend vpn-status event", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -981,95 +1138,11 @@ describe("App", () => {
     });
 
     await act(async () => {
-      emitEvent("vpn-log", { message: "Authorization Required", source: "stderr" });
+      emitEvent("vpn-status", { status: "error", error: "Authorization failed" });
     });
 
     expect(statusPanelProps.status).toBe("error");
-    expect(statusPanelProps.error).toBeTruthy();
-  });
-
-  it("vpn-log detects WintunCreateAdapter error", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "WintunCreateAdapter cannot find module", source: "stderr" });
-    });
-
-    expect(statusPanelProps.status).toBe("error");
-  });
-
-  it("vpn-log detects Failed to create listener error", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "Failed to create listener on port 1080", source: "stderr" });
-    });
-
-    expect(statusPanelProps.status).toBe("error");
-  });
-
-  it("vpn-log detects Connection refused error", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "Connection refused by remote host", source: "stderr" });
-    });
-
-    expect(statusPanelProps.status).toBe("error");
-  });
-
-  it("vpn-log adapter timeout sets error status", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    await act(async () => {
-      emitEvent("vpn-log", { message: "Failed to setup adapter: Timed out", source: "stderr" });
-    });
-
-    expect(statusPanelProps.status).toBe("error");
+    expect(statusPanelProps.error).toBe("Authorization failed");
   });
 
   // vpn-log empty messages test removed — LogPanel no longer rendered in App.tsx
@@ -1080,7 +1153,7 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "connected";
+      if (cmd === "check_vpn_status_full") return { status: "connected", error: null };
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -1091,9 +1164,9 @@ describe("App", () => {
       render(<App />);
     });
 
-    // settingsPanelProps has onClearConfig
+    // connectionPanelProps has onClearConfig
     await act(async () => {
-      await settingsPanelProps.onClearConfig();
+      await connectionPanelProps.onClearConfig();
     });
 
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_disconnect");
@@ -1126,10 +1199,10 @@ describe("App", () => {
       render(<App />);
     });
 
-    // StatusPanel is passed as prop to SettingsPanel, not directly rendered
+    // StatusPanel is passed as prop to ConnectionPanel, not directly rendered
     // But it is also rendered in logs/about pages
-    // Let's check that settingsPanelProps.statusPanel is not null
-    expect(settingsPanelProps.statusPanel).toBeTruthy();
+    // Let's check that connectionPanelProps.statusPanel is not null
+    expect(connectionPanelProps.statusPanel).toBeTruthy();
   });
 
   // ─── Connected since persistence ───

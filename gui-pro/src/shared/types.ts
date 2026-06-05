@@ -3,8 +3,28 @@ export type VpnStatus =
   | "connecting"
   | "connected"
   | "disconnecting"
+  // 02-20 status-UX split: `recovering` now means ONLY «Восстановление» (local
+  // network gone — waiting for the adapter, nothing to connect to). The
+  // re-establish case (server-lost auto-retry OR manual save+reconnect) is the
+  // NEW `reconnecting` = «Переподключение». The Rust `VpnStatus` enum serializes
+  // these as two distinct wire strings ("recovering" / "reconnecting"), so the
+  // frontend can render the red recovering banner vs the yellow reconnecting one.
   | "recovering"
+  | "reconnecting"
   | "error";
+
+/**
+ * 02-20 status-UX split — per-attempt reconnect progress «Попытка N/3».
+ *
+ * The server-silent auto-retry supervisor (connectivity.rs) surfaces the attempt
+ * index on the `vpn-status` event payload (optional `attempt`/`max` fields, present
+ * ONLY while `status === "reconnecting"`). The frontend stores it so StatusPanel can
+ * render «Попытка {attempt} из {max}». `null` whenever no per-attempt counter is live.
+ */
+export interface ReconnectProgress {
+  attempt: number;
+  max: number;
+}
 
 export interface UpdateInfo {
   // EXISTING — DO NOT REMOVE (backwards-compat для AboutPanel + App.tsx)

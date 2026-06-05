@@ -145,8 +145,12 @@ describe("SchemaFieldRenderer", () => {
     );
     // Warning badge text "новое upstream поле"
     expect(screen.getByText(/новое upstream поле/)).toBeInTheDocument();
-    // Lucide AlertTriangle renders как svg.lucide-triangle-alert (Phase 15-03 finding)
-    const svgs = document.querySelectorAll("svg.lucide-triangle-alert");
-    expect(svgs.length).toBeGreaterThan(0);
+    // [Phase 3 FG-3] Previously asserted `svg.lucide-triangle-alert` count — a
+    // CSS-coupled false green (D-04): a lucide version bump renaming that class
+    // would void it silently, and the count matched any triangle-alert svg on
+    // the page. The unknown-field warning is fully proven by the badge text on
+    // the line above (the icon is decorative aria-hidden), so the svg-class
+    // assertion is dropped. The forward-compat raw value still renders too:
+    expect(screen.getByDisplayValue("some_value")).toBeInTheDocument();
   });
 });

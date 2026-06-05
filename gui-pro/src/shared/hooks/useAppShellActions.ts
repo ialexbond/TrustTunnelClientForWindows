@@ -7,7 +7,7 @@ interface UseAppShellActionsParams {
   setStatus: React.Dispatch<React.SetStateAction<VpnStatus>>;
   setConfig: React.Dispatch<React.SetStateAction<VpnConfig>>;
   setWizardKey: React.Dispatch<React.SetStateAction<number>>;
-  setSettingsKey: React.Dispatch<React.SetStateAction<number>>;
+  setConnectionKey: React.Dispatch<React.SetStateAction<number>>;
   setRoutingKey: React.Dispatch<React.SetStateAction<number>>;
   setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
 }
@@ -22,7 +22,7 @@ export function useAppShellActions({
   setStatus,
   setConfig,
   setWizardKey,
-  setSettingsKey,
+  setConnectionKey,
   setRoutingKey,
   setActiveTab,
 }: UseAppShellActionsParams) {
@@ -59,10 +59,10 @@ export function useAppShellActions({
       setConfig((prev) => ({ ...prev, configPath }));
       localStorage.setItem("tt_config_path", configPath);
       localStorage.removeItem("tt_config_cleared");
-      setSettingsKey((k) => k + 1);
+      setConnectionKey((k) => k + 1);
       setActiveTab("connection");
     },
-    [setConfig, setSettingsKey, setActiveTab],
+    [setConfig, setConnectionKey, setActiveTab],
   );
 
   const handleDropRouting = useCallback(() => {

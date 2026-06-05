@@ -79,7 +79,11 @@ describe("ServerPanel", () => {
 
   it("shows loading state", () => {
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByText(/Проверка|checking/i)).toBeInTheDocument();
+    // Phase 3 false-green fix (RESEARCH §3 stream 6): was a dual-language regex
+    // /Проверка|checking/i that passes under either locale even if the wrong
+    // copy renders. Assert the exact i18n string so a green proves the real
+    // `server.status.checking` label rendered.
+    expect(screen.getByText(i18n.t("server.status.checking"))).toBeInTheDocument();
   });
 
   it("shows error state when connection fails", () => {
@@ -90,7 +94,11 @@ describe("ServerPanel", () => {
       serverInfo: null,
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByText("Не удалось подключиться к серверу")).toBeInTheDocument();
+    // Phase 3 false-green fix (RESEARCH §3 stream 6): was a hardcoded RU literal
+    // that silently rots if the translation key changes. Assert via i18n.t so
+    // the test tracks the real `server.status.connection_failed` value. The
+    // backend error string ("Connection refused") is not translated — kept as-is.
+    expect(screen.getByText(i18n.t("server.status.connection_failed"))).toBeInTheDocument();
     expect(screen.getByText("Connection refused")).toBeInTheDocument();
   });
 
@@ -153,7 +161,10 @@ describe("ServerPanel", () => {
       rebooting: true,
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByText("Сервер перезагружается...")).toBeInTheDocument();
+    // Phase 3 false-green fix (RESEARCH §3 stream 6): was a hardcoded RU literal
+    // ("Сервер перезагружается...") — replaced with i18n.t so the assertion
+    // follows the real `server.status.rebooting` translation.
+    expect(screen.getByText(i18n.t("server.status.rebooting"))).toBeInTheDocument();
   });
 
   it("shows loading panel data state", () => {
@@ -165,7 +176,10 @@ describe("ServerPanel", () => {
       panelDataLoaded: false,
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByText(/Загрузка|loading/i)).toBeInTheDocument();
+    // Phase 3 false-green fix (RESEARCH §3 stream 6): was a dual-language regex
+    // /Загрузка|loading/i. Assert the exact i18n string so the green proves the
+    // real `server.status.loading_panel` "wait for panel data" copy rendered.
+    expect(screen.getByText(i18n.t("server.status.loading_panel"))).toBeInTheDocument();
   });
 
   it("shows error state with fallback message when error is empty but serverInfo is null", () => {
@@ -278,7 +292,7 @@ describe("ServerPanel", () => {
   // NOTE: Reboot confirm dialog moved from ServerPanel to ServerStatusSection (Phase 12.5),
   // and now uses global ConfirmDialogProvider (imperative useConfirm) — tests removed.
 
-  it("main panel renders SnackBar component", () => {
+  it("renders main tabbed panel when connected, installed and panel data loaded", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -287,9 +301,17 @@ describe("ServerPanel", () => {
       panelDataLoaded: true,
       successQueue: ["Operation complete"],
     };
-    const { container } = render(<ServerPanel {...defaultProps} />);
-    // SnackBar renders in the DOM
-    expect(container.innerHTML).toBeTruthy();
+    render(<ServerPanel {...defaultProps} />);
+    // Phase 3 false-green fix (RESEARCH §3 stream 6): the old assertion was
+    // `container.innerHTML).toBeTruthy()` — a tautology that passes for ANY
+    // non-empty render (even an error screen). The mocked `useServerState`
+    // means `successQueue` never reaches the provider-driven SnackBar, so there
+    // is no real snackbar text to assert. Instead assert the actual main-panel
+    // path was taken: ServerTabs mounts its WAI-ARIA tablist + the default
+    // Overview tab content (OverviewSection is mocked in this file). This
+    // genuinely proves the "connected + installed + panelDataLoaded" branch.
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-section")).toBeInTheDocument();
   });
 
   it("Phase 19 cascade fix — onServerInfoVersionChange callback fires with current state.serverInfo.version on mount + every change", async () => {
@@ -318,6 +340,70 @@ describe("ServerPanel", () => {
     await waitFor(() => {
       expect(cb2).toHaveBeenCalledWith("1.0.31");
     });
+  });
+
+  // ── Phase 3 gap-fill (RESEARCH §3 stream 6) ──
+
+  it("does not call onPanelReady while panelDataLoaded is false", () => {
+    const onPanelReady = vi.fn();
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: false,
+    };
+    render(<ServerPanel {...defaultProps} onPanelReady={onPanelReady} />);
+    // ServerPanel's useEffect only fires onPanelReady when panelDataLoaded flips
+    // truthy — the skeleton-dismissal contract ControlPanelPage relies on.
+    expect(onPanelReady).not.toHaveBeenCalled();
+  });
+
+  it("fires onPanelReady when panelDataLoaded is true (skeleton-dismissal signal)", async () => {
+    const onPanelReady = vi.fn();
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: true,
+    };
+    render(<ServerPanel {...defaultProps} onPanelReady={onPanelReady} />);
+    // The useEffect keyed on state.panelDataLoaded calls onPanelReady — this is
+    // how ControlPanelPage knows to hide ServerPanelSkeleton (isFirstConnect).
+    await waitFor(() => {
+      expect(onPanelReady).toHaveBeenCalled();
+    });
+  });
+
+  it("forwards cascade props to ServerTabs — service-tab-update-dot appears when hasSidecarUpdate=true", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: true,
+    };
+    // ServerPanel forwards hasSidecarUpdate to the real ServerTabs (only the 5
+    // server SECTIONS are mocked in this file, ServerTabs itself is real). The
+    // dot renders on the «Сервис» pill when an update exists AND the user is not
+    // already on the service tab (default active tab is overview). Asserting the
+    // user-visible testid proves the prop actually reached the chrome, not just
+    // that a prop was passed (the render-through lesson — RESEARCH §4.4).
+    render(<ServerPanel {...defaultProps} hasSidecarUpdate={true} />);
+    expect(screen.getByTestId("service-tab-update-dot")).toBeInTheDocument();
+  });
+
+  it("does NOT render service-tab-update-dot when hasSidecarUpdate is false", () => {
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: true,
+    };
+    render(<ServerPanel {...defaultProps} hasSidecarUpdate={false} />);
+    expect(screen.queryByTestId("service-tab-update-dot")).not.toBeInTheDocument();
   });
 
 });

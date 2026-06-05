@@ -32,7 +32,7 @@ function save(toggles: FeatureToggles) {
 
 /**
  * Hook for reading / writing feature toggles.
- * Both SettingsPanel and RoutingPanel use this —
+ * Both ConnectionPanel and RoutingPanel use this —
  * changes in Settings are picked up via a storage event listener.
  */
 export function useFeatureToggles() {

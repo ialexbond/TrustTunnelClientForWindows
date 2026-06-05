@@ -5,13 +5,13 @@ import type { VpnStatus } from "../shared/types";
 import { useSettingsState } from "./settings/useSettingsState";
 import type { SettingsState } from "./settings/useSettingsState";
 
-// Mock the hook so SettingsPanel uses our controlled state
+// Mock the hook so ConnectionPanel uses our controlled state
 vi.mock("./settings/useSettingsState", () => ({
   useSettingsState: vi.fn(),
 }));
 
-// Must import SettingsPanel AFTER mocking
-import SettingsPanel from "./SettingsPanel";
+// Must import ConnectionPanel AFTER mocking
+import ConnectionPanel from "./ConnectionPanel";
 
 const mockConfig = {
   loglevel: "info",
@@ -65,7 +65,7 @@ const defaultProps = {
   onClearConfig: vi.fn(),
 };
 
-describe("SettingsPanel (mocked state)", () => {
+describe("ConnectionPanel (mocked state)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     i18n.changeLanguage("ru");
@@ -81,7 +81,7 @@ describe("SettingsPanel (mocked state)", () => {
       handleSave,
     });
     render(
-      <SettingsPanel {...defaultProps} status={"connected" as VpnStatus} />
+      <ConnectionPanel {...defaultProps} status={"connected" as VpnStatus} />
     );
     const saveBtn = screen
       .getByText("Сохранить и переподключить")
@@ -96,7 +96,7 @@ describe("SettingsPanel (mocked state)", () => {
       ...baseMockState,
       saving: true,
     });
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     expect(screen.getByText("Сохранение...")).toBeInTheDocument();
   });
 
@@ -106,7 +106,7 @@ describe("SettingsPanel (mocked state)", () => {
       dirty: true,
       status: "disconnected",
     });
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     const saveBtn = screen
       .getByText("Сохранить и переподключить")
       .closest("button");
@@ -119,7 +119,7 @@ describe("SettingsPanel (mocked state)", () => {
       dirty: false,
       status: "connected",
     });
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     const saveBtn = screen
       .getByText("Сохранить и переподключить")
       .closest("button");
@@ -131,7 +131,7 @@ describe("SettingsPanel (mocked state)", () => {
       ...baseMockState,
       config: null,
     });
-    render(<SettingsPanel {...defaultProps} />);
+    render(<ConnectionPanel {...defaultProps} />);
     expect(
       screen.getByText("Укажите путь к конфигу...")
     ).toBeInTheDocument();

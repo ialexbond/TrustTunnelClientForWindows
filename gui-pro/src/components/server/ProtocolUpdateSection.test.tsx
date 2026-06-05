@@ -348,8 +348,8 @@ describe("ProtocolUpdateSection", () => {
     });
   });
 
-  // ─── 9: badge visible when sidecarAvailable ───
-  it("badge_visible_when_sidecar_available — Badge rendered", async () => {
+  // ─── 9: badge visible when sidecarAvailable (FIXED false green :362) ───
+  it("badge_visible_when_sidecar_available — Badge rendered with i18n text scoped to the badge testid", async () => {
     render(
       <ProtocolUpdateSection
         sshParams={SSH_PARAMS}
@@ -359,8 +359,15 @@ describe("ProtocolUpdateSection", () => {
       />,
     );
 
-    expect(screen.getByTestId("protocol-update-badge")).toBeVisible();
-    expect(screen.getByText(/доступно обновление/i)).toBeVisible();
+    // FIX false green :362 — was an unscoped page-wide `/доступно обновление/i`
+    // regex that would pass even if the text leaked anywhere else on the page.
+    // Now scoped to the actual badge element + asserted against the i18n value
+    // (locale-driven, not a hardcoded RU substring).
+    const badge = screen.getByTestId("protocol-update-badge");
+    expect(badge).toBeVisible();
+    expect(badge).toHaveTextContent(
+      i18n.t("server.service.protocol.update_available_badge"),
+    );
   });
 
   // ─── 10: badge hidden when not available ───
@@ -509,9 +516,17 @@ describe("ProtocolUpdateSection", () => {
       />,
     );
 
-    // Loading state present — refresh button shows Loader2 (animate-spin)
+    // Loading state present — refresh button disabled (shows Loader2 spinner).
     const refresh = await screen.findByTestId("protocol-refresh-button");
     expect(refresh).toBeDisabled();
+
+    // FIX false green :513 — the original test asserted ONLY the disabled refresh
+    // button, which is a weak signal. State A (initial fetch, no versions) must
+    // render the action-row Skeletons INSTEAD of the dropdown + install button.
+    // Assert the dropdown + install controls are absent so a refactor that leaks
+    // a half-dead dropdown during loading flips this red.
+    expect(screen.queryByTestId("protocol-version-select")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("protocol-install-button")).not.toBeInTheDocument();
   });
 
   // ─── 17: State F — when GitHub fails AND current is unknown → fallback shown ───
@@ -605,5 +620,291 @@ describe("ProtocolUpdateSection", () => {
     await waitFor(() => expect(refresh).not.toBeDisabled());
     // Use the variable to avoid lint warning
     void user;
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Phase 3 safety-net Stream 5 (Plan 03-06) — KEY cascade gap + remaining gaps
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ─── 19 (KEY cascade gap): badge DYNAMIC reactivity via rerender() ───
+  //
+  // The badge appear/disappear was previously tested STATICALLY only (cases 9 +
+  // 10 — two separate renders). The actual REACTIVITY — that flipping
+  // `sidecarAvailable` false→true makes the badge APPEAR, and true→false (the
+  // post-update state) makes it DISAPPEAR — was never pinned. This is exactly the
+  // slice of the Card #8 cascade a Phase 4 refactor could silently break.
+  it("badge_dynamic_transition — false→true APPEARS, true→false DISAPPEARS via rerender()", async () => {
+    const { rerender } = render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={false}
+        latestVersion="1.0.33"
+      />,
+    );
+
+    // Initial: no update available → badge absent.
+    expect(screen.queryByTestId("protocol-update-badge")).not.toBeInTheDocument();
+
+    // An update becomes available (newer GitHub release) → badge APPEARS, scoped
+    // to its testid and asserted against the i18n value.
+    rerender(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+      />,
+    );
+    const appeared = await screen.findByTestId("protocol-update-badge");
+    expect(appeared).toBeVisible();
+    expect(appeared).toHaveTextContent(
+      i18n.t("server.service.protocol.update_available_badge"),
+    );
+
+    // After the update is applied the parent re-probes and `sidecarAvailable`
+    // returns to false (now on latest) → badge DISAPPEARS.
+    rerender(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.34"
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId("protocol-update-badge")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── 20: caption shows current version (mono) when known ───
+  it("caption_shows_current_version — «Текущая версия: 1.0.33» rendered", async () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={false}
+        latestVersion="1.0.33"
+      />,
+    );
+
+    expect(
+      screen.getByText(i18n.t("server.service.protocol.current_label_prefix")),
+    ).toBeVisible();
+    // Installed version value is shown inline (mono).
+    expect(screen.getByText("1.0.33")).toBeVisible();
+  });
+
+  // ─── 21: caption skeleton while current version still loading ("") ───
+  it("caption_skeleton_when_current_loading — empty currentVersion shows skeleton, not version text", async () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        // "" = SSH probe in flight (NOT "unknown" = State G). Component shows a
+        // Skeleton in the caption row instead of an empty "Текущая версия: ".
+        currentVersion=""
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    // The prefix is still rendered (it's not State G) ...
+    expect(
+      screen.getByText(i18n.t("server.service.protocol.current_label_prefix")),
+    ).toBeVisible();
+    // ... but the «не установлен» State-G label is NOT shown (this is loading,
+    // not not-installed).
+    expect(
+      screen.queryByText(i18n.t("server.service.protocol.not_installed_label")),
+    ).not.toBeInTheDocument();
+  });
+
+  // ─── 22: dropdown option suffixes — installed gets «(установлена)», newer gets «(новая)» ───
+  it("dropdown_option_suffixes — installed «(установлена)», newer «(новая)»", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    await user.click(within(wrapper).getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
+    const labels = options.map((o) => (o.textContent ?? "").trim());
+
+    const installedSuffix = i18n.t("server.service.protocol.current_label_suffix_active");
+    const newSuffix = i18n.t("server.service.protocol.current_label_suffix_new");
+
+    // Installed 1.0.33 carries «(установлена)».
+    expect(labels.find((l) => l.startsWith("1.0.33"))).toContain(installedSuffix);
+    // Newer 1.0.34 carries «(новая)».
+    expect(labels.find((l) => l.startsWith("1.0.34"))).toContain(newSuffix);
+  });
+
+  // ─── 23: install enabled in State G (current unknown) when a version is selected ───
+  it("install_enabled_when_unknown — State G enables Install once a version is selected", async () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="unknown"
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // selectedVersion defaults to the newest GitHub release (current is "unknown",
+    // so the re-sync effect falls back to versions[0]). Install is enabled.
+    const install = await screen.findByTestId("protocol-install-button");
+    await waitFor(() => {
+      expect(install).not.toBeDisabled();
+    });
+  });
+
+  // ─── 24: action-row shows Skeleton (no dropdown) while modal open ───
+  it("action_row_skeleton_while_modal_open — dropdown + install hidden during in-flight update", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sidecar_versions") return RELEASES;
+      if (cmd === "update_sidecar") return null;
+      return null;
+    });
+
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // Select a newer version + open the install modal.
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    await user.click(within(wrapper).getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.34"));
+    await user.click(option!);
+    await user.click(screen.getByTestId("protocol-install-button"));
+
+    // Modal opens → action row swaps to Skeletons: dropdown + install removed.
+    await waitFor(() => {
+      expect(screen.queryByTestId("protocol-version-select")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("protocol-install-button")).not.toBeInTheDocument();
+  });
+
+  // ─── 25: refresh button has an accessible label ───
+  it("refresh_button_aria_label — refresh button exposes check_update_aria", async () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={false}
+        latestVersion="1.0.33"
+      />,
+    );
+
+    const refresh = await screen.findByTestId("protocol-refresh-button");
+    expect(refresh).toHaveAttribute(
+      "aria-label",
+      i18n.t("server.service.protocol.check_update_aria"),
+    );
+  });
+
+  // ─── 26: install button shows disabled-current tooltip when selected === current ───
+  it("install_disabled_current_tooltip — title explains why Install is disabled", async () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={false}
+        latestVersion="1.0.33"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    const install = await screen.findByTestId("protocol-install-button");
+    // Initial selectedVersion === currentVersion → disabled with explanatory title.
+    await waitFor(() => expect(install).toBeDisabled());
+    expect(install).toHaveAttribute(
+      "title",
+      i18n.t("server.service.protocol.install_disabled_current"),
+    );
+  });
+
+  // ─── 27: modal success → onSidecarUpdateApplied fires + GitHub list re-fetched ───
+  it("modal_success_triggers_callback_and_refresh — onSidecarUpdateApplied + extra list_sidecar_versions", async () => {
+    const user = userEvent.setup();
+    const onApplied = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sidecar_versions") return RELEASES;
+      if (cmd === "update_sidecar") return null;
+      return null;
+    });
+
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+        onSidecarUpdateApplied={onApplied}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    const listCallsBefore = vi
+      .mocked(invoke)
+      .mock.calls.filter((c) => c[0] === "list_sidecar_versions").length;
+
+    // Open dropdown, pick newer version, click Install → modal opens.
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    await user.click(within(wrapper).getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.34"));
+    await user.click(option!);
+    await user.click(screen.getByTestId("protocol-install-button"));
+
+    // Wait for the update_sidecar invoke (the modal drives the lifecycle), then
+    // for the success step that fires onSuccess → handleModalSuccess.
+    await waitFor(() => {
+      expect(onApplied).toHaveBeenCalled();
+    });
+
+    // handleModalSuccess also re-fetches the GitHub list (refresh()) so the
+    // dropdown «(установлена)» suffix moves to the newly-installed version.
+    await waitFor(() => {
+      const after = vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === "list_sidecar_versions").length;
+      expect(after).toBeGreaterThan(listCallsBefore);
+    });
   });
 });

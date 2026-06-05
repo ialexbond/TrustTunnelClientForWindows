@@ -1,36 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { OverviewSection } from "./OverviewSection";
 import type { ServerState } from "./useServerState";
+// Phase 3 safety-net (Wave 1, Stream 1): consume the shared Wave-0 fixtures
+// instead of re-declaring a local makeState. makeState now carries `certRaw`
+// (default null) which the Security card's TLS sub-tile reads; makeCertRaw
+// builds a JSON cert payload whose notAfter is N days out so we can pin the
+// TLS day-band labels (ok / warning / expired / no-cert). See
+// gui-pro/src/test/fixtures/index.ts + .planning/phases/03-…/03-RESEARCH.md §3.
+import { makeState, makeCertRaw } from "../../test/fixtures";
 
 // OverviewSection was redesigned in Phase 11 to a 10-card flex-wrap layout.
 // Phase 12.5-followup: all user-facing strings moved from hardcoded Russian
 // literals to i18n keys under server.overview.* and server.status.*. Tests
 // resolve labels through the i18n instance so they work for every locale.
 
-function makeState(overrides: Partial<ServerState> = {}): ServerState {
-  return {
-    serverInfo: {
-      installed: true,
-      version: "1.0.20",
-      serviceActive: true,
-      users: ["user1", "user2"],
-      protocol: "WireGuard",
-      listenPort: 51820,
-    } as ServerState["serverInfo"],
-    actionLoading: null,
-    sshParams: { host: "10.0.0.1", port: 22, user: "root", password: "pass" },
-    runAction: vi.fn(),
-    loadServerInfo: vi.fn().mockResolvedValue(undefined),
-    rebooting: false,
-    setRebooting: vi.fn(),
-    host: "10.0.0.1",
-    setServerInfo: vi.fn(),
-    pushSuccess: vi.fn(),
-    ...overrides,
-  } as unknown as ServerState;
+/**
+ * Scope a query to a single overview card by its (unique) title text.
+ *
+ * Every card renders the same internal shape:
+ *
+ *   <div (Card root)>
+ *     <div (Title)>            ← "flex items-center justify-between mb-3"
+ *       <div> icon <span>{title}</span> </div>
+ *       <div> refresh / chevron </div>
+ *     </div>
+ *     <div> …value content… </div>
+ *   </div>
+ *
+ * `getByText(title)` returns the inner <span>; walking three parents reaches
+ * the Card root that also contains the value. We intentionally walk structural
+ * parents (not a `.closest('[class*="Card"]')` class match) so the scoping
+ * survives a Phase-4 presentation refactor — assertion philosophy D-04 (no CSS
+ * coupling). Returns the root element so callers can `within(card)`.
+ */
+function cardOf(titleKey: string): HTMLElement {
+  const titleSpan = screen.getByText(i18n.t(titleKey));
+  // span → (icon+title div) → (Title div) → (Card root)
+  const root = titleSpan.parentElement?.parentElement?.parentElement;
+  if (!root) throw new Error(`cardOf: could not locate card root for "${titleKey}"`);
+  return root as HTMLElement;
 }
 
 describe("OverviewSection", () => {
@@ -116,20 +127,46 @@ describe("OverviewSection", () => {
     render(<OverviewSection state={state} />);
     const matches = screen.getAllByText("10.0.0.1");
     expect(matches).toHaveLength(1);
-    const ipCard = screen
-      .getByText(i18n.t("server.overview.cards.ip"))
-      .closest('[class*="Card"], [style*="flex"]');
-    expect(ipCard?.textContent).toContain("10.0.0.1");
+    // False-green / CSS-coupling FIX (RESEARCH §3 stream 1, was :121):
+    // previously scoped via `.closest('[class*="Card"], [style*="flex"]')`,
+    // a className/style selector that a Phase-4 refactor could silently void.
+    // Re-scope structurally with within(cardOf(...)) — assert the IP value is
+    // rendered INSIDE the IP card itself, not merely somewhere in the DOM.
+    const ipCard = cardOf("server.overview.cards.ip");
+    expect(within(ipCard).getByText("10.0.0.1")).toBeInTheDocument();
   });
 
   it("renders a Skeleton grid when serverInfo is null", () => {
     const state = makeState({ serverInfo: null });
-    const { container } = render(<OverviewSection state={state} />);
-    expect(container.innerHTML.length).toBeGreaterThan(0);
-    // Skeleton grid renders card titles (via i18n) but no status value.
-    expect(screen.getByText(i18n.t("server.overview.cards.status"))).toBeInTheDocument();
+    render(<OverviewSection state={state} />);
+    // False-green FIX (RESEARCH §3 stream 1, was :128): the old
+    // `container.innerHTML.length > 0` assertion passes on ANY non-empty
+    // markup — even an empty wrapper div — so it never proved the skeleton
+    // grid rendered. Pin the real skeleton-state contract instead: the card
+    // titles render (the grid mounted) AND no resolved status value shows
+    // (we are in the pre-data skeleton branch, not the loaded branch).
+    const skeletonTitleKeys = [
+      "server.overview.cards.status",
+      "server.overview.cards.ping",
+      "server.overview.cards.speed",
+      "server.overview.cards.userCount",
+      "server.overview.cards.ip",
+      "server.overview.cards.country",
+      "server.overview.cards.uptime",
+      "server.overview.cards.protocolVersion",
+      "server.overview.cards.security",
+      "server.overview.cards.load",
+    ];
+    for (const key of skeletonTitleKeys) {
+      expect(screen.getByText(i18n.t(key))).toBeInTheDocument();
+    }
+    // No resolved status value in the skeleton branch.
     expect(screen.queryByText(i18n.t("server.status.running"))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t("server.status.stopped"))).not.toBeInTheDocument();
+    // And no drill-down buttons exist yet (serverInfo===null short-circuits
+    // before ClickableCard renders) — proves we rendered the skeleton grid,
+    // not the loaded 10-card grid.
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 
   it("shows ping value (ms) when service is active and ping resolves", async () => {
@@ -166,14 +203,22 @@ describe("OverviewSection", () => {
   it("shows server version in the protocol-version card", () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
-    const allText = document.body.textContent || "";
-    expect(allText).toMatch(/1\.0\.20/);
+    // False-green FIX (RESEARCH §3 stream 1, was :170): the old
+    // `document.body.textContent` scan would pass on cross-test DOM leakage
+    // or on the version appearing anywhere. Scope to the protocol-version
+    // card and assert the value renders INSIDE it.
+    const versionCard = cardOf("server.overview.cards.protocolVersion");
+    expect(within(versionCard).getByText("1.0.20")).toBeInTheDocument();
   });
 
   it("shows user count of 2 in the Users card", () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
-    expect(screen.getByText("2")).toBeInTheDocument();
+    // False-green FIX (RESEARCH §3 stream 1, was :174): bare `getByText("2")`
+    // could match a "2" anywhere in the tree. Scope to the Users card so the
+    // count is proven to be the userCount value (users: ["user1","user2"]).
+    const usersCard = cardOf("server.overview.cards.userCount");
+    expect(within(usersCard).getByText("2")).toBeInTheDocument();
   });
 
   it("renders correctly in English locale (i18n switch)", async () => {
@@ -206,10 +251,12 @@ describe("OverviewSection", () => {
     it("shows flag emoji + country name when geo resolves", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
+      // False-green FIX (RESEARCH §3 stream 1, was :211): the old
+      // `document.body.textContent` scan passes on cross-test DOM leakage.
+      // Scope to the Country card and assert the resolved name renders inside.
       await waitFor(() => {
-        // Country card now shows just the country name (flag emoji removed per UX)
-        const bodyText = document.body.textContent || "";
-        expect(bodyText).toContain("United States");
+        const countryCard = cardOf("server.overview.cards.country");
+        expect(within(countryCard).getByText("United States")).toBeInTheDocument();
       });
     });
 
@@ -269,10 +316,14 @@ describe("OverviewSection", () => {
     it("shows formatted uptime for 90061 seconds (1д 1ч)", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
+      // False-green FIX (RESEARCH §3 stream 1, was :274): the old
+      // `document.body.textContent` regex scan passes on DOM leakage. Scope
+      // to the Uptime card and assert the formatted value renders inside it.
+      // 90061s → formatServerUptime → "1д 1ч" (ru) (daysHours format).
+      const expected = i18n.t("server.overview.uptimeFormat.daysHours", { days: 1, hours: 1 });
       await waitFor(() => {
-        // 90061s → formatServerUptime returns "1д 1ч" (в ru локали)
-        const bodyText = document.body.textContent || "";
-        expect(bodyText).toMatch(/1д\s*1ч|1d\s*1h/);
+        const uptimeCard = cardOf("server.overview.cards.uptime");
+        expect(within(uptimeCard).getByText(expected)).toBeInTheDocument();
       }, { timeout: 15_000 });
     }, 20_000);
 
@@ -448,9 +499,19 @@ describe("OverviewSection", () => {
         />,
       );
 
-      // ArrowUp icon should be present next to the version
-      const arrow = screen.queryByTestId("overview-protocol-update-arrow");
-      expect(arrow).not.toBeNull();
+      // False-green FIX (RESEARCH §3 stream 1, was :453): `not.toBeNull()` is
+      // weaker than `toBeInTheDocument()` (a detached node is non-null), and
+      // the arrow's accessible label was never asserted. Pin BOTH presence and
+      // the aria-label value, and prove the indicator lives inside the
+      // protocol-version card (cascade indicator is the actual code testid
+      // `overview-protocol-update-arrow`, NOT the stale spec name).
+      const versionCard = cardOf("server.overview.cards.protocolVersion");
+      const arrow = within(versionCard).getByTestId("overview-protocol-update-arrow");
+      expect(arrow).toBeInTheDocument();
+      expect(arrow).toHaveAttribute(
+        "aria-label",
+        i18n.t("server.service.protocol.update_available_badge"),
+      );
     });
 
     it("Phase 19 — Protocol version card HIDES ArrowUp icon when sidecarAvailable=false", () => {
@@ -509,8 +570,16 @@ describe("OverviewSection", () => {
         />,
       );
 
-      // ArrowUpCircle must now be visible without any unmount/remount
-      expect(screen.queryByTestId("overview-protocol-update-arrow")).not.toBeNull();
+      // ArrowUpCircle must now be visible without any unmount/remount, inside
+      // the protocol-version card, with its accessible label populated
+      // (strengthened per RESEARCH §3 stream 1 — assert flip presence + label).
+      const versionCard = cardOf("server.overview.cards.protocolVersion");
+      const arrow = within(versionCard).getByTestId("overview-protocol-update-arrow");
+      expect(arrow).toBeInTheDocument();
+      expect(arrow).toHaveAttribute(
+        "aria-label",
+        i18n.t("server.service.protocol.update_available_badge"),
+      );
     });
 
     it("drill-down: calls onNavigate('security') on Space key on Security card", async () => {
@@ -715,10 +784,17 @@ describe("OverviewSection", () => {
       await waitFor(() => {
         expect(screen.getByText(i18n.t("server.overview.speedRequiresProtocol"))).toBeInTheDocument();
       });
-      // Refresh button absent because onRefresh={undefined} when !isRunning
-      const speedTitle = screen.getByText(i18n.t("server.overview.cards.speed"));
-      const speedCard = speedTitle.closest("div")?.parentElement;
-      expect(speedCard?.querySelector('button[aria-label]')).toBeNull();
+      // False-green FIX (RESEARCH §3 stream 1, was :720): the old
+      // `speedTitle.closest("div")?.parentElement?.querySelector('button…')`
+      // chain passes VACUOUSLY when any link in the traversal returns null
+      // (a null parentElement → undefined?.querySelector → undefined ===
+      // "not present"), so it never genuinely proved the refresh button was
+      // absent. Scope to the Speed card and assert there is no refresh button
+      // by its accessible name (onRefresh={undefined} when !isRunning).
+      const speedCard = cardOf("server.overview.cards.speed");
+      expect(
+        within(speedCard).queryByRole("button", { name: i18n.t("server.overview.refreshAria") }),
+      ).not.toBeInTheDocument();
       expect(speedtestCalled).toBe(false);
     });
 
@@ -741,6 +817,441 @@ describe("OverviewSection", () => {
       await waitFor(() => {
         expect(calls.filter((c) => c === "speedtest_run").length).toBeGreaterThan(0);
       }, { timeout: 5_000 });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 3 safety-net (Stream 1) — missing render-state characterization
+  // (RESEARCH §3 stream 1 Gaps). Pins TODAY's visible behavior + a11y so a
+  // Phase-4 presentation refactor fails loudly on drift. Behavior/role/aria/
+  // i18n text only — no toHaveClass / class-querySelector / snapshots (D-04).
+  // No production code touched (D-06).
+  // ═══════════════════════════════════════════════════════
+
+  describe("Speed card render states (G-05, RESEARCH §3 stream 1)", () => {
+    it("never-measured: shows 'Не измерялась' when running and speedtest never ran", () => {
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // Render-branch priority 5: running, speed=null, !speedFailed → initial.
+      const speedCard = cardOf("server.overview.cards.speed");
+      expect(
+        within(speedCard).getByText(i18n.t("server.overview.speedNotMeasured")),
+      ).toBeInTheDocument();
+    });
+
+    it("result: shows ↓download | ↑upload values + unit after speedtest resolves", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "speedtest_run") return { download_mbps: 200.4, upload_mbps: 80.6 };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const refreshButtons = await screen.findAllByLabelText(i18n.t("server.overview.refreshAria"));
+      fireEvent.click(refreshButtons[1]); // Speed refresh (index 1, after Ping)
+      const speedCard = cardOf("server.overview.cards.speed");
+      await waitFor(() => {
+        // Math.round(200.4)=200, Math.round(80.6)=81
+        expect(within(speedCard).getByText("200")).toBeInTheDocument();
+        expect(within(speedCard).getByText("81")).toBeInTheDocument();
+      });
+      // Both values carry the "Мбит/с" unit (one per arrow).
+      expect(within(speedCard).getAllByText(i18n.t("server.overview.speedUnit"))).toHaveLength(2);
+      // Result branch replaces the initial "Не измерялась" placeholder.
+      expect(
+        within(speedCard).queryByText(i18n.t("server.overview.speedNotMeasured")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("failed: shows '—' + dataUnavailable subtitle when speedtest rejects (G-05)", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "speedtest_run") throw new Error("SPEEDTEST_FAILED");
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const refreshButtons = await screen.findAllByLabelText(i18n.t("server.overview.refreshAria"));
+      fireEvent.click(refreshButtons[1]);
+      const speedCard = cardOf("server.overview.cards.speed");
+      await waitFor(() => {
+        expect(
+          within(speedCard).getByText(i18n.t("server.overview.dataUnavailable")),
+        ).toBeInTheDocument();
+      });
+      // Failed branch shows the muted dash, NOT the never-measured placeholder.
+      expect(within(speedCard).getByText("—")).toBeInTheDocument();
+      expect(
+        within(speedCard).queryByText(i18n.t("server.overview.speedNotMeasured")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("measuring: refresh disabled + no result/placeholder text while speedtest in flight", async () => {
+      // Deferred promise — speedtest_run never settles → speedTesting stays true.
+      let releaseSpeedtest: (v: { download_mbps: number; upload_mbps: number }) => void = () => {};
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "speedtest_run") {
+          return new Promise((resolve) => { releaseSpeedtest = resolve; });
+        }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const refreshButtons = await screen.findAllByLabelText(i18n.t("server.overview.refreshAria"));
+      const speedRefresh = refreshButtons[1];
+      fireEvent.click(speedRefresh);
+      // While measuring (speedTesting=true): the Speed refresh button is
+      // disabled (refreshing={speedTesting}) — accessible state, no CSS.
+      await waitFor(() => {
+        expect(speedRefresh).toBeDisabled();
+      });
+      const speedCard = cardOf("server.overview.cards.speed");
+      // Neither the never-measured placeholder nor a result shows mid-flight.
+      expect(
+        within(speedCard).queryByText(i18n.t("server.overview.speedNotMeasured")),
+      ).not.toBeInTheDocument();
+      expect(
+        within(speedCard).queryByText(i18n.t("server.overview.dataUnavailable")),
+      ).not.toBeInTheDocument();
+      // Cleanup: release the deferred promise so the act() flush settles.
+      await act(async () => { releaseSpeedtest({ download_mbps: 1, upload_mbps: 1 }); });
+    });
+
+    it("requires-protocol: shows 'Запустите протокол' when serviceActive=false", async () => {
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.0",
+          serviceActive: false,
+          users: [],
+          listenPort: 443,
+          protocol: "x",
+        } as ServerState["serverInfo"],
+      });
+      render(<OverviewSection state={state} />);
+      const speedCard = cardOf("server.overview.cards.speed");
+      expect(
+        within(speedCard).getByText(i18n.t("server.overview.speedRequiresProtocol")),
+      ).toBeInTheDocument();
+    });
+
+    it("requires-protocol: shows 'Запустите протокол' when rebooting", async () => {
+      const state = makeState({ rebooting: true });
+      render(<OverviewSection state={state} />);
+      const speedCard = cardOf("server.overview.cards.speed");
+      expect(
+        within(speedCard).getByText(i18n.t("server.overview.speedRequiresProtocol")),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("Ping card render states + G-08 guard (RESEARCH §3 stream 1)", () => {
+    it("unavailable: shows '—' + dataUnavailable subtitle when ping rejects (M-07)", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") throw new Error("PING_TIMEOUT");
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const pingCard = cardOf("server.overview.cards.ping");
+      await waitFor(() => {
+        // ping=-1 → dash + "Не удалось получить данные" subtitle.
+        expect(
+          within(pingCard).getByText(i18n.t("server.overview.dataUnavailable")),
+        ).toBeInTheDocument();
+      });
+      expect(within(pingCard).getByText("—")).toBeInTheDocument();
+    });
+
+    it("pending: shows '—' WITHOUT subtitle while initial ping is unresolved", async () => {
+      // Never-settling ping → ping stays null (pending), not -1 (unavailable).
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return new Promise<number>(() => {});
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const pingCard = cardOf("server.overview.cards.ping");
+      // Pending: dash present, but the unavailable subtitle is absent (ping!==-1).
+      expect(within(pingCard).getByText("—")).toBeInTheDocument();
+      expect(
+        within(pingCard).queryByText(i18n.t("server.overview.dataUnavailable")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("G-08 guard: refresh disabled while a manual ping is in flight (rapid-fire is a no-op)", async () => {
+      // Deferred ping so pingLoading stays true after the manual click.
+      let releasePing: (ms: number) => void = () => {};
+      let manualPingInvokes = 0;
+      let initialResolved = false;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") {
+          // First (initial useEffect) ping resolves immediately so the card
+          // mounts in a settled state; subsequent manual pings are deferred.
+          if (!initialResolved) { initialResolved = true; return 42; }
+          manualPingInvokes++;
+          return new Promise<number>((resolve) => { releasePing = resolve; });
+        }
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // Wait for the initial ping value to settle so we start from a clean state.
+      const pingCard = cardOf("server.overview.cards.ping");
+      await waitFor(() => {
+        expect(within(pingCard).getByText("42")).toBeInTheDocument();
+      });
+      const pingRefresh = within(pingCard).getByRole("button", {
+        name: i18n.t("server.overview.refreshAria"),
+      });
+      // Click once → manual ping starts → button disabled (refreshing=pingLoading).
+      fireEvent.click(pingRefresh);
+      await waitFor(() => { expect(pingRefresh).toBeDisabled(); });
+      // Rapid-fire: extra clicks while disabled must NOT enqueue more invokes.
+      fireEvent.click(pingRefresh);
+      fireEvent.click(pingRefresh);
+      expect(manualPingInvokes).toBe(1);
+      // Release so the act() flush settles cleanly.
+      await act(async () => { releasePing(50); });
+    });
+  });
+
+  describe("Security card sub-tiles (RESEARCH §3 stream 1)", () => {
+    function mockSecurity(
+      firewall: { installed: boolean; active: boolean },
+      fail2ban: { installed: boolean; active: boolean },
+    ) {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "security_get_status") return { firewall, fail2ban };
+        return null;
+      });
+    }
+
+    /** Locate the sub-tile that carries `name` (e.g. "Брандмауэр") and assert its label. */
+    function tileLabel(securityCard: HTMLElement, name: string): string {
+      const nameNode = within(securityCard).getByText(name);
+      // tile = <div><div>{name}</div><div>{label}</div></div>
+      const tile = nameNode.parentElement as HTMLElement;
+      const labelNode = tile.children[1] as HTMLElement;
+      return labelNode.textContent ?? "";
+    }
+
+    it("firewall active + fail2ban inactive: shows 'Активен' / 'Выключен'", async () => {
+      mockSecurity({ installed: true, active: true }, { installed: true, active: false });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const securityCard = cardOf("server.overview.cards.security");
+      await waitFor(() => {
+        expect(tileLabel(securityCard, i18n.t("server.overview.security.firewall")))
+          .toBe(i18n.t("server.overview.security.active"));
+      });
+      expect(tileLabel(securityCard, i18n.t("server.overview.security.fail2ban")))
+        .toBe(i18n.t("server.overview.security.inactive"));
+    });
+
+    it("firewall not-installed: shows 'Не установлен'", async () => {
+      mockSecurity({ installed: false, active: false }, { installed: true, active: true });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const securityCard = cardOf("server.overview.cards.security");
+      await waitFor(() => {
+        expect(tileLabel(securityCard, i18n.t("server.overview.security.firewall")))
+          .toBe(i18n.t("server.overview.security.notInstalled"));
+      });
+      expect(tileLabel(securityCard, i18n.t("server.overview.security.fail2ban")))
+        .toBe(i18n.t("server.overview.security.active"));
+    });
+
+    it("skeleton: while security_get_status is in flight, no firewall/fail2ban label text shows", async () => {
+      // Deferred security status → securityLoading stays true → skeleton branch.
+      let releaseSecurity: (v: unknown) => void = () => {};
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "security_get_status") {
+          return new Promise((resolve) => { releaseSecurity = resolve; });
+        }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const securityCard = cardOf("server.overview.cards.security");
+      // Skeleton branch renders 3 placeholder tiles — no firewall/fail2ban
+      // NAMES (those only render in the loaded grid). Title still shows.
+      expect(
+        within(securityCard).getByText(i18n.t("server.overview.cards.security")),
+      ).toBeInTheDocument();
+      expect(
+        within(securityCard).queryByText(i18n.t("server.overview.security.firewall")),
+      ).not.toBeInTheDocument();
+      expect(
+        within(securityCard).queryByText(i18n.t("server.overview.security.fail2ban")),
+      ).not.toBeInTheDocument();
+      // Release so the loaded grid renders and act() flush settles.
+      await act(async () => {
+        releaseSecurity({ firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } });
+      });
+      await waitFor(() => {
+        expect(
+          within(securityCard).getByText(i18n.t("server.overview.security.firewall")),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("refetches security_get_status on a tt:security-changed window event", async () => {
+      let securityCalls = 0;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "security_get_status") {
+          securityCalls++;
+          return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+        }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      await waitFor(() => { expect(securityCalls).toBeGreaterThanOrEqual(1); });
+      const callsAfterMount = securityCalls;
+      // Cross-component change signal — SecuritySection / FirewallModal /
+      // Fail2banModal dispatch this after every toggle.
+      await act(async () => {
+        window.dispatchEvent(new Event("tt:security-changed"));
+      });
+      await waitFor(() => {
+        expect(securityCalls).toBe(callsAfterMount + 1);
+      });
+    });
+  });
+
+  describe("Security card — TLS sub-tile day-bands (RESEARCH §3 stream 1)", () => {
+    /**
+     * Read the TLS tile label inside the Security card AFTER the loaded grid
+     * renders. The TLS tile only mounts once securityLoading flips false (the
+     * skeleton branch shows placeholder tiles with no sub-tile names), so the
+     * helper waits for the "TLS" name to appear before reading its label.
+     */
+    async function tlsLabel(): Promise<string> {
+      const securityCard = cardOf("server.overview.cards.security");
+      const tlsName = await within(securityCard).findByText(
+        i18n.t("server.overview.security.tls"),
+      );
+      const tile = tlsName.parentElement as HTMLElement;
+      return (tile.children[1] as HTMLElement).textContent ?? "";
+    }
+
+    it("no-cert: TLS tile shows '—' placeholder when certRaw is null", async () => {
+      const state = makeState({ certRaw: null } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      expect(await tlsLabel()).toBe(i18n.t("server.overview.security.placeholder"));
+    });
+
+    it("ok: TLS tile shows '{N} дн.' for a cert well in the future (>14 days)", async () => {
+      const state = makeState({ certRaw: makeCertRaw(40) } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      // daysUntil uses Math.ceil → ~40 or 41 days; assert the days-label shape.
+      const label = await tlsLabel();
+      expect(label).toMatch(/\d+\s*дн\./);
+      expect(label).not.toBe(i18n.t("server.overview.security.tlsExpired"));
+      expect(label).not.toBe(i18n.t("server.overview.security.placeholder"));
+    });
+
+    it("warning: TLS tile shows '{N} дн.' for a cert 8–14 days out", async () => {
+      const state = makeState({ certRaw: makeCertRaw(10) } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      // Warning band shares the "{N} дн." label (only colour differs — not
+      // assertable per D-04). Pin the label shape + that it's not expired.
+      const label = await tlsLabel();
+      expect(label).toMatch(/\d+\s*дн\./);
+      expect(label).not.toBe(i18n.t("server.overview.security.tlsExpired"));
+    });
+
+    it("expired: TLS tile shows 'Истёк' for a past-due cert", async () => {
+      const state = makeState({ certRaw: makeCertRaw(-2) } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      expect(await tlsLabel()).toBe(i18n.t("server.overview.security.tlsExpired"));
+    });
+  });
+
+  describe("fastUptime poller (G-01, RESEARCH §3 stream 1)", () => {
+    it("fires server_get_uptime immediately on mount when service is active", async () => {
+      let uptimeInvokes = 0;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_get_uptime") { uptimeInvokes++; return { uptime_seconds: 3661 }; }
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // G-01: immediate first fire (not waiting for the 10s interval).
+      await waitFor(() => { expect(uptimeInvokes).toBeGreaterThanOrEqual(1); });
+    });
+
+    it("prefers fastUptime value over stats: shows the server_get_uptime result", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        // stats says 1д 1ч (90061s); fast uptime says 1ч 1м (3661s).
+        if (cmd === "server_get_stats") return {
+          cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
+          mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
+          unique_ips: 0, total_connections: 0, uptime_seconds: 90061,
+        };
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_get_uptime") return { uptime_seconds: 3661 };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const uptimeCard = cardOf("server.overview.cards.uptime");
+      // 3661s → "1ч 1м" (hoursMins) from fastUptime, taking priority over stats.
+      const fast = i18n.t("server.overview.uptimeFormat.hoursMins", { hours: 1, mins: 1 });
+      await waitFor(() => {
+        expect(within(uptimeCard).getByText(fast)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("Drill-down by CLICK (RESEARCH §3 stream 1 — was keyboard-only)", () => {
+    it("version card CLICK navigates to the 'service' tab (Phase 19 target)", () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      const versionTitle = screen.getByText(i18n.t("server.overview.cards.protocolVersion"));
+      const card = versionTitle.closest('[role="button"]');
+      expect(card).not.toBeNull();
+      fireEvent.click(card!);
+      expect(onNavigate).toHaveBeenCalledWith("service");
+    });
+
+    it("security card CLICK navigates to the 'security' tab", () => {
+      const onNavigate = vi.fn();
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      const securityTitle = screen.getByText(i18n.t("server.overview.cards.security"));
+      const card = securityTitle.closest('[role="button"]');
+      expect(card).not.toBeNull();
+      fireEvent.click(card!);
+      expect(onNavigate).toHaveBeenCalledWith("security");
     });
   });
 });

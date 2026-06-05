@@ -81,6 +81,10 @@ function AboutScreen({ updateInfo, onCheckUpdates, onOpenDownload }: AboutScreen
   };
 
   const version = updateInfo.currentVersion || "2.1.0";
+  // T-13 build hash (mirror of Pro): append `-<hash>` when injected at build time
+  // (VITE_BUILD_HASH → __BUILD_HASH__ via vite define). Graceful fallback to the
+  // bare version when unset (plain dev run). Version itself is FROZEN.
+  const versionLabel = __BUILD_HASH__ ? `${version}-${__BUILD_HASH__}` : version;
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">
@@ -119,7 +123,7 @@ function AboutScreen({ updateInfo, onCheckUpdates, onOpenDownload }: AboutScreen
               color: "var(--color-text-muted)",
             }}
           >
-            v{version} · Windows
+            v{versionLabel} · Windows
           </span>
         </div>
 
