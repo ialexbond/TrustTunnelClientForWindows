@@ -9,7 +9,7 @@ interface UseConfigLifecycleParams {
   setConfig: React.Dispatch<React.SetStateAction<VpnConfig>>;
   setVpnMode: React.Dispatch<React.SetStateAction<string>>;
   setWizardKey: React.Dispatch<React.SetStateAction<number>>;
-  setSettingsKey: React.Dispatch<React.SetStateAction<number>>;
+  setConnectionKey: React.Dispatch<React.SetStateAction<number>>;
   activeTab: AppTab;
   setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
   pushSuccess: (message: string, variant?: "success" | "error") => void;
@@ -29,7 +29,7 @@ export function useConfigLifecycle({
   setConfig,
   setVpnMode,
   setWizardKey,
-  setSettingsKey,
+  setConnectionKey,
   activeTab,
   setActiveTab,
   pushSuccess,
@@ -103,7 +103,7 @@ export function useConfigLifecycle({
         // Config file appeared — reload it
         setConfig({ configPath: path, logLevel: "info" });
         localStorage.setItem("tt_config_path", path);
-        setSettingsKey((k) => k + 1);
+        setConnectionKey((k) => k + 1);
         setActiveTab("connection");
         pushSuccess(i18n.t("messages.config_file_restored", "Config loaded"));
       }

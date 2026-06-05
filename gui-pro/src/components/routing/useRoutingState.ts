@@ -87,7 +87,10 @@ function serializeEntry(entry: RuleEntry): string {
 // Hook
 // ═══════════════════════════════════════════════════════
 
-export type VpnStatus = "connected" | "connecting" | "disconnected" | "disconnecting" | "recovering" | "error";
+// 02-20: must mirror the shared `VpnStatus` union (src/shared/types.ts) — `reconnecting`
+// («Переподключение») is a distinct status from `recovering` («Восстановление»). This
+// local copy exists for the routing state machine; keep it in lock-step with the source.
+export type VpnStatus = "connected" | "connecting" | "disconnected" | "disconnecting" | "recovering" | "reconnecting" | "error";
 
 export interface UseRoutingStateOptions {
   configPath: string;

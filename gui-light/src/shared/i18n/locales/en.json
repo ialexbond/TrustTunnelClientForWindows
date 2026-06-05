@@ -218,6 +218,8 @@
     "connection_refused": "Server refused connection. Check if VPN service is running on the server.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
     "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them.",
+    "connect_timeout": "Couldn't connect within a minute. Please try again.",
+    "reconnect_gave_up": "Couldn't reconnect. Check your internet and try again.",
     "panelCrash": "An error occurred in the {{panel}} panel. Other panels still work.",
     "retry": "Try again"
   },

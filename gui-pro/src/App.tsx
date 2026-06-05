@@ -4,9 +4,10 @@ import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
 import StatusPanel from "./components/StatusPanel";
+import LogPanel from "./components/LogPanel";
 import { ControlPanelPage } from "./components/ControlPanelPage";
 import SetupWizard from "./components/SetupWizard";
-import SettingsPanel from "./components/SettingsPanel";
+import ConnectionPanel from "./components/ConnectionPanel";
 import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
@@ -31,8 +32,8 @@ import { EmptyState } from "./shared/ui/EmptyState";
 import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
 import { WelcomeTour } from "./components/welcome/WelcomeTour";
 import { useWelcomeTour } from "./shared/hooks/useWelcomeTour";
-import { Settings } from "lucide-react";
-import type { AppTab, VpnStatus, VpnConfig, LogEntry } from "./shared/types";
+import { Settings, Terminal, X } from "lucide-react";
+import type { AppTab, VpnStatus, VpnConfig, LogEntry, ReconnectProgress } from "./shared/types";
 
 function App() {
   // ─── Theme & Language ───
@@ -53,8 +54,21 @@ function App() {
     return { configPath: savedPath, logLevel: savedLevel };
   });
   const [error, setError] = useState<string | null>(null);
+  // 02-20: per-attempt «Попытка N/3» reconnect progress, surfaced by useVpnEvents from
+  // the vpn-status payload (server-lost auto-retry only). Lifted here so StatusPanel can
+  // render the counter; null whenever no per-attempt retry is live.
+  const [reconnectProgress, setReconnectProgress] = useState<ReconnectProgress | null>(null);
   const [vpnMode, setVpnMode] = useState<string>("general");
-  const [_vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
+  // vpnLogs is the live vpn-log stream collected by useVpnEvents (setVpnLogs).
+  // Previously prefixed `_vpnLogs` (collected-but-unused) because LogPanel was
+  // not rendered anywhere. It is now surfaced through the in-window LogPanel
+  // overlay below (toggled by the title-bar Terminal button).
+  const [vpnLogs, setVpnLogs] = useState<LogEntry[]>([]);
+  // In-window log overlay visibility. This is a normal React overlay rendered
+  // inside the main window — NOT a second OS WebviewWindow. A removed earlier
+  // approach (a separate `open_log_window` webview) froze the whole app; an
+  // in-window panel structurally cannot block the main window's event loop.
+  const [showLogs, setShowLogs] = useState(false);
   const [connectedSince, setConnectedSince] = useState<Date | null>(() => {
     const saved = localStorage.getItem("tt_connected_since");
     return saved ? new Date(saved) : null;
@@ -69,7 +83,7 @@ function App() {
   // install panel load sticks around and the user sees the «Установить
   // / Выйти» screen even after a successful deploy.
   const [controlKey, setControlKey] = useState(0);
-  const [settingsKey, setSettingsKey] = useState(0);
+  const [connectionKey, setConnectionKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
 
   // ─── Setup wizard overlay (UAT 2026-05-20) ───
@@ -133,6 +147,7 @@ function App() {
     setVpnLogs,
     reconnectResolve,
     pushSuccess,
+    setReconnectProgress,
   });
 
   // ─── Shell hooks (Phase 12.5 decomposition) ───
@@ -141,7 +156,7 @@ function App() {
     setConfig,
     setVpnMode,
     setWizardKey,
-    setSettingsKey,
+    setConnectionKey,
     activeTab,
     setActiveTab,
     pushSuccess,
@@ -150,6 +165,14 @@ function App() {
   useAutoConnect({ config, status, setStatus, setError });
   useTabPersistence({ activeTab, config, status, connectedSince });
   useActivityLogStartup();
+
+  // ─── Log viewing ───
+  // Logs are surfaced exclusively through the in-window LogPanel overlay
+  // (toggled by the title-bar Terminal button, see showLogs above). An earlier
+  // dev-only separate-webview approach (a `open_log_window` Rust command bound to
+  // Ctrl+Shift+L) was removed: a second OS window blocked the main window's event
+  // loop (froze connect/disconnect/drag/exit) and its shortcut collided with the
+  // language toggle. The in-window overlay cannot block the event loop.
 
   // ─── VPN Actions ───
   const { handleConnect, handleDisconnect, handleReconnect } = useVpnActions({
@@ -167,7 +190,7 @@ function App() {
     setStatus,
     setConfig,
     setWizardKey,
-    setSettingsKey,
+    setConnectionKey,
     setRoutingKey,
     setActiveTab,
   });
@@ -215,6 +238,7 @@ function App() {
       connectedSince={connectedSince}
       onConnect={handleConnect}
       onDisconnect={handleDisconnect}
+      reconnectProgress={reconnectProgress}
     />
   ) : null;
 
@@ -227,8 +251,29 @@ function App() {
     >
       <DropOverlay isDragging={isDragging} />
 
-      {/* Title bar — brand + window controls */}
+      {/* Title bar — brand + logs toggle + window controls.
+          The logs button lands in the title bar's right-side controls slot
+          (which excludes the drag region), BEFORE WindowControls. It toggles
+          the in-window LogPanel overlay. It is the ONLY trigger — no keyboard
+          shortcut is added (Ctrl+Shift+L already toggles language, see
+          useKeyboardShortcuts.ts). */}
       <TitleBar>
+        <button
+          type="button"
+          onClick={() => setShowLogs((v) => !v)}
+          aria-label={i18n.t("logs.toggle_aria")}
+          aria-pressed={showLogs}
+          title={i18n.t("logs.toggle_aria")}
+          className="flex items-center justify-center w-8 h-8 transition-colors outline-none focus-visible:shadow-[var(--focus-ring)] hover:bg-[var(--color-bg-hover)]"
+          style={{
+            color: showLogs
+              ? "var(--color-accent-interactive)"
+              : "var(--color-text-muted)",
+            backgroundColor: showLogs ? "var(--color-accent-tint-10)" : undefined,
+          }}
+        >
+          <Terminal className="w-4 h-4" />
+        </button>
         <WindowControls />
       </TitleBar>
 
@@ -264,7 +309,7 @@ function App() {
               onConfigExported={(path) => {
                 setConfig((prev) => ({ ...prev, configPath: path }));
                 localStorage.setItem("tt_config_path", path);
-                setSettingsKey((k) => k + 1);
+                setConnectionKey((k) => k + 1);
               }}
               onSwitchToSetup={() => {
                 // Remount wizard so it picks up freshly-written localStorage step/mode.
@@ -299,8 +344,8 @@ function App() {
         >
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Connection">
             {hasConfig ? (
-              <SettingsPanel
-                key={settingsKey}
+              <ConnectionPanel
+                key={connectionKey}
                 configPath={config.configPath}
                 onConfigChange={setConfig}
                 status={status}
@@ -477,6 +522,47 @@ function App() {
               // visible after a successful deploy.
               setControlKey((k) => k + 1);
             }}
+          />
+        </div>
+      </div>
+    )}
+
+    {/* In-window log overlay — mirrors the SetupWizard overlay layout so it
+        sits BELOW the 32px title bar and ABOVE the 64px bottom tabs (both stay
+        visible + usable while logs are open). This is a plain React overlay
+        inside the main window — NOT a second OS window — so connect/disconnect/
+        drag/exit keep working with it open, unlike the removed separate-webview
+        log window which froze the app. Width is capped to the same 1000px
+        centered column as the content area. */}
+    {showLogs && (
+      <div
+        className="fixed top-[32px] bottom-[64px] left-0 right-0 z-[var(--z-modal)] overflow-hidden flex flex-col"
+        style={{ background: "var(--color-bg-primary)" }}
+      >
+        <div className="flex-1 flex flex-col w-full max-w-[1000px] mx-auto min-h-0 px-4 pb-4">
+          {/* Compact overlay header — title + close */}
+          <div className="flex items-center justify-between py-3 shrink-0">
+            <span
+              className="text-sm font-semibold"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              {i18n.t("logs.title")}
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowLogs(false)}
+              aria-label={i18n.t("logs.close_aria")}
+              title={i18n.t("logs.close_aria")}
+              className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-sm)] transition-colors outline-none focus-visible:shadow-[var(--focus-ring)] hover:bg-[var(--color-bg-hover)]"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <LogPanel
+            logs={vpnLogs}
+            onClear={() => setVpnLogs([])}
+            isConnected={status === "connected"}
           />
         </div>
       </div>

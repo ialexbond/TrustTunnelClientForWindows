@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useState } from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import i18n from "../../../shared/i18n";
 import { useSaveFlowDialog, type DiffRow } from "./SaveFlowDialog";
 
@@ -124,5 +124,49 @@ describe("SaveFlowDialog (D-4.3 + D-4.4)", () => {
     // Disrupt warning banner has role="status"
     const banner = await screen.findByRole("status");
     expect(banner).toBeInTheDocument();
+    expect(
+      within(banner).getByText(i18n.t("server.config.disrupt_warning")),
+    ).toBeInTheDocument();
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Phase 3 gap-fill: disrupt-absent + non-disrupt copy + close-after
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("hides the disrupt warning when hasDisruptHighField=false (disrupt-absent)", async () => {
+    render(<HookHarness onConfirm={() => {}} />);
+    fireEvent.click(screen.getByTestId("open-save"));
+    // Wait for the diff content to render, then assert NO disrupt status banner.
+    await screen.findByText(/0\.0\.0\.0:443/);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    // The non-disrupt description copy is shown instead.
+    expect(
+      screen.getByText(i18n.t("server.config.confirm_save_desc")),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the disrupt description copy when hasDisruptHighField=true", async () => {
+    render(<HookHarness onConfirm={() => {}} hasDisrupt />);
+    fireEvent.click(screen.getByTestId("open-save"));
+    expect(
+      await screen.findByText(
+        i18n.t("server.config.confirm_save_disrupt_desc"),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("resolves the pending promise (pending → no) after Apply closes the dialog", async () => {
+    render(<HookHarness onConfirm={() => {}} />);
+    fireEvent.click(screen.getByTestId("open-save"));
+    // While the dialog is open the harness reports pending="yes".
+    expect(screen.getByTestId("pending")).toHaveTextContent("yes");
+    const applyBtn = await screen.findByRole("button", {
+      name: /Применить изменения/i,
+    });
+    await act(async () => {
+      fireEvent.click(applyBtn);
+    });
+    // confirmSave promise resolved → pending flips back to "no".
+    expect(screen.getByTestId("pending")).toHaveTextContent("no");
   });
 });

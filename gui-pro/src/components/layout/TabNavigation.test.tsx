@@ -22,10 +22,11 @@ describe("TabNavigation", () => {
     i18n.changeLanguage("ru");
   });
 
-  it("renders 5 tab buttons", () => {
-    const { container } = render(<TabNavigation {...defaultProps} />);
-    const buttons = container.querySelectorAll("button");
-    expect(buttons.length).toBe(5);
+  it("renders 5 tabs (role-based, not button-count)", () => {
+    render(<TabNavigation {...defaultProps} />);
+    // FIX (was querySelectorAll("button") — a false green that would survive a
+    // refactor adding/removing non-tab buttons). Assert the semantic tab role.
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
   });
 
   it("renders all 5 tab labels via i18n", () => {
@@ -77,28 +78,50 @@ describe("TabNavigation", () => {
     expect(btn?.getAttribute("aria-selected")).toBe("false");
   });
 
-  it("all tabs are always clickable", () => {
+  // FIX (was "all tabs are always clickable" — name claimed ALL but asserted
+  // ONLY routing). Now genuinely exercises every tab via it.each.
+  it.each([
+    ["controlPanel", "control"],
+    ["connection", "connection"],
+    ["routing", "routing"],
+    ["about", "about"],
+  ] as const)(
+    "clicking the %s tab calls onTabChange(%s)",
+    (labelKey, expectedId) => {
+      render(<TabNavigation {...defaultProps} activeTab="settings" />);
+      const btn = screen.getByText(i18n.t(`tabs.${labelKey}`)).closest("button")!;
+      fireEvent.click(btn);
+      expect(onTabChange).toHaveBeenCalledWith(expectedId);
+    },
+  );
+
+  it("clicking the settings tab calls onTabChange('settings')", () => {
+    render(<TabNavigation {...defaultProps} activeTab="control" />);
+    const settingsLabel =
+      i18n.t("tabs.appSettings") !== "tabs.appSettings"
+        ? i18n.t("tabs.appSettings")
+        : i18n.t("tabs.settings");
+    fireEvent.click(screen.getByText(settingsLabel).closest("button")!);
+    expect(onTabChange).toHaveBeenCalledWith("settings");
+  });
+
+  it("marks the active tab via aria-selected (not via a stray var(--) match)", () => {
+    // FIX (was container.innerHTML.toMatch(/var\(--/) — matches a token ANYWHERE
+    // in the tree, so it stays green even if the active tab loses its styling).
+    // Behavior under test = which tab is selected. Assert that semantically.
+    render(<TabNavigation {...defaultProps} activeTab="control" />);
+    const selected = screen
+      .getAllByRole("tab")
+      .filter((t) => t.getAttribute("aria-selected") === "true");
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toHaveAttribute("id", "tab-control");
+  });
+
+  it("exposes a tablist landmark (role-based, not querySelector('nav'))", () => {
+    // FIX (was container.querySelector('[role="tablist"]') / querySelector('nav')
+    // — CSS/structure-coupled). getByRole survives the presentation refactor.
     render(<TabNavigation {...defaultProps} />);
-    const routingBtn = screen.getByText(i18n.t("tabs.routing")).closest("button")!;
-    fireEvent.click(routingBtn);
-    expect(onTabChange).toHaveBeenCalledWith("routing");
-  });
-
-  it("uses CSS token var for active tab accent, not hardcoded color", () => {
-    const { container } = render(<TabNavigation {...defaultProps} activeTab="control" />);
-    // The nav/container should use token vars in style
-    const nav = container.querySelector("nav") || container.firstChild as HTMLElement;
-    expect(nav).toBeTruthy();
-    // At least the border-bottom of nav uses tokens
-    void (nav?.getAttribute("style") || "");
-    // We just verify a token var is present somewhere in tab container
-    expect(container.innerHTML).toMatch(/var\(--/);
-  });
-
-  it("nav has role=tablist", () => {
-    const { container } = render(<TabNavigation {...defaultProps} />);
-    const tablist = container.querySelector('[role="tablist"]');
-    expect(tablist).toBeInTheDocument();
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
   });
 
   // ─── Phase 19 — split update-dot indicators (UI-SPEC §Block 1) ───────────
@@ -173,9 +196,9 @@ describe("TabNavigation", () => {
     });
 
     it("dot НЕ дублируется (только один occurrence)", () => {
-      const { container } = render(<TabNavigation {...defaultProps} hasAppUpdate />);
-      const dots = container.querySelectorAll('[data-testid="about-update-dot"]');
-      expect(dots).toHaveLength(1);
+      // FIX (was container.querySelectorAll('[data-testid=...]') — string-coupled).
+      render(<TabNavigation {...defaultProps} hasAppUpdate />);
+      expect(screen.getAllByTestId("about-update-dot")).toHaveLength(1);
     });
 
     it("hasAppUpdate=true НЕ рендерит control-sidecar-update-dot", () => {
@@ -184,11 +207,16 @@ describe("TabNavigation", () => {
     });
   });
 
-  describe("hasSidecarUpdate dot indicator (Control tab)", () => {
+  // ─── control-sidecar-update-dot (Control-Panel pill) — mirror of about-dot ──
+  //
+  // RESEARCH §2: the ACTUAL testid is `control-sidecar-update-dot`. The stale
+  // spec name `control-update-dot` must appear NOWHERE in this file. This suite
+  // mirrors the about-dot suite above: explicit-false, role=status, aria-label
+  // RU+EN, static-no-animation, single-occurrence, cross-isolation.
+  describe("hasSidecarUpdate dot indicator (Control-Panel pill)", () => {
     it("hasSidecarUpdate=true рендерит dot внутри control tab pill", () => {
       render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
-      const dot = screen.getByTestId("control-sidecar-update-dot");
-      expect(dot).toBeInTheDocument();
+      expect(screen.getByTestId("control-sidecar-update-dot")).toBeInTheDocument();
     });
 
     it("hasSidecarUpdate=false (default) — dot НЕ рендерится", () => {
@@ -196,25 +224,150 @@ describe("TabNavigation", () => {
       expect(screen.queryByTestId("control-sidecar-update-dot")).toBeNull();
     });
 
+    it("hasSidecarUpdate=false explicit — dot НЕ рендерится", () => {
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate={false} />);
+      expect(screen.queryByTestId("control-sidecar-update-dot")).toBeNull();
+    });
+
     it("dot живёт внутри control tab button (НЕ на других tabs)", () => {
       render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
       const dot = screen.getByTestId("control-sidecar-update-dot");
-      const parentTabButton = dot.closest('[role="tab"]');
-      expect(parentTabButton?.getAttribute("id")).toBe("tab-control");
+      expect(dot.closest('[role="tab"]')?.getAttribute("id")).toBe("tab-control");
+    });
+
+    it("dot имеет role=status (semantic для screen reader)", () => {
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+      expect(screen.getByTestId("control-sidecar-update-dot")).toHaveAttribute(
+        "role",
+        "status",
+      );
+    });
+
+    it("dot имеет aria-label «Доступно обновление» (RU локаль)", () => {
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+      expect(screen.getByTestId("control-sidecar-update-dot")).toHaveAttribute(
+        "aria-label",
+        "Доступно обновление",
+      );
+    });
+
+    it("dot switches aria-label on i18n.changeLanguage('en')", async () => {
+      await i18n.changeLanguage("en");
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+      expect(screen.getByTestId("control-sidecar-update-dot")).toHaveAttribute(
+        "aria-label",
+        "Update available",
+      );
+    });
+
+    it("dot static — нет animate-* class или CSS animation inline style (D-DECISION-UI-2.1)", () => {
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+      const dot = screen.getByTestId("control-sidecar-update-dot");
+      expect(dot.className).not.toMatch(/animate/);
+      expect(dot.getAttribute("style") || "").not.toMatch(/animation/i);
+      expect(dot.style.animation).toBe("");
     });
 
     it("dot uses CSS token (--color-accent-interactive), no hardcoded hex", () => {
       render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
-      const dot = screen.getByTestId("control-sidecar-update-dot");
-      const styleAttr = dot.getAttribute("style") || "";
+      const styleAttr =
+        screen.getByTestId("control-sidecar-update-dot").getAttribute("style") || "";
       expect(styleAttr).toMatch(/var\(--color-accent-interactive\)/);
       expect(styleAttr).not.toMatch(/#[0-9a-fA-F]{3,6}/);
     });
 
-    it("обе пропы можно включить одновременно — оба dots видны", () => {
-      render(<TabNavigation {...defaultProps} hasAppUpdate hasSidecarUpdate />);
-      expect(screen.getByTestId("about-update-dot")).toBeInTheDocument();
-      expect(screen.getByTestId("control-sidecar-update-dot")).toBeInTheDocument();
+    it("dot НЕ дублируется (только один occurrence)", () => {
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+      expect(screen.getAllByTestId("control-sidecar-update-dot")).toHaveLength(1);
     });
+
+    it("hasSidecarUpdate=true НЕ рендерит about-update-dot (cross-isolation)", () => {
+      render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+      expect(screen.queryByTestId("about-update-dot")).toBeNull();
+    });
+
+    it("обе пропы можно включить одновременно — оба dots видны и независимы", () => {
+      render(<TabNavigation {...defaultProps} hasAppUpdate hasSidecarUpdate />);
+      const aboutDot = screen.getByTestId("about-update-dot");
+      const controlDot = screen.getByTestId("control-sidecar-update-dot");
+      expect(aboutDot).toBeInTheDocument();
+      expect(controlDot).toBeInTheDocument();
+      // Independent: each lives in its own pill.
+      expect(aboutDot.closest('[role="tab"]')?.getAttribute("id")).toBe("tab-about");
+      expect(controlDot.closest('[role="tab"]')?.getAttribute("id")).toBe(
+        "tab-control",
+      );
+    });
+  });
+
+  // ─── Control-Panel pill structure + keyboard navigation ────────────────────
+  describe("Control-Panel pill structure", () => {
+    it("the control pill has id=tab-control + aria-controls=tabpanel-control", () => {
+      render(<TabNavigation {...defaultProps} />);
+      const controlTab = screen
+        .getByText(i18n.t("tabs.controlPanel"))
+        .closest('[role="tab"]')!;
+      expect(controlTab).toHaveAttribute("id", "tab-control");
+      expect(controlTab).toHaveAttribute("aria-controls", "tabpanel-control");
+    });
+
+    it("roving tabIndex: the active control pill is tabIndex 0, inactive pills -1", () => {
+      render(<TabNavigation {...defaultProps} activeTab="control" />);
+      const controlTab = document.getElementById("tab-control")!;
+      const connectionTab = document.getElementById("tab-connection")!;
+      expect(controlTab).toHaveAttribute("tabindex", "0");
+      expect(connectionTab).toHaveAttribute("tabindex", "-1");
+    });
+
+    it("when control is inactive its pill leaves the tab order (tabIndex -1)", () => {
+      render(<TabNavigation {...defaultProps} activeTab="connection" />);
+      expect(document.getElementById("tab-control")).toHaveAttribute(
+        "tabindex",
+        "-1",
+      );
+    });
+  });
+
+  describe("Control-Panel pill keyboard navigation (manual activation)", () => {
+    it("ArrowRight from the control pill moves FOCUS to connection WITHOUT activating", () => {
+      render(<TabNavigation {...defaultProps} activeTab="control" />);
+      const controlTab = document.getElementById("tab-control")!;
+      controlTab.focus();
+      fireEvent.keyDown(controlTab, { key: "ArrowRight" });
+      expect(document.getElementById("tab-connection")).toHaveFocus();
+      // Manual activation: no onTabChange until Enter/Space/click.
+      expect(onTabChange).not.toHaveBeenCalled();
+    });
+
+    it("ArrowLeft from the control pill wraps FOCUS to the last (about) tab", () => {
+      render(<TabNavigation {...defaultProps} activeTab="control" />);
+      const controlTab = document.getElementById("tab-control")!;
+      controlTab.focus();
+      fireEvent.keyDown(controlTab, { key: "ArrowLeft" });
+      expect(document.getElementById("tab-about")).toHaveFocus();
+      expect(onTabChange).not.toHaveBeenCalled();
+    });
+
+    it("Home moves focus to the control pill (first tab)", () => {
+      render(<TabNavigation {...defaultProps} activeTab="about" />);
+      const aboutTab = document.getElementById("tab-about")!;
+      aboutTab.focus();
+      fireEvent.keyDown(aboutTab, { key: "Home" });
+      expect(document.getElementById("tab-control")).toHaveFocus();
+    });
+
+    it("Enter activates the focused control pill (native button behavior)", () => {
+      render(<TabNavigation {...defaultProps} activeTab="connection" />);
+      // Native <button> click semantics: a click is what activates the tab.
+      // Keyboard Enter/Space dispatch a click on a focused button in the browser;
+      // here we assert the activation contract (click → onTabChange("control")).
+      fireEvent.click(document.getElementById("tab-control")!);
+      expect(onTabChange).toHaveBeenCalledWith("control");
+    });
+  });
+
+  it("the stale testid 'control-update-dot' is never rendered (RESEARCH §2)", () => {
+    render(<TabNavigation {...defaultProps} hasSidecarUpdate />);
+    expect(screen.queryByTestId("control-update-dot")).toBeNull();
   });
 });

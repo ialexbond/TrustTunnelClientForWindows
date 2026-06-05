@@ -27,6 +27,11 @@
     "disconnecting_short": "Disconnecting",
     "recovering": "Recovering...",
     "recovering_short": "Recovering",
+    "reconnecting": "Reconnecting...",
+    "reconnecting_short": "Reconnecting",
+    "recovering_detail": "Internet connection lost. Recovering, please wait…",
+    "reconnecting_server_lost": "Lost connection to the server",
+    "reconnect_attempt": "Attempt {{attempt}} of {{max}}",
     "error": "Error",
     "saving": "Saving...",
     "preparing": "Preparing...",
@@ -218,12 +223,18 @@
   },
   "errors": {
     "internet_lost_disconnecting": "Internet connection lost. Disconnecting VPN, waiting for network recovery...",
+    "server_connection_lost": "Lost connection to the server. Reconnecting…",
     "reconnection_failed": "Reconnection failed: {{error}}",
     "network_recovery_timeout": "Network recovery timed out (5 min). Please reconnect manually.",
     "auth_required": "Authorization error: invalid username or password. Update config from server via Control Panel.",
     "wintun_missing": "Failed to create VPN adapter. Run the application as administrator.",
     "listener_failed": "Failed to start VPN tunnel. Check administrator rights and wintun.dll presence.",
     "connection_refused": "Server refused connection. Check if VPN service is running on the server.",
+    "connect_timeout": "Couldn't connect. Check the server and your internet connection.",
+    "reconnect_gave_up": "Couldn't reconnect",
+    "recovery_timeout": "Couldn't restore the connection. Check your internet connection.",
+    "no_internet": "No internet connection. Check your network.",
+    "sidecar_exit": "The VPN core exited unexpectedly. Try connecting again.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
     "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them.",
     "panelCrash": "An error occurred in the {{panel}} panel. Other panels still work.",
@@ -1675,6 +1686,11 @@
     "logs_appear_on_connect": "Logs will appear after connecting...",
     "sidecar_level": "Recording level",
     "display_filter": "Filter"
+  },
+  "logs": {
+    "title": "Logs",
+    "toggle_aria": "Show logs",
+    "close_aria": "Close logs"
   },
   "drop": {
     "overlay_text": "Drop file here",

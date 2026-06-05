@@ -3,6 +3,8 @@ mod connectivity;
 mod diagnostics;
 mod geodata;
 mod geodata_v2ray;
+mod job_object;
+mod lifecycle;
 mod logging;
 mod processes;
 mod routing_rules;
@@ -17,7 +19,7 @@ use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::image::Image;
 use tauri::RunEvent;
 
-use commands::{AppState, kill_sidecar_from_state};
+use commands::{AppState, begin_shutdown, kill_sidecar_from_state};
 
 #[tauri::command]
 fn set_start_minimized(enabled: bool) -> Result<(), String> {
@@ -84,7 +86,11 @@ pub fn run() {
         .manage(AppState {
             sidecar_child: Arc::new(Mutex::new(None)),
             disconnecting: Arc::new(Mutex::new(false)),
-            is_connected: Arc::new(Mutex::new(false)),
+            // Phase 1 — single source of truth for VPN status (D-01). Starts Disconnected.
+            vpn_status: Arc::new(Mutex::new(commands::vpn::VpnStatus::Disconnected)),
+            // Phase 1 (Codex MEDIUM) — last error detail persisted alongside vpn_status
+            // so a late-mounting window can restore the reason, not just the status.
+            last_error: Arc::new(Mutex::new(None)),
             tray_notified: Arc::new(Mutex::new(false)),
             config_path: Arc::new(Mutex::new(None)),
             log_level: Arc::new(Mutex::new("info".to_string())),
@@ -95,6 +101,17 @@ pub fn run() {
             mtproto_install_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             // Phase 18 Plan 05 — sidecar update cancel flag (REQ-18-UPDATE-FLOW-07)
             update_sidecar_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Phase 2 — connection generation (Codex HIGH stale-actor guard). Starts at 0;
+            // each connect/disconnect bumps it so a stale connect-timeout watchdog aborts.
+            connection_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            // Phase 2 — single-supervisor guard (CR-02). Starts false; the reconnect
+            // supervisor sets it while live so the Terminated arm cannot spawn a second.
+            reconnect_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Phase 2 Plan 09 (UAT Gap #2) — per-attempt pre-flight connectivity result.
+            // Starts false; vpn_connect sets it on every attempt before spawning so the
+            // sidecar Terminated arm can classify a never-connected exit (no-internet vs
+            // sidecar-exit). The pre-flight is warning-only and never blocks connecting.
+            last_preflight_offline: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
@@ -158,6 +175,10 @@ pub fn run() {
                         }
                         "quit" => {
                             if let Some(state) = app.try_state::<AppState>() {
+                                // R4: signal shutdown (intent + generation bump) BEFORE
+                                // the kill so a live reconnect supervisor cooperatively
+                                // bails and can't respawn a sidecar after the user quit.
+                                begin_shutdown(&state);
                                 kill_sidecar_from_state(&state);
                             }
                             app.exit(0);
@@ -201,9 +222,9 @@ pub fn run() {
                 w.set_icon(icon).ok();
             }
 
-            // Start connectivity monitor
-            let is_conn_for_monitor = Arc::clone(&app.state::<AppState>().is_connected);
-            connectivity::start_monitor(app.handle().clone(), is_conn_for_monitor);
+            // Start connectivity monitor — reads the single vpn_status owner (D-01)
+            let vpn_status_for_monitor = Arc::clone(&app.state::<AppState>().vpn_status);
+            connectivity::start_monitor(app.handle().clone(), vpn_status_for_monitor);
 
             // Start geodata file watcher
             let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
@@ -234,15 +255,26 @@ pub fn run() {
                                 *locale = lang.to_string();
                             }
                         }
-                        // Rebuild tray menu with new language, current status
+                        // Rebuild tray menu with new language, current status.
+                        // Reads the single vpn_status owner (D-01).
+                        use commands::vpn::VpnStatus;
                         let status = app_handle2.try_state::<AppState>()
                             .map(|s| {
-                                let has_child = s.sidecar_child.lock().map(|g| g.is_some()).unwrap_or(false);
-                                let connected = s.is_connected.lock().map(|g| *g).unwrap_or(false);
-                                if has_child {
-                                    if connected { "connected" } else { "connecting" }
-                                } else {
-                                    "disconnected"
+                                let status = s.vpn_status.lock().map(|g| *g).unwrap_or(VpnStatus::Disconnected);
+                                match status {
+                                    VpnStatus::Connected => "connected",
+                                    VpnStatus::Connecting => "connecting",
+                                    VpnStatus::Error => "error",
+                                    // 02-20 status-UX split: a language change mid-recovery
+                                    // or mid-reconnect must keep the TRUE state's icon/menu,
+                                    // not collapse to "disconnected" nor merge the two. Each
+                                    // maps to its OWN canonical string tray.rs
+                                    // (status_bucket/build_tray_menu/update_tray_icon)
+                                    // understands. Stage 3 (02-20) gives "reconnecting" its
+                                    // yellow bucket and "recovering" its red bucket.
+                                    VpnStatus::Recovering => "recovering",
+                                    VpnStatus::Reconnecting => "reconnecting",
+                                    VpnStatus::Disconnected => "disconnected",
                                 }
                             })
                             .unwrap_or("disconnected");
@@ -317,6 +349,8 @@ pub fn run() {
             commands::vpn::vpn_connect,
             commands::vpn::vpn_disconnect,
             commands::vpn::check_vpn_status,
+            commands::vpn::check_vpn_status_full,
+            commands::vpn::clear_vpn_error,
             commands::vpn::test_sidecar,
             commands::ssh_commands::deploy_server,
             commands::ssh_commands::diagnose_server,
@@ -480,9 +514,25 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                // Disconnect pooled SSH connection
+                // R4 (quit hang): signal shutdown FIRST so a live reconnect supervisor /
+                // monitor can't respawn a sidecar during teardown (idempotent if the
+                // quit menu handler already did it; other exit paths reach here directly).
+                if let Some(state) = app.try_state::<AppState>() {
+                    begin_shutdown(&state);
+                }
+                // Disconnect pooled SSH connection — BOUNDED. `pool.invalidate()` awaits a
+                // graceful SSH disconnect with no internal timeout; on a half-dead socket
+                // (plausible in an error state) the old unbounded `block_on` froze the main
+                // thread and the app would not close (UAT 65692c test 7). Quit is teardown,
+                // so a missed graceful disconnect is harmless — cap it at 2s.
                 if let Some(pool) = app.try_state::<ssh::SshPool>() {
-                    tauri::async_runtime::block_on(pool.invalidate());
+                    tauri::async_runtime::block_on(async {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_secs(2),
+                            pool.invalidate(),
+                        )
+                        .await;
+                    });
                 }
                 // Final cleanup: kill only our own sidecar (not other app's processes)
                 if let Some(state) = app.try_state::<AppState>() {

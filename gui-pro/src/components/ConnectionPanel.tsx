@@ -8,7 +8,7 @@ import { TunnelSection } from "./settings/TunnelSection";
 import { SecuritySection } from "./settings/SecuritySection";
 import { NetworkSection } from "./settings/NetworkSection";
 
-interface SettingsPanelProps {
+interface ConnectionPanelProps {
   configPath: string;
   onConfigChange: (config: VpnConfig) => void;
   status: VpnStatus;
@@ -19,12 +19,30 @@ interface SettingsPanelProps {
   statusPanel?: React.ReactNode;
 }
 
-function SettingsPanel(props: SettingsPanelProps) {
+function ConnectionPanel(props: ConnectionPanelProps) {
   const { t } = useTranslation();
   const state = useSettingsState(props);
   const { config, saving, status } = state;
 
-  const isVpnActive = status === "connected" || status === "connecting";
+  // 02-20 SPEC §4 — «Сохранить и переподключить» states:
+  // - connected: enabled (when dirty) → save + fire «Переподключение» (handleSave's
+  //   reconnect guard fires for connected).
+  // - connecting: DISABLED — the active FIRST-connect must not be interrupted.
+  // - reconnecting / recovering: save-only. The button stays available (when dirty),
+  //   but `handleSave`'s reconnect guard (status === connected || connecting) does NOT
+  //   fire a SECOND reconnect for these states — the new config applies on the next
+  //   (re)connect. So a click here just persists the config; no duplicate teardown.
+  // - disconnected / error: save-only (handleSave's guard also skips reconnect).
+  //
+  // `isVpnActive` keeps the original visibility intent (button is the «save+reconnect»
+  // affordance the user expects while a session is up or being (re)established);
+  // `connecting` is explicitly carved OUT so a first-connect cannot be interrupted.
+  const isVpnActive =
+    status === "connected" ||
+    status === "connecting" ||
+    status === "reconnecting" ||
+    status === "recovering";
+  const isFirstConnecting = status === "connecting";
 
   const saveLabel = saving
     ? t("status.saving")
@@ -47,7 +65,7 @@ function SettingsPanel(props: SettingsPanelProps) {
             fullWidth
             icon={<Save className="w-3.5 h-3.5" />}
             loading={saving}
-            disabled={!isVpnActive || !state.dirty}
+            disabled={!isVpnActive || isFirstConnecting || !state.dirty}
             onClick={() => {
               window.dispatchEvent(new CustomEvent("tt-peer-save"));
               state.handleSave(true);
@@ -73,4 +91,4 @@ function SettingsPanel(props: SettingsPanelProps) {
   );
 }
 
-export default SettingsPanel;
+export default ConnectionPanel;

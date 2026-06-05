@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useTomlConfigState } from "./useTomlConfigState";
 import type { ConfigBundle, VpnConfigKnown } from "./types";
+import { makeBundle } from "../../../test/fixtures";
 
 // Mock @tauri-apps/api/core invoke
 const mockInvoke = vi.fn();
@@ -29,15 +30,15 @@ const EMPTY_DISRUPT = {
   credentials: new Set<string>(),
 } as const;
 
-const MOCK_BUNDLE: ConfigBundle = {
-  vpnToml: `listen_address = "0.0.0.0:443"\nipv6_available = true\n`,
-  hostsToml: `[[main_hosts]]\nhostname = "a.com"\n`,
-  credentialsToml: `[[client]]\nusername = "user1"\npassword = "TOPSECRET123"\n`,
-  rulesToml: `[[rule]]\ncidr = "10.0.0.0/8"\naction = "allow"\n[[rule]]\nclient_random_prefix = "abc"\naction = "allow"\n`,
+// [Phase 3] Deduped from the inlined literal into the Wave-0 makeBundle()
+// factory. This hook's literal used `typed: {}` and a 2-entry rules.toml (the
+// second carries a Users-owned client_random_prefix the merge test relies on),
+// so we recover that exact shape via overrides. Everything else — including the
+// D-29 probe secret TOPSECRET123 — matches the factory defaults byte-for-byte.
+const MOCK_BUNDLE: ConfigBundle = makeBundle({
   typed: {} as unknown as VpnConfigKnown,
-  allowedSni: [],
-  serviceStatus: "active",
-};
+  rulesToml: `[[rule]]\ncidr = "10.0.0.0/8"\naction = "allow"\n[[rule]]\nclient_random_prefix = "abc"\naction = "allow"\n`,
+});
 
 describe("useTomlConfigState", () => {
   beforeEach(() => {
@@ -123,28 +124,50 @@ describe("useTomlConfigState", () => {
     expect(rawContent).toContain("192.168.1.0/24"); // new Config-owned
   });
 
-  it("WR-03 cancelledRef guards stale invoke result", async () => {
-    let resolveLoad: (value: ConfigBundle) => void = () => {};
-    mockInvoke.mockImplementationOnce(
-      () =>
-        new Promise<ConfigBundle>((resolve) => {
-          resolveLoad = resolve;
+  it("WR-03 cancelledRef guards stale invoke result (no post-unmount state warning)", async () => {
+    // [Phase 3 FG-4] Previously ended in `expect(true).toBe(true)` (WR-03
+    // tautology) — a green that proved nothing. The real invariant: when the
+    // initial-load invoke resolves AFTER unmount, the cancelled ref must
+    // short-circuit the state setters so React never logs the
+    // "Can't perform a React state update on an unmounted component" warning.
+    // We spy on console.error and assert it is NEVER called with that warning.
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    try {
+      let resolveLoad: (value: ConfigBundle) => void = () => {};
+      mockInvoke.mockImplementationOnce(
+        () =>
+          new Promise<ConfigBundle>((resolve) => {
+            resolveLoad = resolve;
+          }),
+      );
+      const { unmount } = renderHook(() =>
+        useTomlConfigState(SSH_PARAMS, {
+          defaultsMaps: EMPTY_DEFAULTS,
+          disruptSets: EMPTY_DISRUPT,
         }),
-    );
-    const { unmount } = renderHook(() =>
-      useTomlConfigState(SSH_PARAMS, {
-        defaultsMaps: EMPTY_DEFAULTS,
-        disruptSets: EMPTY_DISRUPT,
-      }),
-    );
-    // Unmount before invoke resolves
-    unmount();
-    // Resolve invoke now — handler should be cancelled
-    resolveLoad(MOCK_BUNDLE);
-    await new Promise((r) => setTimeout(r, 0));
-    // Result reference should not error; React would warn если cancelled.current не работал.
-    // Positive assertion: no exception thrown — cancelled flag short-circuits state setters.
-    expect(true).toBe(true);
+      );
+      // Unmount before the invoke resolves.
+      unmount();
+      // Resolve invoke now — the cancelled ref must drop the result.
+      await act(async () => {
+        resolveLoad(MOCK_BUNDLE);
+        await Promise.resolve();
+      });
+
+      // No React unmounted-state-update warning was emitted.
+      const sawUnmountWarning = consoleErrorSpy.mock.calls.some((call) =>
+        call.some(
+          (arg) =>
+            typeof arg === "string" &&
+            arg.includes("state update on an unmounted component"),
+        ),
+      );
+      expect(sawUnmountWarning).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it("save batch stop-on-first-failure (D-8.1)", async () => {

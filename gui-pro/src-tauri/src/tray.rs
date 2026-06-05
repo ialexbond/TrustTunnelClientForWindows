@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use tauri::Manager;
-use tauri::Emitter;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::image::Image;
 
 use crate::commands::{AppState, kill_stale_sidecar};
+use crate::commands::vpn::{VpnStatus, set_vpn_status, spawn_connect_timeout_watchdog};
 use crate::{routing_rules, geodata_v2ray, sidecar};
 
 /// Tray icon theme — hardcoded `"dark"` (контрастный шилд).
@@ -21,14 +21,27 @@ pub fn detect_windows_system_theme() -> &'static str {
     "dark"
 }
 
-/// Normalize a VPN status to the 3 tray-icon buckets:
-/// - `connected` → zelyonyy indicator
-/// - `reconnect` → oranzhevyy indicator (connecting / recovering / disconnecting)
-/// - `off` → seryy indicator (disconnected / error / unknown)
+/// Normalize a VPN status to the 4 tray-icon buckets (02-22 redesign — solid
+/// color-coded shield glyphs, see new_icon_design):
+/// - `connected`  → 🟢 zelyonyy — tunnel up
+/// - `reconnect`  → 🟡 zhyoltyy — ВСЕ активные состояния: `connecting` (первый
+///   коннект), `reconnecting` («Переподключение», re-establish после обрыва) и
+///   `recovering` («Восстановление», ждём возврата локальной сети). Жёлтый =
+///   «что-то происходит, работаем».
+/// - `error`      → 🔴 krasnyy — терминальная ошибка (собственный красный glyph)
+/// - `off`        → ⚪ seryy — `disconnected` / `disconnecting` / unknown
+///
+/// ОТЛИЧИЕ от Stage 3 (02-20): раньше `recovering` сидел в отдельном красном
+/// bucket'е вместе с `error`. По новому дизайну пользователя у `error` свой
+/// красный shield, а `recovering` объединён с остальными «активными» статусами
+/// в жёлтый `reconnect`. Иконки теперь СТАТИЧНЫЕ (без пульса) — это просто
+/// цветовой код состояния, см. `update_tray_icon`.
 fn status_bucket(status: &str) -> &'static str {
     match status {
         "connected" => "connected",
-        "connecting" | "recovering" | "disconnecting" => "reconnect",
+        "connecting" | "reconnecting" | "recovering" => "reconnect",
+        "error" => "error",
+        // disconnected | disconnecting | unknown
         _ => "off",
     }
 }
@@ -45,51 +58,16 @@ pub fn load_tray_icon(status: &str, theme: &str) -> Image<'static> {
         ("connected", _)       => include_bytes!("../icons/tray/tray-dark-connected-32.png"),
         ("reconnect", "light") => include_bytes!("../icons/tray/tray-light-reconnect-32.png"),
         ("reconnect", _)       => include_bytes!("../icons/tray/tray-dark-reconnect-32.png"),
+        // 🔴 RED bucket — терминальная ошибка. Собственный красный shield glyph
+        // (02-22 redesign): пользователь сгенерировал tray-{dark,light}-error-32.png
+        // из своего .ico. Раньше (Stage 3) красного PNG не было — был placeholder на
+        // жёлтый reconnect-asset; теперь это настоящие красные иконки.
+        ("error", "light")     => include_bytes!("../icons/tray/tray-light-error-32.png"),
+        ("error", _)           => include_bytes!("../icons/tray/tray-dark-error-32.png"),
         (_, "light")           => include_bytes!("../icons/tray/tray-light-off-32.png"),
         (_, _)                 => include_bytes!("../icons/tray/tray-dark-off-32.png"),
     };
     Image::from_bytes(bytes).expect("Failed to load tray icon PNG")
-}
-
-/// Pulse task coordinator — для статуса `reconnect` tray иконка
-/// мерцает между полным-цветом и dimmed (тусклый off-icon). Даёт
-/// пользователю визуальный сигнал «что-то происходит» даже когда
-/// окно свёрнуто в трей.
-///
-/// Cancel flag общий per-process — start_pulse ставит false в старый
-/// флаг чтобы task чисто вышел, создаёт новый флаг для своего цикла.
-static PULSE_CANCEL: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
-
-fn stop_pulse() {
-    if let Ok(mut guard) = PULSE_CANCEL.lock() {
-        if let Some(flag) = guard.take() {
-            flag.store(true, Ordering::Relaxed);
-        }
-    }
-}
-
-fn start_pulse(app: tauri::AppHandle, theme: String) {
-    stop_pulse();
-    let cancel = Arc::new(AtomicBool::new(false));
-    if let Ok(mut guard) = PULSE_CANCEL.lock() {
-        *guard = Some(Arc::clone(&cancel));
-    }
-    tauri::async_runtime::spawn(async move {
-        // Чередуем reconnect-icon и off-icon каждые 550ms — это
-        // subtle-пульсация, не раздражающая, но заметная краем глаза.
-        let mut tick: u32 = 0;
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            let icon_status = if tick.is_multiple_of(2) { "reconnect" } else { "off" };
-            if let Some(tray) = app.tray_by_id("main-tray") {
-                tray.set_icon(Some(load_tray_icon(icon_status, &theme))).ok();
-            }
-            tick = tick.wrapping_add(1);
-            tokio::time::sleep(std::time::Duration::from_millis(550)).await;
-        }
-    });
 }
 
 /// Get current locale from AppState, defaulting to "ru".
@@ -117,10 +95,22 @@ pub fn build_tray_menu(app: &tauri::AppHandle, status: &str) -> tauri::Result<ta
             if is_ru { "Отменить" } else { "Cancel" },
             true,
         ),
-        "recovering" => (
+        // 02-20 status-UX split: «Переподключение» (re-establish туннеля) и
+        // «Восстановление» (ждём локальную сеть) — теперь РАЗНЫЕ статусы. Раньше
+        // единый recovering показывал «Переподключение…»; теперь у каждого свой
+        // ярлык. Toggle во время обоих — «Отмена» (можно прервать ожидание/ретрай,
+        // см. 02-STATUS-SPEC.md §4). Без отдельной ветки `reconnecting` падал бы в
+        // `_` → «Отключен»/«Подключиться» (неверный текст и действие).
+        "reconnecting" => (
             if is_ru { "Переподключение..." } else { "Reconnecting..." },
             "disconnect",
-            if is_ru { "Отключиться" } else { "Disconnect" },
+            if is_ru { "Отмена" } else { "Cancel" },
+            true,
+        ),
+        "recovering" => (
+            if is_ru { "Восстановление..." } else { "Recovering..." },
+            "disconnect",
+            if is_ru { "Отмена" } else { "Cancel" },
             true,
         ),
         "disconnecting" => (
@@ -178,29 +168,31 @@ pub fn build_tray_menu(app: &tauri::AppHandle, status: &str) -> tauri::Result<ta
 /// прилетает часто (коннект/реконнект/disconnect), так что иконка
 /// refresh'ится в течение нескольких секунд после смены темы.
 ///
-/// Reconnect bucket запускает pulse_task (мерцание 550ms) —
-/// визуальный сигнал что VPN не в стабильном состоянии. Любой
-/// другой status отменяет pulse и ставит статичную иконку.
+/// Иконка СТАТИЧНАЯ — это просто цветовой код состояния (02-22 redesign):
+/// 🟢 connected, 🟡 reconnect (все активные: connecting/reconnecting/recovering),
+/// 🔴 error, ⚪ off. Пульсация (мерцание 550ms из Stage 3) убрана — пользователь
+/// заменил indicator-стиль на solid color-coded shield glyphs, для которых
+/// мерцание не нужно: цвет shield'а сам по себе сообщает состояние.
 pub fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
     if let Some(tray) = app.tray_by_id("main-tray") {
         let system_theme = detect_windows_system_theme().to_string();
-        let bucket = status_bucket(status);
 
-        if bucket == "reconnect" {
-            // Pulsing icon для connecting/recovering/disconnecting
-            start_pulse(app.clone(), system_theme.clone());
-        } else {
-            // Static icon для connected / off
-            stop_pulse();
-            tray.set_icon(Some(load_tray_icon(bucket, &system_theme))).ok();
-        }
+        // Всегда статичная иконка — bucket резолвится из status в load_tray_icon.
+        // `disconnecting` (WR-06, FE-local transient, D-09) попадает в off bucket.
+        tray.set_icon(Some(load_tray_icon(status, &system_theme))).ok();
 
         let locale = get_locale(app);
         let is_ru = locale == "ru";
+        // 02-20 status-UX split: `recovering` и `reconnecting` теперь РАЗНЫЕ статусы.
+        // Раньше единый «recovering» показывал «Переподключение…» — теперь:
+        //   recovering   → «Восстановление…» (ждём возврата локальной сети),
+        //   reconnecting → «Переподключение…» (re-establish туннеля).
+        // Без отдельной ветки `reconnecting` падал в `_` → «Отключен» (неверно).
         let tooltip = match status {
             "connected" => if is_ru { "TrustTunnel Pro — Подключен" } else { "TrustTunnel Pro — Connected" },
             "connecting" => if is_ru { "TrustTunnel Pro — Подключение..." } else { "TrustTunnel Pro — Connecting..." },
-            "recovering" => if is_ru { "TrustTunnel Pro — Переподключение..." } else { "TrustTunnel Pro — Reconnecting..." },
+            "reconnecting" => if is_ru { "TrustTunnel Pro — Переподключение..." } else { "TrustTunnel Pro — Reconnecting..." },
+            "recovering" => if is_ru { "TrustTunnel Pro — Восстановление..." } else { "TrustTunnel Pro — Recovering..." },
             "disconnecting" => if is_ru { "TrustTunnel Pro — Отключение..." } else { "TrustTunnel Pro — Disconnecting..." },
             "error" => if is_ru { "TrustTunnel Pro — Ошибка" } else { "TrustTunnel Pro — Error" },
             _ => if is_ru { "TrustTunnel Pro — Отключен" } else { "TrustTunnel Pro — Disconnected" },
@@ -218,9 +210,35 @@ pub fn update_tray_icon(app: &tauri::AppHandle, status: &str) {
 pub fn tray_vpn_connect(app: tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return; };
 
-    // Check if already running
-    if let Ok(guard) = state.sidecar_child.lock() {
-        if guard.is_some() { return; }
+    // R8 / WR-02: refuse a connect ONLY when a session is genuinely live. A bare
+    // `guard.is_some()` was the same unsafe presence-only check R8 removed from the command
+    // path: a STALE `Some` (a supervisor that gave up before R3, or a respawned child that
+    // died without a clean Terminated) made the tray «Подключиться» silently no-op until
+    // the app was restarted. Refuse only when the status is active; otherwise the handle is
+    // stale → take + kill it and proceed (mirrors vpn_connect's R8 guard).
+    {
+        let status_now = *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner());
+        let session_active = matches!(
+            status_now,
+            VpnStatus::Connecting
+                | VpnStatus::Connected
+                | VpnStatus::Reconnecting
+                | VpnStatus::Recovering
+        );
+        if let Ok(mut guard) = state.sidecar_child.lock() {
+            if guard.is_some() {
+                if session_active {
+                    return;
+                }
+                if let Some(child) = guard.take() {
+                    child.child.kill().ok();
+                }
+                crate::logging::log_app(
+                    "WARN",
+                    "[tray] stale sidecar handle on an idle/failed session — cleared it and proceeding with connect (R8/WR-02)",
+                );
+            }
+        }
     }
 
     // Get config path: stored from last connect, or auto-detect
@@ -246,8 +264,8 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<AppState>() else { return; };
 
-        // Emit connecting status
-        app.emit("vpn-status", serde_json::json!({"status": "connecting"})).ok();
+        // Emit connecting status through the single mutator (STATUS-02).
+        set_vpn_status(&app, &state, VpnStatus::Connecting, None);
 
         // Kill stale sidecar processes
         kill_stale_sidecar();
@@ -261,28 +279,44 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
 
         // Reset flags
         if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
-        if let Ok(mut c) = state.is_connected.lock() { *c = false; }
+
+        // CR-03: bump the connection generation so THIS tray-started session owns a
+        // distinct number, exactly like `vpn_connect` does. Without this bump a stale
+        // reconnect supervisor from a previous session is NOT neutralized by a
+        // tray-initiated connect (the Codex HIGH stale-actor guard was bypassed on
+        // the tray path) — the old supervisor could still fire and kill/respawn over
+        // the tray-started session. `fetch_add` returns the PRE-increment value, so
+        // the captured generation for this session is that + 1. Mirror of Light's
+        // tray path.
+        let connect_generation =
+            state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
         let child_arc = Arc::clone(&state.sidecar_child);
         let disc_arc = Arc::clone(&state.disconnecting);
-        let conn_arc = Arc::clone(&state.is_connected);
 
         let sidecar_log_level = match log_level.as_str() {
             "error" | "warn" => "info",
             other => other,
         };
 
-        match sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc, conn_arc).await {
+        match sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc).await {
             Ok(child) => {
                 eprintln!("[tray_vpn_connect] Sidecar spawned OK (PID {})", child.child.pid());
                 if let Ok(mut guard) = state.sidecar_child.lock() {
                     *guard = Some(child);
                 }
-                app.emit("vpn-status", serde_json::json!({"status": "connecting"})).ok();
+                set_vpn_status(&app, &state, VpnStatus::Connecting, None);
+
+                // CR-03: arm the same 60s connect-timeout watchdog `vpn_connect` uses,
+                // so a tray-started session that never completes the handshake escapes
+                // "Connecting…" to an honest Error instead of hanging forever (D-05).
+                // Generation-guarded with the value captured above.
+                spawn_connect_timeout_watchdog(&app, connect_generation);
             }
             Err(e) => {
                 eprintln!("[tray_vpn_connect] Failed: {e}");
-                app.emit("vpn-status", serde_json::json!({"status": "error", "error": e.to_string()})).ok();
+                // e is a derived spawn error string, not a credential (D-29).
+                set_vpn_status(&app, &state, VpnStatus::Error, Some(e.to_string()));
             }
         }
     });
@@ -449,6 +483,9 @@ pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
         }
         "quit" => {
             if let Some(state) = app.try_state::<AppState>() {
+                // R4: signal shutdown (intent + generation bump) before the kill so a
+                // live reconnect supervisor can't respawn a sidecar after the user quit.
+                crate::commands::begin_shutdown(&state);
                 crate::commands::kill_sidecar_from_state(&state);
             }
             app.exit(0);
@@ -458,15 +495,34 @@ pub fn tray_menu_action(app: tauri::AppHandle, action: String) {
 }
 
 /// Current VPN status for tray-menu initial render (before listener
-/// catches any vpn-status event). Derived from AppState.is_connected —
-/// enough to pick Connect vs Disconnect button label.
+/// catches any vpn-status event). Reads the single `vpn_status` owner (D-01)
+/// instead of the legacy bool — enough to pick Connect vs Disconnect button label.
+///
+/// The `disconnecting` fallback is kept: "disconnecting" is a FE-local transient
+/// label that the Rust enum never carries (D-09), so when `vpn_status` is still
+/// `Disconnected` but the user just hit disconnect, the tray shows the transitional
+/// label. Command NAME + `String` return are unchanged (frontend caller untouched).
 #[tauri::command]
 pub fn tray_menu_current_status(app: tauri::AppHandle) -> String {
     if let Some(state) = app.try_state::<AppState>() {
-        if let Ok(c) = state.is_connected.lock() {
-            if *c {
-                return "connected".into();
-            }
+        let status = state
+            .vpn_status
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(VpnStatus::Disconnected);
+        match status {
+            VpnStatus::Connected => return "connected".into(),
+            VpnStatus::Connecting => return "connecting".into(),
+            VpnStatus::Error => return "error".into(),
+            // 02-20 status-UX split: surface the TRUE state from the tray-webview
+            // snapshot so a tray menu opened mid-recovery/mid-reconnect shows the right
+            // label, not the disconnected fallback and not a merged one. Each maps to
+            // its OWN canonical wire string. The tray bucket/label refinement (yellow
+            // for "reconnecting", red for "recovering") is Stage 3 of 02-20; this
+            // backend mapping only keeps the strings honest + the build green here.
+            VpnStatus::Recovering => return "recovering".into(),
+            VpnStatus::Reconnecting => return "reconnecting".into(),
+            VpnStatus::Disconnected => {}
         }
         if let Ok(d) = state.disconnecting.lock() {
             if *d {
@@ -511,11 +567,34 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
         if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
         if let Ok(mut d) = state.disconnecting.lock() { *d = true; }
 
+        // WR-06: kill_sidecar can take seconds (it force-runs taskkill). The tray
+        // icon is driven only by vpn-status events, and no event fires until the
+        // kill completes — so without this the icon would keep showing the previous
+        // (e.g. green "connected") state while the menu text already says
+        // "Отключение...". Proactively move the icon to the "disconnecting"
+        // (reconnect bucket) so icon and menu agree during the kill. No visible
+        // vocabulary change (D-09): "disconnecting" is the existing FE-local
+        // transient label, not a new backend status — vpn_status stays untouched.
+        update_tray_icon(&app, "disconnecting");
+
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
+            // D-08 lifecycle marker (8): sidecar killed on exit (tray quit path) —
+            // fixed phrase, DEV-gated (D-11).
+            sidecar::emit_killed_on_exit_marker(&app_clone);
             sidecar::kill_sidecar(child).await.ok();
             routing_rules::cleanup_hosts_block().ok();
-            app_clone.emit("vpn-status", serde_json::json!({"status": "disconnected"})).ok();
+            // Re-look up state inside the 'static task and route through the mutator.
+            if let Some(state) = app_clone.try_state::<AppState>() {
+                set_vpn_status(&app_clone, &state, VpnStatus::Disconnected, None);
+                // WR-01: clear the process-wide `disconnecting` intent flag after the
+                // disconnect completes (mirrors `vpn_disconnect`). The sidecar's
+                // Terminated arm already read `was_intentional == true` DURING the
+                // `kill_sidecar` above, so resetting after the final Disconnected
+                // status write cannot trigger a spurious reconnect. This prevents a
+                // stale `true` from outliving the tray-initiated disconnect.
+                if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+            }
         });
     }
 }

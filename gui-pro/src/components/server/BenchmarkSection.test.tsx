@@ -84,4 +84,47 @@ describe("BenchmarkSection", () => {
     const card = screen.getByTestId("benchmark-section-card");
     expect(card).toBeInTheDocument();
   });
+
+  // ─── Variant: empty state shows the "not yet run" subtitle ───────────────
+  // RESEARCH §3 stream 4 — BenchmarkSection variants. The empty state was only
+  // asserted via the button; pin its subtitle copy too (asserted by i18n text,
+  // not CSS, per D-04).
+  it("empty_state_shows_not_run_subtitle", () => {
+    render(<BenchmarkSection sshParams={mockSshParams} />);
+
+    expect(
+      screen.getByText(i18n.t("server.service.benchmark.card.empty"))
+    ).toBeVisible();
+    // The card title is always present regardless of state.
+    expect(
+      screen.getByRole("heading", {
+        name: i18n.t("server.service.benchmark.card.title"),
+      })
+    ).toBeVisible();
+    // No "last run" subtitle leaks into the empty state.
+    expect(screen.queryByText(/последняя проверка/i)).toBeNull();
+  });
+
+  // ─── Variant: modern single-object history format renders open-results ───
+  // The pre-existing has-history test stores the OLD v17.x array format
+  // (migration path). Pin the CURRENT single-object format too — loadLast must
+  // accept it and the section must switch to the "Open results" affordance.
+  it("modern_single_object_history_shows_open_results", () => {
+    const record = makeRecord("2026-05-18T14:30:00.000Z");
+    // Current saveLast format: a single object (NOT wrapped in an array).
+    localStorage.setItem(LS_KEY, JSON.stringify(record));
+
+    render(<BenchmarkSection sshParams={mockSshParams} />);
+
+    expect(
+      screen.getByRole("button", { name: /открыть результаты/i })
+    ).toBeVisible();
+    // The empty-state button must NOT be shown.
+    expect(
+      screen.queryByRole("button", { name: /проверить качество/i })
+    ).toBeNull();
+    // Subtitle reflects the last-run timestamp.
+    const subtitle = screen.getByText(/последняя проверка/i);
+    expect(subtitle.textContent).toMatch(/\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}/);
+  });
 });

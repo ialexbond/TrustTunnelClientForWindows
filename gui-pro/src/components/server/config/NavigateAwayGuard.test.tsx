@@ -98,4 +98,38 @@ describe("NavigateAwayGuard", () => {
     });
     expect(resolved).toBe("stay");
   });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Phase 3 gap-fill: title text + onClose (Escape) → stay
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("renders the unsaved-changes title and description from i18n", async () => {
+    render(<HookHarness onChoice={() => {}} />);
+    fireEvent.click(screen.getByTestId("open-guard"));
+    expect(
+      await screen.findByText(i18n.t("server.config.unsaved_title")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t("server.config.unsaved_desc")),
+    ).toBeInTheDocument();
+  });
+
+  it("Modal onClose (Escape) resolves the promise as 'stay' (D-14.1 stay-path)", async () => {
+    let resolved: NavigationChoice | null = null;
+    render(
+      <HookHarness
+        onChoice={(c) => {
+          resolved = c;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("open-guard"));
+    // Wait for the dialog content to mount.
+    await screen.findByText(i18n.t("server.config.unsaved_title"));
+    // Escape triggers Modal.onClose → handleChoice("stay").
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    expect(resolved).toBe("stay");
+  });
 });

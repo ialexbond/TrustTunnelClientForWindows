@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { ConfirmDialogProvider } from "../../shared/ui/ConfirmDialogProvider";
 import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 import i18n from "../../shared/i18n";
 import { ConfigurationTab } from "./ConfigurationTab";
-import type { ConfigBundle } from "./config/types";
+import { makeBundle } from "../../test/fixtures";
 
 const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -26,36 +26,10 @@ vi.mock("../../shared/hooks/useActivityLog", () => ({
 
 const SSH_PARAMS = { host: "test", port: "22", user: "u", password: "p" };
 
-const MOCK_BUNDLE: ConfigBundle = {
-  vpnToml: `listen_address = "0.0.0.0:443"
-ipv6_available = true
-`,
-  hostsToml: `[[main_hosts]]
-hostname = "a.com"
-`,
-  credentialsToml: `[[client]]
-username = "user1"
-password = "TOPSECRET123"
-`,
-  rulesToml: `[[rule]]
-cidr = "10.0.0.0/8"
-action = "allow"
-`,
-  typed: {
-    listen_address: "0.0.0.0:443",
-    ipv6_available: true,
-    allow_private_network_connections: false,
-    log_level: null,
-    auth_failure_status_code: 407,
-    ping_enable: false,
-    speedtest_enable: false,
-    ping_path: "/ping",
-    speedtest_path: "/speedtest",
-    credentials_file: "credentials.toml",
-  },
-  allowedSni: [],
-  serviceStatus: "active",
-};
+// [Phase 3] The inlined MOCK_BUNDLE literal was deduped into the Wave-0
+// makeBundle() factory (gui-pro/src/test/fixtures/config.ts). Values — including
+// the D-29 probe secret TOPSECRET123 — are byte-identical to the old literal.
+const MOCK_BUNDLE = makeBundle();
 
 function renderTab(
   overrides: Partial<Parameters<typeof ConfigurationTab>[0]> = {},
@@ -83,6 +57,11 @@ function renderTab(
  *   D-PRE-4   — Storybook escape hatch (_storybook + _mockBundle bypass invoke)
  *   REQ-15.0  — loading + error states render
  *   D-17.1    — Footer docs link opens external URL
+ *
+ * Phase 3 safety-net additions (Stream 3): retry→second invoke, accordion
+ * expand/collapse aria-expanded, content-on-expand, edit-in-Users nav+log,
+ * empty-file body, storybook forceLoading/forceError/null states; the
+ * loading-state false green (svg-count) rewritten to accordions-absent.
  */
 describe("ConfigurationTab (raw-view)", () => {
   beforeEach(() => {
@@ -171,11 +150,27 @@ describe("ConfigurationTab (raw-view)", () => {
     );
   });
 
-  it("Loading state shows skeleton", () => {
+  // ════════════════════════════════════════════════════════════════════════
+  // Loading / error / empty states (Phase 3 gap-fill + false-green fix)
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("Loading state shows skeleton placeholders and NO file accordions", () => {
+    // [Phase 3 FG-1] Previously asserted `[aria-hidden="true"]` count > 0 — a
+    // false green (D-04) that matched ANY decorative svg/element on the page,
+    // including the chevrons/icons of a rendered accordion. The real loading
+    // contract: the 4 file accordions are ABSENT (no vpn.toml trigger button
+    // exists) while skeleton placeholders are shown in their place.
     mockInvoke.mockImplementation(() => new Promise(() => {}));
     renderTab();
+    expect(
+      screen.queryByRole("button", { name: /vpn\.toml/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /credentials\.toml/i }),
+    ).not.toBeInTheDocument();
+    // Skeleton placeholders (aria-hidden divs) render in the loading layout.
     const skeletons = document.querySelectorAll('[aria-hidden="true"]');
-    expect(skeletons.length).toBeGreaterThan(0);
+    expect(skeletons.length).toBe(4);
   });
 
   it("Error state shows retry button", async () => {
@@ -185,6 +180,154 @@ describe("ConfigurationTab (raw-view)", () => {
       name: /Попробовать снова|Повторить/i,
     });
     expect(retryBtn).toBeInTheDocument();
+  });
+
+  it("Error retry button triggers a SECOND server_get_config_bundle invoke", async () => {
+    // First load fails → error state; clicking Retry re-invokes the bundle load.
+    mockInvoke.mockRejectedValueOnce(new Error("SSH_FAILED"));
+    renderTab();
+    const retryBtn = await screen.findByRole("button", {
+      name: /Повторить|Попробовать снова/i,
+    });
+    // Second attempt succeeds.
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    fireEvent.click(retryBtn);
+    await waitFor(() => {
+      const bundleCalls = mockInvoke.mock.calls.filter(
+        (c) => c[0] === "server_get_config_bundle",
+      );
+      expect(bundleCalls.length).toBe(2);
+    });
+    // Recovery: accordions appear after the successful retry.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /vpn\.toml/i }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("_forceLoading escape hatch shows skeleton (no accordions)", () => {
+    renderTab({ _storybook: true, _mockBundle: MOCK_BUNDLE, _forceLoading: true });
+    expect(
+      screen.queryByRole("button", { name: /vpn\.toml/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("_forceError escape hatch shows the error body + retry button", async () => {
+    renderTab({ _storybook: true, _forceError: "BOOM" });
+    expect(await screen.findByText("BOOM")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Повторить|Попробовать снова/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders nothing meaningful when storybook bundle is null", () => {
+    const { container } = renderTab({ _storybook: true, _mockBundle: undefined });
+    // bundle === null → component returns null (no accordions, no error).
+    expect(
+      screen.queryByRole("button", { name: /vpn\.toml/i }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Accordion expand/collapse + content (Phase 3 gap-fill)
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("accordions start collapsed (aria-expanded=false) and toggle on click", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    renderTab();
+    const vpnTrigger = await screen.findByRole("button", { name: /vpn\.toml/i });
+    expect(vpnTrigger).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(vpnTrigger);
+    await waitFor(() =>
+      expect(vpnTrigger).toHaveAttribute("aria-expanded", "true"),
+    );
+    fireEvent.click(vpnTrigger);
+    await waitFor(() =>
+      expect(vpnTrigger).toHaveAttribute("aria-expanded", "false"),
+    );
+  });
+
+  it("expanding vpn.toml reveals its raw content", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    renderTab();
+    const vpnTrigger = await screen.findByRole("button", { name: /vpn\.toml/i });
+    fireEvent.click(vpnTrigger);
+    await waitFor(() =>
+      expect(
+        screen.getByText((c) => c.includes("listen_address")),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("expanding hosts.toml reveals its raw content", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    renderTab();
+    const hostsTrigger = await screen.findByRole("button", {
+      name: /hosts\.toml/i,
+    });
+    fireEvent.click(hostsTrigger);
+    await waitFor(() =>
+      expect(
+        screen.getByText((c) => c.includes("main_hosts")),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("expanding rules.toml reveals its raw content", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    renderTab();
+    const rulesTrigger = await screen.findByRole("button", {
+      name: /rules\.toml/i,
+    });
+    fireEvent.click(rulesTrigger);
+    await waitFor(() =>
+      expect(
+        screen.getByText((c) => c.includes("10.0.0.0/8")),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("empty file shows the empty-file body instead of a <pre>", async () => {
+    mockInvoke.mockResolvedValueOnce(makeBundle({ vpnToml: "" }));
+    renderTab();
+    const vpnTrigger = await screen.findByRole("button", { name: /vpn\.toml/i });
+    fireEvent.click(vpnTrigger);
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          i18n.t("server.config.empty_file", { defaultValue: "Файл пуст" }),
+        ),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Edit-in-Users navigation (Phase 3 gap-fill)
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("credentials «Редактировать в Пользователях» calls onNavigateToTab('users') + logs", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    const onNavigateToTab = vi.fn();
+    renderTab({ onNavigateToTab });
+    const credTrigger = await screen.findByRole("button", {
+      name: /credentials\.toml/i,
+    });
+    fireEvent.click(credTrigger);
+    const editBtn = await screen.findByRole("button", {
+      name: i18n.t("server.config.edit_in_users", {
+        defaultValue: "Редактировать в Пользователях",
+      }),
+    });
+    fireEvent.click(editBtn);
+    expect(onNavigateToTab).toHaveBeenCalledWith("users");
+    // Navigation is recorded in the activity log (not the credential value).
+    expect(mockActivityLog).toHaveBeenCalledWith(
+      "USER",
+      "config.navigate.users",
+      "ConfigurationTab",
+    );
   });
 
   it("Footer docs link opens external URL (D-17.1)", async () => {
@@ -205,5 +348,29 @@ describe("ConfigurationTab (raw-view)", () => {
         expect.stringContaining("CONFIGURATION.md"),
       ),
     );
+  });
+
+  it("only the edit-in-users button lives under the credentials accordion", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE);
+    renderTab();
+    const credTrigger = await screen.findByRole("button", {
+      name: /credentials\.toml/i,
+    });
+    fireEvent.click(credTrigger);
+    const editBtn = await screen.findByRole("button", {
+      name: i18n.t("server.config.edit_in_users", {
+        defaultValue: "Редактировать в Пользователях",
+      }),
+    });
+    // The edit button is scoped to the credentials region; vpn/hosts/rules do
+    // not get one. Sanity-check there is exactly one edit-in-users button.
+    const allEdit = screen.getAllByRole("button", {
+      name: i18n.t("server.config.edit_in_users", {
+        defaultValue: "Редактировать в Пользователях",
+      }),
+    });
+    expect(allEdit).toHaveLength(1);
+    expect(within(document.body).getByText(/credentials\.toml/i)).toBeInTheDocument();
+    expect(editBtn).toBeInTheDocument();
   });
 });

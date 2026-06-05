@@ -18,6 +18,7 @@ import type { UpdateInfo } from "../shared/types";
 import { open } from "@tauri-apps/plugin-shell";
 import { useSnackBar } from "../shared/ui/SnackBarContext";
 import { formatError } from "../shared/utils/formatError";
+import { buildVersionLabel } from "../shared/utils/buildVersionLabel";
 
 interface AboutPanelProps {
   updateInfo: UpdateInfo;
@@ -82,6 +83,10 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
   };
 
   const version = updateInfo.currentVersion || "3.0.0";
+  // T-13 build hash: append `-<hash>` to the version when a build hash was
+  // injected at build time (VITE_BUILD_HASH → __BUILD_HASH__ via vite define).
+  // Graceful fallback to bare `v{version}` when unset. See buildVersionLabel.
+  const versionLabel = buildVersionLabel(version, __BUILD_HASH__);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto py-6 px-4">
@@ -150,7 +155,7 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             className="text-[11px] font-mono px-2.5 py-0.5 rounded-full"
             style={{ backgroundColor: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
           >
-            v{version}
+            v{versionLabel}
           </span>
         </div>
 

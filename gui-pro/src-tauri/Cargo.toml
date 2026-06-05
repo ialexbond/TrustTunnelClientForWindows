@@ -61,6 +61,27 @@ rand = "0.8"
 # `apply_win11_rounded_corners`) — не тянем windows crate, чтобы
 # избежать HWND type-mismatch с версией, встроенной в Tauri.
 
+# Job Object FFI (D-06 / STATUS-04): сайдкар привязывается к Job Object с
+# KILL_ON_JOB_CLOSE, чтобы ОС убивала его при смерти родителя (включая краш).
+# Берём windows-sys (официальный MS crate, УЖЕ транзитивно в Cargo.lock — нулевая
+# новая загрузка), а НЕ полный `windows` crate и НЕ `win32job` (он тянет
+# `windows ^0.61`). JobObjects не используют HWND, так что правило avoid-windows
+# здесь не применимо. Только нужные модули: JobObjects/Threading/Foundation.
+#
+# 02-14 (STATUS-05, real-time local-loss detection): добавлены ТОЛЬКО features к
+# УЖЕ закреплённому windows-sys 0.59 — это НЕ новый crate и НЕ новая загрузка
+# (Package Legitimacy Gate), а включение модулей на существующей зависимости.
+# NotifyIpInterfaceChange / MIB_IPINTERFACE_ROW в windows-sys 0.59 закрыты под
+# all(Win32_NetworkManagement_Ndis, Win32_Networking_WinSock) (тип ADDRESS_FAMILY
+# живёт в WinSock, а row-структуры — в Ndis), поэтому нужны три feature:
+# Win32_NetworkManagement_IpHelper + Win32_NetworkManagement_Ndis +
+# Win32_Networking_WinSock. Вместе они дают NotifyIpInterfaceChange /
+# CancelMibChangeNotify2 + MIB_IPINTERFACE_ROW / MIB_NOTIFICATION_TYPE, которыми
+# connectivity.rs будит монитор мгновенно при смене состояния сетевого интерфейса
+# (выдернули кабель / выключили Wi-Fi), вместо ожидания ~10-15s пробинга (Plan 02-07).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+
 [dev-dependencies]
 regex = "1"
 

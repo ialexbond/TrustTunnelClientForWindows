@@ -70,25 +70,51 @@ function TrayMenu() {
     void invoke<boolean>("tray_menu_has_config").then((b) => {
       setHasConfig(Boolean(b));
     });
+    // D-08 / Pitfall 3: harden the async-unlisten StrictMode race. This file
+    // is mounted under <React.StrictMode>, so the effect runs mount → unmount
+    // → mount. A bare `unlisten.then((fn) => fn())` cleanup can let a
+    // late-resolving listener survive the first unmount (double registration →
+    // double status updates). Guard with a cancelled flag + stored fn: if
+    // cleanup already ran when listen() resolves, unlisten immediately.
+    let cancelled = false;
+    let resolvedUnlisten: (() => void) | null = null;
     const unlistenStatus = listen<{ status: VpnStatus }>("vpn-status", (e) => {
       if (e.payload?.status) setStatus(e.payload.status);
     });
+    void unlistenStatus.then((fn) => {
+      if (cancelled) fn();
+      else resolvedUnlisten = fn;
+    });
     return () => {
-      void unlistenStatus.then((fn) => fn());
+      cancelled = true;
+      if (resolvedUnlisten) resolvedUnlisten();
     };
   }, []);
 
   // Re-check config каждый раз когда окно получает focus (пользователь
   // мог импортировать config пока tray menu было hidden).
   useEffect(() => {
+    // WR-03: same async-unlisten StrictMode hardening as the vpn-status listener
+    // above. This component mounts under <React.StrictMode> (mount → unmount →
+    // mount); a bare `unlisten.then((fn) => fn())` cleanup can let a
+    // late-resolving focus listener survive the first unmount, double-registering
+    // and firing tray_menu_has_config twice per focus. Guard with cancelled flag
+    // + stored fn so a listener that resolves after teardown is unlistened at once.
     const w = getCurrentWindow();
+    let cancelled = false;
+    let resolvedUnlisten: (() => void) | null = null;
     const unlisten = w.listen("tauri://focus", () => {
       void invoke<boolean>("tray_menu_has_config").then((b) => {
         setHasConfig(Boolean(b));
       });
     });
+    void unlisten.then((fn) => {
+      if (cancelled) fn();
+      else resolvedUnlisten = fn;
+    });
     return () => {
-      void unlisten.then((fn) => fn());
+      cancelled = true;
+      if (resolvedUnlisten) resolvedUnlisten();
     };
   }, []);
 
@@ -111,9 +137,20 @@ function TrayMenu() {
 
   // Auto-hide on blur или Escape.
   useEffect(() => {
+    // WR-03: same async-unlisten StrictMode hardening as above — the bare
+    // `unlistenBlur.then((fn) => fn())` cleanup could leak a late-resolving blur
+    // listener across the StrictMode mount→unmount→mount cycle. Guard with
+    // cancelled flag + stored fn. (The keydown listener uses removeEventListener,
+    // which is already idempotent — only the async Tauri listener needs guarding.)
     const w = getCurrentWindow();
+    let cancelled = false;
+    let resolvedUnlistenBlur: (() => void) | null = null;
     const unlistenBlur = w.listen("tauri://blur", () => {
       void w.hide();
+    });
+    void unlistenBlur.then((fn) => {
+      if (cancelled) fn();
+      else resolvedUnlistenBlur = fn;
     });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -122,7 +159,8 @@ function TrayMenu() {
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      void unlistenBlur.then((fn) => fn());
+      cancelled = true;
+      if (resolvedUnlistenBlur) resolvedUnlistenBlur();
       window.removeEventListener("keydown", onKey);
     };
   }, []);

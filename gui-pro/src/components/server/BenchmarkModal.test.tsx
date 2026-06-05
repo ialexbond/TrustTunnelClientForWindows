@@ -1,12 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { renderWithProviders as render } from "../../test/test-utils";
 import { BenchmarkModal } from "./BenchmarkModal";
-// Vite ?raw import — avoids node:fs / __dirname (same pattern as Plan 17-02 parser tests)
-import BenchmarkModalSource from "./BenchmarkModal.tsx?raw";
+import { captureListeners } from "../../test/fixtures";
 
 // ─── Mock: Tauri plugin-shell ─────────────────────────────────────────────────
 vi.mock("@tauri-apps/plugin-shell", () => ({
@@ -14,6 +13,8 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 }));
 
 // ─── Mock: Tauri event (listen) ───────────────────────────────────────────────
+// Default no-op; tests that need real progress events re-point it with
+// captureListeners() (Wave-0 event-capture helper) before render.
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}), // returns unlisten no-op
 }));
@@ -88,6 +89,13 @@ describe("BenchmarkModal", () => {
     confirmMock.mockClear().mockResolvedValue(true);
     localStorage.clear();
     i18n.changeLanguage("ru");
+  });
+
+  // Safety net: a fake-timer test that times out may skip its own
+  // `vi.useRealTimers()` finally block, leaking fake timers into the next
+  // (real-timer) test and hanging its userEvent interaction. Always restore.
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ─── 1: idle_initial_when_no_history ─────────────────────────────────────
@@ -348,41 +356,357 @@ describe("BenchmarkModal", () => {
     );
   });
 
-  // ─── 16: early_return_null_anti_pattern_absent (T-03) ────────────────────
-  it("early_return_null_anti_pattern_absent", () => {
-    const content = BenchmarkModalSource;
-    expect(content).not.toContain("if (!isOpen) return null");
+  // ════════════════════════════════════════════════════════════════════════
+  //  REWRITTEN false greens (was :352-387 `?raw` source-scan `.toContain`)
+  //
+  //  RESEARCH §3 stream 4: the old tests imported `BenchmarkModal.tsx?raw`
+  //  and asserted on the SOURCE TEXT (`content.toContain("justify-end gap-2")`,
+  //  `content.not.toContain("if (!isOpen) return null")`, etc.). A source-scan
+  //  green proves nothing about the RENDERED DOM — it would stay green even if
+  //  the component rendered nothing. These are rewritten to BEHAVIORAL
+  //  assertions that exercise the real lifecycle / rendered output.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ─── 16 (rewrite of early_return_null_anti_pattern_absent): T-03 ─────────
+  // The old test scanned source for `if (!isOpen) return null`. The behavioral
+  // invariant it was protecting: BenchmarkModal renders <Modal> UNCONDITIONALLY,
+  // so when isOpen flips true→false the Modal stays mounted long enough to play
+  // its 200ms exit animation. If the anti-pattern existed, React would unmount
+  // the whole subtree synchronously and the content would vanish immediately.
+  it("T03_content_stays_mounted_during_exit_animation_when_closed", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <BenchmarkModal
+          isOpen={true}
+          onClose={vi.fn()}
+          sshParams={sshParams}
+        />
+      );
+      // Open → Modal mounts after the double-RAF enter flush.
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+      expect(
+        screen.getByRole("heading", { level: 2, name: /проверка качества сервера/i })
+      ).toBeInTheDocument();
+
+      // Flip to closed — parent must NOT short-circuit to null.
+      rerender(
+        <BenchmarkModal
+          isOpen={false}
+          onClose={vi.fn()}
+          sshParams={sshParams}
+        />
+      );
+      // Immediately after close (before the 200ms exit timer fires) the modal
+      // heading is STILL in the DOM — proves no `if (!isOpen) return null`.
+      expect(
+        screen.queryByRole("heading", { level: 2, name: /проверка качества сервера/i })
+      ).toBeInTheDocument();
+
+      // After the 200ms exit animation, Modal unmounts itself (mounted=false).
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(
+        screen.queryByRole("heading", { level: 2, name: /проверка качества сервера/i })
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  // ─── 17: no_stage_labels_in_source (B1 cleanup) ──────────────────────────
-  it("B1_old_stage_labels_absent", () => {
-    const content = BenchmarkModalSource;
-    expect(content).not.toContain("Проверяем сеть");
-    expect(content).not.toContain("Замеряем скорость");
-    // No imports of removed components
-    expect(content).not.toContain('from "./benchmark/HorizontalProgressBar"');
-    expect(content).not.toContain('from "./benchmark/BenchmarkLiveTail"');
-    expect(content).not.toContain('from "./benchmark/BasicInfoCard"');
+  // ─── 17 (rewrite of B1_old_stage_labels_absent): no stage labels rendered ─
+  // The old test scanned source for the strings "Проверяем сеть" /
+  // "Замеряем скорость". Behavioral: while running, NO stage labels are shown —
+  // only the generic running text + an indeterminate progress bar.
+  it("running_renders_no_stage_labels", async () => {
+    vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByText(/Идёт проверка сервера/i));
+
+    // The removed per-stage labels must NOT appear in the rendered DOM.
+    expect(screen.queryByText(/Проверяем сеть/i)).toBeNull();
+    expect(screen.queryByText(/Замеряем скорость/i)).toBeNull();
+    // Only the generic running text + bar remain.
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
   });
 
-  // ─── 18: no_raw_accordion_in_source (UAT 2026-05-20 round 4) ─────────────
-  it("no_raw_accordion_in_completed_view", () => {
-    const content = BenchmarkModalSource;
-    // Accordion import should still exist (it may be imported for other uses)
-    // but raw-output accordion id must be gone from completed view
-    expect(content).not.toContain('"raw-output"');
-    expect(content).not.toContain("rawOutputAccordion");
+  // ─── 18 (rewrite of no_raw_accordion_in_completed_view): behavioral ──────
+  // The old test scanned source for `"raw-output"` / `rawOutputAccordion`.
+  // Behavioral: the completed view shows NO raw-output accordion control and
+  // does NOT render the raw stdout text into the DOM (UAT 2026-05-20 round 4).
+  it("completed_view_has_no_raw_output_accordion", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(BENCHMARK_RESULT_WITH_LINK);
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByText(/Длительность/i), { timeout: 3000 });
+
+    // No accordion toggle labelled with the raw-output title.
+    expect(screen.queryByRole("button", { name: /Вывод скрипта/i })).toBeNull();
+    expect(screen.queryByText(/Вывод скрипта/i)).toBeNull();
+    // The raw stdout content itself is never rendered.
+    expect(screen.queryByText(/1\. Basic Information/i)).toBeNull();
+    expect(screen.queryByText(/AS41745/i)).toBeNull();
   });
 
-  // ─── 19: cancel_button_follows_modal_footer_convention ────────────────────
-  it("cancel_button_follows_modal_footer_convention", () => {
-    // UAT 2026-05-20 round 5: design system Modal footer pattern is
-    // `flex justify-end gap-2 mt-N`. NOT justify-center (rejected as off-design).
-    const content = BenchmarkModalSource;
-    expect(content).toContain("justify-end gap-2");
-    // Anti-presence: the previous justify-center attempt is gone.
-    expect(content).not.toMatch(/justify-center.*Cancel button/i);
-    // Anti-presence: also not the original "justify-end w-full" with extra empty space.
-    expect(content).not.toContain("justify-end w-full");
+  // ─── 19 (rewrite of cancel_button_follows_modal_footer_convention) ───────
+  // The old test scanned source for `"justify-end gap-2"` (a CSS class) — both
+  // a source-scan AND a CSS coupling (double D-04 violation). Behavioral: the
+  // running view shows exactly ONE actionable control — the Cancel button — and
+  // no other footer button competes with it. We assert by ROLE/accessible name,
+  // not by class.
+  it("running_footer_shows_only_cancel_button", async () => {
+    vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+    renderModal({ _forceState: { kind: "idle" } });
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+
+    await waitFor(() => screen.getByRole("button", { name: /Отменить/i }));
+
+    // The only button in the running view is Cancel — no Close / rerun / retry.
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName(/Отменить/i);
+    expect(screen.queryByRole("button", { name: /Закрыть/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Проверить ещё раз/i })).toBeNull();
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  NEW characterization cases (RESEARCH §3 stream 4 — Benchmark gaps ~7)
+  //  Progress / timers / events — fake timers + Wave-0 event-capture helper.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ─── 20: aria-valuenow updates from benchmark-progress event ─────────────
+  it("progress_event_sets_aria_valuenow", async () => {
+    const events = captureListeners();
+    vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+    renderModal({ _forceState: { kind: "running" } });
+
+    // Initially indeterminate — aria-busy, no aria-valuenow.
+    const barBefore = screen.getByRole("progressbar");
+    expect(barBefore).toHaveAttribute("aria-busy", "true");
+    expect(barBefore).not.toHaveAttribute("aria-valuenow");
+
+    // Listener registered while running.
+    await waitFor(() => expect(events.count("benchmark-progress")).toBeGreaterThan(0));
+
+    act(() => {
+      events.emitEvent("benchmark-progress", { percent: 37 });
+    });
+
+    const barAfter = screen.getByRole("progressbar");
+    expect(barAfter).toHaveAttribute("aria-valuenow", "37");
+    expect(barAfter).toHaveAttribute("aria-busy", "false");
+    // Percent label rendered.
+    expect(screen.getByText("37%")).toBeInTheDocument();
+  });
+
+  // ─── 21: progress is monotonic — a lower percent is ignored ──────────────
+  it("progress_event_is_monotonic", async () => {
+    const events = captureListeners();
+    vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+    renderModal({ _forceState: { kind: "running" } });
+    await waitFor(() => expect(events.count("benchmark-progress")).toBeGreaterThan(0));
+
+    act(() => {
+      events.emitEvent("benchmark-progress", { percent: 60 });
+    });
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "60");
+
+    // A regressive value must NOT lower the bar (Math.max guard).
+    act(() => {
+      events.emitEvent("benchmark-progress", { percent: 25 });
+    });
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "60");
+
+    // A higher value advances it.
+    act(() => {
+      events.emitEvent("benchmark-progress", { percent: 88 });
+    });
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "88");
+  });
+
+  // ─── 22: _forcePercent overrides the live percent (Storybook hook) ───────
+  it("forcePercent_renders_given_percent", () => {
+    renderModal({ _forceState: { kind: "running" }, _forcePercent: 42 });
+
+    const bar = screen.getByRole("progressbar");
+    expect(bar).toHaveAttribute("aria-valuenow", "42");
+    expect(bar).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByText("42%")).toBeInTheDocument();
+  });
+
+  // ─── 23: 5s idle without progress reverts to indeterminate ───────────────
+  it("progress_reverts_to_indeterminate_after_5s_idle", async () => {
+    vi.useFakeTimers();
+    try {
+      const events = captureListeners();
+      vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+      render(
+        <BenchmarkModal
+          isOpen={true}
+          onClose={vi.fn()}
+          sshParams={sshParams}
+          _forceState={{ kind: "running" }}
+        />
+      );
+
+      // Flush the `listen().then(...)` microtask that registers the listener.
+      // Under fake timers `waitFor`'s real-timer polling never advances, so we
+      // flush microtasks via an empty async act instead.
+      await act(async () => {});
+      expect(events.count("benchmark-progress")).toBeGreaterThan(0);
+
+      act(() => {
+        events.emitEvent("benchmark-progress", { percent: 50 });
+      });
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+
+      // 5s pass with no further progress → fallback timer fires → setPercent(null).
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      const bar = screen.getByRole("progressbar");
+      expect(bar).not.toHaveAttribute("aria-valuenow");
+      expect(bar).toHaveAttribute("aria-busy", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ─── 24: cancelled → restart resets to idle ──────────────────────────────
+  it("cancelled_restart_resets_to_idle", async () => {
+    renderModal({ _forceState: { kind: "cancelled" } });
+
+    expect(screen.getByText(/Проверка была отменена/i)).toBeVisible();
+
+    // "Запустить снова" returns to the idle view (no auto re-invoke).
+    await userEvent.click(screen.getByRole("button", { name: /Запустить снова/i }));
+
+    expect(screen.getByText(/Нажмите «Проверить качество»/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /Запустить проверку/i })).toBeVisible();
+    // Restart is local state-only — no benchmark invoked.
+    expect(
+      vi.mocked(invoke).mock.calls.filter((c) => c[0] === "server_run_benchmark")
+    ).toHaveLength(0);
+  });
+
+  // ─── 25: error → retry resets to idle ────────────────────────────────────
+  it("error_retry_resets_to_idle", async () => {
+    renderModal({ _forceState: { kind: "error", message: "boom-network-fail" } });
+
+    expect(screen.getByText(/boom-network-fail/i)).toBeVisible();
+    expect(screen.getByText(/Ошибка:/i)).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: /Повторить/i }));
+
+    // Retry goes back to idle (NOT an automatic re-run).
+    expect(screen.getByText(/Нажмите «Проверить качество»/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /Запустить проверку/i })).toBeVisible();
+  });
+
+  // ─── 26: backdrop click blocked while running ────────────────────────────
+  it("backdrop_click_does_not_close_while_running", async () => {
+    const onClose = vi.fn();
+    vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+    render(
+      <BenchmarkModal
+        isOpen={true}
+        onClose={onClose}
+        sshParams={sshParams}
+        _forceState={{ kind: "idle" }}
+      />
+    );
+    await userEvent.click(screen.getByRole("button", { name: /запустить проверку/i }));
+    await waitFor(() => screen.getByText(/Идёт проверка сервера/i));
+
+    // The backdrop is the portal root's flex container — simulate a full
+    // mousedown+mouseup gesture on it. While running closeOnBackdrop=false, so
+    // onClose must NOT fire and the running view stays mounted.
+    const heading = screen.getByRole("heading", { level: 2, name: /проверка качества сервера/i });
+    // The backdrop is the outermost fixed-inset div in the portal.
+    const backdrop = heading.closest("div.fixed");
+    expect(backdrop).not.toBeNull();
+    fireEvent.mouseDown(backdrop!);
+    fireEvent.mouseUp(backdrop!);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText(/Идёт проверка сервера/i)).toBeVisible();
+  });
+
+  // ─── 27: T-03 delayed cleanup — running state reset 200ms after close ─────
+  it("T03_delayed_cleanup_resets_running_state_after_close", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(invoke).mockReturnValue(new Promise(() => {}));
+
+      const { rerender } = render(
+        <BenchmarkModal
+          isOpen={true}
+          onClose={vi.fn()}
+          sshParams={sshParams}
+          _forceState={{ kind: "running" }}
+        />
+      );
+
+      // Modal enter flush.
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+      expect(screen.getByText(/Идёт проверка сервера/i)).toBeInTheDocument();
+
+      // Close the modal — both Modal exit (200ms) and the parent's T-03 cleanup
+      // (200ms) timers start.
+      rerender(
+        <BenchmarkModal
+          isOpen={false}
+          onClose={vi.fn()}
+          sshParams={sshParams}
+          _forceState={{ kind: "running" }}
+        />
+      );
+
+      // Advance past both 200ms timers.
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+
+      // Modal subtree fully gone.
+      expect(screen.queryByText(/Идёт проверка сервера/i)).not.toBeInTheDocument();
+
+      // Re-open the modal: because the parent reset running→idle during cleanup,
+      // the modal now shows the idle view (NOT the stale running view).
+      rerender(
+        <BenchmarkModal
+          isOpen={true}
+          onClose={vi.fn()}
+          sshParams={sshParams}
+          _forceState={{ kind: "running" }}
+        />
+      );
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+
+      // Idle start button is shown — proves the stale running state was reset.
+      expect(
+        screen.getByRole("button", { name: /запустить проверку/i })
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Идёт проверка сервера/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

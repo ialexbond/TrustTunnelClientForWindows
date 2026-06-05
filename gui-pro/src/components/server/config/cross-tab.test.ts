@@ -57,4 +57,26 @@ describe("useRulesTomlChanged", () => {
     await Promise.resolve();
     expect(mockUnlisten).toHaveBeenCalled();
   });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Phase 3 gap-fill: cross-tab → reloadBundle integration (REQ-15.8)
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("each rules-toml-changed event invokes the consumer's reloadBundle callback", async () => {
+    // Integration view: the consuming tab passes a reloadBundle()-style callback
+    // (re-fetch the config bundle). Every matching event must invoke it so the
+    // other tab's cached view is invalidated.
+    const reloadBundle = vi.fn();
+    renderHook(() => useRulesTomlChanged(reloadBundle));
+    await Promise.resolve();
+    expect(capturedHandler).not.toBeNull();
+
+    capturedHandler!({ payload: { file: "rules.toml" } });
+    capturedHandler!({ payload: { file: "rules.toml" } });
+    // Two events → two reloads; non-matching files are ignored in between.
+    capturedHandler!({ payload: { file: "vpn.toml" } });
+    capturedHandler!({ payload: { file: "rules.toml" } });
+
+    expect(reloadBundle).toHaveBeenCalledTimes(3);
+  });
 });

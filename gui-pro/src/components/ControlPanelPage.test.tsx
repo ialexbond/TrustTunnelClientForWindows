@@ -3,7 +3,10 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../shared/i18n";
 import { ControlPanelPage } from "./ControlPanelPage";
+import { ServerTabs } from "./ServerTabs";
 import { SnackBarProvider } from "../shared/ui/SnackBarContext";
+import { renderWithProviders as renderE2E } from "../test/test-utils";
+import { makeState } from "../test/fixtures";
 
 // Phase 18 Plan 06 — ControlPanelPage uses useSnackBar() для update success
 // notification. Wrap render в SnackBarProvider чтобы тесты не падали с
@@ -34,6 +37,9 @@ vi.mock("./ServerPanel", () => ({
         </button>
         <button data-testid="mock-export-btn" onClick={() => props.onConfigExported("/exported/config.toml")}>Export</button>
         <button data-testid="mock-disconnect-btn" onClick={props.onDisconnect}>Disconnect</button>
+        {/* Phase 3 gap-fill — let tests trigger ServerPanel's onPanelReady so the
+            ControlPanelPage skeleton (isFirstConnect) dismissal path is exercised. */}
+        <button data-testid="mock-panel-ready-btn" onClick={() => props.onPanelReady?.()}>PanelReady</button>
       </div>
     );
   },
@@ -95,6 +101,32 @@ vi.mock("./server/SshConnectForm", () => ({
       </button>
     </div>
   ),
+}));
+
+// ─── In-panel E2E cascade test mocks (D-05 / RESEARCH §3 stream 6) ───
+//
+// The render-through E2E below mounts the REAL ServerTabs + REAL OverviewSection
+// so the two IN-PANEL cascade indicators are asserted through the actual chrome
+// (not a prop probe). The other four server sections are stubbed — they carry no
+// cascade indicator in this tree (the badge lives in ServiceTabSection / stream 5,
+// the control-sidecar-update-dot in TabNavigation / stream 7). Mocking them keeps
+// the tree light per TESTING.md §Mocking heavy child components.
+//
+// IMPORTANT: OverviewSection is deliberately NOT mocked — its real Card #8 renders
+// the `overview-protocol-update-arrow`. ServerTabs is NOT mocked either — its real
+// «Сервис» pill renders the `service-tab-update-dot`.
+vi.mock("./server/UsersSection", () => ({
+  UsersSection: () => <div data-testid="users-section">UsersSection</div>,
+}));
+vi.mock("./server/ConfigurationTab", () => ({
+  ConfigurationTab: () => <div data-testid="configuration-tab">ConfigurationTab</div>,
+  configTabDirtyRef: { current: false },
+}));
+vi.mock("./server/SecurityTabSection", () => ({
+  SecurityTabSection: () => <div data-testid="security-section">SecurityTabSection</div>,
+}));
+vi.mock("./server/ServiceTabSection", () => ({
+  ServiceTabSection: () => <div data-testid="service-section">ServiceTabSection</div>,
 }));
 
 const mockInvoke = vi.mocked(invoke);
@@ -397,6 +429,113 @@ describe("ControlPanelPage", () => {
     expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
   });
 
+  // ── Phase 3 gap-fill (RESEARCH §3 stream 6) ──
+
+  it("calls onSidecarUpdateChange(false) initially when no update is available", async () => {
+    const onSidecarUpdateChange = vi.fn();
+    mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
+    await act(async () => {
+      renderWithProviders(
+        <ControlPanelPage {...defaultProps} onSidecarUpdateChange={onSidecarUpdateChange} />,
+      );
+    });
+    // No serverInfoVersion lifted yet → localSidecarAvailable=false →
+    // sidecarUpdateVisible=false. The lift-to-App callback must report false so
+    // the bottom-tab «Панель управления» dot stays off.
+    expect(onSidecarUpdateChange).toHaveBeenCalledWith(false);
+  });
+
+  it("calls onSidecarUpdateChange(true) when a sidecar update becomes available", async () => {
+    vi.useRealTimers();
+    const onSidecarUpdateChange = vi.fn();
+    mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
+    await act(async () => {
+      renderWithProviders(
+        <ControlPanelPage {...defaultProps} onSidecarUpdateChange={onSidecarUpdateChange} />,
+      );
+    });
+
+    // ServerPanel emits an outdated version (1.0.31 < latest 1.0.33) → the lifted
+    // serverInfoVersion makes localSidecarAvailable true → sidecarUpdateVisible
+    // true → onSidecarUpdateChange(true) for the bottom-tab dot.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-emit-version"));
+    });
+    await waitFor(() => {
+      expect(onSidecarUpdateChange).toHaveBeenCalledWith(true);
+    }, { timeout: 3000 });
+  });
+
+  it("isFirstConnect skeleton is shown on auto-reconnect and hidden on onPanelReady", async () => {
+    mockCredsLoaded({ host: "10.0.0.1", password: "secret" });
+    await act(async () => {
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
+    });
+
+    // On auto-reconnect (creds loaded from keyring) ControlPanelPage sets
+    // isFirstConnect=true (BUG-01 skeleton instead of full-screen loader). While
+    // the skeleton shows, the real ServerPanel wrapper is display:none.
+    const wrapperWhileSkeleton = screen.getByTestId("server-panel").parentElement;
+    expect(wrapperWhileSkeleton).toHaveStyle({ display: "none" });
+
+    // ServerPanel signals data loaded → onPanelReady flips isFirstConnect off →
+    // the panel wrapper becomes visible (skeleton dismissed).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-panel-ready-btn"));
+    });
+    const wrapperAfterReady = screen.getByTestId("server-panel").parentElement;
+    expect(wrapperAfterReady).toHaveStyle({ display: "flex" });
+  });
+
+  it("persists tt_ssh_last_host/user/port to localStorage on connect via SshConnectForm", async () => {
+    await act(async () => {
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
+    });
+    expect(screen.getByTestId("ssh-connect-form")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-connect-btn"));
+    });
+
+    // handleConnect writes the last-used SSH identity so the next visit restores
+    // the form (the mock SshConnectForm connects with host=1.2.3.4 user=root port=22).
+    expect(localStorage.getItem("tt_ssh_last_host")).toBe("1.2.3.4");
+    expect(localStorage.getItem("tt_ssh_last_user")).toBe("root");
+    expect(localStorage.getItem("tt_ssh_last_port")).toBe("22");
+  });
+
+  it("migrates legacy trusttunnel_control_ssh creds into the keyring and removes the legacy key", async () => {
+    // Backend keyring empty → readStoredCredentials falls back to the legacy
+    // localStorage blob, saves it via save_ssh_credentials, then removes it.
+    const saved: Record<string, unknown>[] = [];
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "load_ssh_credentials") return null as unknown as never;
+      if (cmd === "save_ssh_credentials") {
+        if (args) saved.push(args as Record<string, unknown>);
+        return null as unknown as never;
+      }
+      return null as unknown as never;
+    });
+    localStorage.setItem(
+      "trusttunnel_control_ssh",
+      JSON.stringify({ host: "9.9.9.9", port: "2222", user: "admin", password: "legacypass" }),
+    );
+
+    await act(async () => {
+      renderWithProviders(<ControlPanelPage {...defaultProps} />);
+    });
+
+    // Legacy creds resolved → ServerPanel mounts.
+    expect(screen.getByTestId("server-panel")).toBeInTheDocument();
+    // Migration persisted the legacy blob into the keyring...
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "save_ssh_credentials",
+      expect.objectContaining({ host: "9.9.9.9", port: "2222", user: "admin", password: "legacypass" }),
+    );
+    // ...and removed the legacy localStorage key so it migrates exactly once.
+    expect(localStorage.getItem("trusttunnel_control_ssh")).toBeNull();
+  });
+
   // ── Phase 19 cascade fix — sidecarAvailable single source of truth ──
 
   it("Phase 19 cascade fix — sidecarAvailable flips false→true on serverInfo.version downgrade", async () => {
@@ -454,5 +593,84 @@ describe("ControlPanelPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mock-sidecar-available").textContent).toBe("false");
     }, { timeout: 3000 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// In-panel E2E render-through cascade (D-05 / RESEARCH §3 stream 6 / §4.4)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// The two cascade tests in the `ControlPanelPage` describe above (`mock-sidecar-
+// available` prop probe) pin the sidecarAvailable DERIVATION but mock ServerPanel
+// away, so they never prove the user-visible indicators actually appear — the
+// known false green (RESEARCH §3 stream 6, §4.4). They are KEPT as auxiliary
+// (they still pin the derivation logic), and this block ADDS the render-through:
+// it mounts the REAL ServerTabs + REAL OverviewSection (the 4 other sections are
+// stubbed at file level) and asserts the TWO IN-PANEL indicators APPEAR on
+// update-available and RESET when flipped off.
+//
+// CROSS-TREE SCOPE (the four cascade indicators do NOT all mount in one tree):
+//   - service-tab-update-dot       → ServerTabs «Сервис» pill   (THIS tree)
+//   - overview-protocol-update-arrow → OverviewSection Card #8  (THIS tree)
+//   - protocol-update-badge        → ServiceTabSection          (pinned in plan 06 / stream 5)
+//   - control-sidecar-update-dot   → TabNavigation under App    (pinned in plan 07 / stream 7)
+// Only the first two live under ServerPanel→ServerTabs(+OverviewSection), so this
+// E2E asserts exactly those two. OverviewSection's invoke calls are stubbed null
+// by the global tauri-mock, so no new infra is needed.
+describe("in-panel cascade E2E (render-through: real ServerTabs + real OverviewSection)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    i18n.changeLanguage("ru");
+    localStorage.clear();
+    // Default global invoke stub already resolves null (tauri-mock) — OverviewSection
+    // stats/geoip degrade to placeholders; the cascade indicators depend only on the
+    // forwarded props, not on any invoke result.
+  });
+
+  /**
+   * Mirrors ControlPanelPage's main-panel render of ServerTabs: `sidecarAvailable`
+   * drives OverviewSection Card #8's arrow, while `hasSidecarUpdate` drives the
+   * ServerTabs «Сервис» pill dot. ControlPanelPage passes
+   * `sidecarAvailable={localSidecarAvailable}` and
+   * `hasSidecarUpdate={sidecarUpdateVisible}` — both flip together off the same
+   * derivation, so the E2E flips them together too.
+   */
+  function renderPanelChrome(updateAvailable: boolean) {
+    return renderE2E(
+      <ServerTabs
+        state={makeState({ panelDataLoaded: true } as never)}
+        hasSidecarUpdate={updateAvailable}
+        sidecarAvailable={updateAvailable}
+        currentVersion="1.0.20"
+        latestVersion="1.0.33"
+      />,
+    );
+  }
+
+  it("both in-panel indicators (service-tab-update-dot + overview-protocol-update-arrow) APPEAR when an update is available — badge pinned in plan 06, control-sidecar-update-dot in plan 07", () => {
+    renderPanelChrome(true);
+    // ServerTabs «Сервис» pill dot — visible because update available AND default
+    // active tab is overview (dot hides only when the user is on the service tab).
+    const dot = screen.getByTestId("service-tab-update-dot");
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveAttribute("aria-label", i18n.t("server.service.tab_update_available_aria"));
+    // OverviewSection Card #8 ArrowUpCircle — the real render-through indicator.
+    const arrow = screen.getByTestId("overview-protocol-update-arrow");
+    expect(arrow).toBeInTheDocument();
+    expect(arrow).toHaveAttribute("aria-label", i18n.t("server.service.protocol.update_available_badge"));
+  });
+
+  it("both in-panel indicators RESET (disappear) when the update flips off (version-change reset path)", () => {
+    // First render with update available — both present.
+    const { unmount } = renderPanelChrome(true);
+    expect(screen.getByTestId("service-tab-update-dot")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-protocol-update-arrow")).toBeInTheDocument();
+    unmount();
+
+    // Re-render with the flag flipped false (mirrors an in-session upgrade-to-latest
+    // where localSidecarAvailable derives back to false) — both indicators gone.
+    renderPanelChrome(false);
+    expect(screen.queryByTestId("service-tab-update-dot")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview-protocol-update-arrow")).not.toBeInTheDocument();
   });
 });

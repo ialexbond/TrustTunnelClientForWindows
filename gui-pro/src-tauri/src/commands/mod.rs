@@ -10,4 +10,4 @@ pub mod protocol;
 pub mod activity_log;
 
 // Re-export items used directly by lib.rs (tray handlers, run() setup)
-pub use vpn::{AppState, kill_sidecar_from_state, kill_stale_sidecar};
+pub use vpn::{AppState, begin_shutdown, kill_sidecar_from_state, kill_stale_sidecar};
