@@ -449,4 +449,54 @@ describe("ServerTabs", () => {
       expect(state.loadServerInfo).toHaveBeenCalled();
     });
   });
+
+  // ─── H-07: disconnect button MUST NOT live inside role="tablist" ───────────
+  describe("disconnect button WAI-ARIA placement (Chrome H-07)", () => {
+    it("the disconnect button is NOT a descendant of the tablist", () => {
+      renderTabs();
+      const tablist = screen.getByRole("tablist");
+      const disconnect = screen.getByRole("button", {
+        name: i18n.t("control.disconnect"),
+      });
+      // WAI-ARIA 1.2 §3.24: a tablist must contain only role=tab children.
+      // The disconnect button is a separate action — it must sit outside.
+      expect(tablist.contains(disconnect)).toBe(false);
+    });
+
+    it("the tablist still contains exactly the 5 tabs (no stray controls)", () => {
+      renderTabs();
+      const tablist = screen.getByRole("tablist");
+      // role=tab overrides the implicit button role, so a tablist holding only
+      // tabs exposes ZERO elements with role=button. A stray non-tab control
+      // (like the old disconnect button) would surface here.
+      const strayButtons = within(tablist).queryAllByRole("button", {
+        hidden: true,
+      });
+      expect(strayButtons).toHaveLength(0);
+      const tabs = within(tablist).getAllByRole("tab");
+      expect(tabs).toHaveLength(5);
+    });
+  });
+
+  // ─── H-08: loadActiveTab migration writes the canonical value back ─────────
+  describe("loadActiveTab 'utilities'→'service' write-back (Chrome H-08)", () => {
+    it("persists 'service' to localStorage immediately on migration (no tab switch needed)", () => {
+      localStorage.setItem(STORAGE_KEY, "utilities");
+      renderTabs();
+      // The migrated value must be written back at once so a user who stays on
+      // the service tab no longer leaves 'utilities' rotting in storage.
+      expect(localStorage.getItem(STORAGE_KEY)).toBe("service");
+      expect(document.getElementById("tab-service")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    it("does NOT rewrite storage for an already-canonical value", () => {
+      localStorage.setItem(STORAGE_KEY, "security");
+      renderTabs();
+      // No migration happened, so the stored value is untouched.
+      expect(localStorage.getItem(STORAGE_KEY)).toBe("security");
+    });
+  });
 });

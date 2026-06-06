@@ -4,12 +4,27 @@
 //! injection attacks (RCE).
 
 /// VPN username: alphanumeric + limited punctuation, no shell metacharacters.
+///
+/// CF-06 (conformance/01-deeplink-users.md): the DEEP_LINK.md / CONFIGURATION.md
+/// spec imposes NO charset restriction on usernames (any TOML/UTF-8 string). Our
+/// rejection of shell metacharacters, control chars, AND whitespace is an
+/// INTENTIONAL SSH-injection / CLI-safety defense, NOT a spec requirement — the
+/// username is interpolated UNQUOTED into the endpoint CLI `-c <name>` flag, so a
+/// space would split the argument and a metacharacter could break out of the
+/// command. We accept the resulting divergence from spec (a username with a space
+/// or non-ASCII char cannot be created via our UI) as a deliberate security
+/// tradeoff. `is_whitespace()` is included so the backend matches the frontend
+/// `validateUsername` (which rejects `\s`) — closing the prior CF-06 mismatch
+/// where the backend silently allowed spaces the frontend rejected. Do NOT loosen.
 pub fn validate_vpn_username(s: &str) -> Result<(), String> {
     if s.is_empty() || s.len() > 64 {
         return Err("Username must be 1-64 characters".into());
     }
     if s.chars().any(|c| {
-        c.is_control() || matches!(c, '\'' | '"' | '`' | '$' | '\\' | ';' | '|' | '&'
+        // CF-06: reject whitespace too (was previously allowed on the backend but
+        // rejected by the frontend) — a space breaks the unquoted `-c <name>` flag.
+        c.is_control() || c.is_whitespace()
+            || matches!(c, '\'' | '"' | '`' | '$' | '\\' | ';' | '|' | '&'
             | '(' | ')' | '{' | '}' | '<' | '>' | '\n' | '\r' | '\0')
     }) {
         return Err("Username contains invalid characters".into());
@@ -19,6 +34,16 @@ pub fn validate_vpn_username(s: &str) -> Result<(), String> {
 
 /// VPN password: any printable characters EXCEPT backslash, single quote, and
 /// control characters.
+///
+/// CF-05 (conformance/01-deeplink-users.md): the spec (`CONFIGURATION.md`
+/// credentials.toml, DEEP_LINK.md TLV 0x06) places NO charset restriction on the
+/// password — it is a plain TOML/UTF-8 string. Our rejection of `"`, `'`, `\` and
+/// control chars is therefore STRICTER THAN SPEC and is an INTENTIONAL
+/// SSH-heredoc-injection defense, NOT a spec requirement. A spec-valid password
+/// containing `"` cannot be imported via our UI; we accept that divergence as a
+/// deliberate security tradeoff (a future SFTP/SCP credential-write path that
+/// avoids shell interpolation could relax this — tracked in BACKLOG). Do NOT
+/// loosen these rejections to "conform" to the spec.
 ///
 /// CR-03 mitigation: the password is embedded in both a TOML double-quoted string
 /// and a python single-quoted string literal inside a single-quoted heredoc body.
@@ -51,6 +76,64 @@ pub fn validate_domain(s: &str) -> Result<(), String> {
     }
     if !s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.')) {
         return Err("Domain contains invalid characters".into());
+    }
+    Ok(())
+}
+
+/// SSH host (hostname / IPv4 / IPv6) used as the `-a {addr}` argument when
+/// exporting the client config (S-4). The operator types this when connecting,
+/// and it crosses into a generated SSH command string, so it must be
+/// whitelist-validated before interpolation (CLAUDE.md SAFETY-01, whitelist-first).
+///
+/// Accepts the union of hostname, IPv4, and IPv6 character sets:
+/// - ASCII alphanumeric
+/// - `-` `.` (hostname / IPv4)
+/// - `:` (IPv6) and `[` `]` (bracketed IPv6 literal)
+///
+/// Every shell metacharacter (`;`, `|`, `&`, `$`, backtick, quotes, `(` `)`,
+/// `{` `}`, `<` `>`, whitespace, control chars, `\0`) is therefore rejected by
+/// omission from the whitelist — an injected `host;rm -rf /` cannot pass.
+pub fn validate_ssh_host(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Err("SSH host must not be empty".into());
+    }
+    if s.len() > 253 {
+        return Err("SSH host too long (max 253 chars)".into());
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | ':' | '[' | ']'))
+    {
+        return Err("SSH host contains invalid characters".into());
+    }
+    // WR-02 (04-REVIEW.md): the char-whitelist alone lets bracket-mismatched /
+    // malformed IPv6 literals through (`]2001:db8[`, `1.2.3.4]`, `:::::`). None of
+    // the permitted chars are shell metacharacters, so this is a robustness/UX
+    // defect, not an injection — but a structurally broken `-a {host}` produces an
+    // opaque SSH_EXPORT_FAILED downstream. Enforce bracket balance and require that,
+    // when brackets are used, a single `[` opens at index 0 and a single matching
+    // `]` closes the IPv6 body (whitelist-spirit: brackets are only valid as the
+    // enclosing pair of a literal). A bracketless value must contain no stray bracket.
+    let open = s.matches('[').count();
+    let close = s.matches(']').count();
+    if open != close {
+        return Err("SSH host has mismatched IPv6 brackets".into());
+    }
+    if open > 0 {
+        // Exactly one enclosing pair, `[` first and `]` last, with a non-empty body.
+        if open != 1
+            || !s.starts_with('[')
+            || !s.ends_with(']')
+            || s.len() < 3
+        {
+            return Err("SSH host has malformed IPv6 brackets".into());
+        }
+    }
+    // `:::` (three+ consecutive colons) is never a valid IPv6 literal — the `::`
+    // zero-compression token may appear at most once and is exactly two colons.
+    // This rejects degenerate inputs like `:::::` that the char-whitelist allows.
+    if s.contains(":::") {
+        return Err("SSH host has malformed IPv6 (invalid colon run)".into());
     }
     Ok(())
 }
@@ -160,6 +243,14 @@ pub fn validate_cidr(s: &str) -> Result<(), String> {
     for oct in &octets {
         if oct.is_empty() {
             return Err("Empty octet".into());
+        }
+        // WR-03 (04-REVIEW.md): reject redundant leading zeros (`010`, `00`) so the
+        // backend agrees with the frontend octet validator on the canonical decimal
+        // form. Without this the backend silently accepts octal-looking input that
+        // the UI blocked, letting a UI-rejected value reach the backend with a
+        // different interpretation.
+        if oct.len() > 1 && oct.starts_with('0') {
+            return Err(format!("Octet '{oct}' has a redundant leading zero"));
         }
         let n: u32 = oct.parse().map_err(|_| "Invalid octet (must be number)".to_string())?;
         if n > 255 {
@@ -519,6 +610,18 @@ mod tests {
         assert!(validate_vpn_username(&"a".repeat(65)).is_err());
     }
 
+    #[test]
+    fn username_rejects_whitespace() {
+        // CF-06: the backend now matches the frontend and rejects whitespace —
+        // a space would split the unquoted `-c <name>` CLI flag.
+        assert!(validate_vpn_username("alice bob").is_err());
+        assert!(validate_vpn_username("alice\tbob").is_err());
+        assert!(validate_vpn_username(" alice").is_err());
+        assert!(validate_vpn_username("alice ").is_err());
+        // Sanity: a no-space username still passes (not over-tightened).
+        assert!(validate_vpn_username("alice").is_ok());
+    }
+
     // ─── Password ─────────────────────────────────────
 
     #[test]
@@ -570,6 +673,45 @@ mod tests {
         assert!(validate_domain("example.com; rm -rf /").is_err());
         assert!(validate_domain("$(whoami).com").is_err());
         assert!(validate_domain("test`id`.com").is_err());
+    }
+
+    // ─── SSH host (S-4) ───────────────────────────────
+
+    #[test]
+    fn validate_ssh_host_accepts_hostname_ipv4_ipv6() {
+        assert!(validate_ssh_host("example.com").is_ok());
+        assert!(validate_ssh_host("vpn-1.example.com").is_ok());
+        assert!(validate_ssh_host("203.0.113.7").is_ok());
+        assert!(validate_ssh_host("2001:db8::1").is_ok());
+        assert!(validate_ssh_host("[2001:db8::1]").is_ok());
+    }
+
+    #[test]
+    fn validate_ssh_host_rejects_injection() {
+        assert!(validate_ssh_host("host; rm -rf /").is_err());
+        assert!(validate_ssh_host("$(whoami)").is_err());
+        assert!(validate_ssh_host("host`id`").is_err());
+        assert!(validate_ssh_host("host|cat /etc/passwd").is_err());
+        assert!(validate_ssh_host("host'sq").is_err());
+        assert!(validate_ssh_host("host with space").is_err());
+        assert!(validate_ssh_host("").is_err());
+    }
+
+    #[test]
+    fn validate_ssh_host_rejects_malformed_ipv6_brackets() {
+        // WR-02: bracket-mismatched / structurally broken IPv6 literals are
+        // rejected even though they contain only whitelisted characters.
+        assert!(validate_ssh_host("]2001:db8[").is_err());
+        assert!(validate_ssh_host("1.2.3.4]").is_err());
+        assert!(validate_ssh_host("[2001:db8::1").is_err());
+        assert!(validate_ssh_host("2001:db8::1]").is_err());
+        assert!(validate_ssh_host("[[2001:db8::1]]").is_err());
+        assert!(validate_ssh_host(":::::").is_err());
+        // Well-formed values still pass (not over-tightened).
+        assert!(validate_ssh_host("[2001:db8::1]").is_ok());
+        assert!(validate_ssh_host("2001:db8::1").is_ok());
+        assert!(validate_ssh_host("1.2.3.4").is_ok());
+        assert!(validate_ssh_host("example.com").is_ok());
     }
 
     // ─── Email ────────────────────────────────────────
@@ -676,6 +818,19 @@ mod tests {
         assert!(validate_cidr("255.255.255.255/32").is_ok());
         assert!(validate_cidr("256.0.0.0/0").is_err());
         assert!(validate_cidr("0.0.0.0/33").is_err());
+    }
+
+    #[test]
+    fn validate_cidr_rejects_leading_zero_octets() {
+        // WR-03: backend now matches the frontend octet validator and rejects
+        // redundant leading zeros so a UI-blocked value cannot reach the backend
+        // with a different (octal-looking) interpretation.
+        assert!(validate_cidr("010.0.0.0/8").is_err());
+        assert!(validate_cidr("00.0.0.0/8").is_err());
+        assert!(validate_cidr("10.01.0.0/8").is_err());
+        // A single zero octet is the canonical form and stays valid.
+        assert!(validate_cidr("10.0.0.0/8").is_ok());
+        assert!(validate_cidr("0.0.0.0/0").is_ok());
     }
 
     // ─── DNS list ─────────────────────────────────────

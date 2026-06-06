@@ -12,10 +12,13 @@ interface ToggleProps {
   disabled?: boolean;
   className?: string;
   /**
-   * Phase 15.1: a11y label для случаев когда Toggle используется без
-   * внутреннего `label` prop (e.g. ToggleField wrapping schema-driven layout).
-   * Renders на role="switch" button. Без него screen-reader полагается на
-   * соседний визуальный текст — приемлемо, но явный label предпочтительнее.
+   * Explicit a11y name for the role="switch" button. Use this only when the
+   * desired accessible name differs from the visible `label` (or when Toggle is
+   * rendered without a `label`, e.g. ToggleField wrapping schema-driven layout).
+   *
+   * D-03.2: when a visible `label` is provided, it is now forwarded to the
+   * switch accessible name automatically — so most call sites no longer need a
+   * separate `aria-label`. An explicit `aria-label` still overrides the label.
    */
   "aria-label"?: string;
 }
@@ -37,6 +40,13 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
     ref
   ) => {
     const isChecked = checked ?? value ?? false;
+
+    // D-03.2 (Users H-07): forward the visible `label` to the role="switch"
+    // accessible name so screen readers announce the toggle and tests can query
+    // getByRole("switch", { name }). An explicit `aria-label` prop still wins
+    // (used where the visible label differs from the desired a11y name). The
+    // visible label DOM below is unchanged — this only adds the accessible name.
+    const switchAccessibleName = ariaLabel ?? label;
 
     return (
       <div
@@ -82,7 +92,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(
           type="button"
           role="switch"
           aria-checked={isChecked}
-          aria-label={ariaLabel}
+          aria-label={switchAccessibleName}
           onClick={() => !disabled && onChange(!isChecked)}
           disabled={disabled}
           className={`

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { ConfirmDialogProvider } from "../../shared/ui/ConfirmDialogProvider";
 import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 import i18n from "../../shared/i18n";
@@ -372,5 +372,78 @@ describe("ConfigurationTab (raw-view)", () => {
     expect(allEdit).toHaveLength(1);
     expect(within(document.body).getByText(/credentials\.toml/i)).toBeInTheDocument();
     expect(editBtn).toBeInTheDocument();
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Phase 04 Plan 15 — Config H-1 regression (reload() has no cancellation guard).
+  // audit/03-configuration.md H-1: the imperative reload() (Retry button) did NOT
+  // use the `cancelled` pattern the mount-load effect uses. If the user switches
+  // servers (sshParams change) while a manual reload is still in flight, the late
+  // resolution carries STALE data from the OLD server — and without a guard it
+  // overwrites the freshly-loaded new-server bundle. Both loaders now share one
+  // cancellation token so the sshParams-change effect cleanup drops the stale
+  // reload. Fixed regression-test-first (D-02 rail).
+  // ══════════════════════════════════════════════════════════════════════════
+  it("H-1: a manual reload from the OLD server is dropped after sshParams change", async () => {
+    const PARAMS_A = { host: "server-a", port: "22", user: "u", password: "p" };
+    const PARAMS_B = { host: "server-b", port: "22", user: "u", password: "p" };
+    const staleBundle = makeBundle({ vpnToml: "stale_from_server_a = true" });
+    const freshBundle = makeBundle({ vpnToml: "fresh_from_server_b = true" });
+
+    // Mount against server A: load fails → error state with a Retry button.
+    mockInvoke.mockRejectedValueOnce(new Error("SSH_FAILED"));
+    const { rerender } = render(
+      <SnackBarProvider>
+        <ConfirmDialogProvider>
+          <ConfigurationTab sshParams={PARAMS_A} onNavigateToTab={vi.fn()} />
+        </ConfirmDialogProvider>
+      </SnackBarProvider>,
+    );
+    const retryBtn = await screen.findByRole("button", {
+      name: /Повторить|Попробовать снова/i,
+    });
+
+    // Click Retry → manual reload against server A, held pending (skeleton).
+    let resolveStale: (b: typeof staleBundle) => void = () => {};
+    mockInvoke.mockImplementationOnce(
+      () => new Promise((res) => { resolveStale = res; }),
+    );
+    fireEvent.click(retryBtn);
+
+    // User switches to server B → mount effect re-runs and loads B's bundle.
+    mockInvoke.mockResolvedValueOnce(freshBundle);
+    await act(async () => {
+      rerender(
+        <SnackBarProvider>
+          <ConfirmDialogProvider>
+            <ConfigurationTab sshParams={PARAMS_B} onNavigateToTab={vi.fn()} />
+          </ConfirmDialogProvider>
+        </SnackBarProvider>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /vpn\.toml/i })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /vpn\.toml/i }));
+    await waitFor(() =>
+      expect(screen.getByText((c) => c.includes("fresh_from_server_b"))).toBeInTheDocument(),
+    );
+
+    // The server-A reload resolves LATE. The shared cancellation token (flipped by
+    // the sshParams-change cleanup) must drop it — server B's content stays.
+    await act(async () => {
+      resolveStale(staleBundle);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      screen.queryByText((c) => c.includes("stale_from_server_a")),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText((c) => c.includes("fresh_from_server_b")),
+    ).toBeInTheDocument();
   });
 });

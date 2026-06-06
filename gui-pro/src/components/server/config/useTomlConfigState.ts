@@ -234,6 +234,13 @@ export function useTomlConfigState(
   ]);
 
   const reloadBundle = useCallback(async (): Promise<void> => {
+    // H-2 (Plan 15): a successful loadBundle resets dirtyFields (line ~183), but a
+    // FAILED reload (SSH hiccup, cross-tab event during an outage) takes the error
+    // branch and leaves the stale dirty map in place — pointing at trees the
+    // reload did not actually refresh. Reset dirtyFields up front so an external
+    // reload always converges to a clean baseline regardless of the reload's
+    // outcome; the user re-applies edits against the (unchanged-but-clean) view.
+    setDirtyFields(new Map());
     const cancelled = { current: false };
     await loadBundle(cancelled);
   }, [loadBundle]);
@@ -391,10 +398,16 @@ export function useTomlConfigState(
     try {
       await invoke<void>("server_restart_service", { ...sshParams });
     } catch (e) {
-      // Restart failed — files saved but service may not be reloaded
-      // Caller decides UX (e.g., snackbar warning); return success with notice
+      // H-4 (Plan 15): a restart failure is NOT a success. The files were written
+      // but the service is still running the OLD config, so reporting
+      // `success: true` made the caller clear its dirty markers / show "saved"
+      // while the change was not live — a contradictory "clean but not applied"
+      // state. Return `success: false` and deliberately do NOT clear dirtyFields
+      // below (the early return skips the clear), so the user can retry the
+      // save+restart without re-entering edits. The caller surfaces the persistent
+      // restart warning from `error`.
       return {
-        success: true,
+        success: false,
         savedFiles,
         error: `Service restart failed: ${formatError(e)}`,
       };
@@ -467,12 +480,45 @@ function lookupValue(parsed: Record<string, unknown>, path: string[]): unknown {
   return cursor;
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
+/**
+ * Order-independent structural deep-equal used by dirty-tracking.
+ *
+ * IN-02: the previous object/array branch compared `JSON.stringify(a) ===
+ * JSON.stringify(b)`, which is key-INSERTION-ORDER sensitive. A TOML re-parse or
+ * an `applyEditToParsed` that reconstructs an object with the same entries but a
+ * different key order would read as dirty (false-positive "unsaved changes").
+ * This recursive compare is order-independent for object keys while preserving
+ * the original scalar/primitive (`===`) and array-by-index semantics.
+ *
+ * Exported for unit testing (no other production consumer imports it).
+ */
+export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
   if (a === null || b === null) return false;
-  if (typeof a === "object" && typeof b === "object") {
-    return JSON.stringify(a) === JSON.stringify(b);
+  if (typeof a !== "object" || typeof b !== "object") return false;
+
+  const aIsArray = Array.isArray(a);
+  const bIsArray = Array.isArray(b);
+  if (aIsArray !== bIsArray) return false;
+
+  if (aIsArray && bIsArray) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
   }
-  return false;
+
+  // Plain objects: compare by key set (order-independent), then by value.
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(bObj, key)) return false;
+    if (!deepEqual(aObj[key], bObj[key])) return false;
+  }
+  return true;
 }

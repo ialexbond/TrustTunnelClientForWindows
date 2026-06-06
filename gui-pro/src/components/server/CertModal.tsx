@@ -86,9 +86,25 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
   const { t, i18n } = useTranslation();
   const confirm = useConfirm();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // H-04 (Plan 15): tracks whether the modal is still mounted. handleRenew's
+  // `finally` waits an unconditional 2s before reloading the cert + firing the
+  // success toast; if the user closes the server tab during that window the
+  // setters would otherwise run on a dead modal (ghost success toast + parent
+  // cert-state mutation). The cleanup effect flips this to false on unmount.
+  const isMountedRef = useRef(true);
   const [renewLoading, setRenewLoading] = useState(false);
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
   const certInfo: CertInfo | null = preloadedCert ? parseCertInfo(preloadedCert) : null;
+
+  // H-04 (Plan 15): mark unmounted so the post-renew 2s settle in handleRenew's
+  // `finally` cannot fire setters on a dead modal. Runs once for the component
+  // lifetime (mount → unmount), independent of the open/close animation.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // T-03 — auto-focus close button on open.
   useEffect(() => {
@@ -109,9 +125,12 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
   const loadCert = async () => {
     try {
       const raw = await invoke<unknown>("server_get_cert_info", sshParams);
-      setPreloadedCert(raw);
+      // H-04 (Plan 15): the SSH round-trip can outlive the modal — guard the
+      // parent cert-state mutation so a late resolution doesn't write into a
+      // closed modal's parent.
+      if (isMountedRef.current) setPreloadedCert(raw);
     } catch (e) {
-      state.pushSuccess(formatError(e), "error");
+      if (isMountedRef.current) state.pushSuccess(formatError(e), "error");
     }
   };
 
@@ -170,10 +189,19 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
       setRenewOutput({ kind: "error", text: detailsText || raw });
       // Default closed — user click'ает «Подробности» если хочет посмотреть лог.
     } finally {
+      // H-04 (Plan 15): wait out the 2s settle so the server has applied the new
+      // cert before we re-read it — but bail if the modal unmounted in the
+      // meantime. Without this guard loadCert() (parent setCertRaw), the loading
+      // reset, and the success toast all fired on a dead modal, producing a ghost
+      // toast + a cert-state mutation after the user already left.
       await new Promise((r) => setTimeout(r, 2000));
-      await loadCert();
-      setRenewLoading(false);
-      if (succeeded) state.pushSuccess(t("server.cert.renewed"));
+      if (isMountedRef.current) {
+        await loadCert();
+      }
+      if (isMountedRef.current) {
+        setRenewLoading(false);
+        if (succeeded) state.pushSuccess(t("server.cert.renewed"));
+      }
     }
   };
 

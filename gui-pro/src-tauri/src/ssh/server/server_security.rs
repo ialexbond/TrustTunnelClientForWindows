@@ -804,15 +804,82 @@ pub async fn verify_certbot_renewal(
     handle: &client::Handle<SshHandler>,
 ) -> Result<String, String> {
     let sudo = detect_sudo(handle, app).await;
-    emit_log(app, "info", "Running certbot renew --dry-run...");
+    // Thin wrapper — see `verify_certbot_renewal_core` for the UFW port-80 discipline
+    // and the testable command sequence.
+    let run = |cmd: String| async move { exec_command(handle, app, &cmd).await };
+    let log = |level: &str, message: &str| emit_log(app, level, message);
+    verify_certbot_renewal_core(sudo, &run, &log).await
+}
+
+/// Pure orchestration core of [`verify_certbot_renewal`].
+///
+/// CONF-M-07: the dry-run needs port 80 reachable, exactly like a real renewal. On a
+/// correctly-configured server UFW blocks port 80 at rest (the post-install steady state),
+/// so the dry-run would FALSE-FAIL with an ACME HTTP-01 timeout. We replicate the
+/// `renew_cert` open/close discipline here: decide whether port 80 is ALREADY legitimately
+/// in use with `ss -tlnp | grep :80` (a server actually bound to it) instead of parsing
+/// flaky `ufw status` text; if nothing is bound, open the port; run the dry-run; then close
+/// it ONLY if we opened it — on EVERY exit path (D-09 guard discipline mirrored here).
+///
+/// Generic over a `run`/`log` seam so it is unit-testable without a live SSH handle or
+/// AppHandle (see `#[cfg(test)] mod tests`).
+async fn verify_certbot_renewal_core<R, Fut, L>(
+    sudo: &str,
+    run: &R,
+    log: &L,
+) -> Result<String, String>
+where
+    R: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<(String, i32), String>>,
+    L: Fn(&str, &str),
+{
+    log("info", "Running certbot renew --dry-run...");
+
+    // CONF-M-07: is port 80 already bound by a real server? Use `ss -tlnp | grep :80`
+    // (authoritative — something is actually LISTENing) rather than ufw-status text.
+    // If a server already owns port 80 we must NOT open/close a UFW rule around it.
+    let (ss_out, _) = run(format!("{sudo}ss -tlnp 2>/dev/null | grep ':80 ' || true"))
+        .await
+        .unwrap_or_default();
+    let port80_already_bound = ss_out.lines().any(|l| l.contains(":80 "));
+
+    let temporarily_opened_80 = if !port80_already_bound {
+        // Nothing bound — open the UFW rule so the ACME HTTP-01 probe can reach us.
+        log("info", "UFW: temporarily opening 80/tcp for cert dry-run");
+        let _ = run(format!(
+            "{sudo}ufw allow 80/tcp comment 'cert dry-run (temporary)' 2>/dev/null; true"
+        ))
+        .await;
+        true
+    } else {
+        false
+    };
+
+    // D-09 discipline: single close guard, run on EVERY exit path, only closes what we opened.
+    let close_temp_port_80 = || async {
+        if temporarily_opened_80 {
+            log("info", "UFW: closing 80/tcp after cert dry-run");
+            let _ = run(format!(
+                "{sudo}ufw --force delete allow 80/tcp 2>/dev/null; true"
+            ))
+            .await;
+        }
+    };
 
     // timeout 120 — typical dry-run finishes in 10-30s, 120s safe margin.
-    let (output, code) = exec_command(
-        handle,
-        app,
-        &format!("{sudo}timeout 120 certbot renew --dry-run --quiet 2>&1; echo EXITCODE=$?"),
-    )
-    .await?;
+    let dry_run = run(format!(
+        "{sudo}timeout 120 certbot renew --dry-run --quiet 2>&1; echo EXITCODE=$?"
+    ))
+    .await;
+
+    let (output, code) = match dry_run {
+        Ok(v) => v,
+        Err(e) => {
+            // SSH-level failure: still close the port before bubbling up.
+            close_temp_port_80().await;
+            return Err(e);
+        }
+    };
 
     // Parse exit code from echo'ed marker (timeout не пропускает code обратно
     // через ssh stream — приходится grep'ать stdout).
@@ -821,6 +888,9 @@ pub async fn verify_certbot_renewal(
         .rev()
         .find_map(|l| l.strip_prefix("EXITCODE=").and_then(|s| s.parse().ok()))
         .unwrap_or(code);
+
+    // Close the temporarily-opened port on every remaining exit path below.
+    close_temp_port_80().await;
 
     if exit_code == 0 {
         Ok("Dry-run succeeded — auto-renewal будет работать.".into())
@@ -1064,8 +1134,18 @@ fn parse_ufw_numbered(text: &str) -> Vec<FirewallRule> {
         } else {
             (body.to_string(), String::new(), String::new())
         };
-        // Try to extract proto from "443/tcp", "443/udp"
-        let proto = to.split('/').nth(1).unwrap_or("").to_string();
+        // Try to extract proto from "443/tcp", "443/udp".
+        // IN-03: only treat the segment after '/' as a proto when it is exactly
+        // "tcp" or "udp". For a `to` that is not `port/proto` shaped — an
+        // app-profile / "Anywhere" / bare range like "80:90" — the segment after
+        // any stray '/' is garbage and was previously rendered as a bogus proto
+        // in the rules table. Anything else leaves proto empty.
+        let proto = to
+            .split('/')
+            .nth(1)
+            .filter(|seg| *seg == "tcp" || *seg == "udp")
+            .unwrap_or("")
+            .to_string();
         out.push(FirewallRule {
             number: num, to, from, action, proto, comment,
         });
@@ -1769,5 +1849,134 @@ mod tests {
         let parsed = parse_certbot_timer_outputs("enabled\n", "inactive\n", "false\n");
         let obj = parsed.as_object().unwrap();
         assert_eq!(obj["auto_renewal_active"], serde_json::json!(false));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //   CONF-M-07 — verify_certbot_renewal_core UFW port-80 discipline.
+    //
+    //   The dry-run needs port 80; on a UFW-steady server it false-fails.
+    //   These tests stub the command seam (record issued commands + script the
+    //   `ss -tlnp` probe result) to assert the open/close discipline — including
+    //   the ss-based "already bound" check and "only close what we opened".
+    // ═══════════════════════════════════════════════════════════════
+
+    use std::cell::RefCell;
+
+    struct DryRunRecorder {
+        cmds: RefCell<Vec<String>>,
+        // What the `ss -tlnp | grep :80` probe returns (empty = nothing bound).
+        ss_output: &'static str,
+    }
+
+    impl DryRunRecorder {
+        fn new(ss_output: &'static str) -> Self {
+            DryRunRecorder {
+                cmds: RefCell::new(Vec::new()),
+                ss_output,
+            }
+        }
+
+        fn run(
+            &self,
+        ) -> impl Fn(String) -> std::future::Ready<Result<(String, i32), String>> + '_ {
+            move |cmd: String| {
+                let out = if cmd.contains("ss -tlnp") {
+                    self.ss_output.to_string()
+                } else if cmd.contains("certbot renew --dry-run") {
+                    "Congratulations, all simulated renewals succeeded\nEXITCODE=0".to_string()
+                } else {
+                    String::new()
+                };
+                self.cmds.borrow_mut().push(cmd);
+                std::future::ready(Ok((out, 0)))
+            }
+        }
+
+        fn recorded(&self) -> Vec<String> {
+            self.cmds.borrow().clone()
+        }
+    }
+
+    fn drive_verify(rec: &DryRunRecorder) -> Result<String, String> {
+        let run = rec.run();
+        let log = |_l: &str, _m: &str| {};
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(verify_certbot_renewal_core("sudo ", &run, &log))
+    }
+
+    /// CONF-M-07: when nothing is bound to port 80 (ss probe empty), the dry-run must
+    /// open port 80, run, then close it. The detection MUST use `ss -tlnp`, not ufw text.
+    #[test]
+    fn dry_run_opens_and_closes_port_80_when_unbound() {
+        let rec = DryRunRecorder::new(""); // nothing bound
+        let result = drive_verify(&rec);
+        assert!(result.is_ok(), "dry-run with EXITCODE=0 should succeed");
+
+        let cmds = rec.recorded();
+        assert!(
+            cmds.iter().any(|c| c.contains("ss -tlnp")),
+            "must probe with ss -tlnp, not ufw status: {cmds:#?}"
+        );
+        assert!(
+            cmds.iter().any(|c| c.contains("ufw allow 80/tcp")),
+            "must open port 80 before the dry-run when nothing is bound: {cmds:#?}"
+        );
+        assert!(
+            cmds.iter()
+                .any(|c| c.contains("ufw --force delete allow 80/tcp")),
+            "must close the port we opened after the dry-run: {cmds:#?}"
+        );
+    }
+
+    /// CONF-M-07 edge: if a real server is ALREADY bound to port 80 (ss shows a LISTEN),
+    /// we must NOT open or close a UFW rule around it (only touch what we opened).
+    #[test]
+    fn dry_run_does_not_touch_port_80_when_already_bound() {
+        let rec = DryRunRecorder::new(
+            "LISTEN 0      511          0.0.0.0:80        0.0.0.0:*    users:((\"nginx\",pid=1,fd=6))\n",
+        );
+        let _ = drive_verify(&rec);
+        let cmds = rec.recorded();
+        assert!(
+            !cmds.iter().any(|c| c.contains("ufw allow 80/tcp")),
+            "must not open port 80 when a server already owns it: {cmds:#?}"
+        );
+        assert!(
+            !cmds.iter().any(|c| c.contains("ufw --force delete allow 80/tcp")),
+            "must not close a port we never opened: {cmds:#?}"
+        );
+    }
+
+    // ── parse_ufw_numbered proto classification (IN-03) ──
+
+    /// Helper: parse a single `ufw status numbered`-style body line and return
+    /// the proto the parser assigned to it.
+    fn proto_of(line: &str) -> String {
+        let rules = parse_ufw_numbered(line);
+        assert_eq!(rules.len(), 1, "expected exactly one parsed rule for {line:?}");
+        rules[0].proto.clone()
+    }
+
+    #[test]
+    fn ufw_proto_classifies_tcp_and_udp() {
+        // "443/tcp" → tcp, "53/udp" → udp.
+        assert_eq!(proto_of("[ 1] 443/tcp                    ALLOW IN    Anywhere"), "tcp");
+        assert_eq!(proto_of("[ 2] 53/udp                     ALLOW IN    Anywhere"), "udp");
+    }
+
+    #[test]
+    fn ufw_proto_empty_for_bare_port_range() {
+        // "80:90" has no '/', proto must be empty.
+        assert_eq!(proto_of("[ 3] 80:90                      ALLOW IN    Anywhere"), "");
+    }
+
+    #[test]
+    fn ufw_proto_empty_for_non_proto_slash_value() {
+        // IN-03: a '/'-containing `to` whose segment after '/' is NOT tcp/udp
+        // (an app profile / CIDR-shaped value) must NOT be rendered as a proto.
+        assert_eq!(proto_of("[ 4] 10.0.0.0/8                 ALLOW IN    Anywhere"), "");
+        assert_eq!(proto_of("[ 5] Anywhere                   ALLOW IN    192.168.0.0/24"), "");
     }
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../../shared/ui/Input";
 import { InfoTooltipLabel } from "./InfoTooltipLabel";
@@ -35,15 +35,28 @@ export function StringField({ schema, validator, onChange, disabled }: StringFie
   const [localValue, setLocalValue] = useState<string>(initialValue);
   const [error, setError] = useState<string | null>(null);
 
+  // H-3 (Plan 15): the onBlur commit baseline lives in a ref that is re-anchored
+  // in lock-step with the local buffer whenever the schema updates externally
+  // (bundle reload, discardAll, or the per-edit tree refresh from
+  // useTomlConfigState). The audit flagged comparing the typed value against a
+  // value that could drift from the live schema; keeping the baseline in a ref
+  // updated by the SAME sync effect guarantees `handleBlur` always compares
+  // against the current schema value, never a stale snapshot — so a real edit is
+  // never suppressed and a no-op blur after an external update never re-emits.
+  const baselineRef = useRef<string>(initialValue);
+
   // Re-sync local state when schema value changes externally
   // (e.g., bundle reload, discardAll). D-7.1 onBlur pattern needs a local
   // buffer that mirrors parent state when the parent updates externally.
   // Legit "external sync" case per react.dev (resetting on prop change).
   useEffect(() => {
+    const next = schema.type.kind === "string" ? schema.type.value : "";
     /* eslint-disable react-hooks/set-state-in-effect */
-    setLocalValue(schema.type.kind === "string" ? schema.type.value : "");
+    setLocalValue(next);
     setError(null);
     /* eslint-enable react-hooks/set-state-in-effect */
+    // Re-anchor the commit baseline together with the buffer (H-3).
+    baselineRef.current = next;
   }, [schema.type]);
 
   if (schema.type.kind !== "string") return null;
@@ -55,8 +68,8 @@ export function StringField({ schema, validator, onChange, disabled }: StringFie
       return;
     }
     setError(null);
-    // Only emit change if differs from original schema value
-    if (localValue !== initialValue) {
+    // Only emit change if it differs from the current schema baseline (H-3 ref).
+    if (localValue !== baselineRef.current) {
       onChange(schema.path, localValue);
     }
   };

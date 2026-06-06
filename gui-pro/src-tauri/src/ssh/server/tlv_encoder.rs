@@ -41,6 +41,12 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
 
 const MAX_DEEPLINK_BYTES: usize = 16384;
 
+// CF-01: format version tag. Prepended as [0x00, 0x01, 0x01] (tag, len=1,
+// VarInt(1)) when absent so our output is marked deeplink format version 1.
+const TAG_VERSION: u8 = 0x00;
+// CF-02: has_ipv6 tag. Bool, spec default = true → OMIT when the server has
+// IPv6 available; emit `[0x04, 0x01, 0x00]` only when ipv6 is disabled.
+const TAG_HAS_IPV6: u8 = 0x04;
 const TAG_SKIP_VERIFICATION: u8 = 0x07;
 const TAG_CERTIFICATE: u8 = 0x08;
 const TAG_UPSTREAM_PROTOCOL: u8 = 0x09;
@@ -50,15 +56,21 @@ const TAG_ANTI_DPI: u8 = 0x0A;
 ///
 /// # Arguments
 /// - `base_deeplink`: raw "tt://?<base64url>" string from upstream CLI
+/// - `has_ipv6`: TLV 0x04 — bool, spec default true → omitted when true; emitted
+///   as `false` only when the server has IPv6 disabled (CF-02)
 /// - `anti_dpi`: TLV 0x0A — bool, omitted if false (default)
 /// - `skip_verification`: TLV 0x07 — bool, omitted if false (default)
 /// - `upstream_protocol`: TLV 0x09 — "h2"→1, "h3"→2, None/"auto"→omit
 /// - `certificate_der`: TLV 0x08 — raw DER bytes with varint length prefix; None→omit
 ///
+/// The output is also marked as deeplink format version 1 by prepending TLV 0x00
+/// (CF-01) when the base payload does not already carry it.
+///
 /// # Returns
 /// New deeplink string with appended TLVs, or an error if input is malformed.
 pub fn append_missing_tlvs(
     base_deeplink: &str,
+    has_ipv6: bool,
     anti_dpi: bool,
     skip_verification: bool,
     upstream_protocol: Option<&str>,
@@ -72,7 +84,27 @@ pub fn append_missing_tlvs(
         return Err("deeplink too large".into());
     }
 
-    // Append in canonical order (ascending tag number)
+    // CF-01: mark our output as deeplink format version 1. The spec carries the
+    // version in TLV 0x00 (VarInt); when absent, parsers assume version 0. We
+    // prepend `[0x00, 0x01, 0x01]` (tag, len=1, VarInt(1)) IF the base payload
+    // does not already carry a 0x00 tag — never double-prepend if the upstream
+    // CLI ever starts emitting it. Canonical order is ascending tag, so the
+    // version tag goes at the very front.
+    if !tlv_tag_present(&bytes, TAG_VERSION) {
+        let mut versioned = Vec::with_capacity(bytes.len() + 3);
+        versioned.extend_from_slice(&[TAG_VERSION, 0x01, 0x01]);
+        versioned.extend_from_slice(&bytes);
+        bytes = versioned;
+    }
+
+    // Append in canonical order (ascending tag number).
+    // CF-02: TLV 0x04 has_ipv6 — Bool, spec default true. We OMIT it when IPv6
+    // is available (default) and emit `false` only when the server has IPv6
+    // disabled, so strict/future clients don't attempt unreachable IPv6 routing.
+    // Placed before the 0x07 block to keep ascending-tag canonical order.
+    if !has_ipv6 {
+        write_bool_tlv(TAG_HAS_IPV6, false, &mut bytes);
+    }
     if skip_verification {
         write_bool_tlv(TAG_SKIP_VERIFICATION, true, &mut bytes);
     }
@@ -111,6 +143,54 @@ pub fn append_missing_tlvs(
         return Err("deeplink exceeds size cap after TLV append".into());
     }
     Ok(format!("tt://?{}", B64.encode(&bytes)))
+}
+
+/// Walk the TLV payload and report whether `tag` already appears at a
+/// tag boundary. Used by CF-01 to avoid double-prepending the 0x00 version tag
+/// if the upstream CLI ever starts emitting it.
+///
+/// The payload is a flat sequence of `[tag, varint(len), value...]` triples.
+/// We must decode each length as a QUIC varint (NOT scan for a raw byte), because
+/// a value byte could coincidentally equal `tag` (e.g. a cert DER byte == 0x00).
+/// On any structural inconsistency we return `false` (treat as absent) — the
+/// caller then prepends, which is the safe default (a stray extra version tag is
+/// rejected by no parser; a missing one silently degrades to version 0).
+fn tlv_tag_present(bytes: &[u8], tag: u8) -> bool {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == tag {
+            return true;
+        }
+        // Skip this entry: advance past tag, then its varint length, then value.
+        i += 1;
+        let (len, consumed) = match read_varint(bytes, i) {
+            Some(v) => v,
+            None => return false, // malformed → treat tag as absent (prepend)
+        };
+        i += consumed;
+        i = match i.checked_add(len as usize) {
+            Some(n) => n,
+            None => return false,
+        };
+    }
+    false
+}
+
+/// Decode a QUIC/TLS variable-length integer (RFC 9000 §16) at `pos`.
+/// Returns `(value, bytes_consumed)` or `None` if the slice is too short.
+/// Inverse of `write_varint`.
+fn read_varint(bytes: &[u8], pos: usize) -> Option<(u64, usize)> {
+    let first = *bytes.get(pos)?;
+    let prefix = first >> 6; // top 2 bits encode the length class
+    let n_bytes = 1usize << prefix; // 1, 2, 4, or 8
+    if pos + n_bytes > bytes.len() {
+        return None;
+    }
+    let mut value = (first & 0x3F) as u64;
+    for b in &bytes[pos + 1..pos + n_bytes] {
+        value = (value << 8) | (*b as u64);
+    }
+    Some((value, n_bytes))
 }
 
 /// Emit a boolean TLV: [tag, 0x01, 0x01/0x00]
@@ -184,7 +264,7 @@ mod tests {
     fn anti_dpi_appends_0a_01_01() {
         // Start with a dummy payload: tag=0x05 (server addr), len=5, "alice"
         let base = make_base_deeplink(&[0x05, 0x05, b'a', b'l', b'i', b'c', b'e']);
-        let result = append_missing_tlvs(&base, true, false, None, None).unwrap();
+        let result = append_missing_tlvs(&base, true, true, false, None, None).unwrap();
         let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
         // Must contain [0x0A, 0x01, 0x01] somewhere
         assert!(raw.windows(3).any(|w| w == [0x0A, 0x01, 0x01]),
@@ -194,7 +274,7 @@ mod tests {
     #[test]
     fn defaults_omitted() {
         let base = make_base_deeplink(&[0x05, 0x05, b'a', b'l', b'i', b'c', b'e']);
-        let result = append_missing_tlvs(&base, false, false, None, None).unwrap();
+        let result = append_missing_tlvs(&base, true, false, false, None, None).unwrap();
         let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
         // None of the gap tags should appear when all defaults
         assert!(!raw.contains(&TAG_SKIP_VERIFICATION), "0x07 should not appear");
@@ -203,10 +283,62 @@ mod tests {
         assert!(!raw.contains(&TAG_ANTI_DPI), "0x0A should not appear");
     }
 
+    // ── CF-01 (0x00 version) + CF-02 (0x04 has_ipv6) ───────────────────
+    //
+    // RED-first regression for the deeplink format-version + has_ipv6 conformance
+    // fixes. Mirrors `anti_dpi_appends_0a_01_01` / `defaults_omitted`.
+
+    #[test]
+    fn version_tag_prepended_when_absent() {
+        // CF-01: a base payload WITHOUT 0x00 must come out marked version 1.
+        let base = make_base_deeplink(&[0x05, 0x05, b'a', b'l', b'i', b'c', b'e']);
+        let result = append_missing_tlvs(&base, true, false, false, None, None).unwrap();
+        let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
+        assert!(
+            raw.windows(3).any(|w| w == [0x00, 0x01, 0x01]),
+            "Expected version TLV [0x00, 0x01, 0x01] in {:?}",
+            raw
+        );
+        // The version tag must be at the very front (canonical ascending order).
+        assert_eq!(&raw[0..3], &[0x00, 0x01, 0x01], "version TLV must be prepended first");
+    }
+
+    #[test]
+    fn version_tag_not_double_prepended_when_present() {
+        // CF-01: if the base payload already carries 0x00, do not add a second one.
+        let base = make_base_deeplink(&[0x00, 0x01, 0x01, 0x05, 0x01, b'x']);
+        let result = append_missing_tlvs(&base, true, false, false, None, None).unwrap();
+        let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
+        let version_tlvs = raw.windows(3).filter(|w| *w == [0x00, 0x01, 0x01]).count();
+        assert_eq!(version_tlvs, 1, "0x00 must appear exactly once, got {version_tlvs}");
+    }
+
+    #[test]
+    fn has_ipv6_false_emitted_when_disabled() {
+        // CF-02: server with IPv6 disabled → emit [0x04, 0x01, 0x00] (bool false).
+        let base = make_base_deeplink(&[0x05, 0x01, b'x']);
+        let result = append_missing_tlvs(&base, false, false, false, None, None).unwrap();
+        let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
+        assert!(
+            raw.windows(3).any(|w| w == [0x04, 0x01, 0x00]),
+            "Expected has_ipv6=false TLV [0x04, 0x01, 0x00] in {:?}",
+            raw
+        );
+    }
+
+    #[test]
+    fn has_ipv6_true_omitted() {
+        // CF-02: default true → OMIT the 0x04 tag entirely.
+        let base = make_base_deeplink(&[0x05, 0x01, b'x']);
+        let result = append_missing_tlvs(&base, true, false, false, None, None).unwrap();
+        let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
+        assert!(!raw.contains(&TAG_HAS_IPV6), "0x04 should be omitted when ipv6 available");
+    }
+
     #[test]
     fn skip_verification_appends_07_01_01() {
         let base = make_base_deeplink(&[0x05, 0x01, b'x']);
-        let result = append_missing_tlvs(&base, false, true, None, None).unwrap();
+        let result = append_missing_tlvs(&base, true, false, true, None, None).unwrap();
         let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
         assert!(raw.windows(3).any(|w| w == [0x07, 0x01, 0x01]),
             "Expected [0x07, 0x01, 0x01] in {:?}", raw);
@@ -216,7 +348,7 @@ mod tests {
     fn cert_der_appends_0x08_with_correct_length() {
         let base = make_base_deeplink(&[0x05, 0x01, b'x']);
         let cert = vec![0xAAu8; 100];
-        let result = append_missing_tlvs(&base, false, false, None, Some(&cert)).unwrap();
+        let result = append_missing_tlvs(&base, true, false, false, None, Some(&cert)).unwrap();
         let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
         assert!(raw.contains(&TAG_CERTIFICATE), "0x08 tag should appear");
         // Count 0xAA bytes — should be exactly 100
@@ -227,7 +359,7 @@ mod tests {
     #[test]
     fn upstream_protocol_h2_appends_0x09() {
         let base = make_base_deeplink(&[0x05, 0x01, b'x']);
-        let result = append_missing_tlvs(&base, false, false, Some("h2"), None).unwrap();
+        let result = append_missing_tlvs(&base, true, false, false, Some("h2"), None).unwrap();
         let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
         assert!(raw.contains(&TAG_UPSTREAM_PROTOCOL), "0x09 should appear for h2");
     }
@@ -235,19 +367,19 @@ mod tests {
     #[test]
     fn upstream_protocol_auto_omitted() {
         let base = make_base_deeplink(&[0x05, 0x01, b'x']);
-        let result = append_missing_tlvs(&base, false, false, Some("auto"), None).unwrap();
+        let result = append_missing_tlvs(&base, true, false, false, Some("auto"), None).unwrap();
         let raw = B64.decode(result.strip_prefix("tt://?").unwrap()).unwrap();
         assert!(!raw.contains(&TAG_UPSTREAM_PROTOCOL), "0x09 should be omitted for auto");
     }
 
     #[test]
     fn missing_prefix_rejected() {
-        assert!(append_missing_tlvs("not-a-deeplink", true, false, None, None).is_err());
+        assert!(append_missing_tlvs("not-a-deeplink", true, true, false, None, None).is_err());
     }
 
     #[test]
     fn invalid_base64_rejected() {
-        assert!(append_missing_tlvs("tt://?@@not_valid_b64@@", true, false, None, None).is_err());
+        assert!(append_missing_tlvs("tt://?@@not_valid_b64@@", true, true, false, None, None).is_err());
     }
 
     #[test]
@@ -255,7 +387,7 @@ mod tests {
         let base = make_base_deeplink(&[0x05]);
         // FIX-OO-6: cap is now 32768 — pick something comfortably above.
         let huge = vec![0u8; 40_000];
-        assert!(append_missing_tlvs(&base, false, false, None, Some(&huge)).is_err());
+        assert!(append_missing_tlvs(&base, true, false, false, None, Some(&huge)).is_err());
     }
 
     #[test]
@@ -309,16 +441,41 @@ mod tests {
         #[test]
         fn bool_tlvs_decode_back_through_upstream() {
             let base = base_deeplink();
-            let out = append_missing_tlvs(&base, true, true, None, None).unwrap();
+            let out = append_missing_tlvs(&base, true, true, true, None, None).unwrap();
             let decoded = decode(&out).unwrap();
             assert!(decoded.anti_dpi);
             assert!(decoded.skip_verification);
         }
 
         #[test]
+        fn version_and_has_ipv6_decode_back_through_upstream() {
+            // CF-01/CF-02 end-to-end: our output must decode cleanly through the
+            // upstream parser (which validates the 0x00 version ≤ CURRENT_VERSION
+            // and reads 0x04 into `has_ipv6`). The base deeplink from upstream
+            // `encode()` defaults has_ipv6=true; we force it false here.
+            let base = base_deeplink();
+            let out = append_missing_tlvs(&base, false, false, false, None, None).unwrap();
+            let decoded = decode(&out).unwrap();
+            assert!(!decoded.has_ipv6, "has_ipv6 must round-trip as false");
+            // The existing required/base fields must still be intact.
+            assert_eq!(decoded.hostname, "vpn.example.com");
+            assert_eq!(decoded.username, "alice");
+        }
+
+        #[test]
+        fn has_ipv6_true_roundtrips_as_default() {
+            // When ipv6 is available we omit 0x04; the upstream decoder must still
+            // report the spec default (true).
+            let base = base_deeplink();
+            let out = append_missing_tlvs(&base, true, false, false, None, None).unwrap();
+            let decoded = decode(&out).unwrap();
+            assert!(decoded.has_ipv6, "omitted 0x04 must default to true");
+        }
+
+        #[test]
         fn upstream_protocol_h3_decodes_back() {
             let base = base_deeplink();
-            let out = append_missing_tlvs(&base, false, false, Some("h3"), None).unwrap();
+            let out = append_missing_tlvs(&base, true, false, false, Some("h3"), None).unwrap();
             let decoded = decode(&out).unwrap();
             assert_eq!(decoded.upstream_protocol, Protocol::Http3);
         }
@@ -326,7 +483,7 @@ mod tests {
         #[test]
         fn upstream_protocol_h2_decodes_back() {
             let base = base_deeplink();
-            let out = append_missing_tlvs(&base, false, false, Some("h2"), None).unwrap();
+            let out = append_missing_tlvs(&base, true, false, false, Some("h2"), None).unwrap();
             let decoded = decode(&out).unwrap();
             assert_eq!(decoded.upstream_protocol, Protocol::Http2);
         }
@@ -335,7 +492,7 @@ mod tests {
         fn small_cert_decodes_back() {
             let base = base_deeplink();
             let cert = vec![0xAAu8; 50]; // < 64 — single-byte varint length
-            let out = append_missing_tlvs(&base, false, false, None, Some(&cert)).unwrap();
+            let out = append_missing_tlvs(&base, true, false, false, None, Some(&cert)).unwrap();
             let decoded = decode(&out).unwrap();
             assert_eq!(decoded.certificate.as_deref(), Some(&cert[..]));
         }
@@ -348,7 +505,7 @@ mod tests {
             // garbage and decode() returns a parse error.
             let base = base_deeplink();
             let cert = vec![0xBBu8; 500];
-            let out = append_missing_tlvs(&base, false, false, None, Some(&cert)).unwrap();
+            let out = append_missing_tlvs(&base, true, false, false, None, Some(&cert)).unwrap();
             let decoded = decode(&out).unwrap();
             assert_eq!(decoded.certificate.as_deref(), Some(&cert[..]));
         }
@@ -358,7 +515,7 @@ mod tests {
             let base = base_deeplink();
             // 8192 is the cap; 4096 is realistic for an EC cert chain.
             let cert = vec![0xCCu8; 4096];
-            let out = append_missing_tlvs(&base, false, false, None, Some(&cert)).unwrap();
+            let out = append_missing_tlvs(&base, true, false, false, None, Some(&cert)).unwrap();
             let decoded = decode(&out).unwrap();
             assert_eq!(decoded.certificate.as_deref(), Some(&cert[..]));
         }
@@ -369,7 +526,7 @@ mod tests {
             // anti-DPI + skip-verify + h3. All four gap TLVs present at once.
             let base = base_deeplink();
             let cert = vec![0xDDu8; 800];
-            let out = append_missing_tlvs(&base, true, true, Some("h3"), Some(&cert)).unwrap();
+            let out = append_missing_tlvs(&base, true, true, true, Some("h3"), Some(&cert)).unwrap();
             let decoded = decode(&out).unwrap();
             assert!(decoded.anti_dpi);
             assert!(decoded.skip_verification);

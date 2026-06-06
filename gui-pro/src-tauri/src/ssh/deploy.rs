@@ -1,6 +1,23 @@
 use super::*;
 use super::sanitize::*;
 
+// CONF-M-05 (T-04-06 supply-chain) — install.sh is pinned to a specific release
+// TAG and integrity-checked against a SHA-256 that is PINNED HERE IN THE REPO.
+//
+// Why an in-repo constant and not a remotely-served checksum: a checksum fetched
+// from the same channel as the script (e.g. a sibling `install.sh.sha256` on the
+// same CDN/repo) adds nothing — an attacker who can tamper with one can tamper
+// with the other. Pinning the hash in our own source means a compromised upstream
+// script no longer matches and the install aborts.
+//
+// HOW TO BUMP: when raising TRUSTTUNNEL_INSTALL_SH_TAG to a newer release, fetch
+//   curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/<tag>/scripts/install.sh | sha256sum
+// and update TRUSTTUNNEL_INSTALL_SH_SHA256 to the new value IN THE SAME COMMIT.
+// The tag and the hash must always move together.
+const TRUSTTUNNEL_INSTALL_SH_TAG: &str = "v1.0.33";
+const TRUSTTUNNEL_INSTALL_SH_SHA256: &str =
+    "40eddf99a1214b681ef4c2c6404262303e1980c963cbe0fbbf44b9beb2904d12";
+
 /// Validate all user-supplied fields in EndpointSettings before building shell commands.
 fn validate_endpoint_settings(settings: &EndpointSettings) -> Result<(), String> {
     validate_vpn_username(&settings.vpn_username)?;
@@ -91,11 +108,30 @@ direct = {{}}"#,
     );
 
     // 4. hosts.toml (TLS certs — main hosts only, ping_hosts requires unique hostname)
+    //
+    // CONF-C-01 (new-installs-only, D-11): for the Let's Encrypt path, point cert
+    // paths directly at certbot's managed `live/` symlink. certbot rotates the
+    // symlink target on renewal, so TrustTunnel serves the fresh cert after a
+    // graceful reload (SIGHUP) with NO local `cp` step — the spec's zero-copy /
+    // zero-downtime design. Self-signed and provided-cert branches have no live/
+    // directory, so they keep the local `certs/` copy paths.
+    //
+    // D-11: this is the GENERATOR (new installs) side only. Existing-server
+    // migration to the live/ symlink is handled separately by Plan 02's
+    // renew_cert self-heal — we do NOT migrate already-deployed servers here.
+    let (cert_chain_path, private_key_path) = if settings.cert_type == "letsencrypt" {
+        (
+            format!("/etc/letsencrypt/live/{hostname}/fullchain.pem"),
+            format!("/etc/letsencrypt/live/{hostname}/privkey.pem"),
+        )
+    } else {
+        ("certs/cert.pem".to_string(), "certs/key.pem".to_string())
+    };
     let hosts = format!(
         r#"[[main_hosts]]
 hostname = "{hostname}"
-cert_chain_path = "certs/cert.pem"
-private_key_path = "certs/key.pem""#
+cert_chain_path = "{cert_chain_path}"
+private_key_path = "{private_key_path}""#
     );
 
     // Build the full shell script
@@ -146,22 +182,65 @@ if command -v iptables >/dev/null 2>&1; then
   {sudo}iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || {sudo}iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
 fi
 
-{sudo}certbot certonly --standalone -d {hostname} --non-interactive --agree-tos {email_flag} --http-01-port 80
-{sudo}mkdir -p {dir}/certs
-{sudo}cp /etc/letsencrypt/live/{hostname}/fullchain.pem {dir}/certs/cert.pem
-{sudo}cp /etc/letsencrypt/live/{hostname}/privkey.pem {dir}/certs/key.pem
+# CONF-H-02 — certbot issuance with webroot fallback.
+# `--standalone` binds port 80 itself, so it fails ("port 80 already in use")
+# on the common VPS layout where nginx/apache/caddy already serves :80. The
+# spec (CERT_RENEWAL.md §Certificate Issuance Methods) says: standalone only
+# when nothing occupies :80, otherwise webroot. We probe :80 first and pick:
+#   • free  → --standalone (binds :80 directly)
+#   • busy  → --webroot against the common docroots
+# If both fail, surface a specific, actionable error.
+if {sudo}ss -tlnp 2>/dev/null | grep -qE ':80[[:space:]]'; then
+  echo "Port 80 is in use — attempting certbot --webroot fallback"
+  tt_cert_ok=0
+  for tt_webroot in /var/www/html /usr/share/nginx/html; do
+    if [ -d "$tt_webroot" ]; then
+      if {sudo}certbot certonly --webroot -w "$tt_webroot" -d {hostname} --non-interactive --agree-tos {email_flag}; then
+        tt_cert_ok=1
+        break
+      fi
+    fi
+  done
+  if [ "$tt_cert_ok" != "1" ]; then
+    echo "SSH_CERTBOT_PORT80_BUSY: certbot could not issue a certificate — port 80 is occupied by another HTTP server and the webroot fallback failed. Temporarily stop your HTTP server (nginx/apache/caddy) and retry, or switch to a self-signed certificate." >&2
+    exit 1
+  fi
+else
+  {sudo}certbot certonly --standalone -d {hostname} --non-interactive --agree-tos {email_flag} --http-01-port 80
+fi
+# CONF-C-01: no local cp — hosts.toml points directly at the live/ symlink so
+# certbot's renewal-time symlink rotation is served after a graceful reload.
+
+# CONF-H-03 / A2 — ensure the systemd unit can reload (SIGHUP) so cert renewal
+# is zero-downtime instead of restarting and dropping every VPN session.
+# We provision ExecReload via a systemd DROP-IN (not an in-place edit of the
+# shipped unit file) so we never mutate the upstream template:
+#   /etc/systemd/system/trusttunnel.service.d/10-execreload.conf
+# Rewriting the drop-in is idempotent (same bytes every run). We only create it
+# when `systemctl show -p ExecReload` reports no ExecReload, then daemon-reload.
+if [ -z "$({sudo}systemctl show trusttunnel -p ExecReload --value 2>/dev/null)" ]; then
+  {sudo}mkdir -p /etc/systemd/system/trusttunnel.service.d
+  {sudo}bash -c 'cat > /etc/systemd/system/trusttunnel.service.d/10-execreload.conf << '"'"'EXECRELOAD_EOF'"'"'
+[Service]
+ExecReload=/bin/kill -HUP $MAINPID
+EXECRELOAD_EOF'
+  {sudo}systemctl daemon-reload
+fi
 
 # Setup auto-renewal helper script — открывает 80 если UFW активен + закрыт,
 # обновляет cert, закрывает 80. Без скрипта cron renewal провалится если
 # user закрыл 80 в firewall (только manual «Обновить» через UI открывал).
 # P UAT 2026-05-06: --no-random-sleep-on-renew не нужен в cron (cron сам
 # распределяет load), но если user запустит script вручную — defaults sane.
-{sudo}bash -c 'cat > /usr/local/sbin/trusttunnel-cert-renew.sh << RENEW_EOF
+# S-6 — RENEW_EOF is single-quoted so the heredoc body is written VERBATIM.
+# No field in the body is expanded by the writing shell, which keeps the
+# generated script structurally safe even if a future field is added here.
+# Because the delimiter is now quoted, in-body shell variables ($opened_80)
+# are NO LONGER escaped with a backslash — they reach the file as-is.
+{sudo}bash -c 'cat > /usr/local/sbin/trusttunnel-cert-renew.sh << '"'"'RENEW_EOF'"'"'
 #!/bin/bash
 # Auto-generated by TrustTunnel deploy. Re-runs idempotent.
 set -e
-HOSTNAME="{hostname}"
-TT_DIR="{dir}"
 opened_80=0
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | head -1 | grep -q "active"; then
   if ! ufw status 2>/dev/null | grep -qE "^(80/tcp|80 )" ; then
@@ -169,9 +248,12 @@ if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | head -1 | grep -q 
     opened_80=1
   fi
 fi
+# CONF-H-03: deploy-hook issues a graceful reload (SIGHUP via ExecReload),
+# never a restart — active VPN sessions survive cert renewal. No cp step:
+# hosts.toml points at the live/ symlink, which certbot rotates in place.
 certbot renew --quiet \
-  --deploy-hook "cp /etc/letsencrypt/live/\$HOSTNAME/fullchain.pem \$TT_DIR/certs/cert.pem && cp /etc/letsencrypt/live/\$HOSTNAME/privkey.pem \$TT_DIR/certs/key.pem && systemctl restart trusttunnel" || true
-if [ "\$opened_80" = "1" ]; then
+  --deploy-hook "systemctl reload trusttunnel" || true
+if [ "$opened_80" = "1" ]; then
   ufw --force delete allow 80/tcp >/dev/null 2>&1 || true
 fi
 RENEW_EOF'
@@ -179,7 +261,8 @@ RENEW_EOF'
 
 # Cron entry — вызывает helper script. Раньше всё было inline в cron line
 # (без open/close 80 → renewal провалится если firewall закрыл 80).
-{sudo}bash -c 'cat > /etc/cron.d/trusttunnel-cert-renew << CRON_EOF
+# S-6 — CRON_EOF single-quoted: body written verbatim, no shell expansion.
+{sudo}bash -c 'cat > /etc/cron.d/trusttunnel-cert-renew << '"'"'CRON_EOF'"'"'
 0 3 * * * root /usr/local/sbin/trusttunnel-cert-renew.sh
 CRON_EOF'
 "#
@@ -229,12 +312,46 @@ RULES_EOF
 {vpn}
 VPN_EOF
 
+# CONF-H-06 — provision ICMP tunnelling. The endpoint only serves the `_icmp`
+# pseudo-host when vpn.toml has an [icmp] section with a valid interface_name.
+# Autodetect the default-route interface via a DEV-KEYWORD match so it is robust
+# across distros where the interface is not at a fixed positional column (e.g.
+# `default dev venet0 scope link` on some OpenVZ images breaks a fixed-column parse).
+# Fall back to eth0 if the parse yields nothing. Appended after the heredoc so
+# the autodetect runs server-side (the VPN_EOF heredoc is quoted = no expansion).
+TT_ICMP_IFACE="$(ip route show default | awk '/default/ {{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}}' | head -1)"
+[ -z "$TT_ICMP_IFACE" ] && TT_ICMP_IFACE="eth0"
+{sudo}tee -a {dir}/vpn.toml > /dev/null << ICMP_EOF
+
+[icmp]
+interface_name = "$TT_ICMP_IFACE"
+ICMP_EOF
+
 {sudo}tee {dir}/hosts.toml > /dev/null << 'HOSTS_EOF'
 {hosts}
 HOSTS_EOF
 {cert_cmd}
 echo "Configuration files created successfully"
 "#
+    )
+}
+
+/// Build the pinned-tag, integrity-checked install.sh fetch+run command.
+///
+/// CONF-M-05 (T-04-06): pulls install.sh from `TRUSTTUNNEL_INSTALL_SH_TAG` (a
+/// release tag, never `refs/heads/master`) and verifies it against the in-repo
+/// `TRUSTTUNNEL_INSTALL_SH_SHA256` via `sha256sum -c` before executing. The temp
+/// script is always removed, and a non-zero result surfaces a clear marker.
+pub(crate) fn build_install_command(sudo: &str) -> String {
+    let tag = TRUSTTUNNEL_INSTALL_SH_TAG;
+    let expected_sha = TRUSTTUNNEL_INSTALL_SH_SHA256;
+    format!(
+        "curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/{tag}/scripts/install.sh -o /tmp/tt_install.sh \
+         && echo '{expected_sha}  /tmp/tt_install.sh' | sha256sum -c - \
+         && {sudo}sh /tmp/tt_install.sh -a y -v; \
+         tt_rc=$?; rm -f /tmp/tt_install.sh; \
+         if [ \"$tt_rc\" -ne 0 ]; then echo 'SSH_INSTALL_SH_INTEGRITY_OR_RUN_FAILED' >&2; fi; \
+         exit $tt_rc"
     )
 }
 
@@ -339,10 +456,12 @@ async fn deploy_install_binary(
     let stop_cmd = format!("{sudo}systemctl stop trusttunnel 2>/dev/null; sleep 1; true");
     exec_command(handle, app, &stop_cmd).await.ok();
 
-    // Use -a y flag to auto-answer interactive prompts (built into the install script)
-    let install_cmd = format!(
-        "curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh -o /tmp/tt_install.sh && {sudo}sh /tmp/tt_install.sh -a y -v && rm -f /tmp/tt_install.sh"
-    );
+    // CONF-M-05 — fetch install.sh from a PINNED release tag (not refs/heads/master)
+    // and verify it against the in-repo SHA-256 before running it. A breaking or
+    // malicious upstream change to the script no longer silently reaches the server:
+    // the `sha256sum -c` fails the install with a clear error instead.
+    // Use -a y flag to auto-answer interactive prompts (built into the install script).
+    let install_cmd = build_install_command(sudo);
 
     let (_, install_code) = exec_command(handle, app, &install_cmd).await?;
 
@@ -413,11 +532,25 @@ async fn deploy_configure(
         return Err(msg.into());
     }
 
-    // Verify certs were created
-    let (cert_check, cert_code) = exec_command(
-        handle, app,
-        &format!("test -f {dir}/certs/cert.pem && test -f {dir}/certs/key.pem && echo OK", dir = ENDPOINT_DIR)
-    ).await?;
+    // Verify certs were created. CONF-C-01: for the Let's Encrypt path the cert
+    // lives at certbot's live/ symlink (no local certs/ copy), so verify the
+    // live/ path instead of certs/. Self-signed / provided-cert keep certs/.
+    let cert_check_cmd = if settings.cert_type == "letsencrypt" {
+        let hostname = if !settings.domain.is_empty() {
+            settings.domain.clone()
+        } else {
+            "trusttunnel.local".to_string()
+        };
+        format!(
+            "test -f /etc/letsencrypt/live/{hostname}/fullchain.pem && test -f /etc/letsencrypt/live/{hostname}/privkey.pem && echo OK"
+        )
+    } else {
+        format!(
+            "test -f {dir}/certs/cert.pem && test -f {dir}/certs/key.pem && echo OK",
+            dir = ENDPOINT_DIR
+        )
+    };
+    let (cert_check, cert_code) = exec_command(handle, app, &cert_check_cmd).await?;
 
     if cert_code != 0 || !cert_check.contains("OK") {
         let msg = "Certificates were not created. Check logs (openssl/certbot).";
@@ -587,10 +720,16 @@ async fn deploy_export_config(
 ) -> Result<String, String> {
     emit_step(app, "export", "progress", "Generating client config...");
 
-    // Use the endpoint's own export to get proper config with certificate PEM
+    // Use the endpoint's own export to get proper config with certificate PEM.
+    // S-4: the export_address is interpolated unquoted into the `-a {addr}` shell
+    // arg. settings.domain is already whitelist-validated by validate_endpoint_settings;
+    // params.host (operator-typed SSH host) is NOT, so when it is used as the
+    // address we whitelist-validate it first (CLAUDE.md SAFETY-01, whitelist-first).
     let export_address = if !settings.domain.is_empty() {
         format!("{}:{}", settings.domain, settings.listen_address.split(':').next_back().unwrap_or("443"))
     } else {
+        validate_ssh_host(&params.host)
+            .map_err(|e| format!("SSH_EXPORT_INVALID_HOST|{e}"))?;
         let port = settings.listen_address.split(':').next_back().unwrap_or("443");
         format!("{}:{port}", params.host)
     };
@@ -799,6 +938,235 @@ mod tests {
         let settings = test_settings();
         let output = build_configure_commands(&settings, "sudo ");
         assert!(output.contains("openssl req"), "selfsigned should use openssl");
+    }
+
+    #[test]
+    fn test_letsencrypt_hosts_toml_points_at_live_symlink() {
+        // CONF-C-01: LE hosts.toml must reference certbot's live/ symlink, not
+        // a local certs/ copy — so renewal-time symlink rotation is served after
+        // a graceful reload with no cp step.
+        let mut settings = test_settings();
+        settings.cert_type = "letsencrypt".to_string();
+        settings.domain = "vpn.example.com".to_string();
+        let output = build_configure_commands(&settings, "sudo ");
+        assert!(
+            output.contains("/etc/letsencrypt/live/vpn.example.com/fullchain.pem"),
+            "LE hosts.toml should point cert_chain at the live/ symlink"
+        );
+        assert!(
+            output.contains("/etc/letsencrypt/live/vpn.example.com/privkey.pem"),
+            "LE hosts.toml should point private_key at the live/ symlink"
+        );
+        // The LE path must NOT keep a local cp of the cert into certs/.
+        assert!(
+            !output.contains("cp /etc/letsencrypt/live/vpn.example.com/fullchain.pem"),
+            "LE path should not cp cert into local certs/ (CONF-C-01)"
+        );
+    }
+
+    #[test]
+    fn test_selfsigned_hosts_toml_keeps_local_certs() {
+        // Self-signed has no live/ dir — must keep the local certs/ paths.
+        let settings = test_settings(); // cert_type = selfsigned
+        let output = build_configure_commands(&settings, "sudo ");
+        assert!(
+            output.contains("cert_chain_path = \"certs/cert.pem\""),
+            "self-signed hosts.toml should keep local certs/cert.pem"
+        );
+        assert!(
+            output.contains("private_key_path = \"certs/key.pem\""),
+            "self-signed hosts.toml should keep local certs/key.pem"
+        );
+        assert!(
+            !output.contains("/etc/letsencrypt/live/"),
+            "self-signed must not reference the LE live/ symlink"
+        );
+    }
+
+    #[test]
+    fn test_letsencrypt_renew_hook_reloads_not_restarts() {
+        // CONF-H-03: the auto-renewal deploy-hook must issue a graceful reload
+        // (SIGHUP), never a restart that drops active VPN sessions.
+        let mut settings = test_settings();
+        settings.cert_type = "letsencrypt".to_string();
+        let output = build_configure_commands(&settings, "sudo ");
+        assert!(
+            output.contains("--deploy-hook \"systemctl reload trusttunnel\""),
+            "renew deploy-hook should reload, got: {output}"
+        );
+        assert!(
+            !output.contains("systemctl restart trusttunnel"),
+            "renew deploy-hook must not restart (drops sessions)"
+        );
+    }
+
+    #[test]
+    fn test_letsencrypt_provisions_execreload_via_dropin() {
+        // A2 / CONF-H-03: ExecReload must be provisioned via a systemd drop-in
+        // + daemon-reload, NOT an in-place edit of the shipped unit file.
+        let mut settings = test_settings();
+        settings.cert_type = "letsencrypt".to_string();
+        let output = build_configure_commands(&settings, "sudo ");
+        assert!(
+            output.contains("/etc/systemd/system/trusttunnel.service.d/10-execreload.conf"),
+            "ExecReload should be provisioned via a service.d/ drop-in"
+        );
+        assert!(
+            output.contains("ExecReload=/bin/kill -HUP $MAINPID"),
+            "drop-in should define a MAINPID-guarded SIGHUP ExecReload"
+        );
+        assert!(
+            output.contains("systemctl daemon-reload"),
+            "drop-in write must be followed by daemon-reload"
+        );
+        // Must not mutate the upstream unit file in place.
+        assert!(
+            !output.contains(">> /etc/systemd/system/trusttunnel.service")
+                && !output.contains(">>/etc/systemd/system/trusttunnel.service"),
+            "must not append to the shipped unit file in place"
+        );
+    }
+
+    #[test]
+    fn test_vpn_toml_provisions_icmp_with_dev_keyword_autodetect() {
+        // CONF-H-06: vpn.toml must gain an [icmp] section with an autodetected
+        // interface_name, and the autodetect must use the dev-keyword match
+        // (distro-robust), NOT the column-positional `awk '{print $5}'`.
+        let settings = test_settings();
+        let output = build_configure_commands(&settings, "sudo ");
+        assert!(output.contains("[icmp]"), "vpn.toml should gain an [icmp] section");
+        assert!(
+            output.contains("interface_name = \"$TT_ICMP_IFACE\""),
+            "[icmp] should set interface_name from the autodetected interface"
+        );
+        // Dev-keyword match — robust across distros.
+        assert!(
+            output.contains(r#"if($i=="dev")"#),
+            "autodetect must use the dev-keyword match, got: {output}"
+        );
+        // Must NOT use the fragile column-positional approach.
+        assert!(
+            !output.contains("{print $5}") && !output.contains("{ print $5 }"),
+            "autodetect must not use the column-positional awk '{{print $5}}'"
+        );
+        // Sensible fallback when the parse yields empty.
+        assert!(
+            output.contains(r#"TT_ICMP_IFACE="eth0""#),
+            "autodetect should fall back to eth0 when parse is empty"
+        );
+    }
+
+    #[test]
+    fn test_letsencrypt_has_webroot_fallback_on_port80_busy() {
+        // CONF-H-02: when :80 is occupied the certbot flow must fall back to
+        // --webroot instead of failing opaquely on --standalone.
+        let mut settings = test_settings();
+        settings.cert_type = "letsencrypt".to_string();
+        let output = build_configure_commands(&settings, "sudo ");
+        // Probes :80 occupancy before choosing an issuance method.
+        assert!(
+            output.contains("ss -tlnp") && output.contains(":80[[:space:]]"),
+            "certbot flow should probe whether :80 is occupied"
+        );
+        // Webroot branch present with common docroots.
+        assert!(
+            output.contains("certbot certonly --webroot"),
+            "certbot flow should have a --webroot fallback branch"
+        );
+        assert!(
+            output.contains("/var/www/html") && output.contains("/usr/share/nginx/html"),
+            "webroot fallback should try the common docroots"
+        );
+        // Standalone still used on the free-port path.
+        assert!(
+            output.contains("certbot certonly --standalone"),
+            "standalone should still be used when :80 is free"
+        );
+        // Specific, actionable error when both methods fail.
+        assert!(
+            output.contains("SSH_CERTBOT_PORT80_BUSY"),
+            "a specific port-80-busy error should be surfaced when issuance fails"
+        );
+    }
+
+    #[test]
+    fn test_install_command_pins_tag_not_master() {
+        // CONF-M-05: install.sh must be fetched from a release tag, not master.
+        let cmd = build_install_command("sudo ");
+        assert!(
+            !cmd.contains("refs/heads/master"),
+            "install.sh must not be fetched from refs/heads/master"
+        );
+        assert!(
+            cmd.contains(&format!(
+                "TrustTunnel/TrustTunnel/{}/scripts/install.sh",
+                TRUSTTUNNEL_INSTALL_SH_TAG
+            )),
+            "install.sh URL must be pinned to the release tag"
+        );
+    }
+
+    #[test]
+    fn test_install_command_verifies_in_repo_sha256() {
+        // CONF-M-05: the integrity check must compare against the IN-REPO hash
+        // constant via sha256sum -c (not a remotely-fetched checksum).
+        let cmd = build_install_command("sudo ");
+        assert!(
+            cmd.contains(TRUSTTUNNEL_INSTALL_SH_SHA256),
+            "integrity check must use the in-repo pinned SHA-256 constant"
+        );
+        assert!(
+            cmd.contains("sha256sum -c -"),
+            "integrity check must run sha256sum -c against the downloaded script"
+        );
+        // The hash must come from our own constant, not a sibling .sha256 download.
+        assert!(
+            !cmd.contains("install.sh.sha256"),
+            "must not fetch the checksum from the same remote channel as the script"
+        );
+        // Pinned hash is a valid 64-char lowercase hex digest.
+        assert_eq!(TRUSTTUNNEL_INSTALL_SH_SHA256.len(), 64);
+        assert!(
+            TRUSTTUNNEL_INSTALL_SH_SHA256
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && (!c.is_alphabetic() || c.is_lowercase())),
+            "pinned SHA-256 must be 64 lowercase hex chars"
+        );
+    }
+
+    #[test]
+    fn test_renew_and_cron_heredocs_are_single_quoted() {
+        // S-6: RENEW_EOF and CRON_EOF delimiters must be single-quoted so a
+        // future field added to the body cannot be shell-expanded by the writer.
+        let mut settings = test_settings();
+        settings.cert_type = "letsencrypt".to_string();
+        let output = build_configure_commands(&settings, "sudo ");
+        // The helper scripts are written inside `bash -c '...'`, so the quoted
+        // heredoc delimiter is emitted via the `'"'"'` single-quote-escape dance.
+        // After the outer shell unquotes it, the cat sees `<< 'RENEW_EOF'`.
+        assert!(
+            output.contains(r#"<< '"'"'RENEW_EOF'"'"'"#),
+            "RENEW_EOF delimiter must be single-quoted (via the '\"'\"' escape)"
+        );
+        assert!(
+            output.contains(r#"<< '"'"'CRON_EOF'"'"'"#),
+            "CRON_EOF delimiter must be single-quoted (via the '\"'\"' escape)"
+        );
+        // Guard against the un-quoted form ever coming back.
+        assert!(
+            !output.contains("<< RENEW_EOF") && !output.contains("<< CRON_EOF"),
+            "delimiters must never be emitted unquoted"
+        );
+        // With a quoted delimiter the in-body var must NOT be backslash-escaped
+        // (otherwise the literal `\$opened_80` would be written to the script).
+        assert!(
+            output.contains(r#"[ "$opened_80" = "1" ]"#),
+            "in-body var must be unescaped under a quoted heredoc"
+        );
+        assert!(
+            !output.contains(r#"\$opened_80"#),
+            "in-body var must not keep the backslash escape"
+        );
     }
 
     #[test]

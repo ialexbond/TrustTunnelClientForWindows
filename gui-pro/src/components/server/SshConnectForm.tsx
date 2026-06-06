@@ -142,11 +142,11 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
     <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg-primary)]">
       {/* Форма — вертикально по центру */}
       <div className="w-full overflow-y-auto">
-        <div className="max-w-[360px] mx-auto px-4 py-5 space-y-3.5">
+        <div className="max-w-[360px] mx-auto px-4 py-5 space-y-4">
 
           {/* Заголовок */}
           <div className="text-center pb-1">
-            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <h2 className="text-title-sm" style={{ color: "var(--color-text-primary)" }}>
               {t("control.ssh_title")}
             </h2>
             <p className="text-sm mt-1" style={{ color: "var(--color-text-secondary)" }}>
@@ -185,7 +185,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
 
           {/* Способ авторизации — 2 сегмента */}
           <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
+            <label className="block text-button mb-1.5 text-[var(--color-text-secondary)]">
               {t("control.auth_method")}
             </label>
             <div className="flex rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden">
@@ -224,12 +224,12 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
             <div className="space-y-3">
               {/* Файл ключа */}
               <div>
-                <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
+                <label className="block text-button mb-1.5 text-[var(--color-text-secondary)]">
                   {t("control.key_file_label", "Файл ключа")}
                 </label>
                 <div className="flex gap-1.5">
                   <div
-                    className="flex-1 flex items-center px-2.5 h-8 rounded-[var(--radius-md)] text-xs truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)] hover:border-[var(--color-accent-interactive)] transition-colors"
+                    className="flex-1 flex items-center px-[var(--space-2)] h-8 rounded-[var(--radius-md)] text-xs truncate cursor-pointer bg-[var(--color-input-bg)] border border-[var(--color-input-border)] hover:border-[var(--color-accent-interactive)] transition-colors"
                     onClick={handleSelectKey}
                   >
                     <FileKey className="w-3.5 h-3.5 shrink-0 mr-2 text-[var(--color-text-muted)]" />
@@ -257,11 +257,11 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
 
               {/* Вставить ключ */}
               <div>
-                <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
+                <label className="block text-button mb-1.5 text-[var(--color-text-secondary)]">
                   {t("control.key_paste_label", "Вставить ключ")}
                 </label>
                 <textarea
-                  className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-xs font-mono resize-none h-[80px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)] focus:border-[var(--color-accent-interactive)] outline-none focus-visible:shadow-[var(--focus-ring)] transition-colors"
+                  className="w-full rounded-[var(--radius-md)] px-[var(--space-2)] py-2 text-xs font-mono resize-none h-[80px] bg-[var(--color-input-bg)] border border-[var(--color-input-border)] text-[var(--color-text-primary)] focus:border-[var(--color-accent-interactive)] outline-none focus-visible:shadow-[var(--focus-ring)] transition-colors"
                   value={keyData}
                   onChange={(e) => setKeyData(e.target.value)}
                   placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}

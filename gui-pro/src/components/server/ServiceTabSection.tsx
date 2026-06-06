@@ -41,26 +41,7 @@ import { LogsSection } from "./LogsSection";
 import { DangerZoneSection } from "./DangerZoneSection";
 import { ProtocolUpdateSection } from "./ProtocolUpdateSection";
 import { useSidecarVersions } from "./useSidecarVersions";
-
-/**
- * Compare semver-ish strings descending. Negative when `a` > `b`, positive
- * when `a` < `b`, zero when equal. Duplicated locally (same shape lives
- * inside `ProtocolUpdateSection`) so this file has no fragile cross-import
- * dependency on the dropdown component for a 4-line numeric comparison.
- */
-function compareSemverDesc(a: string, b: string): number {
-  const parts = (s: string): number[] =>
-    s.replace(/^v/, "").split("-")[0].split(".").map((p) => parseInt(p, 10) || 0);
-  const pa = parts(a);
-  const pb = parts(b);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const na = pa[i] ?? 0;
-    const nb = pb[i] ?? 0;
-    if (na !== nb) return nb - na;
-  }
-  return 0;
-}
+import { compareSemver } from "../../shared/utils/compareSemver";
 
 interface Props {
   state: ServerState;
@@ -117,7 +98,7 @@ export function ServiceTabSection({
   // `check_sidecar_version` failed or never completed, every consumer below
   // stayed pinned to the initial empty string. UI symptoms: bottomless
   // Skeleton, dropdown without «(установлена)» suffix, every option labelled
-  // «(новая)» (because `compareSemverDesc(anything, "")` is always negative),
+  // «(новая)» (because `compareSemver("", anything)` is always negative),
   // bare Install button.
   //
   // Switch: read the installed version straight from `state.serverInfo.version`
@@ -133,7 +114,10 @@ export function ServiceTabSection({
   const computedSidecarAvailable =
     !!serverInfoVersion &&
     !!latestFromGitHub &&
-    compareSemverDesc(serverInfoVersion, latestFromGitHub) > 0;
+    // Direction: shared compareSemver is ASCENDING. The former descending
+    // compareSemverDesc(serverInfo, latest) > 0 meant "serverInfo < latest"
+    // (an update is available); the ascending equivalent is `< 0`.
+    compareSemver(serverInfoVersion, latestFromGitHub) < 0;
 
   // One-shot signal к parent: пользователь добрался до Service tab и видит
   // карточку с Badge + dropdown. Bottom-tab pill dot на «Панель управления»

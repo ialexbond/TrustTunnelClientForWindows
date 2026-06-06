@@ -105,13 +105,19 @@ describe("ArrayOfTablesBlock (Phase 3 — D-5.2 main_hosts guard)", () => {
         renderEntry={renderEntry}
       />,
     );
-    // [PHASE-4 BUG, D-06] The component passes `{ index: idx + 1 }` to the
-    // delete_rule key, but ru.json interpolates `{{hostname}}` — so the var is
-    // never filled and the trash aria-label renders as "Удалить правило "
-    // (trailing space, NO rule number). We PIN this current-but-buggy behavior
-    // here; a Phase-4 fix should align the placeholder name (index vs hostname).
+    // [PHASE-4 FIX, D-03.1] The component passes `{ index: idx + 1 }` to the
+    // delete_rule key. ru.json now interpolates `{{index}}` (was the buggy
+    // `{{hostname}}`, which left the unnumbered "Удалить правило " label). The
+    // trash button now carries the NAMED label "Удалить правило 1" — a VISIBLE
+    // a11y/i18n improvement.
+    //
+    // Anti-tautology: assert the LITERAL expected string includes the rule
+    // number "1". On pre-fix code the placeholder is {{hostname}} (unfilled by
+    // the component's { index } arg), so the rendered label is the unnumbered
+    // "Удалить правило " and this regex query FAILS; after the placeholder
+    // alignment it resolves "Удалить правило 1" and PASSES.
     const trash = screen.getByRole("button", {
-      name: i18n.t("server.config.delete_rule", {}),
+      name: /Удалить правило 1$/,
     });
     expect(trash).toBeEnabled();
     fireEvent.click(trash);

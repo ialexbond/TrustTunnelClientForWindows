@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -287,8 +288,11 @@ describe("OverviewSection", () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
       await waitFor(() => {
-        // Country card shows just the country name (flag emoji removed per UX)
-        expect(document.body.textContent || "").toContain("Germany");
+        // D-03.4: scope to the Country card instead of a body.textContent scan
+        // (which would pass on cross-test DOM leakage). Country card shows just
+        // the country name (flag emoji removed per UX).
+        const countryCard = cardOf("server.overview.cards.country");
+        expect(within(countryCard).getByText("Germany")).toBeInTheDocument();
       });
     });
 
@@ -302,8 +306,10 @@ describe("OverviewSection", () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
       // After refetch from default mock — country becomes "United States", not "Germany".
+      // D-03.4: scope to the Country card (no body.textContent leakage scan).
       await waitFor(() => {
-        expect(document.body.textContent || "").toContain("United States");
+        const countryCard = cardOf("server.overview.cards.country");
+        expect(within(countryCard).getByText("United States")).toBeInTheDocument();
       });
       // Expired entry was removed.
       expect(localStorage.getItem("tt_geoip_10.0.0.1")).not.toContain("Germany");
@@ -1252,6 +1258,217 @@ describe("OverviewSection", () => {
       expect(card).not.toBeNull();
       fireEvent.click(card!);
       expect(onNavigate).toHaveBeenCalledWith("security");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Plan 04-14 — Overview bug cluster (each regression-test-first).
+  // Fixes C-01 (refetchSecurity stale closure / double-fire),
+  // H-01/SAFETY-02 (password spread into server_get_uptime IPC),
+  // C-02 (silent reboot-timeout credential drop with no user error).
+  // These FAIL on the pre-fix code and PASS after.
+  // ═══════════════════════════════════════════════════════
+
+  describe("C-01: refetchSecurity stable / single-fire (Plan 04-14)", () => {
+    it("uses the CURRENT sshParams (not a stale closure) when a tt:security-changed event fires after a non-host param change", async () => {
+      // Pre-fix bug: `refetchSecurity` was a plain (non-memoized) function and
+      // the window-listener effect suppressed it from its deps, re-registering
+      // only on [sshParams.host, serviceActive, rebooting]. So when a NON-host
+      // SSH param changed (e.g. the SSH port after a port change), the listener
+      // kept a stale closure that invoked security_get_status with the OLD port.
+      // The useCallback/depend-on-primitives fix re-registers the listener when
+      // ANY primitive changes, so the event refetches with the CURRENT params.
+      const portsSeen: number[] = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+        if (cmd === "security_get_status") {
+          portsSeen.push((params as { port: number }).port);
+          return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+        }
+        return null;
+      });
+      const state = makeState({ sshParams: { host: "10.0.0.1", port: 22, user: "root", password: "pass", keyPath: undefined } });
+      const { rerender } = render(<OverviewSection state={state} />);
+      await waitFor(() => { expect(portsSeen.length).toBeGreaterThanOrEqual(1); });
+
+      // SSH port changes (host unchanged) — mirrors a security_change_ssh_port flow.
+      const stateNewPort = makeState({ sshParams: { host: "10.0.0.1", port: 2222, user: "root", password: "pass", keyPath: undefined } });
+      rerender(<OverviewSection state={stateNewPort} />);
+
+      await act(async () => {
+        window.dispatchEvent(new Event("tt:security-changed"));
+      });
+      // The refetch triggered by the event MUST use the new port (2222), proving
+      // the listener closure is no longer stale.
+      await waitFor(() => {
+        expect(portsSeen).toContain(2222);
+      });
+    });
+
+    it("does not double-fire security_get_status on a single StrictMode mount", async () => {
+      // Pre-fix: the misleading 'ref-like' eslint-disable comments masked that
+      // refetchSecurity was re-created every render; under StrictMode the
+      // initial-load effect + listener effect could each fire an extra
+      // security_get_status against the same SSH channel. The
+      // useCallback/depend-on-primitives form keeps a single stable identity so
+      // the effect set is registered once per primitive set.
+      let securityCalls = 0;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+        if (cmd === "security_get_status") { securityCalls++; return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } }; }
+        return null;
+      });
+      const state = makeState();
+      render(
+        <StrictMode>
+          <OverviewSection state={state} />
+        </StrictMode>,
+      );
+      await waitFor(() => { expect(securityCalls).toBeGreaterThanOrEqual(1); });
+      // Give any stray double-mount effect a tick to fire.
+      await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+      expect(securityCalls).toBe(1);
+    });
+  });
+
+  describe("H-01 / SAFETY-02: sshParams not spread wholesale into server_get_uptime IPC (Plan 04-14)", () => {
+    it("forwards ONLY the 5 SSH fields — extra metadata keys (which could carry the secret) are not spread", async () => {
+      // Pre-fix: `invoke("server_get_uptime", sshParams)` spread the ENTIRE
+      // sshParams object — whose `[key: string]: unknown` index signature lets
+      // callers attach arbitrary metadata — into every uptime poll's IPC args.
+      // That bypasses the type-level guarantee that only the 5 SSH fields reach
+      // Rust, and risks leaking a secret carried in an unexpected key. The fix
+      // forwards an explicit { host, port, user, password, keyPath } picked
+      // subset. D-29 assertion: an extra `secretSidecar` key (carrying the
+      // password value) must NEVER appear in the IPC args.
+      const SECRET = "TOPSECRET_UPTIME_PW";
+      const uptimeArgs: Array<Record<string, unknown>> = [];
+      vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+        if (cmd === "server_get_uptime") {
+          uptimeArgs.push((params ?? {}) as Record<string, unknown>);
+          return { uptime_seconds: 3661 };
+        }
+        return null;
+      });
+      // sshParams carries an extra non-SSH key holding the secret (allowed by the
+      // index signature) — the pre-fix full-object spread would forward it.
+      const state = makeState({
+        // Cast: the real sshParams type lists the 5 SSH fields, but the runtime
+        // object has an index signature ([key: string]: unknown) that lets extra
+        // metadata attach — which is exactly the leak surface under test.
+        sshParams: {
+          host: "10.0.0.1",
+          port: 22,
+          user: "root",
+          password: SECRET,
+          keyPath: undefined,
+          secretSidecar: SECRET,
+        } as unknown as ServerState["sshParams"],
+      });
+      render(<OverviewSection state={state} />);
+      await waitFor(() => { expect(uptimeArgs.length).toBeGreaterThanOrEqual(1); });
+      for (const args of uptimeArgs) {
+        // The extra metadata key (and its secret payload) must not be forwarded.
+        expect(args).not.toHaveProperty("secretSidecar");
+        // The arg surface is exactly the 5 picked SSH fields — no extra keys.
+        expect(Object.keys(args).sort()).toEqual(
+          ["host", "keyPath", "password", "port", "user"].sort(),
+        );
+        // The secret appears ONLY via the legitimate `password` field (needed to
+        // open the SSH channel) — never duplicated into any other arg key.
+        for (const [k, v] of Object.entries(args)) {
+          if (k === "password") continue;
+          expect(String(v)).not.toContain(SECRET);
+        }
+      }
+    });
+  });
+
+  describe("C-02: reboot poller surfaces an honest error on timeout (Plan 04-14)", () => {
+    it("pushes an error notification + logs it instead of silently dropping the server when the 120s reboot poll times out", async () => {
+      vi.useFakeTimers();
+      try {
+        const logged: Array<{ tag: string; message: string }> = [];
+        vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") return null;
+          if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+          if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+          if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+          // The reboot poll keeps failing → drives the elapsed>=120 timeout path.
+          if (cmd === "check_server_installation") throw new Error("still rebooting");
+          if (cmd === "clear_ssh_credentials") return null;
+          if (cmd === "write_activity_log") {
+            const p = params as { tag: string; message: string };
+            logged.push({ tag: p.tag, message: p.message });
+          }
+          return null;
+        });
+        const pushSuccess = vi.fn();
+        const state = makeState({ rebooting: true, pushSuccess });
+        render(<OverviewSection state={state} />);
+
+        // Advance through the full 120s reboot-timeout window (12 × 10s ticks).
+        await act(async () => {
+          for (let i = 0; i < 13; i++) {
+            await vi.advanceTimersByTimeAsync(10_000);
+          }
+        });
+
+        // Pre-fix: nothing user-visible fired — clear_ssh_credentials silently
+        // dropped the server. Post-fix: an honest error toast + an ERROR log.
+        expect(pushSuccess).toHaveBeenCalledWith(
+          i18n.t("server.overview.rebootTimeout"),
+          "error",
+        );
+        expect(
+          logged.some((e) => e.tag === "ERROR" && e.message.includes("overview.reboot.timeout")),
+        ).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("H-03 / L-03: serverInfo-null skeleton matches the loaded layout (Plan 04-14, D-04)", () => {
+    it("renders exactly 3 Security skeleton sub-tiles in the pre-data (serverInfo===null) branch", () => {
+      // Pre-fix: this branch rendered [1,2,3,4] = 4 tiles, while the loaded
+      // Security card renders 3 (Firewall / Fail2Ban / TLS). That produced a
+      // 4→3 layout jump the moment serverInfo arrived. The fix aligns both
+      // skeleton paths to 3 (D-04 — skeleton must mirror the loaded layout).
+      const state = makeState({ serverInfo: null });
+      render(<OverviewSection state={state} />);
+      expect(screen.getAllByTestId("security-skeleton-tile")).toHaveLength(3);
+    });
+
+    it("renders all 10 card titles in the pre-data skeleton (L-03 — same card set as loaded)", () => {
+      const state = makeState({ serverInfo: null });
+      render(<OverviewSection state={state} />);
+      const cardKeys = [
+        "server.overview.cards.status",
+        "server.overview.cards.ping",
+        "server.overview.cards.speed",
+        "server.overview.cards.userCount",
+        "server.overview.cards.ip",
+        "server.overview.cards.country",
+        "server.overview.cards.uptime",
+        "server.overview.cards.protocolVersion",
+        "server.overview.cards.security",
+        "server.overview.cards.load",
+      ];
+      for (const key of cardKeys) {
+        expect(screen.getByText(i18n.t(key))).toBeInTheDocument();
+      }
     });
   });
 });

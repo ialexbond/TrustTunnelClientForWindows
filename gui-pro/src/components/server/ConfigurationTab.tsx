@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- module-level configTabDirtyRef preserved для ServerTabs navigate-away guard backwards-compat (всегда false в raw-view режиме). */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openExternalUrl } from "@tauri-apps/plugin-shell";
 import { ExternalLink, AlertCircle, RotateCcw } from "lucide-react";
@@ -75,36 +75,52 @@ export function ConfigurationTab({
   // Live bundle: prop в Storybook, fetch state в production.
   const bundle = _storybook ? _mockBundle ?? null : fetchedBundle;
 
-  useEffect(() => {
-    if (_storybook) return;
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: load lifecycle for fetched bundle
+  // H-1 (Plan 15): single cancellation token OWNED by the mount-load effect and
+  // REUSED by the imperative reload() (Retry button). The audit found reload()
+  // had no `cancelled` guard, unlike the effect — so a reload still in flight when
+  // the user switched servers (sshParams change) or closed the tab (unmount)
+  // could resolve late and overwrite the fresher state with stale data from the
+  // OLD server. Both loaders now share the SAME token: the effect cleanup flips
+  // `current=true` on every sshParams change / unmount, dropping any in-flight
+  // manual reload that was started against the previous server.
+  const loadTokenRef = useRef<{ current: boolean }>({ current: false });
+
+  // Shared loader so the mount effect and reload() apply byte-identical
+  // resolve / cancel / finally semantics against the ACTIVE token.
+  const runLoad = (token: { current: boolean }) => {
     setLoading(true);
     setError(null);
     invoke<ConfigBundle>("server_get_config_bundle", { ...sshParams })
       .then((b) => {
-        if (cancelled) return;
+        if (token.current) return;
         setFetchedBundle(b);
       })
       .catch((e) => {
-        if (cancelled) return;
+        if (token.current) return;
         setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!token.current) setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    if (_storybook) return;
+    const token = { current: false };
+    loadTokenRef.current = token;
+    runLoad(token);
     return () => {
-      cancelled = true;
+      token.current = true;
     };
+    // runLoad closes over sshParams; the effect already re-runs on sshParams,
+    // so re-creating runLoad each render is fine and keeps semantics in one place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sshParams, _storybook]);
 
   const reload = () => {
-    setLoading(true);
-    setError(null);
-    invoke<ConfigBundle>("server_get_config_bundle", { ...sshParams })
-      .then(setFetchedBundle)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+    // Reuse the active effect token so the NEXT effect-cleanup (sshParams change /
+    // unmount) cancels this manual reload too — the H-1 guard parity.
+    runLoad(loadTokenRef.current);
   };
 
   const handleNavigateToUsers = () => {

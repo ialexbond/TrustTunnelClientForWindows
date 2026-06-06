@@ -111,6 +111,27 @@ describe("SnackBar", () => {
     expect(icon).toBeTruthy();
   });
 
+  // D-03.3: the toast must be an announced live region so screen readers read
+  // it out. Success toasts are polite (role="status"), error toasts are
+  // assertive (role="alert"). These FAIL on pre-fix code (no role at all) and
+  // PASS after the live-region role is added to the toast item.
+  it("success toast is an announced polite live region (role=status)", () => {
+    render(<SnackBar messages={["Saved!"]} onShown={onShown} />);
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(screen.getByRole("status")).toHaveTextContent("Saved!");
+  });
+
+  it("error toast is an announced assertive live region (role=alert)", () => {
+    render(
+      <SnackBar
+        messages={[{ text: "Something failed", type: "error" }]}
+        onShown={onShown}
+      />,
+    );
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Something failed");
+  });
+
   it("uses z-snackbar token for stacking", () => {
     const { container } = render(
       <SnackBar messages={["Test"]} onShown={onShown} />,

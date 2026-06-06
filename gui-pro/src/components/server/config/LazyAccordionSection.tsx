@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "../../../shared/lib/cn";
 
@@ -47,6 +47,13 @@ export function LazyAccordionSection({
   onOpenChange,
   className,
 }: LazyAccordionSectionProps) {
+  // Config H-5: stable ids tie the trigger to the panel it controls
+  // (aria-controls ↔ panel id, panel aria-labelledby ↔ trigger id) so SR users
+  // know which region the button expands. useId keeps them unique per instance.
+  const baseId = useId();
+  const triggerId = `${baseId}-trigger`;
+  const panelId = `${baseId}-panel`;
+
   const [isOpen, setIsOpen] = useState<boolean>(defaultOpen);
   // mounted: true once children should render (sticky — once mounted, stays
   // mounted, so close→open animations are smooth and field state persists).
@@ -69,8 +76,10 @@ export function LazyAccordionSection({
       {/* Trigger */}
       <button
         type="button"
+        id={triggerId}
         onClick={handleToggle}
         aria-expanded={isOpen}
+        aria-controls={panelId}
         className={cn(
           "w-full flex items-center justify-between gap-3 px-4 py-3",
           "text-title-sm text-[var(--color-text-primary)]",
@@ -96,6 +105,9 @@ export function LazyAccordionSection({
 
       {/* Content area — gridTemplateRows animation (Accordion pattern) */}
       <div
+        id={panelId}
+        role="region"
+        aria-labelledby={triggerId}
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{
           gridTemplateRows: isOpen ? "1fr" : "0fr",

@@ -928,7 +928,7 @@
       "unsaved_title": "Unsaved changes",
       "unsaved_desc": "Leave tab? Unsaved changes will be lost.",
       "delete_host": "Delete host {{hostname}}",
-      "delete_rule": "Delete rule {{hostname}}",
+      "delete_rule": "Delete rule {{index}}",
       "min_one_host": "Server requires at least 1 main host",
       "info_for": "Description for field {{key}}",
       "diff_col_file": "File",
@@ -1586,6 +1586,7 @@
         "load": "Load"
       },
       "rebootingCountdown": "Rebooting",
+      "rebootTimeout": "The server did not respond after the reboot. Its connection was reset — please add it again.",
       "speedNotMeasured": "Not measured",
       "speedRequiresProtocol": "Start protocol",
       "dataUnavailable": "Data unavailable",

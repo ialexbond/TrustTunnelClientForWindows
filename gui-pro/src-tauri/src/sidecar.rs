@@ -533,26 +533,193 @@ pub async fn spawn_trusttunnel(
     Ok(SidecarChild { child, disconnecting: disc_for_child, job })
 }
 
+/// How long the sidecar is given to run its OWN cleanup-on-exit (WFP / route /
+/// killswitch teardown, all owned by the C++ sidecar — Rust cannot remove those
+/// filters itself) after a GRACEFUL terminate signal, before we fall back to the
+/// guaranteed hard kill. Short and bounded (T-22 B1): a hung sidecar must still be
+/// hard-killed promptly so a stuck adapter / killswitch never strands the machine.
+/// The hard kill + the KILL_ON_JOB_CLOSE Job Object remain the guaranteed fallback;
+/// this window only ADDS a chance for a graceful self-teardown FIRST, it never
+/// replaces the hard kill.
+///
+/// Tuned down from 3000ms after UAT (2026-06-06): the current prebuilt C++ sidecar
+/// appears NOT to honour the graceful `taskkill /PID` signal (disconnect waited the
+/// full window every time, i.e. it never self-exits early), so the window is mostly
+/// dead-wait today and was a NOTICEABLE disconnect lag. 1500ms still gives a FUTURE
+/// C++ sidecar (T-29: add a console-close handler that removes the WFP/route filters)
+/// ample time to self-clean, while halving the user-visible cost until then. The
+/// loop below still breaks the instant the process exits, so a sidecar that DOES
+/// honour the signal disconnects fast regardless of this ceiling.
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS: u64 = 1500;
+/// Poll cadence while waiting for the graceful terminate to take effect.
+const GRACEFUL_SHUTDOWN_POLL_MS: u64 = 100;
+
+/// Pure decision for T-22 B2 (honest `kill_sidecar`): given the outcomes of the
+/// two HARD-kill paths (the in-process `child.kill()` == `TerminateProcess`, and
+/// the out-of-band `taskkill /F /PID`), should `kill_sidecar` report FAILURE?
+///
+/// It is a failure ONLY when BOTH hard paths reported failure — in that case the
+/// sidecar may still be alive holding the fail-closed killswitch / WinTUN adapter,
+/// and the caller (`vpn_disconnect`) MUST surface that instead of believing the
+/// teardown succeeded (the old code returned `Ok(())` unconditionally — T-22 leak,
+/// deferred IN-02). If EITHER hard path succeeded the process is dead, so it is a
+/// success regardless of the graceful attempt's outcome. Free of any IO so the
+/// decision is unit-testable without a real process.
+fn kill_succeeded(hard_kill_ok: bool, taskkill_ok: bool) -> bool {
+    hard_kill_ok || taskkill_ok
+}
+
+/// Is the process with `pid` still alive? Windows-only liveness probe used to tell
+/// whether the GRACEFUL terminate (T-22 B1) let the sidecar exit on its own before
+/// we escalate to the hard kill. Returns `false` (treat as gone) on any probe error
+/// so we never BLOCK escalation on a flaky query — a false "gone" only means we skip
+/// the redundant hard kill on an already-dead process, and the Job Object still
+/// guarantees no zombie.
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE,
+    };
+    // SAFETY: FFI into documented Win32 APIs. We open the process for query +
+    // synchronize, check both the wait state and the exit code, and always close
+    // the handle. A null handle (process gone / access denied) ⇒ treat as not alive.
+    unsafe {
+        let handle = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        );
+        if handle.is_null() {
+            // Could not open ⇒ most likely already exited (or no rights). Either way
+            // we do not block escalation: report "not alive" so the caller proceeds.
+            return false;
+        }
+        // WaitForSingleObject(0) returns WAIT_TIMEOUT while the process is still
+        // running, and WAIT_OBJECT_0 (0) once it has signaled (exited).
+        let waited = WaitForSingleObject(handle, 0);
+        let mut exit_code: u32 = 0;
+        let got_code = GetExitCodeProcess(handle, &mut exit_code) != 0;
+        CloseHandle(handle);
+        // Alive == the wait timed out AND the exit code is still STILL_ACTIVE.
+        waited == WAIT_TIMEOUT && got_code && exit_code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(windows))]
+fn process_is_alive(_pid: u32) -> bool {
+    // Non-Windows builds don't run the real sidecar; assume gone so the kill path
+    // is a no-op-friendly success (mirrors the job_object non-windows twin).
+    false
+}
+
+/// Tear down the session's sidecar (T-22 B1 + B2).
+///
+/// CRITICAL invariant: the sidecar PROCESS owns the WinTUN adapter, the routing
+/// hijack AND the fail-closed killswitch (WFP filters / routes) in C++. Rust has NO
+/// independent path to remove those filters — the ONLY way they are torn down is the
+/// sidecar running its OWN cleanup-on-exit. A hard `TerminateProcess` (what the old
+/// code did FIRST, and what the KILL_ON_JOB_CLOSE Job Object does on app death) gives
+/// the sidecar NO chance to run that cleanup, so a hard-only kill can LEAK the
+/// all-traffic killswitch block (the T-22 "Docker hang" / "boot stall" mechanism).
+///
+/// So we now:
+///   1. B1 — send a GRACEFUL terminate first (`taskkill /PID` WITHOUT `/F`), which
+///      delivers a console-close / WM_CLOSE the sidecar's own shutdown handler can
+///      catch to remove its WFP/route/killswitch filters, and WAIT a SHORT bounded
+///      window (`GRACEFUL_SHUTDOWN_TIMEOUT_MS`) for it to exit on its own.
+///   2. FALLBACK (zombie-kill guarantee PRESERVED) — if it is still alive after that
+///      window, escalate to the existing HARD kill: the in-process `child.kill()`
+///      (`TerminateProcess`) AND `taskkill /F /PID`. The KILL_ON_JOB_CLOSE Job Object
+///      (job_object.rs) remains armed via the `SidecarChild` drop, so a hung sidecar
+///      is ALWAYS killed regardless — we only ADDED a graceful attempt before it.
+///   3. B2 — if BOTH hard paths fail, the process may still be alive holding the
+///      killswitch: return `Err` (the old code swallowed this as `Ok(())` — deferred
+///      IN-02) so the caller surfaces the failure instead of believing teardown won.
+///
+/// NOTE (follow-up, C++ sidecar): whether the graceful signal in step 1 ACTUALLY
+/// triggers the C++ teardown depends on the prebuilt sidecar installing a
+/// console-control / window-close handler that removes its WFP filters. That source
+/// is not in this tree, so the graceful leg cannot be proven here — if the sidecar
+/// has no such handler the step is a harmless ~bounded no-op before the guaranteed
+/// hard kill, and the full leak-on-hard-kill close requires a C++ change (see the
+/// debug session resolution).
 pub async fn kill_sidecar(sidecar: SidecarChild) -> Result<(), Box<dyn std::error::Error>> {
     let pid = sidecar.child.pid();
-    // Try graceful kill first.
-    let graceful_ok = sidecar.child.kill().is_ok();
-    // Force-kill by PID to ensure the process is dead.
+
+    // ── 1. B1 — graceful terminate FIRST, then a short bounded wait ──────────
+    // `taskkill /PID <pid>` WITHOUT `/F` requests a graceful close (console close
+    // event / WM_CLOSE) so the sidecar can run its OWN WFP/route/killswitch cleanup
+    // before exiting. We do NOT consume `sidecar.child` here — we keep it so the
+    // hard `child.kill()` fallback is still available if graceful does not take.
+    let graceful_requested = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    crate::logging::log_app(
+        "INFO",
+        &format!(
+            "[vpn] kill_sidecar: requested graceful shutdown for PID {pid} (requested={graceful_requested}) — waiting up to {GRACEFUL_SHUTDOWN_TIMEOUT_MS}ms for the sidecar to run its own killswitch/route cleanup (T-22 B1)"
+        ),
+    );
+
+    // Poll for the process to exit on its own within the bounded window.
+    let mut waited_ms: u64 = 0;
+    let mut exited_gracefully = false;
+    while waited_ms < GRACEFUL_SHUTDOWN_TIMEOUT_MS {
+        if !process_is_alive(pid) {
+            exited_gracefully = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(GRACEFUL_SHUTDOWN_POLL_MS)).await;
+        waited_ms += GRACEFUL_SHUTDOWN_POLL_MS;
+    }
+
+    if exited_gracefully {
+        // The sidecar exited on its own → it had the chance to tear down its
+        // WFP/route/killswitch filters. No hard kill needed; teardown succeeded.
+        crate::logging::log_app(
+            "INFO",
+            &format!("[vpn] kill_sidecar: PID {pid} exited gracefully — its own cleanup ran (T-22 B1)"),
+        );
+        return Ok(());
+    }
+
+    // ── 2. FALLBACK — guaranteed HARD kill (zombie-kill guarantee preserved) ──
+    // Still alive after the graceful window (or no graceful handler) → hard-kill.
+    // This is the SAME guaranteed teardown as before, now reached only AFTER the
+    // graceful attempt. The KILL_ON_JOB_CLOSE Job Object also stays armed via the
+    // SidecarChild drop, so a hung sidecar can never become a zombie.
+    crate::logging::log_app(
+        "WARN",
+        &format!("[vpn] kill_sidecar: PID {pid} did not exit gracefully within {GRACEFUL_SHUTDOWN_TIMEOUT_MS}ms — escalating to hard kill (fallback preserved)"),
+    );
+    // In-process TerminateProcess (consumes the child handle).
+    let hard_kill_ok = sidecar.child.kill().is_ok();
+    // Force-kill by PID as the belt-and-braces second hard path.
     let taskkill_ok = std::process::Command::new("taskkill")
         .args(["/F", "/PID", &pid.to_string()])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    // IN-04: if BOTH the graceful kill AND taskkill report failure, the sidecar may
-    // still be alive holding the WinTUN adapter, which the NEXT connect would trip
-    // over (only partially mitigated by kill_stale_sidecar). Log a WARN so a stuck
-    // adapter is at least diagnosable. The PID is non-secret (A2) — no D-29 concern.
-    if !graceful_ok && !taskkill_ok {
-        crate::logging::log_app(
-            "WARN",
-            &format!("[vpn] kill_sidecar: both graceful kill and taskkill failed for PID {pid} — adapter may still be held"),
+
+    // ── 3. B2 — honest result: Err when BOTH hard paths failed ───────────────
+    // If BOTH the graceful kill AND taskkill report failure, the sidecar may still be
+    // alive holding the WinTUN adapter / fail-closed killswitch, which the NEXT connect
+    // would trip over (only partially mitigated by kill_stale_sidecar). The old code
+    // logged a WARN and STILL returned Ok(()) (T-22 leak — deferred IN-02): the caller
+    // believed teardown succeeded while an orphan kept the all-traffic block. We now
+    // surface the failure. The PID is non-secret (A2) — no D-29 concern.
+    if !kill_succeeded(hard_kill_ok, taskkill_ok) {
+        let msg = format!(
+            "[vpn] kill_sidecar: both hard kill and taskkill failed for PID {pid} — sidecar may still be alive holding the killswitch/adapter"
         );
+        crate::logging::log_app("WARN", &msg);
+        return Err(msg.into());
     }
     Ok(())
 }
@@ -868,5 +1035,29 @@ mod tests {
         assert_ne!(derived, raw_line.as_str());
         // A non-matching line returns None (mutually exclusive with fatal markers).
         assert_eq!(config_parse_error("some unrelated info line"), None);
+    }
+
+    // ── T-22 B2: honest kill_sidecar — Err when BOTH hard paths fail ─────────
+    #[test]
+    fn kill_succeeds_when_either_hard_path_works() {
+        // The process is dead if EITHER the in-process TerminateProcess OR the
+        // out-of-band `taskkill /F` reported success — so kill_sidecar must report
+        // success (Ok) in all three of those cases.
+        assert!(kill_succeeded(true, true), "both hard kills succeeded ⇒ success");
+        assert!(kill_succeeded(true, false), "in-process kill succeeded ⇒ success");
+        assert!(kill_succeeded(false, true), "taskkill /F succeeded ⇒ success");
+    }
+
+    #[test]
+    fn kill_fails_only_when_both_hard_paths_fail() {
+        // T-22 B2 / deferred IN-02: the ONLY failure case is BOTH hard paths failing —
+        // there the sidecar may still be alive holding the fail-closed killswitch, so
+        // kill_sidecar must report FAILURE (the old code swallowed this as Ok(())). The
+        // graceful attempt's outcome does NOT enter this decision: it is purely about
+        // whether the guaranteed hard fallback actually killed the process.
+        assert!(
+            !kill_succeeded(false, false),
+            "both hard kill AND taskkill failed ⇒ kill_sidecar must surface an error (no silent Ok)",
+        );
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   RefreshCw,
@@ -28,6 +28,15 @@ interface ServerPanelProps {
   onConfigExported: (configPath: string) => void;
   onPortChanged?: (newPort: number) => void;
   onPanelReady?: () => void;  // called when panelDataLoaded becomes true
+  /**
+   * H-05 — fired right before a user-initiated retry re-runs `loadServerInfo`
+   * from the error screen. The parent (`ControlPanelPage`/orchestrator) resets
+   * `isFirstConnect` to `true` so the first-connect skeleton RE-SHOWS during the
+   * retry instead of latching off after the first connect. Without this the
+   * `display:none` skeleton guard is a one-way latch and the retry shows nothing
+   * but the inner spinner. See audit 06 H-05.
+   */
+  onPanelRetry?: () => void;
   /**
    * Phase 19 (UI-SPEC §Block 2+3) cascade — sidecar update info sourced from
    * `useUpdateChecker(sshParams)` in `ControlPanelPage`. Forwards to
@@ -91,12 +100,29 @@ export function ServerPanel(props: ServerPanelProps) {
     onServerInfoVersionChange?.(state.serverInfo?.version ?? "");
   }, [state.serverInfo?.version, onServerInfoVersionChange]);
 
-  // Signal to parent when panel data is loaded (for skeleton dismissal)
+  // Signal to parent when panel data is loaded (for skeleton dismissal).
+  //
+  // H-05 (resettable): the parent's skeleton latch (`isFirstConnect`) is reset
+  // to `true` on retry, so `onPanelReady` must be able to fire AGAIN once the
+  // retry settles — otherwise the re-shown skeleton would never be dismissed.
+  // `loadServerInfo` does NOT flip `panelDataLoaded` back to false on a retry
+  // (it was already true from the error path), so an effect keyed purely on the
+  // `panelDataLoaded` edge would latch after the first fire. Instead we fire on
+  // each load-settled transition: arm while a load is in-flight (`loading`),
+  // then fire once it completes with data loaded. On a fresh mount that is
+  // already settled (loading=false, panelDataLoaded=true) we still fire once.
+  const readyArmedRef = useRef(true);
   useEffect(() => {
-    if (state.panelDataLoaded && onPanelReady) {
-      onPanelReady();
+    if (state.loading) {
+      // A (re)load is running — arm so the NEXT settle fires onPanelReady again.
+      readyArmedRef.current = true;
+      return;
     }
-  }, [state.panelDataLoaded, onPanelReady]);
+    if (state.panelDataLoaded && readyArmedRef.current) {
+      readyArmedRef.current = false;
+      onPanelReady?.();
+    }
+  }, [state.panelDataLoaded, state.loading, onPanelReady]);
 
   // Reboot polling is handled by OverviewSection (inside the Overview tab) —
   // see `useEffect` keyed on `rebooting` there for the 10s poll + 2min timeout.
@@ -137,7 +163,13 @@ export function ServerPanel(props: ServerPanelProps) {
               variant="ghost"
               size="sm"
               icon={<RefreshCw className="w-3.5 h-3.5" />}
-              onClick={() => state.loadServerInfo()}
+              onClick={() => {
+                // H-05: re-show the first-connect skeleton on retry (parent
+                // resets isFirstConnect) BEFORE kicking off the reload, so the
+                // skeleton reappears instead of the latch staying off.
+                props.onPanelRetry?.();
+                void state.loadServerInfo();
+              }}
             >
               {t("server.actions.retry")}
             </Button>

@@ -177,6 +177,12 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
       {items.map((item) => (
         <div
           key={item.id}
+          // D-03.3: make each toast an announced live region. Errors are
+          // assertive (role="alert", interrupts) and successes are polite
+          // (role="status", queued) — matching the panel's aria-live
+          // conventions so screen readers read the toast out.
+          role={item.type === "error" ? "alert" : "status"}
+          aria-live={item.type === "error" ? "assertive" : "polite"}
           className={cn(
             "flex items-center gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)]",
             "rounded-[var(--radius-lg)] text-sm font-normal pointer-events-auto",

@@ -60,7 +60,10 @@ export type { TabId };
 const muted: React.CSSProperties = { color: "var(--color-text-muted)" };
 const primary: React.CSSProperties = { color: "var(--color-text-primary)" };
 const accent: React.CSSProperties = { color: "var(--color-accent-interactive)" };
-const bigNum: React.CSSProperties = { fontSize: "2rem", fontWeight: 600, lineHeight: 1, color: "var(--color-text-primary)" };
+// Card big-number value — token-driven (UI-REVIEW Typography BLOCKER). Was a
+// hardcoded `2rem`/`600`; now --font-size-card-value (32px) + --font-weight-semibold
+// so a card-value retune lives in tokens.css, not scattered inline styles.
+const bigNum: React.CSSProperties = { fontSize: "var(--font-size-card-value)", fontWeight: "var(--font-weight-semibold)", lineHeight: 1, color: "var(--color-text-primary)" };
 const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
 
 /* ── Title ── */
@@ -76,7 +79,7 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel 
     <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
       <div className="flex items-center gap-2 h-full whitespace-nowrap">
         <span className="flex items-center justify-center w-5 h-5 shrink-0" style={accent}>{icon}</span>
-        <span className="text-lg font-semibold" style={primary}>{text}</span>
+        <span className="text-title-sm" style={primary}>{text}</span>
       </div>
       <div className="flex items-center h-full shrink-0 ml-2">
         {onRefresh && (
@@ -118,7 +121,7 @@ function ClickableCard({
     <Card
       padding="md"
       style={style}
-      className="cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors focus-visible:shadow-[var(--focus-ring)] outline-none"
+      className="cursor-pointer hover:bg-[var(--color-bg-hover)] active:bg-[var(--color-bg-active)] transition-colors focus-visible:shadow-[var(--focus-ring)] outline-none"
       role="button"
       tabIndex={0}
       aria-label={ariaLabel}
@@ -208,18 +211,41 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   //    почти мгновенно, не ждёт CPU/RAM. Polling 10s как и у stats.
   const [fastUptime, setFastUptime] = useState<number | null>(null);
 
+  // H-01 / SAFETY-02 (Plan 04-14): destructure the exact fields server_get_uptime
+  // needs so we forward ONLY those — not the whole sshParams object (which has a
+  // `[key: string]: unknown` index signature and carries the plaintext password).
+  // Spreading the full object leaked the password into every uptime poll's IPC
+  // args. Mirrors the primitive-destructure pattern in useServerStats.ts.
+  const {
+    host: uptimeHost,
+    port: uptimePort,
+    user: uptimeUser,
+    password: uptimePassword,
+    keyPath: uptimeKeyPath,
+  } = sshParams;
+
   useEffect(() => {
     if (!serverInfo?.serviceActive || rebooting || !isOverviewVisible) return;
     let cancelled = false;
     const fetchUptime = () => {
-      invoke<{ uptime_seconds: number }>("server_get_uptime", sshParams)
+      invoke<{ uptime_seconds: number }>("server_get_uptime", {
+        host: uptimeHost,
+        port: uptimePort,
+        user: uptimeUser,
+        password: uptimePassword,
+        keyPath: uptimeKeyPath,
+      })
         .then((r) => { if (!cancelled) setFastUptime(r.uptime_seconds); })
         .catch(() => { /* silent — stats fallback handles display */ });
     };
     fetchUptime(); // immediate
     const interval = setInterval(fetchUptime, 10000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [sshParams, serverInfo?.serviceActive, rebooting, isOverviewVisible]);
+    // H-01 / SAFETY-02 (Plan 04-14): depend on the primitive SSH fields the
+    // poller actually forwards, NOT the whole sshParams object — fetchUptime
+    // below now passes only { host, port, user, password, keyPath }, so the
+    // password is never spread into extra IPC arg keys (mirrors useServerStats).
+  }, [uptimeHost, uptimePort, uptimeUser, uptimePassword, uptimeKeyPath, serverInfo?.serviceActive, rebooting, isOverviewVisible]);
 
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
@@ -233,12 +259,27 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   // 'tt:security-changed' (below) is the canonical source of refresh
   // signals; SecuritySection / FirewallModal / Fail2banModal dispatch
   // it after every toggle. Tab switches no longer cause a refetch.
-  const refetchSecurity = () => {
-    if (!serverInfo?.serviceActive || rebooting) return;
+  //
+  // C-01 (Plan 04-14): refetchSecurity is now a `useCallback` that depends on
+  // the primitive SSH fields (host/port/user/password/keyPath) + serviceActive +
+  // rebooting — exactly like useSecurityState.load. Pre-fix it was a plain
+  // function re-created every render, and the two effects below suppressed it
+  // from their deps via a MISLEADING "ref-like pattern" eslint-disable comment
+  // (no ref existed). That meant a NON-host SSH change (e.g. a port change) left
+  // the window-listener closure stale, refetching with the OLD port. The
+  // memoized form makes the listener genuinely re-bind on every primitive change.
+  const securityHost = sshParams.host;
+  const securityPort = sshParams.port;
+  const securityUser = sshParams.user;
+  const securityPassword = sshParams.password;
+  const securityKeyPath = sshParams.keyPath;
+  const serviceActive = serverInfo?.serviceActive;
+  const refetchSecurity = useCallback(() => {
+    if (!serviceActive || rebooting) return;
     setSecurityLoading(true);
     invoke<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } }>(
       "security_get_status",
-      sshParams,
+      { host: securityHost, port: securityPort, user: securityUser, password: securityPassword, keyPath: securityKeyPath },
     )
       .then((s) => {
         setSecurity(s);
@@ -253,27 +294,30 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         activityLog("ERROR", `overview.security.failed err=${String(e)}`, "security_get_status");
       })
       .finally(() => setSecurityLoading(false));
-  };
+  }, [securityHost, securityPort, securityUser, securityPassword, securityKeyPath, serviceActive, rebooting, activityLog]);
 
+  // C-01: StrictMode-safe single-fire. The dev double-mount would otherwise fire
+  // security_get_status twice on the same SSH channel. A signature ref ensures
+  // the initial fetch runs exactly once per unique param set, surviving the
+  // mount→cleanup→remount cycle (same approach as the Phase-2 listener guards).
+  const securityFetchedSigRef = useRef<string | null>(null);
   useEffect(() => {
-    // UAT 2026-05-23: dropped `isOverviewVisible` from the deps and the
-    // early-return guard. Refetches now fire only when the underlying
-    // SSH context changes (host / serviceActive / rebooting) — not on
-    // every tab switch. Cross-component changes flow through the
-    // 'tt:security-changed' window event (effect below).
+    const sig = `${securityHost}|${securityPort}|${securityUser}|${securityPassword}|${securityKeyPath}|${serviceActive}|${rebooting}`;
+    if (securityFetchedSigRef.current === sig) return;
+    securityFetchedSigRef.current = sig;
     refetchSecurity();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional minimal deps
-  }, [sshParams.host, serverInfo?.serviceActive, rebooting]);
+  }, [refetchSecurity, securityHost, securityPort, securityUser, securityPassword, securityKeyPath, serviceActive, rebooting]);
 
   // Listen to cross-component «security state changed» events from
   // SecuritySection / FirewallModal / Fail2banModal. Even when user is
-  // на Overview tab while change happens (rare — but defensive).
+  // на Overview tab while change happens (rare — but defensive). The handler
+  // now depends on the memoized refetchSecurity, so it always re-binds to the
+  // current closure (no stale-port bug).
   useEffect(() => {
     const handler = () => refetchSecurity();
     window.addEventListener("tt:security-changed", handler);
     return () => window.removeEventListener("tt:security-changed", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handler closure captures latest refetchSecurity via ref-like pattern
-  }, [sshParams.host, serverInfo?.serviceActive, rebooting]);
+  }, [refetchSecurity]);
 
   // ── Initial ping ──
   useEffect(() => {
@@ -306,6 +350,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
     setServerInfo,
     t,
     pushSuccess: state.pushSuccess,
+    activityLog,
   });
   rebootRefs.current = {
     sshParams,
@@ -314,6 +359,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
     setServerInfo,
     t,
     pushSuccess: state.pushSuccess,
+    activityLog,
   };
 
   useEffect(() => {
@@ -340,6 +386,18 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         if (elapsed >= 120) {
           refs.setRebooting(false);
           setRebootCountdown(0);
+          // C-02 (Plan 04-14): surface an HONEST error before dropping the
+          // server. Pre-fix this path silently called clear_ssh_credentials —
+          // the panel returned to idle and the server vanished from the list
+          // with zero feedback (a slow OVH/Hetzner reboot can exceed 120s). Now
+          // the user sees an error toast + an ERROR activity-log entry first,
+          // so the disappearance is explained rather than mysterious.
+          refs.pushSuccess(refs.t("server.overview.rebootTimeout"), "error");
+          refs.activityLog(
+            "ERROR",
+            "overview.reboot.timeout server unreachable after 120s — credentials cleared",
+            "check_server_installation",
+          );
           invoke("clear_ssh_credentials").catch(() => {});
           localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
         }
@@ -391,9 +449,12 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         ))}
         <Card padding="md" style={{ flex: "1 1 340px" }}>
           <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} refreshAriaLabel={refreshAriaLabel} />
+          {/* D-04 / H-03 (Plan 04-14): 3 sub-tiles to match the loaded layout
+              (Firewall / Fail2Ban / TLS — SSH-key removed in Phase 16). A 4-tile
+              skeleton produced a visible 4→3 jump when serverInfo arrived. */}
           <div className="grid grid-cols-2 gap-2 mt-1">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+            {[1, 2, 3].map(i => (
+              <div key={i} data-testid="security-skeleton-tile" className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
                 <Skeleton variant="line" width={60} height={14} className="mb-1" />
                 <Skeleton variant="line" width={50} height={14} />
               </div>
@@ -704,7 +765,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         {securityLoading ? (
           <div className="grid grid-cols-2 gap-2 mt-1">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+              <div key={i} data-testid="security-skeleton-tile" className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
                 <Skeleton variant="line" width={70} height={14} className="mb-1.5" />
                 <Skeleton variant="line" width={50} height={14} />
               </div>

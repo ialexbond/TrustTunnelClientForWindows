@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { UserModal } from "./UserModal";
@@ -20,31 +20,18 @@ vi.mock("../../shared/hooks/useActivityLog", () => ({
 }));
 
 /**
- * Find a Toggle's role="switch" element by the visible label text it sits next
- * to. PHASE-4 NOTE (a11y bug, documented for PANEL-04/05, NOT fixed here per
- * D-06): the shared `Toggle` primitive does NOT forward its visible `label`
- * prop onto the role="switch" button as an accessible name (it only sets
- * aria-label when an explicit `aria-label` prop is passed, which UserModal does
- * not do). So `getByRole("switch", { name })` cannot match these toggles today.
- * Until production wires the label → switch a11y name, we resolve the switch
- * through its labelled container instead of a positional
- * `getAllByRole("switch")[N]` index — this keeps the assertion tied to the
- * USER-VISIBLE label rather than DOM ordering.
+ * Find a Toggle's role="switch" element by its visible label text.
+ *
+ * D-03.2 (Phase-4 fix, Users H-07): the shared `Toggle` primitive now forwards
+ * its visible `label` onto the role="switch" button as the accessible name, so
+ * `getByRole("switch", { name })` resolves the toggle directly. This tightening
+ * accompanies a REAL a11y improvement (label → switch accessible name) — it is
+ * not a behavior drift; the toggle's user-visible label is unchanged.
+ * Previously this helper walked the labelled container because no accessible
+ * name existed.
  */
 function switchByLabel(labelKey: string): HTMLElement {
-  const label = screen.getByText(i18n.t(labelKey));
-  // Toggle markup (Toggle.tsx):
-  //   <div class="flex items-center justify-between py-2 ...">  (outer — holds switch)
-  //     <div class="min-w-0 flex items-center gap-2"> ...label... </div>
-  //     <button role="switch" />
-  //   </div>
-  // The INNER label block is also `div.flex`, so target the OUTER wrapper by its
-  // distinctive `justify-between` class to reach the sibling switch button.
-  const container = label.closest("div.justify-between");
-  if (!container) {
-    throw new Error(`Toggle container for label "${labelKey}" not found`);
-  }
-  return within(container as HTMLElement).getByRole("switch");
+  return screen.getByRole("switch", { name: i18n.t(labelKey) });
 }
 
 const ANTI_DPI_LABEL = "server.users.toggle_anti_dpi";
@@ -283,6 +270,34 @@ describe("UserModal — Add mode", () => {
     });
     // The invoke payload legitimately carries the password; the ACTIVITY LOG
     // must not. expectNoSecretLogged walks every string arg of every spy call.
+    expectNoSecretLogged(SECRET);
+  });
+
+  // D-29 ERROR PATH (S-1, SAFETY-02): a backend Err string may echo the
+  // password (e.g. `invalid password value: <pw>`). The add error handler logs
+  // `user.add_advanced.failed err=${raw}` — before the fix it logged `raw`
+  // verbatim, leaking the secret. This test FAILS on the verbatim echo and
+  // PASSES once the log path routes through sanitizeLogMessage.
+  it("D-29: Add ERROR path never logs the password even when the backend error echoes it", async () => {
+    const SECRET = "S3cr3tP@ss-add-err";
+    vi.mocked(invoke).mockRejectedValueOnce(
+      new Error(`invalid password value: ${SECRET}`),
+    );
+    render(<UserModal {...defaultAddProps} />);
+    fireEvent.change(screen.getByPlaceholderText(/имя пользователя/i), {
+      target: { value: "leak-check-user" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/пароль/i), {
+      target: { value: SECRET },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      // the failure was logged (so the spy has the error entry to inspect)
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "ERROR",
+        expect.stringContaining("user.add_advanced.failed"),
+      );
+    });
     expectNoSecretLogged(SECRET);
   });
 
@@ -533,6 +548,53 @@ describe("UserModal — Edit mode", () => {
     });
   });
 
+  // ══════════════════════════════════════════════════════
+  // CF-02 (frontend contract): deeplink regeneration invoke
+  // ══════════════════════════════════════════════════════
+  //
+  // Conformance CF-02 (`has_ipv6` TLV 0x04) is owned server-side: Plan 04 made
+  // `export_config_deeplink_advanced` read `ipv6_available` straight from the
+  // server's vpn.toml and forward it into the TLV encoder (commit 4e1968a0;
+  // decision: "server is source of truth, NOT threaded from frontend"). The
+  // Tauri command therefore takes NO `ipv6_available` argument.
+  //
+  // This test pins the FRONTEND half of CF-02: when the deeplink section is
+  // dirty, UserModal fires `server_export_config_deeplink_advanced` with the
+  // documented arg shape so the (server-side) has_ipv6 path runs — and it
+  // deliberately does NOT carry an ipv6/has_ipv6 flag, because forwarding a
+  // frontend value would override the authoritative server flag (would make
+  // CF-02 *less* correct). The absent-flag assertion is the regression guard:
+  // if a future edit re-introduces a frontend ipv6 arg, this fails and forces
+  // a deliberate re-baseline (see phases/04/deferred-items.md "Plan 11 —
+  // CF-02 frontend wiring").
+  it("CF-02: regenerating a dirty deeplink invokes export_config_deeplink_advanced; the server owns has_ipv6 (no frontend ipv6 arg)", async () => {
+    vi.mocked(invoke).mockResolvedValue("tt://regenerated");
+    render(<UserModal {...defaultEditProps} />);
+    // Dirty the deeplink section so handleSave runs Step 2 (regeneration).
+    fireEvent.click(switchByLabel(ANTI_DPI_LABEL));
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "server_export_config_deeplink_advanced",
+        expect.objectContaining({
+          clientName: "alice",
+          antiDpi: false, // we toggled it OFF
+        }),
+      );
+    });
+    // The export-deeplink call must NOT thread a frontend ipv6/has_ipv6 flag —
+    // the server reads ipv6_available from vpn.toml itself (CF-02, Plan 04).
+    const exportCall = vi
+      .mocked(invoke)
+      .mock.calls.find((c) => c[0] === "server_export_config_deeplink_advanced");
+    expect(exportCall).toBeDefined();
+    const args = exportCall![1] as Record<string, unknown>;
+    expect(args).not.toHaveProperty("ipv6_available");
+    expect(args).not.toHaveProperty("ipv6Available");
+    expect(args).not.toHaveProperty("has_ipv6");
+    expect(args).not.toHaveProperty("hasIpv6");
+  });
+
   it("shows dirty warning banner when deeplink fields are modified (D-9)", () => {
     render(<UserModal {...defaultEditProps} />);
     // Toggle anti-DPI to change from default (resolved by visible label).
@@ -615,6 +677,31 @@ describe("UserModal — Edit mode", () => {
     // (sshParams.password = "secret") may appear in any activity-log arg.
     expectNoSecretLogged(NEW_SECRET);
     expectNoSecretLogged(mockSshParams.password);
+  });
+
+  // D-29 ERROR PATH (S-2, SAFETY-02): the Save/update error handler logs
+  // `user.update.failed err=${raw}`; before the fix it echoed the backend error
+  // verbatim, so a rejection that quotes the new password leaked it. This test
+  // FAILS on the verbatim echo and PASSES once the log routes through
+  // sanitizeLogMessage.
+  it("D-29: Save ERROR path never logs the password even when the backend error echoes it", async () => {
+    const NEW_SECRET = "S3cr3tP@ss-save-err";
+    vi.mocked(invoke).mockRejectedValue(
+      new Error(`rejected password="${NEW_SECRET}"`),
+    );
+    render(<UserModal {...defaultEditProps} />);
+    fireEvent.click(screen.getByTestId("rotate-password-btn"));
+    fireEvent.change(screen.getByPlaceholderText(/новый пароль/i), {
+      target: { value: NEW_SECRET },
+    });
+    fireEvent.click(screen.getByTestId("user-modal-submit"));
+    await waitFor(() => {
+      expect(activityLogSpy).toHaveBeenCalledWith(
+        "ERROR",
+        expect.stringContaining("user.update.failed"),
+      );
+    });
+    expectNoSecretLogged(NEW_SECRET);
   });
 
   // ══════════════════════════════════════════════════════
@@ -840,5 +927,32 @@ describe("UserModal — renders nothing when closed", () => {
     render(<UserModal {...defaultAddProps} isOpen={false} />);
     // Modal primitive returns null when !mounted — nothing visible
     expect(screen.queryByText("Добавить пользователя")).toBeNull();
+  });
+});
+
+describe("UserModal — a11y dialog semantics (Users H-06)", () => {
+  beforeEach(() => {
+    i18n.changeLanguage("ru");
+    vi.clearAllMocks();
+    vi.mocked(invoke).mockReset();
+    installActivityLogSpy();
+    sessionStorage.clear();
+  });
+
+  it("exposes role=dialog named by its title (Add mode)", () => {
+    render(<UserModal {...defaultAddProps} />);
+    // H-06: the modal must be a proper dialog so screen-reader / keyboard users
+    // hear the title as the dialog's accessible name. aria-labelledby points at
+    // the visible <h2>, so the name == the rendered Russian title.
+    expect(
+      screen.getByRole("dialog", { name: "Добавить пользователя" }),
+    ).toBeInTheDocument();
+  });
+
+  it("dialog accessible name follows the Edit-mode title", () => {
+    render(<UserModal {...defaultEditProps} />);
+    const dialog = screen.getByRole("dialog");
+    // Edit title interpolates the username — the accessible name must carry it.
+    expect(dialog).toHaveAccessibleName(/alice/);
   });
 });

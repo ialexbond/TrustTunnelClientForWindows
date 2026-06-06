@@ -355,4 +355,51 @@ describe("CertModal (P1-9 + P1-10)", () => {
     // Belt & suspenders: nothing at all was logged by this surface.
     expect(handle.spy).not.toHaveBeenCalled();
   }, 10000);
+
+  // ── Security H-04 (unmount-setter) regression ─────────────────────────────
+
+  it("H-04: unmounting during the post-renew 2s settle does NOT fire setters on the dead modal", async () => {
+    // audit/04-security.md H-04: handleRenew's `finally` runs an unconditional 2s
+    // setTimeout, then calls loadCert() (mutates parent cert state via
+    // setCertRaw), setRenewLoading(false), and state.pushSuccess(renewed) — all
+    // WITHOUT any cancellation/mounted guard. If the modal is closed/unmounted
+    // during that 2s window, those setters run on a dead modal: a ghost success
+    // toast fires and the parent cert state is mutated after the user left. The
+    // fix guards the post-settle block behind a mounted ref so unmount cancels it.
+    vi.mocked(invoke).mockResolvedValue("certbot renewal succeeded");
+    const pushSuccess = vi.fn();
+    const setCertRaw = vi.fn();
+    const { unmount } = render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState({ pushSuccess, setCertRaw })}
+        security={mockSecurityFactory()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("cert-renew-button"));
+    await clickConfirmDialogRenew();
+
+    // Wait until server_renew_cert has been invoked — we are now inside the 2s
+    // `finally` settle window.
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "server_renew_cert",
+        expect.objectContaining({ host: "10.0.0.1" }),
+      ),
+    );
+
+    // User closes the server tab / modal: unmount mid-settle.
+    unmount();
+
+    // Let the full 2s settle elapse (plus margin) on real timers.
+    await new Promise((r) => setTimeout(r, 2300));
+
+    // The dead modal must NOT have fired the success toast, the cert reload
+    // (server_get_cert_info), nor mutated the parent cert state.
+    expect(pushSuccess).not.toHaveBeenCalledWith(i18n.t("server.cert.renewed"));
+    expect(setCertRaw).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith("server_get_cert_info", expect.anything());
+  }, 10000);
 });

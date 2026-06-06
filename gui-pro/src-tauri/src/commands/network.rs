@@ -1,3 +1,24 @@
+/// T-22 B3 (boot guard): is the LOCAL physical network ready (adapter up + gateway
+/// or HTTP reachable)?
+///
+/// Reuses the existing `connectivity::check_adapter_online` probe — the SAME one the
+/// connectivity monitor and `vpn_connect`'s pre-flight use — so there is no second,
+/// divergent "is the network up" notion. The auto-connect-on-launch path
+/// (`useAutoConnect`) calls this to AVOID engaging the sidecar's fail-closed killswitch
+/// at OS boot BEFORE the network stack is ready: a connect against a dead early-boot
+/// network would install the all-traffic block with no working tunnel and could stall
+/// boot / freeze Docker's WSL NAT (T-22 boot-stall leg).
+///
+/// Deliberately a WARNING-style gate, mirroring `vpn_connect`'s captive-network
+/// philosophy (cross-AI: never PERMANENTLY block a connect — corporate / captive nets
+/// can block the gateway while still allowing the VPN). The frontend uses this only to
+/// WAIT a BOUNDED time for the network to come up, then connects regardless. Returns
+/// `true` when the adapter looks online, `false` otherwise.
+#[tauri::command]
+pub async fn network_ready() -> bool {
+    crate::connectivity::check_adapter_online().await
+}
+
 /// Run a simple speed test using Cloudflare endpoints.
 /// Returns { download_mbps, upload_mbps } or an error.
 #[tauri::command]

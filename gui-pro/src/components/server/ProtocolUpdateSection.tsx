@@ -7,16 +7,12 @@ import { Badge } from "../../shared/ui/Badge";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { Select } from "../../shared/ui/Select";
 import { UpdateProgressModal } from "../update/UpdateProgressModal";
-// Phase 18 hook — eagerly mounted via `useEffect` listener subscription inside
-// `useUpdateProgress`. The component itself does NOT consume the returned state
-// (UpdateProgressModal owns its internal instance). The import is purely to
-// register the Tauri event listener early so test assertions on `listen()` pass.
-import { useUpdateProgress } from "../update/useUpdateProgress";
 import {
   useSidecarVersions,
   type SidecarReleaseInfo,
   type SshParams,
 } from "./useSidecarVersions";
+import { compareSemver } from "../../shared/utils/compareSemver";
 
 /**
  * Phase 19 Plan 19-03 — `ProtocolUpdateSection`.
@@ -78,25 +74,6 @@ export interface ProtocolUpdateSectionProps {
 }
 
 /**
- * Compare semver-ish strings numerically. Returns negative if `a < b`,
- * positive if `a > b`, zero if equal. Numeric — `"1.10.0" > "1.9.0"`,
- * not lexicographic. Missing segments treated as 0.
- */
-function compareSemverDesc(a: string, b: string): number {
-  const parts = (s: string): number[] =>
-    s.replace(/^v/, "").split("-")[0].split(".").map((p) => parseInt(p, 10) || 0);
-  const pa = parts(a);
-  const pb = parts(b);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const na = pa[i] ?? 0;
-    const nb = pb[i] ?? 0;
-    if (na !== nb) return nb - na; // desc — bigger first
-  }
-  return 0;
-}
-
-/**
  * Format a dropdown option label per the updated UX (label semantics):
  *
  *   - opt is the currently INSTALLED version → `"1.0.31 (установлена)"`
@@ -117,8 +94,10 @@ function formatOptionLabel(
   if (opt.version === currentVersion) {
     return `${opt.version} ${suffixInstalled}`;
   }
-  if (compareSemverDesc(opt.version, currentVersion) < 0) {
-    // opt is newer than currentVersion (desc compare: newer comes earlier → negative)
+  // Direction: shared compareSemver is ASCENDING (positive when a > b). The
+  // former descending compareSemverDesc(opt, current) < 0 meant "opt is newer
+  // than current"; the ascending equivalent is `> 0`.
+  if (compareSemver(opt.version, currentVersion) > 0) {
     return `${opt.version} ${suffixNew}`;
   }
   return opt.version;
@@ -134,11 +113,13 @@ export function ProtocolUpdateSection({
   const { t } = useTranslation();
   const { versions, loading, error, refresh } = useSidecarVersions(sshParams);
 
-  // Touch the Phase 18 hook so its useEffect mounts the `update-protocol-step`
-  // Tauri listener early (T-03 test 14 asserts `listen()` is called). The actual
-  // update lifecycle is driven by `UpdateProgressModal`'s own internal hook
-  // instance — we don't read state here.
-  void useUpdateProgress();
+  // Service C-01 / D-05: the dead `void useUpdateProgress()` 2nd
+  // `update-protocol-step` listener was removed here. The single cascade-level
+  // listener now lives in `useSidecarUpdateCascade` (orchestrator-owned), and
+  // the `UpdateProgressModal` rendered below still owns its OWN modal-scoped
+  // `useUpdateProgress` instance for the live update flow — so the
+  // `update-protocol-step` listener is registered exactly where it is needed,
+  // never as a forever-mounted dead subscription on the Service tab.
 
   // Three distinct states for `currentVersion`:
   //   - `""` (empty string) — `useUpdateChecker` initial value, before SSH probe
@@ -191,8 +172,10 @@ export function ProtocolUpdateSection({
         map.set(v.version, v);
       }
     });
+    // Descending sort (newest first). Shared compareSemver is ASCENDING, so
+    // swap the arguments to keep the newest release at the top of the dropdown.
     return Array.from(map.values()).sort((a, b) =>
-      compareSemverDesc(a.version, b.version),
+      compareSemver(b.version, a.version),
     );
   }, [versions, currentVersion]);
 
@@ -274,7 +257,7 @@ export function ProtocolUpdateSection({
           onClick={() => void handleRefresh()}
           disabled={loading || refreshing}
           aria-label={t("server.service.protocol.check_update_aria")}
-          className="shrink-0 w-8 h-8 flex items-center justify-center rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] focus-visible:shadow-[var(--focus-ring)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="shrink-0 w-8 h-8 flex items-center justify-center rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] focus-visible:shadow-[var(--focus-ring)] transition-colors disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
           data-testid="protocol-refresh-button"
         >
           {loading || refreshing ? (

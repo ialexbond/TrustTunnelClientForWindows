@@ -37,6 +37,79 @@ fn default_process_mode() -> String {
     "exclude".to_string()
 }
 
+// ─── Default private/local exclusions (T-33) ────────
+//
+// In "general" mode every destination goes THROUGH the VPN tunnel except for
+// the `direct` bypass list. Standard split-tunnel VPNs additionally keep
+// private/local traffic OFF the tunnel by default — otherwise Docker's and
+// WSL's INTERNAL networking (172.16.0.0/12 for Docker, link-local /
+// private ranges for WSL/Hyper-V) gets routed into the tunnel, the host can
+// no longer reach its own VM/containers, and Docker fails to start while the
+// VPN is connected (see .planning/debug/docker-system-hang-on-connect.md).
+//
+// These CIDRs are added as an ADDITIVE baseline to the bypass set so LAN /
+// Docker / WSL keep working while connected. They never override an explicit
+// user rule: a default entry is skipped if the user forced that exact CIDR
+// THROUGH the VPN via `proxy` (see `build_general_exclusions`).
+const DEFAULT_PRIVATE_EXCLUSIONS: &[&str] = &[
+    // RFC1918 private IPv4 (covers Docker bridge 172.17.0.0/16 + WSL/Hyper-V NAT).
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    // Loopback.
+    "127.0.0.0/8",
+    // Link-local IPv4 (incl. WSL/Hyper-V auto-config and APIPA).
+    "169.254.0.0/16",
+    // IPv6 loopback / unique-local (ULA) / link-local.
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+];
+
+/// Build the final exclusions (bypass) list for "general" mode.
+///
+/// Starts from the user's resolved `direct` entries, then APPENDS the
+/// `DEFAULT_PRIVATE_EXCLUSIONS` baseline (T-33) so Docker/WSL/LAN bypass the
+/// tunnel by default. The override rule preserves user intent:
+///
+/// * A default-private CIDR is skipped if the user forced that **exact** CIDR
+///   through the VPN via `proxy` — the user's explicit "route through VPN"
+///   rule wins, so the CIDR stays tunnelled. Override granularity is
+///   exact-string CIDR match (simple and predictable): forcing
+///   `192.168.0.0/16` through VPN does NOT keep `192.168.1.0/24` excluded,
+///   and vice-versa.
+/// * A default-private CIDR already present in `direct` is not duplicated.
+///
+/// User `direct` entries are always preserved as-is (the baseline is additive
+/// only — it never removes or reorders user rules).
+fn build_general_exclusions(direct_entries: &[String], proxy_entries: &[String]) -> Vec<String> {
+    // Non-empty user direct entries form the base bypass set, order preserved.
+    let mut result: Vec<String> = direct_entries
+        .iter()
+        .filter(|e| !e.is_empty())
+        .cloned()
+        .collect();
+
+    // Exact-string set of what the user forced THROUGH the VPN (override signal)
+    // and of what is already a bypass entry (dedup guard).
+    let forced_through_vpn: HashSet<&str> =
+        proxy_entries.iter().map(|s| s.as_str()).collect();
+    let mut already_present: HashSet<String> = result.iter().cloned().collect();
+
+    for &cidr in DEFAULT_PRIVATE_EXCLUSIONS {
+        // User rule wins: keep this private range tunnelled if explicitly proxied.
+        if forced_through_vpn.contains(cidr) {
+            continue;
+        }
+        // Never duplicate a CIDR the user already listed as direct.
+        if already_present.insert(cidr.to_string()) {
+            result.push(cidr.to_string());
+        }
+    }
+
+    result
+}
+
 impl Default for RoutingRules {
     fn default() -> Self {
         Self {
@@ -278,20 +351,25 @@ pub fn resolve_and_apply_inner(
         "general".to_string()
     };
 
-    // Build exclusions file content based on vpn_mode:
+    // Build the resolved exclusions (bypass) list based on vpn_mode:
     // - "general": everything through VPN, EXCEPT direct entries (they bypass)
-    //   → exclusions = direct entries
+    //   → exclusions = direct entries + DEFAULT_PRIVATE_EXCLUSIONS baseline (T-33),
+    //     so Docker/WSL/LAN bypass the tunnel by default unless the user forced
+    //     a private CIDR through VPN via `proxy`.
     // - "selective": everything direct, EXCEPT proxy entries (they go through VPN)
-    //   → exclusions = proxy entries
-    let exclusions_content = if vpn_mode == "selective" {
-        proxy_entries.iter()
+    //   → exclusions = proxy entries. Private nets already bypass in this mode,
+    //     so no default-private baseline is added here.
+    let resolved_exclusions: Vec<String> = if vpn_mode == "selective" {
+        proxy_entries
+            .iter()
+            .filter(|e| !e.is_empty())
+            .cloned()
+            .collect()
     } else {
-        direct_entries.iter()
-    }
-    .filter(|e| !e.is_empty())
-    .cloned()
-    .collect::<Vec<_>>()
-    .join("\n");
+        build_general_exclusions(&direct_entries, &proxy_entries)
+    };
+
+    let exclusions_content = resolved_exclusions.join("\n");
 
     // Build blocked file content — domains/IPs/CIDRs for C++ core DNS-level blocking.
     // No DNS resolution needed — the VPN core blocks at DNS query level (match_domain).
@@ -330,12 +408,10 @@ pub fn resolve_and_apply_inner(
         );
     }
 
-    // Build the exclusions list (same as file content, used for logging)
-    let exclusions_for_toml: Vec<String> = if vpn_mode == "selective" {
-        proxy_entries.clone()
-    } else {
-        direct_entries.clone()
-    };
+    // Exclusions list surfaced to the TOML log line — must match exactly what was
+    // written to exclusions.txt above (incl. the T-33 default-private baseline in
+    // general mode), so logs reflect reality.
+    let exclusions_for_toml: Vec<String> = resolved_exclusions.clone();
 
     // Update TOML config — preserve vpn_mode from Settings, write file paths
     if !config_path.is_empty() {
@@ -648,5 +724,101 @@ fn cleanup_hosts_block_inner() -> Result<(), String> {
 #[tauri::command]
 pub fn cleanup_hosts_block() -> Result<(), String> {
     cleanup_hosts_block_inner()
+}
+
+// ─── Tests ──────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── T-33: default private/local exclusions in general mode ──
+
+    #[test]
+    fn general_mode_adds_default_private_exclusions() {
+        // No user rules at all → bypass set is exactly the default-private baseline,
+        // so Docker (172.16.0.0/12) / WSL / LAN bypass the tunnel out of the box.
+        let result = build_general_exclusions(&[], &[]);
+        for cidr in DEFAULT_PRIVATE_EXCLUSIONS {
+            assert!(
+                result.contains(&cidr.to_string()),
+                "expected default private CIDR {cidr} in exclusions, got {result:?}"
+            );
+        }
+        // Spot-check the four critical IPv4 ranges called out in the task.
+        assert!(result.contains(&"172.16.0.0/12".to_string()));
+        assert!(result.contains(&"192.168.0.0/16".to_string()));
+        assert!(result.contains(&"10.0.0.0/8".to_string()));
+        assert!(result.contains(&"127.0.0.0/8".to_string()));
+    }
+
+    #[test]
+    fn general_mode_proxy_override_keeps_cidr_tunnelled() {
+        // User forces 192.168.0.0/16 THROUGH the VPN via `proxy`. The user's rule
+        // must win → that exact CIDR is NOT auto-excluded, while the other private
+        // ranges remain excluded.
+        let proxy = v(&["192.168.0.0/16"]);
+        let result = build_general_exclusions(&[], &proxy);
+
+        assert!(
+            !result.contains(&"192.168.0.0/16".to_string()),
+            "user-proxied CIDR must stay tunnelled (not auto-excluded), got {result:?}"
+        );
+        // Other defaults still excluded.
+        assert!(result.contains(&"172.16.0.0/12".to_string()));
+        assert!(result.contains(&"10.0.0.0/8".to_string()));
+        assert!(result.contains(&"127.0.0.0/8".to_string()));
+    }
+
+    #[test]
+    fn general_mode_override_is_exact_match_only() {
+        // Exact-string override granularity: forcing 192.168.1.0/24 through VPN does
+        // NOT suppress the broader default 192.168.0.0/16 (different string).
+        let proxy = v(&["192.168.1.0/24"]);
+        let result = build_general_exclusions(&[], &proxy);
+        assert!(
+            result.contains(&"192.168.0.0/16".to_string()),
+            "non-exact proxy CIDR must not suppress the default /16, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn general_mode_preserves_user_direct_entries() {
+        // User direct entries are always present, kept in order, ahead of the baseline.
+        let direct = v(&["8.8.8.8/32", "example.com"]);
+        let result = build_general_exclusions(&direct, &[]);
+
+        assert!(result.contains(&"8.8.8.8/32".to_string()));
+        assert!(result.contains(&"example.com".to_string()));
+        // User entries come first, baseline appended after.
+        assert_eq!(result[0], "8.8.8.8/32");
+        assert_eq!(result[1], "example.com");
+        assert!(result.contains(&"172.16.0.0/12".to_string()));
+    }
+
+    #[test]
+    fn general_mode_does_not_duplicate_direct_private_cidr() {
+        // User already listed 10.0.0.0/8 as direct → baseline must not duplicate it.
+        let direct = v(&["10.0.0.0/8"]);
+        let result = build_general_exclusions(&direct, &[]);
+
+        let count = result.iter().filter(|e| *e == "10.0.0.0/8").count();
+        assert_eq!(count, 1, "10.0.0.0/8 must appear exactly once, got {result:?}");
+        // Other defaults still appended.
+        assert!(result.contains(&"172.16.0.0/12".to_string()));
+    }
+
+    #[test]
+    fn general_mode_skips_empty_direct_entries() {
+        // Empty resolved entries are filtered out of the bypass set.
+        let direct = v(&["", "1.1.1.1/32", ""]);
+        let result = build_general_exclusions(&direct, &[]);
+        assert!(!result.iter().any(|e| e.is_empty()));
+        assert!(result.contains(&"1.1.1.1/32".to_string()));
+    }
 }
 
