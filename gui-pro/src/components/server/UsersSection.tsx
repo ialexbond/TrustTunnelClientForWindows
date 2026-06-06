@@ -36,9 +36,11 @@ interface Props {
  * UsersSection — Phase 14.1 redesign.
  *
  * Changes from Phase 14:
- * - D-2: UsersAddForm removed. Plus-icon button added to CardHeader «Добавить пользователя».
+ * - D-2: UsersAddForm removed. The add action is a full-width secondary Button
+ *   («Добавить пользователя») rendered at the BOTTOM of the card (below the user
+ *   list + Divider), not a plus-icon in a header — there is no CardHeader here.
  * - D-3: 3 inline icons per row: FileText (config) + Settings/Gear (edit) + Trash (delete).
- * - UserModal integration: Add mode (plus-icon) + Edit mode (gear-icon per row).
+ * - UserModal integration: Add mode (bottom button) + Edit mode (gear-icon per row).
  * - UserConfigModal remains for FileText (show QR deeplink — unchanged).
  *
  * D-21: Trash disabled when users.length === 1.
@@ -374,7 +376,7 @@ export function UsersSection({ state, activeServerTab }: Props) {
                     })()}
 
                     {/* 3-icon cluster: FileText + Gear + Trash (D-3) */}
-                    <div className="flex items-center gap-[var(--space-0\.5)] shrink-0 ml-2">
+                    <div className="flex items-center gap-[var(--space-0-5)] shrink-0 ml-2">
                       {/* FileText — show config QR */}
                       <Tooltip text={t("server.users.show_config_tooltip")}>
                         <button

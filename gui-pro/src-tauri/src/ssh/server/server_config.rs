@@ -1,9 +1,44 @@
 use super::super::*;
-use super::super::sanitize::{validate_client_name, validate_display_name, validate_fqdn_sni, validate_dns_list};
+use super::super::sanitize::{validate_client_name, validate_display_name, validate_fqdn_sni, validate_dns_list, validate_ssh_host};
 use russh::client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use super::users_advanced::UserAdvanced;
+
+/// S-5 (04-SECURITY-REVIEW.md): the `endpoint_hostname` we read from the server's
+/// `hosts.toml` (and the `hostname -f` fallback) is server-controlled and gets
+/// interpolated UNQUOTED into the `-a {host:port}` arg of the deeplink-export
+/// command. A malicious / compromised server could return a hostname containing
+/// shell metacharacters (`a.com; rm -rf /`) and run arbitrary commands under the
+/// operator's `sudo`. Before using such a hostname we run it through the existing
+/// whitelist `validate_ssh_host` (hostname / IPv4 / IPv6 charset only). On failure
+/// we return `None` so the caller falls through to its safe fallback instead of
+/// interpolating attacker-controlled bytes. Whitelist-first per CLAUDE.md SAFETY-01.
+fn validated_server_host(hostname: &str) -> Option<&str> {
+    let h = hostname.trim();
+    if h.is_empty() || h == "trusttunnel.local" {
+        return None;
+    }
+    match validate_ssh_host(h) {
+        Ok(()) => Some(h),
+        Err(_) => None,
+    }
+}
+
+/// WR-01 (04-REVIEW.md): the anti-DPI `client_random_prefix` we read back from the
+/// server's `rules.toml` (via `find_user_rule`) is interpolated UNQUOTED into the
+/// export command as `-r {prefix}`. Like `validated_server_host` (S-5), this value
+/// crosses back from the remote host into a shell argument, so it MUST be
+/// whitelist-validated before interpolation — not merely assumed-hex because of who
+/// is supposed to have written the file. `rules.toml` lives on the remote and can be
+/// edited out-of-band; a value like `aa; reboot` would otherwise inject a command
+/// under the same `sudo` context. We require a non-empty, <=64-char string of ASCII
+/// hex digits (the canonical shape `server_rules.rs` emits via `format!("{:02x}", ...)`)
+/// and return `None` otherwise so the caller simply omits the `-r` flag.
+/// Whitelist-first per CLAUDE.md SAFETY-01.
+fn validated_hex_prefix(p: &str) -> Option<&str> {
+    (!p.is_empty() && p.len() <= 64 && p.chars().all(|c| c.is_ascii_hexdigit())).then_some(p)
+}
 
 // ── REQ-15.1: Typed vpn.toml parser with extras preservation ───────────────
 //
@@ -263,11 +298,12 @@ pub async fn fetch_server_config(
         &handle, app,
         &format!(r#"grep -oP 'hostname\s*=\s*"\K[^"]+' {dir}/hosts.toml 2>/dev/null | head -1"#, dir = ENDPOINT_DIR)
     ).await?;
-    let endpoint_hostname = hostname_raw.trim();
-    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
-        format!("{endpoint_hostname}:{listen_port}")
-    } else {
-        format!("{}:{listen_port}", params.host)
+    // S-5: validate the server-returned hostname before interpolating it into
+    // the `-a` flag; on reject, fall back to the operator-provided `params.host`
+    // (which is itself validated by validate_ssh_host at the connect layer).
+    let export_address = match validated_server_host(hostname_raw.trim()) {
+        Some(h) => format!("{h}:{listen_port}"),
+        None => format!("{}:{listen_port}", params.host),
     };
 
     emit_step(app, "export", "progress", "Exporting client config...");
@@ -288,11 +324,22 @@ pub async fn fetch_server_config(
     let name = if !client_name.trim().is_empty() {
         client_name.trim().to_string()
     } else if let Some(first) = available_users.first() {
-        emit_log(app, "info", &format!("Client name not specified, using: {first}"));
         first.to_string()
     } else {
         "client".to_string()
     };
+
+    // IN-04 (04-REVIEW.md): validate the client name BEFORE it is logged or used.
+    // When `name` is auto-picked from `available_users` it is a value read off the
+    // server's credentials.toml — a malicious username there would otherwise reach
+    // the deploy-log event (emit_log is sanitized for `key = value` secrets, but a
+    // username is not secret-shaped) before the validation gate. Validate first so
+    // the auto-picked username is never logged unvalidated.
+    validate_client_name(&name)?;
+
+    if client_name.trim().is_empty() && !available_users.is_empty() {
+        emit_log(app, "info", &format!("Client name not specified, using: {name}"));
+    }
 
     if !available_users.is_empty() {
         emit_log(app, "info", &format!("Available users: {}", available_users.join(", ")));
@@ -306,9 +353,6 @@ pub async fn fetch_server_config(
             return Err(msg);
         }
     }
-
-    // Validate client name before interpolating into shell command
-    validate_client_name(&name)?;
 
     // FIX-OO-4: pull the user's anti-DPI prefix out of rules.toml so we can
     // pass it to the CLI via `-r <prefix>`. Same reason as the deeplink
@@ -324,9 +368,12 @@ pub async fn fetch_server_config(
         .ok()
         .flatten()
         .and_then(|r| r.client_random_prefix);
+    // WR-01: whitelist-validate the server-read prefix (hex only) before it
+    // becomes an unquoted shell argument. An out-of-band-edited rules.toml could
+    // otherwise smuggle `aa; reboot` into the sudo'd export command.
     let r_flag = stored_prefix
         .as_deref()
-        .filter(|p| !p.is_empty())
+        .and_then(validated_hex_prefix)
         .map(|p| format!(" -r {p}"))
         .unwrap_or_default();
 
@@ -459,20 +506,18 @@ pub async fn export_config_deeplink(
         &format!(r#"{sudo}grep -oP 'hostname\s*=\s*"\K[^"]+' {dir}/hosts.toml 2>/dev/null | head -1"#, dir = ENDPOINT_DIR),
     )
     .await?;
-    let endpoint_hostname = hostname_raw.trim();
-    // Use hostname from hosts.toml; if unavailable, the caller must provide the host
-    // via a different mechanism. Since the pool always connects to the same host,
-    // the hostname from hosts.toml is the correct fallback.
-    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
-        format!("{endpoint_hostname}:{listen_port}")
-    } else {
-        // Fallback: use the hostname from the server's perspective
-        let (host_raw, _) = exec_command(handle, app, "hostname -f 2>/dev/null || hostname").await.unwrap_or_default();
-        let fallback = host_raw.trim();
-        if fallback.is_empty() {
-            format!("localhost:{listen_port}")
-        } else {
-            format!("{fallback}:{listen_port}")
+    // S-5: validate the server-returned hostname from hosts.toml; if it is absent
+    // or fails the whitelist, fall back to the server's own `hostname -f` (also
+    // server-controlled → validated too); if that is unusable, default to localhost.
+    let export_address = match validated_server_host(hostname_raw.trim()) {
+        Some(h) => format!("{h}:{listen_port}"),
+        None => {
+            // Fallback: use the hostname from the server's perspective
+            let (host_raw, _) = exec_command(handle, app, "hostname -f 2>/dev/null || hostname").await.unwrap_or_default();
+            match validated_server_host(host_raw.trim()) {
+                Some(fb) => format!("{fb}:{listen_port}"),
+                None => format!("localhost:{listen_port}"),
+            }
         }
     };
 
@@ -598,6 +643,24 @@ pub async fn export_config_deeplink_advanced(
     let listen_addr = listen_raw.trim();
     let listen_port = listen_addr.split(':').next_back().unwrap_or("443");
 
+    // CF-02: read the server's `ipv6_available` flag from vpn.toml so we can
+    // forward it into the deeplink. Spec default is `true` (TLV 0x04 omitted);
+    // we only emit `has_ipv6 = false` when the server has IPv6 disabled. The grep
+    // matches `ipv6_available = false` (whitespace-tolerant); anything else
+    // (true, missing, malformed) leaves the default `true` — the safe assumption
+    // that keeps existing servers behaving exactly as before this change.
+    let (ipv6_raw, _) = exec_command(
+        handle,
+        app,
+        &format!(
+            r#"{sudo}grep -oP 'ipv6_available\s*=\s*\K(true|false)' {cfg} 2>/dev/null | head -1 || echo 'true'"#,
+            cfg = ENDPOINT_CONFIG
+        ),
+    )
+    .await
+    .unwrap_or((String::from("true"), 0));
+    let ipv6_available = ipv6_raw.trim() != "false";
+
     let (hostname_raw, _) = exec_command(
         handle,
         app,
@@ -607,17 +670,18 @@ pub async fn export_config_deeplink_advanced(
         ),
     )
     .await?;
-    let endpoint_hostname = hostname_raw.trim();
-    let export_address = if !endpoint_hostname.is_empty() && endpoint_hostname != "trusttunnel.local" {
-        format!("{endpoint_hostname}:{listen_port}")
-    } else {
-        let (host_raw, _) =
-            exec_command(handle, app, "hostname -f 2>/dev/null || hostname").await.unwrap_or_default();
-        let fallback = host_raw.trim();
-        if fallback.is_empty() {
-            format!("localhost:{listen_port}")
-        } else {
-            format!("{fallback}:{listen_port}")
+    // S-5: validate the server-returned hostname before it crosses into the
+    // unquoted `-a {host:port}` arg of the deeplink-export command; reject →
+    // fall back to the server's `hostname -f` (validated) → localhost.
+    let export_address = match validated_server_host(hostname_raw.trim()) {
+        Some(h) => format!("{h}:{listen_port}"),
+        None => {
+            let (host_raw, _) =
+                exec_command(handle, app, "hostname -f 2>/dev/null || hostname").await.unwrap_or_default();
+            match validated_server_host(host_raw.trim()) {
+                Some(fb) => format!("{fb}:{listen_port}"),
+                None => format!("localhost:{listen_port}"),
+            }
         }
     };
 
@@ -653,15 +717,13 @@ pub async fn export_config_deeplink_advanced(
             cli_args.push_str(&format!(" -n \"{n}\""));
         }
     }
-    if let Some(prefix) = stored_prefix.as_deref() {
-        // rules.toml stored prefix is always hex (server_rules.rs generates
-        // via `format!("{:02x}", ...)`). CLI validates hex format again on
-        // its side via `hex::decode` and matches against rules.toml — we
-        // pass the exact same value we just read from rules.toml, so the
-        // round-trip match is guaranteed.
-        if !prefix.is_empty() {
-            cli_args.push_str(&format!(" -r {prefix}"));
-        }
+    // WR-01: the stored prefix is server-controlled (read from rules.toml on the
+    // remote host) and interpolated UNQUOTED as `-r {prefix}`. Do NOT trust the
+    // "always hex because server_rules.rs wrote it" assumption — rules.toml can be
+    // edited out-of-band. Whitelist-validate (hex only) before interpolation; a
+    // non-hex value simply drops the `-r` flag instead of injecting under sudo.
+    if let Some(prefix) = stored_prefix.as_deref().and_then(validated_hex_prefix) {
+        cli_args.push_str(&format!(" -r {prefix}"));
     }
     for dns in &dns_upstreams {
         let t = dns.trim();
@@ -717,9 +779,12 @@ pub async fn export_config_deeplink_advanced(
         _ => None,
     };
 
-    // PATH A — post-encode the 4 gap TLVs via tlv_encoder
+    // PATH A — post-encode the gap TLVs via tlv_encoder. `ipv6_available` is
+    // forwarded so CF-02 (0x04 has_ipv6=false) emits when the server has IPv6
+    // disabled; CF-01 (0x00 version=1) is prepended inside append_missing_tlvs.
     super::tlv_encoder::append_missing_tlvs(
         &base_deeplink,
+        ipv6_available,
         anti_dpi,
         skip_verification,
         upstream_protocol.as_deref(),
@@ -1218,6 +1283,53 @@ mod tests {
     fn sample_toml() -> String {
         // Minimal client toml with [endpoint] block produced by build_client_config.
         "# header\n\nloglevel = \"info\"\n\n[endpoint]\nhost = \"1.2.3.4\"\nport = 443\nusername = \"alice\"\npassword = \"secret\"\nanti_dpi = true\n\n[listener.tun]\nmtu_size = 1280\n".to_string()
+    }
+
+    // ── S-5: server-returned hostname validation ───────────────────────────
+    #[test]
+    fn validated_server_host_accepts_clean_host() {
+        assert_eq!(validated_server_host("vpn.example.com"), Some("vpn.example.com"));
+        assert_eq!(validated_server_host("203.0.113.7"), Some("203.0.113.7"));
+        assert_eq!(validated_server_host("  vpn.example.com  "), Some("vpn.example.com"));
+        assert_eq!(validated_server_host("[2001:db8::1]"), Some("[2001:db8::1]"));
+    }
+
+    #[test]
+    fn validated_server_host_rejects_injection_and_placeholders() {
+        // A compromised server cannot smuggle shell metachars into the `-a` arg.
+        assert_eq!(validated_server_host("host; rm -rf /"), None);
+        assert_eq!(validated_server_host("$(whoami)"), None);
+        assert_eq!(validated_server_host("a`id`b"), None);
+        assert_eq!(validated_server_host("host with space"), None);
+        // Empty and the local placeholder fall through to the caller's fallback.
+        assert_eq!(validated_server_host(""), None);
+        assert_eq!(validated_server_host("   "), None);
+        assert_eq!(validated_server_host("trusttunnel.local"), None);
+    }
+
+    // ── WR-01: server-read anti-DPI prefix validation ──────────────────────
+    #[test]
+    fn validated_hex_prefix_accepts_hex() {
+        assert_eq!(validated_hex_prefix("aabbcc"), Some("aabbcc"));
+        assert_eq!(validated_hex_prefix("0011ff"), Some("0011ff"));
+        assert_eq!(validated_hex_prefix("ABCDEF0123"), Some("ABCDEF0123"));
+        // 64-char boundary (max length) is accepted.
+        let max = "a".repeat(64);
+        assert_eq!(validated_hex_prefix(&max), Some(max.as_str()));
+    }
+
+    #[test]
+    fn validated_hex_prefix_rejects_injection_and_malformed() {
+        // The injection payload from the finding: a non-hex prefix must NOT
+        // produce a `-r` flag (returns None → caller omits the flag).
+        assert_eq!(validated_hex_prefix("aa; reboot"), None);
+        assert_eq!(validated_hex_prefix("$(whoami)"), None);
+        assert_eq!(validated_hex_prefix("aa bb"), None);
+        // 'g' is not a hex digit.
+        assert_eq!(validated_hex_prefix("aagg"), None);
+        // Empty and over-length are rejected.
+        assert_eq!(validated_hex_prefix(""), None);
+        assert_eq!(validated_hex_prefix(&"a".repeat(65)), None);
     }
 
     fn sample_advanced() -> UserAdvanced {

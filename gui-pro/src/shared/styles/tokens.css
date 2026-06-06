@@ -70,6 +70,12 @@
   --radius-full: 9999px;
 
   /* ── Spacing (4px base) ────────────────────────── */
+  /* Sub-step half-unit (2px). Added Phase 04-13 to replace the undefined
+     `var(--space-0.5)` reference that collapsed the Users action-icon gap to 0
+     at runtime (UI-REVIEW Spacing BLOCKER — an invalid custom property resolves
+     to the initial value, so gap became 0). Use this for tight icon clusters
+     where 4px (--space-1) is too wide. */
+  --space-0-5: 2px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -107,6 +113,13 @@
   --font-size-display-sm: 32px;  /* wizard hero */
   --font-size-display:    40px;  /* splash, critical states */
   --font-size-display-lg: 48px;  /* AboutPanel wordmark (Outfit) */
+
+  /* Card big-number value — the large stat figure on the Overview cards
+     (ping / speed). Added Phase 04-13 so OverviewSection `bigNum` stops
+     hardcoding `2rem` (UI-REVIEW Typography BLOCKER). 32px == --font-size-display-sm;
+     kept as its own semantic alias so a future card-value retune doesn't drag
+     the wizard-hero size with it. Pair with --font-weight-semibold (600). */
+  --font-size-card-value: 32px;
 
   /* Font weights — 4 веса (regular для body, medium для кнопок/subtitle,
      semibold для заголовков, bold для display). */

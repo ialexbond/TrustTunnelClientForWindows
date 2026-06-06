@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import type { UpdateInfo } from "../types";
+import { compareSemver } from "../utils/compareSemver";
 
 // Asset name pattern for this edition (Pro)
 const ASSET_PATTERN = /Pro.*setup.*\.exe$/i;
@@ -31,20 +32,6 @@ export interface UpdateCheckerSshParams {
   password: string;
   keyPath?: string;
   keyData?: string;
-}
-
-function compareVersions(a: string, b: string): number {
-  // Strip pre-release suffixes: "2.1.1-test" → "2.1.1"
-  const clean = (v: string) => v.replace(/-.*$/, "");
-  const pa = clean(a).split(".").map(Number);
-  const pb = clean(b).split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na > nb) return 1;
-    if (na < nb) return -1;
-  }
-  return 0;
 }
 
 /**
@@ -111,7 +98,10 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
       if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
       const data = await res.json();
       const latestTag = (data.tag_name || "").replace(/^v\.?/, "");
-      const isNewer = compareVersions(latestTag, currentVersion) > 0;
+      // Direction: shared compareSemver is ASCENDING (positive when a > b), the
+      // same sign the former local compareVersions returned — so `> 0` still
+      // means "latestTag is newer than the installed app" (update available).
+      const isNewer = compareSemver(latestTag, currentVersion) > 0;
       const assets = data.assets || [];
 
       // Find setup.exe matching this edition (Pro)

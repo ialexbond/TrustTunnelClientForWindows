@@ -57,9 +57,11 @@ function loadActiveTab(): TabId {
   try {
     const raw = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
     // Phase 19 migration: legacy "utilities" persisted value → "service".
-    // Single mapping branch, no separate migration storage write — the next
-    // saveActiveTab() call (на любой tab switch) перепишет storage свежим id.
+    // H-08: write the canonical value back IMMEDIATELY rather than relying on a
+    // future tab switch. Previously a user who landed on the migrated service tab
+    // and never switched left "utilities" rotting in storage indefinitely.
     if (raw === "utilities") {
+      saveActiveTab("service");
       return "service";
     }
     if (raw && (VALID_TAB_IDS as readonly string[]).includes(raw)) {
@@ -226,11 +228,18 @@ export function ServerTabs({
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Tab bar — separator (border-bottom) constrained to button extent (BUG-05) */}
       <div className="px-6 shrink-0">
+      {/* H-07: the tablist and the disconnect action share one flex row, but the
+          disconnect button sits OUTSIDE role="tablist" (WAI-ARIA 1.2 §3.24: a
+          tablist must contain only role=tab children). The border-bottom + flex
+          layout move to this wrapper so the visual row is unchanged. */}
+      <div
+        className="flex items-center gap-1"
+        style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
+      >
       <div
         role="tablist"
         aria-label={t("tabs.server_tabs", "Серверные вкладки")}
-        className="flex items-center gap-1"
-        style={{ borderBottom: "1px solid var(--color-border)", paddingTop: "4px", paddingBottom: "4px" }}
+        className="flex flex-1 items-center gap-1"
       >
         {tabs.map((tab, idx) => {
           // Phase 19 — dot indicator on «Сервис» pill (UI-SPEC §Block 1 §A.2).
@@ -275,8 +284,10 @@ export function ServerTabs({
             </button>
           );
         })}
+      </div>
 
-        {/* Separator + Disconnect icon (semi-destructive action — hover красным). */}
+        {/* Separator + Disconnect icon (semi-destructive action — hover красным).
+            Sibling of the tablist (H-07) — reachable via Tab, not Arrow keys. */}
         <Divider orientation="vertical" className="shrink-0 mx-2 my-1.5" />
         <Tooltip text={t("control.disconnect")} position="bottom">
           <button

@@ -406,4 +406,72 @@ describe("ServerPanel", () => {
     expect(screen.queryByTestId("service-tab-update-dot")).not.toBeInTheDocument();
   });
 
+  // ── H-05: skeleton re-shows on error-then-retry (audit 06 H-05) ──
+
+  it("H-05: retry button fires onPanelRetry so the parent re-arms the skeleton", () => {
+    const onPanelRetry = vi.fn();
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "timeout",
+      serverInfo: null,
+      panelDataLoaded: true, // error path already set this true (the latch source)
+    };
+    render(<ServerPanel {...defaultProps} onPanelRetry={onPanelRetry} />);
+    screen.getByRole("button", { name: /Повторить|retry/i }).click();
+    expect(onPanelRetry).toHaveBeenCalled();
+    expect(mockLoadServerInfo).toHaveBeenCalled();
+  });
+
+  it("H-05: onPanelReady fires AGAIN after an error → retry → reload cycle (resettable, not a one-shot latch)", async () => {
+    const onPanelReady = vi.fn();
+    // 1. First successful load — onPanelReady fires once (skeleton dismissed).
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: true,
+    };
+    const { rerender } = render(<ServerPanel {...defaultProps} onPanelReady={onPanelReady} />);
+    await waitFor(() => expect(onPanelReady).toHaveBeenCalledTimes(1));
+
+    // 2. Connection drops into an error. NB: loadServerInfo does NOT flip
+    //    panelDataLoaded back to false — it stays true (the error path set it).
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "timeout",
+      serverInfo: null,
+      panelDataLoaded: true,
+    };
+    rerender(<ServerPanel {...defaultProps} onPanelReady={onPanelReady} />);
+
+    // 3. User clicks retry → a fresh load runs (loading=true). This must RE-ARM
+    //    onPanelReady even though panelDataLoaded never went false.
+    mockState = {
+      ...mockState,
+      loading: true,
+      error: "",
+      serverInfo: null,
+      panelDataLoaded: true,
+    };
+    rerender(<ServerPanel {...defaultProps} onPanelReady={onPanelReady} />);
+
+    // 4. Retry settles successfully.
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: true, version: "1.0.0", serviceActive: true, users: ["u1"] },
+      panelDataLoaded: true,
+    };
+    rerender(<ServerPanel {...defaultProps} onPanelReady={onPanelReady} />);
+
+    // Pre-fix (effect keyed only on the panelDataLoaded edge) this would stay at
+    // 1 because panelDataLoaded never toggled false→true again. The resettable
+    // effect fires once more so the re-shown skeleton can be dismissed.
+    await waitFor(() => expect(onPanelReady).toHaveBeenCalledTimes(2));
+  });
+
 });

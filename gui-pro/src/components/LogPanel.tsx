@@ -25,9 +25,25 @@ const LEVEL_COLOR: Record<string, string> = {
   trace: "var(--color-text-muted)",
 };
 
+// T-30: how close to the bottom (in px) the user must be for the view to still be
+// considered "stuck to the bottom". A small slack absorbs sub-pixel rounding and the
+// height of a single just-appended line, so normal tailing keeps following while a
+// deliberate scroll-up (well past this) stops the auto-follow.
+const STICK_TO_BOTTOM_THRESHOLD_PX = 24;
+
+function isAtBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_TO_BOTTOM_THRESHOLD_PX;
+}
+
 function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
+  // T-30: track whether the view is currently pinned to the bottom. New log lines
+  // only force-scroll while this is true; once the user scrolls up to read history a
+  // new line must NOT yank the view back down. Starts true so the very first batch
+  // tails as before. A ref (not state) so the effect reads the latest value without
+  // re-subscribing and without an extra render per scroll event.
+  const stickToBottomRef = useRef(true);
   const [copied, setCopied] = useState(false);
   const [levelFilter, setLevelFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,11 +74,27 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
 
   const isFiltered = levelFilter !== "all" || searchQuery !== "";
 
+  // T-30: stick-to-bottom ONLY when the user is already at (or near) the bottom.
+  // Previously this unconditionally scrolled to the bottom on every new line, so a
+  // user scrolled up to read history was yanked back down by each incoming line and
+  // could never read older entries (UAT). Now we follow only while pinned.
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (el && stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [filteredLogs]);
+
+  // T-30: re-evaluate the pin on every user scroll. Scrolling up away from the bottom
+  // releases the pin (new lines stop pulling the view down); scrolling back to the
+  // bottom re-arms it (tailing resumes). The pin lives in a ref so this handler does
+  // not trigger a render on every scroll tick.
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) {
+      stickToBottomRef.current = isAtBottom(el);
+    }
+  }, []);
 
   const handleCopy = useCallback(() => {
     const text = filteredLogs
@@ -170,6 +202,7 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
       {/* Log entries */}
       <div
         ref={scrollRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto font-mono text-xs min-h-0 px-4 py-2 space-y-0.5 scroll-visible"
       >
         {filteredLogs.length === 0 ? (

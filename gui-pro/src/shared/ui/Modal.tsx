@@ -15,6 +15,16 @@ interface ModalProps {
   className?: string;
   closeOnBackdrop?: boolean;
   closeOnEscape?: boolean;
+  /**
+   * a11y dialog semantics (opt-in). When `role="dialog"` is supplied the content
+   * box becomes a screen-reader dialog; pair with `ariaLabelledby` (the id of the
+   * visible title) so the dialog gets an accessible name. Left undefined by
+   * default so existing modals keep their current (role-less) DOM byte-stable —
+   * only callers that opt in (e.g. UserModal, Users H-06) gain the role.
+   */
+  role?: "dialog";
+  ariaLabelledby?: string;
+  ariaModal?: boolean;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -72,6 +82,9 @@ export function Modal({
   className = "",
   closeOnBackdrop = true,
   closeOnEscape = true,
+  role,
+  ariaLabelledby,
+  ariaModal,
 }: ModalProps) {
   const isVisible = isOpen ?? open ?? false;
   const [mounted, setMounted] = useState(false);
@@ -130,6 +143,11 @@ export function Modal({
           animating ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-2",
           className,
         )}
+        // a11y: opt-in dialog role + accessible name (Users H-06). Undefined for
+        // callers that don't pass them, so non-opted modals stay DOM-byte-stable.
+        role={role}
+        aria-labelledby={ariaLabelledby}
+        aria-modal={ariaModal}
         // stopPropagation on click inside the modal so clicks inside never
         // bubble to the backdrop even when the gesture is clean.
         onClick={(e) => e.stopPropagation()}

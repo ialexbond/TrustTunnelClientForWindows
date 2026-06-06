@@ -25,7 +25,7 @@ export function UsersSectionSkeleton() {
           <li key={i}>
             <div className="flex items-center justify-between px-3 py-2">
               <Skeleton variant="line" width={140} height={14} />
-              <div className="flex items-center gap-[var(--space-0\.5)] shrink-0 ml-2">
+              <div className="flex items-center gap-[var(--space-0-5)] shrink-0 ml-2">
                 <Skeleton variant="card" width={32} height={32} />
                 <Skeleton variant="card" width={32} height={32} />
                 <Skeleton variant="card" width={32} height={32} />

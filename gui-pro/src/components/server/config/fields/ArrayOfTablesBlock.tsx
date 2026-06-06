@@ -88,9 +88,12 @@ export function ArrayOfTablesBlock({
         defaultValue: `Удалить host ${name}`,
       });
     }
+    // D-03.1: the key interpolates {{index}} (was the buggy {{hostname}}, which
+    // left the unnumbered "Удалить правило " label). Pass the 1-based rule number
+    // so the trash button gains a NAMED accessible label "Удалить правило 1".
     return t("server.config.delete_rule", {
       index: idx + 1,
-      defaultValue: `Удалить правило ${name}`,
+      defaultValue: `Удалить правило ${idx + 1}`,
     });
   };
 

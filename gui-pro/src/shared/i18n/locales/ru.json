@@ -928,7 +928,7 @@
       "unsaved_title": "Несохранённые изменения",
       "unsaved_desc": "Покинуть вкладку? Несохранённые изменения будут потеряны.",
       "delete_host": "Удалить host {{hostname}}",
-      "delete_rule": "Удалить правило {{hostname}}",
+      "delete_rule": "Удалить правило {{index}}",
       "min_one_host": "Сервер требует минимум 1 main host",
       "info_for": "Описание поля {{key}}",
       "diff_col_file": "Файл",
@@ -1586,6 +1586,7 @@
         "load": "Нагрузка"
       },
       "rebootingCountdown": "Перезагрузка",
+      "rebootTimeout": "Сервер не ответил после перезагрузки. Подключение к серверу сброшено — добавьте его заново.",
       "speedNotMeasured": "Не измерялась",
       "speedRequiresProtocol": "Запустите протокол",
       "dataUnavailable": "Не удалось получить данные",

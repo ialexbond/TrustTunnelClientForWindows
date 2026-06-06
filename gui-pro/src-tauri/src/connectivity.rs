@@ -798,6 +798,17 @@ where
 
         let (succeeded, elapsed, failure_reason) = try_connect(attempt).await;
         if succeeded {
+            // T-31: a user disconnect can land WHILE `try_connect` (the real
+            // respawn_and_wait) is in flight — the respawn then connects and would
+            // report Recovered, flipping the session back to Connected against the
+            // user's wish (the double-press UAT bug). The pre-attempt guard at the top
+            // of the loop cannot catch this because the disconnect arrives mid-attempt.
+            // Re-check intent NOW, after the success: if the user requested a
+            // disconnect, the respawned-and-connected sidecar must NOT win — return
+            // Aborted so the supervisor tears it down to a clean Disconnected.
+            if user_disconnected() {
+                return SupervisorOutcome::Aborted;
+            }
             return SupervisorOutcome::Recovered;
         }
 
@@ -1373,9 +1384,21 @@ pub fn start_reconnect_supervisor(
             let gen_arc = Arc::clone(&gen_arc);
             move || gen_arc.load(Ordering::SeqCst)
         };
+        // T-31: a user disconnect is observed via EITHER the transient `disconnecting`
+        // flag OR the DURABLE `user_disconnect_requested` flag. The transient one is
+        // cleared at the end of `vpn_disconnect` (WR-01), so a supervisor re-reading
+        // intent after the disconnect completed would miss it and let an in-flight
+        // respawn flip back to Connected (the double-press UAT bug). The durable flag
+        // persists until the next vpn_connect, so the OR sees the user's intent at
+        // every decision point — including the post-success re-check below.
+        let user_disconnect_requested_arc = Arc::clone(&state.user_disconnect_requested);
         let user_disconnected = {
             let disc_arc = Arc::clone(&disc_arc);
-            move || *disc_arc.lock().unwrap_or_else(|e| e.into_inner())
+            let durable = Arc::clone(&user_disconnect_requested_arc);
+            move || {
+                *disc_arc.lock().unwrap_or_else(|e| e.into_inner())
+                    || durable.load(Ordering::SeqCst)
+            }
         };
 
         // Per-attempt Reconnecting status via the single mutator (D-03). The
@@ -1460,6 +1483,39 @@ pub fn start_reconnect_supervisor(
                     "INFO",
                     "[reconnect] supervisor aborted (user intent / generation advanced)",
                 );
+                // T-31: distinguish the TWO abort causes — they need opposite handling.
+                //
+                //  - USER DISCONNECT (durable intent set): the abort may have happened
+                //    AFTER a successful respawn (the in-flight attempt connected just as
+                //    the user clicked Disconnect), leaving a respawned sidecar ALIVE and
+                //    the status flipped back to Connected. The user's Disconnect must
+                //    WIN: force a clean Disconnected and tear down that respawned sidecar
+                //    (it holds the WinTUN adapter + killswitch — R3). This is the fix for
+                //    the "Disconnect flashes an error then flips back to Connected, needs
+                //    a second press" UAT bug.
+                //
+                //  - GENERATION ADVANCE from a manual RECONNECT (durable intent NOT set):
+                //    a NEW session owns the sidecar now. We must NOT touch it — leave the
+                //    status/sidecar to that new session (unchanged behavior).
+                if user_disconnect_requested_arc.load(Ordering::SeqCst) {
+                    if let Some(state) = app.try_state::<crate::commands::AppState>() {
+                        log_app(
+                            "INFO",
+                            "[reconnect] aborted by user disconnect — forcing Disconnected and releasing any respawned sidecar (T-31)",
+                        );
+                        crate::commands::vpn::set_vpn_status(
+                            &app,
+                            &state,
+                            VpnStatus::Disconnected,
+                            None,
+                        );
+                    }
+                    // Release the (possibly just-respawned, Connected) sidecar so the
+                    // killswitch/adapter can't strand traffic and the next connect is
+                    // clean. No-op if the attempt never spawned one. Done OUTSIDE the
+                    // `state` borrow (teardown is async / takes the child lock).
+                    crate::commands::vpn::teardown_session_sidecar(&app).await;
+                }
             }
             SupervisorOutcome::GaveUp => {
                 // One final generation re-check before the terminal write so a
@@ -2127,6 +2183,43 @@ mod reconnect_supervisor_tests {
 
         assert_eq!(outcome, SupervisorOutcome::Recovered);
         assert_eq!(calls.get(), 3, "stopped exactly on the successful attempt");
+    }
+
+    #[tokio::test]
+    async fn user_disconnect_during_inflight_reconnect_aborts_not_recovers() {
+        // T-31 regression: the user clicks Disconnect WHILE a reconnect attempt is in
+        // flight. The attempt then SUCCEEDS (the respawn connected just as the user
+        // disconnected), but the user's intent must WIN — the loop must return Aborted,
+        // NOT Recovered, so the supervisor tears the respawned sidecar down to a clean
+        // Disconnected instead of flipping the session back to Connected (the
+        // "Disconnect needs a second press" UAT bug).
+        //
+        // Model: user_disconnected() is false at the pre-attempt guard (so the attempt
+        // runs) and flips to true DURING the attempt (the disconnect landed mid-respawn).
+        // The post-success re-check then observes the intent and aborts.
+        let disconnected = Cell::new(false);
+        let calls = Cell::new(0u32);
+        let outcome = run_reconnect_loop(
+            1,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                // The attempt connects, but the user disconnected meanwhile.
+                disconnected.set(true);
+                async { (true, Duration::from_secs(1), None) }
+            },
+            || disconnected.get(), // false at pre-attempt guard, true after the attempt
+            || 1,                  // generation unchanged (this is a DISCONNECT, not a reconnect)
+            |_attempt| {},
+            || async { never_sleeps() },
+        )
+        .await;
+
+        assert_eq!(
+            outcome,
+            SupervisorOutcome::Aborted,
+            "a user disconnect during an in-flight reconnect must abort, never report Recovered",
+        );
+        assert_eq!(calls.get(), 1, "exactly one attempt ran before the abort");
     }
 
     #[tokio::test]

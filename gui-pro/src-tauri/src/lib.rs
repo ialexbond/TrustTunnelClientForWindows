@@ -112,6 +112,10 @@ pub fn run() {
             // sidecar Terminated arm can classify a never-connected exit (no-internet vs
             // sidecar-exit). The pre-flight is warning-only and never blocks connecting.
             last_preflight_offline: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // T-31 — durable user-disconnect intent. Starts false; set true by
+            // vpn_disconnect and cleared by the next vpn_connect, so a user disconnect
+            // wins over an in-flight auto-reconnect (no flip back to Connected).
+            user_disconnect_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
@@ -474,6 +478,8 @@ pub fn run() {
             processes::list_running_processes,
             commands::network::ping_endpoint,
             commands::network::health_check,
+            // T-22 B3 (boot guard): network-readiness probe for auto-connect-on-launch
+            commands::network::network_ready,
             commands::history::record_session_start,
             commands::history::record_session_end,
             commands::history::get_connection_history,

@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { useTomlConfigState } from "./useTomlConfigState";
+import {
+  useTomlConfigState,
+  deepEqual,
+  type SaveBatchResult,
+} from "./useTomlConfigState";
 import type { ConfigBundle, VpnConfigKnown } from "./types";
 import { makeBundle } from "../../../test/fixtures";
 
@@ -281,5 +285,121 @@ describe("useTomlConfigState", () => {
     const defaultOnly = vpnTree.flatMap.get("y");
     expect(defaultOnly).toBeDefined();
     expect(defaultOnly!.isExplicit).toBe(false);
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Phase 04 Plan 15 — Config dirty-tracking regressions (H-2 + H-4).
+  // Each reproduces the audit/03-configuration.md symptom and FAILS before the
+  // fix, PASSES after (D-02 rail / success criterion 3).
+  // ════════════════════════════════════════════════════════════════════════
+
+  // H-4 (audit/03-configuration.md): saveAll() reported `success: true` even when
+  // the post-save `server_restart_service` REJECTED. The caller then treats the
+  // batch as fully applied (clears its UI dirty markers, shows "saved") although
+  // the service is NOT running the new config — and the hook's own dirtyFields
+  // are cleared only on a real success, so a true restart failure left a
+  // contradictory "clean but not live" state. The fix: a restart failure returns
+  // `success: false` AND keeps dirtyFields so the user can retry the save/restart.
+  it("H-4: a restart failure after a clean save returns success=false and keeps dirty", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE); // initial load
+    const { result } = renderHook(() =>
+      useTomlConfigState(SSH_PARAMS, {
+        defaultsMaps: EMPTY_DEFAULTS,
+        disruptSets: EMPTY_DISRUPT,
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      result.current.setFieldValue("vpn", ["listen_address"], "0.0.0.0:8443");
+    });
+    expect(result.current.dirtyCount).toBe(1);
+
+    // Save: file write OK, restart REJECTS.
+    mockInvoke
+      .mockResolvedValueOnce(undefined) // vpn save OK
+      .mockRejectedValueOnce(new Error("RESTART_FAILED")); // restart fails
+
+    let saveResult: SaveBatchResult | null = null;
+    await act(async () => {
+      saveResult = await result.current.saveAll();
+    });
+
+    // Restart failure must NOT be reported as a success — the new config is not
+    // live, so the caller must surface a persistent warning, not a "saved" toast.
+    expect(saveResult!.success).toBe(false);
+    expect(saveResult!.error).toMatch(/restart/i);
+    // Dirty state must survive so the user can retry without re-entering edits.
+    expect(result.current.dirtyCount).toBe(1);
+  });
+
+  // H-2 (audit/03-configuration.md): reloadBundle() (cross-tab event / retry)
+  // discards dirty edits via loadBundle's reset — but only on a SUCCESSFUL reload.
+  // If the reload itself FAILS (SSH hiccup), loadBundle takes the error branch and
+  // dirtyFields are left untouched: the schema trees are now out of sync with the
+  // stale dirty map (the bundle never changed, yet the user's intent is unclear).
+  // The fix makes reloadBundle() reset dirtyFields up front so a failed reload
+  // never leaves a dirty map pointing at a tree that no longer reflects an edit.
+  it("H-2: reloadBundle() clears dirtyFields even when the reload fails", async () => {
+    mockInvoke.mockResolvedValueOnce(MOCK_BUNDLE); // initial load
+    const { result } = renderHook(() =>
+      useTomlConfigState(SSH_PARAMS, {
+        defaultsMaps: EMPTY_DEFAULTS,
+        disruptSets: EMPTY_DISRUPT,
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      result.current.setFieldValue("vpn", ["listen_address"], "0.0.0.0:8443");
+    });
+    expect(result.current.dirtyCount).toBe(1);
+
+    // Reload fails (SSH error). dirtyFields must still be reset.
+    mockInvoke.mockRejectedValueOnce(new Error("SSH_RELOAD_FAILED"));
+    await act(async () => {
+      await result.current.reloadBundle();
+    });
+
+    expect(result.current.dirtyCount).toBe(0);
+  });
+});
+
+// IN-02: deepEqual must be order-independent so a reordered-but-equal object
+// (e.g. after a TOML re-parse) does NOT read as dirty. The previous
+// JSON.stringify-based compare failed this because it was key-insertion-order
+// sensitive.
+describe("deepEqual (dirty-tracking compare)", () => {
+  it("treats objects with same entries but different key order as equal", () => {
+    const a = { listen_address: "0.0.0.0:8443", mtu: 1420 };
+    const b = { mtu: 1420, listen_address: "0.0.0.0:8443" };
+    expect(deepEqual(a, b)).toBe(true);
+    // Sanity: JSON.stringify order-sensitivity would have reported these unequal.
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+  });
+
+  it("compares nested objects order-independently", () => {
+    const a = { outer: { x: 1, y: 2 }, name: "vpn" };
+    const b = { name: "vpn", outer: { y: 2, x: 1 } };
+    expect(deepEqual(a, b)).toBe(true);
+  });
+
+  it("still detects a real value difference", () => {
+    expect(deepEqual({ a: 1, b: 2 }, { a: 1, b: 3 })).toBe(false);
+    expect(deepEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+  });
+
+  it("preserves scalar/primitive comparison semantics", () => {
+    expect(deepEqual("x", "x")).toBe(true);
+    expect(deepEqual(1, 1)).toBe(true);
+    expect(deepEqual(1, "1")).toBe(false);
+    expect(deepEqual(null, null)).toBe(true);
+    expect(deepEqual(null, {})).toBe(false);
+  });
+
+  it("compares arrays by index", () => {
+    expect(deepEqual([1, 2, 3], [1, 2, 3])).toBe(true);
+    expect(deepEqual([1, 2], [2, 1])).toBe(false);
+    expect(deepEqual([{ a: 1, b: 2 }], [{ b: 2, a: 1 }])).toBe(true);
   });
 });

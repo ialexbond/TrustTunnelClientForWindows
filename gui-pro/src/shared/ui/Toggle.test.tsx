@@ -45,6 +45,32 @@ describe("Toggle", () => {
     expect(screen.getByRole("switch")).toBeInTheDocument();
   });
 
+  // D-03.2 (Users H-07): the visible `label` must become the role="switch"
+  // accessible name so screen readers announce it and tests can query
+  // getByRole("switch", { name }). FAILS on pre-fix code (label was only
+  // rendered visually, never wired to the switch's accessible name); PASSES
+  // after the label→switch a11y forward.
+  it("forwards the visible label to the switch accessible name", () => {
+    render(<Toggle checked={false} onChange={() => {}} label="Anti-DPI" />);
+    expect(
+      screen.getByRole("switch", { name: "Anti-DPI" })
+    ).toBeInTheDocument();
+  });
+
+  it("explicit aria-label overrides the visible label as the accessible name", () => {
+    render(
+      <Toggle
+        checked={false}
+        onChange={() => {}}
+        label="Visible"
+        aria-label="Explicit name"
+      />
+    );
+    expect(
+      screen.getByRole("switch", { name: "Explicit name" })
+    ).toBeInTheDocument();
+  });
+
   it("aria-checked is true when checked", () => {
     render(<Toggle checked={true} onChange={() => {}} label="On" />);
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");

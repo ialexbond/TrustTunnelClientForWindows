@@ -140,6 +140,19 @@ pub struct AppState {
     /// never-connected non-zero exit: offline → `NO_INTERNET_REASON`, else
     /// `SIDECAR_EXIT_REASON`. Starts at `false`.
     pub last_preflight_offline: Arc<AtomicBool>,
+    /// T-31 — DURABLE user-disconnect intent (a user-initiated Disconnect must WIN
+    /// over an in-flight auto-reconnect).
+    ///
+    /// Distinct from `disconnecting`: that flag is cleared at the END of
+    /// `vpn_disconnect` (the WR-01 "latent landmine" reset), so a supervisor that
+    /// re-reads it AFTER the disconnect completes sees a stale `false` and can let an
+    /// in-flight respawn flip the session back to Connected — the user then had to
+    /// press Disconnect twice (UAT). This flag instead PERSISTS from `vpn_disconnect`
+    /// until the next `vpn_connect` clears it, giving the reconnect supervisor a
+    /// durable "the user wants to be disconnected" signal it can check at EVERY
+    /// decision point (including AFTER a successful respawn) to abort to a clean
+    /// Disconnected instead of Connected. Starts at `false`.
+    pub user_disconnect_requested: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Serialize)]
@@ -370,8 +383,38 @@ pub fn kill_stale_sidecar() {
     }
 }
 
+/// Substring that identifies THIS client's OWN WinTUN adapter (T-21). The C++ sidecar
+/// (not in this tree) creates its tunnel adapter with a `Name` of the form
+/// "TrustTunnel (<server-host>)" (e.g. "TrustTunnel (vpn.example.com)"). Matched
+/// case-insensitively so a casing change in the sidecar can't slip our own adapter
+/// back into the conflict list.
+const OWN_ADAPTER_IDENTITY: &str = "trusttunnel";
+
+/// Pure, testable filter for the conflict list (T-21).
+///
+/// `detect_conflicting_adapters` enumerates VPN/TUN adapters via PowerShell, but the
+/// raw enumeration ALSO returns this client's OWN WinTUN adapter — its `Name` is
+/// "TrustTunnel (<host>)", while its `InterfaceDescription` is the generic WinTUN
+/// driver string ("Wintun Userspace Tunnel"). The PowerShell `-notmatch 'TrustTunnel'`
+/// only checked the DESCRIPTION, so our own adapter (identified by NAME) slipped
+/// through and was reported as "active VPN adapters from other software: TrustTunnel
+/// (vpn.example.com)" (UAT). This drops any entry whose name contains our own identity,
+/// while preserving genuine third-party adapters (NordVPN, WireGuard, OpenVPN/TAP,
+/// Amnezia, …) so a real conflict is still surfaced.
+fn filter_out_own_adapter(names: Vec<String>) -> Vec<String> {
+    names
+        .into_iter()
+        .filter(|name| !name.to_lowercase().contains(OWN_ADAPTER_IDENTITY))
+        .collect()
+}
+
 /// Detect conflicting VPN/TUN adapters that may block WinTUN creation.
 /// Returns a list of adapter names that look like they belong to other VPN software.
+///
+/// T-21: the app's OWN WinTUN adapter is excluded via `filter_out_own_adapter` AFTER
+/// enumeration. We filter by NAME in Rust (not only the PowerShell description match)
+/// because the own adapter carries the "TrustTunnel" identity in its `Name`, not its
+/// `InterfaceDescription` — so the previous description-only `-notmatch` let it through.
 #[cfg(windows)]
 fn detect_conflicting_adapters() -> Vec<String> {
     let output = std::process::Command::new("powershell")
@@ -386,10 +429,13 @@ fn detect_conflicting_adapters() -> Vec<String> {
     match output {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
-            text.lines()
+            let names = text
+                .lines()
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
-                .collect()
+                .collect();
+            // T-21: drop our own "TrustTunnel (<host>)" adapter (matched by Name).
+            filter_out_own_adapter(names)
         }
         Err(_) => vec![],
     }
@@ -797,6 +843,10 @@ pub async fn vpn_connect(
 
     // Reset flags for new connection
     if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+    // T-31: a fresh connect clears the durable user-disconnect intent so a prior
+    // Disconnect can never suppress THIS new session's reconnects. Pairs with the
+    // store(true) in vpn_disconnect — the only two writers of this flag.
+    state.user_disconnect_requested.store(false, Ordering::SeqCst);
 
     // ── Non-blocking pre-flight connectivity check (02-09, UAT Gap #2) ──────
     //
@@ -982,6 +1032,19 @@ pub async fn respawn_sidecar(app: &tauri::AppHandle, config_path: &str, log_leve
     // the supervisor spawned + STORED a fresh sidecar AFTER the cancel: a leaked session
     // with a stuck killswitch (exactly the class of drop-vs-recovery race this phase
     // fixes). Holding the guard across the check+clear closes the TOCTOU.
+    // T-31: also honor the DURABLE user-disconnect intent here. `disconnecting` may
+    // already have been cleared by a completed `vpn_disconnect` (its end-of-fn reset),
+    // so checking it alone can miss a user disconnect that landed during this respawn.
+    // The durable flag persists until the next vpn_connect, so it closes that gap: if
+    // the user requested disconnect, do NOT spawn a sidecar they don't want — bail so
+    // the loop's post-attempt intent guard aborts the supervisor to Disconnected.
+    if state.user_disconnect_requested.load(Ordering::SeqCst) {
+        crate::logging::log_app(
+            "INFO",
+            "[reconnect] durable user-disconnect intent set before respawn — aborting respawn (T-31)",
+        );
+        return;
+    }
     {
         let mut d = state
             .disconnecting
@@ -1060,6 +1123,15 @@ pub async fn vpn_disconnect(
     // Always set disconnecting flag first — even if sidecar hasn't spawned yet.
     // This prevents vpn_connect from spawning a sidecar after cancel.
     if let Ok(mut d) = state.disconnecting.lock() { *d = true; }
+
+    // T-31: also raise the DURABLE user-disconnect intent. Unlike `disconnecting`
+    // (cleared at the end of this fn — WR-01), this stays set until the next
+    // `vpn_connect`, so a reconnect supervisor that re-reads intent AFTER this
+    // disconnect completes still sees "the user wants to be disconnected" and aborts
+    // an in-flight respawn to a clean Disconnected instead of letting it flip the
+    // session back to Connected (the double-press UAT bug). Set BEFORE the generation
+    // bump so the supervisor can never observe the bump without also seeing the intent.
+    state.user_disconnect_requested.store(true, Ordering::SeqCst);
 
     // Bump the connection generation so any in-flight connect-timeout watchdog from
     // the session being torn down sees a generation mismatch and neutralizes itself
@@ -1514,5 +1586,48 @@ mod tests {
             "reason code must contain NO Cyrillic",
         );
         assert_eq!(reason, "connect-timeout");
+    }
+
+    // ── Conflict detection excludes our OWN WinTUN adapter (T-21) ──────────────
+    #[test]
+    fn conflict_filter_excludes_own_trusttunnel_adapter() {
+        // UAT: the conflict detector reported "active VPN adapters from other software:
+        // TrustTunnel (vpn.example.com)" — our OWN adapter. The own adapter (identified by
+        // its "TrustTunnel (<host>)" Name) MUST be dropped, while a genuine third-party
+        // VPN adapter is STILL reported so a real conflict is not hidden.
+        let raw = vec![
+            "TrustTunnel (vpn.example.com)".to_string(),
+            "NordLynx".to_string(),
+        ];
+        let filtered = filter_out_own_adapter(raw);
+        assert_eq!(
+            filtered,
+            vec!["NordLynx".to_string()],
+            "own TrustTunnel adapter removed; third-party adapter preserved",
+        );
+    }
+
+    #[test]
+    fn conflict_filter_preserves_genuine_third_party_adapters() {
+        // Over-filtering guard: real third-party VPN/TUN adapters (none carrying our
+        // identity) must pass through UNCHANGED — the filter only ever drops our own.
+        let raw = vec![
+            "WireGuard Tunnel".to_string(),
+            "OpenVPN TAP-Windows Adapter V9".to_string(),
+            "AmneziaWG".to_string(),
+        ];
+        let filtered = filter_out_own_adapter(raw.clone());
+        assert_eq!(filtered, raw, "no genuine third-party adapter must be over-filtered");
+    }
+
+    #[test]
+    fn conflict_filter_is_case_insensitive_for_own_identity() {
+        // The match is case-insensitive so a casing change in the C++ sidecar's adapter
+        // Name (e.g. "trusttunnel (host)") can't slip our own adapter back into the list.
+        let raw = vec!["trusttunnel (example.host)".to_string()];
+        assert!(
+            filter_out_own_adapter(raw).is_empty(),
+            "own adapter must be excluded regardless of letter case",
+        );
     }
 }

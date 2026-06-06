@@ -341,15 +341,51 @@ pub(crate) fn emit_step(app: &tauri::AppHandle, step: &str, status: &str, messag
     .ok();
 }
 
+/// Sink-formatting seam for the deploy-log channel (S-3 / SAFETY-02 / D-29).
+///
+/// This is the single point that produces the FINAL strings handed to BOTH
+/// deploy-log sinks. It returns the two shapes the sinks actually consume:
+///
+/// - `.0` = the `eprintln!` stderr line, `[deploy-log] [{level}] {message}`
+///   (prefix preserved byte-identical so nothing that scrapes stderr changes
+///   shape).
+/// - `.1` = the bare message that goes into the `deploy-log` Tauri event
+///   payload's `message` field (the frontend renders this verbatim and parses
+///   `\b(\d+)\s*%`; it must stay prefix-free, so we keep it bare).
+///
+/// `emit_log` routes both sinks through this seam so the redaction below cannot
+/// be bypassed on one of the two paths.
+///
+/// `diagnose_server` / `get_server_config` stream the output of
+/// `cat .../vpn.toml` (which contains `password = "…"` lines) through `emit_log`
+/// line by line. Before this seam sanitized, the raw line reached stderr and the
+/// frontend event unredacted. We apply `crate::logging::sanitize` here — the SAME
+/// redaction the activity-log file-writer (`commands::activity_log`) uses — so the
+/// secret never crosses the host log boundary on either sink. sanitize() is a
+/// no-op on lines that are not `key = value`-shaped, so non-secret log lines are
+/// unchanged.
+///
+/// Returns `(stderr_line, event_message)`.
+fn format_deploy_log_line(level: &str, message: &str) -> (String, String) {
+    let safe = crate::logging::sanitize(message);
+    let stderr_line = format!("[deploy-log] [{level}] {safe}");
+    (stderr_line, safe)
+}
+
 pub(crate) fn emit_log(app: &tauri::AppHandle, level: &str, message: &str) {
     if message.trim().is_empty() {
         return;
     }
-    eprintln!("[deploy-log] [{level}] {message}");
+    // Both sinks consume the seam's sanitized output so the redaction is
+    // identical and cannot be bypassed on one path (S-3 / SAFETY-02).
+    let (stderr_line, event_message) = format_deploy_log_line(level, message);
+    eprintln!("{stderr_line}");
     app.emit(
         "deploy-log",
         DeployLogPayload {
-            message: message.into(),
+            // Bare sanitized message — frontend renders this verbatim and parses
+            // it for percent; the stderr prefix must NOT leak into the UI.
+            message: event_message,
             level: level.into(),
         },
     )
@@ -571,4 +607,44 @@ pub(crate) async fn exec_command(
     }
 
     Ok((stdout, exit_code))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// S-3 / SAFETY-02 / D-29 regression: a `password = "…"` line streamed from
+    /// `cat vpn.toml` through `emit_log` must NOT carry the secret into either
+    /// deploy-log sink. We assert on the REAL sink output — the exact `(stderr,
+    /// event)` strings produced by `format_deploy_log_line`, the single seam both
+    /// `eprintln!` and the event emit consume — not on `sanitize()` in isolation,
+    /// so a future change that bypasses the seam fails this test.
+    #[test]
+    fn deploy_log_seam_redacts_password_before_both_sinks() {
+        let secret = "S3cr3t";
+        let message = format!("password = \"{secret}\"");
+
+        let (stderr_line, event_message) = format_deploy_log_line("info", &message);
+
+        assert!(
+            !stderr_line.contains(secret),
+            "stderr sink leaked the password: {stderr_line}"
+        );
+        assert!(
+            !event_message.contains(secret),
+            "deploy-log event sink leaked the password: {event_message}"
+        );
+    }
+
+    /// The seam must not mangle ordinary (non-secret) log lines — sanitize is a
+    /// no-op on lines that are not `key = value`-shaped, and the stderr prefix
+    /// stays byte-identical so nothing scraping stderr/percent-parsing changes.
+    #[test]
+    fn deploy_log_seam_preserves_plain_lines() {
+        let (stderr_line, event_message) =
+            format_deploy_log_line("info", "Installing systemd unit 60%");
+
+        assert_eq!(stderr_line, "[deploy-log] [info] Installing systemd unit 60%");
+        assert_eq!(event_message, "Installing systemd unit 60%");
+    }
 }
