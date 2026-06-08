@@ -394,6 +394,13 @@ pub fn start_monitor(
         let mut consecutive_failures: u32 = 0;
         let mut was_online = true;
         let mut was_connected = false;
+        // FIX-D (killswitch-ON warm-up): timestamp of the current connect + whether the
+        // tunnel probe has succeeded at least once this session. Until one of those arms
+        // detection (see lifecycle::tunnel_loss_armed), a failed probe is treated as
+        // warm-up, not a drop — the fail-closed killswitch blocks the probe while the
+        // tunnel warms up. See debug/claude-code-403-on-vpn-reconnect.md (FIX-D).
+        let mut connected_at: Option<Instant> = None;
+        let mut first_probe_success = false;
 
         // 02-14 (STATUS-05): the shared wake handle. The OS interface-change callback
         // signals this; the monitor `select!`s on it below so a real-time link-state
@@ -479,6 +486,8 @@ pub fn start_monitor(
                 consecutive_failures = 0;
                 was_online = true;
                 was_connected = false;
+                connected_at = None; // FIX-D: re-arm warm-up on the next connect
+                first_probe_success = false;
                 continue;
             }
 
@@ -520,6 +529,9 @@ pub fn start_monitor(
             // period the monitor sees DNS failures and kills the VPN.
             if !was_connected {
                 was_connected = true;
+                // FIX-D: start the killswitch warm-up window for this connect.
+                connected_at = Some(Instant::now());
+                first_probe_success = false;
                 log_app("INFO", "[connectivity] VPN just connected — skipping first check cycle");
                 continue;
             }
@@ -656,13 +668,24 @@ pub fn start_monitor(
                 }
                 consecutive_failures = 0;
                 was_online = true;
+                first_probe_success = true; // FIX-D: arm normal detection now the tunnel proved alive
             } else {
                 consecutive_failures += 1;
                 eprintln!("[connectivity] Tunnel probe failed ({consecutive_failures}/{MAX_FAILURES})");
                 // Declare offline after MAX_FAILURES consecutive failed probes (~12-15s)
                 // — requiring N>1 failures tolerates one transient miss under heavy load
                 // so a busy-but-healthy tunnel is never false-killed (T-07-01).
-                if consecutive_failures >= MAX_FAILURES && was_online {
+                // FIX-D (killswitch-ON warm-up): don't declare tunnel-lost until the first
+                // successful probe OR the warm-up grace elapses. The fail-closed killswitch
+                // blocks our probe while the tunnel warms up (~up to 60s); the old ~12s
+                // detect declared a false loss → recovery that also couldn't probe → hang.
+                // With killswitch OFF the first probe succeeds in ~1s so this is a no-op.
+                // See debug/claude-code-403-on-vpn-reconnect.md (FIX-D).
+                let connected_secs_ago =
+                    connected_at.map(|t| t.elapsed().as_secs()).unwrap_or(u64::MAX);
+                let loss_armed =
+                    crate::lifecycle::tunnel_loss_armed(connected_secs_ago, first_probe_success);
+                if consecutive_failures >= MAX_FAILURES && was_online && loss_armed {
                     // Secondary gate: is the LOCAL network still reachable? This does NOT
                     // gate the offline decision (the tunnel probe already failed N times);
                     // it only classifies the reason code so the UI can distinguish a
