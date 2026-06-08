@@ -524,6 +524,29 @@ pub fn start_monitor(
                 continue;
             }
 
+            // FIX-B (RC-1): an interface-change wake (e.g. Docker/WSL bringing up a
+            // vEthernet) must NOT let a transient tunnel-probe miss escalate to
+            // tunnel-lost while the physical uplink is still present. Reset the failure
+            // counter and settle so only a SUSTAINED probe failure via the poll cadence
+            // (no intervening adapter churn) can declare the tunnel dead. This is the
+            // Claude-Code-403-on-Docker-start fix — see
+            // .planning/debug/claude-code-403-on-vpn-reconnect.md (RC-1 / FIX-B).
+            if woke_via_event
+                && crate::lifecycle::reset_tunnel_failures_on_adapter_event(
+                    find_physical_adapter().is_some(),
+                )
+            {
+                consecutive_failures = 0;
+                log_app(
+                    "DEBUG",
+                    "[connectivity] adapter-change wake with uplink present — reset tunnel-probe failures + settle (FIX-B)",
+                );
+                tokio::time::sleep(Duration::from_millis(
+                    crate::lifecycle::ADAPTER_EVENT_SETTLE_MS,
+                ))
+                .await;
+            }
+
             // 02-18 (STATUS-05 gap): FAST LOCAL-uplink-loss short-circuit. Runs AFTER
             // the grace skip + resume re-baseline (so a just-connected session and a
             // resume are handled first) and BEFORE the slow tunnel probe below.

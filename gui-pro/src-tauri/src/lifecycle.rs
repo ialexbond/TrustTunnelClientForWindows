@@ -320,3 +320,46 @@ mod tests {
         assert_ne!(RECOVERY_TIMEOUT_REASON, crate::connectivity::RECONNECT_GAVE_UP_REASON);
     }
 }
+
+// ─── FIX-B (RC-1): false-tunnel-loss hardening ─────────────────────────────
+// A new virtual adapter appearing (Docker/WSL/Hyper-V vEthernet) wakes the
+// connectivity monitor via the OS interface-change notification; a single
+// transient tunnel-probe miss during that network churn must NOT accumulate
+// toward MAX_FAILURES and trigger a reconnect that breaks live app sessions
+// (the Claude Code 403-on-Docker-start regression). While the physical uplink
+// is still present we reset the probe failure counter and settle, so only a
+// SUSTAINED failure with no intervening adapter event declares the tunnel dead.
+// See .planning/debug/claude-code-403-on-vpn-reconnect.md (RC-1 / FIX-B).
+
+/// Settle delay after an interface-change wake before counting tunnel-probe
+/// misses again. Long enough to outlast Docker/WSL NIC bring-up churn.
+pub const ADAPTER_EVENT_SETTLE_MS: u64 = 1500;
+
+/// Whether an interface-change wake should reset the tunnel-probe failure
+/// counter: true when the physical uplink is still present (the event is a NIC
+/// add / parameter change, not a loss of the real uplink).
+pub fn reset_tunnel_failures_on_adapter_event(physical_uplink_present: bool) -> bool {
+    physical_uplink_present
+}
+
+#[cfg(test)]
+mod adapter_event_tests {
+    use super::*;
+
+    #[test]
+    fn virtual_add_with_uplink_present_resets() {
+        // Docker/WSL vEthernet appears, real uplink still there → reset + settle.
+        assert!(reset_tunnel_failures_on_adapter_event(true));
+    }
+
+    #[test]
+    fn real_uplink_loss_does_not_reset() {
+        // Physical uplink genuinely gone → do NOT mask it; let the loss path run.
+        assert!(!reset_tunnel_failures_on_adapter_event(false));
+    }
+
+    #[test]
+    fn settle_delay_is_sane() {
+        assert!((500..=5000).contains(&ADAPTER_EVENT_SETTLE_MS));
+    }
+}
