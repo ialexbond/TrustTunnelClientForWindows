@@ -363,3 +363,50 @@ mod adapter_event_tests {
         assert!((500..=5000).contains(&ADAPTER_EVENT_SETTLE_MS));
     }
 }
+
+// ─── FIX-D (RC: killswitch-ON warm-up grace) ───────────────────────────────
+// The C++ fail-closed killswitch blocks ALL non-tunnel traffic — including our
+// tunnel-liveness probe — while the tunnel is still warming up (handshake +
+// routes + DNS proxy, up to ~1 min). The aggressive detect (POLL 4s × 3 ≈ 12s)
+// declared a FALSE tunnel-lost before warm-up finished → recovery that also
+// couldn't probe through the killswitch → hang. Tunnel-lost detection must be
+// "armed" only AFTER the first successful probe, or after a warm-up grace has
+// elapsed since connect. This is additive: with killswitch OFF the first probe
+// succeeds in ~1s, so the grace ends immediately and behavior is unchanged
+// (the killswitch-OFF 403 fix is not regressed). See
+// .planning/debug/claude-code-403-on-vpn-reconnect.md (FIX-D).
+
+/// Warm-up window after connect during which a failed tunnel probe does NOT
+/// declare the tunnel dead (covers killswitch fail-closed warm-up).
+pub const WARMUP_GRACE_SECS: u64 = 60;
+
+/// Whether tunnel-lost detection is armed: a probe has succeeded at least once,
+/// or the warm-up grace has elapsed since connect.
+pub fn tunnel_loss_armed(connected_secs_ago: u64, first_probe_success: bool) -> bool {
+    first_probe_success || connected_secs_ago >= WARMUP_GRACE_SECS
+}
+
+#[cfg(test)]
+mod warmup_grace_tests {
+    use super::*;
+
+    #[test]
+    fn not_armed_during_warmup_without_a_success() {
+        // killswitch blocks the probe during warm-up → must NOT declare lost.
+        assert!(!tunnel_loss_armed(0, false));
+        assert!(!tunnel_loss_armed(WARMUP_GRACE_SECS - 1, false));
+    }
+
+    #[test]
+    fn armed_immediately_after_first_success() {
+        // Once the tunnel has proven alive, normal fast detection resumes.
+        assert!(tunnel_loss_armed(0, true));
+    }
+
+    #[test]
+    fn armed_after_grace_even_without_success() {
+        // A tunnel that never warms up within the grace is then honestly declared dead.
+        assert!(tunnel_loss_armed(WARMUP_GRACE_SECS, false));
+        assert!(tunnel_loss_armed(WARMUP_GRACE_SECS + 10, false));
+    }
+}
