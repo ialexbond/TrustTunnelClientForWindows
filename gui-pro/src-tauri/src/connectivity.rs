@@ -1714,7 +1714,18 @@ async fn check_tunnel_alive() -> bool {
     // upstream through the tunnel. Multiple providers so one operator outage does
     // not look like a tunnel death. NOT bound to the physical adapter, so while VPN
     // is up these travel through the tunnel (the whole point).
+    // FIX-E (T-32): DNS-INDEPENDENT liveness. The sidecar DNS-proxy intermittently
+    // fails mid-session (log: "DNS_HANDLER ... DNS proxy request id=N failed"); the
+    // hostname probes below then fail to RESOLVE even though the tunnel/route is
+    // perfectly alive, which was misread as tunnel-lost → false reconnect → death
+    // spiral (invisible with killswitch OFF, fatal with it ON). The two Cloudflare IP
+    // literals carry valid TLS (1.1.1.1 / 1.0.0.1 are in the cert SAN) and need NO DNS,
+    // so a DNS-proxy stall can no longer false-fail the probe. Any-one-success = alive,
+    // so this is purely additive — no regression to the existing hostname signal.
+    // See .planning/debug/claude-code-403-on-vpn-reconnect.md (FIX-E).
     let http_endpoints = [
+        "https://1.1.1.1/",
+        "https://1.0.0.1/",
         "https://clients3.google.com/generate_204",
         "https://cp.cloudflare.com",
         "http://www.msftconnecttest.com/connecttest.txt",
@@ -1748,12 +1759,14 @@ async fn check_tunnel_alive() -> bool {
         }
     };
 
-    let (a, b, c) = tokio::join!(
+    let (a, b, c, d, e) = tokio::join!(
         probe(http_endpoints[0]),
         probe(http_endpoints[1]),
         probe(http_endpoints[2]),
+        probe(http_endpoints[3]),
+        probe(http_endpoints[4]),
     );
-    let any_alive = a || b || c;
+    let any_alive = a || b || c || d || e;
     if !any_alive {
         log_app("DEBUG", "[connectivity] Tunnel probe: all endpoints failed");
     }
