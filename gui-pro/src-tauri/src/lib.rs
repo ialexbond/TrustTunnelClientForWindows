@@ -1,6 +1,7 @@
 mod commands;
 mod connectivity;
 mod diagnostics;
+mod dns_guard;
 mod geodata;
 mod geodata_v2ray;
 mod job_object;
@@ -124,6 +125,11 @@ pub fn run() {
             logging::init_logging();
             // Initialize activity log (always active, fire-and-forget from UI)
             commands::activity_log::init_activity_log();
+
+            // FIX-A (RC-2): crash-sweep. If the previous session hard-died without
+            // restoring system DNS, the machine is still pointing at the dead tunnel
+            // resolver (Claude Code 403 until restart). Restore the snapshot now.
+            dns_guard::sweep_stale_dns_on_startup();
 
             // Show window unless start_minimized flag file exists next to exe
             if let Some(window) = app.get_webview_window("main") {

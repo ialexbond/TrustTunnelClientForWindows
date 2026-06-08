@@ -493,6 +493,9 @@ pub async fn teardown_session_sidecar(app: &tauri::AppHandle) {
     // Remove the hosts-file DNS block the session installed (same as vpn_disconnect),
     // so a give-up never leaves a stale DNS override behind.
     routing_rules::cleanup_hosts_block().ok();
+    // FIX-A (RC-2): restore pre-VPN system DNS on terminal teardown too (mirror of
+    // vpn_disconnect) so a give-up never strands the resolver.
+    crate::dns_guard::restore_system_dns();
 }
 
 /// R4 (UAT build 65692c test 7 — quit hang): signal shutdown BEFORE killing the sidecar
@@ -894,6 +897,13 @@ pub async fn vpn_connect(
         other => other,
     };
 
+    // FIX-A (RC-2): snapshot the pre-VPN system DNS ONCE before the tunnel comes up, so we
+    // can restore it on teardown even though the C++ sidecar is hard-killed and never
+    // restores it itself (guarded against overwrite on reconnect). Flush stale resolver
+    // entries so resolution is clean across the transition.
+    crate::dns_guard::snapshot_system_dns();
+    crate::dns_guard::flush_dns_cache();
+
     let child = sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc)
         .await
         .map_err(|e| {
@@ -1170,6 +1180,11 @@ pub async fn vpn_disconnect(
 
     // Clean up hosts file blocked entries on disconnect
     routing_rules::cleanup_hosts_block().ok();
+
+    // FIX-A (RC-2): restore the pre-VPN system DNS (+flush). The hard-killed C++ sidecar
+    // never restores it, so without this the system stays on the dead tunnel resolver and
+    // Claude Code keeps returning 403 until a CC restart.
+    crate::dns_guard::restore_system_dns();
 
     set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
 
