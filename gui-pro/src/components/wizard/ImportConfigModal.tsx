@@ -21,7 +21,9 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
   const [linkValue, setLinkValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
-  const pushSuccess = useSnackBar();
+  // IN-06: this snackbar handle pushes BOTH success and error toasts (the "error"
+  // severity arg below), so it is named neutrally — not pushSuccess.
+  const pushSnack = useSnackBar();
 
   const resetState = () => {
     setLinkValue("");
@@ -42,7 +44,7 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
       onImported(path);
       handleClose();
     } catch (e) {
-      pushSuccess(String(e), "error");
+      pushSnack(String(e), "error");
     } finally {
       setLoading(false);
     }
@@ -71,15 +73,23 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
     const trimmed = linkValue.trim();
     if (!trimmed) return;
 
-    if (trimmed.startsWith("trusttunnel://") || trimmed.startsWith("tt://")) {
-      try {
+    // WR-02: gate the button for the WHOLE round-trip. Without this, `loading` was only
+    // set inside importToml — AFTER the awaited decode_deeplink call — so «Импортировать»
+    // stayed clickable during decode, leaving a double-submit window. Mirror handleClipboard:
+    // set loading up front and reset it in finally (importToml manages its own loading once
+    // it runs; on the error/invalid paths the finally restores the button).
+    setLoading(true);
+    try {
+      if (trimmed.startsWith("trusttunnel://") || trimmed.startsWith("tt://")) {
         const configContent = await invoke<string>("decode_deeplink", { url: trimmed });
         await importToml(configContent, "deeplink");
-      } catch (e) {
-        pushSuccess(String(e), "error");
+      } else {
+        pushSnack(t("wizard.import.invalid_link"), "error");
       }
-    } else {
-      pushSuccess(t("wizard.import.invalid_link"), "error");
+    } catch (e) {
+      pushSnack(String(e), "error");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -95,11 +105,11 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
       } else if (trimmed.includes("[endpoint]") || trimmed.includes("hostname")) {
         await importToml(trimmed, "clipboard-toml");
       } else {
-        pushSuccess(t("wizard.import.clipboard_invalid"), "error");
+        pushSnack(t("wizard.import.clipboard_invalid"), "error");
         setLoading(false);
       }
     } catch {
-      pushSuccess(t("wizard.import.clipboard_error"), "error");
+      pushSnack(t("wizard.import.clipboard_error"), "error");
       setLoading(false);
     }
   };
@@ -119,23 +129,15 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
   // happens in handleClose() via resetState() before onClose() fires.
   // See CLAUDE.md §Gotchas + memory/v3/design-system/known-issues.md#10.
   return (
-    <>
     <Modal isOpen={isOpen} onClose={handleClose} closeOnBackdrop={false}>
-      <div
-        className="w-[380px] p-5 space-y-4 rounded-xl"
-        style={{
-          backgroundColor: "var(--color-bg-surface)",
-          border: "1px solid var(--color-border)",
-          boxShadow: "var(--shadow-xl)",
-        }}
-      >
+      <div className="w-[380px] p-5 space-y-4 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border)] shadow-[var(--shadow-xl)]">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
             {t("wizard.import.title")}
           </h2>
           <button onClick={handleClose} className="p-1 rounded hover:bg-[var(--color-bg-hover)]">
-            <X className="w-4 h-4" style={{ color: "var(--color-text-muted)" }} />
+            <X className="w-4 h-4 text-[var(--color-text-muted)]" />
           </button>
         </div>
 
@@ -144,38 +146,44 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
           {/* File */}
           <button
             onClick={handleFile}
-            className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors hover:bg-[var(--color-bg-hover)]"
-            style={{ border: "1px solid var(--color-border)" }}
+            className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors hover:bg-[var(--color-bg-hover)] border border-[var(--color-border)]"
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
-              <FileText className="w-4 h-4" style={{ color: "var(--color-accent-500)" }} />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[var(--color-accent-tint-10)]">
+              <FileText className="w-4 h-4 text-[var(--color-accent-500)]" />
             </div>
             <div>
-              <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{t("wizard.import.from_file")}</p>
-              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("wizard.import.from_file_desc")}</p>
+              <p className="text-sm font-medium text-[var(--color-text-primary)]">{t("wizard.import.from_file")}</p>
+              <p className="text-xs text-[var(--color-text-muted)]">{t("wizard.import.from_file_desc")}</p>
             </div>
           </button>
 
           {/* Link + Clipboard combined */}
-          <div
-            className="rounded-xl overflow-hidden"
-            style={{ border: "1px solid var(--color-border)" }}
-          >
+          <div className="rounded-xl overflow-hidden border border-[var(--color-border)]">
             <button
               onClick={() => setShowLinkInput(!showLinkInput)}
               className="w-full flex items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
             >
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
-                <Link2 className="w-4 h-4" style={{ color: "var(--color-accent-500)" }} />
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[var(--color-accent-tint-10)]">
+                <Link2 className="w-4 h-4 text-[var(--color-accent-500)]" />
               </div>
               <div>
-                <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{t("wizard.import.from_link")}</p>
-                <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{t("wizard.import.from_link_desc")}</p>
+                <p className="text-sm font-medium text-[var(--color-text-primary)]">{t("wizard.import.from_link")}</p>
+                <p className="text-xs text-[var(--color-text-muted)]">{t("wizard.import.from_link_desc")}</p>
               </div>
             </button>
 
             {showLinkInput && (
               <div className="px-3 pb-3 space-y-2">
+                {/* C-22 / D-14: when the modal was opened from a clicked deep-link
+                    (initialUrl set), tell a non-technical user WHY the field is
+                    pre-filled. The URL is untrusted — it is only PRE-FILLED here,
+                    never auto-imported; the user must click «Импортировать», which
+                    routes it through the backend decode_deeplink boundary. */}
+                {initialUrl && (
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {t("wizard.import.deeplink_received")}
+                  </p>
+                )}
                 <Input
                   value={linkValue}
                   onChange={(e) => {
@@ -214,6 +222,5 @@ export function ImportConfigModal({ open: isOpen, onClose, onImported, initialUr
         </div>
       </div>
     </Modal>
-    </>
   );
 }

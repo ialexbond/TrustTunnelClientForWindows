@@ -7,6 +7,7 @@ pub mod process;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use russh::client;
 use russh::ChannelMsg;
 use serde::Deserialize;
@@ -54,10 +55,11 @@ pub use server::{
     // FIX-NN — server-side TLV persistence
     users_advanced,
     UserAdvanced,
-    // Phase 15 — vpn.toml typed mutations + bundle reader (Plan 01)
-    get_config_bundle, update_listen_address, update_log_level,
-    update_allow_private, update_auth_status, update_ping_path,
-    update_speedtest_path, write_vpn_toml_raw,
+    // Phase 15 — vpn.toml bundle reader + raw write (Plan 01). The per-field typed
+    // setters (update_listen_address / _log_level / _allow_private / _auth_status /
+    // _ping_path / _speedtest_path) were REMOVED — superseded by the generic
+    // save_config_file path, zero frontend callers remained.
+    get_config_bundle, write_vpn_toml_raw,
     // Phase 15 — hosts.toml allowed_sni mutation (Plan 02, REQ-15.A)
     update_hosts_allowed_sni,
     // Phase 15.1 — generic per-file config save (REQ-15.0 + 15.7 + 15.8)
@@ -101,16 +103,55 @@ pub struct SshParams {
     /// PEM-encoded private key content (alternative to key_path).
     #[serde(default)]
     pub key_data: Option<String>,
+    /// EXPLICIT single auth choice from the wizard ("password" | "key"), D-06.
+    /// When `Some`, `ssh_connect` attempts ONLY that method — sending BOTH a
+    /// password and a key was the root cause of "key rejected even though the
+    /// password works" (the backend silently preferred the key). `#[serde(default)]`
+    /// keeps every existing internal caller (which never sets it) backward-compatible:
+    /// `None` ⇒ the legacy try-key-then-password sequence (Codex #2 / Pitfall 2).
+    #[serde(default)]
+    pub auth_method: Option<String>,
 }
 
 impl SshParams {
     #[allow(dead_code)]
     pub async fn connect(&self) -> Result<client::Handle<SshHandler>, String> {
-        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), None).await
+        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), self.auth_method.as_deref(), None).await
     }
 
     pub async fn connect_with_app(&self, app: tauri::AppHandle) -> Result<client::Handle<SshHandler>, String> {
-        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), Some(app)).await
+        ssh_connect(&self.host, self.port, &self.ssh_user, &self.ssh_password, self.key_path.as_deref(), self.key_data.as_deref(), self.auth_method.as_deref(), Some(app)).await
+    }
+}
+
+// ─── Single-auth-method decision (D-06 root fix) ───
+//
+// The PURE decision of which auth method `ssh_connect` should attempt, factored
+// out so the D-06 fix is unit-testable WITHOUT a live SSH server (the live
+// `authenticate_*` calls need a server; the DECISION does not). russh 0.46
+// returns only `Result<bool>` — there is NO server method list — so D-07 steering
+// downstream is a heuristic keyed on WHICH method we attempted, never a read of a
+// permitted-method list (RESEARCH Priority Finding / Pitfall 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthAttempt {
+    /// Attempt publickey ONLY (from key_path or key_data) — never fall through.
+    KeyOnly,
+    /// Attempt password ONLY — never try the key.
+    PasswordOnly,
+    /// Legacy back-compat: try key (path/data) then password in sequence.
+    /// Used by every internal (non-wizard) caller that passes no auth_method.
+    LegacySequence,
+}
+
+/// Pure decision helper: given the explicit `auth_method` (if any) and which
+/// credentials are present, decide what `ssh_connect` attempts. The wizard always
+/// passes `Some("password")` / `Some("key")` so exactly one method crosses the
+/// boundary (D-06); internal callers pass `None` and keep the legacy sequence.
+pub fn auth_plan(auth_method: Option<&str>, _has_key: bool, _has_password: bool) -> AuthAttempt {
+    match auth_method {
+        Some("key") => AuthAttempt::KeyOnly,
+        Some("password") => AuthAttempt::PasswordOnly,
+        _ => AuthAttempt::LegacySequence,
     }
 }
 
@@ -134,17 +175,50 @@ struct HostKeyVerifyPayload {
 
 // ─── Event Payloads ────────────────────────────────
 
+// #22 (06-uat) per-run generation stamp. The deploy-step / deploy-log events carry
+// NO information about WHICH install run produced them, so the frontend listener could
+// not distinguish a late/buffered event from a just-cancelled run from a fresh run's
+// own event. After cancel→re-install that bled the old run's step rows into the new
+// run's progress map (two yellow steps at once, a stale green/skipped row). The fix
+// stamps every deploy event with the CURRENT run's opId; the frontend captures the
+// opId it passed to deploy_server / fetch_server_config and drops any event whose opId
+// does not match — so cross-run bleed is structurally impossible.
+//
+// CURRENT_DEPLOY_OP_ID holds the opId of the run that is allowed to emit right now.
+// deploy_server / fetch_server_config STORE their op_id here at entry (before the first
+// emit_step), and emit_step / emit_log READ it when building the payload. This is safe
+// against a stale-run overwrite because the frontend is single-flight (the no-overlap
+// guard in handleDeploy means only one deploy command runs at a time) AND cancel awaits
+// uninstall_server, which kills the old deploy's server-side process group BEFORE the
+// new run starts — so the old emitter is dead before the new run sets this value. A
+// value of 0 means "unstamped" (no deploy run has set it, or a legacy caller that did
+// not pass an opId); the frontend treats 0 as "accept" so existing flows are unchanged.
+pub static CURRENT_DEPLOY_OP_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Set the active deploy generation so subsequent emit_step / emit_log events are
+/// stamped with this run's opId. Called once at the top of deploy_server /
+/// fetch_server_config, before any event is emitted.
+pub(crate) fn set_deploy_op_id(op_id: u64) {
+    CURRENT_DEPLOY_OP_ID.store(op_id, Ordering::SeqCst);
+}
+
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeployStepPayload {
     pub step: String,
     pub status: String,
     pub message: String,
+    // #22: the run generation this event belongs to (0 = unstamped; see CURRENT_DEPLOY_OP_ID).
+    pub op_id: u64,
 }
 
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeployLogPayload {
     pub message: String,
     pub level: String,
+    // #22: the run generation this event belongs to (0 = unstamped; see CURRENT_DEPLOY_OP_ID).
+    pub op_id: u64,
 }
 
 // ─── Endpoint Settings (from GUI wizard) ───────────
@@ -157,22 +231,59 @@ pub struct EndpointSettings {
     pub vpn_password: String,
     pub cert_type: String,
     pub domain: String,
-    #[allow(dead_code)]
-    pub client_name: String,
+    // DC-01: the `client_name` field was REMOVED — nothing read it. The client config
+    // filename is derived from `vpn_username` via client_config_filename(&vpn_username).
+    // Serde has no deny_unknown_fields, so a frontend still sending `clientName` is
+    // harmlessly ignored.
     #[serde(default)]
     pub email: String,
-    #[serde(default)]
-    pub ping_enable: bool,
-    #[serde(default)]
-    pub speedtest_enable: bool,
-    #[serde(default = "default_true")]
-    pub ipv6_available: bool,
+    // 06-uat install-wizard slimming: the ICMP and IPv6 toggles were HIDDEN in the
+    // wizard (rarely useful for a non-technical operator) but their feature stays ON.
+    // Their `icmp_enable` / `ipv6_available` EndpointSettings fields were REMOVED — the
+    // safe ON defaults are now hard-coded as the constants ICMP_ENABLE_DEFAULT /
+    // IPV6_AVAILABLE_DEFAULT in deploy.rs's build_intended_vpn_toml + build_configure_commands,
+    // so the written vpn.toml ([icmp] section + ipv6_available = true) is unchanged. The
+    // Metrics (Prometheus), SOCKS5 upstream and Allow-private-network settings were
+    // REMOVED from the wizard entirely (UI + state + validators + their fields here);
+    // allow_private_network_connections is now hard-coded `false` in build_intended_vpn_toml.
     #[serde(default)]
     pub cert_chain_path: String,
     #[serde(default)]
     pub cert_key_path: String,
+    // D-10 (06-09): the 407/405 auth-failure chooser (top-level, default 407; 405|407),
+    // value-constrained by the EXISTING sanitize::validate_auth_status_code (no duplicate
+    // validator). Schema-exact per CONFIGURATION.md v1.0.33.
+    #[serde(default = "default_407")]
+    pub auth_failure_status_code: u16,
+    // CAMOUFLAGE REMOVED: the reverse-proxy / camouflage fields (reverse_proxy_enable,
+    // reverse_proxy_auto, reverse_proxy_address, reverse_proxy_path_mask,
+    // reverse_proxy_h3_compat) were removed along with the rest of the camouflage feature —
+    // it does not work on the prebuilt core (v1.0.33). build_intended_vpn_toml no longer
+    // emits a `[reverse_proxy]` section. Serde has no deny_unknown_fields, so a frontend
+    // still sending the old `reverseProxy*` keys is harmlessly ignored.
+    // Best-effort GeoIP country code (serde camelCase → JS key `countryCode`) used ONLY
+    // to brand the LOCAL client-config filename `[<CC>_]TrustTunnel_<login>.toml` in
+    // deploy_export_config, matching the Save-As dialog default. Optional/unvalidated
+    // here on purpose: client_config_filename only accepts an exactly-two-ASCII-letter
+    // value and ignores anything else, so a junk/None value never reaches the path.
+    #[serde(default)]
+    pub country_code: Option<String>,
+    // WIZARD-06 / D-01: install-time server-hardening toggles, default ON. These are the
+    // recommended secure baseline (ufw + fail2ban), so a legacy/omitting payload must STILL
+    // provision them — hence `#[serde(default = "default_true")]`, not bare `#[serde(default)]`
+    // (which would default a missing key to `false` and silently skip hardening).
+    //
+    // SAFETY-01 rationale (RESEARCH Pitfall 2): these are `bool` — they cannot carry shell
+    // metacharacters and only GATE a call, so they add NO new SSH-reaching string surface and
+    // need NO new `sanitize.rs` validator. The only string reaching the firewall command is
+    // `params.port: u16`, already typed and validated at the `ssh_connect` chokepoint.
+    #[serde(default = "default_true")]
+    pub enable_firewall: bool,
+    #[serde(default = "default_true")]
+    pub enable_fail2ban: bool,
 }
 
+fn default_407() -> u16 { 407 }
 fn default_true() -> bool { true }
 
 // ─── Known Hosts (TOFU) ───────────────────────────
@@ -202,6 +313,16 @@ pub fn forget_known_host(host: &str, port: u16) {
     }
 }
 
+/// Whether a STORED host fingerprint differs from the LIVE one presented by the
+/// server (D-09, Gemini #11). Pure fn so the changed-key decision is unit-testable
+/// under `cargo test --lib` without a live SSH session. A differing fingerprint means
+/// the server's host key changed (reinstall — or, in the worst case, a MITM), which
+/// `check_server_key` records on the SshHandler flag so `ssh_connect` can surface
+/// `SSH_HOST_KEY_CHANGED` distinctly from an unknown (never-seen) key.
+pub(crate) fn fingerprints_differ(stored: &str, live: &str) -> bool {
+    stored != live
+}
+
 #[tauri::command]
 pub fn confirm_host_key(accepted: bool) {
     // WR-05 fix: tolerate poisoned Mutex. If a prior thread panicked while
@@ -219,6 +340,15 @@ pub fn confirm_host_key(accepted: bool) {
 pub struct SshHandler {
     host_key: String,
     app: Option<tauri::AppHandle>,
+    // D-09 / Gemini #11: `check_server_key` is a russh trait method that can only
+    // return a bool — when it detects a CHANGED host key it returns Ok(false) but the
+    // "why" never reaches `ssh_connect`. This shared flag carries that signal out: the
+    // changed-key arm sets it true before returning Ok(false), and `ssh_connect` reads
+    // it AFTER the connection aborts to map the failure to SSH_HOST_KEY_CHANGED
+    // (authoritative — does NOT depend on the unreliable russh 0.46 error string,
+    // RESEARCH Pitfall 5). An Arc<AtomicBool> so it survives the move into russh and is
+    // readable from the connecting task after the handler is consumed.
+    host_key_changed: Arc<AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -274,14 +404,27 @@ impl client::Handler for SshHandler {
                 eprintln!("[SSH] Host {} fingerprint verified", self.host_key);
                 Ok(true)
             }
-            Some(stored) => {
+            // A stored fingerprint that DIFFERS from the live one → CHANGED host key
+            // (the equal case is handled above). fingerprints_differ is the pure,
+            // unit-tested predicate (D-09 / Gemini #11).
+            Some(stored) if fingerprints_differ(stored, &fingerprint) => {
                 eprintln!(
                     "[SSH] WARNING: Host key for {} has CHANGED!\n  Expected: {stored}\n  Got:      {fingerprint}\n  \
-                     Connection rejected. If the server was reinstalled, remove the old key via settings.",
+                     Connection rejected. If the server was reinstalled, trust the new key via the recovery screen.",
                     self.host_key
                 );
+                // D-09 / Gemini #11: record the CHANGED-key signal so ssh_connect can
+                // surface SSH_HOST_KEY_CHANGED after the connection aborts. We return
+                // Ok(false) (reject) — trust is NEVER granted silently here; it happens
+                // only via the explicit RecoveryStep "trust the new key" action
+                // (round-2 finding B: the old auto-forget is removed).
+                self.host_key_changed.store(true, Ordering::SeqCst);
                 Ok(false)
             }
+            // Logically unreachable (the two guards above partition the Some space on
+            // equality), but the compiler cannot prove guard exhaustiveness — a safe
+            // reject keeps the match total without ever silently accepting a key.
+            Some(_) => Ok(false),
         }
     }
 }
@@ -330,12 +473,17 @@ excluded_routes = []
 
 pub(crate) fn emit_step(app: &tauri::AppHandle, step: &str, status: &str, message: &str) {
     eprintln!("[deploy] step={step} status={status} msg={message}");
+    // #22: stamp the event with the active run generation so the frontend can drop a
+    // late/stale event from a previous (cancelled) run instead of bleeding it into a
+    // fresh run's progress map.
+    let op_id = CURRENT_DEPLOY_OP_ID.load(Ordering::SeqCst);
     app.emit(
         "deploy-step",
         DeployStepPayload {
             step: step.into(),
             status: status.into(),
             message: message.into(),
+            op_id,
         },
     )
     .ok();
@@ -380,6 +528,8 @@ pub(crate) fn emit_log(app: &tauri::AppHandle, level: &str, message: &str) {
     // identical and cannot be bypassed on one path (S-3 / SAFETY-02).
     let (stderr_line, event_message) = format_deploy_log_line(level, message);
     eprintln!("{stderr_line}");
+    // #22: stamp the log event with the active run generation (same rationale as emit_step).
+    let op_id = CURRENT_DEPLOY_OP_ID.load(Ordering::SeqCst);
     app.emit(
         "deploy-log",
         DeployLogPayload {
@@ -387,6 +537,7 @@ pub(crate) fn emit_log(app: &tauri::AppHandle, level: &str, message: &str) {
             // it for percent; the stderr prefix must NOT leak into the UI.
             message: event_message,
             level: level.into(),
+            op_id,
         },
     )
     .ok();
@@ -394,6 +545,12 @@ pub(crate) fn emit_log(app: &tauri::AppHandle, level: &str, message: &str) {
 
 // ─── SSH Connection ────────────────────────────────
 
+// Adding the D-06 `auth_method` param pushed this past clippy's 7-arg threshold.
+// These are flat connection inputs mirroring the SSH handshake (host/port/user/
+// password/key_path/key_data/auth_method/app); bundling them into a struct buys
+// nothing here, so we silence the lint for this one function (matches the
+// module-wide allow on ssh_commands.rs).
+#[allow(clippy::too_many_arguments)]
 pub async fn ssh_connect(
     host: &str,
     port: u16,
@@ -401,16 +558,35 @@ pub async fn ssh_connect(
     ssh_password: &str,
     key_path: Option<&str>,
     key_data: Option<&str>,
+    auth_method: Option<&str>,
     app: Option<tauri::AppHandle>,
 ) -> Result<client::Handle<SshHandler>, String> {
+    // SAFETY-01 (S-04) — validate the operator-typed connect inputs at the IPC
+    // boundary BEFORE they are used. `host` reaches a remote shell command later
+    // (the `-a {addr}` export, deploy.rs) and `ssh_user` crosses into russh's native
+    // userauth + the pool cache key; whitelist-validate both here so a metacharacter
+    // payload (`host;rm -rf /`) is refused at the single connect chokepoint rather
+    // than relying on each downstream call site to re-validate. `auth_method` is
+    // constrained to the explicit enum here (finding H) — `None` is allowed (the
+    // legacy/internal Option<String> back-compat path, round-3 LOW E).
+    sanitize::validate_ssh_host(host).map_err(|e| format!("SSH_INVALID_HOST|{e}"))?;
+    sanitize::validate_ssh_user(ssh_user).map_err(|e| format!("SSH_INVALID_USER|{e}"))?;
+    sanitize::validate_auth_method(auth_method).map_err(|e| format!("SSH_INVALID_AUTH_METHOD|{e}"))?;
+
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(300)),
         ..Default::default()
     });
 
+    // D-09 / Gemini #11: share a host_key_changed flag with the handler so we can read
+    // it AFTER the connection aborts and surface SSH_HOST_KEY_CHANGED authoritatively
+    // (the russh error string does not cleanly separate changed-vs-unknown keys —
+    // RESEARCH Pitfall 5). The Arc lets the flag outlive the handler's move into russh.
+    let host_key_changed = Arc::new(AtomicBool::new(false));
     let connect_fut = client::connect(config, (host, port), SshHandler {
         host_key: format!("{host}:{port}"),
         app,
+        host_key_changed: host_key_changed.clone(),
     });
     let mut handle = tokio::time::timeout(
         std::time::Duration::from_secs(15),
@@ -419,6 +595,13 @@ pub async fn ssh_connect(
     .await
     .map_err(|_| format!("SSH_TIMEOUT|{host}:{port}"))?
     .map_err(|e| {
+        // AUTHORITATIVE changed-key signal (Gemini #11): if check_server_key recorded a
+        // CHANGED host key, the connection aborts here — read the flag first and map to
+        // SSH_HOST_KEY_CHANGED regardless of what the russh error string says. The
+        // UnknownKey string match below stays only as a best-effort fallback.
+        if host_key_changed.load(Ordering::SeqCst) {
+            return "SSH_HOST_KEY_CHANGED".to_string();
+        }
         let msg = e.to_string();
         let lower = msg.to_lowercase();
         if msg.contains("UnknownKey") || msg.contains("unknown key") {
@@ -449,46 +632,95 @@ pub async fn ssh_connect(
         }
     })?;
 
-    // Try key-based auth: file path or pasted PEM content
-    if let Some(kp) = key_path {
-        if !kp.is_empty() {
-            let key = russh_keys::load_secret_key(kp, None)
-                .map_err(|e| format!("SSH_KEY_LOAD_FAILED|{kp}|{e}"))?;
-            let auth_ok = handle
-                .authenticate_publickey(ssh_user, Arc::new(key))
-                .await
-                .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
-            if !auth_ok {
-                return Err("SSH_KEY_REJECTED".into());
+    // D-06: send ONLY the chosen auth method. Sending both a password AND a key
+    // (the legacy sequence below) was the root cause of "key rejected even though
+    // the password works" — the backend tried the key first and reported its
+    // rejection. The wizard now passes an explicit `auth_method`; internal callers
+    // pass None and keep the legacy sequence (back-compat). russh 0.46 returns only
+    // `Ok(bool)` from `authenticate_*`, so D-07 steering downstream is a HEURISTIC
+    // on which method we attempted, never a read of a server method list (Pitfall 3).
+    let has_key = key_path.map(|k| !k.is_empty()).unwrap_or(false)
+        || key_data.map(|k| !k.is_empty()).unwrap_or(false);
+    let has_password = !ssh_password.is_empty();
+    let plan = auth_plan(auth_method, has_key, has_password);
+
+    // D-08: a missing key file / undecodable pasted key returns an ACTIONABLE
+    // re-enter signal (`SSH_KEY_REENTER_REQUIRED`) instead of the opaque
+    // `SSH_KEY_LOAD_FAILED` dead end. Never interpolate the key material itself into
+    // the error (D-29/D-10) — only a stable code (the path/`pasted` tag is safe).
+    async fn try_key_auth(
+        handle: &mut client::Handle<SshHandler>,
+        ssh_user: &str,
+        key_path: Option<&str>,
+        key_data: Option<&str>,
+    ) -> Result<Option<bool>, String> {
+        if let Some(kp) = key_path {
+            if !kp.is_empty() {
+                let key = russh_keys::load_secret_key(kp, None)
+                    .map_err(|_| "SSH_KEY_REENTER_REQUIRED|file".to_string())?;
+                let ok = handle
+                    .authenticate_publickey(ssh_user, Arc::new(key))
+                    .await
+                    .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
+                return Ok(Some(ok));
             }
-            return Ok(handle);
+        }
+        if let Some(kd) = key_data {
+            if !kd.is_empty() {
+                let key = russh_keys::decode_secret_key(kd, None)
+                    .map_err(|_| "SSH_KEY_REENTER_REQUIRED|pasted".to_string())?;
+                let ok = handle
+                    .authenticate_publickey(ssh_user, Arc::new(key))
+                    .await
+                    .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
+                return Ok(Some(ok));
+            }
+        }
+        Ok(None) // no key material present
+    }
+
+    match plan {
+        AuthAttempt::KeyOnly => {
+            // Explicit "key" choice: attempt ONLY publickey, NEVER fall through to
+            // password. Absent/undecodable key ⇒ re-enter (D-08), not a password try.
+            match try_key_auth(&mut handle, ssh_user, key_path, key_data).await? {
+                Some(true) => Ok(handle),
+                Some(false) => Err("SSH_KEY_REJECTED".into()),
+                // The user chose "key" but no usable key material reached us — ask
+                // them to re-select/re-paste rather than silently using a password.
+                None => Err("SSH_KEY_REENTER_REQUIRED|missing".into()),
+            }
+        }
+        AuthAttempt::PasswordOnly => {
+            // Explicit "password" choice: attempt ONLY the password, NEVER the key.
+            let auth_ok = handle
+                .authenticate_password(ssh_user, ssh_password)
+                .await
+                .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
+            if !auth_ok {
+                // DISTINCT from SSH_KEY_REJECTED so D-07 can steer toward the key.
+                return Err("SSH_PASSWORD_REJECTED".into());
+            }
+            Ok(handle)
+        }
+        AuthAttempt::LegacySequence => {
+            // Back-compat for internal (non-wizard) callers: key (path/data) then
+            // password in sequence. Preserved verbatim so existing flows are unchanged.
+            match try_key_auth(&mut handle, ssh_user, key_path, key_data).await? {
+                Some(true) => return Ok(handle),
+                Some(false) => return Err("SSH_KEY_REJECTED".into()),
+                None => { /* no key material — fall through to password */ }
+            }
+            let auth_ok = handle
+                .authenticate_password(ssh_user, ssh_password)
+                .await
+                .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
+            if !auth_ok {
+                return Err("SSH_AUTH_FAILED".into());
+            }
+            Ok(handle)
         }
     }
-    if let Some(kd) = key_data {
-        if !kd.is_empty() {
-            let key = russh_keys::decode_secret_key(kd, None)
-                .map_err(|e| format!("SSH_KEY_LOAD_FAILED|pasted|{e}"))?;
-            let auth_ok = handle
-                .authenticate_publickey(ssh_user, Arc::new(key))
-                .await
-                .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
-            if !auth_ok {
-                return Err("SSH_KEY_REJECTED".into());
-            }
-            return Ok(handle);
-        }
-    }
-
-    let auth_ok = handle
-        .authenticate_password(ssh_user, ssh_password)
-        .await
-        .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
-
-    if !auth_ok {
-        return Err("SSH_AUTH_FAILED".into());
-    }
-
-    Ok(handle)
 }
 
 // ─── Command Execution ─────────────────────────────
@@ -609,9 +841,131 @@ pub(crate) async fn exec_command(
     Ok((stdout, exit_code))
 }
 
+/// True when the active deploy generation no longer matches `expected` — the run was
+/// cancelled (`cancel_deploy` bumps `CURRENT_DEPLOY_OP_ID`) or superseded by a newer
+/// deploy. `expected == 0` means "no run captured" → never superseded (so non-deploy
+/// callers and legacy unstamped flows are unaffected).
+pub(crate) fn deploy_superseded(expected: u64) -> bool {
+    expected != 0 && CURRENT_DEPLOY_OP_ID.load(Ordering::SeqCst) != expected
+}
+
+/// Like [`exec_command`], but ABORTS the moment the active deploy generation changes.
+///
+/// 06-uat cancel→reinstall blocker: plain `exec_command` blocks on `channel.wait()`
+/// with no cancellation branch, so a cancelled `deploy_server` kept running its long
+/// server-side stages (apt / install.sh / certbot). Its `configure` then raced the
+/// cancel's `uninstall_server` rollback (`rm -rf /opt/trusttunnel` mid-configure) and
+/// a fresh install piled on top → "наслоение процессов". This variant polls
+/// `CURRENT_DEPLOY_OP_ID` every 250 ms via `tokio::select!`; on a generation change it
+/// drops the channel (russh closes it on drop) and returns `SSH_DEPLOY_CANCELLED` so
+/// the local future unwinds immediately — freeing the backend single-flight guard. The
+/// remote process tree is killed separately by `uninstall_server`'s
+/// `build_stop_in_progress` (the negative-PGID kill). Used only by the long deploy
+/// stages; the short probes keep plain `exec_command`.
+pub(crate) async fn exec_command_cancellable(
+    handle: &client::Handle<SshHandler>,
+    app: &tauri::AppHandle,
+    command: &str,
+) -> Result<(String, i32), String> {
+    // Capture the generation this exec belongs to (the run's op_id, set by
+    // set_deploy_op_id at deploy_server entry). 0 = unstamped → not cancellable.
+    let expected = CURRENT_DEPLOY_OP_ID.load(Ordering::SeqCst);
+
+    let mut channel = open_session_with_retry(handle)
+        .await
+        .map_err(|e| format!("SSH_CHANNEL_FAILED|{e}"))?;
+
+    channel
+        .exec(true, command.as_bytes())
+        .await
+        .map_err(|e| format!("SSH_EXEC_FAILED|{e}"))?;
+
+    let mut stdout = String::new();
+    let mut exit_code: i32 = -1;
+
+    // A short cancellation poll. The first tick fires immediately, so consume it before
+    // the loop — otherwise we would spuriously check before any work has begun.
+    let mut poll = tokio::time::interval(std::time::Duration::from_millis(250));
+    poll.tick().await;
+
+    loop {
+        tokio::select! {
+            maybe_msg = channel.wait() => {
+                match maybe_msg {
+                    Some(ChannelMsg::Data { ref data }) => {
+                        let text = String::from_utf8_lossy(data);
+                        for line in text.lines() {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() { emit_log(app, "info", trimmed); }
+                        }
+                        stdout.push_str(&text);
+                    }
+                    Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+                        let text = String::from_utf8_lossy(data);
+                        for line in text.lines() {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() { emit_log(app, "warn", trimmed); }
+                        }
+                        stdout.push_str(&text);
+                    }
+                    Some(ChannelMsg::ExitStatus { exit_status }) => { exit_code = exit_status as i32; }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+            _ = poll.tick() => {
+                if deploy_superseded(expected) {
+                    // Cancelled / superseded — returning drops `channel`, which russh
+                    // closes; the local future stops here. The server-side process is
+                    // reaped by uninstall_server's PID-group kill.
+                    return Err("SSH_DEPLOY_CANCELLED|superseded".to_string());
+                }
+            }
+        }
+    }
+
+    Ok((stdout, exit_code))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── host-key-changed detection (D-09, Gemini #11) ──
+
+    /// A DIFFERENT stored vs live fingerprint is a CHANGED host key (the reinstalled-
+    /// server / MITM case) — fingerprints_differ returns true, which check_server_key
+    /// uses to set the host_key_changed flag so ssh_connect surfaces
+    /// SSH_HOST_KEY_CHANGED.
+    #[test]
+    fn host_key_changed_when_fingerprints_differ() {
+        assert!(fingerprints_differ("SHA256:aaa", "SHA256:bbb"));
+    }
+
+    /// The SAME stored vs live fingerprint is NOT a change — an unchanged key must
+    /// never be mis-flagged as changed (it would falsely route into the recovery
+    /// trust-new-key path).
+    #[test]
+    fn host_key_unchanged_when_fingerprints_match() {
+        assert!(!fingerprints_differ("SHA256:aaa", "SHA256:aaa"));
+    }
+
+    /// 06-uat cancel→reinstall: `deploy_superseded` drives `exec_command_cancellable`'s
+    /// abort. A run is superseded when the active generation changed from the one the
+    /// exec captured (cancel_deploy bumps it / a newer deploy sets its own). An
+    /// `expected == 0` (unstamped) exec is NEVER superseded so non-deploy callers and
+    /// legacy flows are unaffected.
+    #[test]
+    fn deploy_superseded_tracks_generation_changes() {
+        set_deploy_op_id(7);
+        assert!(!deploy_superseded(7), "matching generation is not superseded");
+        assert!(deploy_superseded(6), "an older captured generation is superseded");
+        // cancel_deploy bumps the active generation → the in-flight exec (captured 7) aborts.
+        CURRENT_DEPLOY_OP_ID.fetch_add(1, Ordering::SeqCst);
+        assert!(deploy_superseded(7), "after a cancel bump, the captured run is superseded");
+        // expected == 0 is the unstamped sentinel — never cancellable.
+        assert!(!deploy_superseded(0), "unstamped (0) exec is never superseded");
+    }
 
     /// S-3 / SAFETY-02 / D-29 regression: a `password = "…"` line streamed from
     /// `cat vpn.toml` through `emit_log` must NOT carry the secret into either
@@ -646,5 +1000,80 @@ mod tests {
 
         assert_eq!(stderr_line, "[deploy-log] [info] Installing systemd unit 60%");
         assert_eq!(event_message, "Installing systemd unit 60%");
+    }
+
+    // ── WIZARD-06 / D-01: enable_firewall / enable_fail2ban serde defaults ──
+
+    /// D-01: a deploy payload that OMITS the two hardening keys must still default
+    /// them to ON — a legacy wizard (pre-WIZARD-06) that never sends them must STILL
+    /// provision ufw + fail2ban, not silently skip them. A payload that explicitly
+    /// sends `false` must be honoured (operator opted out). This pins the
+    /// `#[serde(default = "default_true")]` contract: missing → true, false → false.
+    #[test]
+    fn endpoint_settings_security_defaults() {
+        // Minimal payload OMITTING enable_firewall / enable_fail2ban → both default ON.
+        let omitted = r#"{
+            "listenAddress": "0.0.0.0:443",
+            "vpnUsername": "user",
+            "vpnPassword": "secret",
+            "certType": "letsencrypt",
+            "domain": "vpn.example.com"
+        }"#;
+        let s: EndpointSettings = serde_json::from_str(omitted).expect("omitted payload deserializes");
+        assert!(s.enable_firewall, "omitted enable_firewall must default to true (D-01)");
+        assert!(s.enable_fail2ban, "omitted enable_fail2ban must default to true (D-01)");
+
+        // Payload that explicitly opts OUT → both false (operator's choice honoured).
+        let disabled = r#"{
+            "listenAddress": "0.0.0.0:443",
+            "vpnUsername": "user",
+            "vpnPassword": "secret",
+            "certType": "selfsigned",
+            "domain": "",
+            "enableFirewall": false,
+            "enableFail2ban": false
+        }"#;
+        let s: EndpointSettings = serde_json::from_str(disabled).expect("disabled payload deserializes");
+        assert!(!s.enable_firewall, "explicit enableFirewall=false must be honoured");
+        assert!(!s.enable_fail2ban, "explicit enableFail2ban=false must be honoured");
+    }
+
+    // ── single-auth-method decision (D-06 — the auth-bleed root fix) ──
+
+    /// D-06: an explicit "password" choice attempts ONLY the password — even if a
+    /// key is ALSO present (the wizard's pre-fix bleed: both fields populated). This
+    /// is the exact "key rejected even though the password works" scenario: with the
+    /// fix, the key is never tried.
+    #[test]
+    fn auth_plan_password_attempts_password_only_even_with_key_present() {
+        assert_eq!(
+            auth_plan(Some("password"), /*has_key=*/ true, /*has_password=*/ true),
+            AuthAttempt::PasswordOnly
+        );
+    }
+
+    /// D-06: an explicit "key" choice attempts ONLY the key — even if a password is
+    /// ALSO present. The backend never falls through to the password.
+    #[test]
+    fn auth_plan_key_attempts_key_only_even_with_password_present() {
+        assert_eq!(
+            auth_plan(Some("key"), /*has_key=*/ true, /*has_password=*/ true),
+            AuthAttempt::KeyOnly
+        );
+    }
+
+    /// Back-compat: an internal caller passing no auth_method keeps the legacy
+    /// try-key-then-password sequence (so existing non-wizard flows are unchanged).
+    #[test]
+    fn auth_plan_none_is_legacy_sequence() {
+        assert_eq!(
+            auth_plan(None, true, true),
+            AuthAttempt::LegacySequence
+        );
+        // An unrecognized value is treated conservatively as legacy, not a panic.
+        assert_eq!(
+            auth_plan(Some("bogus"), true, true),
+            AuthAttempt::LegacySequence
+        );
     }
 }

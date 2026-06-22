@@ -275,6 +275,11 @@ pub async fn spawn_trusttunnel(
     let disc_for_child = Arc::clone(&disconnecting);
     let disc_for_task = Arc::clone(&disc_for_child);
     let spawn_time = Instant::now();
+    // AUDIT-2026-06-11 #4: capture THIS child's pid before spawning its reader
+    // task. The Terminated arm uses it as the identity key for every shared-state
+    // side effect (PID-file removal / sidecar_child slot clear / status write), so
+    // a LATE Terminated from an OLD child can never act on a NEWER session's state.
+    let my_pid = child.pid();
     tokio::spawn(async move {
         let mut handshake_done = false;
         let mut dns_proxy_ready = false;
@@ -290,22 +295,71 @@ pub async fn spawn_trusttunnel(
         // and emits Connected for the new session.
         let mut connected_emitted = false;
 
+        // T-32 (2026-06-11): collapse the core's noisy-line floods. When the tunnel
+        // dies the C++ core emits THOUSANDS of identical "DNS proxy request id=N
+        // failed" lines (one per in-flight query) within milliseconds — they push
+        // every useful line out of the 500-line panel buffer and bloat the file.
+        // The FIRST line of a burst passes through, repeats are counted; a summary
+        // ("... repeated ×N") is emitted every NOISY_FLUSH_EVERY repeats and when
+        // the burst ends. Marker/fatal parsing below is NOT gated — it still sees
+        // every line.
+        let mut noisy_key: Option<&'static str> = None;
+        let mut noisy_count: u64 = 0;
+
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
                     let line_str = String::from_utf8_lossy(&line);
                     let trimmed = line_str.trim();
-                    eprintln!("[sidecar stdout] {trimmed}");
-                    crate::logging::log_sidecar(trimmed);
-                    app_handle
-                        .emit(
-                            "vpn-log",
-                            serde_json::json!({
-                                "message": trimmed,
-                                "level": parse_log_level(trimmed),
-                            }),
-                        )
-                        .ok();
+
+                    let key = noisy_line_key(trimmed);
+                    let mut suppress = false;
+                    let mut summary: Option<String> = None;
+                    match (key, noisy_key) {
+                        (Some(k), Some(prev)) if k == prev => {
+                            noisy_count += 1;
+                            if noisy_count.is_multiple_of(NOISY_FLUSH_EVERY) {
+                                summary = Some(format!(
+                                    "[noise] {k} — repeated ×{noisy_count} (collapsed, T-32)"
+                                ));
+                            }
+                            suppress = true;
+                        }
+                        (new_key, prev) => {
+                            // Burst boundary: flush the previous burst's total (if any
+                            // repeats were swallowed), then let the current line pass.
+                            if let Some(prev_k) = prev {
+                                if noisy_count > 1 {
+                                    summary = Some(format!(
+                                        "[noise] {prev_k} — repeated ×{noisy_count} total (collapsed, T-32)"
+                                    ));
+                                }
+                            }
+                            noisy_key = new_key;
+                            noisy_count = u64::from(new_key.is_some());
+                        }
+                    }
+                    if let Some(s) = summary {
+                        eprintln!("[sidecar stdout] {s}");
+                        crate::logging::log_sidecar(&s);
+                        app_handle
+                            .emit("vpn-log", serde_json::json!({ "message": s, "level": "info" }))
+                            .ok();
+                    }
+
+                    if !suppress {
+                        eprintln!("[sidecar stdout] {trimmed}");
+                        crate::logging::log_sidecar(trimmed);
+                        app_handle
+                            .emit(
+                                "vpn-log",
+                                serde_json::json!({
+                                    "message": trimmed,
+                                    "level": parse_log_level(trimmed),
+                                }),
+                            )
+                            .ok();
+                    }
 
                     check_sidecar_markers(
                         trimmed, &app_handle, &disc_for_task,
@@ -362,7 +416,18 @@ pub async fn spawn_trusttunnel(
                     // added to prevent. Clean up the SAME per-edition basename we wrote.
                     let pid_path = crate::ssh::portable_data_dir()
                         .join(crate::lifecycle::SIDECAR_PID_BASENAME);
-                    let _ = std::fs::remove_file(&pid_path);
+                    // AUDIT-2026-06-11 #4: delete the PID file ONLY when it still records
+                    // OUR OWN pid. A supervisor respawn (`respawn_sidecar`) or a fast
+                    // manual reconnect may have already saved the NEW child's pid into the
+                    // same per-edition file; this OLD child's late Terminated removing it
+                    // unconditionally would strip the new session's crash-cleanup fallback
+                    // (the next launch's `kill_stale_sidecar` would find nothing to sweep).
+                    let pid_file_is_ours = std::fs::read_to_string(&pid_path)
+                        .map(|contents| pid_file_records_pid(&contents, my_pid))
+                        .unwrap_or(false);
+                    if pid_file_is_ours {
+                        let _ = std::fs::remove_file(&pid_path);
+                    }
 
                     // Read "was connected" from the single owner (vpn_status), not a
                     // parallel bool — the mutator keeps both in sync this phase.
@@ -376,10 +441,47 @@ pub async fn spawn_trusttunnel(
                     eprintln!("[sidecar] Process terminated with code {exit_code} (intentional={was_intentional}, was_connected={was_connected})");
                     crate::logging::log_app("INFO", &format!("Sidecar terminated: code={exit_code}, intentional={was_intentional}, was_connected={was_connected}"));
 
-                    // Clear the sidecar child so VPN can be reconnected
-                    if let Ok(mut guard) = child_state.lock() {
-                        *guard = None;
-                        eprintln!("[sidecar] Cleared sidecar_child state");
+                    // Clear the sidecar child so VPN can be reconnected — but ONLY when
+                    // the slot is empty (this child was already taken out: intentional
+                    // disconnect / respawn kill) or still holds OUR OWN pid.
+                    //
+                    // AUDIT-2026-06-11 #4: this clear used to be UNCONDITIONAL. A LATE
+                    // Terminated from an OLD child (its reader task can be queued behind
+                    // a backlog of buffered Stdout events — the T-32 log spam) can run
+                    // AFTER `respawn_sidecar` stored the NEW session's child. `*guard =
+                    // None` then DROPS that new `SidecarChild`; the drop closes its
+                    // KILL_ON_JOB_CLOSE `OwnedJobHandle` and the OS kills the freshly
+                    // respawned sidecar mid-handshake — each killed child's late
+                    // Terminated could poison the next attempt until the supervisor burnt
+                    // all 10 attempts → Error("reconnect-gave-up"). Identity-gate the
+                    // clear (and, below, every trailing side effect). Check + clear run
+                    // under ONE lock acquisition so a respawn storing the new child can
+                    // never interleave between them (same TOCTOU rule as WR-05).
+                    let owns_shared_state = {
+                        let mut guard = child_state.lock().unwrap_or_else(|e| e.into_inner());
+                        let stored_pid = guard.as_ref().map(|c| c.child.pid());
+                        let owns = terminated_arm_owns_state(my_pid, stored_pid);
+                        if owns && stored_pid.is_some() {
+                            *guard = None;
+                            eprintln!("[sidecar] Cleared sidecar_child state");
+                        }
+                        owns
+                    };
+                    if !owns_shared_state {
+                        // AUDIT-2026-06-11 #4: a NEWER live child is stored — that session
+                        // owns the shared state now and its OWN reader task reports for
+                        // it. Skip the status write / supervisor handoff below: acting
+                        // here would e.g. flip the new session's fresh Connecting to
+                        // Error("sidecar-exit") via the else-branch, or hand a competing
+                        // supervisor a drop that belongs to a dead session. All
+                        // legitimate own-child paths (intentional disconnect, error
+                        // preservation, reconnect handoff) still run when the slot is
+                        // ours or already empty.
+                        crate::logging::log_app(
+                            "INFO",
+                            "[sidecar] late Terminated from an old child — a newer child owns the state; skipping cleanup/status (AUDIT #4)",
+                        );
+                        continue;
                     }
 
                     // STATUS-05 / D-04 (Plan 04, trigger A — PROCESS DEATH): an
@@ -804,9 +906,26 @@ async fn check_sidecar_markers(
             // DNS proxy already reported ready — emit immediately
             emit_connected(app, spawn_time);
         } else {
-            // DNS proxy not yet ready — run a quick probe instead of waiting for log line
+            // DNS proxy not yet ready — run a quick probe instead of waiting for log line.
+            //
+            // AUDIT-2026-06-11 #1: this probe task is DETACHED and can call
+            // emit_connected up to 10s later, and emit_connected's only guard is
+            // `is_already_connected`. Without a staleness re-check the late emit
+            // overwrote a user's Disconnected (cancel during the probe window — the
+            // probe then resolves via the restored SYSTEM DNS and "succeeds") or a
+            // terminal Error (connect-timeout watchdog killing at T+60s after the
+            // handshake landed at ~T+55s) with a bogus Connected: stuck-green with no
+            // tunnel. Capture the session identity NOW — the disconnecting flag Arc +
+            // the live connection generation — and re-check it INSIDE the task right
+            // before emitting, mirroring the generation re-check every other
+            // stale-able actor performs (decide_timeout_action, run_reconnect_loop —
+            // lifecycle::is_current_generation).
             let app_clone = app.clone();
             let t = *spawn_time;
+            let disc_for_probe = Arc::clone(disconnecting);
+            let captured_generation = app
+                .try_state::<AppState>()
+                .map(|s| s.connection_generation.load(std::sync::atomic::Ordering::SeqCst));
             tokio::spawn(async move {
                 let probe_ok = dns_probe(std::time::Duration::from_secs(10)).await;
                 let elapsed = t.elapsed().as_millis();
@@ -815,10 +934,93 @@ async fn check_sidecar_markers(
                 } else {
                     crate::logging::log_app("WARN", &format!("[vpn] T+{elapsed}ms: DNS probe timeout — emitting connected anyway"));
                 }
+                // AUDIT-2026-06-11 #1: bail when the session this latch belonged to is
+                // no longer live. All four signals are needed: the transient
+                // `disconnecting` covers an IN-FLIGHT cancel; the durable
+                // `user_disconnect_requested` covers a COMPLETED cancel (the transient
+                // flag is reset at the end of vpn_disconnect — WR-01/T-31); the
+                // generation covers any newer connect/disconnect; and the in-progress
+                // status check covers a terminal Error (connect-timeout), which does
+                // NOT bump the generation. Status writes still route ONLY through
+                // set_vpn_status — this gate just stops a stale actor from writing
+                // (D-01 single-mutator invariant untouched).
+                let disconnecting_now = disc_for_probe.lock().map(|g| *g).unwrap_or(false);
+                let may_emit = match (app_clone.try_state::<AppState>(), captured_generation) {
+                    (Some(state), Some(captured)) => {
+                        use std::sync::atomic::Ordering;
+                        let durable = state.user_disconnect_requested.load(Ordering::SeqCst);
+                        let live = state.connection_generation.load(Ordering::SeqCst);
+                        let status = *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner());
+                        probe_task_may_emit(disconnecting_now, durable, captured, live, status)
+                    }
+                    // No AppState / no captured generation ⇒ the session's liveness
+                    // cannot be proven — suppress rather than risk a stale Connected.
+                    _ => false,
+                };
+                if !may_emit {
+                    crate::logging::log_app(
+                        "INFO",
+                        &format!("[vpn] T+{elapsed}ms: DNS probe finished but the session is stale/cancelled — suppressing Connected (AUDIT #1)"),
+                    );
+                    return;
+                }
                 emit_connected(&app_clone, &t);
             });
         }
     }
+}
+
+/// AUDIT-2026-06-11 #1: pure staleness gate for the detached DNS-probe task.
+///
+/// The probe task latches at handshake time (`check_sidecar_markers`) but emits up
+/// to 10s later — after the user may have cancelled, or the connect-timeout
+/// watchdog may have set a terminal Error. It may emit Connected ONLY while:
+/// - no disconnect is in flight (transient `disconnecting` flag), AND
+/// - no COMPLETED manual disconnect happened (durable `user_disconnect_requested`,
+///   T-31 — the transient flag is already reset at the end of vpn_disconnect), AND
+/// - the connection generation captured at latch time is still the live one (any
+///   newer connect/disconnect advances it — `lifecycle::is_current_generation`), AND
+/// - the live status is still an IN-PROGRESS connect state (Connecting for a first
+///   connect, Reconnecting for a supervisor respawn). A terminal Error (e.g.
+///   connect-timeout at T+60s with the handshake at ~T+55s) does NOT bump the
+///   generation, so this status check is what protects it; Disconnected/Recovering/
+///   Connected are owned by other actors and must not be overwritten either.
+///
+/// Pure (no IO / no locks) so the decision matrix is unit-testable.
+fn probe_task_may_emit(
+    disconnecting: bool,
+    user_disconnect_requested: bool,
+    captured_generation: u64,
+    live_generation: u64,
+    status: VpnStatus,
+) -> bool {
+    !disconnecting
+        && !user_disconnect_requested
+        && crate::lifecycle::is_current_generation(captured_generation, live_generation)
+        && matches!(status, VpnStatus::Connecting | VpnStatus::Reconnecting)
+}
+
+/// AUDIT-2026-06-11 #4: pure identity gate for the reader task's Terminated arm.
+///
+/// The arm may act on the SHARED session state (clear the `sidecar_child` slot,
+/// write a status, hand off to the reconnect supervisor) only when the slot is
+/// EMPTY (this child was already taken out — intentional disconnect / respawn
+/// kill, the legitimate own-child paths) or still holds THIS child's own pid.
+/// When the slot holds a DIFFERENT pid, a newer session owns the state: clearing
+/// the slot would DROP the new `SidecarChild` (closing its KILL_ON_JOB_CLOSE job
+/// handle ⇒ the OS kills the fresh sidecar mid-handshake) and the trailing status
+/// write would clobber the new session's status.
+fn terminated_arm_owns_state(my_pid: u32, stored_pid: Option<u32>) -> bool {
+    stored_pid.is_none() || stored_pid == Some(my_pid)
+}
+
+/// AUDIT-2026-06-11 #4: does the PID file's current contents record `my_pid`?
+/// The Terminated arm deletes `.sidecar-pro.pid` only when this is true — a
+/// respawn may have already saved the NEW child's pid into the same file, and an
+/// old child's late Terminated must not strip the new session's crash-cleanup
+/// fallback. Pure string→decision so it is unit-testable without touching disk.
+fn pid_file_records_pid(contents: &str, my_pid: u32) -> bool {
+    contents.trim().parse::<u32>().ok() == Some(my_pid)
 }
 
 /// True when the single owner already reports `Connected` — the double-emit guard.
@@ -859,6 +1061,23 @@ async fn dns_probe(max_wait: std::time::Duration) -> bool {
     false
 }
 
+/// T-32: every NOISY_FLUSH_EVERY-th swallowed repeat emits a liveness summary so a
+/// long-running burst is still visible in the panel/file without flooding either.
+const NOISY_FLUSH_EVERY: u64 = 1000;
+
+/// T-32 (2026-06-11): classify a sidecar stdout line as known flood noise.
+/// Returns the burst key (a STABLE label used for counting + the summary line)
+/// for lines that arrive thousands-at-a-time when the tunnel dies, None for
+/// everything else. Deliberately narrow — only patterns CONFIRMED to flood are
+/// collapsed, so novel diagnostics are never hidden. The id=N varies per line,
+/// which is why dedup is keyed on this label, not on the raw line.
+fn noisy_line_key(line: &str) -> Option<&'static str> {
+    if line.contains("DNS proxy request id=") && line.contains("failed") {
+        return Some("DNS_HANDLER: DNS proxy request failed");
+    }
+    None
+}
+
 fn parse_log_level(line: &str) -> &str {
     let lower = line.to_lowercase();
     if lower.contains("[error]") || lower.contains("error:") {
@@ -877,6 +1096,33 @@ fn parse_log_level(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── T-32 noisy-line collapse ──
+
+    /// The confirmed flood shape (thousands per second on tunnel death) must be
+    /// classified as noise regardless of the varying id.
+    #[test]
+    fn noisy_key_matches_dns_proxy_flood_lines() {
+        let l1 = "11.06.2026 20:51:58.349505 INFO  [46044] DNS_HANDLER client_handler: System DNS proxy request id=41953 failed";
+        let l2 = "11.06.2026 20:51:58.349509 INFO  [46044] DNS_HANDLER client_handler: System DNS proxy request id=99999 failed";
+        assert_eq!(noisy_line_key(l1), noisy_line_key(l2));
+        assert!(noisy_line_key(l1).is_some());
+    }
+
+    /// Narrowness guard: normal lines — including OTHER DNS_HANDLER lines and the
+    /// connect markers — must never be collapsed (hiding novel info is worse than
+    /// some noise).
+    #[test]
+    fn noisy_key_ignores_normal_lines() {
+        for line in [
+            "DNS_HANDLER start_system_dns_proxy: System DNS proxy listening on 127.0.0.1:56606/TCP",
+            "TRUSTTUNNEL_CLIENT_APP operator (): Successfully connected to endpoint",
+            "VPNCORE raise_state: [0] VPN_SS_CONNECTED",
+            "DNS proxy init: Initializing proxy module...",
+        ] {
+            assert_eq!(noisy_line_key(line), None, "line must not be collapsed: {line}");
+        }
+    }
 
     #[test]
     fn fatal_markers_map_to_derived_messages() {
@@ -1046,6 +1292,76 @@ mod tests {
         assert!(kill_succeeded(true, true), "both hard kills succeeded ⇒ success");
         assert!(kill_succeeded(true, false), "in-process kill succeeded ⇒ success");
         assert!(kill_succeeded(false, true), "taskkill /F succeeded ⇒ success");
+    }
+
+    // ── AUDIT-2026-06-11 #1: DNS-probe staleness gate ────────────────────────
+
+    #[test]
+    fn probe_emit_allowed_only_for_live_in_progress_session() {
+        // Happy path: nothing changed during the ≤10s probe window — same
+        // generation, no cancel, status still Connecting (first connect) or
+        // Reconnecting (supervisor respawn). The probe may emit Connected.
+        assert!(probe_task_may_emit(false, false, 7, 7, VpnStatus::Connecting));
+        assert!(probe_task_may_emit(false, false, 7, 7, VpnStatus::Reconnecting));
+    }
+
+    #[test]
+    fn probe_emit_suppressed_on_any_staleness_signal() {
+        // Cancel IN FLIGHT (transient flag): the user pressed «Отмена» while the
+        // probe was still running.
+        assert!(!probe_task_may_emit(true, false, 7, 7, VpnStatus::Connecting));
+        // COMPLETED cancel: the transient flag was reset at the end of
+        // vpn_disconnect (WR-01), but the durable T-31 intent persists until the
+        // next connect — the audit #1 primary scenario (probe resolves via the
+        // restored system DNS and would flip Disconnected back to Connected).
+        assert!(!probe_task_may_emit(false, true, 7, 7, VpnStatus::Disconnected));
+        // A newer connect/disconnect advanced the generation — stale actor.
+        assert!(!probe_task_may_emit(false, false, 7, 8, VpnStatus::Connecting));
+        // Terminal Error (connect-timeout) does NOT bump the generation — the
+        // in-progress status check is what protects it (audit #1 scenario B:
+        // handshake at ~T+55s, watchdog kills at T+60s, probe fires at ~T+62s).
+        assert!(!probe_task_may_emit(false, false, 7, 7, VpnStatus::Error));
+        // Disconnected with no flags set must still suppress — only an
+        // in-progress connect state may be promoted to Connected.
+        assert!(!probe_task_may_emit(false, false, 7, 7, VpnStatus::Disconnected));
+        // Recovering / already-Connected are owned by the monitor; not ours.
+        assert!(!probe_task_may_emit(false, false, 7, 7, VpnStatus::Recovering));
+        assert!(!probe_task_may_emit(false, false, 7, 7, VpnStatus::Connected));
+    }
+
+    // ── AUDIT-2026-06-11 #4: Terminated-arm identity gate ───────────────────
+
+    #[test]
+    fn terminated_arm_acts_on_own_or_empty_slot() {
+        // Slot still holds OUR child (unexpected crash / sidecar self-exit) → the
+        // arm must act: clear the slot, classify the exit, write the status.
+        assert!(terminated_arm_owns_state(1111, Some(1111)));
+        // Slot already EMPTY: vpn_disconnect / respawn_sidecar took the child out
+        // before killing it — the legitimate intentional-disconnect and
+        // error-preservation paths must keep running.
+        assert!(terminated_arm_owns_state(1111, None));
+    }
+
+    #[test]
+    fn terminated_arm_skips_when_a_newer_child_is_stored() {
+        // A LATE Terminated from an OLD child while the slot holds the NEW
+        // session's child: clearing the slot would drop the new child's
+        // KILL_ON_JOB_CLOSE handle (OS kills the fresh sidecar) and the trailing
+        // status write would clobber the new session — must NOT act.
+        assert!(!terminated_arm_owns_state(1111, Some(2222)));
+    }
+
+    #[test]
+    fn pid_file_removed_only_when_it_records_our_pid() {
+        // save_sidecar_pid writes bare digits; tolerate surrounding whitespace.
+        assert!(pid_file_records_pid("1111", 1111));
+        assert!(pid_file_records_pid(" 1111\r\n", 1111));
+        // The respawn already saved the NEW child's pid → the old child's late
+        // Terminated must keep its hands off the file.
+        assert!(!pid_file_records_pid("2222", 1111));
+        // Unreadable / corrupt contents ⇒ identity unproven ⇒ do not delete.
+        assert!(!pid_file_records_pid("", 1111));
+        assert!(!pid_file_records_pid("not-a-pid", 1111));
     }
 
     #[test]

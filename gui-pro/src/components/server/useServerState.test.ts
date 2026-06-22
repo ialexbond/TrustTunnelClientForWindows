@@ -99,6 +99,105 @@ describe("useServerState", () => {
     expect(result.current.serverInfo).toBeNull();
   });
 
+  // ── cold-start transient: one-shot fresh retry (UAT 2026-06-19) ──
+
+  it("retries check_server_installation ONCE on a transient SSH_CHANNEL_FAILED, then succeeds without error", async () => {
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        if (calls === 1) throw "SSH_CHANNEL_FAILED|Disconnected";
+        return fakeServerInfo;
+      }
+      if (cmd === "server_get_config") return "config-data";
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return ["1.4.0"];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+      },
+      { timeout: 3000 },
+    );
+
+    expect(calls).toBe(2); // first attempt transient → one fresh retry
+    expect(result.current.serverInfo).toEqual(fakeServerInfo);
+    expect(result.current.error).toBe("");
+  });
+
+  // 06-review: the retry trigger was BROADENED. The cold-start double-handshake race
+  // surfaces under many russh wordings (not just SSH_CHANNEL_FAILED), and translateSshError
+  // reclassifies some of them as «Неверный SSH логин или пароль». So a transient that does
+  // NOT mention the channel (e.g. SSH_TIMEOUT) must now ALSO get the one fresh retry —
+  // otherwise a spurious auth-error screen flashes on launch.
+  it("retries ONCE on a generic transient (SSH_TIMEOUT, not channel-tagged), then succeeds", async () => {
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        if (calls === 1) throw "SSH_TIMEOUT|10.0.0.1";
+        return fakeServerInfo;
+      }
+      if (cmd === "server_get_config") return "config-data";
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return ["1.4.0"];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 3000 });
+
+    expect(calls).toBe(2); // broadened: generic transient → one fresh retry
+    expect(result.current.serverInfo).toEqual(fakeServerInfo);
+    expect(result.current.error).toBe("");
+  });
+
+  it("a genuine PERSISTENT failure still surfaces after the one retry (broadening hides nothing)", async () => {
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        throw "SSH_AUTH_FAILED|10.0.0.1"; // fails on BOTH attempts
+      }
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 3000 });
+
+    expect(calls).toBe(2); // retried once, then surfaced
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.serverInfo).toBeNull();
+  });
+
+  it("does NOT retry on a changed host key (deterministic + security-sensitive → single attempt)", async () => {
+    let calls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        calls += 1;
+        throw "HOST_KEY_CHANGED|10.0.0.1";
+      }
+      if (cmd === "forget_ssh_host_key") return null;
+      if (cmd === "server_get_available_versions") return [];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); });
+
+    expect(calls).toBe(1); // host-key change is excluded from the broadened retry
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.serverInfo).toBeNull();
+  });
+
   // ── loadServerInfo skips when no credentials ───────
 
   it("does not invoke when host or password is empty", async () => {

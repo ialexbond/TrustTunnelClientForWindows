@@ -354,6 +354,88 @@ fn save_sidecar_pid(pid: u32) {
 // inline at the two real sites (sidecar.rs on Terminated, kill_stale_sidecar
 // below), so a parallel unused helper only invited the cleanup paths to drift.
 
+/// Full path of THIS edition's own sidecar executable. Resolved the SAME way the
+/// spawn does: tauri-plugin-shell's `.sidecar("trusttunnel_client")` runs the binary
+/// that sits NEXT TO the app executable, so `current_exe().with_file_name(...)` is
+/// byte-for-byte the path the spawned process reports as its image path
+/// (AUDIT-2026-06-11 #21). Deliberately NOT canonicalized: `fs::canonicalize` returns
+/// a `\\?\`-prefixed verbatim path while `QueryFullProcessImageNameW(PROCESS_NAME_WIN32)`
+/// returns the plain Win32 form — the comparison normalizes the prefix instead.
+fn own_sidecar_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .map(|exe| exe.with_file_name(SIDECAR_IMAGE_NAME))
+}
+
+/// Query the full executable path of a live process by PID.
+///
+/// AUDIT-2026-06-11 #21: follows the same windows-sys FFI pattern as
+/// `sidecar::process_is_alive` (open with PROCESS_QUERY_LIMITED_INFORMATION, always
+/// close the handle, treat ANY failure as "unknown"). Returns `None` when the process
+/// is gone, access is denied, or the query fails — the caller must treat `None` as
+/// "do not kill" (doubt ⇒ no-op).
+#[cfg(windows)]
+fn query_process_image_path(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: FFI into documented Win32 APIs. We open the process for limited query
+    // only, read the image path into a stack buffer, and always close the handle.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None; // gone or no rights — the caller skips the kill
+        }
+        // MAX_PATH-plus buffer; QueryFullProcessImageNameW updates `len` in place to
+        // the number of characters written (without the trailing NUL).
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len);
+        CloseHandle(handle);
+        if ok == 0 || len == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+#[cfg(not(windows))]
+fn query_process_image_path(_pid: u32) -> Option<String> {
+    // Non-Windows builds never run the real sidecar; "unknown" keeps the kill a no-op.
+    None
+}
+
+/// Normalize a Windows path for identity comparison: strip the `\\?\` verbatim
+/// prefix (canonicalized paths carry it, Win32 query results do not) and lowercase
+/// (NTFS paths are case-insensitive). Pure — unit-tested below.
+fn normalize_win_path(p: &str) -> String {
+    p.strip_prefix(r"\\?\").unwrap_or(p).to_lowercase()
+}
+
+/// AUDIT-2026-06-11 #21: the stale-PID kill decision, pure and unit-testable.
+///
+/// The IMAGENAME+PID taskkill filters (T-10-01) cannot tell Pro's sidecar from the
+/// co-installed Light edition's — BOTH editions run the identical image name
+/// `trusttunnel_client.exe`, just from different install directories. After a Pro
+/// crash + reboot, Windows can recycle Pro's stale saved PID onto Light's LIVE
+/// sidecar, which then passes both filters and gets force-killed mid-session (the
+/// exact cross-edition kill D-07 was added to prevent). So the kill is allowed ONLY
+/// when the candidate process's full executable path provably equals OUR OWN sidecar
+/// path. Any doubt — query failed (`None`), own path unresolvable (`None`), or a path
+/// mismatch — means "skip the kill"; the caller still removes the stale PID file, and
+/// the Job Object already guarantees no orphan of our own survives a crash.
+fn stale_pid_kill_allowed(
+    candidate_exe_path: Option<&str>,
+    own_sidecar_path: Option<&str>,
+) -> bool {
+    match (candidate_exe_path, own_sidecar_path) {
+        (Some(candidate), Some(own)) => normalize_win_path(candidate) == normalize_win_path(own),
+        _ => false,
+    }
+}
+
 /// Kill a stale sidecar from a previous crashed session using the saved PID file.
 /// Only kills the specific process, not all processes with the same name.
 ///
@@ -365,19 +447,46 @@ fn save_sidecar_pid(pid: u32) {
 /// `taskkill` becomes a NO-OP whenever the recycled PID no longer belongs to our
 /// sidecar — it only ever kills a process that is BOTH our image AND that PID. The
 /// PID file is still removed afterward so a one-shot stale entry never lingers.
+///
+/// AUDIT-2026-06-11 #21: image+PID filtering is NOT enough when Pro and Light are
+/// co-installed — both spawn the identical image name, so a recycled PID landing on
+/// the OTHER edition's live sidecar passed both filters. The kill is now additionally
+/// gated on the candidate process's full executable PATH equaling THIS edition's own
+/// sidecar path (`stale_pid_kill_allowed`); any doubt skips the kill.
 pub fn kill_stale_sidecar() {
     let pid_path = sidecar_pid_path();
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            eprintln!("[cleanup] Killing stale sidecar PID {pid} (image-validated)");
-            crate::logging::log_app("WARN", &format!("Killing stale sidecar PID {pid}"));
-            // Image-name + PID filters: a recycled PID belonging to a DIFFERENT image
-            // matches neither pair and is left untouched (T-10-01). `/F` still forces
-            // the kill when both filters match our own crashed sidecar.
-            let _ = std::process::Command::new("taskkill")
-                .args(stale_kill_args(pid))
-                .creation_flags(crate::sidecar::CREATE_NO_WINDOW) // CREATE_NO_WINDOW
-                .output();
+            // AUDIT-2026-06-11 #21: gate the kill on the candidate's FULL EXECUTABLE
+            // PATH, not just IMAGENAME+PID. Both editions (Pro/Light) spawn the same
+            // image name, so a PID recycled onto the OTHER edition's live sidecar
+            // passed both taskkill filters and was force-killed mid-session. Only
+            // kill when the live process at that PID verifiably runs OUR OWN sidecar
+            // binary; on any doubt skip the kill and just drop the stale PID file.
+            let candidate = query_process_image_path(pid);
+            let own = own_sidecar_path();
+            let own_str = own.as_ref().map(|p| p.to_string_lossy().to_string());
+            if stale_pid_kill_allowed(candidate.as_deref(), own_str.as_deref()) {
+                eprintln!("[cleanup] Killing stale sidecar PID {pid} (image+path-validated)");
+                crate::logging::log_app("WARN", &format!("Killing stale sidecar PID {pid}"));
+                // Image-name + PID filters kept as defense-in-depth (T-10-01) under
+                // the new path gate. `/F` still forces the kill when everything
+                // matches our own crashed sidecar.
+                let _ = std::process::Command::new("taskkill")
+                    .args(stale_kill_args(pid))
+                    .creation_flags(crate::sidecar::CREATE_NO_WINDOW) // CREATE_NO_WINDOW
+                    .output();
+            } else {
+                // FIXED phrase, no executable path in the log (D-29). The stale PID
+                // file is removed below either way, so this one-shot entry never
+                // re-triggers the check.
+                crate::logging::log_app(
+                    "INFO",
+                    &format!(
+                        "Stale sidecar PID {pid} does not belong to our own sidecar (exited or recycled) — skipping kill, removing PID file (#21)"
+                    ),
+                );
+            }
         }
         let _ = std::fs::remove_file(&pid_path);
     }
@@ -496,6 +605,20 @@ pub async fn teardown_session_sidecar(app: &tauri::AppHandle) {
     // FIX-A (RC-2): restore pre-VPN system DNS on terminal teardown too (mirror of
     // vpn_disconnect) so a give-up never strands the resolver.
     crate::dns_guard::restore_system_dns();
+    // AUDIT-2026-06-11 #12: clear the process-wide `disconnecting` intent now that the
+    // teardown is complete. `child.disconnecting` IS `state.disconnecting` (the same Arc,
+    // passed in by spawn_trusttunnel), so the `*d = true` above latched the PROCESS-WIDE
+    // flag — and unlike vpn_disconnect (its WR-01 end-of-fn reset) this fn never cleared
+    // it. A stale `true` at rest made the tray show «Отключение…» indefinitely
+    // (tray_menu_current_status maps Disconnected + disconnecting=true to that bucket)
+    // and misled every other intent reader (recovery polls, respawn's WR-05 bail).
+    // Ordering mirrors vpn_disconnect's WR-01 argument: the Terminated arm reads
+    // `was_intentional` DURING `kill_sidecar` above, which has fully returned by this
+    // point, so resetting here cannot race the arm into a spurious reconnect.
+    // (Trailing semicolon: the lock Result temporary must drop BEFORE `state` — E0597.)
+    if let Ok(mut d) = state.disconnecting.lock() {
+        *d = false;
+    };
 }
 
 /// R4 (UAT build 65692c test 7 — quit hang): signal shutdown BEFORE killing the sidecar
@@ -719,6 +842,21 @@ pub fn spawn_connect_timeout_watchdog(app: &tauri::AppHandle, captured_gen: u64)
     });
 }
 
+/// AUDIT-2026-06-11 #19: the connect-path cancel predicate, pure and unit-testable.
+///
+/// A user Cancel must be visible to `vpn_connect` through EITHER intent flag:
+/// - `disconnecting` (transient) — a `vpn_disconnect` still in flight;
+/// - `user_disconnect_requested` (durable, T-31) — a `vpn_disconnect` that already
+///   RAN TO COMPLETION (it resets the transient flag back to `false` at its end —
+///   WR-01 — so checking the transient flag alone misses a completed cancel; the
+///   durable flag persists until the next `vpn_connect` clears it).
+///
+/// Factored out so the OR of both flags is locked by tests — dropping the durable
+/// leg would silently reintroduce the "Cancel during spawn is overridden" bug.
+fn connect_cancelled(transient_disconnecting: bool, durable_disconnect_requested: bool) -> bool {
+    transient_disconnecting || durable_disconnect_requested
+}
+
 #[tauri::command]
 pub async fn vpn_connect(
     app: tauri::AppHandle,
@@ -877,8 +1015,14 @@ pub async fn vpn_connect(
     // generation for this session is that + 1.
     let connect_generation = state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
-    // Check if user cancelled during routing rules resolution
-    if state.disconnecting.lock().map(|g| *g).unwrap_or(false) {
+    // Check if user cancelled during routing rules resolution / the awaited pre-flight.
+    // AUDIT-2026-06-11 #19: ALSO consult the durable T-31 flag — a vpn_disconnect that
+    // ran to completion during the pre-flight `.await` above already reset the transient
+    // `disconnecting` back to false (WR-01), so the transient flag alone misses it.
+    if connect_cancelled(
+        state.disconnecting.lock().map(|g| *g).unwrap_or(false),
+        state.user_disconnect_requested.load(Ordering::SeqCst),
+    ) {
         eprintln!("[vpn_connect] Cancelled before sidecar spawn");
         set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
         return Ok(());
@@ -919,6 +1063,45 @@ pub async fn vpn_connect(
             set_vpn_status(&app, &state, VpnStatus::Error, None);
             msg
         })?;
+
+    // AUDIT-2026-06-11 #19: post-spawn cancel re-check — the mirror of respawn_sidecar's
+    // T-10-05 guard, which the first-connect path never received. `spawn_trusttunnel` is
+    // async: a user can press Cancel WHILE the spawn is in flight, and vpn_disconnect can
+    // run TO COMPLETION in that window (it takes `None` from the child slot — the child
+    // is not stored yet, so its kill is a no-op — writes Disconnected, sets the durable
+    // T-31 flag, and clears the transient flag back to false). Without this re-check the
+    // fresh child was stored anyway and the sidecar markers flipped the session to
+    // Connected — silently overriding the user's completed Cancel (the T-31 double-press
+    // class on the first-connect path). Placed BEFORE save_sidecar_pid so the PID file
+    // never records a child we immediately tear down.
+    if connect_cancelled(
+        state.disconnecting.lock().map(|g| *g).unwrap_or(false),
+        state.user_disconnect_requested.load(Ordering::SeqCst),
+    ) {
+        crate::logging::log_app(
+            "INFO",
+            "[vpn] cancel observed after spawn — killing fresh child, not storing it (#19, mirrors T-10-05)",
+        );
+        // Mark the kill as INTENTIONAL for the child's Terminated arm (same contract
+        // as vpn_disconnect / teardown_session_sidecar). In the completed-cancel
+        // scenario the transient flag is already back to false (WR-01 reset at the
+        // end of vpn_disconnect), so without re-raising it the arm would classify
+        // this never-connected non-zero exit as a failure and write
+        // Error("sidecar-exit") over the user's clean Disconnected.
+        if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
+        // Graceful-then-hard kill (same teardown as everywhere else) so the fresh
+        // sidecar can drop any WFP/route state it already installed.
+        sidecar::kill_sidecar(child).await.ok();
+        // Through the single mutator (D-01); vpn_disconnect already wrote Disconnected,
+        // re-asserting it keeps every surface consistent even if the cancel is still
+        // mid-flight.
+        set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+        // WR-01-style reset: the Terminated arm read `was_intentional` during the
+        // kill_sidecar await above, so clearing now cannot race it into a spurious
+        // reconnect — and a stale `true` at rest is the known landmine.
+        if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+        return Ok(());
+    }
 
     // Save PID for stale-process cleanup after crashes
     save_sidecar_pid(child.child.pid());
@@ -1158,6 +1341,16 @@ pub async fn vpn_disconnect(
         guard.take()
     };
 
+    // AUDIT-2026-06-11 #20/#22: capture the kill result instead of `?`-returning on it.
+    // The old `?` bailed out BEFORE the hosts cleanup, the DNS restore, the Disconnected
+    // status write AND the WR-01 `disconnecting=false` reset — so a kill failure (both
+    // hard paths denied, e.g. AV interference) left the session in a stuck partial
+    // state: tray frozen on «Отключение…», `disconnecting` latched true forever (which
+    // suppressed every future recovery — the WR-01 landmine), hosts block and stranded
+    // DNS never cleaned, and the already-taken child handle made a retry-press a no-op.
+    // Once a disconnect has BEGUN, the teardown steps below must be unconditional —
+    // the same always-cleanup principle the tray disconnect path already follows.
+    let mut kill_error: Option<String> = None;
     if let Some(child) = child {
         if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
         // WR-06: kill_sidecar can take seconds (force taskkill). The tray icon is
@@ -1171,20 +1364,52 @@ pub async fn vpn_disconnect(
         // D-08 lifecycle marker (8): sidecar killed on exit — fixed phrase,
         // DEV-gated (D-11). Emitted next to the kill where `app` is in scope.
         sidecar::emit_killed_on_exit_marker(&app);
-        sidecar::kill_sidecar(child)
-            .await
-            .map_err(|e| format!("Failed to stop sidecar: {e}"))?;
+        if let Err(e) = sidecar::kill_sidecar(child).await {
+            kill_error = Some(format!("Failed to stop sidecar: {e}"));
+        }
     }
 
-    crate::logging::log_app("INFO", "VPN disconnected");
+    if kill_error.is_none() {
+        crate::logging::log_app("INFO", "VPN disconnected");
+    } else {
+        // FIXED phrase (no raw error text on this line — the mapped Err carries the
+        // detail back to the frontend; D-29).
+        crate::logging::log_app(
+            "WARN",
+            "VPN disconnect: kill_sidecar failed — running unconditional cleanup anyway (#20)",
+        );
+    }
 
-    // Clean up hosts file blocked entries on disconnect
+    // Clean up hosts file blocked entries on disconnect — ALWAYS, even on kill failure.
     routing_rules::cleanup_hosts_block().ok();
 
     // FIX-A (RC-2): restore the pre-VPN system DNS (+flush). The hard-killed C++ sidecar
     // never restores it, so without this the system stays on the dead tunnel resolver and
-    // Claude Code keeps returning 403 until a CC restart.
+    // Claude Code keeps returning 403 until a CC restart. ALWAYS runs (#20).
     crate::dns_guard::restore_system_dns();
+
+    if let Some(err) = kill_error {
+        // AUDIT-2026-06-11 #20: an HONEST terminal status through the single mutator
+        // (D-01) instead of the stale pre-disconnect status. The sidecar may genuinely
+        // still be alive holding the killswitch (kill_sidecar errs only when BOTH hard
+        // paths failed), so Disconnected would be a lie — Error with the STABLE ASCII
+        // reason code "disconnect-failed" (D-29: fixed token, no secrets; display text
+        // is the frontend's i18n job) tells the truth and un-sticks the tray from the
+        // transient "disconnecting" bucket forced above.
+        set_vpn_status(
+            &app,
+            &state,
+            VpnStatus::Error,
+            Some("disconnect-failed".to_string()),
+        );
+        // WR-01 reset still applies on the failure path: leaving `disconnecting`
+        // latched true at rest would suppress every future recovery decision
+        // (declare_offline_and_handoff / run_recovery_flow read it as "user is
+        // disconnecting"). The Terminated arm's `was_intentional` read happened
+        // DURING kill_sidecar above, so clearing here cannot race it.
+        if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+        return Err(err);
+    }
 
     set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
 
@@ -1586,6 +1811,102 @@ mod tests {
             "blind /PID kill must not return — it could /F-kill an unrelated recycled PID",
         );
         assert_eq!(SIDECAR_IMAGE_NAME, "trusttunnel_client.exe");
+    }
+
+    // ── Stale-PID kill is PATH-validated (AUDIT-2026-06-11 #21) ─────────────
+    // IMAGENAME+PID filtering alone cannot tell Pro's sidecar from the co-installed
+    // Light edition's (identical image name, different install dir). The pure
+    // `stale_pid_kill_allowed` decision must only allow the kill when the candidate
+    // process's full executable path provably equals OUR OWN sidecar path; ANY doubt
+    // (query failed / own path unresolvable / mismatch) must skip the kill.
+
+    #[test]
+    fn stale_pid_kill_allowed_only_for_exact_own_path() {
+        let own = r"C:\Program Files\TrustTunnel Pro\trusttunnel_client.exe";
+        assert!(
+            stale_pid_kill_allowed(Some(own), Some(own)),
+            "an exact path match is our own crashed sidecar — kill allowed",
+        );
+    }
+
+    #[test]
+    fn stale_pid_kill_denied_for_other_editions_sidecar() {
+        // The cross-edition recycle scenario: Pro's stale PID now belongs to Light's
+        // LIVE sidecar — same image name, DIFFERENT install directory. Must skip.
+        let light = r"C:\Program Files\TrustTunnel Light\trusttunnel_client.exe";
+        let own = r"C:\Program Files\TrustTunnel Pro\trusttunnel_client.exe";
+        assert!(
+            !stale_pid_kill_allowed(Some(light), Some(own)),
+            "a recycled PID on the co-installed edition's live sidecar must NOT be killed",
+        );
+    }
+
+    #[test]
+    fn stale_pid_kill_denied_on_any_doubt() {
+        let own = r"C:\Program Files\TrustTunnel Pro\trusttunnel_client.exe";
+        // Query failed (process gone / access denied) → unknown identity → skip.
+        assert!(!stale_pid_kill_allowed(None, Some(own)));
+        // Our own path unresolvable → nothing to compare against → skip.
+        assert!(!stale_pid_kill_allowed(Some(own), None));
+        assert!(!stale_pid_kill_allowed(None, None));
+    }
+
+    #[test]
+    fn stale_pid_kill_path_match_is_case_insensitive_and_verbatim_tolerant() {
+        // NTFS paths are case-insensitive, and a canonicalized own-path may carry the
+        // `\\?\` verbatim prefix while QueryFullProcessImageNameW(PROCESS_NAME_WIN32)
+        // returns the plain Win32 form — neither difference is a real identity mismatch.
+        assert!(stale_pid_kill_allowed(
+            Some(r"c:\program files\trusttunnel pro\TRUSTTUNNEL_CLIENT.EXE"),
+            Some(r"C:\Program Files\TrustTunnel Pro\trusttunnel_client.exe"),
+        ));
+        assert!(stale_pid_kill_allowed(
+            Some(r"C:\Program Files\TrustTunnel Pro\trusttunnel_client.exe"),
+            Some(r"\\?\C:\Program Files\TrustTunnel Pro\trusttunnel_client.exe"),
+        ));
+    }
+
+    // ── Connect-path cancel predicate (AUDIT-2026-06-11 #19) ───────────────
+    // vpn_connect's pre-spawn AND post-spawn cancel checks must see a Cancel through
+    // EITHER flag: the transient `disconnecting` (a vpn_disconnect still in flight)
+    // OR the durable `user_disconnect_requested` (a vpn_disconnect that already ran
+    // to completion — it resets the transient flag at its end per WR-01, so the
+    // transient flag alone misses a completed cancel).
+
+    #[test]
+    fn connect_cancelled_sees_transient_in_flight_disconnect() {
+        assert!(connect_cancelled(true, false));
+    }
+
+    #[test]
+    fn connect_cancelled_sees_completed_disconnect_via_durable_flag() {
+        // The #19 scenario: Cancel completed during the spawn await — transient flag
+        // already reset to false, only the durable T-31 flag remains. Must still
+        // count as cancelled, or the fresh child gets stored and connects anyway.
+        assert!(connect_cancelled(false, true));
+    }
+
+    #[test]
+    fn connect_not_cancelled_when_no_intent_flag_set() {
+        assert!(!connect_cancelled(false, false));
+        // Both set (mid-disconnect) is trivially cancelled too.
+        assert!(connect_cancelled(true, true));
+    }
+
+    #[test]
+    fn disconnect_failed_error_uses_reason_code_not_cyrillic() {
+        // AUDIT-2026-06-11 #20: the value vpn_disconnect passes to the single mutator
+        // when BOTH kill paths failed is the STABLE ASCII reason code
+        // "disconnect-failed" — no Cyrillic, no user-facing display string (that
+        // wording is the i18n key on the frontend), no secrets (D-29). Mirrors the
+        // connect-timeout reason-code lock below.
+        let reason = "disconnect-failed";
+        assert!(reason.is_ascii(), "reason code must be ASCII");
+        assert!(
+            !reason.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+            "reason code must contain NO Cyrillic",
+        );
+        assert_eq!(reason, "disconnect-failed");
     }
 
     #[test]

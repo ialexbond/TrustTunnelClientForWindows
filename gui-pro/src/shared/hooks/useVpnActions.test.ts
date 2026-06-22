@@ -65,6 +65,10 @@ function renderReconnectHarness(initialStatus: VpnStatus) {
     const [, setConnectedSince] = useState<Date | null>(null);
     const [, setVpnLogs] = useState<unknown[]>([]);
     const reconnectResolve = useRef<(() => void) | null>(null);
+    // AUDIT-2026-06-11 #8: the shared manual-reconnect mark, wired between the two
+    // hooks exactly like App.tsx does. handleReconnect raises it; the no-dwell guard
+    // in useVpnEvents suppresses the teardown's "disconnected" ONLY while it is up.
+    const manualReconnectActiveRef = useRef(false);
 
     statusHistory.push(status);
 
@@ -76,6 +80,7 @@ function renderReconnectHarness(initialStatus: VpnStatus) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setVpnLogs: setVpnLogs as any,
       reconnectResolve,
+      manualReconnectActiveRef,
     });
 
     const actions = useVpnActions({
@@ -85,9 +90,10 @@ function renderReconnectHarness(initialStatus: VpnStatus) {
       setError,
       i18n,
       reconnectResolve,
+      manualReconnectActiveRef,
     });
 
-    return { status, actions, reconnectResolve };
+    return { status, actions, reconnectResolve, manualReconnectActiveRef };
   });
 
   return { hook, statusHistory };
@@ -213,6 +219,82 @@ describe("useVpnActions.handleReconnect (Plan 02-12 — no dwell on «Отклю
     // handleConnect's catch set the honest error status — a failed reconnect is
     // NOT hidden behind the recovering label.
     expect(hook.result.current.status).toBe("error");
+  });
+
+  it("AUDIT #8: a tray disconnect during an AUTO-reconnect commits 'disconnected' (no manual reconnect in flight)", async () => {
+    // The backend supervisor drives «Переподключение» on a server-silent drop; the
+    // user then disconnects from the TRAY (no frontend action — handleReconnect was
+    // never called, the manual-reconnect mark is down). The backend kills the core
+    // and emits ONE bare "disconnected" (D-09 / the supervisor's T-31 forced
+    // Disconnected). Before the #8 fix the unconditional no-dwell guard swallowed
+    // it and the window stuck on yellow «Переподключение» forever.
+    const { hook } = renderReconnectHarness("connected");
+
+    // Backend-driven auto-reconnect attempt (NOT a manual save+reconnect).
+    await act(async () => {
+      emitEvent("vpn-status", { status: "reconnecting" });
+    });
+    expect(hook.result.current.status).toBe("reconnecting");
+    expect(hook.result.current.manualReconnectActiveRef.current).toBe(false);
+
+    // Tray disconnect → single terminal "disconnected" — must COMMIT, not be eaten.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+    });
+    expect(hook.result.current.status).toBe("disconnected");
+  });
+
+  it("AUDIT #8: the manual-reconnect mark is raised during the teardown window and cleared before the re-connect", async () => {
+    // Pins the mark's lifecycle: handleReconnect raises it synchronously (that is what
+    // arms the no-dwell suppression), and clears it once the teardown completed — so a
+    // LATER real "disconnected" (e.g. tray disconnect after the reconnect) still lands.
+    const { hook } = renderReconnectHarness("connected");
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+
+    // Mid-teardown: the mark is up — the "disconnected" below gets suppressed.
+    expect(hook.result.current.manualReconnectActiveRef.current).toBe(true);
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise;
+    });
+
+    // Teardown done, handleConnect ran: the mark must be DOWN again so the guard
+    // no longer suppresses real terminal Disconnected events.
+    expect(hook.result.current.manualReconnectActiveRef.current).toBe(false);
+    expect(hook.result.current.status).toBe("connecting");
+
+    // A real disconnect after the reconnect flow commits normally.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "connected" });
+    });
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+    });
+    expect(hook.result.current.status).toBe("disconnected");
+  });
+
+  it("AUDIT #8: a failed teardown clears the manual-reconnect mark (error path)", async () => {
+    // WR-02 abort path: vpn_disconnect rejects → handleReconnect stops with "error".
+    // The mark must not stay latched (a stale true would silently eat the next
+    // reconnecting → disconnected transition for up to the 5s safety window).
+    const { hook } = renderReconnectHarness("connected");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_disconnect") throw new Error("Lock error");
+      return null;
+    });
+
+    await act(async () => {
+      await hook.result.current.actions.handleReconnect();
+    });
+
+    expect(hook.result.current.status).toBe("error");
+    expect(hook.result.current.manualReconnectActiveRef.current).toBe(false);
   });
 
   it("is a no-op when not connected/connecting (guard at the top of handleReconnect)", async () => {

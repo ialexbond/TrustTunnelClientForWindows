@@ -42,7 +42,12 @@ export function useAppShellActions({
     try {
       const raw = localStorage.getItem("trusttunnel_wizard");
       const obj = raw ? JSON.parse(raw) : {};
-      obj.wizardStep = "welcome";
+      // 06-uat: the wizard navigation snapshot key is `step` (persist.ts), not the stale
+      // `wizardStep`. Seed it to the install entry `endpoint` (the deleted `welcome`/`server`
+      // screens no longer exist) so a later wizard mount resumes at Settings, not a removed
+      // screen. Deleting the config must NOT navigate or open the wizard — this only resets
+      // the persisted snapshot for the next time it IS opened from the Control Panel.
+      obj.step = "endpoint";
       obj.deploySteps = "{}";
       obj.deployLogs = "[]";
       obj.configPath = "";

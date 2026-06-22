@@ -25,9 +25,14 @@ macro_rules! ssh_command {
             password: String,
             key_path: Option<String>,
             key_data: Option<String>,
+            // D-06 (Codex #2): the wizard's explicit single auth choice. Threading it
+            // through the macro is the load-bearing fix — without it the frontend can
+            // never deliver auth_method to SshParams. `#[serde(default)]` on the struct
+            // field keeps callers that omit it (non-wizard) working with None ⇒ legacy.
+            auth_method: Option<String>,
             $($extra_param: $extra_type,)*
         ) -> Result<impl serde::Serialize, String> {
-            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method };
             $method(&app, params $(, $extra_param)*).await
         }
     };
@@ -50,9 +55,12 @@ macro_rules! ssh_pool_command {
             password: String,
             key_path: Option<String>,
             key_data: Option<String>,
+            // D-06 (Codex #2): explicit single auth choice threaded through the pooled
+            // macro too, so wizard-facing pooled commands deliver it to SshParams.
+            auth_method: Option<String>,
             $($extra_param: $extra_type,)*
         ) -> Result<serde_json::Value, String> {
-            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+            let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method };
             let handle = pool.acquire(&params, Some(app.clone())).await?;
             let result = $method(&app, &*handle $(, $extra_param)*).await?;
             serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
@@ -62,11 +70,33 @@ macro_rules! ssh_pool_command {
 
 // ─── Direct-connect commands (long-running / one-shot) ────────────
 
-ssh_command!(deploy_server, ssh::deploy_server, settings: ssh::EndpointSettings);
+// overwrite_config (round-3 LOW C, finding C): the ONLY frontend overwrite
+// surface. The 05-03 "apply my settings" recovery action calls
+// invoke("deploy_server", { ..., overwriteConfig: true }); deploy_configure stays
+// internal (never a Tauri command). Default false on a normal deploy.
+// #22 (06-uat): deploy_server / fetch_server_config take a per-run `op_id` so the
+// streamed deploy events can be stamped with the run that produced them and the frontend
+// can drop a stale event from a cancelled run (see ssh/mod.rs CURRENT_DEPLOY_OP_ID).
+ssh_command!(deploy_server, ssh::deploy_server, settings: ssh::EndpointSettings, overwrite_config: bool, op_id: u64);
+
+/// Cancel the in-flight deploy (06-uat cancel→reinstall race). Bumps the active deploy
+/// generation so every `exec_command_cancellable` in the running deploy_server aborts
+/// (~250 ms) and the run unwinds — freeing the backend single-flight guard so the next
+/// install is clean. The frontend then awaits `uninstall_server` for the server-side
+/// kill + rollback. No SSH params: a pure local signal.
+#[tauri::command]
+pub fn cancel_deploy() {
+    crate::ssh::CURRENT_DEPLOY_OP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
 ssh_command!(diagnose_server, ssh::diagnose_server);
 ssh_command!(check_server_installation, ssh::check_server_installation);
 ssh_command!(uninstall_server, ssh::uninstall_server);
-ssh_command!(fetch_server_config, ssh::fetch_server_config, client_name: String);
+// country_code (Option<String>, Tauri maps JS `countryCode`): best-effort GeoIP code used
+// only to brand the LOCAL config filename `[<CC>_]TrustTunnel_<login>.toml` so a re-export
+// writes the SAME name the Save-As dialog defaults to. Optional → omitting it (legacy
+// callers) yields None ⇒ unbranded-by-country, still a valid branded filename.
+ssh_command!(fetch_server_config, ssh::fetch_server_config, client_name: String, op_id: u64, country_code: Option<String>);
 ssh_command!(server_upgrade, ssh::server_upgrade, version: String);
 
 // ─── Pooled server management commands ────────────────────────────
@@ -88,12 +118,10 @@ ssh_pool_command!(add_server_user, ssh::add_server_user, vpn_username: String, v
 
 // ─── Phase 15: vpn.toml Quick Settings + Bundle reader (REQ-15.0, 15.2) ───
 ssh_pool_command!(server_get_config_bundle, ssh::get_config_bundle);
-ssh_pool_command!(server_update_listen_address, ssh::update_listen_address, address: String);
-ssh_pool_command!(server_update_log_level, ssh::update_log_level, level: String);
-ssh_pool_command!(server_update_allow_private, ssh::update_allow_private, enabled: bool);
-ssh_pool_command!(server_update_auth_status, ssh::update_auth_status, code: u16);
-ssh_pool_command!(server_update_ping_path, ssh::update_ping_path, path: String);
-ssh_pool_command!(server_update_speedtest_path, ssh::update_speedtest_path, path: String);
+// The per-field vpn.toml setter commands (server_update_listen_address /
+// _log_level / _allow_private / _auth_status / _ping_path / _speedtest_path) were
+// REMOVED — the Configuration tab now persists vpn.toml exclusively via the generic
+// server_save_config_file command, so these had zero frontend invoke() callers.
 
 // ─── Phase 15: Advanced raw TOML write (REQ-15.3) ─────────────────────────
 ssh_pool_command!(server_write_vpn_toml_raw, ssh::write_vpn_toml_raw, content: String);
@@ -131,7 +159,7 @@ pub async fn security_get_status(
     key_path: Option<String>,
     key_data: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     let result = ssh::get_security_status(&app, &handle, port).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
@@ -149,7 +177,7 @@ pub async fn security_install_firewall(
     key_data: Option<String>,
     keep_http_open: bool,
 ) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     ssh::install_firewall(&app, &handle, port, keep_http_open).await?;
     Ok(serde_json::Value::Null)
@@ -179,6 +207,9 @@ pub async fn security_start_firewall(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     ssh::start_firewall(&app, &handle, port).await
@@ -209,7 +240,7 @@ pub async fn security_change_ssh_port(
     key_data: Option<String>,
     new_port: u16,
 ) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     let actual_port = ssh::change_ssh_port(&app, &handle, new_port, port).await?;
     // Drop stale handle and invalidate pool — the SSH daemon restarted on a new port
@@ -243,6 +274,9 @@ pub async fn mtproto_install(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
     // Reset cancel flag at start (in case it was left set by a previous cancel
     // before this install kicked off). The reset gives a clean slate per-attempt.
@@ -305,6 +339,9 @@ pub async fn update_sidecar(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
     // Reset cancel flag at start (in case it was left set by a previous cancel
     // before this update kicked off). The reset gives a clean slate per-attempt.
@@ -344,7 +381,7 @@ pub async fn mtproto_get_status(
     key_path: Option<String>,
     key_data: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     let result = ssh::mtproto_get_status(&app, &handle, &host).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
@@ -364,7 +401,7 @@ pub async fn mtproto_start(
     key_path: Option<String>,
     key_data: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     let result = ssh::mtproto_start(&app, &handle, &host).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
@@ -381,7 +418,7 @@ pub async fn mtproto_stop(
     key_path: Option<String>,
     key_data: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data };
+    let params = ssh::SshParams { host: host.clone(), port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method: None };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     let result = ssh::mtproto_stop(&app, &handle, &host).await?;
     serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
@@ -433,6 +470,9 @@ pub async fn server_run_benchmark(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
 
@@ -504,6 +544,9 @@ pub async fn server_cancel_benchmark(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
 
     let kill_result: Result<(), String> = async {
@@ -571,6 +614,286 @@ fn keyring_key(host: &str, port: &str, user: &str) -> String {
     format!("ssh-{host}:{port}-{user}")
 }
 
+// ─── Per-host credential store (v2) ──────────────────────────────
+//
+// 06-19 / D-15 / C-23: the JSON metadata store is now keyed per host:port:user.
+// Previously `ssh_credentials.json` held a SINGLE `{host,port,user,keyPath}`
+// object, so saving credentials for server B clobbered server A's record. On a
+// machine that has touched multiple servers the Control Panel / wizard could
+// then install/connect/auto-connect against the WRONG server (C-23, HIGH).
+//
+// v2 shape:
+//   { "version": 2,
+//     "last_active": "<id>" | null,
+//     "records": { "<id>": { "host", "port", "user", "keyPath" } } }
+// where `<id>` = record_id(host,port,user) and uses the SAME identity shape as
+// `keyring_key` so the JSON record id and the per-host keyring entry stay aligned.
+// The password is NEVER stored on disk — the Windows keyring (DPAPI) remains the
+// only at-rest secret store (D-29 / T-06-19-2).
+
+/// Stable per-record identity. MUST mirror `keyring_key`'s identity shape so the
+/// JSON record id and the keyring entry refer to the same host:port:user.
+fn record_id(host: &str, port: &str, user: &str) -> String {
+    keyring_key(host, port, user)
+}
+
+/// Read and parse the v2 store at `path`. Migrates a legacy v1 single-object
+/// file (top-level `host`, no `version`/`records`) into a v2 records map first.
+/// Returns an empty v2 store if the file is missing or unparseable.
+fn read_store_at(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return empty_store(),
+    };
+    let parsed: serde_json::Map<String, serde_json::Value> = match serde_json::from_str(&content) {
+        Ok(m) => m,
+        Err(_) => return empty_store(),
+    };
+    // Already v2?
+    if parsed.contains_key("records") || parsed.contains_key("version") {
+        return parsed;
+    }
+    // Legacy v1 single-object file — migrate it (lossless, one-shot).
+    migrate_legacy_store(path, parsed)
+}
+
+fn empty_store() -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    m.insert("version".into(), serde_json::Value::from(2));
+    m.insert("last_active".into(), serde_json::Value::Null);
+    m.insert("records".into(), serde_json::Value::Object(serde_json::Map::new()));
+    m
+}
+
+/// Serialize-or-error write. Carries the WR-06 fix forward: on a serialization
+/// error we return Err and do NOT clobber the file with an empty string.
+fn write_store_at(
+    path: &std::path::Path,
+    store: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let s = serde_json::to_string_pretty(&serde_json::Value::Object(store.clone()))
+        .map_err(|e| format!("Failed to serialize credentials: {e}"))?;
+    std::fs::write(path, s).map_err(|e| format!("Failed to save credentials: {e}"))
+}
+
+/// Lift a legacy v1 single-object `{host,port,user,keyPath[,password]}` into a v2
+/// records map. Any stranded `password` (`b64:`-prefixed or plaintext) is moved
+/// into the keyring and DROPPED before the v2 file is written — no secret on disk.
+fn migrate_legacy_store(
+    path: &std::path::Path,
+    mut legacy: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let host = legacy.get("host").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let port = legacy.get("port").and_then(|v| v.as_str()).unwrap_or("22").to_string();
+    let user = legacy.get("user").and_then(|v| v.as_str()).unwrap_or("root").to_string();
+    let key_path = legacy
+        .get("keyPath")
+        .cloned()
+        .unwrap_or(serde_json::Value::String(String::new()));
+
+    // Lift any at-rest password into the keyring, then drop it (no secret on disk).
+    if let Some(pwd_val) = legacy.remove("password") {
+        if let Some(pwd_str) = pwd_val.as_str() {
+            if !pwd_str.is_empty() {
+                let decoded = decode_legacy_password(pwd_str);
+                let _ = keyring_save(&host, &port, &user, &decoded);
+            }
+        }
+    }
+
+    let mut store = empty_store();
+    // An empty legacy file (no host) yields an empty v2 store.
+    if !host.is_empty() {
+        let id = record_id(&host, &port, &user);
+        let mut record = serde_json::Map::new();
+        record.insert("host".into(), serde_json::Value::String(host));
+        record.insert("port".into(), serde_json::Value::String(port));
+        record.insert("user".into(), serde_json::Value::String(user));
+        record.insert("keyPath".into(), key_path);
+        if let Some(records) = store.get_mut("records").and_then(|v| v.as_object_mut()) {
+            records.insert(id.clone(), serde_json::Value::Object(record));
+        }
+        store.insert("last_active".into(), serde_json::Value::String(id));
+    }
+
+    // Best-effort rewrite to the v2 shape (drops the stranded password). On a
+    // serialization failure we leave the legacy file alone; the next read retries.
+    let _ = write_store_at(path, &store);
+    store
+}
+
+/// Decode a legacy stored password: `b64:`-prefixed → base64-decoded, else plaintext.
+fn decode_legacy_password(pwd_str: &str) -> String {
+    if let Some(b64_payload) = pwd_str.strip_prefix("b64:") {
+        base64::engine::general_purpose::STANDARD
+            .decode(b64_payload)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .unwrap_or_else(|| pwd_str.to_string())
+    } else {
+        pwd_str.to_string()
+    }
+}
+
+/// Build the combined frontend-facing bundle (host/port/user/password/keyPath)
+/// for a single v2 record, pulling the password from that record's keyring entry.
+fn record_to_bundle(record: &serde_json::Value) -> Option<serde_json::Value> {
+    let host = record.get("host").and_then(|v| v.as_str())?.to_string();
+    let port = record.get("port").and_then(|v| v.as_str()).unwrap_or("22").to_string();
+    let user = record.get("user").and_then(|v| v.as_str()).unwrap_or("root").to_string();
+    let key_path = record
+        .get("keyPath")
+        .cloned()
+        .unwrap_or(serde_json::Value::String(String::new()));
+    let password = keyring_load(&host, &port, &user).ok().flatten().unwrap_or_default();
+
+    let mut result = serde_json::Map::new();
+    result.insert("host".into(), serde_json::Value::String(host));
+    result.insert("port".into(), serde_json::Value::String(port));
+    result.insert("user".into(), serde_json::Value::String(user));
+    result.insert("password".into(), serde_json::Value::String(password));
+    result.insert("keyPath".into(), key_path);
+    Some(serde_json::Value::Object(result))
+}
+
+/// Upsert a record into the store at `path` and mark it `last_active`. Other
+/// records are untouched (per-host isolation — T-06-19-4). Password goes to the
+/// keyring (when non-empty); only metadata is written to disk.
+fn save_creds_at(
+    path: &std::path::Path,
+    host: &str,
+    port: &str,
+    user: &str,
+    password: &str,
+    key_path: Option<String>,
+) -> Result<(), String> {
+    if !password.is_empty() {
+        keyring_save(host, port, user, password)?;
+    }
+    let mut store = read_store_at(path);
+    let id = record_id(host, port, user);
+    let mut record = serde_json::Map::new();
+    record.insert("host".into(), serde_json::Value::String(host.to_string()));
+    record.insert("port".into(), serde_json::Value::String(port.to_string()));
+    record.insert("user".into(), serde_json::Value::String(user.to_string()));
+    record.insert(
+        "keyPath".into(),
+        serde_json::Value::String(key_path.unwrap_or_default()),
+    );
+    if let Some(records) = store.get_mut("records").and_then(|v| v.as_object_mut()) {
+        records.insert(id.clone(), serde_json::Value::Object(record));
+    }
+    store.insert("last_active".into(), serde_json::Value::String(id));
+    write_store_at(path, &store)
+}
+
+/// Load the `last_active` record's bundle from the store at `path`.
+fn load_active_at(path: &std::path::Path) -> Option<serde_json::Value> {
+    let store = read_store_at(path);
+    let id = store.get("last_active").and_then(|v| v.as_str())?;
+    let record = store.get("records").and_then(|v| v.as_object())?.get(id)?;
+    record_to_bundle(record)
+}
+
+/// Load a specific host's record bundle from the store at `path`.
+fn load_for_at(
+    path: &std::path::Path,
+    host: &str,
+    port: &str,
+    user: &str,
+) -> Option<serde_json::Value> {
+    let store = read_store_at(path);
+    let id = record_id(host, port, user);
+    let record = store.get("records").and_then(|v| v.as_object())?.get(&id)?;
+    record_to_bundle(record)
+}
+
+/// Clear the active record (+ its keyring entry) from the store at `path`,
+/// leaving other hosts' records intact. The file is removed only when the store
+/// becomes empty (T-06-19-4: no global clobber).
+fn clear_active_at(path: &std::path::Path) {
+    let mut store = read_store_at(path);
+    let active_id = store.get("last_active").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let Some(id) = active_id else {
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+    // Pull host/port/user from the record to clear its keyring entry.
+    if let Some(record) = store.get("records").and_then(|v| v.as_object()).and_then(|r| r.get(&id)) {
+        let host = record.get("host").and_then(|v| v.as_str()).unwrap_or_default();
+        let port = record.get("port").and_then(|v| v.as_str()).unwrap_or("22");
+        let user = record.get("user").and_then(|v| v.as_str()).unwrap_or("root");
+        let _ = keyring_clear(host, port, user);
+    }
+    let remaining = if let Some(records) = store.get_mut("records").and_then(|v| v.as_object_mut()) {
+        records.remove(&id);
+        records.len()
+    } else {
+        0
+    };
+    if remaining == 0 {
+        // Nothing left — remove the file entirely.
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    // Point last_active at an arbitrary surviving record.
+    let next = store
+        .get("records")
+        .and_then(|v| v.as_object())
+        .and_then(|r| r.keys().next().cloned());
+    store.insert(
+        "last_active".into(),
+        next.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+    );
+    let _ = write_store_at(path, &store);
+}
+
+/// Clear a SPECIFIC host:port:user record (+ its keyring entry) from the store
+/// at `path`, leaving every other record — including `last_active` when it is a
+/// different record — intact (WR-04). The file is removed only when the store
+/// becomes empty. No-op when the target record does not exist.
+fn clear_for_at(path: &std::path::Path, host: &str, port: &str, user: &str) {
+    let id = record_id(host, port, user);
+    let mut store = read_store_at(path);
+    // Nothing to do if the target record is absent.
+    let present = store
+        .get("records")
+        .and_then(|v| v.as_object())
+        .is_some_and(|r| r.contains_key(&id));
+    if !present {
+        return;
+    }
+    // Drop the keyring entry for the targeted identity (best-effort).
+    let _ = keyring_clear(host, port, user);
+    let remaining = if let Some(records) = store.get_mut("records").and_then(|v| v.as_object_mut()) {
+        records.remove(&id);
+        records.len()
+    } else {
+        0
+    };
+    if remaining == 0 {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    // If last_active pointed at the cleared record, re-point it at a survivor;
+    // otherwise leave it untouched (we only re-keyed an inactive old-port entry).
+    let active_is_cleared = store
+        .get("last_active")
+        .and_then(|v| v.as_str())
+        .is_some_and(|a| a == id);
+    if active_is_cleared {
+        let next = store
+            .get("records")
+            .and_then(|v| v.as_object())
+            .and_then(|r| r.keys().next().cloned());
+        store.insert(
+            "last_active".into(),
+            next.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let _ = write_store_at(path, &store);
+}
+
 fn keyring_save(host: &str, port: &str, user: &str, password: &str) -> Result<(), String> {
     let key = keyring_key(host, port, user);
     let entry = Entry::new(KEYRING_SERVICE, &key).map_err(|e| format!("Keyring error: {e}"))?;
@@ -605,93 +928,41 @@ pub fn save_ssh_credentials(
     password: String,
     key_path: Option<String>,
 ) -> Result<(), String> {
-    // Store password in Windows Credential Manager (DPAPI-backed)
-    if !password.is_empty() {
-        keyring_save(&host, &port, &user, &password)?;
-    }
-    // Store metadata only in JSON (no password)
-    let data = serde_json::json!({
-        "host": host,
-        "port": port,
-        "user": user,
-        "keyPath": key_path.unwrap_or_default(),
-    });
-    // WR-06 fix: propagate serialization error instead of writing "" (which
-    // would silently clobber any existing valid credentials file).
-    let data_str = serde_json::to_string_pretty(&data)
-        .map_err(|e| format!("Failed to serialize credentials: {e}"))?;
-    std::fs::write(ssh_creds_path(), data_str)
-        .map_err(|e| format!("Failed to save credentials: {e}"))
+    // Per-host upsert: writing server B never clobbers server A's record
+    // (06-19 / D-15 / T-06-19-4). Password goes to the keyring; only metadata
+    // is written to disk (D-29 / T-06-19-2). Note: no secret is ever logged.
+    save_creds_at(&ssh_creds_path(), &host, &port, &user, &password, key_path)
 }
 
 #[tauri::command]
 pub fn load_ssh_credentials() -> Option<serde_json::Value> {
-    let path = ssh_creds_path();
-    let content = std::fs::read_to_string(&path).ok()?;
-    let mut obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&content).ok()?;
+    // Back-compat no-arg read: returns the last-active record's bundle.
+    // Reading the store migrates a legacy v1 single-object file on first touch.
+    load_active_at(&ssh_creds_path())
+}
 
-    let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let port = obj.get("port").and_then(|v| v.as_str()).unwrap_or("22").to_string();
-    let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("root").to_string();
-
-    // Migration: if JSON still has a "password" field, move it to keyring
-    if let Some(pwd_val) = obj.remove("password") {
-        if let Some(pwd_str) = pwd_val.as_str() {
-            if !pwd_str.is_empty() {
-                let decoded = if let Some(b64_payload) = pwd_str.strip_prefix("b64:") {
-                    // Decode base64-obfuscated password
-                    base64::engine::general_purpose::STANDARD
-                        .decode(b64_payload)
-                        .ok()
-                        .and_then(|bytes| String::from_utf8(bytes).ok())
-                        .unwrap_or_else(|| pwd_str.to_string())
-                } else {
-                    // Plaintext legacy password
-                    pwd_str.to_string()
-                };
-                // Store decoded password in keyring (best-effort migration)
-                let _ = keyring_save(&host, &port, &user, &decoded);
-                // Rewrite JSON without password field.
-                // WR-06 fix: skip write on serialization failure instead of
-                // clobbering the file with an empty string. Migration is best-
-                // effort — if we can't rewrite cleanly we leave the legacy file
-                // alone; next load_ssh_credentials pass retries migration.
-                if let Ok(stripped_json) = serde_json::to_string_pretty(&obj) {
-                    let _ = std::fs::write(&path, stripped_json);
-                }
-            }
-        }
-    }
-
-    // Load password from keyring
-    let password = keyring_load(&host, &port, &user).ok().flatten().unwrap_or_default();
-
-    // Return combined object with password from keyring + metadata from JSON
-    let mut result = serde_json::Map::new();
-    result.insert("host".into(), serde_json::Value::String(host));
-    result.insert("port".into(), serde_json::Value::String(port));
-    result.insert("user".into(), serde_json::Value::String(user));
-    result.insert("password".into(), serde_json::Value::String(password));
-    result.insert(
-        "keyPath".into(),
-        obj.get("keyPath").cloned().unwrap_or(serde_json::Value::String(String::new())),
-    );
-
-    Some(serde_json::Value::Object(result))
+/// Host-keyed read (06-19 / D-15 / C-23): return the EXACT target's bundle so a
+/// caller that knows its host:port:user never receives a different server's
+/// last-saved credentials. Returns None when no record exists for the target.
+#[tauri::command]
+pub fn load_ssh_credentials_for(host: String, port: String, user: String) -> Option<serde_json::Value> {
+    load_for_at(&ssh_creds_path(), &host, &port, &user)
 }
 
 #[tauri::command]
 pub fn clear_ssh_credentials() {
-    // Read JSON to get host/port/user for keyring cleanup
-    if let Ok(content) = std::fs::read_to_string(ssh_creds_path()) {
-        if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content) {
-            let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default();
-            let port = obj.get("port").and_then(|v| v.as_str()).unwrap_or("22");
-            let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("root");
-            let _ = keyring_clear(host, port, user);
-        }
-    }
-    let _ = std::fs::remove_file(ssh_creds_path());
+    // Clears only the active record (+ its keyring entry); other hosts' records
+    // survive. The file is removed only when the store becomes empty.
+    clear_active_at(&ssh_creds_path());
+}
+
+/// Clear a SPECIFIC host:port:user record (+ its keyring entry) (WR-04). Used
+/// when the SSH port changes: the orchestrator saves the NEW host:port:user
+/// record and then clears the OLD one so the per-host store does not accumulate
+/// orphaned old-port records / keyring entries. No-op when the record is absent.
+#[tauri::command]
+pub fn clear_ssh_credentials_for(host: String, port: String, user: String) {
+    clear_for_at(&ssh_creds_path(), &host, &port, &user);
 }
 
 #[tauri::command]
@@ -798,6 +1069,9 @@ pub async fn security_disable_password_auth(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     ssh::disable_password_auth(&app, &handle).await?;
@@ -830,6 +1104,9 @@ pub async fn security_enable_password_auth(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — keep the legacy try-key-then-password
+        // sequence; the D-06 single-method choice only flows from the wizard.
+        auth_method: None,
     };
     let handle = pool.acquire(&params, Some(app.clone())).await?;
     ssh::enable_password_auth(&app, &handle).await?;
@@ -958,3 +1235,269 @@ ssh_pool_command!(
     ssh::users_advanced::delete_user_advanced,
     username: String
 );
+
+// ─── Per-host credential store tests (06-19 / D-15 / C-23) ───────
+//
+// These exercise the path-based store helpers directly with a temp file, so they
+// never touch the real portable data dir. The keyring (Windows DPAPI) is not
+// available headlessly, so the security-load-bearing assertions are on the
+// ON-DISK JSON (no `password` field, per-host isolation, lossless migration) and
+// on store routing (records map / last_active). The keyring round-trip itself is
+// covered by manual multi-server UAT (see plan <verification>).
+#[cfg(test)]
+mod cred_store_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Unique temp credential-store path per test (no external tempfile dep).
+    fn temp_store(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let mut p = std::env::temp_dir();
+        p.push(format!("tt_creds_test_{tag}_{nanos}_{:?}.json", std::thread::current().id()));
+        let _ = std::fs::remove_file(&p);
+        p
+    }
+
+    fn records_count(path: &std::path::Path) -> usize {
+        let store = read_store_at(path);
+        store.get("records").and_then(|v| v.as_object()).map(|r| r.len()).unwrap_or(0)
+    }
+
+    fn disk_json(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    #[test]
+    fn saving_b_does_not_clobber_a() {
+        let path = temp_store("coexist");
+        // No password → keyring is never touched; store records still coexist.
+        save_creds_at(&path, "10.0.0.1", "22", "root", "", Some("".into())).unwrap();
+        save_creds_at(&path, "10.0.0.2", "22", "deploy", "", Some("/k.pem".into())).unwrap();
+
+        assert_eq!(records_count(&path), 2, "both host records must coexist");
+
+        let a = load_for_at(&path, "10.0.0.1", "22", "root").expect("A record present");
+        assert_eq!(a.get("host").and_then(|v| v.as_str()), Some("10.0.0.1"));
+        assert_eq!(a.get("user").and_then(|v| v.as_str()), Some("root"));
+
+        let b = load_for_at(&path, "10.0.0.2", "22", "deploy").expect("B record present");
+        assert_eq!(b.get("user").and_then(|v| v.as_str()), Some("deploy"));
+        assert_eq!(b.get("keyPath").and_then(|v| v.as_str()), Some("/k.pem"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_for_returns_target_or_none() {
+        let path = temp_store("loadfor");
+        save_creds_at(&path, "10.0.0.1", "22", "root", "", None).unwrap();
+        save_creds_at(&path, "10.0.0.2", "22", "deploy", "", None).unwrap();
+
+        assert!(load_for_at(&path, "10.0.0.1", "22", "root").is_some());
+        assert!(load_for_at(&path, "10.0.0.2", "22", "deploy").is_some());
+        assert!(
+            load_for_at(&path, "9.9.9.9", "22", "nobody").is_none(),
+            "unknown target must return None"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_v1_object_migrates_to_v2_with_last_active() {
+        let path = temp_store("migrate");
+        // Write a legacy v1 single-object file (no version/records).
+        let legacy = serde_json::json!({
+            "host": "203.0.113.5",
+            "port": "2222",
+            "user": "admin",
+            "keyPath": "/home/admin/key.pem"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        // Reading migrates it.
+        let store = read_store_at(&path);
+        assert_eq!(store.get("version").and_then(|v| v.as_u64()), Some(2));
+        let id = record_id("203.0.113.5", "2222", "admin");
+        assert_eq!(
+            store.get("last_active").and_then(|v| v.as_str()),
+            Some(id.as_str()),
+            "last_active points at the migrated record"
+        );
+        let rec = store
+            .get("records")
+            .and_then(|v| v.as_object())
+            .and_then(|r| r.get(&id))
+            .expect("migrated record present");
+        assert_eq!(rec.get("keyPath").and_then(|v| v.as_str()), Some("/home/admin/key.pem"));
+
+        // No-arg load returns the migrated record (back-compat).
+        let active = load_active_at(&path).expect("active bundle present");
+        assert_eq!(active.get("host").and_then(|v| v.as_str()), Some("203.0.113.5"));
+        assert_eq!(active.get("user").and_then(|v| v.as_str()), Some("admin"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_password_is_dropped_from_disk_on_migration() {
+        let path = temp_store("migrate_pwd");
+        // Legacy file carrying a stranded plaintext password.
+        let legacy = serde_json::json!({
+            "host": "198.51.100.7",
+            "port": "22",
+            "user": "root",
+            "keyPath": "",
+            "password": "super-secret-plaintext"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        // Migration runs on read (keyring_save may fail headlessly — that's fine,
+        // the security claim is that the password is NOT on disk afterwards).
+        let _ = read_store_at(&path);
+
+        let on_disk = disk_json(&path);
+        assert!(
+            !on_disk.contains("password"),
+            "rewritten v2 store must contain NO password field"
+        );
+        assert!(
+            !on_disk.contains("super-secret-plaintext"),
+            "the secret value must never appear on disk"
+        );
+        // The record itself survived (lossless metadata migration).
+        assert!(on_disk.contains("198.51.100.7"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_b64_password_is_dropped_from_disk() {
+        let path = temp_store("migrate_b64");
+        let encoded = base64::engine::general_purpose::STANDARD.encode("b64-secret");
+        let legacy = serde_json::json!({
+            "host": "198.51.100.8",
+            "port": "22",
+            "user": "root",
+            "keyPath": "",
+            "password": format!("b64:{encoded}")
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let _ = read_store_at(&path);
+
+        let on_disk = disk_json(&path);
+        assert!(!on_disk.contains("password"), "no password field on disk");
+        assert!(!on_disk.contains(&encoded), "encoded secret must not be on disk");
+
+        // decode_legacy_password correctly decodes the b64 form (unit check).
+        assert_eq!(decode_legacy_password(&format!("b64:{encoded}")), "b64-secret");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_never_writes_password_to_disk() {
+        let path = temp_store("nopwd");
+        // Even when a non-empty password is supplied, the on-disk JSON must not
+        // contain it (keyring is the only at-rest secret store). keyring_save may
+        // fail headlessly; metadata write still proceeds.
+        let _ = save_creds_at(&path, "10.0.0.9", "22", "root", "topsecretpw", None);
+        let on_disk = disk_json(&path);
+        assert!(!on_disk.contains("topsecretpw"), "password must not be on disk");
+        assert!(!on_disk.contains("\"password\""), "no password field on disk");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn clear_active_removes_only_active_record() {
+        let path = temp_store("clear");
+        save_creds_at(&path, "10.0.0.1", "22", "root", "", None).unwrap();
+        save_creds_at(&path, "10.0.0.2", "22", "deploy", "", None).unwrap();
+        // last_active is now B (last saved).
+        assert_eq!(records_count(&path), 2);
+
+        clear_active_at(&path);
+        // B removed, A survives.
+        assert_eq!(records_count(&path), 1, "only the active record is cleared");
+        assert!(load_for_at(&path, "10.0.0.1", "22", "root").is_some(), "A survives");
+        assert!(load_for_at(&path, "10.0.0.2", "22", "deploy").is_none(), "B cleared");
+
+        // Clearing the last record removes the file entirely.
+        clear_active_at(&path);
+        assert!(!path.exists(), "file removed when store becomes empty");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // WR-04 regression: changing the SSH port re-keys the per-host record
+    // (host:port:user). Saving under the NEW port must not leave the OLD-port
+    // record orphaned — `clear_for_at(old)` removes exactly that record (+ its
+    // keyring entry) while leaving every other host's record intact.
+    #[test]
+    fn clear_for_removes_only_the_targeted_record() {
+        let path = temp_store("clear_for");
+        // Old-port record for host X, plus an unrelated host Y.
+        save_creds_at(&path, "10.0.0.1", "22", "root", "", None).unwrap();
+        save_creds_at(&path, "10.0.0.9", "22", "deploy", "", None).unwrap();
+        assert_eq!(records_count(&path), 2);
+
+        // Simulate the port change: save the NEW-port record, then clear the OLD.
+        save_creds_at(&path, "10.0.0.1", "2222", "root", "", None).unwrap();
+        assert_eq!(records_count(&path), 3, "new-port record was added");
+        clear_for_at(&path, "10.0.0.1", "22", "root");
+
+        // The orphaned old-port record is gone…
+        assert!(
+            load_for_at(&path, "10.0.0.1", "22", "root").is_none(),
+            "old-port record cleared"
+        );
+        // …the new-port record survives…
+        assert!(
+            load_for_at(&path, "10.0.0.1", "2222", "root").is_some(),
+            "new-port record survives"
+        );
+        // …and the unrelated host is untouched.
+        assert!(
+            load_for_at(&path, "10.0.0.9", "22", "deploy").is_some(),
+            "unrelated host untouched"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn clear_for_keeps_last_active_when_it_is_not_the_cleared_record() {
+        let path = temp_store("clear_for_active");
+        save_creds_at(&path, "10.0.0.1", "22", "root", "", None).unwrap();
+        // last_active points at the new-port record (last saved).
+        save_creds_at(&path, "10.0.0.1", "2222", "root", "", None).unwrap();
+        let active_before = read_store_at(&path)
+            .get("last_active")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        clear_for_at(&path, "10.0.0.1", "22", "root");
+
+        let active_after = read_store_at(&path)
+            .get("last_active")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        assert_eq!(active_before, active_after, "active record pointer preserved");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn record_id_matches_keyring_key() {
+        // The JSON record id and the keyring entry MUST share identity.
+        assert_eq!(
+            record_id("h", "22", "u"),
+            keyring_key("h", "22", "u"),
+            "record_id and keyring_key must stay aligned"
+        );
+    }
+}

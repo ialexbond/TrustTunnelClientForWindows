@@ -40,6 +40,9 @@ describe("UserConfigModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     activityLogSpy.mockClear();
+    // UAT (06-uat fix 14): clear the GeoIP cache between tests so a seeded
+    // tt_geoip_<host> entry never leaks into a test that expects no country prefix.
+    localStorage.clear();
     i18n.changeLanguage("ru");
 
     // Mock clipboard API — writeText + write.
@@ -284,6 +287,11 @@ describe("UserConfigModal", () => {
     await waitFor(() => {
       expect(save).toHaveBeenCalled();
     });
+    // UAT (06-uat fix 14): the save-dialog default name is branded + consistent —
+    // `TrustTunnel_<username>.toml` (no country prefix when none is cached for the host).
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "TrustTunnel_swift-fox.toml" }),
+    );
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith(
         "copy_file",
@@ -296,6 +304,47 @@ describe("UserConfigModal", () => {
         expect.stringContaining("user.config.downloaded user=swift-fox"),
       );
     });
+  });
+
+  // UAT (06-uat fix 14): when the host's country is already cached, the save-dialog
+  // default name carries the country prefix — `<COUNTRY>_TrustTunnel_<username>.toml`.
+  it("Download default name includes the country prefix when the host geoip is cached", async () => {
+    // Seed the GeoIP cache the same way useServerGeoIp persists it (tt_geoip_<host>).
+    localStorage.setItem(
+      "tt_geoip_192.168.1.100",
+      JSON.stringify({
+        country: "Germany",
+        country_code: "DE",
+        flag_emoji: "🇩🇪",
+        fetched_at: new Date().toISOString(),
+      }),
+    );
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "fetch_server_config") return "/tmp/test.toml";
+      if (cmd === "copy_file") return undefined;
+      return null;
+    });
+    vi.mocked(save).mockResolvedValueOnce("/home/user/config.toml");
+
+    render(
+      <UserConfigModal
+        isOpen={true}
+        username="swift-fox"
+        sshParams={mockSshParams}
+        onClose={vi.fn()}
+        _deeplinkOverride="tt://test"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(i18n.t("server.users.download_config"), "i"),
+      }),
+    );
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "DE_TrustTunnel_swift-fox.toml" }),
+    );
   });
 
   it("Download cancelled (user closes save dialog) does not invoke copy_file", async () => {

@@ -240,9 +240,37 @@ pub fn run() {
             let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
             geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
 
-            // Deep-link URL protocol support is disabled for portable builds.
-            // For installer builds, uncomment to auto-register trusttunnel:// and tt://
-            // std::thread::spawn(|| { let _ = commands::protocol::register_url_protocols(); });
+            // Deep-link URL protocol wiring (C-22 / D-14). A clicked tt:// /
+            // trusttunnel:// link must reach the app no matter HOW it arrives.
+            // Three arrival channels all funnel into ONE `deep-link-url` event so
+            // the frontend needs only a single listener:
+            //   (a) single-instance arg — a second launch with a tt:// arg already
+            //       emits `deep-link-url` (see plugin handler ~L64-67 above);
+            //   (b) protocol-handler launcher — writes `.pending_deeplink` next to
+            //       the exe (protocol.rs:40-48), drained by `poll_pending_deeplink`
+            //       on the frontend and at startup here;
+            //   (c) cold start launched BY the link — the file is written before
+            //       the window mounts, so we drain it here at startup too.
+            //
+            // (1) Register the HKCU-only scheme DIRECTLY on the app exe (no admin / no UAC).
+            //     A clicked tt:// link then prompts «Открыть TrustTunnel Client Pro?», NOT
+            //     «Открыть Windows PowerShell?» (06-uat — the old powershell handler read as
+            //     malware). Always overwrites so legacy installs migrate off the powershell
+            //     command. Fire-and-forget + best-effort: a registration failure must NEVER
+            //     block startup.
+            std::thread::spawn(|| {
+                let _ = commands::protocol::register_url_protocols();
+            });
+            // (2) Cold start launched BY the link: the URL is in OUR argv (the direct-exe
+            //     handler passed "%1"). Stage it in .pending_deeplink so the frontend's
+            //     startup poll (useDeepLinkImport channel 2) drains it once its listener is
+            //     attached — avoiding the emit-before-listener race. Warm start (an already-
+            //     running instance) is handled by the single-instance handler (~L64), which
+            //     emits `deep-link-url` directly. The URL is untrusted external input — it is
+            //     only carried to the frontend; it is NOT decoded/validated until the user
+            //     clicks «Импортировать» (decode_deeplink, the trusted boundary). Never
+            //     logged (D-29).
+            let _ = commands::protocol::capture_cold_start_deeplink();
 
             // Listen for vpn-status events to update tray icon color
             use tauri::Listener;
@@ -363,12 +391,15 @@ pub fn run() {
             commands::vpn::clear_vpn_error,
             commands::vpn::test_sidecar,
             commands::ssh_commands::deploy_server,
+            commands::ssh_commands::cancel_deploy,
             commands::ssh_commands::diagnose_server,
             commands::ssh_commands::forget_ssh_host_key,
             ssh::confirm_host_key,
             commands::ssh_commands::save_ssh_credentials,
             commands::ssh_commands::load_ssh_credentials,
+            commands::ssh_commands::load_ssh_credentials_for,
             commands::ssh_commands::clear_ssh_credentials,
+            commands::ssh_commands::clear_ssh_credentials_for,
             commands::ssh_commands::check_process_conflict,
             commands::ssh_commands::kill_existing_process,
             commands::config::copy_file,
@@ -397,12 +428,6 @@ pub fn run() {
             commands::ssh_commands::server_update_config_feature,
             // Phase 15 (Configuration tab) — vpn.toml + hosts.toml mutations
             commands::ssh_commands::server_get_config_bundle,
-            commands::ssh_commands::server_update_listen_address,
-            commands::ssh_commands::server_update_log_level,
-            commands::ssh_commands::server_update_allow_private,
-            commands::ssh_commands::server_update_auth_status,
-            commands::ssh_commands::server_update_ping_path,
-            commands::ssh_commands::server_update_speedtest_path,
             commands::ssh_commands::server_write_vpn_toml_raw,
             commands::ssh_commands::server_save_config_file,
             commands::ssh_commands::server_update_hosts_allowed_sni,
@@ -550,6 +575,14 @@ pub fn run() {
                 if let Some(state) = app.try_state::<AppState>() {
                     kill_sidecar_from_state(&state);
                 }
+                // AUDIT-2026-06-11 #10: the hard-killed sidecar never runs its own DNS
+                // teardown (see dns_guard.rs header), so quit-while-connected used to leave
+                // the whole machine pointing at the dead tunnel resolver until the NEXT
+                // launch's sweep_stale_dns_on_startup. Restore here, AFTER the kill so the
+                // sidecar can't re-set DNS behind us. No-op when no snapshot exists — safe
+                // on every exit. Tray «Выйти» (tray.rs "quit") ends in app.exit(0), which
+                // also dispatches RunEvent::Exit, so this single call covers that path too.
+                dns_guard::restore_system_dns();
                 // Flush pending log entries before exit
                 logging::shutdown_logging();
                 // Clean up hosts file blocked entries

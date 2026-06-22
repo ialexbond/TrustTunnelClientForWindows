@@ -44,7 +44,10 @@ vi.mock("./components/ConnectionPanel", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
     connectionPanelProps = props;
-    return <div data-testid="connection-panel">ConnectionPanel</div>;
+    // IN-11: App now mounts StatusPanel only on the ACTIVE tab (statusPanelFor). The
+    // default tab in the status tests is "connection", so render the passed statusPanel
+    // here — that is the live probe instance the `statusPanelProps` assertions read.
+    return <div data-testid="connection-panel">ConnectionPanel{props.statusPanel}</div>;
   },
 }));
 
@@ -83,8 +86,10 @@ vi.mock("./components/DashboardPanel", () => ({
 vi.mock("./components/AppSettingsPanel", () => ({
   __esModule: true,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: (_props: any) => {
-    return <div data-testid="app-settings-panel">AppSettingsPanel</div>;
+  default: (props: any) => {
+    // IN-11: render the passed statusPanel so a test that probes status from the Settings
+    // tab still mounts the StatusPanel instance (App now gates it to the active tab).
+    return <div data-testid="app-settings-panel">AppSettingsPanel{props.statusPanel}</div>;
   },
 }));
 
@@ -278,6 +283,209 @@ describe("App", () => {
       );
     });
     expect(screen.queryByTestId("log-panel")).not.toBeInTheDocument();
+  });
+
+  // ─── Setup wizard overlay — no overlay-level × (06-uat, user request) ───
+  // The overlay-level close (×) was REMOVED: the install flow is self-contained
+  // (ServerStep «Назад» + the Done/Found buttons exit via onClose), and switching
+  // bottom tabs hides the overlay (it sits between the title bar and the tab bar,
+  // which stays clickable), so there is no trap. Assert the overlay opens via
+  // onSwitchToSetup and that it no longer renders a × close button.
+
+  it("opens the setup wizard overlay via onSwitchToSetup and exposes NO overlay × (removed)", async () => {
+    // Returning user — suppress the first-run WelcomeTour so only the wizard
+    // overlay is in play.
+    localStorage.setItem("tt_welcome_completed", "true");
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // No config → control panel; wizard overlay not mounted yet.
+    expect(screen.queryByTestId("setup-wizard")).not.toBeInTheDocument();
+
+    // «Установить» path → wizardActive = true.
+    await act(async () => {
+      controlPanelProps.onSwitchToSetup();
+    });
+    expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
+
+    // The overlay-level × is gone — there is no «Закрыть мастер установки» button.
+    expect(
+      screen.queryByRole("button", { name: "Закрыть мастер установки" }),
+    ).not.toBeInTheDocument();
+  });
+
+  // ─── Wizard overlay dialog a11y (D-01/D-05) — RED until Plan 03 ───
+  //
+  // The wizardActive overlay wrapper lives in App.tsx (NOT inside SetupWizard,
+  // which is mocked here), so we can assert its roles directly. Plan 03 (D-01)
+  // added role="dialog" + aria-modal="true" + aria-labelledby pointing at the
+  // hidden stable wizard title (06-UI-SPEC §"Accessibility Contract"). Assert by
+  // ARIA role/name only — never CSS classes.
+  describe("wizard overlay dialog a11y (D-01 / Plan 03)", () => {
+    it("exposes the overlay as role=dialog with aria-modal and a non-empty accessible name", async () => {
+      // Returning user — suppress the first-run WelcomeTour so only the wizard
+      // overlay is in play (same harness as the anti-trap close test above).
+      localStorage.setItem("tt_welcome_completed", "true");
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      // «Установить» path → wizardActive = true (overlay mounts).
+      await act(async () => {
+        controlPanelProps.onSwitchToSetup();
+      });
+      // The mocked SetupWizard confirms the overlay opened.
+      expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
+
+      // The overlay wrapper carries the dialog role (D-01 / Plan 03).
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+      // A dialog must have a non-empty accessible name (aria-labelledby →
+      // the current screen heading).
+      expect(dialog).toHaveAccessibleName(/\S/);
+    });
+
+    // ─── UAT (06-uat fix 9): overlay only on its launching tab ───
+    //
+    // The wizard overlay used to render on `wizardActive` alone, so a running
+    // install covered EVERY tab. The overlay now records its launching tab and is
+    // only VISIBLE there; on other tabs it is hidden (display:none + aria-hidden)
+    // while the SetupWizard stays MOUNTED (the deploy keeps running). Assert that
+    // switching away from the launch tab hides the overlay but keeps the wizard
+    // mounted, and switching back reveals it again.
+    it("shows the overlay only on the launching tab and keeps the wizard mounted on others", async () => {
+      localStorage.setItem("tt_welcome_completed", "true");
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      // Launch from the control tab → overlay visible (dialog accessible).
+      await act(async () => {
+        controlPanelProps.onSwitchToSetup();
+      });
+      expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      // Switch to the connection tab → overlay hidden (display:none → getByRole
+      // can't find the now-hidden dialog), but the wizard is STILL mounted so a
+      // background install keeps running.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
+
+      // Switch back to control → overlay visible again.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Панель управления/ }));
+      });
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Connection no-config import relocation (D-02 A1) — D-01 / Plan 03 / 06-uat ───
+  //
+  // D-01 removed the welcome 3-card menu, which was the ONLY place the "import config"
+  // action lived. D-02 relocates it onto the existing Connection no-config surface
+  // (App.tsx connection.noConfig EmptyState) WITHOUT restyling the Connection section
+  // (v2/CONNECT-01, out of scope). 06-uat: the «Забрать с сервера» (fetch) entry was
+  // removed end-to-end — fetching an existing user's config is done from the Control Panel
+  // (per-user QR/Link). The quiet affordance now goes STRAIGHT to the import modal; there
+  // is no fetch button. Assert by role + Russian text only.
+  describe("connection no-config import relocation (D-02 / Plan 03 / 06-uat)", () => {
+    it("surfaces an 'Импортировать конфиг' affordance and NO «Забрать с сервера» fetch entry", async () => {
+      // No config → the connection tab renders the noConfig EmptyState (the
+      // relocation target). Default invoke mock already returns no config.
+      await act(async () => {
+        render(<App />);
+      });
+
+      // Navigate to the connection tab so its tabpanel is the active (non-aria-hidden)
+      // one — getByRole ignores aria-hidden elements.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+
+      // The import affordance is present…
+      expect(
+        screen.getByRole("button", { name: /Импортировать конфиг/ }),
+      ).toBeInTheDocument();
+      // …and the removed fetch entry is NOT.
+      expect(
+        screen.queryByRole("button", { name: /Забрать с сервера/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clicking 'Импортировать конфиг' opens the import modal directly", async () => {
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Импортировать конфиг/ }));
+      });
+      // The reused ImportConfigModal mounts — its title always renders when open.
+      expect(
+        screen.getByText(i18n.t("wizard.import.title")),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // ─── Deep-link config import (06-18 C-22 / D-14) ───
+  // A clicked tt:// / trusttunnel:// link funnels into a `deep-link-url` event;
+  // App routes to the Connection no-config import surface and pre-fills the modal
+  // via its initialUrl prop. The URL is NEVER auto-imported — the user must click
+  // «Импортировать», which routes through decode_deeplink (the trusted boundary).
+  describe("deep-link config import (06-18 C-22/D-14)", () => {
+    it("a deep-link-url event navigates to connection and pre-fills the import modal", async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      // Fire the deep-link arrival (the same event every channel funnels into).
+      await act(async () => {
+        emitEvent("deep-link-url", { url: "tt://?ZmFrZQ" });
+      });
+
+      // Routed to the Connection tab (its tabpanel becomes the visible one).
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute(
+        "aria-hidden",
+        "false",
+      );
+
+      // The import modal is pre-filled: the deeplink helper text renders and the
+      // link field carries the URL.
+      expect(
+        screen.getByText(i18n.t("wizard.import.deeplink_received")),
+      ).toBeInTheDocument();
+      const linkInput = screen.getByPlaceholderText(/tt:\/\/\?BASE64/) as HTMLInputElement;
+      expect(linkInput.value).toBe("tt://?ZmFrZQ");
+    });
+
+    it("does NOT auto-import the pre-filled URL (no decode_deeplink / import without a click)", async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      await act(async () => {
+        emitEvent("deep-link-url", { url: "tt://garbage" });
+      });
+
+      // Modal is open + pre-filled, but no import command fired without a user click.
+      expect(
+        screen.getByText(i18n.t("wizard.import.deeplink_received")),
+      ).toBeInTheDocument();
+
+      const invokeCalls = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+      expect(invokeCalls).not.toContain("decode_deeplink");
+      expect(invokeCalls).not.toContain("import_config_from_string");
+    });
   });
 
   // ─── Theme management ───
@@ -489,7 +697,16 @@ describe("App", () => {
     expect(statusPanelProps.status).toBe("disconnected");
   });
 
-  it("vpn-status reconnecting → disconnected is suppressed (manual save+reconnect flash)", async () => {
+  it("vpn-status reconnecting → disconnected COMMITS when no manual reconnect is in flight (tray disconnect — AUDIT #8)", async () => {
+    // Re-pinned (AUDIT-2026-06-11 #8): this test used to assert the OLD unconditional
+    // no-dwell suppression — exactly the bug. A backend-driven "reconnecting" (auto-
+    // reconnect supervisor) followed by a bare "disconnected" is a TRAY disconnect:
+    // the backend emits no intermediate status (D-09) and the supervisor's T-31 abort
+    // forces Disconnected. Suppressing it left the window stuck on «Переподключение»
+    // forever while the tray went grey. The suppression now requires an actually
+    // in-flight MANUAL reconnect (manualReconnectActiveRef, raised only by
+    // useVpnActions.handleReconnect) — that no-dwell path is pinned end-to-end in
+    // useVpnActions.test.ts; here no manual reconnect ran, so the event must land.
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "check_vpn_status") return "disconnected";
@@ -503,18 +720,17 @@ describe("App", () => {
       render(<App />);
     });
 
-    // A manual «Сохранить и переподключить» sets the status to "reconnecting" up-front.
+    // Backend auto-reconnect drives the status to "reconnecting" (no frontend action).
     await act(async () => {
       emitEvent("vpn-status", { status: "reconnecting" });
     });
     expect(statusPanelProps.status).toBe("reconnecting");
 
-    // The teardown emits a transient "disconnected" — the no-dwell guard keeps the
-    // «Переподключение» label continuous (no «Отключено» flash) until the re-connect.
+    // Tray disconnect → single terminal "disconnected" — must COMMIT, not be eaten.
     await act(async () => {
       emitEvent("vpn-status", { status: "disconnected" });
     });
-    expect(statusPanelProps.status).toBe("reconnecting");
+    expect(statusPanelProps.status).toBe("disconnected");
   });
 
   it("handleConnect invokes vpn_connect with config", async () => {
@@ -1460,6 +1676,26 @@ describe("App", () => {
       expect(screen.queryByTestId("welcome-tour-overlay")).not.toBeInTheDocument();
     });
 
+    it("existing user может вручную вызвать WelcomeTour событием tt-show-welcome-tour (About → «Приветственный тур»)", async () => {
+      // Configured user: auto-skip suppresses the first-run tour.
+      localStorage.setItem("tt_ssh_last_host", "1.2.3.4");
+      localStorage.setItem("tt_welcome_completed", "true");
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(screen.queryByTestId("welcome-tour-overlay")).not.toBeInTheDocument();
+
+      // The manual trigger (the window event AboutPanel dispatches) re-opens the
+      // tour on demand, bypassing the existing-user auto-skip.
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent("tt-show-welcome-tour"));
+      });
+
+      expect(screen.getByTestId("welcome-tour-overlay")).toBeVisible();
+    });
+
     it("completed user (tt_welcome_completed === \"true\") НЕ видит WelcomeTour", async () => {
       localStorage.setItem("tt_welcome_completed", "true");
 
@@ -1488,6 +1724,98 @@ describe("App", () => {
       // Overlay больше не в DOM.
       expect(screen.queryByTestId("welcome-tour-overlay")).not.toBeInTheDocument();
       expect(localStorage.getItem("tt_welcome_completed")).toBe("true");
+    });
+  });
+
+  // ─── 06-17 — Cross-app entry-flow unification (C-21/D-17, C-24) ───
+
+  describe("06-17 entry flow", () => {
+    // Drives the WelcomeTour to its final screen and clicks «Начать».
+    async function finishOnboardingStart() {
+      // Navigate Screen 1 → 2 → 3 via the right arrow, then click start.
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("welcome-tour-arrow-right"));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("welcome-tour-arrow-right"));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("welcome-tour-start"));
+      });
+    }
+
+    it("C-21/D-17: onboarding «Начать» с НЕТ конфига → вкладка «Панель управления» (control), не в петлю Подключения", async () => {
+      localStorage.clear();
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      // First-run tour is visible (no config, no tt_ssh_last_host).
+      expect(screen.getByTestId("welcome-tour-overlay")).toBeVisible();
+
+      await finishOnboardingStart();
+
+      // The control tabpanel is active (aria-hidden=false), Connection is hidden.
+      expect(document.getElementById("tabpanel-control")).toHaveAttribute("aria-hidden", "false");
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("C-21/D-17: onboarding «Начать» С конфигом → вкладка «Подключение» (connection)", async () => {
+      localStorage.clear();
+      // Config present → wizard auto-skip is NOT engaged because tt_ssh_last_host is
+      // absent, so the tour still shows; but completion must route to connection.
+      localStorage.setItem("tt_config_path", "/config.json");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      expect(screen.getByTestId("welcome-tour-overlay")).toBeVisible();
+
+      await finishOnboardingStart();
+
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "false");
+      expect(document.getElementById("tabpanel-control")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    // C-24 «Забрать с сервера» fetch-entry test REMOVED (06-uat): the fetch flow was
+    // removed end-to-end from the Connection no-config affordance (fetching an existing
+    // user's config is done from the Control Panel via per-user QR/Link). There is no
+    // longer a «Забрать с сервера» button to seed a fetch-mode wizard.
+
+    it("C-26: emitting tray-navigate {target:install} активирует вкладку «Панель управления»", async () => {
+      // Start on the connection tab (config present) so the route change is observable.
+      localStorage.setItem("tt_config_path", "/config.json");
+      localStorage.setItem("tt_ssh_last_host", "1.2.3.4"); // suppress the welcome tour
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      // Starts on connection (saved config path).
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "false");
+
+      await act(async () => {
+        emitEvent("tray-navigate", { target: "install" });
+      });
+
+      expect(document.getElementById("tabpanel-control")).toHaveAttribute("aria-hidden", "false");
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "true");
     });
   });
 });

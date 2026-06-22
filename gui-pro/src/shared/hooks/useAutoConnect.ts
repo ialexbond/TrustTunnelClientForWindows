@@ -44,10 +44,25 @@ export function useAutoConnect({
 }: UseAutoConnectParams) {
   const autoConnectDone = useRef(false);
 
+  // AUDIT-2026-06-11 #15: live status mirror, updated EVERY render. The effect below
+  // closes over `status` from its first run only (deps = [config.configPath]), so its
+  // `status !== "disconnected"` guard always saw the initial "disconnected" — a dead
+  // check. After a webview remount with a live tunnel, the mount snapshot restores
+  // "connected" within ~100ms, but the stale guard let auto-connect fire anyway:
+  // the optimistic "connecting" clobbered the green status and vpn_connect bounced
+  // off the backend's R8 "VPN is already running" guard into a stuck red error
+  // (a settled-Connected backend emits no further events to self-heal it). The
+  // timer callback and the pre-invoke point re-check THIS ref instead.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
   useEffect(() => {
     if (autoConnectDone.current) return;
     if (localStorage.getItem("tt_auto_connect") !== "true") return;
     if (!config.configPath) return;
+    // NOTE: stale closure — on the first run this is always "disconnected"
+    // (App initializes status before the snapshot lands). Kept as a cheap
+    // first-render guard; the LIVE checks are the statusRef re-checks below (#15).
     if (status !== "disconnected") return;
     autoConnectDone.current = true;
 
@@ -78,7 +93,27 @@ export function useAutoConnect({
         await new Promise((r) => setTimeout(r, NETWORK_READY_POLL_MS));
       }
 
-      if (cancelled) return;
+      if (cancelled) {
+        // AUDIT-2026-06-11 #23: cancelled mid network-wait (config path changed /
+        // unmount) — vpn_connect was never invoked, so the backend stays silently
+        // Disconnected and no vpn-status event will ever correct the optimistic
+        // "connecting" the timer set. Roll back ONLY our own optimistic mark: the
+        // functional updater leaves the status untouched if a live vpn-status event
+        // already moved it (the backend remains the sole status owner — we never
+        // synthesize a status it didn't have).
+        setStatus((s) => (s === "connecting" ? "disconnected" : s));
+        return;
+      }
+
+      // AUDIT-2026-06-11 #15: last-moment live-status re-check. During the bounded
+      // network wait the mount snapshot / a live vpn-status event may have surfaced
+      // an already-active session (connected / reconnecting / recovering / error).
+      // Firing vpn_connect then would bounce off the backend R8 guard into a stuck
+      // error. Proceed only from "disconnected" (nothing changed) or "connecting"
+      // (our own optimistic mark from the timer below — React may or may not have
+      // re-rendered it into the ref yet, both values mean "still our flow").
+      const liveStatus = statusRef.current;
+      if (liveStatus !== "disconnected" && liveStatus !== "connecting") return;
 
       try {
         await invoke("vpn_connect", {
@@ -93,6 +128,11 @@ export function useAutoConnect({
     };
 
     const timer = setTimeout(() => {
+      // AUDIT-2026-06-11 #15: re-check the LIVE status (not the stale closure) right
+      // before the optimistic mark. By now (1.5s after mount) the snapshot has long
+      // restored any live tunnel state — if the session is not plainly disconnected,
+      // auto-connect must stand down instead of clobbering it.
+      if (statusRef.current !== "disconnected") return;
       // Move to "connecting" up-front (unchanged UX), then run the gated connect.
       setStatus("connecting");
       void waitForNetworkThenConnect();

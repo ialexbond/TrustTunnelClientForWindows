@@ -243,9 +243,60 @@ describe("ServerPanel", () => {
     installBtn.click();
     const stored = JSON.parse(localStorage.getItem("trusttunnel_wizard") || "{}");
     expect(stored.host).toBe("10.0.0.1");
-    expect(stored.wizardStep).toBe("endpoint");
+    // CANONICAL `step` (persist.ts reads `step`, not the legacy `wizardStep`) + the
+    // one-shot install-entry marker so the wizard opens straight on Settings, no probe.
+    expect(stored.step).toBe("endpoint");
+    expect(stored.wizardStep).toBeUndefined();
+    expect(stored.installEntry).toBe(true);
     expect(stored.wizardMode).toBe("deploy");
     expect(mockOnSwitchToSetup).toHaveBeenCalled();
+  });
+
+  // UAT (06-uat fix 3): a fresh install must NOT carry over the previous install's
+  // endpoint fields — including ADVANCED settings (metrics/socks5/reverse-proxy/...).
+  // The «Установить» seed runs clearEndpointForm, which drops the FULL endpoint+advanced
+  // key set and resets certType, so the EndpointStep opens blank instead of showing
+  // stale values (e.g. metrics still ON) from a prior install on the same server.
+  it("install button clears ALL stale endpoint + advanced fields from a prior install", () => {
+    // Pre-seed the blob as if a PREVIOUS install left endpoint + advanced values behind.
+    localStorage.setItem(
+      "trusttunnel_wizard",
+      JSON.stringify({
+        domain: "old.example.com",
+        email: "old@example.com",
+        vpnUsername: "old-user",
+        certChainPath: "/etc/ssl/old-cert.pem",
+        certKeyPath: "/etc/ssl/old-key.pem",
+        certType: "provided",
+        // Advanced settings that were leaking forward before fix 3. 06-uat install-wizard
+        // slimming removed the Metrics/SOCKS5/Allow-private/ICMP keys from the wizard, and
+        // the reverse-proxy / camouflage keys were dropped when that feature was removed
+        // entirely, so only the kept advanced setting (407/405) is cleared now.
+        authFailureStatusCode: 405,
+      }),
+    );
+    mockState = {
+      ...mockState,
+      loading: false,
+      error: "",
+      serverInfo: { installed: false, version: "", serviceActive: false, users: [] },
+    };
+    render(<ServerPanel {...defaultProps} />);
+    screen.getByRole("button", { name: new RegExp(i18n.t("buttons.install")) }).click();
+    const stored = JSON.parse(localStorage.getItem("trusttunnel_wizard") || "{}");
+    // The stale endpoint fields are gone — the wizard's seed regenerates vpnUsername
+    // and leaves domain/email blank.
+    expect(stored.domain).toBeUndefined();
+    expect(stored.email).toBeUndefined();
+    expect(stored.vpnUsername).toBeUndefined();
+    expect(stored.certChainPath).toBeUndefined();
+    expect(stored.certKeyPath).toBeUndefined();
+    // The kept ADVANCED key is ALSO cleared (the core of fix 3) — it falls back to
+    // its useWizardState default on the fresh mount instead of staying ON.
+    expect(stored.authFailureStatusCode).toBeUndefined();
+    // certType is reset to the default; host/port/sshUser were (re)seeded from the panel.
+    expect(stored.certType).toBe("letsencrypt");
+    expect(stored.host).toBe("10.0.0.1");
   });
 
   it("rebooting state shows cancel button that stops rebooting and disconnects", () => {

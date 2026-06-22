@@ -1,26 +1,44 @@
-//! Register trusttunnel:// and tt:// URL protocol handlers in Windows registry.
+//! Register trusttunnel:// and tt:// URL protocol handlers in the Windows registry.
 //! Uses HKEY_CURRENT_USER (no admin rights needed).
 //!
-//! Strategy: register a small launcher script that writes the URL to a temp file,
-//! then the main app picks it up via file watcher. This avoids UAC for the protocol handler.
+//! Strategy: register the app EXE DIRECTLY as the handler (`"<exe>" "%1"`). A clicked
+//! `tt://` link then makes the browser/OS prompt show the app name («Открыть TrustTunnel
+//! Client Pro?») — NOT powershell.exe. (The previous design registered a hidden
+//! powershell.exe one-liner that wrote the URL to a file; for a VPN app, a browser prompt
+//! to "open Windows PowerShell" reads as malware and scared users off — 06-uat.) The URL
+//! reaches the running app via the single-instance handler (warm start) or via argv on a
+//! cold start (`capture_cold_start_deeplink` writes `.pending_deeplink`, drained by the
+//! frontend's startup poll once its listener is attached).
 
 #[cfg(windows)]
 use winreg::enums::HKEY_CURRENT_USER;
 #[cfg(windows)]
 use winreg::RegKey;
 
-/// Get the path where incoming deep-link URLs are written.
-#[cfg(windows)]
-#[allow(dead_code)]
+/// Path where an incoming deep-link URL is staged for the frontend's startup poll
+/// (`poll_pending_deeplink`). Lives next to the exe (per-user install dir, writable).
 fn deeplink_pending_path() -> std::path::PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.parent().unwrap_or(std::path::Path::new(".")).join(".pending_deeplink")
 }
 
-/// Register a URL protocol scheme using a PowerShell one-liner that writes
-/// the URL to a file next to the exe (no UAC needed).
+/// Cold-start capture: if THIS process was launched by the protocol handler
+/// (`"<exe>" "%1"`), the URL is in our own argv. Stage it in `.pending_deeplink` so the
+/// frontend's startup poll (`useDeepLinkImport` channel 2) drains it AFTER its listener
+/// is attached — avoiding the emit-before-listener race. Warm start (an already-running
+/// instance) is handled by the single-instance handler instead, so this only fires on a
+/// genuine cold launch. Best-effort; returns the captured URL if any.
+pub fn capture_cold_start_deeplink() -> Option<String> {
+    let url = std::env::args()
+        .find(|a| a.starts_with("trusttunnel://") || a.starts_with("tt://"))?;
+    let _ = std::fs::write(deeplink_pending_path(), &url);
+    Some(url)
+}
+
+/// Register a URL protocol scheme pointing DIRECTLY at the app exe (`"<exe>" "%1"`), so
+/// the OS handler-prompt shows the app — not powershell.exe. HKCU = no UAC.
 #[cfg(windows)]
-fn register_protocol(scheme: &str, exe_dir: &str) -> Result<(), String> {
+fn register_protocol(scheme: &str, exe_path: &str) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let class_path = format!("Software\\Classes\\{scheme}");
 
@@ -37,17 +55,22 @@ fn register_protocol(scheme: &str, exe_dir: &str) -> Result<(), String> {
         .create_subkey(format!("{class_path}\\shell\\open\\command"))
         .map_err(|e| format!("Failed to create command key: {e}"))?;
 
-    // Write URL to .pending_deeplink file — the running app polls for it
-    let pending_path = exe_dir.replace('\\', "\\\\");
-    let cmd = format!(
-        "powershell.exe -NoProfile -WindowStyle Hidden -Command \"Set-Content -Path '{pending_path}\\\\.pending_deeplink' -Value '%1' -NoNewline\"",
-    );
-
+    // Launch the app directly with the URL as %1. The running app receives it via the
+    // single-instance handler (warm) or argv at startup (cold). Quoted so a path with
+    // spaces is one argument.
     cmd_key
-        .set_value("", &cmd)
+        .set_value("", &build_protocol_command(exe_path))
         .map_err(|e| format!("Failed to set command: {e}"))?;
 
     Ok(())
+}
+
+/// The registry `shell\open\command` value for a scheme: the app exe launched directly
+/// with the URL as `%1`. Pure (testable) — locks the "direct exe, never powershell"
+/// contract so the malware-looking «Открыть Windows PowerShell?» prompt cannot regress.
+#[cfg(windows)]
+fn build_protocol_command(exe_path: &str) -> String {
+    format!("\"{exe_path}\" \"%1\"")
 }
 
 /// Check if a URL protocol is registered.
@@ -65,25 +88,17 @@ pub fn register_url_protocols() -> Result<String, String> {
     {
         let exe = std::env::current_exe()
             .map_err(|e| format!("Failed to get exe path: {e}"))?;
-        let exe_dir = exe.parent()
-            .ok_or("Failed to get exe directory")?
-            .to_string_lossy()
-            .to_string();
+        let exe_path = exe.to_string_lossy().to_string();
 
-        let mut registered = Vec::new();
-
+        // Always (re)write the command — this MIGRATES installs whose registry still holds
+        // the old powershell.exe handler to the direct-exe command. create_subkey +
+        // set_value overwrites; it is idempotent and cheap, so no is_protocol_registered
+        // short-circuit (that guard is exactly why legacy installs never got the fix).
         for scheme in &["trusttunnel", "tt"] {
-            if !is_protocol_registered(scheme) {
-                register_protocol(scheme, &exe_dir)?;
-                registered.push(*scheme);
-            }
+            register_protocol(scheme, &exe_path)?;
         }
 
-        if registered.is_empty() {
-            Ok("Protocols already registered".into())
-        } else {
-            Ok(format!("Registered: {}", registered.join(", ")))
-        }
+        Ok("Registered: trusttunnel, tt".into())
     }
 
     #[cfg(not(windows))]
@@ -123,5 +138,35 @@ pub fn poll_pending_deeplink() -> Option<String> {
         }
     } else {
         None
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    // 06-uat regression: the protocol handler must launch the app DIRECTLY, never via
+    // powershell.exe — a clicked tt:// link prompting «Открыть Windows PowerShell?» reads
+    // as malware for a VPN app and scared users off.
+    #[test]
+    fn protocol_command_launches_exe_directly_not_powershell() {
+        let cmd = build_protocol_command(r"C:\Users\me\AppData\Local\TrustTunnel\trusttunnel.exe");
+        assert!(
+            cmd.to_lowercase().contains("trusttunnel.exe"),
+            "command must launch the app exe directly"
+        );
+        assert!(cmd.contains("\"%1\""), "command must pass the URL as %1");
+        assert!(
+            !cmd.to_lowercase().contains("powershell"),
+            "command must NEVER route through powershell"
+        );
+    }
+
+    #[test]
+    fn protocol_command_quotes_a_path_with_spaces() {
+        let cmd = build_protocol_command(r"C:\Program Files\TrustTunnel Client Pro\trusttunnel.exe");
+        // The exe path is quoted as one argument, then a separate quoted %1.
+        assert!(cmd.starts_with("\"C:\\Program Files\\TrustTunnel Client Pro\\trusttunnel.exe\""));
+        assert!(cmd.ends_with("\"%1\""));
     }
 }

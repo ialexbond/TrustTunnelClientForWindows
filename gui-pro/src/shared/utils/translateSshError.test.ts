@@ -73,6 +73,11 @@ describe("translateSshError", () => {
     expect(translateSshError("SSH_SERVICE_START_FAILED", mockT)).toBe("sshErrors.serviceStartFailed");
   });
 
+  // 06-14 C-07: deploy_check_env emits this instead of raw English.
+  it("translates SSH_ROOT_REQUIRED without params (C-07)", () => {
+    expect(translateSshError("SSH_ROOT_REQUIRED", mockT)).toBe("sshErrors.rootRequired");
+  });
+
   // ─── User operations ───
   it("translates SSH_ADD_USER_FAILED without params", () => {
     expect(translateSshError("SSH_ADD_USER_FAILED", mockT)).toBe("sshErrors.addUserFailed");
@@ -82,9 +87,39 @@ describe("translateSshError", () => {
     expect(translateSshError("SSH_DELETE_USER_FAILED", mockT)).toBe("sshErrors.deleteUserFailed");
   });
 
+  // 06-14 C-07: server_install emits SSH_USER_ALREADY_EXISTS|{username}.
+  it("translates SSH_USER_ALREADY_EXISTS with the username (C-07)", () => {
+    expect(translateSshError("SSH_USER_ALREADY_EXISTS|alice", mockT)).toBe(
+      'sshErrors.userAlreadyExists:{"user":"alice"}',
+    );
+  });
+
+  // 06-14 C-07: add-user emits this when credentials.toml is missing.
+  it("translates SSH_CREDENTIALS_NOT_FOUND without params (C-07)", () => {
+    expect(translateSshError("SSH_CREDENTIALS_NOT_FOUND", mockT)).toBe("sshErrors.credentialsNotFound");
+  });
+
   // ─── Config operations ───
   it("translates SSH_CONFIG_CREATE_FAILED without params", () => {
     expect(translateSshError("SSH_CONFIG_CREATE_FAILED", mockT)).toBe("sshErrors.configCreateFailed");
+  });
+
+  it("translates SSH_CONFIG_DIVERGES (marker carries fname) to a friendly RU string (C-05)", () => {
+    // The marker shape is `SSH_CONFIG_DIVERGES|{fname}|{reason}`; the friendly string
+    // ignores parts[1] (fname) so the user never sees the raw English.
+    expect(
+      translateSshError("SSH_CONFIG_DIVERGES|vpn.toml|existing server config differs", mockT)
+    ).toBe("sshErrors.configDiverges");
+  });
+
+  // 06-14 C-06: deploy_configure preserves the port-80-busy marker as this code.
+  it("translates SSH_CERTBOT_PORT80_BUSY without params (C-06)", () => {
+    expect(translateSshError("SSH_CERTBOT_PORT80_BUSY", mockT)).toBe("sshErrors.certbotPort80Busy");
+  });
+
+  // 06-14 C-07: cert-verification failure no longer leaks raw English.
+  it("translates SSH_CERT_NOT_CREATED without params (C-07)", () => {
+    expect(translateSshError("SSH_CERT_NOT_CREATED", mockT)).toBe("sshErrors.certNotCreated");
   });
 
   it("translates SSH_READ_CONFIG_FAILED without params", () => {
@@ -123,6 +158,11 @@ describe("translateSshError", () => {
   });
 
   // ─── Install / Uninstall ───
+  // 06-14 C-14: a held dpkg lock during update is surfaced as a recoverable code.
+  it("translates SSH_DPKG_LOCKED without params (C-14)", () => {
+    expect(translateSshError("SSH_DPKG_LOCKED", mockT)).toBe("sshErrors.dpkgLocked");
+  });
+
   it("translates SSH_UNINSTALL_FAILED with code", () => {
     expect(translateSshError("SSH_UNINSTALL_FAILED|127", mockT)).toBe(
       'sshErrors.uninstallFailed:{"code":"127"}',

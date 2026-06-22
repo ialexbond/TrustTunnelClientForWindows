@@ -622,9 +622,20 @@ describe("in-panel cascade E2E (render-through: real ServerTabs + real OverviewS
     vi.clearAllMocks();
     i18n.changeLanguage("ru");
     localStorage.clear();
-    // Default global invoke stub already resolves null (tauri-mock) — OverviewSection
-    // stats/geoip degrade to placeholders; the cascade indicators depend only on the
-    // forwarded props, not on any invoke result.
+    // D-07 (Plan 07-06): OverviewSection now gates its real grid behind an
+    // all-cards-loaded check. The overview-protocol-update-arrow (Card #8) only
+    // renders once every per-card signal SETTLES, so we resolve ping/stats/geo/
+    // security here (success or failure both count as settled) to open the gate.
+    // The cascade indicators still depend only on the forwarded props, not on any
+    // invoke result — we just need the gate open so the loaded grid renders.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "ping_endpoint") return 42;
+      if (cmd === "server_get_stats") return null;
+      if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+      if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+      if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+      return null;
+    });
   });
 
   /**
@@ -647,7 +658,7 @@ describe("in-panel cascade E2E (render-through: real ServerTabs + real OverviewS
     );
   }
 
-  it("both in-panel indicators (service-tab-update-dot + overview-protocol-update-arrow) APPEAR when an update is available — badge pinned in plan 06, control-sidecar-update-dot in plan 07", () => {
+  it("both in-panel indicators (service-tab-update-dot + overview-protocol-update-arrow) APPEAR when an update is available — badge pinned in plan 06, control-sidecar-update-dot in plan 07", async () => {
     renderPanelChrome(true);
     // ServerTabs «Сервис» pill dot — visible because update available AND default
     // active tab is overview (dot hides only when the user is on the service tab).
@@ -655,22 +666,31 @@ describe("in-panel cascade E2E (render-through: real ServerTabs + real OverviewS
     expect(dot).toBeInTheDocument();
     expect(dot).toHaveAttribute("aria-label", i18n.t("server.service.tab_update_available_aria"));
     // OverviewSection Card #8 ArrowUpCircle — the real render-through indicator.
-    const arrow = screen.getByTestId("overview-protocol-update-arrow");
+    // D-07 (Plan 07-06): await the all-cards gate opening (the version card is
+    // loaded-grid content) before asserting the arrow.
+    const arrow = await screen.findByTestId("overview-protocol-update-arrow");
     expect(arrow).toBeInTheDocument();
     expect(arrow).toHaveAttribute("aria-label", i18n.t("server.service.protocol.update_available_badge"));
   });
 
-  it("both in-panel indicators RESET (disappear) when the update flips off (version-change reset path)", () => {
-    // First render with update available — both present.
+  it("both in-panel indicators RESET (disappear) when the update flips off (version-change reset path)", async () => {
+    // First render with update available — both present (await the gated arrow).
     const { unmount } = renderPanelChrome(true);
     expect(screen.getByTestId("service-tab-update-dot")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-protocol-update-arrow")).toBeInTheDocument();
+    expect(await screen.findByTestId("overview-protocol-update-arrow")).toBeInTheDocument();
     unmount();
 
     // Re-render with the flag flipped false (mirrors an in-session upgrade-to-latest
-    // where localSidecarAvailable derives back to false) — both indicators gone.
+    // where localSidecarAvailable derives back to false). The «Сервис» dot is
+    // prop-driven (gone immediately); the arrow is loaded-grid content, so wait
+    // for the gate to open and confirm it is absent once the grid renders.
     renderPanelChrome(false);
     expect(screen.queryByTestId("service-tab-update-dot")).not.toBeInTheDocument();
+    await waitFor(() => {
+      // The IP card's eye toggle marks the loaded grid; once present, the version
+      // card has rendered and the arrow must be absent (sidecarAvailable=false).
+      expect(screen.getByRole("button", { name: i18n.t("server.overview.ip.show") })).toBeInTheDocument();
+    });
     expect(screen.queryByTestId("overview-protocol-update-arrow")).not.toBeInTheDocument();
   });
 });

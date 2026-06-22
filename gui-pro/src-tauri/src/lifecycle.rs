@@ -15,7 +15,7 @@
 //! connectable while this dead-but-tested module sits in the crate).
 #![allow(dead_code)]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // Named timing constants (D-02 / D-05).
@@ -342,6 +342,35 @@ pub fn reset_tunnel_failures_on_adapter_event(physical_uplink_present: bool) -> 
     physical_uplink_present
 }
 
+/// AUDIT-2026-06-11 #13: minimum spacing between two FIX-B failure-counter resets.
+///
+/// Unbounded, the FIX-B reset fired on EVERY honored adapter-event wake. Accumulating
+/// MAX_FAILURES (3) probe misses needs ~12-15s of clean cadence, while the WR-01
+/// debounce only enforces 750ms between honored wakes — so SUSTAINED interface churn
+/// (a flapping Wi-Fi driver roaming between APs, Docker/WSL repeatedly recreating
+/// vEthernet adapters, a failing USB NIC in a reconnect loop) firing at least once per
+/// ~12s zeroed the counter forever: a genuinely dead tunnel stayed green «Connected»
+/// with NO reconnect for as long as the churn persisted — the inverse over-correction
+/// of the T-37 fix. 60s is comfortably above the worst-case detection window
+/// (~12-15s), so between two allowed resets a sustained probe-failure streak ALWAYS
+/// has room to cross MAX_FAILURES, while a one-off Docker/WSL bring-up burst (the
+/// RC-1 case FIX-B exists for) is still absorbed by the first, allowed reset.
+pub const FIXB_RESET_MIN_INTERVAL_SECS: u64 = 60;
+
+/// AUDIT-2026-06-11 #13: pure rate-limit decision for the FIX-B counter reset —
+/// at most one reset per `FIXB_RESET_MIN_INTERVAL_SECS`. Mirrors the WR-01
+/// `should_honor_event_wake` debounce shape (now + last-honored Option) so the
+/// decision stays clock/IO-free and unit-testable. The first reset of a session
+/// (`last_reset == None`) is always allowed.
+pub fn fixb_reset_allowed(now: Instant, last_reset: Option<Instant>) -> bool {
+    match last_reset {
+        None => true,
+        Some(prev) => {
+            now.duration_since(prev) >= Duration::from_secs(FIXB_RESET_MIN_INTERVAL_SECS)
+        }
+    }
+}
+
 #[cfg(test)]
 mod adapter_event_tests {
     use super::*;
@@ -361,6 +390,54 @@ mod adapter_event_tests {
     #[test]
     fn settle_delay_is_sane() {
         assert!((500..=5000).contains(&ADAPTER_EVENT_SETTLE_MS));
+    }
+
+    // ── AUDIT-2026-06-11 #13: FIX-B reset rate-limit ────────────────────────
+
+    #[test]
+    fn fixb_first_reset_is_always_allowed() {
+        // The first honored adapter-event wake of a session must still get its
+        // reset — the RC-1 Docker/WSL bring-up case FIX-B exists for.
+        assert!(fixb_reset_allowed(Instant::now(), None));
+    }
+
+    #[test]
+    fn fixb_reset_is_rate_limited_within_the_window() {
+        // Sustained interface churn (flapping Wi-Fi / vEthernet churn) firing
+        // honored wakes faster than the window must NOT keep zeroing the failure
+        // counter — otherwise tunnel-lost detection is starved indefinitely.
+        let t0 = Instant::now();
+        assert!(!fixb_reset_allowed(t0, Some(t0))); // immediate repeat → denied
+        let just_under =
+            t0 + Duration::from_secs(FIXB_RESET_MIN_INTERVAL_SECS) - Duration::from_millis(1);
+        assert!(
+            !fixb_reset_allowed(just_under, Some(t0)),
+            "a reset under FIXB_RESET_MIN_INTERVAL_SECS must be denied",
+        );
+    }
+
+    #[test]
+    fn fixb_reset_allowed_again_after_the_window() {
+        let t0 = Instant::now();
+        let at_floor = t0 + Duration::from_secs(FIXB_RESET_MIN_INTERVAL_SECS);
+        assert!(
+            fixb_reset_allowed(at_floor, Some(t0)),
+            "AT the window boundary the next reset is allowed again",
+        );
+        let well_past = t0 + Duration::from_secs(FIXB_RESET_MIN_INTERVAL_SECS * 3);
+        assert!(fixb_reset_allowed(well_past, Some(t0)));
+    }
+
+    #[test]
+    fn fixb_window_outlasts_the_detection_cadence() {
+        // The whole point: between two ALLOWED resets there must be enough room for
+        // a sustained probe-failure streak to cross MAX_FAILURES (~12-15s of clean
+        // cadence in connectivity.rs). A window at or below the detection cadence
+        // would reintroduce the starvation this fix removes.
+        assert!(
+            FIXB_RESET_MIN_INTERVAL_SECS >= 60,
+            "rate-limit window must comfortably exceed the ~12-15s detection window",
+        );
     }
 }
 

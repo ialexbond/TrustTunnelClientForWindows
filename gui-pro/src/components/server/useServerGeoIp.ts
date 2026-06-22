@@ -28,6 +28,11 @@ function getCacheKey(host: string): string {
   return `${STORAGE_PREFIX}${host}`;
 }
 
+// IN-08: PURE read — returns the cached geo or null (on miss / corrupt / expired)
+// WITHOUT any localStorage write. It used to `removeItem` expired entries inline, which
+// made it a side-effecting function unsafe to call from a render-path lazy useState
+// initializer (it double-runs in StrictMode). Expired-entry cleanup now lives in the
+// hook's effect (clearExpiredCache), so this stays safe to call during render.
 function loadCache(host: string): GeoIpInfo | null {
   try {
     const raw = localStorage.getItem(getCacheKey(host));
@@ -38,8 +43,7 @@ function loadCache(host: string): GeoIpInfo | null {
     }
     const age = Date.now() - new Date(parsed.fetched_at).getTime();
     if (Number.isNaN(age) || age > TTL_MS) {
-      // Expired or invalid date — drop and refetch.
-      localStorage.removeItem(getCacheKey(host));
+      // Expired or invalid date — treat as a miss (cleanup happens in the effect).
       return null;
     }
     return {
@@ -53,6 +57,33 @@ function loadCache(host: string): GeoIpInfo | null {
   }
 }
 
+// IN-08: the side-effecting half split out of loadCache. Removes the stored entry for a
+// host when it is expired/invalid/corrupt, so a later mount refetches instead of reading
+// stale JSON. Safe to call only from an effect (never the render path). Never throws.
+function clearExpiredCache(host: string): void {
+  try {
+    const raw = localStorage.getItem(getCacheKey(host));
+    if (!raw) return;
+    let shouldRemove = false;
+    try {
+      const parsed = JSON.parse(raw) as CachedGeoIp;
+      const age = Date.now() - new Date(parsed.fetched_at).getTime();
+      shouldRemove =
+        !parsed.country ||
+        !parsed.flag_emoji ||
+        !parsed.fetched_at ||
+        Number.isNaN(age) ||
+        age > TTL_MS;
+    } catch {
+      // Corrupt JSON — drop it.
+      shouldRemove = true;
+    }
+    if (shouldRemove) localStorage.removeItem(getCacheKey(host));
+  } catch {
+    // localStorage unavailable — nothing to clean.
+  }
+}
+
 function saveCache(host: string, info: GeoIpInfo): void {
   try {
     const cached: CachedGeoIp = {
@@ -63,6 +94,21 @@ function saveCache(host: string, info: GeoIpInfo): void {
   } catch {
     // localStorage может быть недоступен (privacy mode / quota) — не блокируем UI.
   }
+}
+
+// ═══════════════════════════════════════════════════════
+// Best-effort cached country read (06-uat fix 14)
+// ═══════════════════════════════════════════════════════
+//
+// readCachedCountryCode returns the GeoIP country_code already in the localStorage
+// cache for a host, or "" when it is not (yet) cached / expired. It NEVER triggers a
+// fetch and NEVER throws — it is used to OPTIONALLY brand the save-dialog default
+// filename with a country prefix without blocking or slowing the save. When the
+// country isn't readily available we simply omit the prefix (06-uat fix 14).
+export function readCachedCountryCode(host: string): string {
+  if (!host) return "";
+  const cached = loadCache(host);
+  return cached?.country_code || "";
 }
 
 // ═══════════════════════════════════════════════════════
@@ -111,7 +157,9 @@ export function useServerGeoIp(sshParams: { host: string }) {
         return;
       }
 
-      // Cache miss — invoke and persist.
+      // Cache miss — invoke and persist. IN-08: drop any expired/corrupt stored entry
+      // here (the cleanup moved out of the now-pure loadCache) before refetching.
+      clearExpiredCache(host);
       setGeo(null);
       setLoading(true);
       setError(null);

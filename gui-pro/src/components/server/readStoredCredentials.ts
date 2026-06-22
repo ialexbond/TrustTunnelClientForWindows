@@ -83,3 +83,43 @@ export async function readStoredCredentials(): Promise<SshCredentials | null> {
     return null;
   }
 }
+
+/**
+ * Host-keyed read (06-19 / D-15 / C-23). Returns the EXACT target's stored
+ * bundle via the backend `load_ssh_credentials_for` command, so a caller that
+ * knows its host:port:user can never receive a DIFFERENT server's last-saved
+ * credentials. Returns null when no record exists for the target or it yields no
+ * usable secret.
+ *
+ * This sibling does NOT re-run the one-time legacy-localStorage migration: the
+ * no-arg `readStoredCredentials` already owns that migration on cold start
+ * (C-04 / T-04-25 guard). Re-running it here would introduce a second migration
+ * path and risk re-migrating a stale/external legacy key.
+ */
+export async function readStoredCredentialsFor(target: {
+  host: string;
+  port: string;
+  user: string;
+}): Promise<SshCredentials | null> {
+  try {
+    const obj = await invoke<
+      { host: string; port: string; user: string; password: string; keyPath: string } | null
+    >("load_ssh_credentials_for", {
+      host: target.host,
+      port: target.port,
+      user: target.user,
+    });
+    if (obj && obj.host && (obj.password || obj.keyPath)) {
+      return {
+        host: obj.host,
+        port: obj.port || "22",
+        user: obj.user || "root",
+        password: obj.password || "",
+        keyPath: obj.keyPath || undefined,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  User, Download, XCircle, Server, ChevronRight,
+  User, XCircle, Server, ChevronRight,
   PackageCheck, FolderOpen, RefreshCw, Trash2,
   QrCode, Link2,
 } from "lucide-react";
@@ -16,128 +16,20 @@ import { AddUserForm } from "./AddUserForm";
 import { StepBar } from "./StepBar";
 import type { WizardState } from "./useWizardState";
 
-// ─── Fetch mode: show users only, save config ──────────────
-function FoundFetchMode(w: WizardState & { pushSuccess: (msg: string) => void }) {
-  const { t } = useTranslation();
-  const isInstalled = w.serverInfo?.installed;
-  const users = w.serverInfo?.users || [];
-
-  if (isInstalled && users.length > 0) {
-    return (
-      <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-connected-bg)" }}>
-          <User className="w-7 h-7" style={{ color: "var(--color-success-500)" }} />
-        </div>
-        <div className="space-y-1.5">
-          <h2 className="text-lg font-bold">{t('wizard.found.users_on_server')}</h2>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {t('wizard.found.select_user_for_config')}
-          </p>
-        </div>
-
-        <div className="text-left space-y-1 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-          {users.map((u) => (
-            <div key={u} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg transition-colors cursor-default"
-              style={{ backgroundColor: "transparent" }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-            >
-              <span className="text-sm font-mono" style={{ color: "var(--color-text-primary)" }}>{u}</span>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }}
-                disabled={!!w.savingConfigFor}
-                loading={w.savingConfigFor === u}
-                icon={<Download className="w-3 h-3" />}
-              >
-                {w.savingConfigFor === u ? t('wizard.found.saving_config') : t('wizard.found.save_config')}
-              </Button>
-            </div>
-          ))}
-        </div>
-
-        {w.errorMessage && (
-          <p className="text-xs" style={{ color: "var(--color-danger-500)" }}>{translateSshError(w.errorMessage, t)}</p>
-        )}
-
-        <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("welcome")}>
-          {t('wizard.found.to_home')}
-        </Button>
-      </>
-    );
-  }
-
-  if (isInstalled && users.length === 0) {
-    return (
-      <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-connecting-bg)" }}>
-          <User className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
-        </div>
-        <div className="space-y-1.5">
-          <h2 className="text-lg font-bold">{t('wizard.found.no_users_title')}</h2>
-          <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-            {t('wizard.found.no_users_description')}
-          </p>
-        </div>
-        <div className="flex gap-2 w-full">
-          <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
-            {t('buttons.back')}
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            className="flex-1"
-            icon={<ChevronRight className="w-4 h-4" />}
-            onClick={() => { w.saveField("wizardMode", ""); w.setWizardStep("server"); }}
-          >
-            {t('wizard.found.setup_server')}
-          </Button>
-        </div>
-      </>
-    );
-  }
-
-  // Not installed or error in fetch mode
-  return (
-    <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-error-bg)" }}>
-        <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
-      </div>
-      <div className="space-y-1.5">
-        <h2 className="text-lg font-bold" style={{ color: "var(--color-danger-500)" }}>
-          {w.checkError ? t('wizard.found.server_unreachable') : t('wizard.found.not_installed_title')}
-        </h2>
-        <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-          {w.checkError
-            ? t('wizard.found.ssh_error_fetch_description')
-            : t('wizard.found.not_installed_fetch_description')}
-        </p>
-        {w.checkError && (
-          <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-            <p className="text-xs leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
-              {translateSshError(w.checkError, t)}
-            </p>
-          </div>
-        )}
-      </div>
-      <div className="flex gap-2 w-full">
-        <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
-          {t('buttons.back')}
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          className="flex-1"
-          icon={<ChevronRight className="w-4 h-4" />}
-          onClick={() => { w.saveField("wizardMode", ""); w.setWizardStep("server"); }}
-        >
-          {t('wizard.found.setup_server')}
-        </Button>
-      </div>
-    </>
-  );
-}
+// FoundStep — re-skinned onto the v3.0 onboarding hero language (D-05; UI-SPEC
+// "Found" row + §Accessibility). This is the largest wizard screen (user list +
+// choice rows). The migration is PRESENTATION-ONLY: every branch keeps the same
+// handlers it already called — only the visual shell + the icon-only-control
+// aria-labels change.
+//
+// Hero squares: the old 56px (`w-14 h-14`) squares become the 64px (`w-16 h-16`)
+// onboarding square + a 32px (`w-8 h-8`) glyph; headings move from `text-lg
+// font-bold` to the `.text-display-sm`/`.text-title-sm` token classes (token color
+// classes, no inline `style` for color). The icon-only `IconButton` user-row actions
+// keep their handlers but gain explicit `aria-label`s naming the action AND its
+// target (UI-SPEC §A11y: the row text alone is not a sufficient accessible name for
+// an icon-only control). Destructive delete-user / uninstall stay behind
+// `useConfirm`/`ConfirmDialog` (PATTERNS §D — never a bare destructive click).
 
 // ─── Setup mode: TT installed or not ──────────────
 function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void }) {
@@ -161,7 +53,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     });
     if (!ok) return;
     await w.handleDeleteUser(u);
-    w.pushSuccess(t("wizard.user_deleted", "Пользователь удалён"));
+    w.pushSuccess(t("server.users.user_deleted", { user: u }));
   };
 
   const handleUninstallPrompt = async () => {
@@ -176,16 +68,19 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     w.handleUninstall();
   };
 
-  const sshParams = {
-    host: w.host,
-    port: parseInt(w.port),
-    user: w.sshUser,
-    password: w.sshPassword,
-    keyPath: w.sshKeyPath || undefined,
-  };
-
   const getDeeplink = async (username: string): Promise<string> => {
-    return invoke<string>("server_export_config_deeplink", { ...sshParams, clientName: username });
+    // D-06: the deeplink/QR export carries SSH creds, so it MUST go through
+    // buildAuthArgs() like every other IPC handler — sending authMethod + exactly
+    // one credential. The previous hand-rolled sshParams omitted authMethod and
+    // sent BOTH password and keyPath, dropping the backend into its legacy
+    // both-then-prefer-key heuristic (the exact auth-bleed D-06 closes).
+    return invoke<string>("server_export_config_deeplink", {
+      host: w.host,
+      port: parseInt(w.port),
+      user: w.sshUser,
+      ...w.buildAuthArgs(),
+      clientName: username,
+    });
   };
 
   const handleShowQR = async (username: string) => {
@@ -204,7 +99,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     try {
       const link = await getDeeplink(username);
       await navigator.clipboard.writeText(link);
-      w.pushSuccess(t("wizard.link_copied", "Скопировано"));
+      w.pushSuccess(t("server.users.link_copied"));
     } catch { /* ignore */ }
     finally { setLinkLoadingUser(null); }
   };
@@ -213,32 +108,32 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
     const users = w.serverInfo?.users ?? [];
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-connecting-bg)" }}>
-          <PackageCheck className="w-7 h-7" style={{ color: "var(--color-warning-500)" }} />
+        <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-status-connecting-bg)]">
+          <PackageCheck className="w-8 h-8 text-[var(--color-warning-500)]" />
         </div>
         <div className="space-y-1.5">
-          <h2 className="text-lg font-bold" style={{ color: "var(--color-warning-500)" }}>
+          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-warning-500)]">
             {t('wizard.found.already_installed')}
           </h2>
           {w.serverInfo?.version && (
-            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            <p className="text-body-sm text-[var(--color-text-muted)]">
               {t('wizard.found.version_label', { version: w.serverInfo.version })}
             </p>
           )}
-          <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+          <p className="text-body-sm text-[var(--color-text-secondary)]">
             {t('wizard.found.service_label')} {w.serverInfo?.serviceActive ? (
-              <span style={{ color: "var(--color-success-500)" }}>{t('wizard.found.service_running')}</span>
+              <span className="text-[var(--color-success-500)]">{t('wizard.found.service_running')}</span>
             ) : (
-              <span style={{ color: "var(--color-text-muted)" }}>{t('wizard.found.service_stopped')}</span>
+              <span className="text-[var(--color-text-muted)]">{t('wizard.found.service_stopped')}</span>
             )}
           </p>
         </div>
 
         {/* ── Users (same layout as UsersSection in dashboard) ── */}
         {users.length > 0 && (
-          <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-            <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
-              <User className="w-3.5 h-3.5" />
+          <div className="text-left space-y-2 p-3 rounded-[var(--radius-lg)] bg-[var(--color-bg-surface)] border border-[var(--color-border)]">
+            <p className="text-body-sm font-semibold flex items-center gap-1.5 text-[var(--color-text-primary)]">
+              <User className="w-4 h-4" />
               {t('wizard.found.added_users')}
             </p>
             <div>
@@ -249,42 +144,38 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                   <div key={u}>
                     <div
                       onClick={() => w.setSelectedUser(u)}
-                      className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-all duration-200 cursor-pointer"
-                      style={{ backgroundColor: isSelected ? "var(--color-accent-tint-08)" : "transparent" }}
-                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
-                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
+                      className={`flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-colors duration-200 cursor-pointer ${isSelected ? "bg-[var(--color-accent-tint-08)]" : "hover:bg-[var(--color-bg-hover)]"}`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0"
-                          style={{ border: `2px solid ${isSelected ? "var(--color-accent-500)" : "var(--color-border)"}` }}
-                        >
-                          {isSelected && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-accent-500)" }} />}
+                        <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border-2 ${isSelected ? "border-[var(--color-accent-500)]" : "border-[var(--color-border)]"}`}>
+                          {isSelected && <div className="w-2 h-2 rounded-full bg-[var(--color-accent-500)]" />}
                         </div>
-                        <span className="text-xs font-medium font-mono" style={{ color: "var(--color-text-primary)" }}>{u}</span>
+                        <span className="text-body-sm font-medium font-mono text-[var(--color-text-primary)]">{u}</span>
                       </div>
                       <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                        <IconButton aria-label={t("server.users.qr_tooltip")} tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
-                          <QrCode className="w-3.5 h-3.5" />
+                        {/* Icon-only controls: explicit aria-label names action + target
+                            (UI-SPEC §A11y). tooltip stays the short generic label. */}
+                        <IconButton aria-label={t("wizard.found.qr_aria", { user: u })} tooltip={t("server.users.qr_tooltip")} onClick={() => handleShowQR(u)} loading={qrLoading && qrUser === u}>
+                          <QrCode className="w-4 h-4" />
                         </IconButton>
-                        <IconButton aria-label={t("server.users.link_tooltip")} tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
-                          <Link2 className="w-3.5 h-3.5" />
+                        <IconButton aria-label={t("wizard.found.link_aria", { user: u })} tooltip={t("server.users.link_tooltip")} onClick={() => handleCopyLink(u)} loading={linkLoadingUser === u}>
+                          <Link2 className="w-4 h-4" />
                         </IconButton>
-                        <IconButton aria-label={t("server.users.export_tooltip")} tooltip={t("server.users.export_tooltip")} onClick={async () => { await w.handleSaveConfigDirect(u); w.pushSuccess(t("wizard.config_saved", "Конфиг сохранён")); }} loading={w.savingConfigFor === u}>
-                          <Download className="w-3.5 h-3.5" />
-                        </IconButton>
+                        {/* 06-uat: the per-user «save config to this PC» action used the
+                            fetch flow (handleSaveConfigDirect) that was removed with the
+                            wizard SSH/fetch surface. QR + Link export (deeplink) stay. */}
                         <IconButton
-                          aria-label={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
+                          aria-label={users.length <= 1 ? t("server.users.cant_delete_last") : t("wizard.found.delete_aria", { user: u })}
                           tooltip={users.length <= 1 ? t("server.users.cant_delete_last") : t("server.users.delete_tooltip")}
                           onClick={() => { void handleDeleteUserPrompt(u); }}
                           disabled={users.length <= 1 || !!w.deletingUser}
                           loading={w.deletingUser === u}
-                          color="var(--color-danger-400)"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </IconButton>
                       </div>
                     </div>
-                    {!isLast && <div className="mx-3 my-1" style={{ borderBottom: "1px solid var(--color-border)" }} />}
+                    {!isLast && <div className="mx-3 my-1 border-b border-[var(--color-border)]" />}
                   </div>
                 );
               })}
@@ -296,28 +187,23 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
         <UserQRModal qrUser={qrUser} qrLink={qrLink} qrLoading={qrLoading} onClose={() => setQrUser(null)} />
 
         {/* ── Add new user ── */}
-        <AddUserForm w={w} onUserAdded={() => w.pushSuccess(t("wizard.user_added", "Пользователь добавлен"))} />
+        <AddUserForm w={w} onUserAdded={(username) => w.pushSuccess(t("server.users.user_added", { user: username }))} />
 
-        {/* Continue as user button */}
-        <Button
-          variant={w.selectedUser ? "primary" : "secondary"}
-          size="sm"
-          fullWidth
-          onClick={() => { if (w.selectedUser) w.handleFetchConfig(w.selectedUser); }}
-          disabled={!w.selectedUser}
-          icon={<ChevronRight className="w-4 h-4" />}
-        >
-          {w.selectedUser ? t('wizard.found.continue_as', { user: w.selectedUser }) : t('wizard.found.select_user_prompt')}
-        </Button>
-
+        {/* 06-uat: the «Continue as user» button drove the fetch flow (handleFetchConfig)
+            that was removed. Importing an existing user's config to this PC is done via
+            the per-user QR/Link export above or «У меня уже есть конфиг» on Connection. */}
         <div className="space-y-2 pt-1">
           <Button variant="secondary" size="sm" fullWidth icon={<FolderOpen className="w-4 h-4" />} onClick={w.handleSkip}>
             {t('wizard.found.skip_have_config')}
           </Button>
-          <Button variant="secondary" size="sm" fullWidth icon={<RefreshCw className="w-3.5 h-3.5" />} onClick={() => { w.setCameFromFound(true); w.setWizardStep("endpoint"); }}>
+          {/* C-05: cameFromFound=true is the carrier the EndpointStep install button
+              reads as the consent to overwrite a diverging vpn.toml/hosts.toml on the
+              subsequent install (overwriteConfig=cameFromFound). credentials.toml stays
+              preserved regardless (D-02). No separate flag — reuse cameFromFound. */}
+          <Button variant="secondary" size="sm" fullWidth icon={<RefreshCw className="w-4 h-4" />} onClick={() => { w.setCameFromFound(true); w.setWizardStep("endpoint"); }}>
             {t('wizard.found.reinstall_tt')}
           </Button>
-          <Button variant="danger-outline" size="sm" fullWidth icon={<Trash2 className="w-3.5 h-3.5" />} onClick={handleUninstallPrompt}>
+          <Button variant="danger-outline" size="sm" fullWidth icon={<Trash2 className="w-4 h-4" />} onClick={handleUninstallPrompt}>
             {t('wizard.found.delete_tt')}
           </Button>
         </div>
@@ -329,16 +215,16 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (w.checkError === "HOST_KEY_RESET") {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
-          <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
+        <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-accent-tint-10)]">
+          <Server className="w-8 h-8 text-[var(--color-accent-500)]" />
         </div>
         <div className="space-y-1.5">
-          <h2 className="text-lg font-bold" style={{ color: "var(--color-text-primary)" }}>{t('sshErrors.hostKeyReset', 'Host key was reset. Press Connect again.')}</h2>
-          <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-text-primary)]">{t('sshErrors.hostKeyReset', 'Host key was reset. Press Connect again.')}</h2>
+          <p className="text-body text-[var(--color-text-secondary)]">
             {t('wizard.found.host_key_reset_help')}
           </p>
         </div>
-        <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
+        <Button variant="ghost" size="sm" fullWidth onClick={() => w.onClose?.()}>
           {t('buttons.back')}
         </Button>
       </>
@@ -349,21 +235,21 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   if (w.checkError) {
     return (
       <>
-        <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-status-error-bg)" }}>
-          <XCircle className="w-7 h-7" style={{ color: "var(--color-danger-500)" }} />
+        <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-status-error-bg)]">
+          <XCircle className="w-8 h-8 text-[var(--color-danger-500)]" />
         </div>
         <div className="space-y-1.5">
-          <h2 className="text-lg font-bold" style={{ color: "var(--color-danger-500)" }}>{t('wizard.found.server_unreachable')}</h2>
-          <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+          <h2 id="wizard-heading" className="text-display-sm text-[var(--color-danger-500)]">{t('wizard.found.server_unreachable')}</h2>
+          <p className="text-body text-[var(--color-text-secondary)]">
             {t('wizard.found.connection_error_help')}
           </p>
-          <div className="max-h-20 overflow-y-auto rounded-lg p-2 mt-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-            <p className="text-xs leading-relaxed select-text cursor-text break-words" style={{ color: "var(--color-danger-500)", opacity: 0.8 }}>
+          <div className="max-h-20 overflow-y-auto rounded-[var(--radius-lg)] p-2 mt-2 bg-[var(--color-bg-elevated)]">
+            <p className="text-mono-sm leading-relaxed select-text cursor-text break-words text-[var(--color-danger-500)]">
               {translateSshError(w.checkError, t)}
             </p>
           </div>
         </div>
-        <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
+        <Button variant="ghost" size="sm" fullWidth onClick={() => w.onClose?.()}>
           {t('buttons.back')}
         </Button>
       </>
@@ -373,17 +259,19 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
   // Server ready, TT not installed
   return (
     <>
-      <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "var(--color-accent-tint-10)" }}>
-        <Server className="w-7 h-7" style={{ color: "var(--color-accent-500)" }} />
+      <div className="mx-auto w-16 h-16 rounded-[var(--radius-xl)] flex items-center justify-center bg-[var(--color-accent-tint-10)]">
+        <Server className="w-8 h-8 text-[var(--color-accent-500)]" />
       </div>
       <div className="space-y-1.5">
-        <h2 className="text-lg font-bold">{t('wizard.found.server_ready')}</h2>
-        <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+        <h2 id="wizard-heading" className="text-display-sm text-[var(--color-text-primary)]">{t('wizard.found.server_ready')}</h2>
+        <p className="text-body text-[var(--color-text-muted)]">
           {t('wizard.found.not_found_can_install')}
         </p>
       </div>
       <div className="flex gap-2 w-full">
-        <Button variant="ghost" size="sm" onClick={() => w.setWizardStep("server")}>
+        {/* 06-uat: «Назад» closes the wizard overlay — there is no SSH-connect screen to
+            return to (SSH auth lives only in the Control Panel). */}
+        <Button variant="ghost" size="sm" onClick={() => w.onClose?.()}>
           {t('buttons.back')}
         </Button>
         <Button
@@ -408,20 +296,16 @@ export function FoundStep(w: WizardState) {
 
   return (
     <>
-      <StepBar step={w.step} isFetchMode={w.isFetchMode} />
+      <StepBar step={w.step} />
       <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
         <div className="max-w-sm w-full text-center space-y-5 my-auto">
-          {w.isFetchMode ? (
-            <FoundFetchMode {...w} pushSuccess={pushSuccess} />
-          ) : (
-            <>
-              <FoundSetupMode {...w} pushSuccess={pushSuccess} />
-              {isInstalled && (
-                <Button variant="ghost" size="sm" fullWidth onClick={() => w.setWizardStep("server")}>
-                  {t('buttons.back')}
-                </Button>
-              )}
-            </>
+          <FoundSetupMode {...w} pushSuccess={pushSuccess} />
+          {isInstalled && (
+            // 06-uat: «Назад» closes the wizard overlay (there is no SSH-connect screen
+            // to go back to — SSH auth lives only in the Control Panel).
+            <Button variant="ghost" size="sm" fullWidth onClick={() => w.onClose?.()}>
+              {t('buttons.back')}
+            </Button>
           )}
         </div>
       </div>

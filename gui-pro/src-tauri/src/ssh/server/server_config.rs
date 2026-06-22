@@ -250,7 +250,18 @@ pub async fn fetch_server_config(
     app: &tauri::AppHandle,
     params: SshParams,
     client_name: String,
+    // #22: the frontend's per-run generation (same stamp rationale as deploy_server). The
+    // post-deploy FINALIZE re-export passes the SAME op_id as the deploy run so its
+    // re-emitted connect/auth/check/export/save/done cycle is stamped with the run that is
+    // on screen; a standalone fetch passes its own fresh op_id.
+    op_id: u64,
+    // Best-effort GeoIP country code (Tauri maps JS `countryCode`) used ONLY to brand the
+    // LOCAL config filename `[<CC>_]TrustTunnel_<login>.toml` so a re-export writes the
+    // SAME branded name the Save-As dialog defaults to. None when unknown → no prefix.
+    // client_config_filename ignores any non-2-ASCII-letter value, so it is safe unvalidated.
+    country_code: Option<String>,
 ) -> Result<String, String> {
+    super::super::set_deploy_op_id(op_id);
     emit_step(app, "connect", "progress", "Connecting to server...");
     let handle = params.connect_with_app(app.clone()).await
         .inspect_err(|e| { emit_step(app, "connect", "error", e); })?;
@@ -445,7 +456,20 @@ pub async fn fetch_server_config(
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("SSH_MKDIR_FAILED|{e}"))?;
 
-    let client_config_path = config_dir.join("trusttunnel_client.toml");
+    // UAT 2026-06-19 (R1 consistency): write the SAME branded per-login
+    // `[<CC>_]TrustTunnel_<login>.toml` that an install-time deploy writes (deploy.rs
+    // deploy_export_config), instead of a hardcoded `trusttunnel_client.toml`. Otherwise
+    // a post-deploy advanced re-export (anti-DPI / Custom SNI / DNS / display name) lands
+    // in a DIFFERENT file than the basic one deploy just wrote, and the active install-time
+    // config stays basic — and the on-disk name would diverge from the Save-As default.
+    // `name` is the validated first-user login (validate_client_name above); we JOIN a
+    // BARE filename onto config_dir — never interpolate into a path — and
+    // `client_config_filename` adds the branding + empty/degenerate + Windows
+    // reserved-name guards and ignores a malformed country.
+    let client_config_path = config_dir.join(super::super::deploy::client_config_filename(
+        &name,
+        country_code.as_deref(),
+    ));
     std::fs::write(&client_config_path, &client_toml)
         .map_err(|e| format!("SSH_WRITE_CONFIG_FAILED|{e}"))?;
 
@@ -1026,95 +1050,15 @@ async fn write_vpn_toml_via_heredoc(
     Ok(())
 }
 
-pub async fn update_listen_address(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    address: String,
-) -> Result<(), String> {
-    crate::ssh::sanitize::validate_listen_address(&address)?;
-    let sudo = detect_sudo(handle, app).await;
-    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
-    let new_content = update_listen_address_in_toml(&raw, &address)?;
-    write_vpn_toml_via_heredoc(app, handle, &new_content, "listen_address").await
-}
-
-pub async fn update_log_level(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    level: String,
-) -> Result<(), String> {
-    crate::ssh::sanitize::validate_log_level(&level)?;
-    let sudo = detect_sudo(handle, app).await;
-    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
-    let mut doc: toml_edit::DocumentMut = raw
-        .parse()
-        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
-    if level.is_empty() {
-        doc.remove("log_level");
-    } else {
-        doc["log_level"] = toml_edit::value(&level);
-    }
-    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "log_level").await
-}
-
-pub async fn update_allow_private(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    enabled: bool,
-) -> Result<(), String> {
-    let sudo = detect_sudo(handle, app).await;
-    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
-    let mut doc: toml_edit::DocumentMut = raw
-        .parse()
-        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
-    doc["allow_private_network_connections"] = toml_edit::value(enabled);
-    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "allow_private_network_connections").await
-}
-
-pub async fn update_auth_status(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    code: u16,
-) -> Result<(), String> {
-    crate::ssh::sanitize::validate_auth_status_code(code)?;
-    let sudo = detect_sudo(handle, app).await;
-    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
-    let mut doc: toml_edit::DocumentMut = raw
-        .parse()
-        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
-    doc["auth_failure_status_code"] = toml_edit::value(code as i64);
-    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "auth_failure_status_code").await
-}
-
-pub async fn update_ping_path(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    path: String,
-) -> Result<(), String> {
-    crate::ssh::sanitize::validate_url_path(&path)?;
-    let sudo = detect_sudo(handle, app).await;
-    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
-    let mut doc: toml_edit::DocumentMut = raw
-        .parse()
-        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
-    doc["ping_path"] = toml_edit::value(&path);
-    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "ping_path").await
-}
-
-pub async fn update_speedtest_path(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    path: String,
-) -> Result<(), String> {
-    crate::ssh::sanitize::validate_url_path(&path)?;
-    let sudo = detect_sudo(handle, app).await;
-    let (raw, _) = exec_command(handle, app, &format!("{sudo}cat {cfg}", cfg = ENDPOINT_CONFIG)).await?;
-    let mut doc: toml_edit::DocumentMut = raw
-        .parse()
-        .map_err(|e: toml_edit::TomlError| format!("Parse vpn.toml: {e}"))?;
-    doc["speedtest_path"] = toml_edit::value(&path);
-    write_vpn_toml_via_heredoc(app, handle, &doc.to_string(), "speedtest_path").await
-}
+// The six per-field vpn.toml setters (update_listen_address / update_log_level /
+// update_allow_private / update_auth_status / update_ping_path /
+// update_speedtest_path) were REMOVED — the Configuration tab now persists vpn.toml
+// exclusively via the generic save_config_file path, so they had zero frontend
+// invoke() callers. Their shared helpers stay because they have other live callers:
+// update_listen_address_in_toml (above) is still exercised by unit tests,
+// write_vpn_toml_via_heredoc backs write_vpn_toml_raw, and the validators
+// (validate_listen_address / validate_auth_status_code / validate_url_path) are still
+// used by deploy.rs.
 
 // ── REQ-15.3: Raw write fallback for Advanced editor ───────────────────────
 //

@@ -40,13 +40,19 @@ describe("ServerPanelSkeleton ↔ OverviewSection layout parity (Plan 04-14, D-0
     i18n.changeLanguage("ru");
     const state = makeState();
     render(<OverviewSection state={state} />);
-    // The Security card root is reached from its title.
-    const securityTitle = await screen.findByText(i18n.t("server.overview.cards.security"));
-    const securityCard = securityTitle.closest('[role="button"]') as HTMLElement;
-    await waitFor(() => {
+    // D-07 (Plan 07-06): OverviewSection now gates the real grid behind an
+    // all-cards-loaded check (it paints the full skeleton until every per-card
+    // signal settles). The loaded Security card (a ClickableCard with role=button)
+    // only exists once the gate opens — wait for it, re-resolving the card inside
+    // waitFor so we never read from the detached skeleton node.
+    const securityCard = await waitFor(() => {
+      const title = screen.getByText(i18n.t("server.overview.cards.security"));
+      const card = title.closest('[role="button"]') as HTMLElement | null;
+      expect(card).not.toBeNull();
       expect(
-        within(securityCard).getByText(i18n.t("server.overview.security.firewall")),
+        within(card!).getByText(i18n.t("server.overview.security.firewall")),
       ).toBeInTheDocument();
+      return card!;
     });
     // Exactly 3 named tiles — confirms the loaded count the skeleton must mirror.
     expect(within(securityCard).getByText(i18n.t("server.overview.security.firewall"))).toBeInTheDocument();

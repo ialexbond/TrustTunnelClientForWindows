@@ -235,6 +235,7 @@
     "recovery_timeout": "Couldn't restore the connection. Check your internet connection.",
     "no_internet": "No internet connection. Check your network.",
     "sidecar_exit": "The VPN core exited unexpectedly. Try connecting again.",
+    "disconnect_failed": "Could not stop the VPN core — it may still be blocking traffic. Try disconnecting again or restart the application.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
     "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them.",
     "panelCrash": "An error occurred in the {{panel}} panel. Other panels still work.",
@@ -249,7 +250,13 @@
     "version_available": "Version {{version}} available",
     "current_version_latest": "You have the latest version installed"
   },
+  "connection": {
+    "noConfig": "No connection",
+    "noConfigHint": "Set up a server in the Control Panel to manage your VPN connection",
+    "importConfig": "Import config"
+  },
   "wizard": {
+    "dialog_title": "Server setup wizard",
     "steps": {
       "connect": "Connecting to server",
       "auth": "Authorization",
@@ -258,41 +265,20 @@
       "install": "Installing TrustTunnel",
       "configure": "Endpoint configuration",
       "service": "Starting service",
+      "security": "Server protection",
       "export": "Exporting config",
       "save": "Saving",
-      "done": "Done",
-      "check_tt": "Checking TrustTunnel"
+      "done": "Done"
     },
     "progress": {
       "server": "Server",
       "checking": "Check",
       "settings": "Settings",
-      "installation": "Install",
-      "saving_config": "Saving config"
-    },
-    "welcome": {
-      "tagline": "Fast and secure VPN protocol.",
-      "description": "Set up a server in minutes or use an existing config.",
-      "setup_server": "Set Up Server",
-      "setup_new": "Set Up New Server",
-      "setup_description": "Deploy VPN with HTTP/2, HTTP/3, QUIC, TCP, UDP, ICMP tunneling and Kill Switch on your own server",
-      "fetch_config": "Save Config from Server",
-      "fetch_description": "Connect to an already configured server and download your VPN configuration",
-      "skip": "I Have a Config File",
-      "skip_description": "Load an existing .toml configuration file from disk",
-      "import_config": "Import Configuration",
-      "import_description": "Import config from file, link, or clipboard",
-      "use_existing_config": "I have a config",
-      "requirements_header": "Server setup requires:",
-      "requirement_linux": "• Linux server (Ubuntu 22+, Debian 11+) with SSH access",
-      "requirement_resources": "• Minimum 1 CPU core and 512 MB RAM (1 GB recommended)",
-      "requirement_root_domain": "• Root access • Domain pointed to server IP"
+      "installation": "Install"
     },
     "server": {
       "title": "Server Connection",
       "description": "SSH credentials to access your server",
-      "server_ip_label": "Server IP Address",
-      "host_hint": "IP address or domain name of your VPS",
       "check_connection": "Check Connection"
     },
     "checking": {
@@ -305,18 +291,7 @@
       "service_label": "Service:",
       "service_running": "running",
       "service_stopped": "not running",
-      "users_on_server": "Users on server",
       "added_users": "Added users",
-      "continue_as": "Continue as {{user}}",
-      "select_user_prompt": "Select a user",
-      "select_user_for_config": "Select a user to save config",
-      "saving_config": "Saving...",
-      "save_config": "Save",
-      "no_users_title": "No users",
-      "no_users_description": "TrustTunnel is installed on the server, but no users are configured. Set up the server to add users.",
-      "not_installed_title": "TrustTunnel not installed",
-      "not_installed_fetch_description": "TrustTunnel was not found on the server. Set up the server first.",
-      "ssh_error_fetch_description": "Could not connect to the server via SSH. Check your connection details.",
       "add_user": "Add User",
       "add_user_description": "Each device should connect with its own user.",
       "username_placeholder": "Username",
@@ -324,12 +299,12 @@
       "user_already_exists": "User with this name already exists",
       "adding_user": "Adding...",
       "add_btn": "Add",
-      "save_config_tooltip": "Save config",
-      "delete_user_tooltip": "Delete user",
+      "qr_aria": "QR code for user {{user}}",
+      "link_aria": "Copy link for user {{user}}",
+      "delete_aria": "Delete user {{user}}",
       "confirm_delete_title": "Delete user?",
       "confirm_delete_message": "User \"{{user}}\" will be removed from the server.\nTheir configuration will stop working.",
       "confirm_uninstall_title": "Are you sure?",
-      "continue_btn": "Continue",
       "skip_have_config": "Skip — I have a config",
       "reinstall_tt": "Reinstall TrustTunnel",
       "delete_tt": "Remove TrustTunnel",
@@ -339,9 +314,7 @@
       "server_ready": "Server is ready for setup",
       "not_found_can_install": "TrustTunnel not found — can install from scratch",
       "continue_setup": "Continue setup",
-      "setup_server": "Set Up Server",
-      "uninstall_consequences": "The service will be stopped, all TrustTunnel files will be deleted from the server. The current VPN connection will be terminated.",
-      "to_home": "Home"
+      "uninstall_consequences": "Only what we installed will be removed:\n• TrustTunnel itself and all its settings;\n• the server's TLS certificate;\n• the certificate auto-renewal task;\n• the firewall rule we added.\n\nSystem packages (curl, certbot) and your other data are NOT touched.\n\nThe current VPN connection will be terminated."
     },
     "uninstalling": {
       "title": "Removing TrustTunnel...",
@@ -354,6 +327,13 @@
       "login_label": "Username",
       "password_label": "Password",
       "tls_certificate": "TLS Certificate",
+      "server_protection": "Server protection",
+      "firewall_label": "Firewall",
+      "firewall_help": "Closes all unnecessary ports on the server except those needed to connect. Protects against outsiders.",
+      "fail2ban_label": "Fail2ban",
+      "fail2ban_help": "Automatically blocks anyone trying to brute-force the server password.",
+      "firewall_failed": "Couldn't set up the firewall, but the server is working. You can configure it later in «Security».",
+      "fail2ban_failed": "Couldn't set up Fail2ban, but the server is working. You can configure it later in «Security».",
       "self_signed": "Self-signed",
       "self_signed_warning": "Self-signed certificates are insecure and may be blocked. We strongly recommend using a domain with Let's Encrypt.",
       "dns_record_help": "A record for domain → {{host}}, port 80 open",
@@ -367,40 +347,36 @@
       "dns_warning_important": "Important:",
       "dns_warning_text": "make sure the A record for domain {{domain}} points to IP {{host}}. Without this, Let's Encrypt cannot issue a certificate.",
       "dns_warning_text_no_host": "make sure the A record for domain {{domain}} points to your server IP. Without this, Let's Encrypt cannot issue a certificate.",
-      "system_requirements": "Requirements: Linux x86_64, 512 MB RAM, 100 MB disk, port 443",
       "self_signed_quick": "Quick, no domain",
-      "provided_cert": "Custom",
-      "provided_cert_hint": "Your own cert files",
+      "le_recommended": "Recommended if you have a domain",
+      "provided_cert": "Custom certificate",
       "cert_chain_path": "Certificate chain path",
       "cert_chain_path_help": "Full path to cert.pem file on the server",
       "cert_key_path": "Private key path",
       "cert_key_path_help": "Full path to key.pem file on the server",
-      "server_features": "Server Features",
-      "feature_ping": "Health-check Ping",
-      "feature_ping_desc": "Server availability check endpoint",
-      "feature_speedtest": "Speedtest",
-      "feature_speedtest_desc": "Upload/download speed test",
-      "feature_ipv6": "IPv6",
-      "feature_ipv6_desc": "IPv6 connection support"
+      "auth_failure_label": "Response on failed authorization",
+      "auth_failure_407": "407 (default)",
+      "auth_failure_405": "405",
+      "auth_failure_help": "Which HTTP code to return on failed authorization — disguises the presence of a VPN. Default 407.",
+      "le_domain_invalid": "Let's Encrypt needs a public domain. Addresses like .local/.test are not supported.",
+      "username_taken": "A user with this name already exists on the server",
+      "first_user_advanced_label": "Advanced",
+      "first_user_advanced_banner": "Optional — fill in only the fields marked *; everything else can be changed later in «Users»."
     },
     "deploying": {
       "title": "Installing TrustTunnel...",
       "description": "This may take a few minutes",
       "cancelling": "Cancelling installation...",
-      "overall_progress": "Overall progress"
-    },
-    "fetching": {
-      "title": "Fetching config from server...",
-      "description": "Connecting and exporting client configuration"
+      "overall_progress": "Overall progress",
+      "finalizing": "Finishing up…"
     },
     "done": {
       "title": "All done!",
-      "fetch_description": "Configuration fetched from server and saved.",
       "deploy_description": "Server installed and running. Configuration created automatically.",
       "config_file_label": "Configuration file:",
       "go_to_panel": "Go to Control Panel",
       "go_to_connection": "Go to Connection",
-      "to_home": "Home"
+      "reachability_warning": "Could not reach port 443 from outside. The server may still be starting up — wait a minute and try connecting. If that doesn't help, check whether port 443/tcp is open in your VPS firewall / Security Group."
     },
     "error": {
       "title": "Something went wrong",
@@ -411,16 +387,45 @@
       "hint_port_in_use": "Port 443 is already in use by another process. Open a terminal on the server and check who's listening: sudo ss -tlnp | grep :443 — then stop that service or use a separate VPS.",
       "hint_port_held_by": "Port 443 is held by «{{process}}» — TrustTunnel cannot run alongside it. Options: stop «{{process}}» (sudo systemctl stop {{process}}), move it to another port, or use a separate VPS for TrustTunnel.",
       "hint_port_80": "Port 80 must be open and not occupied by another service (nginx, apache) to obtain a certificate.",
+      "hint_port_80_busy": "Port 80 is occupied by another web server, so Let's Encrypt could not issue a certificate. The fastest fix is to switch to a self-signed certificate: the install completes immediately, with no dependency on port 80.",
+      "switch_to_selfsigned": "Switch to self-signed",
       "hint_port_80_refused": "Your VPS replied «Connection refused» on port 80 — the packet got through, but nothing is listening. Likely nginx/apache holds 443 with no forward on 80. Before certbot: sudo systemctl stop nginx (or apache2), then retry. After certbot succeeds you can bring nginx back up.",
       "hint_port_80_timeout": "Let's Encrypt's external probe to your VPS on port 80 timed out — a firewall is dropping inbound packets. Check: (1) sudo ufw allow 80/tcp on the server, (2) iptables -L INPUT, (3) Inbound rules in your VPS provider panel (AWS Security Group / DigitalOcean / Selectel — port 80/tcp must be open for 0.0.0.0/0). This is NOT a Let's Encrypt rate limit — it's the server being unreachable from the internet.",
       "hint_unreachable": "Server unreachable. Verify the IP address is correct, the server is running and not blocking connections from your network.",
       "hint_auth_failed": "SSH authentication error. Check your username and password.",
+      "hint_config_diverges": "This is not an install error: the server still has a config from a previous version. «Reinstall» will overwrite it with your settings, while users and their passwords are preserved.",
       "show_logs": "Show logs",
       "hide_logs": "Hide logs",
+      "details_show": "Details",
+      "details_hide": "Hide",
+      "logs_region_label": "Install log",
       "copy_logs_tooltip": "Copy logs",
-      "back_to_settings": "Back to settings",
-      "reinstall_prompt": "Would you like to reinstall VPN on the server?",
-      "reinstall_description": "Config fetching failed again. You can reinstall VPN from scratch."
+      "back_to_settings": "Back to settings"
+    },
+    "recovery": {
+      "title": "Installation not finished",
+      "explain": "Traces of an unfinished TrustTunnel installation were found on the server. You can continue from where it stopped, or start over with a clean slate.",
+      "continue": "Continue installation",
+      "continue_hint": "The safe option: we re-check the server and finish the remaining steps.",
+      "startOver": "Start over",
+      "startOver_hint": "Completely removes TrustTunnel from the server (including certificates and opened ports) and starts the installation from scratch.",
+      "startOverConfirm_title": "Remove and start over?",
+      "startOverConfirm_message": "Only what we installed will be removed:\n• TrustTunnel itself and all its settings;\n• the server's TLS certificate;\n• the certificate auto-renewal task;\n• the firewall rule we added.\n\nSystem packages (curl, certbot) and your other data are NOT touched.\n\nThis action is irreversible.",
+      "applySettings": "Apply my settings",
+      "applySettings_hint": "The server config differs from the settings in the app. Overwrite the server config (user passwords are preserved).",
+      "working": "Working...",
+      "hostKeyChanged": {
+        "title": "The server looks reinstalled",
+        "explain": "The server's host key has changed. Usually this means the server was reinstalled. In rare cases it can indicate spoofing — trust the new key only if you reinstalled the server yourself.",
+        "trust": "Trust the new key",
+        "trust_hint": "Remember the server's new key and connect again."
+      }
+    },
+    "auth": {
+      "switchClears": "Switching the auth method clears the other field — re-enter your credentials.",
+      "steerToKey": "The password was rejected. This server may accept SSH-key login only — try switching to an SSH key.",
+      "steerToPassword": "The SSH key was rejected. Check that the right key is selected, or try logging in with a password.",
+      "reenterKey": "The SSH key could not be loaded. Re-select the key file or paste its contents again."
     },
     "import": {
       "title": "Import Configuration",
@@ -428,14 +433,12 @@
       "from_file_desc": "Select a .toml configuration file from disk",
       "from_link": "From link",
       "from_link_desc": "Paste a trusttunnel:// link",
-      "from_clipboard": "From clipboard",
-      "from_clipboard_desc": "Paste config or link from clipboard",
-      "link_label": "Configuration link",
       "import_button": "Import",
       "paste_clipboard": "Paste",
       "invalid_link": "Invalid link. Use trusttunnel://... format",
       "clipboard_invalid": "No TrustTunnel config or link found in clipboard",
-      "clipboard_error": "Failed to read clipboard"
+      "clipboard_error": "Failed to read clipboard",
+      "deeplink_received": "Configuration link received — review it and click «Import»"
     }
   },
   "routing": {
@@ -536,6 +539,7 @@
     "vibe_coding": "Built with vibe coding — an AI assistant writes code based on natural language task descriptions.",
     "up_to_date": "You are running the latest version",
     "update_available": "Version {{version}} is available",
+    "show_welcome_tour": "Welcome tour",
     "copyright": "Protocol © AdGuard · Client © {{year}} ialexbond"
   },
   "update": {
@@ -572,6 +576,11 @@
     "active_connections": "Active connections"
   },
   "server": {
+    "unavailable": {
+      "heading": "Server unavailable",
+      "body": "Can't reach the server. Check that it is powered on and reachable over the network.",
+      "retry": "Retry"
+    },
     "status": {
       "title": "Server Status",
       "running": "Running",
@@ -843,33 +852,8 @@
       "apply_and_restart": "Apply and restart",
       "discard_changes": "Discard changes",
       "discard_confirm_cta": "Yes, discard",
-      "section": {
-        "main": "Main settings",
-        "protocols": "Protocols",
-        "timeouts": "Timeouts",
-        "metrics": "Metrics",
-        "icmp": "ICMP",
-        "hosts": "TLS hosts"
-      },
       "quick_settings_title": "Quick settings",
       "advanced_accordion_title": "Advanced configuration",
-      "advanced_section_main": "Main",
-      "advanced_section_protocols": "Protocols",
-      "advanced_section_timeouts": "Timeouts",
-      "advanced_section_metrics": "Metrics",
-      "advanced_section_icmp": "ICMP",
-      "advanced_section_hosts": "TLS hosts",
-      "listen_address_label": "Listen address and port",
-      "listen_address_helper": "Format: 0.0.0.0:443 or [::]:443",
-      "log_level_label": "Log level",
-      "allow_private_label": "Private networks",
-      "allow_private_helper": "Allow connections from local networks",
-      "auth_failure_code_label": "Authentication failure code",
-      "auth_failure_code_helper": "HTTP status when credentials invalid (407 or 405)",
-      "ping_path_label": "Health check path",
-      "ping_path_helper": "URL for availability check",
-      "speedtest_path_label": "Speed test path",
-      "speedtest_path_helper": "URL for speed test",
       "confirm_save_title": "Apply settings?",
       "confirm_save_message": "Service will restart. Active VPN connections will drop for ~5 seconds.",
       "confirm_save_message_high_disrupt": "This change will interrupt all active connections. After restart the service will be available at the new address.",
@@ -1586,10 +1570,14 @@
         "load": "Load"
       },
       "rebootingCountdown": "Rebooting",
-      "rebootTimeout": "The server did not respond after the reboot. Its connection was reset — please add it again.",
+      "rebootTimeout": "The server didn't respond after the reboot. Try refreshing manually.",
       "speedNotMeasured": "Not measured",
       "speedRequiresProtocol": "Start protocol",
       "dataUnavailable": "Data unavailable",
+      "ip": {
+        "show": "Show IP address",
+        "hide": "Hide IP address"
+      },
       "speedUnit": "Mbps",
       "ramUnit": "MB",
       "refreshAria": "Refresh",
@@ -1650,9 +1638,16 @@
     "serviceRestartFailed": "Failed to restart the service",
     "serviceStopFailed": "Failed to stop the service",
     "serviceStartFailed": "Failed to start the service",
+    "rootRequired": "Root privileges are required. Connect as root or configure passwordless sudo.",
     "addUserFailed": "Failed to add user to credentials.toml",
     "deleteUserFailed": "Failed to delete user from credentials.toml",
+    "userAlreadyExists": "User «{{user}}» already exists on the server. Choose a different name.",
+    "credentialsNotFound": "credentials.toml was not found on the server — install the server first.",
+    "certbotPort80Busy": "Port 80 is occupied by another web server — stop it for the duration of the install, or choose a self-signed certificate.",
+    "certNotCreated": "Failed to create the certificate. Check the logs (openssl/certbot).",
+    "dpkgLocked": "The server is currently busy with system updates — try again in a couple of minutes.",
     "configCreateFailed": "Failed to create configuration files. Check logs.",
+    "configDiverges": "The server already has a configuration different from yours. Click «Reinstall» to apply your settings — users and passwords will be preserved.",
     "readConfigFailed": "Failed to read vpn.toml on the server",
     "writeConfigFailed": "Failed to write client config: {{detail}}",
     "endpointConfigError": "Endpoint configuration error: {{detail}}",
@@ -1716,7 +1711,8 @@
     "show_password": "Show password",
     "hide_password": "Hide password",
     "details": "Details",
-    "add": "Add"
+    "add": "Add",
+    "loading": "Loading"
   },
   "sidebar": {
     "servers": "Servers",

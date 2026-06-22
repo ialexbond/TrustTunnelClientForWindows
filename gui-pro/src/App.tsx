@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from "react";
+import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
@@ -22,17 +22,21 @@ import { useUpdateChecker } from "./shared/hooks/useUpdateChecker";
 import { useVpnActions } from "./shared/hooks/useVpnActions";
 import { useFileDrop } from "./shared/hooks/useFileDrop";
 import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
+import { useDeepLinkImport } from "./shared/hooks/useDeepLinkImport";
 import { useConfigLifecycle } from "./shared/hooks/useConfigLifecycle";
 import { useAutoConnect } from "./shared/hooks/useAutoConnect";
 import { useTabPersistence } from "./shared/hooks/useTabPersistence";
 import { useActivityLogStartup } from "./shared/hooks/useActivityLogStartup";
 import { useAppShellActions } from "./shared/hooks/useAppShellActions";
+import { useTrayNavigate } from "./shared/hooks/useTrayNavigate";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { EmptyState } from "./shared/ui/EmptyState";
-import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
+import { ConfirmDialog, ConfirmDialogProvider, Button } from "./shared/ui";
+import { ImportConfigModal } from "./components/wizard/ImportConfigModal";
+import { shouldActivateConfig } from "./components/wizard/shouldActivateConfig";
 import { WelcomeTour } from "./components/welcome/WelcomeTour";
 import { useWelcomeTour } from "./shared/hooks/useWelcomeTour";
-import { Settings, Terminal, X } from "lucide-react";
+import { Settings, Terminal, X, FileText } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry, ReconnectProgress } from "./shared/types";
 
 function App() {
@@ -92,6 +96,28 @@ function App() {
   // for initial step (set by ServerPanel install handler to step="endpoint",
   // mode="deploy").
   const [wizardActive, setWizardActive] = useState(false);
+  // UAT (06-uat fix 9): which tab LAUNCHED the wizard. The overlay is a fixed,
+  // full-band layer; previously it rendered on `wizardActive` alone, so it covered
+  // EVERY tab and a running install blocked the user on all sections. We now record
+  // the launch tab and only make the overlay VISIBLE on that tab — but the
+  // SetupWizard stays MOUNTED while wizardActive (hidden via CSS, never unmounted),
+  // so the deploy-step listener stays alive and a running install keeps going in the
+  // background while the user browses other tabs. The × still fully closes.
+  const [wizardLaunchTab, setWizardLaunchTab] = useState<AppTab>("control");
+
+  // ─── Connection no-config import relocation (D-02, A1) ───
+  // The wizard no longer hosts the import entry (WelcomeStep is deleted, D-01). It is
+  // relocated onto the connection no-config EmptyState as ONE quiet "У меня уже есть
+  // конфиг" affordance that opens the reused ImportConfigModal. 06-uat: the «Забрать с
+  // сервера» (fetch) choice was removed end-to-end — fetching an existing user's config is
+  // done from the Control Panel (per-user QR/Link), so the affordance now goes straight to
+  // the import modal. `importOpen` mounts the reused ImportConfigModal unchanged.
+  const [importOpen, setImportOpen] = useState(false);
+  // C-22 / D-14 — a clicked tt:// / trusttunnel:// deep-link pre-fills the import
+  // modal. The URL survives `consume()` here so it can be passed as the modal's
+  // `initialUrl`; it is cleared on modal close/import so a later MANUAL open is not
+  // pre-filled with a stale URL.
+  const [deepLinkUrl, setDeepLinkUrl] = useState<string | null>(null);
 
   // ─── Welcome onboarding tour (Phase 18, REQ-18-ONBOARDING-01..04) ───
   // First-run пользователи (нет `tt_welcome_completed` И нет
@@ -104,18 +130,39 @@ function App() {
     () => Boolean(localStorage.getItem("tt_ssh_last_host")),
     [],
   );
-  const showWelcomeTour = !welcomeCompleted && !hasExistingCredentials;
-  // Intent-based completion: 'start' → navigate to connection tab, 'skip' (X corner)
+  // Manual re-trigger of the welcome tour (About → «Приветственный тур»). The
+  // auto-show path above stays gated on the existing-user auto-skip (a configured
+  // user is not interrupted on startup); this lets such a user explicitly re-open
+  // the tour at any time. Signalled via a window CustomEvent so AboutPanel —
+  // rendered deep in the shell — doesn't prop-drill the trigger up to this overlay.
+  const [manualWelcomeTour, setManualWelcomeTour] = useState(false);
+  useEffect(() => {
+    const onShow = () => setManualWelcomeTour(true);
+    window.addEventListener("tt-show-welcome-tour", onShow);
+    return () => window.removeEventListener("tt-show-welcome-tour", onShow);
+  }, []);
+  const showWelcomeTour = manualWelcomeTour || (!welcomeCompleted && !hasExistingCredentials);
+  // Intent-based completion: 'start' → navigate by config presence, 'skip' (X corner)
   // → stay where we are. WelcomeTour hook сам пишет localStorage; здесь только
   // re-render + conditional navigate.
+  //
+  // C-21 / D-17 (round-2 audit fix): раньше 'start' ВСЕГДА вёл на вкладку
+  // «Подключение». Но first-run пользователь без конфига там упирается в
+  // no-config EmptyState, который отправляет его ОБРАТНО в «Панель управления» —
+  // петля. Теперь без конфига 'start' ведёт прямо на «Панель управления» (там
+  // живёт connect/install-вход ServerPanel), чтобы заявление D-01 «установка
+  // начинается из онбординга» стало буквально верным. С уже имеющимся конфигом
+  // по-прежнему ведём на «Подключение».
   const handleWelcomeComplete = useCallback(
     (intent: "skip" | "start") => {
+      // Close the manually-opened tour too (no-op when it was auto-shown).
+      setManualWelcomeTour(false);
       completeWelcome();
       if (intent === "start") {
-        setActiveTab("connection");
+        setActiveTab(config.configPath ? "connection" : "control");
       }
     },
-    [completeWelcome],
+    [completeWelcome, config.configPath],
   );
 
   // ─── External integrations ───
@@ -136,7 +183,41 @@ function App() {
   // legacy `available` alias so AboutPanel test surface stays untouched.
   const hasAppUpdate = updateInfo.appAvailable ?? updateInfo.available;
   const { pending: hostKeyPending, respond: hostKeyRespond } = useHostKeyVerification();
+
+  // C-22 / D-14 — deep-link config import. A clicked tt:// / trusttunnel:// link
+  // (single-instance arg, runtime event, or the backend startup file-poll — all
+  // funnel into one `deep-link-url` event) surfaces here as `pendingUrl`. The URL
+  // is UNTRUSTED external input: we only ROUTE the user to the Connection import
+  // surface and PRE-FILL the modal — the URL is never auto-imported. Validation
+  // happens in the backend `decode_deeplink` boundary when the user clicks
+  // «Импортировать», so a malformed link cannot silently write a config.
+  const { pendingUrl: deepLinkPendingUrl, consume: consumeDeepLink } = useDeepLinkImport();
+  useEffect(() => {
+    if (!deepLinkPendingUrl) return;
+    // This effect is the legitimate "react to an external system" case: a deep-link
+    // URL arrived via the useDeepLinkImport subscription, and the shell must adopt
+    // it (stash + route + open the modal) on that same arrival. The cascade is
+    // bounded — it runs once per distinct arrival, then consume() clears the source.
+    //
+    // NOTE: when a config already exists, the Connection tab renders ConnectionPanel
+    // and the import modal is NOT mounted (App.tsx no-config branch). The deep-link
+    // primarily serves the not-yet-configured user receiving a config link;
+    // re-import-over-existing is out of round-2 scope.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: synchronizing shell state with an external deep-link arrival; bounded to one run per distinct URL (consume() clears the source)
+    setDeepLinkUrl(deepLinkPendingUrl);
+    setActiveTab("connection");
+    setImportOpen(true);
+    // Clear the hook's pending value so the same URL is not re-applied on the next
+    // render; our local deepLinkUrl copy keeps it for the modal.
+    consumeDeepLink();
+  }, [deepLinkPendingUrl, consumeDeepLink]);
   const reconnectResolve = useRef<(() => void) | null>(null);
+  // AUDIT-2026-06-11 #8: true only while useVpnActions.handleReconnect (manual
+  // «Сохранить и переподключить») is in flight. Shared with useVpnEvents so its
+  // no-dwell guard suppresses the teardown's transient "disconnected" ONLY then —
+  // a tray disconnect during a backend auto-reconnect must land as a real
+  // terminal «Отключено», not be swallowed (UI used to stick on «Переподключение»).
+  const manualReconnectActiveRef = useRef(false);
   const pushSuccess = useSnackBar();
 
   useVpnEvents({
@@ -148,6 +229,7 @@ function App() {
     reconnectResolve,
     pushSuccess,
     setReconnectProgress,
+    manualReconnectActiveRef,
   });
 
   // ─── Shell hooks (Phase 12.5 decomposition) ───
@@ -166,6 +248,15 @@ function App() {
   useTabPersistence({ activeTab, config, status, connectedSince });
   useActivityLogStartup();
 
+  // C-26: no-config tray «Подключиться» emits a `tray-navigate` event; route the
+  // user to the install entry («Панель управления» — ServerPanel's connect/install
+  // surface) instead of leaving them on a silent blank/last tab.
+  useTrayNavigate(
+    useCallback((target: "install") => {
+      if (target === "install") setActiveTab("control");
+    }, []),
+  );
+
   // ─── Log viewing ───
   // Logs are surfaced exclusively through the in-window LogPanel overlay
   // (toggled by the title-bar Terminal button, see showLogs above). An earlier
@@ -182,6 +273,7 @@ function App() {
     setError,
     i18n,
     reconnectResolve,
+    manualReconnectActiveRef,
   });
 
   // ─── Shell action callbacks ───
@@ -231,6 +323,13 @@ function App() {
     [status, connectedSince, config.configPath, vpnMode, handleConnect, handleDisconnect, handleReconnect],
   );
 
+  // IN-11 (06-review): the tabpanels stay MOUNTED (hidden via opacity/visibility, not
+  // unmounted), and statusPanelNode is consumed by three of them (Connection / Settings /
+  // About). StatusPanel runs a per-instance 1s uptime ticker (UptimeCounter) while
+  // connected, so sharing one node across three mounted panels spun up THREE concurrent
+  // tickers. Each consumer below takes the node ONLY when its own tab is active
+  // (statusPanelFor), so exactly one StatusPanel — and one ticker — is ever live. Uptime is
+  // derived from connectedSince, so the remount on tab-switch shows no glitch.
   const statusPanelNode = showStatusPanel ? (
     <StatusPanel
       status={status}
@@ -241,6 +340,7 @@ function App() {
       reconnectProgress={reconnectProgress}
     />
   ) : null;
+  const statusPanelFor = (tab: AppTab) => (activeTab === tab ? statusPanelNode : null);
 
   return (
     <VpnProvider value={vpnContextValue}>
@@ -314,6 +414,9 @@ function App() {
               onSwitchToSetup={() => {
                 // Remount wizard so it picks up freshly-written localStorage step/mode.
                 setWizardKey((k) => k + 1);
+                // UAT (06-uat fix 9): record the launching tab so the overlay is only
+                // visible here — a background install no longer covers other tabs.
+                setWizardLaunchTab("control");
                 // Activate the wizard overlay (UAT 2026-05-20: «Установить»
                 // must actually launch the install flow, not just nav-noop).
                 setWizardActive(true);
@@ -353,15 +456,53 @@ function App() {
                 onSwitchToSetup={() => setActiveTab("control")}
                 onClearConfig={handleClearConfig}
                 onVpnModeChange={setVpnMode}
-                statusPanel={statusPanelNode}
+                statusPanel={statusPanelFor("connection")}
               />
             ) : (
-              <EmptyState
-                icon={<Settings className="w-6 h-6" />}
-                heading={i18n.t("connection.noConfig", "Нет подключения")}
-                body={i18n.t("connection.noConfigHint", "Настройте сервер в «Панель управления», чтобы управлять VPN-подключением")}
-                className="flex-1"
-              />
+              <>
+                <EmptyState
+                  icon={<Settings className="w-6 h-6" />}
+                  heading={i18n.t("connection.noConfig", "Нет подключения")}
+                  body={i18n.t("connection.noConfigHint", "Настройте сервер в «Панель управления», чтобы управлять VPN-подключением")}
+                  className="flex-1"
+                  // D-02 / A1: ONE quiet secondary affordance. 06-uat: it now opens the
+                  // import modal directly — the «Забрать с сервера» (fetch) choice was
+                  // removed (fetching an existing user's config is done from the Control
+                  // Panel via per-user QR/Link). The Connection section itself is NOT
+                  // restyled (v2/CONNECT-01).
+                  action={
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<FileText className="w-4 h-4" />}
+                      onClick={() => setImportOpen(true)}
+                    >
+                      {i18n.t("connection.importConfig", "Импортировать конфиг")}
+                    </Button>
+                  }
+                />
+                {/* Reused unchanged from the deleted WelcomeStep (single-consumer,
+                    D-02). onImported wires to the same setConfig/tt_config_path writers
+                    the wizard's onSetupComplete uses (App.tsx). */}
+                <ImportConfigModal
+                  open={importOpen}
+                  // C-22 / D-14: pre-fill with the deep-link URL when present.
+                  // undefined for a manual open so the link field stays empty.
+                  initialUrl={deepLinkUrl ?? undefined}
+                  onClose={() => {
+                    setImportOpen(false);
+                    // Clear the stale deep-link URL so a later manual open is not pre-filled.
+                    setDeepLinkUrl(null);
+                  }}
+                  onImported={(path) => {
+                    setConfig((prev) => ({ ...prev, configPath: path }));
+                    if (path) localStorage.setItem("tt_config_path", path);
+                    setConnectionKey((k) => k + 1);
+                    setImportOpen(false);
+                    setDeepLinkUrl(null);
+                  }}
+                />
+              </>
             )}
           </PanelErrorBoundary>
         </div>
@@ -420,7 +561,7 @@ function App() {
             language={i18n.language}
             onLanguageChange={handleLanguageChange}
             hasConfig={!!config.configPath}
-            statusPanel={statusPanelNode}
+            statusPanel={statusPanelFor("settings")}
           />
         </div>
 
@@ -440,7 +581,7 @@ function App() {
           }}
           aria-hidden={activeTab !== "about"}
         >
-          {statusPanelNode}
+          {statusPanelFor("about")}
           <AboutPanel
             updateInfo={updateInfo}
             onCheckUpdates={() => checkForUpdates(false)}
@@ -491,15 +632,60 @@ function App() {
             which is what made content look "stuck top-left". */}
     {wizardActive && (
       <div
-        className="fixed top-[32px] bottom-[64px] left-0 right-0 z-[var(--z-modal)] overflow-y-auto flex flex-col"
+        // D-01 / 06-UI-SPEC §"Accessibility Contract": the wizard overlay is a
+        // labelled modal dialog. aria-labelledby points at the stable hidden title
+        // below so the dialog always has a non-empty accessible name regardless of
+        // which inner screen the wizard opens on.
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wizard-dialog-title"
+        // UAT (06-uat fix 9): the SetupWizard stays MOUNTED while wizardActive (so a
+        // running install / its deploy-step listener is never torn down), but the fixed
+        // overlay is only VISIBLE on the tab that launched it. On any other tab we hide
+        // it with `hidden` (display:none) + aria-hidden so it no longer covers that tab's
+        // content while the install keeps running in the background.
+        className={`fixed top-[32px] bottom-[64px] left-0 right-0 z-[var(--z-modal)] overflow-y-auto flex flex-col${activeTab !== wizardLaunchTab ? " hidden" : ""}`}
+        aria-hidden={activeTab !== wizardLaunchTab}
         style={{ background: "var(--color-bg-primary)" }}
       >
+        {/* Stable accessible name for the dialog. Visually hidden (sr-only) — the
+            inner screens render their own visible heroes; this only feeds the a11y
+            tree so the dialog name never goes empty. */}
+        <h2 id="wizard-dialog-title" className="sr-only">
+          {i18n.t("wizard.dialog_title")}
+        </h2>
+        {/* The overlay-level close (×) was REMOVED (06-uat, user request): the install
+            flow is now self-contained and works correctly, so the × had no real purpose and
+            only invited closing mid-install. Exits remain: ServerStep «Назад» and the
+            Done/Found buttons close via onClose, and switching bottom tabs hides the overlay
+            (it sits BETWEEN the title bar and the tab bar — top-[32px] bottom-[64px] — so the
+            tab bar stays clickable). So there is no trap to escape without the ×. */}
         <div className="flex-1 flex flex-col w-full max-w-[600px] mx-auto">
           <SetupWizard
             key={wizardKey}
+            // D-01 / Pitfall 3: first-screen "Назад" and Done/Found post-install nav
+            // close the overlay (no welcome menu to navigate back to).
+            onClose={() => setWizardActive(false)}
             onSetupComplete={(configPath) => {
-              setConfig((prev) => ({ ...prev, configPath }));
-              if (configPath) localStorage.setItem("tt_config_path", configPath);
+              // UAT 2026-06-19 (R2/R3) — finishing the wizard used to
+              // UNCONDITIONALLY promote the freshly-created config to the active
+              // «Подключение» config (overwriting whatever was there, even mid-
+              // connection). The product owner reported this as a bug. Promote the
+              // new config ONLY when there is no active config AND the VPN is not
+              // connected; otherwise leave the existing active config/connection
+              // completely untouched (the new <username>.toml is still on disk).
+              // A future Connection-tab redesign adds a multi-config switcher (R5).
+              const hasActiveConfig = Boolean(config.configPath);
+              // Treat any non-idle status as "connected" so we never replace the
+              // active config while a session is live or being established (R4).
+              const vpnConnected = status !== "disconnected" && status !== "error";
+              const activate =
+                shouldActivateConfig({ hasActiveConfig, vpnConnected }) &&
+                Boolean(configPath);
+              if (activate) {
+                setConfig((prev) => ({ ...prev, configPath }));
+                localStorage.setItem("tt_config_path", configPath);
+              }
               setWizardActive(false);
               // UAT 2026-05-21 — honour DoneStep navigation intent. DoneStep
               // writes `tt_navigate_after_setup` = "connection" (or "settings",
@@ -520,6 +706,14 @@ function App() {
               // endpoint. Without this bump the cached pre-install
               // `installed=false` keeps the «Установить / Выйти» screen
               // visible after a successful deploy.
+              // UAT 2026-06-19 — after finishing the wizard always open the
+              // control panel on «Обзор» (Overview), not the last-active sub-tab.
+              // Delete+reinstall happens on «Сервис», so tt_active_tab held
+              // "service" and the remounted ServerTabs reopened it. Force overview
+              // (in ServerTabs VALID_TAB_IDS) before the remount. Normal sub-tab
+              // memory during regular use is unaffected (ServerTabs rewrites the
+              // key on each click).
+              localStorage.setItem("tt_active_tab", "overview");
               setControlKey((k) => k + 1);
             }}
           />

@@ -100,11 +100,14 @@ export function useConfigLifecycle({
         setWizardKey((k) => k + 1);
         pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
       } else if (exists && !config.configPath) {
-        // Config file appeared — reload it
+        // Config file appeared — reload it. 06-uat: do NOT auto-navigate to the
+        // Connection tab here. An externally-restored config file should not yank the
+        // user away from whatever section they are on; the config is loaded silently and
+        // the snackbar tells them. (The first-load auto-detect nav above is kept — that
+        // is the legitimate startup case.)
         setConfig({ configPath: path, logLevel: "info" });
         localStorage.setItem("tt_config_path", path);
         setConnectionKey((k) => k + 1);
-        setActiveTab("connection");
         pushSuccess(i18n.t("messages.config_file_restored", "Config loaded"));
       }
     });

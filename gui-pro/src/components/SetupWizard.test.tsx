@@ -11,16 +11,10 @@ vi.mock("./wizard/useWizardState", () => ({
   useWizardState: () => mockWizardState,
 }));
 
-// Mock individual step components for isolation
-vi.mock("./wizard/WelcomeStep", () => ({
-  WelcomeStep: () => <div data-testid="welcome-step">WelcomeStep</div>,
-}));
-vi.mock("./wizard/ServerStep", () => ({
-  ServerStep: () => <div data-testid="server-step">ServerStep</div>,
-}));
-vi.mock("./wizard/CheckingStep", () => ({
-  CheckingStep: () => <div data-testid="checking-step">CheckingStep</div>,
-}));
+// Mock individual step components for isolation.
+// 06-uat: the install wizard no longer renders an SSH-login (ServerStep), a server-probe
+// (CheckingStep) or a fetch-progress (FetchingStep) screen — those components are deleted.
+// Reachable screens: endpoint → deploying → done/error, plus found + recovery + uninstalling.
 vi.mock("./wizard/FoundStep", () => ({
   FoundStep: () => <div data-testid="found-step">FoundStep</div>,
 }));
@@ -30,14 +24,14 @@ vi.mock("./wizard/EndpointStep", () => ({
 vi.mock("./wizard/DeployingStep", () => ({
   DeployingStep: () => <div data-testid="deploying-step">DeployingStep</div>,
 }));
-vi.mock("./wizard/FetchingStep", () => ({
-  FetchingStep: () => <div data-testid="fetching-step">FetchingStep</div>,
-}));
 vi.mock("./wizard/DoneStep", () => ({
   DoneStep: () => <div data-testid="done-step">DoneStep</div>,
 }));
 vi.mock("./wizard/ErrorStep", () => ({
   ErrorStep: () => <div data-testid="error-step">ErrorStep</div>,
+}));
+vi.mock("./wizard/RecoveryStep", () => ({
+  RecoveryStep: () => <div data-testid="recovery-step">RecoveryStep</div>,
 }));
 vi.mock("./wizard/StepBar", () => ({
   StepBar: () => <div data-testid="step-bar">StepBar</div>,
@@ -51,26 +45,8 @@ describe("SetupWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     i18n.changeLanguage("ru");
-    // Reset to welcome step
-    Object.assign(mockWizardState, makeWizardState({ step: "welcome" }));
-  });
-
-  it("renders WelcomeStep when step is welcome", () => {
-    Object.assign(mockWizardState, makeWizardState({ step: "welcome" }));
-    render(<SetupWizard {...defaultProps} />);
-    expect(screen.getByTestId("welcome-step")).toBeInTheDocument();
-  });
-
-  it("renders ServerStep when step is server", () => {
-    Object.assign(mockWizardState, makeWizardState({ step: "server" }));
-    render(<SetupWizard {...defaultProps} />);
-    expect(screen.getByTestId("server-step")).toBeInTheDocument();
-  });
-
-  it("renders CheckingStep when step is checking", () => {
-    Object.assign(mockWizardState, makeWizardState({ step: "checking" }));
-    render(<SetupWizard {...defaultProps} />);
-    expect(screen.getByTestId("checking-step")).toBeInTheDocument();
+    // 06-uat: install-only wizard opens on the Settings (endpoint) screen.
+    Object.assign(mockWizardState, makeWizardState({ step: "endpoint" }));
   });
 
   it("renders FoundStep when step is found", () => {
@@ -91,12 +67,6 @@ describe("SetupWizard", () => {
     expect(screen.getByTestId("deploying-step")).toBeInTheDocument();
   });
 
-  it("renders FetchingStep when step is fetching", () => {
-    Object.assign(mockWizardState, makeWizardState({ step: "fetching" }));
-    render(<SetupWizard {...defaultProps} />);
-    expect(screen.getByTestId("fetching-step")).toBeInTheDocument();
-  });
-
   it("renders DoneStep when step is done", () => {
     Object.assign(mockWizardState, makeWizardState({ step: "done" }));
     render(<SetupWizard {...defaultProps} />);
@@ -107,6 +77,12 @@ describe("SetupWizard", () => {
     Object.assign(mockWizardState, makeWizardState({ step: "error" }));
     render(<SetupWizard {...defaultProps} />);
     expect(screen.getByTestId("error-step")).toBeInTheDocument();
+  });
+
+  it("renders RecoveryStep when step is recovery", () => {
+    Object.assign(mockWizardState, makeWizardState({ step: "recovery" }));
+    render(<SetupWizard {...defaultProps} />);
+    expect(screen.getByTestId("recovery-step")).toBeInTheDocument();
   });
 
   it("renders uninstalling step with spinner when status is not ok", () => {
@@ -138,10 +114,13 @@ describe("SetupWizard", () => {
     expect(screen.getByText(i18n.t("wizard.uninstalling.description"))).toBeInTheDocument();
   });
 
-  it("falls back to WelcomeStep for unknown step", () => {
+  it("falls back to EndpointStep for unknown/legacy step", () => {
+    // 06-uat: the router default renders the install-first EndpointStep (Settings) for any
+    // unknown/legacy step (incl. a stale persisted "welcome"/"server"/"checking"/"fetching"),
+    // never a deleted component.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     Object.assign(mockWizardState, makeWizardState({ step: "unknown_step" as any }));
     render(<SetupWizard {...defaultProps} />);
-    expect(screen.getByTestId("welcome-step")).toBeInTheDocument();
+    expect(screen.getByTestId("endpoint-step")).toBeInTheDocument();
   });
 });

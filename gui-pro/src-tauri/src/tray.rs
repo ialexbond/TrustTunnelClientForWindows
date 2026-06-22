@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 
 use tauri::Manager;
+use tauri::Emitter;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::image::Image;
 
@@ -247,7 +248,17 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         .or_else(crate::commands::config::auto_detect_config);
 
     let Some(config_path) = config_path else {
-        // No config found — show the window so user can configure
+        // No config found — show the window so user can configure.
+        //
+        // C-26 (round-2 audit fix): раньше мы только показывали окно — и
+        // пользователь без конфига попадал на пустую/последнюю вкладку без
+        // подсказки куда идти, чтобы установить сервер. Теперь СНАЧАЛА
+        // отправляем navigation-событие `tray-navigate`, которое фронтенд
+        // (useTrayNavigate) ловит и переводит на «Панель управления» — вход в
+        // установку. Payload несёт ТОЛЬКО строку-цель навигации — никаких
+        // учётных данных, никакого пути к конфигу (граница threat-model).
+        // Зеркалит форму emit'а `deep-link-url` из lib.rs:66.
+        app.emit("tray-navigate", serde_json::json!({ "target": "install" })).ok();
         if let Some(w) = app.get_webview_window("main") {
             w.show().ok();
             w.set_focus().ok();
@@ -279,6 +290,14 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
 
         // Reset flags
         if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+        // AUDIT-2026-06-11 #3: also clear the DURABLE user-disconnect intent, exactly
+        // like `vpn_connect` does (T-31 contract: set by a disconnect, cleared by the
+        // NEXT connect — on EVERY connect entry point). Without this a tray-started
+        // session ran with a stale `true` from an earlier window disconnect, and the
+        // reconnect supervisor's very first intent check aborted to a forced
+        // Disconnected on the first drop — i.e. tray sessions silently lost ALL
+        // auto-reconnect.
+        state.user_disconnect_requested.store(false, Ordering::SeqCst);
 
         // CR-03: bump the connection generation so THIS tray-started session owns a
         // distinct number, exactly like `vpn_connect` does. Without this bump a stale
@@ -298,6 +317,16 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
             "error" | "warn" => "info",
             other => other,
         };
+
+        // AUDIT-2026-06-11 #5 / FIX-A (RC-2): snapshot the pre-VPN system DNS before the
+        // tunnel comes up, mirroring `vpn_connect` (same direct sync calls in an async
+        // body). The C++ sidecar flips system DNS on connect and is always hard-killed,
+        // so without a baseline taken HERE a tray-started session has nothing to restore
+        // on teardown — the machine stays pointed at the dead tunnel resolver. The
+        // snapshot is self-guarded against overwriting an existing baseline, so a
+        // reconnect can never capture the tunnel resolver as "pre-VPN".
+        crate::dns_guard::snapshot_system_dns();
+        crate::dns_guard::flush_dns_cache();
 
         match sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc).await {
             Ok(child) => {
@@ -558,14 +587,39 @@ pub fn tray_menu_has_config(app: tauri::AppHandle) -> bool {
 pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return; };
 
+    // AUDIT-2026-06-11 #2: mirror `vpn_disconnect`'s intent preamble UNCONDITIONALLY,
+    // BEFORE the child slot is even inspected. Previously ALL bookkeeping (including
+    // `disconnecting=true`) lived inside `if let Some(child)`, so a tray cancel during
+    // a supervisor respawn gap was either a silent no-op or left no durable trace —
+    // and the supervisor's next pre-attempt intent check happily reconnected against
+    // the user's explicit cancel (the exact T-31 double-press bug, on the tray path).
+    if let Ok(mut d) = state.disconnecting.lock() { *d = true; }
+    // T-31: raise the DURABLE user-disconnect intent. Unlike the transient
+    // `disconnecting` (cleared at the end of the task below — WR-01), this stays set
+    // until the next connect, so a supervisor that re-reads intent AFTER this
+    // disconnect completes still aborts instead of flipping the session back on.
+    state.user_disconnect_requested.store(true, Ordering::SeqCst);
+    // Codex HIGH stale-actor guard: bump the generation so any in-flight
+    // connect-timeout watchdog / supervisor attempt from the session being torn down
+    // sees a mismatch and neutralizes itself (mirrors `vpn_disconnect`).
+    state.connection_generation.fetch_add(1, Ordering::SeqCst);
+
     let child = {
-        let Ok(mut guard) = state.sidecar_child.lock() else { return; };
+        // Poison-recovery instead of the old `else { return; }`: bailing here AFTER
+        // the preamble above would leave `disconnecting` latched true forever.
+        let mut guard = state
+            .sidecar_child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         guard.take()
     };
+    // Captured before `child` moves into the task: the empty-slot path gates its
+    // status write on the live status (see below), the kill path keeps the
+    // unconditional Disconnected write it always had.
+    let had_child = child.is_some();
 
-    if let Some(child) = child {
+    if let Some(ref child) = child {
         if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
-        if let Ok(mut d) = state.disconnecting.lock() { *d = true; }
 
         // WR-06: kill_sidecar can take seconds (it force-runs taskkill). The tray
         // icon is driven only by vpn-status events, and no event fires until the
@@ -575,26 +629,60 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
         // (reconnect bucket) so icon and menu agree during the kill. No visible
         // vocabulary change (D-09): "disconnecting" is the existing FE-local
         // transient label, not a new backend status — vpn_status stays untouched.
+        // Kill path only: the empty-slot path below either writes Disconnected
+        // promptly (which refreshes the icon via the mutator) or leaves a settled
+        // status alone — a proactive gray flip would wrongly mask e.g. a red Error.
         update_tray_icon(&app, "disconnecting");
+    }
 
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(child) = child {
             // D-08 lifecycle marker (8): sidecar killed on exit (tray quit path) —
             // fixed phrase, DEV-gated (D-11).
             sidecar::emit_killed_on_exit_marker(&app_clone);
             sidecar::kill_sidecar(child).await.ok();
-            routing_rules::cleanup_hosts_block().ok();
-            // Re-look up state inside the 'static task and route through the mutator.
-            if let Some(state) = app_clone.try_state::<AppState>() {
+        }
+        // AUDIT-2026-06-11 #7: cleanup runs even when the child slot was empty — a
+        // tray cancel mid-respawn / mid-recovery must still tear the session down
+        // (the supervisor's T-31 Aborted branch handles any in-flight respawn).
+        routing_rules::cleanup_hosts_block().ok();
+        // AUDIT-2026-06-11 #5 / FIX-A (RC-2): restore the pre-VPN system DNS, exactly
+        // like `vpn_disconnect`. The hard-killed sidecar never restores it itself, so
+        // without this a tray disconnect stranded the whole machine on the dead
+        // tunnel resolver until the next app launch's startup sweep.
+        crate::dns_guard::restore_system_dns();
+        // Re-look up state inside the 'static task and route through the mutator.
+        if let Some(state) = app_clone.try_state::<AppState>() {
+            // AUDIT-2026-06-11 #7: on the empty-slot path only write Disconnected
+            // when the session is genuinely active (the supervisor/recovery states a
+            // tray «Отмена» is cancelling). A settled Disconnected/Error stays put —
+            // overwriting a terminal Error here would erase its reason for nothing.
+            let write_disconnected = had_child || {
+                let status_now = *state
+                    .vpn_status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                matches!(
+                    status_now,
+                    VpnStatus::Connecting
+                        | VpnStatus::Connected
+                        | VpnStatus::Reconnecting
+                        | VpnStatus::Recovering
+                )
+            };
+            if write_disconnected {
                 set_vpn_status(&app_clone, &state, VpnStatus::Disconnected, None);
-                // WR-01: clear the process-wide `disconnecting` intent flag after the
-                // disconnect completes (mirrors `vpn_disconnect`). The sidecar's
-                // Terminated arm already read `was_intentional == true` DURING the
-                // `kill_sidecar` above, so resetting after the final Disconnected
-                // status write cannot trigger a spurious reconnect. This prevents a
-                // stale `true` from outliving the tray-initiated disconnect.
-                if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
             }
-        });
-    }
+            // WR-01: clear the process-wide `disconnecting` intent flag after the
+            // disconnect completes (mirrors `vpn_disconnect`). The sidecar's
+            // Terminated arm already read `was_intentional == true` DURING the
+            // `kill_sidecar` above, so resetting after the final Disconnected
+            // status write cannot trigger a spurious reconnect. This prevents a
+            // stale `true` from outliving the tray-initiated disconnect — and per
+            // AUDIT-2026-06-11 #2/#7 it now runs on the empty-slot path too, so the
+            // unconditional preamble can never strand the flag.
+            if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+        }
+    });
 }

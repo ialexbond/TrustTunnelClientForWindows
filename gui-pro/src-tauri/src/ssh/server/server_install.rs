@@ -2,8 +2,55 @@ use super::super::*;
 use super::super::sanitize::*;
 use russh::client;
 
+/// Derive the `partial` flag from the per-stage install probe (WIZARD-02; Codex
+/// #4, #9; round-2 finding G). A server is "partial" when the binary is present
+/// but the full official install chain is NOT complete: any config/cert artifact
+/// missing, OR the systemd unit exists but is not enabled, OR the service is not
+/// active. Pure fn so it is unit-testable under `cargo test --lib` without a live
+/// SSH server.
+///
+/// FINDING G: `unit_exists && !unit_enabled` counts as partial — a unit that was
+/// created but never `systemctl enable --now`d is NOT a complete install. The
+/// frontend `resolveResume` consumes `unitExists`/`unitEnabled` distinctly, so the
+/// probe reports both and `partial` folds them in.
+///
+/// Scope (LOW #13): assumes the CANONICAL `/opt/trusttunnel` install dir + default
+/// filenames (`ENDPOINT_DIR`). Upstream `install.sh -o DIR` / custom `setup_wizard`
+/// install paths are OUT OF SCOPE for this resume probe.
+#[allow(clippy::too_many_arguments)]
+fn derive_partial(
+    binary: bool,
+    credentials: bool,
+    rules: bool,
+    vpn: bool,
+    hosts: bool,
+    cert: bool,
+    unit_exists: bool,
+    unit_enabled: bool,
+    unit_active: bool,
+) -> bool {
+    // Not installed at all → not "partial", it's a clean slate.
+    if !binary {
+        return false;
+    }
+    // Binary present: complete only when EVERY artifact is present AND the unit is
+    // present + enabled + active. Anything missing (including a present-but-not-
+    // enabled unit, finding G) is a partial install.
+    let complete = credentials && rules && vpn && hosts && cert && unit_exists && unit_enabled && unit_active;
+    !complete
+}
+
+/// Probe a single `test -f`-style artifact answer for `TT_EXISTS`.
+fn probe_exists(raw: &str) -> bool {
+    raw.trim().contains("TT_EXISTS")
+}
+
 /// Check if TrustTunnel is already installed on the server.
-/// Returns JSON: { installed: bool, version: String, service_active: bool }
+/// Returns JSON with per-stage idempotent "done?" booleans mirroring the REAL
+/// install artifact chain (WIZARD-02; Codex #4): installed/version/serviceActive/
+/// users (existing) PLUS binaryInstalled, credentialsExist, rulesExist,
+/// vpnConfigExists, hostsConfigExists, certPresent, unitExists, unitEnabled, and
+/// a derived `partial`. The frontend `resolveResume` keys off these.
 /// NOTE: Uses direct connect (NOT pooled) — initial check before pool exists.
 pub async fn check_server_installation(
     app: &tauri::AppHandle,
@@ -29,12 +76,59 @@ pub async fn check_server_installation(
         String::new()
     };
 
-    // Check service status
+    // Check service status (existing — kept verbatim).
     let (svc_status, _) = exec_command(
         &handle, app,
         "systemctl is-active trusttunnel 2>/dev/null || echo inactive"
     ).await?;
     let service_active = svc_status.trim() == "active";
+
+    // ── Per-stage artifact probe mirroring the REAL install chain (Codex #4) ──
+    // Batch all the cheap `test -f` checks into ONE script so we do not pay N SSH
+    // round-trips. The script echoes a labelled TT_EXISTS / TT_MISSING line per
+    // artifact; we parse the labels back out. The systemd `is-enabled` answer is
+    // included in the same script.
+    //
+    // The cert is considered present when EITHER the Let's Encrypt live/ symlink
+    // exists for any host OR the local certs/cert.pem copy exists (mirrors the two
+    // cert layouts `build_configure_commands` writes — letsencrypt live/ vs
+    // self-signed/provided certs/).
+    //
+    // Scope (LOW #13): canonical ENDPOINT_DIR only — see `derive_partial` doc.
+    let (binary_installed, credentials_exist, rules_exist, vpn_config_exists, hosts_config_exists, cert_present, unit_exists, unit_enabled) = if installed {
+        let sudo = detect_sudo(&handle, app).await;
+        // WR-04 / round-2 finding J: dynamically-generated UUID heredoc delimiter
+        // for the multi-line probe script — never a static delimiter. The body is
+        // single-quoted so the writing shell performs no expansion; the labels are
+        // literal and parsed back out below.
+        let delim = format!("PROBE_EOF_{}", uuid::Uuid::new_v4().simple());
+        // Codex #14 + round-2 finding A: the probe SHELL CONSTRUCTION is extracted
+        // into a pure helper so a backend snapshot test can pin it against the real
+        // /opt/trusttunnel → config → cert → systemd artifact chain without a live
+        // server (mocked frontend flows do not cover this).
+        let probe_script = build_probe_script(sudo, &delim);
+        let (probe_out, _) = exec_command(&handle, app, &probe_script).await?;
+        // Parse the labelled lines back into booleans.
+        let line_for = |label: &str| -> bool {
+            probe_out
+                .lines()
+                .find(|l| l.trim_start().starts_with(label))
+                .map(probe_exists)
+                .unwrap_or(false)
+        };
+        (
+            line_for("BINARY_SW"),
+            line_for("CREDENTIALS"),
+            line_for("RULES"),
+            line_for("VPNCFG"),
+            line_for("HOSTSCFG"),
+            line_for("CERT"),
+            line_for("UNIT"),
+            line_for("ENABLED"),
+        )
+    } else {
+        (false, false, false, false, false, false, false, false)
+    };
 
     // Get list of VPN users from credentials.toml
     let users: Vec<String> = if installed {
@@ -53,37 +147,227 @@ pub async fn check_server_installation(
 
     handle.disconnect(russh::Disconnect::ByApplication, "", "en").await.ok();
 
+    let partial = derive_partial(
+        binary_installed,
+        credentials_exist,
+        rules_exist,
+        vpn_config_exists,
+        hosts_config_exists,
+        cert_present,
+        unit_exists,
+        unit_enabled,
+        service_active,
+    );
+
     Ok(serde_json::json!({
         "installed": installed,
         "version": version,
         "serviceActive": service_active,
         "users": users,
+        // Per-stage idempotent probe (Codex #4) — additive only, existing callers
+        // (ServerPanel) ignore the new keys. unitExists/unitEnabled are DISTINCT
+        // (finding G).
+        "binaryInstalled": binary_installed,
+        "credentialsExist": credentials_exist,
+        "rulesExist": rules_exist,
+        "vpnConfigExists": vpn_config_exists,
+        "hostsConfigExists": hosts_config_exists,
+        "certPresent": cert_present,
+        "unitExists": unit_exists,
+        "unitEnabled": unit_enabled,
+        "partial": partial,
     }))
 }
 
-/// Completely remove TrustTunnel from the server.
-/// NOTE: Uses direct connect (NOT pooled) — destructive one-shot operation.
-pub async fn uninstall_server(
-    app: &tauri::AppHandle,
-    params: SshParams,
-) -> Result<(), String> {
-    emit_step(app, "uninstall", "progress", "Connecting to server...");
-
-    let handle = params.connect_with_app(app.clone()).await
-        .inspect_err(|e| { emit_step(app, "uninstall", "error", e); })?;
-
-    // Determine sudo
-    let sudo = detect_sudo(&handle, app).await;
-
-    emit_step(app, "uninstall", "progress", "Removing TrustTunnel...");
-
-    // Run full uninstall as a single script for reliability
+/// Build the per-stage artifact probe SHELL CONSTRUCTION (Codex #4 + #14, round-2
+/// finding A). Pure fn → unit-testable under `cargo test --lib` so a snapshot test
+/// can pin the constructed shell against the REAL deploy artifact chain
+/// (`/opt/trusttunnel` → the four config files → cert layout → systemd unit) WITHOUT
+/// a live SSH server. Mocked frontend `invoke` flows cannot verify this — the
+/// server-truth model must not silently drift from what deploy actually writes.
+///
+/// `delim` is a dynamically-generated `PROBE_EOF_<uuid>` heredoc delimiter (WR-04 /
+/// round-2 finding J — never a static delimiter). The body is single-quoted so the
+/// WRITING shell performs no expansion; the labels are parsed back out by the caller.
+pub(crate) fn build_probe_script(sudo: &str, delim: &str) -> String {
     let dir = ENDPOINT_DIR;
-    let svc = ENDPOINT_SERVICE;
-    let uninstall_script = format!(
+    format!(
+        r#"{sudo}bash << '{delim}'
+emit() {{ test -f "$1" && echo "$2 TT_EXISTS" || echo "$2 TT_MISSING"; }}
+emit "{dir}/setup_wizard" BINARY_SW
+emit "{dir}/credentials.toml" CREDENTIALS
+emit "{dir}/rules.toml" RULES
+emit "{dir}/vpn.toml" VPNCFG
+emit "{dir}/hosts.toml" HOSTSCFG
+# cert: LE live/ symlink (any host) OR local certs/cert.pem
+if ls /etc/letsencrypt/live/*/fullchain.pem >/dev/null 2>&1 || test -f "{dir}/certs/cert.pem"; then
+  echo "CERT TT_EXISTS"
+else
+  echo "CERT TT_MISSING"
+fi
+# systemd unit file present?
+emit "/etc/systemd/system/trusttunnel.service" UNIT
+# systemd unit enabled? (is-enabled prints "enabled" when enabled)
+if systemctl is-enabled trusttunnel >/dev/null 2>&1; then
+  echo "ENABLED TT_EXISTS"
+else
+  echo "ENABLED TT_MISSING"
+fi
+{delim}"#
+    )
+}
+
+/// Build the EXTENDED, OWNERSHIP-SCOPED cleanup commands appended to the uninstall
+/// script (D-04 full clean slate; Codex #7 + round-2 finding A + round-3 HIGH A).
+///
+/// "Start over" must be a GENUINELY full clean slate — but firewall removal must be
+/// OWNERSHIP-SCOPED so it never clobbers a pre-existing admin firewall opening on the
+/// user's own server. This helper produces:
+///   (i)   Let's Encrypt state removal (certbot delete + rm -rf the live/archive/
+///         renewal entries for {host}), so a re-issue is clean.
+///   (ii)  ufw rules removed BY COMMENT: parse `ufw status numbered`, find ONLY the
+///         lines carrying `trusttunnel-acme` (port 80) / `trusttunnel-tls` (port 443),
+///         and `ufw --force delete <number>` each in DESCENDING order (so deleting one
+///         does not renumber the next target). NEVER a broad `ufw --force delete allow
+///         80/tcp` — that broad form matches an admin's bare rule and is FORBIDDEN.
+///   (iii) iptables rules removed BY TAG: `iptables -D ... -m comment --comment
+///         trusttunnel-managed` — matches ONLY the rule the (now-tagging) deploy
+///         inserted, never an admin's untagged ACCEPT on the same port.
+///
+/// Pre-tag installs (iptables rules inserted by an OLDER build before tag-on-install)
+/// carry NO comment, so the tagged `-D` does NOT match them and they are LEFT
+/// untouched — we deliberately do NOT fall back to a broad untagged `-D` (that is
+/// exactly the clobber risk). An open port with no service behind it is harmless
+/// residue. This narrowing is documented in CONTEXT.md Deferred Ideas.
+///
+/// `host` is validated upstream by `validate_ssh_host` before it reaches here (no
+/// shell metacharacters), so it is safe to interpolate. Pure fn → unit-testable under
+/// `cargo test --lib` without a live server.
+pub(crate) fn build_uninstall_extras(sudo: &str, host: &str) -> String {
+    format!(
+        r#"echo "=== Step 5b: Remove Let's Encrypt state ({host}) ==="
+{sudo}certbot delete --cert-name {host} --non-interactive 2>/dev/null || true
+{sudo}rm -rf /etc/letsencrypt/live/{host} /etc/letsencrypt/archive/{host} /etc/letsencrypt/renewal/{host}.conf 2>/dev/null || true
+
+echo "=== Step 5c: Remove TrustTunnel ufw rules BY COMMENT (ownership-scoped) ==="
+# Delete ONLY rules whose comment marks them as ours. install_firewall tags rules
+# with 'SSH (TrustTunnel)' / 'VPN (TrustTunnel)' / 'TrustTunnel VPN' / 'TrustTunnel
+# QUIC' / 'HTTP cert renewal (TrustTunnel)', and the deploy stage with
+# 'trusttunnel-acme' / 'trusttunnel-tls'. A case-insensitive 'trusttunnel' matches
+# all the (TrustTunnel)-tagged ones; 'HTTP cert renewal' also matches the LEGACY
+# 80/tcp comment written by older builds (pre this fix). Bare admin rules (no
+# TrustTunnel comment) never match → never touched. Highest rule number first so
+# renumbering does not shift the next target. NEVER a broad `ufw delete allow <port>`
+# (that would clobber an admin's bare rule on the same port).
+# BUGFIX (post-UAT): the old pattern grepped only 'trusttunnel-acme|trusttunnel-tls',
+# which the install_firewall comments NEVER contain — so NO ufw rule was ever removed
+# on uninstall (confirmed on a live server: all TrustTunnel rules survived).
+if command -v ufw >/dev/null 2>&1; then
+  for tt_num in $({sudo}ufw status numbered 2>/dev/null | grep -iE 'trusttunnel|HTTP cert renewal' | grep -oE '^\[[ ]*[0-9]+\]' | grep -oE '[0-9]+' | sort -rn); do
+    yes | {sudo}ufw delete "$tt_num" 2>/dev/null || true
+  done
+fi
+
+echo "=== Step 5d: Remove deploy-inserted iptables ACCEPT rules BY TAG (ownership-scoped) ==="
+# Delete ONLY rules tagged `-m comment --comment trusttunnel-managed` — matches our
+# rule, never an admin's untagged ACCEPT on the same port.
+if command -v iptables >/dev/null 2>&1; then
+  {sudo}iptables -D INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment trusttunnel-managed 2>/dev/null || true
+  {sudo}iptables -D INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment trusttunnel-managed 2>/dev/null || true
+fi
+"#
+    )
+}
+
+/// Shell preamble for `uninstall_server`: STOP an in-progress deploy before
+/// removing files (05-UAT 2026-06-09 — "cancel must kill the remote process").
+/// Reads the deploy process-group id recorded by `deploy::build_pidfile_record`
+/// (/tmp/tt_deploy.pid) and TERM-then-KILLs ONLY that group, then
+/// `dpkg --configure -a` heals a half-finished apt transaction left by the
+/// interrupted install. The `[ "$TT_PGID" -gt 1 ]` guard means we can never
+/// signal our own group or pid/group 0; this is scoped ON PURPOSE so the
+/// system's own apt / unattended-upgrades is NEVER touched (we do not broad-kill
+/// apt). Pure fn → unit-testable under `cargo test --lib`.
+pub(crate) fn build_stop_in_progress(sudo: &str) -> String {
+    format!(
+        r#"echo "=== Step 0: Stop any in-progress TrustTunnel install ==="
+if [ -f /tmp/tt_deploy.pid ]; then
+  TT_PGID=$(tr -dc 0-9 < /tmp/tt_deploy.pid 2>/dev/null)
+  if [ -n "$TT_PGID" ] && [ "$TT_PGID" -gt 1 ] 2>/dev/null; then
+    {sudo}kill -TERM -"$TT_PGID" 2>/dev/null || true
+    sleep 2
+    {sudo}kill -KILL -"$TT_PGID" 2>/dev/null || true
+  fi
+  {sudo}rm -f /tmp/tt_deploy.pid 2>/dev/null || true
+fi
+{sudo}dpkg --configure -a 2>/dev/null || true
+"#
+    )
+}
+
+/// Build the COMPLETE uninstall script body for «Начать заново» (D-04 full clean
+/// slate, OWNERSHIP-SCOPED — round-3 HIGH A). Pure fn → unit-testable under
+/// `cargo test --lib` without a live server, mirroring the `build_uninstall_extras`
+/// / `build_stop_in_progress` pure-helper pattern.
+///
+/// COCOON COMPLETENESS (06-16 C-15/C-16/C-18): this script must remove EVERY server
+/// path the install can write — see the COCOON MANIFEST doc-comment in `deploy.rs`
+/// for the authoritative install-write ↔ uninstall-remove cross-reference, pinned by
+/// the `cocoon_manifest_symmetry_every_owned_path_is_removed` unit test. Two LE-path
+/// leaks closed here:
+///   • C-15: the systemd DROP-IN dir `/etc/systemd/system/trusttunnel.service.d`
+///     (created by `deploy.rs` `mkdir -p` for the zero-downtime `ExecReload`) is
+///     removed with `rm -rf` BEFORE `systemctl daemon-reload` — `rm -f` on the
+///     `*.service` glob never matched a `.d` DIRECTORY, so the drop-in survived.
+///   • C-16: the cert-renewal helper `/usr/local/sbin/trusttunnel-cert-renew.sh`
+///     (written by `deploy.rs` for cron renewal) is removed — Step 6 only swept
+///     `/usr/local/bin` + `/usr/bin`, never `/usr/local/sbin`.
+///
+/// OWNERSHIP BOUNDARY (C-20): admin-shared apt PACKAGES (certbot/curl/iptables) are
+/// deliberately NOT purged — removing a package an admin may rely on is an
+/// over-deletion violation. We remove only the host's cert STATE (in
+/// `build_uninstall_extras`) and OUR own files. Every removal targets a 100%-ours
+/// path (`.service.d` drop-in dir, `/usr/local/sbin/trusttunnel*` glob) — no glob
+/// that could match a foreign file.
+///
+/// SMART SECURITY DE-PROVISION (post-UAT exception to C-20): ufw + fail2ban — which
+/// install_firewall / install_fail2ban can apt-install — ARE removed, but scoped by
+/// OWNERSHIP MARKERS written at install time under `{dir}` (`.tt-installed-ufw`,
+/// `.tt-enabled-ufw`, `.tt-installed-fail2ban`). Read in Step 0.6 BEFORE `{dir}` is
+/// removed, applied in Step 5e: purge the PACKAGE only if WE installed it (marker
+/// present); otherwise keep the admin's package and remove only OUR ufw rules +
+/// fail2ban jail. `ufw --force disable` precedes any purge so the SSH session is
+/// never stranded. The ufw rule sweep itself (Step 5c) is comment-scoped and runs
+/// regardless of markers (it never touches a bare admin rule).
+///
+/// `host` is validated upstream by `validate_ssh_host` (whitelist — no shell
+/// metacharacters) before reaching here; no NEW free-text SSH-reaching field is
+/// introduced by this helper. `build_stop_in_progress` + `build_uninstall_extras`
+/// are interpolated in (no inline duplicate of their bodies).
+pub(crate) fn build_uninstall_script(sudo: &str, dir: &str, svc: &str, host: &str) -> String {
+    // OWNERSHIP-SCOPED extended cleanup (LE state + ufw-by-comment + iptables-by-tag)
+    // — see build_uninstall_extras doc. host already whitelist-validated upstream.
+    let uninstall_extras = build_uninstall_extras(sudo, host);
+    // Step 0: stop an in-progress deploy (kill OUR recorded process group + heal
+    // dpkg) so a mid-install cancel leaves a clean, re-runnable server — never
+    // touches the system's own apt (05-UAT 2026-06-09).
+    let stop_in_progress = build_stop_in_progress(sudo);
+    format!(
         r#"set -x
 echo "=== BEFORE: listing {dir} ==="
 ls -la {dir}/ 2>&1 || echo "(dir does not exist)"
+
+{stop_in_progress}
+echo "=== Step 0.6: Read TrustTunnel provisioning markers (BEFORE {dir} removal) ==="
+# Captured NOW because Step 4 below removes {dir}. These gate the smart de-provision
+# in Step 5e: purge ufw/fail2ban ONLY if WE installed them (marker present), disable
+# ufw only if WE enabled it. Servers provisioned before these markers existed have
+# none → packages are kept (their ufw rules + our fail2ban jail are still cleaned).
+TT_INSTALLED_UFW=0; TT_ENABLED_UFW=0; TT_INSTALLED_F2B=0
+[ -f {dir}/.tt-installed-ufw ] && TT_INSTALLED_UFW=1
+[ -f {dir}/.tt-enabled-ufw ] && TT_ENABLED_UFW=1
+[ -f {dir}/.tt-installed-fail2ban ] && TT_INSTALLED_F2B=1
+echo "markers: ufw_installed=$TT_INSTALLED_UFW ufw_enabled=$TT_ENABLED_UFW f2b_installed=$TT_INSTALLED_F2B"
 
 echo "=== Step 1: Stop systemd service ==="
 {sudo}systemctl stop trusttunnel 2>/dev/null || true
@@ -97,6 +381,16 @@ sleep 1
 echo "=== Step 3: Remove systemd units ==="
 {sudo}rm -f /etc/systemd/system/trusttunnel.service
 {sudo}rm -f /etc/systemd/system/trusttunnel*.service
+# C-15: remove the systemd DROP-IN DIRECTORY created by deploy.rs (`mkdir -p
+# /etc/systemd/system/trusttunnel.service.d` for the zero-downtime ExecReload).
+# `rm -f` above can NOT remove a directory and the `*.service` glob never matches
+# the `.d` dir, so the drop-in survived a clean uninstall. Use `rm -rf` and run it
+# BEFORE daemon-reload so the reload re-reads units without our drop-in. The path is
+# 100%-ours → ownership-safe (never a foreign file).
+{sudo}rm -rf /etc/systemd/system/trusttunnel.service.d 2>/dev/null || true
+# CAMOUFLAGE REMOVED: the former "Step 3b" that stopped/disabled/removed the
+# trusttunnel-decoy.service unit was dropped with the camouflage feature — the installer
+# no longer provisions a decoy, so there is nothing to remove here.
 {sudo}systemctl daemon-reload
 
 echo "=== Step 4: Remove {dir} ==="
@@ -105,12 +399,57 @@ echo "=== Step 4: Remove {dir} ==="
 echo "=== Step 5: Remove certbot cron ==="
 {sudo}rm -f /etc/cron.d/trusttunnel-cert-renew 2>/dev/null || true
 
+{uninstall_extras}
+echo "=== Step 5e: Smart de-provision of TrustTunnel-managed security (ownership-scoped) ==="
+# fail2ban: always remove OUR jail config; purge the package only if WE installed it.
+if command -v fail2ban-client >/dev/null 2>&1 || dpkg -s fail2ban >/dev/null 2>&1; then
+  if [ "$TT_INSTALLED_F2B" = "1" ]; then
+    # We installed fail2ban (it was absent) → full purge, back to pre-TrustTunnel.
+    {sudo}systemctl stop fail2ban 2>/dev/null || true
+    {sudo}systemctl disable fail2ban 2>/dev/null || true
+    {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y fail2ban 2>/dev/null || true
+    {sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
+    {sudo}rm -rf /etc/fail2ban 2>/dev/null || true
+  else
+    # Admin already had fail2ban → keep the package; remove ONLY our jail.local + reload.
+    {sudo}rm -f /etc/fail2ban/jail.local 2>/dev/null || true
+    {sudo}systemctl reload fail2ban 2>/dev/null || {sudo}systemctl restart fail2ban 2>/dev/null || true
+  fi
+fi
+# ufw: the TrustTunnel rules were removed above (Step 5c). Now the package / state.
+# `ufw --force disable` first drops all enforcement (default ACCEPT) so purging can
+# never strand the SSH session — there is no lock-out window.
+if command -v ufw >/dev/null 2>&1; then
+  if [ "$TT_INSTALLED_UFW" = "1" ]; then
+    # We installed ufw (was absent → server had no firewall before) → full purge.
+    {sudo}ufw --force disable 2>/dev/null || true
+    {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y ufw 2>/dev/null || true
+    {sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
+  elif [ "$TT_ENABLED_UFW" = "1" ]; then
+    # ufw pre-existed but was INACTIVE before TrustTunnel enabled it → turn it back
+    # off (its prior state). Keep the package — it is the admin's base tool.
+    {sudo}ufw --force disable 2>/dev/null || true
+  fi
+fi
 echo "=== Step 6: Remove binaries from PATH ==="
 {sudo}rm -fv /usr/local/bin/trusttunnel* 2>/dev/null || true
 {sudo}rm -fv /usr/bin/trusttunnel* 2>/dev/null || true
+# C-16: remove the cert-renewal helper written by deploy.rs to /usr/local/sbin
+# (`/usr/local/sbin/trusttunnel-cert-renew.sh`). Step 6 previously swept only
+# /usr/local/bin + /usr/bin, never /usr/local/sbin, so the helper was orphaned. The
+# `trusttunnel*` prefix scopes the glob to OUR files only (no foreign sbin script).
+{sudo}rm -fv /usr/local/sbin/trusttunnel* 2>/dev/null || true
 
 echo "=== Step 7: Search for any remaining trusttunnel files ==="
 find / -maxdepth 4 -name '*trusttunnel*' -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null || true
+
+# C-20: admin-shared apt PACKAGES (certbot/curl/iptables) are deliberately NOT
+# purged here — removing a package an admin may rely on is an over-deletion
+# violation. We remove only the host's Let's Encrypt cert STATE (in the extras
+# above) plus OUR own files; that shared tooling stays installed for the admin.
+# EXCEPTION (post-UAT, Step 5e above): ufw + fail2ban ARE smart-purged — but ONLY
+# when an ownership marker proves WE apt-installed them (the package was absent).
+# An admin's pre-existing ufw/fail2ban is never purged; only our rules + jail go.
 
 echo "=== VERIFY ==="
 if test -d {dir}; then
@@ -119,7 +458,38 @@ else
     echo "UNINSTALL_OK"
 fi
 "#
-    );
+    )
+}
+
+/// Completely remove TrustTunnel from the server.
+/// NOTE: Uses direct connect (NOT pooled) — destructive one-shot operation.
+pub async fn uninstall_server(
+    app: &tauri::AppHandle,
+    params: SshParams,
+) -> Result<(), String> {
+    // 06-uat (Layer 1 of the cancel→reinstall race fix): when this runs as the CANCEL
+    // rollback, wait (bounded) for the in-flight deploy_server to finish aborting BEFORE
+    // we connect and run the destructive `rm -rf /opt/trusttunnel`, so the removal can
+    // never race a still-running configure stage. The frontend fires `cancel_deploy`
+    // first, so the run aborts within ~250 ms; a normal uninstall (no deploy running)
+    // returns from this immediately.
+    crate::ssh::deploy::await_deploy_idle(4000).await;
+
+    emit_step(app, "uninstall", "progress", "Connecting to server...");
+
+    let handle = params.connect_with_app(app.clone()).await
+        .inspect_err(|e| { emit_step(app, "uninstall", "error", e); })?;
+
+    // Determine sudo
+    let sudo = detect_sudo(&handle, app).await;
+
+    emit_step(app, "uninstall", "progress", "Removing TrustTunnel...");
+
+    // Run full uninstall as a single script for reliability. The script body is built
+    // by the pure, unit-testable `build_uninstall_script` (06-16 C-18: pinned to the
+    // deploy.rs COCOON MANIFEST by a symmetry test). host is validated upstream by
+    // `validate_ssh_host` (no shell metacharacters).
+    let uninstall_script = build_uninstall_script(sudo, ENDPOINT_DIR, ENDPOINT_SERVICE, &params.host);
 
     let (output, code) = exec_command(&handle, app, &uninstall_script).await?;
 
@@ -186,7 +556,8 @@ async fn add_server_user_internal(
     ).await?;
 
     if !cfg_check.contains("CFG_OK") {
-        let msg = "credentials.toml not found on server";
+        // 06-14 C-07: translatable code → translateSshError → sshErrors.credentialsNotFound.
+        let msg = "SSH_CREDENTIALS_NOT_FOUND";
         emit_step(app, "check", "error", msg);
         return Err(msg.into());
     }
@@ -202,7 +573,11 @@ async fn add_server_user_internal(
         .collect();
 
     if existing_users.contains(&vpn_username.as_str()) {
-        let msg = format!("User '{}' already exists on server", vpn_username);
+        // 06-14 C-07: translatable code carrying ONLY the username (already
+        // validate_vpn_username-clean, non-secret) — NEVER the password (D-29). The
+        // frontend (translateSshError → sshErrors.userAlreadyExists) splits on '|' and
+        // interpolates the name into the friendly RU sentence.
+        let msg = format!("SSH_USER_ALREADY_EXISTS|{}", vpn_username);
         emit_step(app, "check", "error", &msg);
         return Err(msg);
     }
@@ -809,6 +1184,451 @@ pub async fn server_get_user_config(
 
 #[cfg(test)]
 mod tests {
+    use super::{build_probe_script, build_stop_in_progress, build_uninstall_extras, build_uninstall_script, derive_partial};
+
+    // ── build_stop_in_progress: cancel must kill OUR deploy group, heal dpkg,
+    //    and NEVER broad-kill the system's apt (05-UAT 2026-06-09) ──
+
+    // ── 06-14 C-07 / D-29: the add-user failures emit translatable SSH_* codes and
+    //    the duplicate-user code carries ONLY the username, never the password. ──
+
+    #[test]
+    fn test_add_user_emits_translatable_codes_carrying_no_secret() {
+        let src = include_str!("server_install.rs");
+        // The two raw-English add-user failures are now translatable codes.
+        assert!(
+            src.contains("\"SSH_CREDENTIALS_NOT_FOUND\""),
+            "credentials-missing must emit SSH_CREDENTIALS_NOT_FOUND (C-07)"
+        );
+        assert!(
+            src.contains("SSH_USER_ALREADY_EXISTS|"),
+            "duplicate-user must emit SSH_USER_ALREADY_EXISTS|{{username}} (C-07)"
+        );
+        // The duplicate-user code interpolates ONLY the username, never the password.
+        // Inspect the exact `format!("SSH_USER_ALREADY_EXISTS|...` line in the source so
+        // the D-29 check cannot self-match other text elsewhere in this file.
+        let dup_line = src
+            .lines()
+            .find(|l| l.contains("let msg = format!(\"SSH_USER_ALREADY_EXISTS|"))
+            .expect("duplicate-user code line must exist");
+        assert!(
+            dup_line.contains("vpn_username"),
+            "duplicate-user code must carry the username: {dup_line}"
+        );
+        assert!(
+            !dup_line.contains("vpn_password") && !dup_line.contains("password"),
+            "D-29: the duplicate-user code must NEVER carry the password: {dup_line}"
+        );
+        // The old raw-English LEAD strings are no longer RETURNED (scan only the
+        // `let msg = ...` assignment lines so this guard cannot self-match its own text).
+        let msg_lines: Vec<&str> = src
+            .lines()
+            .filter(|l| l.trim_start().starts_with("let msg ="))
+            .collect();
+        assert!(
+            !msg_lines.iter().any(|l| l.contains("credentials.toml not found")),
+            "raw-English credentials-missing string must be replaced by a code"
+        );
+        assert!(
+            !msg_lines.iter().any(|l| l.contains("already exists on server")),
+            "raw-English duplicate-user string must be replaced by a code"
+        );
+    }
+
+    #[test]
+    fn test_stop_in_progress_kills_recorded_group_and_heals_dpkg() {
+        let s = build_stop_in_progress("sudo ");
+        // Reads the PGID our deploy recorded, then TERM- then KILL-signals that GROUP
+        // (negative pid). The -gt 1 guard prevents ever signalling our own group / 0.
+        assert!(s.contains("/tmp/tt_deploy.pid"), "must read the recorded deploy PGID");
+        assert!(s.contains(r#"[ "$TT_PGID" -gt 1 ]"#), "must guard against pgid <= 1 (self/0)");
+        assert!(s.contains(r#"kill -TERM -"$TT_PGID""#), "must TERM the recorded GROUP");
+        assert!(s.contains(r#"kill -KILL -"$TT_PGID""#), "must KILL the group if TERM is ignored");
+        assert!(s.contains("dpkg --configure -a"), "must heal a half-finished dpkg transaction");
+    }
+
+    #[test]
+    fn test_stop_in_progress_never_broad_kills_system_apt() {
+        // Scoping invariant: we only ever signal the recorded group — never a broad
+        // `pkill apt` / `killall apt-get` that would hit the system's unattended-upgrades.
+        let s = build_stop_in_progress("sudo ");
+        assert!(!s.contains("pkill"), "must not broad-pkill (would hit system apt)");
+        assert!(!s.contains("killall"), "must not killall (would hit system apt)");
+        assert!(!s.contains("apt-get"), "must not signal apt-get by name");
+    }
+
+    // ── build_probe_script: probe SHELL pinned to the REAL artifact chain (Codex #4
+    //    + #14, round-2 finding A — mocked frontend flows do not cover this) ──
+
+    #[test]
+    fn probe_script_references_real_install_artifact_chain() {
+        // Snapshot: the probe's per-stage construction must reference EVERY artifact
+        // the deploy writes, so the server-verified resume model can never silently
+        // drift from what deploy produced (Codex #4 closed end-to-end at the backend).
+        let s = build_probe_script("sudo ", "PROBE_EOF_test");
+        // Canonical install dir + the binary marker.
+        assert!(s.contains("/opt/trusttunnel/setup_wizard"), "missing install dir + binary: {s}");
+        // The four config files deploy_configure writes.
+        assert!(s.contains("/opt/trusttunnel/credentials.toml"));
+        assert!(s.contains("/opt/trusttunnel/rules.toml"));
+        assert!(s.contains("/opt/trusttunnel/vpn.toml"));
+        assert!(s.contains("/opt/trusttunnel/hosts.toml"));
+        // The cert path — BOTH layouts (LE live/ symlink OR local certs/cert.pem).
+        assert!(s.contains("/etc/letsencrypt/live/"));
+        assert!(s.contains("/opt/trusttunnel/certs/cert.pem"));
+        // The systemd unit file + the enable check (the `enable --now` chain, finding G).
+        assert!(s.contains("/etc/systemd/system/trusttunnel.service"));
+        assert!(s.contains("systemctl is-enabled trusttunnel"));
+    }
+
+    #[test]
+    fn probe_script_uses_dynamic_uuid_heredoc_delim_not_static() {
+        // round-2 finding J / WR-04: the probe heredoc delimiter is dynamic
+        // (PROBE_EOF_<uuid>), never a static `USER_EOF`. The helper interpolates
+        // whatever delim it is given — assert it uses THAT delim and carries no static
+        // delimiter literal.
+        let s = build_probe_script("sudo ", "PROBE_EOF_deadbeef");
+        assert!(s.contains("<< 'PROBE_EOF_deadbeef'"), "delim not used in heredoc open: {s}");
+        assert!(s.trim_end().ends_with("PROBE_EOF_deadbeef"), "delim not used to close heredoc");
+        assert!(!s.contains("USER_EOF"), "static heredoc delimiter must not appear");
+    }
+
+    #[test]
+    fn uninstall_extras_references_systemd_and_full_lifecycle() {
+        // Codex #14: the uninstall (combined with the systemd stop/disable in the
+        // outer uninstall_script) must clean the SAME lifecycle the probe inspects —
+        // here we pin the EXTRAS to the cert/firewall tail of that lifecycle (the
+        // systemd unit removal lives in the outer script; the LE + firewall removal
+        // is what build_uninstall_extras owns). Assert the LE + both firewall layers.
+        let s = build_uninstall_extras("sudo ", "example.com");
+        assert!(s.contains("certbot delete"), "LE certbot delete missing");
+        assert!(s.contains("/etc/letsencrypt/live/example.com"), "LE live dir removal missing");
+        assert!(s.contains("ufw status numbered"), "ownership-scoped ufw removal missing");
+        assert!(s.contains("--comment trusttunnel-managed"), "ownership-scoped iptables removal missing");
+    }
+
+    // ── build_uninstall_extras: ownership-scoped full-clean uninstall (D-04, Codex #7
+    //    + round-2 finding A + round-3 HIGH A) ──
+
+    #[test]
+    fn uninstall_extras_removes_letsencrypt_state() {
+        let s = build_uninstall_extras("sudo ", "example.com");
+        // certbot delete for the host AND rm -rf of the LE state dirs.
+        assert!(s.contains("certbot delete --cert-name example.com"));
+        assert!(s.contains("/etc/letsencrypt/live/example.com"));
+        assert!(s.contains("/etc/letsencrypt/archive/example.com"));
+        assert!(s.contains("/etc/letsencrypt/renewal/example.com.conf"));
+    }
+
+    #[test]
+    fn uninstall_extras_deletes_iptables_by_tag_not_by_port_shape() {
+        let s = build_uninstall_extras("sudo ", "example.com");
+        // iptables removal must carry the ownership TAG on the -D for 80 AND 443.
+        assert!(s.contains("iptables -D INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment trusttunnel-managed"));
+        assert!(s.contains("iptables -D INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment trusttunnel-managed"));
+        // NO-BROAD-DELETE assertion (round-3 HIGH A): an UNTAGGED iptables -D on
+        // those ports would clobber a pre-existing admin ACCEPT rule. Prove no such
+        // untagged delete line exists.
+        for line in s.lines() {
+            let l = line.trim();
+            if l.contains("iptables -D") && l.contains("--dport 80") {
+                assert!(
+                    l.contains("-m comment --comment trusttunnel-managed"),
+                    "untagged iptables -D on port 80 found (would clobber admin rule): {l}"
+                );
+            }
+            if l.contains("iptables -D") && l.contains("--dport 443") {
+                assert!(
+                    l.contains("-m comment --comment trusttunnel-managed"),
+                    "untagged iptables -D on port 443 found (would clobber admin rule): {l}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn uninstall_extras_deletes_ufw_by_comment_not_by_spec() {
+        let s = build_uninstall_extras("sudo ", "example.com");
+        // ufw removal must scope to OUR comments via `ufw status numbered`.
+        assert!(s.contains("ufw status numbered"));
+        assert!(s.contains("trusttunnel-acme"));
+        assert!(s.contains("trusttunnel-tls"));
+        // NO-BROAD-DELETE assertion (round-3 HIGH A): a `ufw ... delete allow 80/tcp`
+        // (or 443/tcp) matches an admin's bare rule and is FORBIDDEN. Prove absent.
+        assert!(!s.contains("delete allow 80/tcp"), "forbidden broad ufw delete on 80/tcp");
+        assert!(!s.contains("delete allow 443/tcp"), "forbidden broad ufw delete on 443/tcp");
+    }
+
+    #[test]
+    fn uninstall_extras_interpolates_validated_host_verbatim() {
+        // host is validated upstream by validate_ssh_host (whitelist — no shell
+        // metacharacters). A clean sample is interpolated verbatim into the certbot
+        // delete + the LE state paths, so the host name itself introduces no
+        // injection vector. (The script's own ufw loop legitimately uses `$(...)`/`;`
+        // — that is OUR shell, not attacker-controlled host content.)
+        let host = "vpn-1.example.com";
+        let s = build_uninstall_extras("sudo ", host);
+        assert!(s.contains(&format!("--cert-name {host}")));
+        assert!(s.contains(&format!("/etc/letsencrypt/renewal/{host}.conf")));
+        // The validated host carries no metacharacters of its own.
+        assert!(!host.contains(';'));
+        assert!(!host.contains('`'));
+        assert!(!host.contains('$'));
+    }
+
+    // ── build_uninstall_script: the COMPLETE uninstall body, COCOON-complete
+    //    (06-16 C-15/C-16/C-18/C-20). Pure helper extracted from uninstall_server. ──
+
+    #[test]
+    fn uninstall_removes_service_d_dropin_dir_before_daemon_reload() {
+        // C-15: the systemd DROP-IN dir created by deploy.rs (mkdir -p
+        // /etc/systemd/system/trusttunnel.service.d) must be removed with `rm -rf`
+        // (it is a DIRECTORY — `rm -f` cannot remove it, the root cause) and the
+        // removal must come BEFORE `systemctl daemon-reload` so the reload re-reads
+        // units without our drop-in.
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        assert!(
+            s.contains("rm -rf /etc/systemd/system/trusttunnel.service.d"),
+            "must rm -rf the .service.d drop-in dir (rm -f cannot remove a dir): {s}"
+        );
+        let drop_in_off = s
+            .find("rm -rf /etc/systemd/system/trusttunnel.service.d")
+            .expect("drop-in removal must be present");
+        let reload_off = s
+            .find("systemctl daemon-reload")
+            .expect("daemon-reload must be present");
+        assert!(
+            drop_in_off < reload_off,
+            "the .service.d removal must come BEFORE daemon-reload (drop_in_off={drop_in_off}, reload_off={reload_off})"
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_local_sbin_cert_renew_helper() {
+        // C-16: the cert-renew helper deploy.rs writes to /usr/local/sbin must be
+        // removed. The glob must be prefixed with `trusttunnel` (OUR files only) —
+        // never a bare /usr/local/sbin/* that could match a foreign admin script.
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        assert!(
+            s.contains("/usr/local/sbin/trusttunnel*"),
+            "must remove the orphaned /usr/local/sbin/trusttunnel* cert-renew helper: {s}"
+        );
+        assert!(
+            !s.contains("/usr/local/sbin/*"),
+            "must NOT use a bare /usr/local/sbin/* glob (would match foreign files)"
+        );
+    }
+
+    #[test]
+    fn uninstall_smart_purges_ufw_fail2ban_only_when_marker_present_never_other_packages() {
+        // post-UAT exception to C-20: ufw + fail2ban (which install_firewall /
+        // install_fail2ban can apt-install) ARE purged — but ONLY inside the
+        // ownership-marker branches. Admin-shared certbot/curl/iptables are STILL
+        // never purged.
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        // The ufw/fail2ban purges exist…
+        assert!(s.contains("apt-get purge -y fail2ban"), "fail2ban smart-purge missing");
+        assert!(s.contains("apt-get purge -y ufw"), "ufw smart-purge missing");
+        // …but ONLY gated behind the ownership markers (never unconditional).
+        assert!(s.contains(r#"[ "$TT_INSTALLED_F2B" = "1" ]"#), "fail2ban purge must be marker-gated");
+        assert!(s.contains(r#"[ "$TT_INSTALLED_UFW" = "1" ]"#), "ufw purge must be marker-gated");
+        // Markers are read from {dir} BEFORE Step 4 removes it.
+        assert!(s.contains("/opt/trusttunnel/.tt-installed-fail2ban"), "f2b marker read missing");
+        assert!(s.contains("/opt/trusttunnel/.tt-installed-ufw"), "ufw marker read missing");
+        assert!(s.contains("/opt/trusttunnel/.tt-enabled-ufw"), "ufw-enabled marker read missing");
+        // The marker read must come BEFORE the `rm -rfv {dir}` (else the markers are gone).
+        let read_idx = s.find(".tt-installed-ufw").expect("marker read present");
+        let rm_idx = s.find("rm -rfv /opt/trusttunnel").expect("Step 4 rm present");
+        assert!(read_idx < rm_idx, "markers must be read BEFORE the dir is removed");
+        // ufw is disabled before any purge → no SSH lock-out window.
+        assert!(s.contains("ufw --force disable"), "ufw must be disabled before purge");
+        // Admin-shared packages are STILL never purged (C-20 boundary holds).
+        assert!(!s.contains("purge -y certbot"), "must not purge certbot (C-20)");
+        assert!(!s.contains("purge -y curl"), "must not purge curl (C-20)");
+        assert!(!s.contains("purge -y iptables"), "must not purge iptables (C-20)");
+    }
+
+    #[test]
+    fn ufw_rule_sweep_matches_real_install_comments_not_just_acme_tls() {
+        // BUGFIX (post-UAT): the old sweep grepped only 'trusttunnel-acme|trusttunnel-tls',
+        // which the install_firewall comments NEVER contain (they are 'SSH (TrustTunnel)',
+        // 'TrustTunnel VPN/QUIC', 'HTTP cert renewal …') → on a live server NO ufw rule was
+        // ever removed. The sweep must match the comments install_firewall actually writes.
+        let s = build_uninstall_extras("sudo ", "example.com");
+        assert!(
+            s.contains("grep -iE 'trusttunnel|HTTP cert renewal'"),
+            "ufw sweep must match the real install_firewall comments (trusttunnel / HTTP cert renewal)"
+        );
+        assert!(
+            !s.contains("grep -E 'trusttunnel-acme|trusttunnel-tls'"),
+            "the old broken acme/tls-only grep must be gone"
+        );
+        // Still ownership-scoped: parse `ufw status numbered`, delete BY RULE NUMBER,
+        // never a broad `delete allow <port>/tcp` by port spec.
+        assert!(s.contains("ufw status numbered"), "ufw sweep must stay comment-scoped");
+        assert!(s.contains(r#"ufw delete "$tt_num""#), "ufw sweep must delete by rule number");
+        assert!(!s.contains("delete allow 80/tcp"), "no broad ufw delete on 80/tcp");
+        assert!(!s.contains("delete allow 443/tcp"), "no broad ufw delete on 443/tcp");
+    }
+
+    #[test]
+    fn uninstall_script_preserves_full_lifecycle_and_no_broad_firewall_delete() {
+        // Behavior-preserving: the extraction into build_uninstall_script must keep
+        // the same lifecycle (Step 0..7 + VERIFY) AND interpolate the
+        // ownership-scoped extras (no broad firewall delete introduced).
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        // Step 0 stop-in-progress (interpolated build_stop_in_progress)
+        assert!(s.contains("/tmp/tt_deploy.pid"), "Step 0 stop-in-progress must be interpolated");
+        // Step 1 stop/disable, Step 2 kill, Step 4 rm dir, Step 5 cron
+        assert!(s.contains("systemctl stop trusttunnel"), "Step 1 stop missing");
+        assert!(s.contains("killall -9 trusttunnel_endpoint"), "Step 2 kill missing");
+        assert!(s.contains("rm -rfv /opt/trusttunnel"), "Step 4 rm dir missing");
+        assert!(s.contains("/etc/cron.d/trusttunnel-cert-renew"), "Step 5 cron removal missing");
+        // Extras (build_uninstall_extras) interpolated: LE state + ownership-scoped firewall
+        assert!(s.contains("certbot delete --cert-name example.com"), "LE state removal not interpolated");
+        assert!(s.contains("--comment trusttunnel-managed"), "ownership-scoped iptables not interpolated");
+        // NO-BROAD-DELETE invariant survives the extraction.
+        assert!(!s.contains("delete allow 80/tcp"), "forbidden broad ufw delete on 80/tcp");
+        assert!(!s.contains("delete allow 443/tcp"), "forbidden broad ufw delete on 443/tcp");
+        // Step 7 find + VERIFY
+        assert!(s.contains("-name '*trusttunnel*'"), "Step 7 find missing");
+        assert!(s.contains("UNINSTALL_OK"), "VERIFY block missing");
+    }
+
+    // ── COCOON MANIFEST symmetry (06-16 C-18): install-writes(OWNED) ⊆ uninstall-
+    //    removals. If a future deploy.rs write forgets its uninstall removal, CI
+    //    goes red — the C-15/C-16 drift class cannot silently recur. ──
+
+    #[test]
+    fn cocoon_manifest_symmetry_every_owned_path_is_removed() {
+        // The OWNED removal set — every server path the install can write (per the
+        // COCOON MANIFEST in deploy.rs). build_uninstall_script (which interpolates
+        // build_uninstall_extras) must contain a removal targeting EACH. Adding a fake
+        // path here would turn the test red — that is the drift guard working.
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        let owned: &[&str] = &[
+            // ENDPOINT_DIR — all config + certs + binaries (Step 4)
+            "/opt/trusttunnel",
+            // systemd unit (Step 3)
+            "/etc/systemd/system/trusttunnel.service",
+            // C-15: the .service.d drop-in DIR (Step 3, rm -rf)
+            "/etc/systemd/system/trusttunnel.service.d",
+            // C-16: the /usr/local/sbin cert-renew helper (Step 6)
+            "/usr/local/sbin/trusttunnel",
+            // OUR cron entry (Step 5)
+            "/etc/cron.d/trusttunnel-cert-renew",
+            // CAMOUFLAGE REMOVED: the trusttunnel-decoy.service unit is no longer written
+            // (camouflage feature dropped), so it is no longer an owned path to assert.
+            // LE cert STATE for the host (extras Step 5b)
+            "/etc/letsencrypt/live/example.com",
+            // firewall ownership-scoped removal (extras Step 5c/5d): ufw rules swept
+            // by comment + iptables by tag. (Pre-fix this listed the literal
+            // 'trusttunnel-acme'/'trusttunnel-tls' comments; the ufw sweep now matches
+            // ANY 'trusttunnel'/'HTTP cert renewal' comment — pinned by the dedicated
+            // ufw_rule_sweep_matches_real_install_comments test.)
+            "ufw status numbered",
+            "trusttunnel-managed",
+        ];
+        for path in owned {
+            assert!(
+                s.contains(path),
+                "COCOON drift: owned install-write `{path}` has no uninstall removal in build_uninstall_script — add the removal (and keep the deploy.rs COCOON MANIFEST in sync)"
+            );
+        }
+    }
+
+    #[test]
+    fn cocoon_manifest_doc_comment_exists_in_deploy_and_lists_c15_c16_paths() {
+        // C-18: the COCOON MANIFEST in deploy.rs is the single source of truth. Assert
+        // the marker + the two previously-leaking paths (C-15 .service.d, C-16
+        // /usr/local/sbin helper) so the doc stays authoritative for the D-18 UI.
+        let deploy_src = include_str!("../deploy.rs");
+        assert!(deploy_src.contains("COCOON MANIFEST"), "deploy.rs must carry the COCOON MANIFEST marker");
+        assert!(
+            deploy_src.contains("/etc/systemd/system/trusttunnel.service.d"),
+            "manifest must list the C-15 .service.d drop-in dir"
+        );
+        assert!(
+            deploy_src.contains("/usr/local/sbin/trusttunnel-cert-renew.sh"),
+            "manifest must list the C-16 /usr/local/sbin cert-renew helper"
+        );
+        // C-20 boundary must be stated in the manifest (packages not purged).
+        assert!(
+            deploy_src.contains("ADMIN-SHARED") || deploy_src.contains("admin-shared"),
+            "manifest must state the C-20 admin-shared not-purged boundary"
+        );
+    }
+
+    // ── derive_partial: server-verified resume probe (WIZARD-02, Codex #4, finding G) ──
+
+    #[test]
+    fn derive_partial_binary_only_is_partial() {
+        // Binary present but nothing else → partial install.
+        assert!(derive_partial(
+            true,  // binary
+            false, false, false, false, false, // creds/rules/vpn/hosts/cert
+            false, false, false, // unit_exists/unit_enabled/unit_active
+        ));
+    }
+
+    #[test]
+    fn derive_partial_binary_present_no_credentials_is_partial() {
+        // binaryInstalled && !credentialsExist ⇒ partial=true (the canonical case).
+        assert!(derive_partial(
+            true,  // binary
+            false, // credentials MISSING
+            true, true, true, true, // rules/vpn/hosts/cert
+            true, true, true, // unit present + enabled + active
+        ));
+    }
+
+    #[test]
+    fn derive_partial_all_present_enabled_active_is_complete() {
+        // Everything present + unit enabled + active ⇒ partial=false (done-eligible).
+        assert!(!derive_partial(
+            true,  // binary
+            true, true, true, true, true, // creds/rules/vpn/hosts/cert
+            true,  // unit_exists
+            true,  // unit_enabled
+            true,  // unit_active
+        ));
+    }
+
+    #[test]
+    fn derive_partial_unit_present_but_not_enabled_is_partial() {
+        // FINDING G: unit EXISTS but is NOT enabled (everything else present) ⇒
+        // partial=true. The `systemctl enable --now` step is not done.
+        assert!(derive_partial(
+            true,  // binary
+            true, true, true, true, true, // all config + cert present
+            true,  // unit_exists
+            false, // unit_enabled — NOT enabled
+            true,  // unit_active (running but not enabled — still partial)
+        ));
+    }
+
+    #[test]
+    fn derive_partial_not_installed_is_not_partial() {
+        // No binary → clean slate, NOT partial.
+        assert!(!derive_partial(
+            false, // binary
+            false, false, false, false, false,
+            false, false, false,
+        ));
+    }
+
+    #[test]
+    fn derive_partial_enabled_but_not_active_is_partial() {
+        // Unit enabled but the service is not running ⇒ partial=true.
+        assert!(derive_partial(
+            true,  // binary
+            true, true, true, true, true,
+            true,  // unit_exists
+            true,  // unit_enabled
+            false, // unit_active — NOT running
+        ));
+    }
+
     #[test]
     fn rotate_password_regex_matches_user_block() {
         use regex::Regex;

@@ -36,9 +36,36 @@ const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client
 /// `password: hunter2`. Free-form prose containing the key word is left
 /// alone. IPv4 masking and quoted-value handling unchanged.
 pub fn sanitize(text: &str) -> String {
+    // D-10: pasted SSH key data must never reach any log channel. A pasted private
+    // key (`-----BEGIN OPENSSH PRIVATE KEY-----` / `-----BEGIN RSA PRIVATE KEY-----`
+    // …) is a MULTI-LINE block whose base64 body lines are NOT `key = value`
+    // assignments, so the assignment redactor below would let them through. We run a
+    // stateful key-block pass FIRST that replaces every line inside a PEM/OpenSSH
+    // key block with `***`, keeping the BEGIN/END marker lines (non-secret) so the
+    // log still records that a key was present. This EXTENDS the existing D-29
+    // password redaction; the assignment + IPv4 passes still run afterwards.
+    let mut in_key_block = false;
     let mut redacted = text
         .lines()
-        .map(redact_assignment_line)
+        .map(|line| {
+            let trimmed = line.trim();
+            let is_begin = trimmed.starts_with("-----BEGIN ") && trimmed.contains("KEY-----");
+            let is_end = trimmed.starts_with("-----END ") && trimmed.contains("KEY-----");
+            if is_begin {
+                in_key_block = true;
+                return line.to_string(); // keep the non-secret marker line
+            }
+            if is_end {
+                in_key_block = false;
+                return line.to_string();
+            }
+            if in_key_block {
+                // A body line of the key block — redact the secret material entirely.
+                return "***".to_string();
+            }
+            // Outside any key block: the existing assignment redaction (D-29).
+            redact_assignment_line(line)
+        })
         .collect::<Vec<_>>()
         .join("\n");
     if text.ends_with('\n') {
@@ -494,5 +521,66 @@ mod tests {
         let result = sanitize(input);
         // These do not form valid IPv4 quads (only 3 / 2 octets)
         assert_eq!(result, input, "non-IP numbers should not be modified");
+    }
+
+    // ─── D-10: pasted SSH key data redaction (extends the D-29 spies) ──
+
+    #[test]
+    fn sanitize_redacts_pasted_openssh_private_key_block() {
+        // D-10 spy: a pasted OpenSSH private key dropped into a log message (e.g. an
+        // error that echoes the user's pasted key) must NEVER reach the sink. The
+        // base64 body lines are NOT key=value assignments, so the prior line-based
+        // redactor would have leaked them — this proves the PEM-block redaction.
+        let secret_body = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAASECRETKEYMATERIAL";
+        let input = format!(
+            "Failed to load key:\n-----BEGIN OPENSSH PRIVATE KEY-----\n{secret_body}\nAAAAtrailerline==\n-----END OPENSSH PRIVATE KEY-----\nretrying"
+        );
+        let result = sanitize(&input);
+        assert!(
+            !result.contains(secret_body),
+            "pasted OpenSSH key body must be redacted — got: {result}"
+        );
+        assert!(
+            !result.contains("AAAAtrailerline"),
+            "every key body line must be redacted — got: {result}"
+        );
+        // The non-secret prose around the block survives so the log stays useful.
+        assert!(result.contains("Failed to load key"));
+        assert!(result.contains("retrying"));
+        // A redaction marker is present where the key body was.
+        assert!(result.contains("***"));
+    }
+
+    #[test]
+    fn sanitize_redacts_pasted_rsa_pem_private_key_block() {
+        // The classic `-----BEGIN RSA PRIVATE KEY-----` PEM shape too.
+        let secret_body = "MIIEpAIBAAKCAQEAvSECRETrsaKEYbytes0123456789abcdef";
+        let input = format!(
+            "-----BEGIN RSA PRIVATE KEY-----\n{secret_body}\n-----END RSA PRIVATE KEY-----"
+        );
+        let result = sanitize(&input);
+        assert!(
+            !result.contains(secret_body),
+            "pasted RSA PEM key body must be redacted — got: {result}"
+        );
+    }
+
+    #[test]
+    fn sanitize_still_redacts_password_assignment_alongside_key() {
+        // The existing password redaction must remain intact (no regression) even when
+        // a key block is present in the same message (D-29 + D-10 together).
+        let input = "password = \"hunter2\"\n-----BEGIN OPENSSH PRIVATE KEY-----\nSECRETkeyBODYline\n-----END OPENSSH PRIVATE KEY-----";
+        let result = sanitize(input);
+        assert!(!result.contains("hunter2"), "password must still be redacted");
+        assert!(!result.contains("SECRETkeyBODYline"), "key body must be redacted");
+    }
+
+    #[test]
+    fn sanitize_preserves_prose_without_key_block() {
+        // Regression guard: a normal log line that merely mentions "key" (no PEM
+        // markers) is untouched — only real PEM/OpenSSH key blocks are redacted.
+        let input = "Generated SSH key fingerprint OK; reconnecting";
+        let result = sanitize(input);
+        assert_eq!(result, input, "non-key-block prose must survive");
     }
 }

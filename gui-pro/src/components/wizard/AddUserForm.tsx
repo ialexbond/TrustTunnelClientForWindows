@@ -9,19 +9,21 @@ import type { WizardState } from "./useWizardState";
 
 interface AddUserFormProps {
   w: WizardState;
-  onUserAdded: () => void;
+  // Receives the name of the user that was just added, so the caller can show a
+  // parameterized snackbar (server.users.user_added has a {{user}} placeholder).
+  onUserAdded: (username: string) => void;
 }
 
 export function AddUserForm({ w, onUserAdded }: AddUserFormProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="text-left space-y-2 p-3 rounded-xl" style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-      <p className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--color-text-primary)" }}>
+    <div className="text-left space-y-2 p-3 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border)]">
+      <p className="text-xs font-medium flex items-center gap-1.5 text-[var(--color-text-primary)]">
         <UserPlus className="w-3.5 h-3.5" />
         {t('wizard.found.add_user')}
       </p>
-      <p className="text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
+      <p className="text-xs leading-relaxed text-[var(--color-text-muted)]">
         {t('wizard.found.add_user_description')}
       </p>
       <div className="space-y-1.5">
@@ -39,8 +41,7 @@ export function AddUserForm({ w, onUserAdded }: AddUserFormProps) {
                   type="button"
                   onClick={() => w.setNewUsername(generateUsername())}
                   disabled={w.addingUser}
-                  className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: "var(--color-text-muted)" }}
+                  className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed text-[var(--color-text-muted)]"
                 >
                   <Shuffle className="w-3 h-3" />
                 </button>
@@ -60,8 +61,7 @@ export function AddUserForm({ w, onUserAdded }: AddUserFormProps) {
                 type="button"
                 onClick={() => w.setNewPassword(generatePassword())}
                 disabled={w.addingUser}
-                className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{ color: "var(--color-text-muted)" }}
+                className="transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed text-[var(--color-text-muted)]"
               >
                 <Shuffle className="w-3 h-3" />
               </button>
@@ -72,7 +72,13 @@ export function AddUserForm({ w, onUserAdded }: AddUserFormProps) {
           variant="primary"
           size="sm"
           fullWidth
-          onClick={async () => { await w.handleAddUser(); onUserAdded(); }}
+          onClick={async () => {
+            // Capture the name BEFORE awaiting: handleAddUser clears newUsername on
+            // success, so reading it afterwards would yield "".
+            const added = w.newUsername.trim();
+            await w.handleAddUser();
+            onUserAdded(added);
+          }}
           disabled={w.addingUser || !w.newUsername.trim() || !w.newPassword.trim() || !!w.serverInfo?.users?.includes(w.newUsername.trim())}
           loading={w.addingUser}
           icon={<UserPlus className="w-3.5 h-3.5" />}

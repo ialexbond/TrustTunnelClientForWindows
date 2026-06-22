@@ -1164,6 +1164,16 @@ pub async fn install_fail2ban(
     emit_step(app, "security", "progress", "Installing fail2ban...");
     let sudo = detect_sudo(handle, app).await;
 
+    // De-provisioning marker (post-UAT): detect whether fail2ban is ALREADY present
+    // (admin had it) BEFORE we apt-install it. The full uninstall purges the package
+    // ONLY when WE installed it — never an admin's pre-existing fail2ban. The marker
+    // is written below after a successful install; read by build_uninstall_script.
+    let (f2b_pre, _) = exec_command(
+        handle, app,
+        &format!("{sudo}dpkg -s fail2ban >/dev/null 2>&1 && echo PRESENT || echo ABSENT"),
+    ).await?;
+    let we_installed_f2b = f2b_pre.contains("ABSENT");
+
     let (_, code) = exec_command(
         handle, app,
         &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get update -qq && {sudo}DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban"),
@@ -1194,6 +1204,15 @@ pub async fn install_fail2ban(
     }
 
     let _ = exec_command(handle, app, &format!("{sudo}systemctl enable fail2ban && {sudo}systemctl restart fail2ban")).await?;
+
+    if we_installed_f2b {
+        // WE apt-installed fail2ban (it was absent) → drop an ownership marker so a
+        // full uninstall purges the package. Never marked when the admin had it.
+        let _ = exec_command(
+            handle, app,
+            &format!("{sudo}mkdir -p /opt/trusttunnel 2>/dev/null; {sudo}touch /opt/trusttunnel/.tt-installed-fail2ban 2>/dev/null; true"),
+        ).await?;
+    }
     emit_step(app, "security", "ok", "fail2ban installed");
     Ok(())
 }
@@ -1426,6 +1445,16 @@ pub async fn install_firewall(
     emit_step(app, "security", "progress", "Installing UFW...");
     let sudo = detect_sudo(handle, app).await;
 
+    // De-provisioning marker (post-UAT): detect whether the ufw PACKAGE is already
+    // present BEFORE we apt-install it. ufw ships on most Ubuntu base images, so this
+    // is usually PRESENT (admin's base tool) → we must NOT purge it on uninstall. The
+    // full uninstall purges ufw ONLY when WE installed it (package was absent).
+    let (ufw_pre, _) = exec_command(
+        handle, app,
+        &format!("{sudo}dpkg -s ufw >/dev/null 2>&1 && echo PRESENT || echo ABSENT"),
+    ).await?;
+    let we_installed_ufw = ufw_pre.contains("ABSENT");
+
     // Install (no-op if already present)
     let (_, code) = exec_command(
         handle, app,
@@ -1464,7 +1493,7 @@ pub async fn install_firewall(
     }
 
     if keep_http_open {
-        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 80/tcp comment 'HTTP cert renewal'")).await?;
+        let _ = exec_command(handle, app, &format!("{sudo}ufw allow 80/tcp comment 'HTTP cert renewal (TrustTunnel)'")).await?;
     }
 
     if !already_active {
@@ -1473,6 +1502,18 @@ pub async fn install_firewall(
             emit_step(app, "security", "error", "ufw enable failed");
             return Err("SECURITY_UFW_ENABLE_FAILED".into());
         }
+    }
+
+    // Ownership markers for the smart full-uninstall:
+    //   • `.tt-installed-ufw` — WE apt-installed the package (was absent) → purge it.
+    //   • `.tt-enabled-ufw`   — ufw was INACTIVE and WE enabled it → disable it again
+    //     on uninstall (back to its prior off state), keeping the package.
+    let _ = exec_command(handle, app, &format!("{sudo}mkdir -p /opt/trusttunnel 2>/dev/null; true")).await?;
+    if we_installed_ufw {
+        let _ = exec_command(handle, app, &format!("{sudo}touch /opt/trusttunnel/.tt-installed-ufw 2>/dev/null; true")).await?;
+    }
+    if !already_active {
+        let _ = exec_command(handle, app, &format!("{sudo}touch /opt/trusttunnel/.tt-enabled-ufw 2>/dev/null; true")).await?;
     }
 
     emit_step(app, "security", "ok", "Firewall enabled");

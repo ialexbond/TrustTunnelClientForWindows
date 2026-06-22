@@ -196,6 +196,8 @@ pub async fn check_sidecar_version(
         ssh_password: password,
         key_path,
         key_data,
+        // Internal (non-wizard) caller — None ⇒ legacy try-key-then-password (D-06).
+        auth_method: None,
     };
 
     // 1. SSH probe for current version (REUSE pattern из server_install.rs:23-26)

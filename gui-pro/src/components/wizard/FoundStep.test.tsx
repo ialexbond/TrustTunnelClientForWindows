@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import i18n from "../../shared/i18n";
 import { FoundStep } from "./FoundStep";
 import { renderWithProviders as render } from "../../test/test-utils";
 import { makeWizardState } from "./testHelpers";
 
+// invoke is globally mocked (src/test/tauri-mock.ts). Cast to the vitest mock type
+// so we can assert on the exact IPC args (D-06 auth contract).
+const invokeMock = vi.mocked(invoke);
+
+// 06-uat: the install wizard's fetch flow («Забрать с сервера» / per-user save-config /
+// «Continue as user») was removed end-to-end. FoundStep is now always the setup-mode
+// screen (server already installed → manage/reinstall, or not-installed → install). Back
+// buttons close the overlay (onClose) — there is no SSH-connect screen to return to.
 describe("FoundStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -17,7 +26,6 @@ describe("FoundStep", () => {
     it("renders server ready title", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
@@ -30,7 +38,6 @@ describe("FoundStep", () => {
       const setWizardStep = vi.fn();
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
@@ -41,21 +48,22 @@ describe("FoundStep", () => {
       expect(setWizardStep).toHaveBeenCalledWith("endpoint");
     });
 
-    it("renders back button that navigates to server", () => {
+    it("back button closes the overlay (onClose), never navigates to a deleted server screen", () => {
+      const onClose = vi.fn();
       const setWizardStep = vi.fn();
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
+        onClose,
         setWizardStep,
       });
       render(<FoundStep {...w} />);
-      // There should be a "back" button
       const backBtns = screen.getAllByText(i18n.t("buttons.back"));
       fireEvent.click(backBtns[0]);
-      expect(setWizardStep).toHaveBeenCalledWith("server");
+      expect(onClose).toHaveBeenCalled();
+      expect(setWizardStep).not.toHaveBeenCalledWith("server");
     });
   });
 
@@ -65,7 +73,6 @@ describe("FoundStep", () => {
     it("renders unreachable title and error text", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: null,
         checkError: "Connection refused",
       });
@@ -74,18 +81,20 @@ describe("FoundStep", () => {
       expect(screen.getByText("Connection refused")).toBeInTheDocument();
     });
 
-    it("back button navigates to server step", () => {
+    it("back button closes the overlay (onClose)", () => {
+      const onClose = vi.fn();
       const setWizardStep = vi.fn();
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: null,
         checkError: "Connection refused",
+        onClose,
         setWizardStep,
       });
       render(<FoundStep {...w} />);
       fireEvent.click(screen.getByText(i18n.t("buttons.back")));
-      expect(setWizardStep).toHaveBeenCalledWith("server");
+      expect(onClose).toHaveBeenCalled();
+      expect(setWizardStep).not.toHaveBeenCalledWith("server");
     });
   });
 
@@ -95,7 +104,6 @@ describe("FoundStep", () => {
     const installedState = () =>
       makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice", "bob"],
@@ -127,7 +135,6 @@ describe("FoundStep", () => {
     it("shows service stopped when not active", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -313,297 +320,27 @@ describe("FoundStep", () => {
       ).toBeInTheDocument();
     });
 
-    it("continue button is disabled when no user selected", () => {
-      const w = makeWizardState({ ...installedState(), selectedUser: null });
-      render(<FoundStep {...w} />);
-      const btn = screen.getByText(i18n.t("wizard.found.select_user_prompt")).closest("button");
-      expect(btn).toBeDisabled();
-    });
-
-    it("continue button calls handleFetchConfig with selected user", () => {
-      const handleFetchConfig = vi.fn();
-      const w = makeWizardState({
-        ...installedState(),
-        selectedUser: "alice",
-        handleFetchConfig,
-      });
-      render(<FoundStep {...w} />);
-      fireEvent.click(
-        screen.getByText(i18n.t("wizard.found.continue_as", { user: "alice" }))
-      );
-      expect(handleFetchConfig).toHaveBeenCalledWith("alice");
-    });
-
-    it("renders back button (installed mode) that navigates to server", () => {
+    it("back button (installed mode) closes the overlay (onClose)", () => {
+      const onClose = vi.fn();
       const setWizardStep = vi.fn();
-      const w = makeWizardState({ ...installedState(), setWizardStep });
+      const w = makeWizardState({ ...installedState(), onClose, setWizardStep });
       render(<FoundStep {...w} />);
       const backBtns = screen.getAllByText(i18n.t("buttons.back"));
       fireEvent.click(backBtns[0]);
-      expect(setWizardStep).toHaveBeenCalledWith("server");
-    });
-  });
-
-  // ─── Fetch mode: installed with users ───
-
-  describe("fetch mode — installed with users", () => {
-    const fetchInstalledState = () =>
-      makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: {
-          installed: true,
-          users: ["alice", "bob"],
-          version: "1.5.0",
-          serviceActive: true,
-          os: "linux",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        checkError: "",
-      });
-
-    it("renders users on server heading", () => {
-      render(<FoundStep {...fetchInstalledState()} />);
-      expect(screen.getByText(i18n.t("wizard.found.users_on_server"))).toBeInTheDocument();
-    });
-
-    it("renders user names", () => {
-      render(<FoundStep {...fetchInstalledState()} />);
-      expect(screen.getByText("alice")).toBeInTheDocument();
-      expect(screen.getByText("bob")).toBeInTheDocument();
-    });
-
-    it("save config button calls handleSaveConfigDirect", () => {
-      const handleSaveConfigDirect = vi.fn();
-      const w = makeWizardState({
-        ...fetchInstalledState(),
-        handleSaveConfigDirect,
-      });
-      render(<FoundStep {...w} />);
-      const saveBtns = screen.getAllByText(i18n.t("wizard.found.save_config"));
-      fireEvent.click(saveBtns[0]);
-      expect(handleSaveConfigDirect).toHaveBeenCalledWith("alice");
-    });
-
-    it("shows to home button that navigates to welcome", () => {
-      const setWizardStep = vi.fn();
-      const w = makeWizardState({ ...fetchInstalledState(), setWizardStep });
-      render(<FoundStep {...w} />);
-      fireEvent.click(screen.getByText(i18n.t("wizard.found.to_home")));
-      expect(setWizardStep).toHaveBeenCalledWith("welcome");
-    });
-
-    it("shows error message when present", () => {
-      const w = makeWizardState({
-        ...fetchInstalledState(),
-        errorMessage: "Something went wrong",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-    });
-  });
-
-  // ─── Fetch mode: installed with no users ───
-
-  describe("fetch mode — installed with no users", () => {
-    it("renders no users title", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: {
-          installed: true,
-          users: [],
-          version: "1.5.0",
-          serviceActive: true,
-          os: "linux",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        checkError: "",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.no_users_title"))).toBeInTheDocument();
-    });
-
-    it("setup server button navigates and clears fetch mode", () => {
-      const setWizardStep = vi.fn();
-      const saveField = vi.fn();
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: {
-          installed: true,
-          users: [],
-          version: "1.5.0",
-          serviceActive: true,
-          os: "linux",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        checkError: "",
-        setWizardStep,
-        saveField,
-      });
-      render(<FoundStep {...w} />);
-      fireEvent.click(screen.getByText(i18n.t("wizard.found.setup_server")));
-      expect(saveField).toHaveBeenCalledWith("wizardMode", "");
-      expect(setWizardStep).toHaveBeenCalledWith("server");
-    });
-  });
-
-  // ─── Fetch mode: not installed ───
-
-  describe("fetch mode — not installed", () => {
-    it("renders not installed title", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
-        checkError: "",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.not_installed_title"))).toBeInTheDocument();
-    });
-
-    it("renders unreachable title when checkError present in fetch mode", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: null,
-        checkError: "Timeout",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.server_unreachable"))).toBeInTheDocument();
-      expect(screen.getByText("Timeout")).toBeInTheDocument();
-    });
-
-    it("renders not installed description in fetch mode", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
-        checkError: "",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.not_installed_fetch_description"))).toBeInTheDocument();
-    });
-
-    it("setup server button in not-installed fetch mode clears fetch mode and navigates", () => {
-      const setWizardStep = vi.fn();
-      const saveField = vi.fn();
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
-        checkError: "",
-        setWizardStep,
-        saveField,
-      });
-      render(<FoundStep {...w} />);
-      fireEvent.click(screen.getByText(i18n.t("wizard.found.setup_server")));
-      expect(saveField).toHaveBeenCalledWith("wizardMode", "");
-      expect(setWizardStep).toHaveBeenCalledWith("server");
-    });
-
-    it("back button in not-installed fetch mode navigates to server", () => {
-      const setWizardStep = vi.fn();
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
-        checkError: "",
-        setWizardStep,
-      });
-      render(<FoundStep {...w} />);
-      const backBtns = screen.getAllByText(i18n.t("buttons.back"));
-      fireEvent.click(backBtns[0]);
-      expect(setWizardStep).toHaveBeenCalledWith("server");
-    });
-  });
-
-  // ─── Fetch mode: error with checkError ───
-
-  describe("fetch mode — SSH error", () => {
-    it("renders SSH error description in fetch mode when checkError present", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: null,
-        checkError: "SSH connection failed",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.ssh_error_fetch_description"))).toBeInTheDocument();
-    });
-
-    it("shows error text in scrollable container", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: null,
-        checkError: "Authentication error: invalid key",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText("Authentication error: invalid key")).toBeInTheDocument();
-    });
-  });
-
-  // ─── Fetch mode: saving config ───
-
-  describe("fetch mode — saving config state", () => {
-    it("shows saving text when savingConfigFor matches user", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: {
-          installed: true,
-          users: ["alice"],
-          version: "1.5.0",
-          serviceActive: true,
-          os: "linux",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        savingConfigFor: "alice",
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.saving_config"))).toBeInTheDocument();
-    });
-
-    it("save config buttons are disabled when savingConfigFor is set", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: {
-          installed: true,
-          users: ["alice", "bob"],
-          version: "1.5.0",
-          serviceActive: true,
-          os: "linux",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        savingConfigFor: "alice",
-      });
-      render(<FoundStep {...w} />);
-      // The button for bob should be disabled while alice is saving
-      const saveBtns = screen.getAllByText(i18n.t("wizard.found.save_config"));
-      // bob's button should be disabled
-      saveBtns.forEach(btn => {
-        expect(btn.closest("button")).toBeDisabled();
-      });
+      expect(onClose).toHaveBeenCalled();
+      expect(setWizardStep).not.toHaveBeenCalledWith("server");
     });
   });
 
   // ─── Setup mode: user interactions ───
 
   describe("setup mode — user interaction flows", () => {
-    it("shows select user for config description in fetch mode", () => {
+    it("icon-only row controls have explicit aria-labels naming action + target", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: true,
         serverInfo: {
           installed: true,
-          users: ["alice"],
+          users: ["alice", "bob"],
           version: "1.5.0",
           serviceActive: true,
           os: "linux",
@@ -611,30 +348,22 @@ describe("FoundStep", () => {
         } as any,
       });
       render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.select_user_for_config"))).toBeInTheDocument();
-    });
-
-    it("renders no users description in fetch mode", () => {
-      const w = makeWizardState({
-        step: "found",
-        isFetchMode: true,
-        serverInfo: {
-          installed: true,
-          users: [],
-          version: "1.5.0",
-          serviceActive: true,
-          os: "linux",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-      });
-      render(<FoundStep {...w} />);
-      expect(screen.getByText(i18n.t("wizard.found.no_users_description"))).toBeInTheDocument();
+      // Each icon-only control resolves by its target user name (UI-SPEC §A11y). 06-uat:
+      // the per-user save-config control was removed; QR + Link + delete remain.
+      expect(
+        screen.getByRole("button", { name: i18n.t("wizard.found.qr_aria", { user: "alice" }) }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: i18n.t("wizard.found.link_aria", { user: "bob" }) }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: i18n.t("wizard.found.delete_aria", { user: "bob" }) }),
+      ).toBeInTheDocument();
     });
 
     it("delete user button is disabled when only one user", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -655,7 +384,6 @@ describe("FoundStep", () => {
     it("delete user button opens confirm dialog for multi-user list", async () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice", "bob"],
@@ -666,10 +394,11 @@ describe("FoundStep", () => {
         } as any,
       });
       render(<FoundStep {...w} />);
-      // Click a delete (trash) icon button — they have aria-label from server.users.delete_tooltip
-      const deleteBtn = screen.getAllByRole("button", {
-        name: new RegExp(i18n.t("server.users.delete_tooltip")),
-      })[0];
+      // Icon-only row controls now carry an explicit aria-label naming the action +
+      // target (UI-SPEC §A11y): "Удалить пользователя {name}". Resolve by that name.
+      const deleteBtn = screen.getByRole("button", {
+        name: i18n.t("wizard.found.delete_aria", { user: "alice" }),
+      });
       fireEvent.click(deleteBtn);
       // Dialog rendered by ConfirmDialogProvider
       expect(
@@ -681,7 +410,6 @@ describe("FoundStep", () => {
       const handleUninstall = vi.fn();
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -701,11 +429,40 @@ describe("FoundStep", () => {
       expect(handleUninstall).toHaveBeenCalled();
     });
 
+    it("D-18: uninstall confirm shows the plain-language «что будет удалено (только наше)» cocoon list + «НЕ трогаем» line", async () => {
+      // 06-17 D-18: copy-only enrichment of the EXISTING uninstall confirm — the
+      // ownership-scoped cocoon list makes the «only our files» boundary legible
+      // to a non-technical user before the traceless removal.
+      const w = makeWizardState({
+        step: "found",
+        serverInfo: {
+          installed: true,
+          users: ["alice"],
+          version: "1.5.0",
+          serviceActive: true,
+          os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      });
+      render(<FoundStep {...w} />);
+      fireEvent.click(screen.getByText(i18n.t("wizard.found.delete_tt")));
+      // ConfirmDialog renders the message with whitespace-pre-line — the \n-list
+      // lives in one text node, so match on a substring via a function matcher.
+      const msg = await screen.findByText(
+        (content) =>
+          content.includes("правило фаервола, которое мы добавили") &&
+          content.includes("Системные пакеты (curl, certbot)") &&
+          content.includes("НЕ трогаем"),
+      );
+      expect(msg).toBeInTheDocument();
+      // No SSH host/path/secret shown verbatim (D-29).
+      expect(msg).not.toHaveTextContent("/opt/trusttunnel");
+    });
+
     it("confirm uninstall dialog closes without action when cancelled", async () => {
       const handleUninstall = vi.fn();
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -727,7 +484,6 @@ describe("FoundStep", () => {
     it("adding user shows loading state", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -747,7 +503,6 @@ describe("FoundStep", () => {
     it("password input type is password when showNewPassword is false", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -766,7 +521,6 @@ describe("FoundStep", () => {
     it("password input type is text after toggling visibility", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -791,7 +545,6 @@ describe("FoundStep", () => {
       const setNewUsername = vi.fn();
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice"],
@@ -814,7 +567,6 @@ describe("FoundStep", () => {
     it("shows selected user radio indicator", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: {
           installed: true,
           users: ["alice", "bob"],
@@ -835,7 +587,6 @@ describe("FoundStep", () => {
     it("shows connection error help text in setup mode with checkError", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         serverInfo: null,
         checkError: "Connection timed out",
       });
@@ -846,13 +597,122 @@ describe("FoundStep", () => {
     it("shows not found can install message when server ready", () => {
       const w = makeWizardState({
         step: "found",
-        isFetchMode: false,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serverInfo: { installed: false, users: [], version: "", serviceActive: false, os: "linux" } as any,
         checkError: "",
       });
       render(<FoundStep {...w} />);
       expect(screen.getByText(i18n.t("wizard.found.not_found_can_install"))).toBeInTheDocument();
+    });
+  });
+
+  // ─── CR-03: snackbar i18n uses the server.users.* namespace with interpolation ───
+  describe("CR-03 — snackbar resolves server.users.* keys with {{user}} interpolation", () => {
+    it("add-user snackbar shows the interpolated user_added string", async () => {
+      const w = makeWizardState({
+        step: "found",
+        serverInfo: {
+          installed: true,
+          users: ["alice"],
+          version: "1.5.0",
+          serviceActive: true,
+          os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        newUsername: "charlie",
+        newPassword: "pass123",
+        handleAddUser: vi.fn().mockResolvedValue(undefined),
+      });
+      render(<FoundStep {...w} />);
+      fireEvent.click(screen.getByText(i18n.t("wizard.found.add_btn")));
+      expect(
+        await screen.findByText(i18n.t("server.users.user_added", { user: "charlie" })),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // ─── D-06: deeplink/QR export must go through buildAuthArgs ───
+  // CR-01 regression: the export call carries SSH creds, so it MUST send authMethod
+  // + exactly one credential (never both password and keyPath). The bug shipped a
+  // hand-rolled sshParams object that omitted authMethod and leaked both.
+  describe("D-06 — deeplink export sends buildAuthArgs (authMethod, single credential)", () => {
+    const installedWithUser = (extra = {}) =>
+      makeWizardState({
+        step: "found",
+        serverInfo: {
+          installed: true,
+          users: ["alice"],
+          version: "1.5.0",
+          serviceActive: true,
+          os: "linux",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        host: "1.2.3.4",
+        port: "22",
+        sshUser: "root",
+        ...extra,
+      });
+
+    it("copy-link export carries authMethod 'key' and no password when authMode is key", async () => {
+      invokeMock.mockClear();
+      invokeMock.mockResolvedValue("tt://deeplink");
+      const w = installedWithUser({
+        authMode: "key",
+        sshKeyPath: "/home/me/id_ed25519",
+        sshKeyData: "KEYDATA",
+        // password present in state, but key mode must NOT send it:
+        sshPassword: "should-not-be-sent",
+        buildAuthArgs: () => ({
+          password: "",
+          keyPath: "/home/me/id_ed25519",
+          keyData: "KEYDATA",
+          authMethod: "key" as const,
+        }),
+      });
+      render(<FoundStep {...w} />);
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("wizard.found.link_aria", { user: "alice" }) }),
+      );
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith(
+          "server_export_config_deeplink",
+          expect.objectContaining({ authMethod: "key", clientName: "alice" }),
+        );
+      });
+      const args = invokeMock.mock.calls.find((c) => c[0] === "server_export_config_deeplink")![1];
+      expect(args).toMatchObject({ keyPath: "/home/me/id_ed25519", keyData: "KEYDATA", password: "" });
+      // The leaked password must NOT ride along in key mode.
+      expect((args as Record<string, unknown>).password).not.toBe("should-not-be-sent");
+    });
+
+    it("QR export carries authMethod 'password' and no key when authMode is password", async () => {
+      invokeMock.mockClear();
+      invokeMock.mockResolvedValue("tt://deeplink");
+      const w = installedWithUser({
+        authMode: "password",
+        sshPassword: "hunter2",
+        sshKeyPath: "/leaked/key",
+        buildAuthArgs: () => ({
+          password: "hunter2",
+          keyPath: undefined,
+          keyData: undefined,
+          authMethod: "password" as const,
+        }),
+      });
+      render(<FoundStep {...w} />);
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("wizard.found.qr_aria", { user: "alice" }) }),
+      );
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith(
+          "server_export_config_deeplink",
+          expect.objectContaining({ authMethod: "password", password: "hunter2", clientName: "alice" }),
+        );
+      });
+      const args = invokeMock.mock.calls.find((c) => c[0] === "server_export_config_deeplink")![1] as Record<string, unknown>;
+      // The leaked key path must NOT ride along in password mode.
+      expect(args.keyPath).toBeUndefined();
+      expect(args.keyData).toBeUndefined();
     });
   });
 });

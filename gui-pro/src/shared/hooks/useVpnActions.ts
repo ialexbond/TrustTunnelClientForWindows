@@ -11,7 +11,20 @@ interface UseVpnActionsParams {
   setError: (e: string | null) => void;
   i18n: I18nType;
   reconnectResolve: React.MutableRefObject<(() => void) | null>;
+  // AUDIT-2026-06-11 #8: shared with useVpnEvents (owned by App.tsx). handleReconnect
+  // marks it true ONLY for the window where its own optimistic "reconnecting" status
+  // hides the teardown's transient "disconnected" (the no-dwell guard). Without the
+  // mark, the guard also swallowed a REAL terminal Disconnected emitted by a tray
+  // disconnect during a backend auto-reconnect. Optional so call sites / tests that
+  // don't wire it keep type-checking (they simply get no suppression).
+  manualReconnectActiveRef?: React.MutableRefObject<boolean>;
 }
+
+// AUDIT-2026-06-11 #8: upper bound on how long the manual-reconnect mark may stay
+// raised if handleReconnect never reaches a clearing point (e.g. vpn_disconnect's
+// IPC await hangs). Matches the 5s disconnect-event safety timeout below — past
+// that window a "disconnected" is no longer plausibly the teardown's transient one.
+const MANUAL_RECONNECT_SAFETY_MS = 5000;
 
 export function useVpnActions({
   config,
@@ -20,6 +33,7 @@ export function useVpnActions({
   setError,
   i18n,
   reconnectResolve,
+  manualReconnectActiveRef,
 }: UseVpnActionsParams) {
   const handleConnect = useCallback(async () => {
     if (!config.configPath) {
@@ -52,6 +66,24 @@ export function useVpnActions({
   const handleReconnect = useCallback(async () => {
     if (status !== "connected" && status !== "connecting") return;
 
+    // AUDIT-2026-06-11 #8: raise the shared manual-reconnect mark SYNCHRONOUSLY,
+    // before the optimistic setStatus("reconnecting") below, so the no-dwell guard
+    // in useVpnEvents only suppresses "disconnected" while THIS flow is actually in
+    // flight (a backend auto-reconnect never raises it, so a tray disconnect's real
+    // terminal Disconnected now lands). Cleared at every exit: the teardown-failure
+    // catch, right before reconnecting (handleConnect owns the status from there),
+    // and a safety timeout in case an IPC await never resolves.
+    let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearManualReconnectMark = () => {
+      if (safetyTimer !== undefined) clearTimeout(safetyTimer);
+      safetyTimer = undefined;
+      if (manualReconnectActiveRef) manualReconnectActiveRef.current = false;
+    };
+    if (manualReconnectActiveRef) {
+      manualReconnectActiveRef.current = true;
+      safetyTimer = setTimeout(clearManualReconnectMark, MANUAL_RECONNECT_SAFETY_MS);
+    }
+
     // Opt the MANUAL reconnect («Сохранить и переподключить») into the same no-dwell
     // guard the AUTO-reconnect path uses (useVpnEvents.ts: prev === "recovering" ||
     // prev === "reconnecting" && payload === "disconnected" → keep). 02-20: a manual
@@ -82,6 +114,9 @@ export function useVpnActions({
       // 5s safety timeout and only THEN surface an error (via handleConnect hitting
       // the "VPN is already running" guard on a still-alive sidecar). Abort cleanly
       // instead: show the error now and stop, do NOT proceed to the wait + reconnect.
+      // AUDIT-2026-06-11 #8: the reconnect flow is over — drop the mark so the
+      // no-dwell guard stops suppressing future "disconnected" events.
+      clearManualReconnectMark();
       setError(formatError(e));
       setStatus("error");
       return;
@@ -100,11 +135,16 @@ export function useVpnActions({
       }, 5000);
     });
 
+    // AUDIT-2026-06-11 #8: teardown is done (the "disconnected" event fired or the
+    // 5s wait elapsed) — clear the mark BEFORE reconnecting. From here handleConnect
+    // owns the optimistic status, and any later "disconnected" is a real one.
+    clearManualReconnectMark();
+
     // Reconnect immediately — sidecar is already terminated when disconnect event
     // fires. handleConnect moves "reconnecting" → "connecting" → "connected" on
     // success, or → "error" via its own catch on a real failure.
     await handleConnect();
-  }, [status, handleConnect, reconnectResolve, setStatus, setError]);
+  }, [status, handleConnect, reconnectResolve, setStatus, setError, manualReconnectActiveRef]);
 
   return { handleConnect, handleDisconnect, handleReconnect };
 }
