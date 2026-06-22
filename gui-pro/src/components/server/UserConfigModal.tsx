@@ -14,6 +14,8 @@ import { useActivityLog } from "../../shared/hooks/useActivityLog";
 import { formatError } from "../../shared/utils/formatError";
 import { cn } from "../../shared/lib/cn";
 import { fromServerResponse as advancedFromServer } from "../../shared/utils/userAdvanced";
+import { buildConfigFileName } from "../../shared/utils/configFileName";
+import { readCachedCountryCode } from "./useServerGeoIp";
 
 /**
  * UserConfigModal — Phase 14 Plan 04 production implementation.
@@ -330,9 +332,22 @@ export function UserConfigModal({
       const path = await invoke<string>("fetch_server_config", {
         ...sshParams,
         clientName: username,
+        // #22: the Users-tab download does not render the wizard deploy progress UI, so it
+        // passes the unstamped generation (0 = "accept everywhere", no listener impact).
+        opId: 0,
+        // Brand the on-disk config `[<CC>_]TrustTunnel_<username>.toml` consistently with
+        // the Save-As default below, so the file fetch_server_config writes carries the
+        // country prefix too. Best-effort cached GeoIP (undefined when unknown).
+        countryCode: readCachedCountryCode(sshHost) || undefined,
       });
+      // UAT (06-uat fix 14): branded, consistent default name
+      // `[COUNTRY_]TrustTunnel_<username>.toml` (matching the wizard DoneStep save).
+      // The country prefix is BEST-EFFORT — read synchronously from the already-cached
+      // GeoIP for this host (no fetch, never blocks the save); omitted gracefully when
+      // not readily available.
+      const country = readCachedCountryCode(sshHost);
       const dest = await save({
-        defaultPath: `trusttunnel_${username}.toml`,
+        defaultPath: buildConfigFileName(username, country),
         filters: [{ name: "TOML Config", extensions: ["toml"] }],
       });
       if (dest) {
@@ -392,7 +407,7 @@ export function UserConfigModal({
         // Skeleton, отражающий финальный layout (QR + caption + deeplink + download).
         // Модалка всегда показывает одни и те же 4 блока, поэтому скелетон
         // статически повторяет их пропорции — предотвращает CLS при догрузке.
-        <div aria-busy="true" aria-label={t("common.loading") || "Загрузка"}>
+        <div aria-busy="true" aria-label={t("common.loading")}>
           <div className="flex justify-center">
             <Skeleton
               variant="card"

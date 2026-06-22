@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Loader2,
@@ -18,8 +19,11 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpCircle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
+import { IconButton } from "../../shared/ui/IconButton";
 import { ProgressBar } from "../../shared/ui/ProgressBar";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { EcgSvg, ecgHeartbeat, ecgFlatline } from "../../shared/ui/EcgSvg";
@@ -66,14 +70,31 @@ const accent: React.CSSProperties = { color: "var(--color-accent-interactive)" }
 const bigNum: React.CSSProperties = { fontSize: "var(--font-size-card-value)", fontWeight: "var(--font-weight-semibold)", lineHeight: 1, color: "var(--color-text-primary)" };
 const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
 
+// D-10 (Plan 07-06, post-UAT scope): perceptible press-state — a native-app
+// push-in feel — applied ONLY to the clickable drill-down cards (Users / Protocol
+// Version / Security via ClickableCard). The user rejected press feedback on the
+// plain info cards: a press animation on a non-actionable card reads as "this is
+// clickable" when it is not, which is misleading. So the plain Status/Ping/Speed/
+// IP/Country/Uptime/Load cards carry NO press-state. active:bg darkens on press,
+// active:scale-[0.98] pushes in 2%, transform-origin keeps the squeeze centered.
+// The transform/background transition runs over --transition-fast (150ms) so the
+// press reads as a quick, tactile response (token collapses to 0ms under
+// prefers-reduced-motion → the scale applies instantly, which is acceptable).
+const PRESS_STATE_CLASS =
+  "active:bg-[var(--color-bg-active)] active:scale-[0.98] origin-center transition-[transform,background-color] duration-[var(--transition-fast)] ease-[var(--ease-out)]";
+
 /* ── Title ── */
-function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel }: {
+function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel, action }: {
   icon: React.ReactNode;
   text: string;
   onRefresh?: () => void;
   refreshing?: boolean;
   clickable?: boolean;
   refreshAriaLabel: string;
+  // D-08 (Plan 07-06): optional right-side action node — used by the IP card to
+  // host the Eye/EyeOff reveal button. Lives in the SAME fixed-height action row
+  // as refresh/chevron, so adding it never reflows the card title (no layout shift).
+  action?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
@@ -82,6 +103,7 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel 
         <span className="text-title-sm" style={primary}>{text}</span>
       </div>
       <div className="flex items-center h-full shrink-0 ml-2">
+        {action}
         {onRefresh && (
           <button
             className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors"
@@ -121,7 +143,12 @@ function ClickableCard({
     <Card
       padding="md"
       style={style}
-      className="cursor-pointer hover:bg-[var(--color-bg-hover)] active:bg-[var(--color-bg-active)] transition-colors focus-visible:shadow-[var(--focus-ring)] outline-none"
+      // D-10 (Plan 07-06): extend the existing press pattern with active:scale-[0.98]
+      // + a transform/background transition (PRESS_STATE_CLASS). The press-scale is
+      // on the SAME element as the focus ring — focus-visible:shadow-[var(--focus-ring)]
+      // is kept explicitly so the keyboard focus ring still renders on the
+      // clickable drill-down cards (Users / Version / Security).
+      className={`cursor-pointer hover:bg-[var(--color-bg-hover)] focus-visible:shadow-[var(--focus-ring)] outline-none ${PRESS_STATE_CLASS}`}
       role="button"
       tabIndex={0}
       aria-label={ariaLabel}
@@ -135,6 +162,63 @@ function ClickableCard({
     >
       {children}
     </Card>
+  );
+}
+
+/* ── OverviewSkeleton — the 10-card placeholder grid ──
+   Extracted verbatim from the original `serverInfo === null` branch so it can be
+   reused as the D-07 all-cards-loaded gate (Plan 07-06) WITHOUT authoring a new
+   loading visual. Same flex/gap/sub-tile shape as the real grid, so the swap to
+   real content never jumps the layout. Takes only `t` + `refreshAriaLabel`. */
+function OverviewSkeleton({ t, refreshAriaLabel }: { t: TFunction; refreshAriaLabel: string }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
+      {[
+        { icon: <HeartPulse className="w-5 h-5" />, text: t("server.overview.cards.status"), flex: "1 1 220px", h: 56 },
+        { icon: <Activity className="w-5 h-5" />, text: t("server.overview.cards.ping"), flex: "1 1 140px", h: 48 },
+        { icon: <Zap className="w-5 h-5" />, text: t("server.overview.cards.speed"), flex: "1 1 280px", maxWidth: "360px", h: 48 },
+        { icon: <Users className="w-5 h-5" />, text: t("server.overview.cards.userCount"), flex: "1 1 180px", h: 48 },
+        { icon: <Network className="w-5 h-5" />, text: t("server.overview.cards.ip"), flex: "1 1 240px", h: 48 },
+        { icon: <Globe className="w-5 h-5" />, text: t("server.overview.cards.country"), flex: "1 1 180px", h: 36 },
+        { icon: <Clock className="w-5 h-5" />, text: t("server.overview.cards.uptime"), flex: "1 1 160px", h: 48 },
+        { icon: <Package className="w-5 h-5" />, text: t("server.overview.cards.protocolVersion"), flex: "1 1 220px", h: 48 },
+      ].map((c) => (
+        <Card key={c.text} padding="md" style={{ flex: c.flex, maxWidth: c.maxWidth }}>
+          <Title icon={c.icon} text={c.text} refreshAriaLabel={refreshAriaLabel} />
+          <div className="flex items-center justify-center py-2" style={{ minHeight: c.h }}>
+            <Skeleton variant="line" width={100} height={32} />
+          </div>
+        </Card>
+      ))}
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
+        <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} refreshAriaLabel={refreshAriaLabel} />
+        {/* D-04 / H-03 (Plan 04-14): 3 sub-tiles to match the loaded layout
+            (Firewall / Fail2Ban / TLS — SSH-key removed in Phase 16). A 4-tile
+            skeleton produced a visible 4→3 jump when serverInfo arrived. */}
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          {[1, 2, 3].map(i => (
+            <div key={i} data-testid="security-skeleton-tile" className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
+              <Skeleton variant="line" width={60} height={14} className="mb-1" />
+              <Skeleton variant="line" width={50} height={14} />
+            </div>
+          ))}
+        </div>
+      </Card>
+      <Card padding="md" style={{ flex: "1 1 300px" }}>
+        <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
+        <div className="space-y-2.5 mt-1">
+          {[1, 2].map(i => (
+            <div key={i}>
+              <div className="flex items-center justify-between mb-1">
+                <Skeleton variant="line" width={30} height={20} />
+                <Skeleton variant="line" width={60} height={20} />
+              </div>
+              <Skeleton variant="line" width="100%" height={6} />
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -166,6 +250,31 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
     intervalMs: 10_000,
   });
   const { geo, loading: geoLoading } = useServerGeoIp({ host: state.host });
+
+  // D-08 (Plan 07-06): the server IP is blurred by default and revealed only on
+  // an explicit eye-toggle click — a shoulder-surfing privacy guard. Hidden is
+  // the default on EVERY mount (state seeds false), so re-opening the panel never
+  // leaves a previously-revealed IP in cleartext (session-only reveal, resets on
+  // remount). This is a CSS-blur guard, not a secret-from-owner guard — the value
+  // stays in the DOM and is NOT aria-hidden (a screen-reader owner may read it).
+  const [ipRevealed, setIpRevealed] = useState(false);
+
+  // D-07 (Plan 07-06): 60s fallback for the all-cards-loaded gate. If not all
+  // cards settle within ~60s of mount, we render whatever IS ready rather than
+  // hold the skeleton forever (the app must never look frozen on a slow card).
+  // A single mount-scoped timer; cleared on unmount.
+  const [fallbackElapsed, setFallbackElapsed] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setFallbackElapsed(true), 60_000);
+    return () => clearTimeout(id);
+  }, []);
+
+  // D-07 fix (post-UAT): monotonic latch for the all-cards gate. Once the gate
+  // opens (all-ready OR the 60s fallback), it stays open for the lifetime of this
+  // mount. Tying the gate directly to the live `*Loading` flags re-closed it on
+  // every periodic poll refetch within the first 60s, flashing the whole grid back
+  // to the skeleton. The latch makes the gate a true first-load-only gate.
+  const gateOpenedRef = useRef(false);
 
   const [ping, setPing] = useState<number | null>(null);
   // G-08: guard против rapid-fire ping клика — иначе каждый tick открывает новый
@@ -250,6 +359,12 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
   const [security, setSecurity] = useState<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } } | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
+  // post-UAT: the D-07 gate must wait for security to have actually SETTLED (its
+  // first fetch finished), NOT merely `!securityLoading`. That flag inits `false`
+  // and the fetch is kicked off in an effect AFTER first render — so the gate could
+  // open before security even started, and the Security card then flashed its
+  // skeleton AFTER the general skeleton. Flipped true in refetchSecurity's .finally().
+  const [securityHasSettled, setSecurityHasSettled] = useState(false);
 
   // UAT 2026-05-23 revision: refresh strategy is now event-driven only.
   // Previously this card re-fetched on every flip of `isOverviewVisible`
@@ -293,7 +408,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         setSecurity(null);
         activityLog("ERROR", `overview.security.failed err=${String(e)}`, "security_get_status");
       })
-      .finally(() => setSecurityLoading(false));
+      .finally(() => { setSecurityLoading(false); setSecurityHasSettled(true); });
   }, [securityHost, securityPort, securityUser, securityPassword, securityKeyPath, serviceActive, rebooting, activityLog]);
 
   // C-01: StrictMode-safe single-fire. The dev double-mount would otherwise fire
@@ -386,19 +501,25 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         if (elapsed >= 120) {
           refs.setRebooting(false);
           setRebootCountdown(0);
-          // C-02 (Plan 04-14): surface an HONEST error before dropping the
-          // server. Pre-fix this path silently called clear_ssh_credentials —
-          // the panel returned to idle and the server vanished from the list
-          // with zero feedback (a slow OVH/Hetzner reboot can exceed 120s). Now
-          // the user sees an error toast + an ERROR activity-log entry first,
-          // so the disappearance is explained rather than mysterious.
+          // C-02 (Plan 04-14): surface an HONEST error when the reboot poll
+          // exceeds 120s (a slow OVH/Hetzner reboot can take that long). The
+          // user sees an error toast + an ERROR activity-log entry so the
+          // panel returning to idle is explained rather than mysterious.
+          //
+          // D-06 (Plan 07-05): plain unreachability/timeout must NOT wipe
+          // stored credentials. The old `clear_ssh_credentials` call here was
+          // an auto-logout that made a transient reboot delay look like a
+          // permanent disconnect — the user had to re-enter SSH data for a
+          // server that was merely slow to wake. The ONLY credential-clear path
+          // is now the DELIBERATE handleDisconnect in
+          // useControlPanelOrchestrator. We keep the toast/log/refresh-signal so
+          // the panel still reacts honestly, just without dropping the creds.
           refs.pushSuccess(refs.t("server.overview.rebootTimeout"), "error");
           refs.activityLog(
             "ERROR",
-            "overview.reboot.timeout server unreachable after 120s — credentials cleared",
+            "overview.reboot.timeout server unreachable after 120s",
             "check_server_installation",
           );
-          invoke("clear_ssh_credentials").catch(() => {});
           localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
         }
       }
@@ -428,55 +549,54 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   // ── Skeleton: пока нет данных ──
   const refreshAriaLabel = t("server.overview.refreshAria");
   if (!serverInfo) {
-    return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, width: "100%" }}>
-        {[
-          { icon: <HeartPulse className="w-5 h-5" />, text: t("server.overview.cards.status"), flex: "1 1 220px", maxWidth: "260px", h: 56 },
-          { icon: <Activity className="w-5 h-5" />, text: t("server.overview.cards.ping"), flex: "1 1 140px", maxWidth: "180px", h: 48 },
-          { icon: <Zap className="w-5 h-5" />, text: t("server.overview.cards.speed"), flex: "2 1 340px", h: 48 },
-          { icon: <Users className="w-5 h-5" />, text: t("server.overview.cards.userCount"), flex: "1 1 180px", h: 48 },
-          { icon: <Network className="w-5 h-5" />, text: t("server.overview.cards.ip"), flex: "1 1 240px", h: 48 },
-          { icon: <Globe className="w-5 h-5" />, text: t("server.overview.cards.country"), flex: "1 1 180px", h: 36 },
-          { icon: <Clock className="w-5 h-5" />, text: t("server.overview.cards.uptime"), flex: "1 1 160px", h: 48 },
-          { icon: <Package className="w-5 h-5" />, text: t("server.overview.cards.protocolVersion"), flex: "1 1 220px", h: 48 },
-        ].map((c) => (
-          <Card key={c.text} padding="md" style={{ flex: c.flex, maxWidth: c.maxWidth }}>
-            <Title icon={c.icon} text={c.text} refreshAriaLabel={refreshAriaLabel} />
-            <div className="flex items-center justify-center py-2" style={{ minHeight: c.h }}>
-              <Skeleton variant="line" width={100} height={32} />
-            </div>
-          </Card>
-        ))}
-        <Card padding="md" style={{ flex: "1 1 340px" }}>
-          <Title icon={<Shield className="w-5 h-5" />} text={t("server.overview.cards.security")} refreshAriaLabel={refreshAriaLabel} />
-          {/* D-04 / H-03 (Plan 04-14): 3 sub-tiles to match the loaded layout
-              (Firewall / Fail2Ban / TLS — SSH-key removed in Phase 16). A 4-tile
-              skeleton produced a visible 4→3 jump when serverInfo arrived. */}
-          <div className="grid grid-cols-2 gap-2 mt-1">
-            {[1, 2, 3].map(i => (
-              <div key={i} data-testid="security-skeleton-tile" className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: "var(--color-bg-elevated)" }}>
-                <Skeleton variant="line" width={60} height={14} className="mb-1" />
-                <Skeleton variant="line" width={50} height={14} />
-              </div>
-            ))}
-          </div>
-        </Card>
-        <Card padding="md" style={{ flex: "2 1 400px" }}>
-          <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
-          <div className="space-y-2.5 mt-1">
-            {[1, 2].map(i => (
-              <div key={i}>
-                <div className="flex items-center justify-between mb-1">
-                  <Skeleton variant="line" width={30} height={20} />
-                  <Skeleton variant="line" width={60} height={20} />
-                </div>
-                <Skeleton variant="line" width="100%" height={6} />
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-    );
+    return <OverviewSkeleton t={t} refreshAriaLabel={refreshAriaLabel} />;
+  }
+
+  // ── D-07 (Plan 07-06): all-cards-loaded gate (+60s fallback) ──
+  // The panel must NEVER look broken because one card is slow. Render the full
+  // skeleton until EVERY async per-card signal is SETTLED (success OR failure —
+  // RESEARCH Pitfall 4), then swap to the real grid in one go (no per-card
+  // progressive flash). "settled" — not "succeeded" — is critical: a genuinely
+  // down card (ping=-1, a geo error, a stats failure) counts as ready, so a
+  // permanently-failing card does NOT hold the skeleton for the full 60s.
+  //
+  // The async signals we wait on (others derive from `serverInfo`, already
+  // present here, so they are ready by construction):
+  //   • ping     — settled once `ping !== null` (a number, or -1 on failure)
+  //   • geo      — settled once `!geoLoading`
+  //   • stats    — settled once `!statsLoading` (drives Load + the Uptime fallback)
+  //   • security — settled once `!securityLoading`
+  // Speed is on-demand (never auto-loads) so it is NOT a gate signal.
+  //
+  // Crucial: ping is only a *pending* signal while the protocol is RUNNING and not
+  // rebooting. When the protocol is stopped the ping effect deliberately sets
+  // `ping = null` (it is "n/a", not "loading"), so we must NOT wait on it then —
+  // otherwise a stopped server would hold the skeleton until the 60s fallback.
+  // While rebooting we also don't gate on ping (the Status card shows its own
+  // rebooting spinner regardless). `fallbackElapsed` is flipped by a 60s timer
+  // below; once either all-ready or the fallback fires, the gate opens and stays
+  // open for this mount.
+  const pingSettled = !serverInfo.serviceActive || rebooting || ping !== null;
+  // security is "settled" once its first fetch completes (.finally sets the flag),
+  // OR when the service is stopped/rebooting (refetchSecurity early-returns then, so
+  // it never fetches — gating on it would hang the panel until the 60s fallback).
+  // Using `!securityLoading` was wrong: it inits true-equivalent (!false) before the
+  // fetch starts, so the gate could open before security loaded (skeleton flash).
+  const securitySettled = !serverInfo.serviceActive || rebooting || securityHasSettled;
+  const allReady = pingSettled && !geoLoading && !statsLoading && securitySettled;
+
+  // Gate: hold the full skeleton until all-ready OR the 60s fallback fires, then
+  // LATCH open. Reuses OverviewSkeleton verbatim — no new loading visual (D-07
+  // contract). The latch (gateOpenedRef) is the post-UAT fix: without it, a
+  // periodic poll refetch (stats/geo/security toggling its *Loading flag) flipped
+  // `allReady` back to false within the 60s window and re-rendered the whole grid
+  // as the skeleton — a synchronized full-grid flash every poll cycle. Once opened,
+  // the gate never re-closes for this mount; later refetches update cards in place.
+  if (allReady || fallbackElapsed) {
+    gateOpenedRef.current = true;
+  }
+  if (!gateOpenedRef.current) {
+    return <OverviewSkeleton t={t} refreshAriaLabel={refreshAriaLabel} />;
   }
 
   // ── Computed values ──
@@ -570,7 +690,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             <>
               <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
               {ping === -1 && (
-                <span className="text-xs" style={muted}>
+                // D-09: single-line error caption (wrapping a 2nd line breaks the
+                // card-height/row rhythm). nowrap + truncate, keep text-xs muted.
+                <span className="text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-full" style={muted}>
                   {t("server.overview.dataUnavailable")}
                 </span>
               )}
@@ -630,7 +752,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
              Refresh в Title перезапустит speedtest_run. */
           <div className="flex flex-col items-center justify-center gap-0.5 py-2" style={{ minHeight: 48 }}>
             <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
-            <span className="text-xs" style={muted}>
+            {/* D-09: single-line error caption — nowrap + truncate (same rationale
+                as the Ping caption: a 2nd line breaks the flex-wrap row rhythm). */}
+            <span className="text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-full" style={muted}>
               {t("server.overview.dataUnavailable")}
             </span>
           </div>
@@ -658,9 +782,39 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
       {/* IP / Сервер — CONTROL-PANEL-SPEC §4.1: «Сервер» card.
           UAT 2026-05-20: Restart Service removed entirely (not needed in Overview). */}
       <Card padding="md" style={{ flex: "1 1 240px" }}>
-        <Title icon={<Network className="w-5 h-5" />} text={t("server.overview.cards.ip")} refreshAriaLabel={refreshAriaLabel} />
+        <Title
+          icon={<Network className="w-5 h-5" />}
+          text={t("server.overview.cards.ip")}
+          refreshAriaLabel={refreshAriaLabel}
+          action={
+            // D-08: Eye/EyeOff toggle. EyeOff = currently hidden (click to reveal),
+            // Eye = currently revealed (click to hide). w-4 h-4 matches the refresh
+            // icon size. aria-label reflects the ACTION the click performs, so AT
+            // users hear «Показать…»/«Скрыть…» — the actual outcome, not the state.
+            <IconButton
+              icon={ipRevealed ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              aria-label={t(ipRevealed ? "server.overview.ip.hide" : "server.overview.ip.show")}
+              onClick={() => setIpRevealed((v) => !v)}
+            />
+          }
+        />
         <div className="flex items-center justify-center py-2">
-          <span className="font-mono" style={bigNum}>{state.host || "—"}</span>
+          {/* D-08: blur the IP value when hidden (blur(6px)) → readable silhouette
+              but unreadable address; blur(0) when revealed. Only `filter` changes —
+              same font-mono, same box, same real width in both states → no layout
+              shift / card reflow on toggle. transition over --transition-normal
+              (200ms) with --ease-out for a smooth, non-snap reveal (the token
+              collapses to 0ms under prefers-reduced-motion automatically). */}
+          <span
+            className="font-mono"
+            style={{
+              ...bigNum,
+              filter: ipRevealed ? "blur(0)" : "blur(6px)",
+              transition: "filter var(--transition-normal) var(--ease-out)",
+            }}
+          >
+            {state.host || "—"}
+          </span>
         </div>
       </Card>
 
@@ -705,10 +859,15 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
       <Card padding="md" style={{ flex: "1 1 160px" }}>
         <Title icon={<Clock className="w-5 h-5" />} text={t("server.overview.cards.uptime")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
+          {/* D-09 (Plan 07-06): whitespace-nowrap + truncate on the Uptime value.
+              A 2nd line would change this card's height and break the flex-wrap
+              row rhythm (the grid relies on consistent heights to wrap into clean
+              rows). overflow-hidden text-ellipsis is the overflow fallback — the
+              rare long value truncates instead of wrapping. */}
           {fastUptime !== null ? (
-            <span className="font-mono" style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
+            <span className="font-mono whitespace-nowrap overflow-hidden text-ellipsis" style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
           ) : stats ? (
-            <span className="font-mono" style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
+            <span className="font-mono whitespace-nowrap overflow-hidden text-ellipsis" style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
           ) : statsLoading ? (
             <Skeleton variant="line" width={80} height={28} />
           ) : (

@@ -19,6 +19,9 @@ vi.mock("@tauri-apps/api/app", () => ({
 // Mock @tauri-apps/plugin-dialog
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue(null),
+  // save() is used by the wizard «Сохранить как» + Users-tab download paths. Default
+  // to a cancelled dialog (null) so tests that don't exercise it stay inert.
+  save: vi.fn().mockResolvedValue(null),
 }));
 
 // Mock @tauri-apps/plugin-shell

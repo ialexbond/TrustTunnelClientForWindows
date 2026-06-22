@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { readStoredCredentials } from "./readStoredCredentials";
+import { readStoredCredentials, readStoredCredentialsFor } from "./readStoredCredentials";
 
 const mockInvoke = vi.mocked(invoke) as unknown as Mock;
 
@@ -95,5 +95,66 @@ describe("readStoredCredentials", () => {
     // No second save_ssh_credentials, and the externally-written key is ignored.
     expect(saveCalls).toHaveLength(1);
     expect(resurrected).toBeNull();
+  });
+});
+
+// ─── readStoredCredentialsFor (06-19 / D-15 / C-23): host-keyed read ─────────
+describe("readStoredCredentialsFor", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("invokes load_ssh_credentials_for with the target and returns the target's bundle", async () => {
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      calls.push({ cmd, args });
+      if (cmd === "load_ssh_credentials_for") {
+        return { host: "10.0.0.1", port: "22", user: "root", password: "pwA", keyPath: "" };
+      }
+      return null;
+    });
+
+    const creds = await readStoredCredentialsFor({ host: "10.0.0.1", port: "22", user: "root" });
+    expect(creds).toEqual({
+      host: "10.0.0.1",
+      port: "22",
+      user: "root",
+      password: "pwA",
+      keyPath: undefined,
+    });
+    // The host-keyed command is invoked with the exact target.
+    expect(calls[0]).toEqual({
+      cmd: "load_ssh_credentials_for",
+      args: { host: "10.0.0.1", port: "22", user: "root" },
+    });
+  });
+
+  it("returns null for an unknown target (command resolves null)", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "load_ssh_credentials_for") return null;
+      return null;
+    });
+    const creds = await readStoredCredentialsFor({ host: "9.9.9.9", port: "22", user: "nobody" });
+    expect(creds).toBeNull();
+  });
+
+  it("does NOT run the legacy localStorage migration (no save_ssh_credentials)", async () => {
+    // A legacy key is present, but the host-keyed sibling must NOT migrate it
+    // (the no-arg reader owns the one-time migration on cold start).
+    localStorage.setItem(
+      "trusttunnel_control_ssh",
+      JSON.stringify({ host: "5.5.5.5", port: "22", user: "root", password: "legacy" }),
+    );
+    const saveCalls: unknown[] = [];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "save_ssh_credentials") saveCalls.push(cmd);
+      return null;
+    });
+
+    await readStoredCredentialsFor({ host: "5.5.5.5", port: "22", user: "root" });
+    expect(saveCalls).toHaveLength(0);
+    // Legacy key untouched (not consumed by the host-keyed read).
+    expect(localStorage.getItem("trusttunnel_control_ssh")).not.toBeNull();
   });
 });

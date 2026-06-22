@@ -138,6 +138,57 @@ pub fn validate_ssh_host(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// SSH login user (the operator-typed account the wizard connects AS, e.g. `root`).
+///
+/// SAFETY-01 / S-04 whitelist defense (do NOT loosen): the SSH user is an
+/// operator-typed wizard input that crosses the IPC boundary. It is delivered to
+/// russh's native `authenticate_*` (protocol-level, not a shell) AND is used to
+/// form the SSH pool cache key (`pool.rs`), so it is not a direct shell-injection
+/// vector today — but it is operator-controlled input reaching the connect path, so
+/// we whitelist-validate it at the boundary as defense-in-depth (a future code path
+/// that interpolates the login user into a remote command must not be able to
+/// inject). A POSIX login name is `[a-z_][a-z0-9_-]*` plus an optional trailing `$`;
+/// we permit ASCII alphanumerics + `_ - . $` (the `.` covers AD-style `user.name`),
+/// which is a strict whitelist — every shell metacharacter (`' " $ \` ; | &` and the
+/// rest) is rejected by omission. `$` is permitted only because POSIX allows it in a
+/// trailing machine-account position; it can never reach an unquoted shell context
+/// from here (russh sends it as the SSH userauth name, not a command).
+pub fn validate_ssh_user(s: &str) -> Result<(), String> {
+    if s.is_empty() || s.len() > 64 {
+        return Err("SSH user must be 1-64 characters".into());
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '$'))
+    {
+        return Err("SSH user contains invalid characters".into());
+    }
+    Ok(())
+}
+
+/// `auth_method` enum constraint at the IPC boundary (round-2 finding H + round-3
+/// LOW E). `auth_method` is the wizard's EXPLICIT single auth choice; it is a
+/// BRANCH SELECTOR (`ssh_connect`'s `auth_plan`), not interpolated into a shell —
+/// but per finding H it must be constrained to the explicit enum `"password" |
+/// "key"` at the boundary so a stray value (`"both"`, `""`, `"password; rm -rf /"`)
+/// can never select an unexpected branch or smuggle anything downstream.
+///
+/// `auth_method` on `SshParams` is `Option<String>` with `#[serde(default)]` for
+/// legacy/internal back-compat (05-04 Task 1): every non-wizard caller passes
+/// `None` and keeps the legacy try-key-then-password sequence. So this validator
+/// MUST allow `None` (round-3 LOW E) — it returns `Ok(())` on `None` and on the two
+/// enum values, and `Err(...)` on any OTHER `Some(...)`. Validate ONLY when `Some`.
+pub fn validate_auth_method(m: Option<&str>) -> Result<(), String> {
+    match m {
+        // None ⇒ legacy/internal caller (Option<String> back-compat) — allowed/skipped.
+        None => Ok(()),
+        Some("password") | Some("key") => Ok(()),
+        Some(other) => Err(format!(
+            "Invalid auth_method '{other}' (allowed: password, key)"
+        )),
+    }
+}
+
 /// Email: basic format check, no shell metacharacters.
 pub fn validate_email(s: &str) -> Result<(), String> {
     if s.is_empty() {
@@ -199,6 +250,15 @@ pub fn validate_listen_address(s: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+// 06-uat install-wizard slimming: `validate_metrics_address` and `validate_socks5_address`
+// were REMOVED with their Metrics (Prometheus) / SOCKS5 upstream wizard settings — they
+// had no remaining callers after the settings were dropped. `validate_reverse_proxy_address`
+// was likewise REMOVED with the camouflage / `[reverse_proxy]` feature (it does not work on
+// the prebuilt core v1.0.33) — it had no remaining callers once the deploy.rs reverse-proxy
+// gate was deleted. The shared `validate_url_path` (ping/speedtest paths) and
+// `validate_auth_status_code` (407/405 chooser) validators are deliberately KEPT —
+// validate_url_path still has other callers and is not specific to reverse-proxy.
 
 /// Version string: semver-like format only (digits, dots, optional 'v' prefix).
 pub fn validate_version(s: &str) -> Result<(), String> {
@@ -714,6 +774,60 @@ mod tests {
         assert!(validate_ssh_host("example.com").is_ok());
     }
 
+    // ─── SSH user (SAFETY-01) ─────────────────────────
+
+    #[test]
+    fn validate_ssh_user_accepts_normal() {
+        assert!(validate_ssh_user("root").is_ok());
+        assert!(validate_ssh_user("ubuntu").is_ok());
+        assert!(validate_ssh_user("deploy-bot").is_ok());
+        assert!(validate_ssh_user("user_01").is_ok());
+        assert!(validate_ssh_user("first.last").is_ok());
+        assert!(validate_ssh_user("machine$").is_ok()); // POSIX trailing machine-acct
+    }
+
+    #[test]
+    fn validate_ssh_user_rejects_shell_metacharacters() {
+        // SAFETY-01: every one of ' " $ \ ; | & is refused at the IPC boundary.
+        assert!(validate_ssh_user("root'sq").is_err()); // single quote
+        assert!(validate_ssh_user("root\"dq").is_err()); // double quote
+        assert!(validate_ssh_user("root$(whoami)").is_err()); // $ + ( )
+        assert!(validate_ssh_user("root\\bs").is_err()); // backslash
+        assert!(validate_ssh_user("root;ls").is_err()); // semicolon
+        assert!(validate_ssh_user("root|cat").is_err()); // pipe
+        assert!(validate_ssh_user("root&bg").is_err()); // ampersand
+        assert!(validate_ssh_user("root`id`").is_err()); // backtick
+        assert!(validate_ssh_user("root with space").is_err());
+        assert!(validate_ssh_user("").is_err());
+        assert!(validate_ssh_user(&"a".repeat(65)).is_err());
+    }
+
+    // ─── auth_method enum constraint (finding H + round-3 LOW E) ──
+
+    #[test]
+    fn validate_auth_method_accepts_enum_values() {
+        assert!(validate_auth_method(Some("password")).is_ok());
+        assert!(validate_auth_method(Some("key")).is_ok());
+    }
+
+    #[test]
+    fn validate_auth_method_allows_none() {
+        // round-3 LOW E: auth_method is Option<String> (#[serde(default)]); a None
+        // value (legacy/internal callers passing nothing) MUST be allowed, never
+        // rejected — otherwise existing non-wizard callers break.
+        assert!(validate_auth_method(None).is_ok());
+    }
+
+    #[test]
+    fn validate_auth_method_rejects_non_enum_some() {
+        // round-2 finding H: any other non-None value is refused at the boundary.
+        assert!(validate_auth_method(Some("both")).is_err());
+        assert!(validate_auth_method(Some("")).is_err());
+        assert!(validate_auth_method(Some("PASSWORD")).is_err()); // case-sensitive enum
+        assert!(validate_auth_method(Some("password; rm -rf /")).is_err());
+        assert!(validate_auth_method(Some("$(whoami)")).is_err());
+    }
+
     // ─── Email ────────────────────────────────────────
 
     #[test]
@@ -770,6 +884,32 @@ mod tests {
     fn listen_address_rejects_injection() {
         assert!(validate_listen_address("0.0.0.0; rm -rf /").is_err());
         assert!(validate_listen_address("").is_err());
+    }
+
+    // 06-uat install-wizard slimming: the validate_metrics_address / validate_socks5_address
+    // tests were removed with those validators (their Metrics / SOCKS5 wizard settings were
+    // removed end-to-end). The validate_reverse_proxy_address tests were likewise removed
+    // with the camouflage / `[reverse_proxy]` feature (dropped — does not work on the
+    // prebuilt core v1.0.33). The shared validate_url_path + validate_auth_status_code tests
+    // stay — they gate the kept 407/405 setting and other validate_url_path callers.
+
+    // ─── path_mask gate: the EXISTING validate_url_path is the chosen validator ───
+    // (reviews: dedup — no new validate_path_mask twin). These cases pin the
+    // path_mask <behavior> contract from 06-11 Task 1.
+
+    #[test]
+    fn validate_url_path_as_path_mask_accepts_valid() {
+        assert!(validate_url_path("/").is_ok());
+        assert!(validate_url_path("/blog").is_ok());
+        assert!(validate_url_path("/blog/sub-path_1.html").is_ok());
+    }
+
+    #[test]
+    fn validate_url_path_as_path_mask_rejects_invalid() {
+        assert!(validate_url_path("").is_err()); // empty
+        assert!(validate_url_path("blog").is_err()); // missing leading '/'
+        // Quote-breakout payload: the `"` `;` and space all fail the whitelist.
+        assert!(validate_url_path("/\"; rm -rf /").is_err());
     }
 
     // ─── Version ──────────────────────────────────────

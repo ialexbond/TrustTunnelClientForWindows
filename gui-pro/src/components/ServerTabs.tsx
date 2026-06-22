@@ -9,7 +9,6 @@ import {
   Wrench,
   LogOut,
 } from "lucide-react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "../shared/lib/cn";
 import { Divider } from "../shared/ui/Divider";
 import { Tooltip } from "../shared/ui/Tooltip";
@@ -26,6 +25,7 @@ import {
 // ConfigurationTab (Phase 15.1 schema-driven editor).
 import { SecurityTabSection } from "./server/SecurityTabSection";
 import { ServiceTabSection } from "./server/ServiceTabSection";
+import { ServerUnavailablePlate } from "./server/ServerUnavailablePlate";
 import type { ServerTabId } from "../shared/types";
 
 type TabId = ServerTabId;
@@ -335,25 +335,15 @@ export function ServerTabs({
                 <Skeleton variant="card" height={80} />
               </div>
             ) : state.error ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-4" style={{ color: "var(--color-text-muted)" }}>
-                <AlertTriangle className="w-8 h-8" style={{ color: "var(--color-danger-400)" }} />
-                <p className="text-sm text-center max-w-sm">{state.error}</p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => state.loadServerInfo()}
-                    className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)]",
-                      "bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]",
-                      "hover:bg-[var(--color-bg-hover)] transition-colors",
-                      "focus-visible:shadow-[var(--focus-ring)] outline-none"
-                    )}
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    {t("errors.retry")}
-                  </button>
-                </div>
-              </div>
+              // D-05: when the managed server is unreachable, every sub-tab shows
+              // the SAME reusable «сервер недоступен» plate instead of the raw
+              // `state.error` string + per-tab cards. Showing the raw error text
+              // (e.g. "Connection refused") or greyed-out cards would read as
+              // stale/live data and lie about the connection — the plate replaces
+              // the whole tab body so nothing misleading remains. The «Повторить»
+              // control re-runs loadServerInfo, same retry action as before.
+              // See memory/v3/screens/control-panel-overview.md + 07-UI-SPEC §D-05.
+              <ServerUnavailablePlate onRetry={() => state.loadServerInfo()} />
             ) : (
               <>
                 {tab.id === "overview" && (

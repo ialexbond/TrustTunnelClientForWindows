@@ -12,6 +12,7 @@ import {
   Heart,
   ExternalLink,
   FileText,
+  Compass,
 } from "lucide-react";
 import { ChangelogModal } from "./ChangelogModal";
 import type { UpdateInfo } from "../shared/types";
@@ -34,11 +35,9 @@ interface UpdateProgressPayload {
 
 function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelProps) {
   const { t } = useTranslation();
-  // Theme-swapped logo через CSS-classes (.only-dark / .only-light)
-  // вместо per-component useTheme. useTheme хранил local state на каждый
-  // компонент — переключение темы в Settings не re-render'ило AboutPanel
-  // и логотип оставался чёрным на светлой теме. CSS selectors на
-  // `data-theme` attribute работают атомарно. См. index.css.
+  // The logo is theme-swapped purely via CSS (.only-dark / .only-light keyed on the
+  // `data-theme` attribute) so a theme change re-paints it without re-rendering this
+  // component. See index.css.
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
   const pushSuccess = useSnackBar();
@@ -296,6 +295,18 @@ function AboutPanel({ updateInfo, onCheckUpdates, onOpenDownload }: AboutPanelPr
             <Github className="w-3 h-3" />
             GitHub
             <ExternalLink className="w-2.5 h-2.5 opacity-50" />
+          </button>
+          <span style={{ color: "var(--color-border)" }}>·</span>
+          {/* Manual welcome-tour re-trigger (user request). App.tsx listens for this
+              window event and mounts the WelcomeTour overlay, bypassing the
+              existing-user auto-skip so a configured user can re-watch the intro. */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("tt-show-welcome-tour"))}
+            className="flex items-center gap-1 text-[11px] transition-opacity hover:opacity-80"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <Compass className="w-3 h-3" />
+            {t("about.show_welcome_tour")}
           </button>
           <span style={{ color: "var(--color-border)" }}>·</span>
           <span className="text-[11px]" style={{ color: "var(--color-text-muted)" }}>

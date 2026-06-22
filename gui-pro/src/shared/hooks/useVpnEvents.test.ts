@@ -376,10 +376,57 @@ describe("useVpnEvents", () => {
     expect(setReconnectProgress).toHaveBeenCalledWith(null);
   });
 
-  it("the recovering-keep guard ALSO keeps 'reconnecting' over an intermediate 'disconnected'", async () => {
-    // 02-20: the no-dwell guard now suppresses a transient "disconnected" while prev is
-    // EITHER "recovering" OR "reconnecting" (a manual save+reconnect sets reconnecting
-    // up-front). Resolve the updater with prev="reconnecting" → must stay "reconnecting".
+  it("AUDIT #8: keeps 'reconnecting' over an intermediate 'disconnected' WHILE a manual reconnect is in flight", async () => {
+    // Re-pinned (AUDIT-2026-06-11 #8): this test used to pin UNCONDITIONAL suppression
+    // (any prev="reconnecting" ate "disconnected"), which is the bug — a tray disconnect
+    // during a backend auto-reconnect was swallowed and the UI stuck on «Переподключение»
+    // forever. The no-dwell suppression now applies ONLY while the shared
+    // manualReconnectActiveRef is raised (useVpnActions.handleReconnect in flight).
+    const { setStatus, params } = makeParams();
+    const manualReconnectActiveRef = { current: true };
+
+    await act(async () => {
+      renderHook(() => useVpnEvents({ ...params, manualReconnectActiveRef }));
+    });
+    setStatus.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+    });
+
+    const calls = setStatus.mock.calls;
+    const updater = calls[calls.length - 1]?.[0];
+    const resolved = typeof updater === "function" ? updater("reconnecting") : updater;
+    expect(resolved).toBe("reconnecting");
+  });
+
+  it("AUDIT #8: a real terminal 'disconnected' during an AUTO-reconnect COMMITS (no manual reconnect in flight)", async () => {
+    // Tray disconnect while the Rust supervisor is retrying: the backend emits a single
+    // bare "disconnected" (no intermediate status, D-09) and prev is "reconnecting" from
+    // the supervisor's attempt events. With no manual reconnect in flight the guard must
+    // let it through — suppressing it left the window on «Переподключение» with a grey
+    // tray and a dead Ctrl+Shift+C, recoverable only by another manual action.
+    const { setStatus, params } = makeParams();
+    const manualReconnectActiveRef = { current: false };
+
+    await act(async () => {
+      renderHook(() => useVpnEvents({ ...params, manualReconnectActiveRef }));
+    });
+    setStatus.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+    });
+
+    const calls = setStatus.mock.calls;
+    const updater = calls[calls.length - 1]?.[0];
+    const resolved = typeof updater === "function" ? updater("reconnecting") : updater;
+    expect(resolved).toBe("disconnected");
+  });
+
+  it("AUDIT #8: with no manualReconnectActiveRef wired at all, 'disconnected' is never suppressed", async () => {
+    // The ref param is optional (older call sites / tests). Absent ref must behave like
+    // "no manual reconnect in flight" — the safe direction (never suppress).
     const { setStatus, params } = makeParams();
 
     await act(async () => {
@@ -394,7 +441,66 @@ describe("useVpnEvents", () => {
     const calls = setStatus.mock.calls;
     const updater = calls[calls.length - 1]?.[0];
     const resolved = typeof updater === "function" ? updater("reconnecting") : updater;
-    expect(resolved).toBe("reconnecting");
+    expect(resolved).toBe("disconnected");
+  });
+
+  // ──────────────────────────────────────────────────────────
+  // AUDIT-2026-06-11 #14: the mount snapshot must not clobber a NEWER live event
+  // ──────────────────────────────────────────────────────────
+
+  it("AUDIT #14: a stale mount snapshot does NOT overwrite a newer live vpn-status event", async () => {
+    // Webview remounts mid-auto-reconnect: the snapshot IPC reads "reconnecting" and the
+    // reply is still in flight when the supervisor emits a live "connected". The stale
+    // snapshot reply must be DROPPED — applying it would roll the UI back to a permanent
+    // «Переподключение» (a settled-Connected backend emits nothing further to fix it).
+    let resolveSnapshot!: (v: { status: VpnStatus; error: string | null }) => void;
+    vi.mocked(invoke).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    const { setStatus, setError, setConnectedSince, params } = makeParams();
+
+    await act(async () => {
+      renderHook(() => useVpnEvents(params));
+    });
+
+    // The live event lands FIRST (while the snapshot reply is still in flight).
+    await act(async () => {
+      emitEvent("vpn-status", { status: "connected" as VpnStatus });
+    });
+    setStatus.mockClear();
+    setError.mockClear();
+    setConnectedSince.mockClear();
+
+    // The stale snapshot reply arrives LAST — it must be ignored entirely
+    // (neither the status nor the error payload may apply).
+    await act(async () => {
+      resolveSnapshot({ status: "reconnecting", error: "recovery-timeout" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(setStatus).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+    expect(setConnectedSince).not.toHaveBeenCalled();
+  });
+
+  it("AUDIT #14: the snapshot still applies when it resolves BEFORE any live event", async () => {
+    // The other ordering (the common case): no live event yet → the snapshot is the
+    // freshest information available and must apply as before.
+    const { setStatus, setConnectedSince, params } = makeParams();
+    vi.mocked(invoke).mockResolvedValueOnce({ status: "connected", error: null });
+
+    await act(async () => {
+      renderHook(() => useVpnEvents(params));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(setStatus).toHaveBeenCalledWith("connected");
+    expect(setConnectedSince).toHaveBeenCalled();
   });
 
   it("the internet-status 'disconnect' handler sets the message but NEVER the status (vpn-status owns it)", async () => {

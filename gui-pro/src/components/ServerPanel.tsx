@@ -11,6 +11,7 @@ import {
 import { Button } from "../shared/ui/Button";
 import { useServerState } from "./server/useServerState";
 import { ServerTabs } from "./ServerTabs";
+import { clearEndpointForm } from "./wizard/persist";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -212,7 +213,9 @@ export function ServerPanel(props: ServerPanelProps) {
               variant="primary"
               icon={<Download className="w-4 h-4" />}
               onClick={() => {
-                // Pre-fill wizard with current SSH and skip to endpoint
+                // The Control Panel already connected + verified this server, so the
+                // install wizard opens STRAIGHT on the Settings (endpoint) screen — no
+                // server-connect form, no «проверка» step (that all happened here).
                 try {
                   const existing = localStorage.getItem("trusttunnel_wizard");
                   const obj = existing ? JSON.parse(existing) : {};
@@ -221,7 +224,31 @@ export function ServerPanel(props: ServerPanelProps) {
                   obj.sshUser = state.sshParams.user;
                   obj.sshPassword = state.sshParams.password || "";
                   if (state.sshParams.keyPath) obj.sshKeyPath = state.sshParams.keyPath;
-                  obj.wizardStep = "endpoint";
+                  // UAT (06-uat fix 3): the persisted blob is REUSED for the NEXT install on
+                  // this server. The earlier fix only dropped domain/email/vpnUsername + the
+                  // provided-cert paths — but the ADVANCED settings (the 407/405 chooser),
+                  // written via saveField, STAYED behind across installs. clearEndpointForm
+                  // drops the FULL endpoint+advanced key set and resets certType to the default,
+                  // so a fresh install starts blank: each cleared key falls back to its
+                  // useWizardState loadSaved default on the fresh mount
+                  // (authFailureStatusCode→407, vpnUsername→"" regenerates).
+                  // NOTE (06-uat install-wizard slimming): the old Metrics/SOCKS5/Allow-private/ICMP
+                  // settings, and the reverse-proxy / camouflage settings, were removed from the
+                  // wizard entirely, so they are no longer in this clear set.
+                  // host/port/sshUser are KEPT — the panel just connected to THIS server.
+                  // (These are NON-secret, safe to clear; D-29 only governs passwords.) The
+                  // Phase-5 server-verified resume routes by installEntry/server-probe booleans,
+                  // not by these fields, and never calls this, so clearing them is safe.
+                  clearEndpointForm(obj);
+                  // CANONICAL `step` — persist.ts reads `step`, NOT the legacy `wizardStep`,
+                  // so the old key was silently ignored and a stale persisted step (e.g.
+                  // "done" from a prior install) flashed server/«проверка»/«Всё готово».
+                  obj.step = "endpoint";
+                  delete obj.wizardStep;
+                  // One-shot marker: the wizard consumes it on mount to LOAD the SSH secret
+                  // (from Credential Manager) without re-probing the server — so it lands
+                  // directly on Settings instead of running the resume probe («проверка»).
+                  obj.installEntry = true;
                   obj.wizardMode = "deploy";
                   localStorage.setItem("trusttunnel_wizard", JSON.stringify(obj));
                 } catch { /* ignore */ }

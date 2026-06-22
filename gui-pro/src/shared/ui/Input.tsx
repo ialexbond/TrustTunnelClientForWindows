@@ -3,8 +3,10 @@ import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string;
-  description?: string;
+  // UAT (06-uat fix 1): ReactNode (was string) so a label can carry the required «*»
+  // marker element — matching ActionInput/ActionPasswordInput, which already accept
+  // ReactNode. The domain + email LE fields render `<>{label} <span>*</span></>`.
+  label?: ReactNode;
   icon?: ReactNode;
   error?: string;
   helperText?: string;
@@ -16,7 +18,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   (
     {
       label,
-      description,
       icon,
       error,
       helperText,
@@ -49,11 +50,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           >
             {label}
           </label>
-        )}
-        {description && (
-          <p className="text-xs mb-1.5 text-[var(--color-text-muted)]">
-            {description}
-          </p>
         )}
         <div className={cn(hasAdornment ? "relative" : "")}>
           {icon && (

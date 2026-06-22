@@ -418,6 +418,14 @@ pub fn start_monitor(
         // change) cannot spin back-to-back re-checks. `None` until the first wake.
         let mut last_event_wake_at: Option<Instant> = None;
 
+        // AUDIT-2026-06-11 #13: when the FIX-B failure-counter reset last fired.
+        // The reset is rate-limited to one per FIXB_RESET_MIN_INTERVAL_SECS (pure
+        // decision in lifecycle::fixb_reset_allowed, same shape as the WR-01 debounce
+        // above) so SUSTAINED interface churn cannot zero `consecutive_failures` on
+        // every honored wake and starve tunnel-lost detection. `None` until the first
+        // reset of the session.
+        let mut last_fixb_reset_at: Option<Instant> = None;
+
         log_app("INFO", "[connectivity] Monitor started");
 
         loop {
@@ -511,15 +519,24 @@ pub fn start_monitor(
                 // survived the sleep is reported promptly and a dead one is caught by the
                 // normal cadence next iterations rather than burst-failing on stale state.
                 let online_now = check_tunnel_alive().await;
+                // AUDIT-2026-06-11 #9: a FAILED immediate post-resume probe must NOT
+                // set `was_online = false`. BOTH offline-declaration paths are gated on
+                // `was_online == true` (the fast uplink short-circuit and the
+                // MAX_FAILURES declaration), and the ONLY thing that re-arms the flag
+                // is a SUCCESSFUL tunnel probe — which never comes when the tunnel
+                // died during sleep. A failed probe here is routine (Wi-Fi takes 2-10s
+                // to re-associate after resume), so the old `was_online = false` branch
+                // permanently disarmed offline detection on essentially every
+                // sleep/resume where the tunnel also died: stuck green «Connected»
+                // forever, traffic black-holed, no reconnect. Leave `was_online`
+                // untouched — the counter + grace were already re-baselined above, so
+                // the normal MAX_FAILURES cadence makes the offline call a few cycles
+                // later if the tunnel is really dead.
                 if online_now {
                     if !was_online {
                         app.emit("internet-status", serde_json::json!({ "online": true })).ok();
                     }
                     was_online = true;
-                } else {
-                    // Don't declare offline off a single post-resume miss — let the
-                    // re-armed grace + normal cadence make the call. Just remember it.
-                    was_online = false;
                 }
                 continue;
             }
@@ -548,15 +565,34 @@ pub fn start_monitor(
                     find_physical_adapter().is_some(),
                 )
             {
-                consecutive_failures = 0;
-                log_app(
-                    "DEBUG",
-                    "[connectivity] adapter-change wake with uplink present — reset tunnel-probe failures + settle (FIX-B)",
-                );
-                tokio::time::sleep(Duration::from_millis(
-                    crate::lifecycle::ADAPTER_EVENT_SETTLE_MS,
-                ))
-                .await;
+                // AUDIT-2026-06-11 #13: rate-limit the FIX-B reset. Unbounded, it fired
+                // on EVERY honored adapter-event wake; accumulating MAX_FAILURES misses
+                // needs ~12-15s of clean cadence while the WR-01 debounce only spaces
+                // wakes 750ms apart — so sustained interface churn (flapping Wi-Fi,
+                // Docker/WSL vEthernet churn) kept the counter at zero forever and a
+                // genuinely dead tunnel stayed green with no reconnect (the inverse
+                // over-correction of T-37). At most one reset per
+                // FIXB_RESET_MIN_INTERVAL_SECS; a rate-limited wake keeps the failure
+                // streak so a sustained miss run can still cross MAX_FAILURES. The
+                // one-off Docker bring-up burst (RC-1) still gets the first reset.
+                let now = Instant::now();
+                if crate::lifecycle::fixb_reset_allowed(now, last_fixb_reset_at) {
+                    last_fixb_reset_at = Some(now);
+                    consecutive_failures = 0;
+                    log_app(
+                        "DEBUG",
+                        "[connectivity] adapter-change wake with uplink present — reset tunnel-probe failures + settle (FIX-B)",
+                    );
+                    tokio::time::sleep(Duration::from_millis(
+                        crate::lifecycle::ADAPTER_EVENT_SETTLE_MS,
+                    ))
+                    .await;
+                } else {
+                    log_app(
+                        "DEBUG",
+                        "[connectivity] adapter-change wake but the FIX-B reset is rate-limited — keeping the failure streak (AUDIT #13)",
+                    );
+                }
             }
 
             // 02-18 (STATUS-05 gap): FAST LOCAL-uplink-loss short-circuit. Runs AFTER
@@ -703,6 +739,30 @@ pub fn start_monitor(
                         "WARN",
                         &format!("[connectivity] Declaring offline after {MAX_FAILURES} failed tunnel probes (reason={reason})"),
                     );
+                    // 2026-06-11 (user-requested drop diagnostics): ONE verdict line
+                    // answering "did MY side break, or the path/server?" — the question a
+                    // post-mortem log read could not answer before. By this point the
+                    // tunnel probe failed MAX_FAILURES times; local_up says whether the
+                    // physical side (adapter + gateway) still works. Emitted on the
+                    // vpn-log channel too so it lands in the in-window panel next to the
+                    // sidecar lines, not only in the (opt-in) log file.
+                    let adapter_present = find_physical_adapter().is_some();
+                    let verdict = if local_up {
+                        format!(
+                            "[diagnose] drop verdict: adapter=present, gateway=reachable, tunnel probes failed {MAX_FAILURES}x — cause is OUTSIDE this PC (ISP path or server)"
+                        )
+                    } else {
+                        format!(
+                            "[diagnose] drop verdict: adapter={}, gateway=unreachable — cause is LOCAL (PC / Wi-Fi / router side)",
+                            if adapter_present { "present" } else { "missing" }
+                        )
+                    };
+                    log_app("WARN", &verdict);
+                    app.emit(
+                        "vpn-log",
+                        serde_json::json!({ "message": verdict, "level": "warn" }),
+                    )
+                    .ok();
 
                     // 02-20 status-UX split: branch on the drop TYPE.
                     //
@@ -990,6 +1050,20 @@ async fn await_adapter_recovery(
     vpn_status: &Arc<Mutex<VpnStatus>>,
 ) -> bool {
     eprintln!("[connectivity] Waiting for network adapter to recover...");
+    // AUDIT-2026-06-11 #6/#11: capture the session generation + the DURABLE
+    // disconnect-intent handle at ENTRY, mirroring run_recovery_flow. The R2 guard
+    // below reads only the TRANSIENT `disconnecting` flag (true ~1.6-2s) on a 5s
+    // poll cadence, so a disconnect that COMPLETED between two polls was invisible
+    // and this wait later fired a spurious `reconnect`/`give_up` against the newer
+    // session. `None` only if AppState is somehow absent (never in-app) — then the
+    // legacy transient-only behavior remains.
+    let session_handles = app.try_state::<crate::commands::AppState>().map(|s| {
+        (
+            s.connection_generation.load(Ordering::SeqCst),
+            Arc::clone(&s.connection_generation),
+            Arc::clone(&s.user_disconnect_requested),
+        )
+    });
     let mut adapter_wait = 0u32;
     loop {
         tokio::time::sleep(Duration::from_secs(ADAPTER_POLL_INTERVAL_SECS)).await;
@@ -1020,6 +1094,27 @@ async fn await_adapter_recovery(
         if already_reconnected {
             log_app("INFO", "[connectivity] VPN reconnected externally, exiting recovery loop");
             return true;
+        }
+
+        // AUDIT-2026-06-11 #6/#11: the R2 transient-flag check above misses a
+        // disconnect that COMPLETED between two 5s polls. Re-check the DURABLE
+        // intent + the captured generation (bumped by vpn_connect / vpn_disconnect /
+        // begin_shutdown): either means the session this wait was started for is
+        // gone, so abort instead of later emitting a spurious reconnect/give_up
+        // against the newer session. Runs AFTER the Connected check so an external
+        // reconnect that already landed still reports `recovered = true`.
+        if let Some((captured_generation, gen_arc, durable_disconnect)) = &session_handles {
+            if !crate::lifecycle::is_current_generation(
+                *captured_generation,
+                gen_arc.load(Ordering::SeqCst),
+            ) || durable_disconnect.load(Ordering::SeqCst)
+            {
+                log_app(
+                    "INFO",
+                    "[connectivity] generation advanced or user disconnect requested during adapter recovery — aborting the wait (AUDIT #6/#11)",
+                );
+                return false;
+            }
         }
 
         if check_adapter_online().await {
@@ -1109,6 +1204,24 @@ async fn run_recovery_flow(app: &tauri::AppHandle, vpn_status: &Arc<Mutex<VpnSta
             }
         };
 
+    // AUDIT-2026-06-11 #6/#11: capture the session generation + the DURABLE
+    // disconnect-intent handle at ENTRY. The wait loop below used to read only the
+    // TRANSIENT `disconnecting` flag (true for just ~1.6-2s while vpn_disconnect
+    // runs) on a 5s poll cadence, so a manual disconnect that COMPLETED between two
+    // polls was routinely missed: this actor lived on as a zombie holding the CR-02
+    // slot for up to 5 minutes, and its timeout then wrote Error(recovery-timeout) +
+    // teardown over the user's clean Disconnected — or over (and killing) a
+    // brand-new Connecting session started after the cancel («Отмена» +
+    // «Подключиться» is the documented T-36 user remedy, so this raced in the
+    // field). vpn_connect / vpn_disconnect / begin_shutdown ALL bump the generation,
+    // so the per-poll re-check below aborts on: a generation advance, the durable
+    // `user_disconnect_requested` flag, or the live status leaving Recovering
+    // (another actor owns the status) — making the doc-comment's claimed guard real.
+    // Cloned Arcs only — no `state` borrow is held across an await.
+    let captured_generation = state.connection_generation.load(Ordering::SeqCst);
+    let gen_arc = Arc::clone(&state.connection_generation);
+    let durable_disconnect_arc = Arc::clone(&state.user_disconnect_requested);
+
     // 1. Announce «Восстановление». Status write through the single owner (D-01); the
     //    FE banner is driven by the internet-status event (action=disconnect) the same
     //    way the legacy path drove it — the reason classifies it as internet-loss.
@@ -1152,21 +1265,60 @@ async fn run_recovery_flow(app: &tauri::AppHandle, vpn_status: &Arc<Mutex<VpnSta
             return;
         }
 
-        // USER RECONNECT — the user manually reconnected during the wait; exit clean.
-        let already_reconnected = vpn_status
-            .lock()
-            .map(|g| *g == VpnStatus::Connected)
-            .unwrap_or(false);
-        if already_reconnected {
+        // AUDIT-2026-06-11 #6/#11: abort when we provably no longer own this wait —
+        // the generation advanced (a manual disconnect / connect / shutdown completed
+        // between two polls, which the ~2s transient flag above routinely misses) or
+        // the durable disconnect intent is set. Without this, the zombie wait held
+        // the CR-02 slot for up to 5 minutes and its timeout clobbered the newer
+        // session (see the entry comment).
+        if !crate::lifecycle::is_current_generation(
+            captured_generation,
+            gen_arc.load(Ordering::SeqCst),
+        ) || durable_disconnect_arc.load(Ordering::SeqCst)
+        {
             log_app(
                 "INFO",
-                "[connectivity] VPN reconnected externally during recovery — exiting recovery wait (02-20)",
+                "[connectivity] generation advanced or user disconnect requested during recovery — aborting recovery wait (AUDIT #6/#11)",
+            );
+            return;
+        }
+
+        // AUDIT-2026-06-11 #6/#11: ownership-of-status check, WIDENED from the old
+        // `== Connected` (USER RECONNECT) test. This flow set Recovering itself at
+        // entry, so ANY other live status means another actor took ownership — a
+        // manual reconnect (Connecting/Connected), a completed disconnect
+        // (Disconnected), or a quit. The old check matched only Connected, so a
+        // completed disconnect was invisible and the zombie wait ran on.
+        let still_recovering = vpn_status
+            .lock()
+            .map(|g| *g == VpnStatus::Recovering)
+            .unwrap_or(false);
+        if !still_recovering {
+            log_app(
+                "INFO",
+                "[connectivity] status moved off Recovering during recovery wait — another actor owns the session, exiting (AUDIT #6/#11)",
             );
             return;
         }
 
         // ADAPTER BACK → hand off to the supervisor for the «Переподключение» phase.
-        if check_adapter_online().await {
+        //
+        // AUDIT-2026-06-11 #16 (T-36): the adapter-back signal is
+        // `find_physical_adapter().is_some()` — the EXACT no-I/O signal whose absence
+        // declared the loss — NOT `check_adapter_online()`. During the Recovering
+        // wait the dead-tunnel sidecar is deliberately kept ALIVE (it is only killed
+        // later by the supervisor's respawn or the teardown), so its WinTUN routes +
+        // fail-closed killswitch still hijack default routing: check_adapter_online's
+        // unbound HTTP fallback rode the DEAD tunnel and always failed, and its
+        // gateway:80 TCP leg gets RST on gateways with no HTTP listener (phone
+        // hotspots, enterprise routers). The adapter would be physically back yet
+        // recovery never completed → terminal Error(recovery-timeout) after 5 minutes
+        // with the killswitch blocking all traffic — the T-36 «recovery hangs»
+        // mechanism. No corroborating I/O probe is added here: any probe would have
+        // to be socket-bound to the new adapter's IP to avoid the same hijack, and
+        // the supervisor's respawn + bounded connect attempts right after this
+        // handoff already prove (or honestly fail) actual connectivity.
+        if find_physical_adapter().is_some() {
             log_app(
                 "INFO",
                 &format!("[connectivity] adapter back after {adapter_wait} checks — moving to Reconnecting (02-20)"),
@@ -1238,6 +1390,28 @@ async fn run_recovery_flow(app: &tauri::AppHandle, vpn_status: &Arc<Mutex<VpnSta
 
         // 3. TIMEOUT — the adapter never returned within the SHORT recovery window.
         if adapter_wait >= RECOVERY_TIMEOUT_CHECKS {
+            // AUDIT-2026-06-11 #6: re-run the SAME ownership checks as the poll body
+            // immediately before the terminal write — the per-poll checks above can
+            // be a full poll interval stale, and a stale recovery actor must NEVER
+            // clobber a newer session with Error(recovery-timeout) + teardown (the
+            // teardown would kill the user's brand-new in-flight sidecar). Checked
+            // BEFORE the give_up emit too, so a stale actor doesn't even flash the
+            // banner over the newer session.
+            let still_owns_session = crate::lifecycle::is_current_generation(
+                captured_generation,
+                gen_arc.load(Ordering::SeqCst),
+            ) && !durable_disconnect_arc.load(Ordering::SeqCst)
+                && vpn_status
+                    .lock()
+                    .map(|g| *g == VpnStatus::Recovering)
+                    .unwrap_or(false);
+            if !still_owns_session {
+                log_app(
+                    "INFO",
+                    "[connectivity] recovery timeout reached but the session is no longer ours — suppressing Error(recovery-timeout) + teardown (AUDIT #6)",
+                );
+                return;
+            }
             log_app(
                 "WARN",
                 "[connectivity] adapter did not return within the recovery timeout — Error(recovery-timeout) (02-20)",
@@ -1812,7 +1986,15 @@ pub(crate) async fn check_adapter_online() -> bool {
         }
     }
 
-    // Fallback: HTTP without bind (VPN is disconnected during recovery, so default routing = physical)
+    // Fallback: UNBOUND HTTP probe — rides whatever default routing currently is.
+    // AUDIT-2026-06-11 #16 (T-36): the old comment claimed "VPN is disconnected
+    // during recovery, so default routing = physical" — stale: in the 02-20 flow the
+    // dead-tunnel sidecar (WinTUN routes + fail-closed killswitch) stays ALIVE for
+    // the whole Recovering wait, so an unbound request rides the DEAD tunnel and
+    // always fails. run_recovery_flow therefore no longer calls this; it uses
+    // find_physical_adapter() as the adapter-back signal. This fallback is only
+    // truthful where default routing is genuinely physical (e.g. the vpn_connect
+    // pre-flight before any sidecar is spawned).
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()

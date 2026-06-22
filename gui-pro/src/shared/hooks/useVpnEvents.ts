@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { VpnStatus, LogEntry, ReconnectProgress } from "../types";
@@ -16,6 +16,13 @@ interface UseVpnEventsParams {
   // StatusPanel can render the counter. Optional so existing call sites / tests that
   // don't surface the counter still type-check.
   setReconnectProgress?: React.Dispatch<React.SetStateAction<ReconnectProgress | null>>;
+  // AUDIT-2026-06-11 #8: shared with useVpnActions (owned by App.tsx). True ONLY while
+  // a manual «Сохранить и переподключить» (handleReconnect) is actually in flight.
+  // The no-dwell guard below keys on it so a backend-driven `reconnecting →
+  // disconnected` (tray disconnect during auto-reconnect) is no longer swallowed.
+  // Optional so existing call sites / tests that don't wire it still type-check
+  // (absent ref = guard never suppresses, which is the safe direction).
+  manualReconnectActiveRef?: React.MutableRefObject<boolean>;
 }
 
 export function useVpnEvents({
@@ -27,7 +34,18 @@ export function useVpnEvents({
   reconnectResolve,
   pushSuccess,
   setReconnectProgress,
+  manualReconnectActiveRef,
 }: UseVpnEventsParams) {
+  // AUDIT-2026-06-11 #14: the mount snapshot (check_vpn_status_full) and the live
+  // vpn-status listener are independent async channels — the IPC reply can land
+  // AFTER a newer live event (webview remount mid-auto-reconnect: snapshot reads
+  // "reconnecting", supervisor then emits "connected", then the stale snapshot
+  // reply would roll status back to "reconnecting" with nothing left to correct
+  // it). The listener flips this ref first thing; the snapshot applies its result
+  // only while the ref is still false (a live event is always newer than the
+  // snapshot taken at mount). The ref never SYNTHESIZES status — it only gates
+  // the frontend's own snapshot write (D-01: the vpn-status event stays the owner).
+  const sawLiveStatusEventRef = useRef(false);
   // ─── Helper: map a stable backend reason CODE to a localized display string ───
   //
   // The backend (vpn.rs connect-timeout watchdog, Plan 02-02) sets the Error with a
@@ -58,6 +76,10 @@ export function useVpnEvents({
     "recovery-timeout": "errors.recovery_timeout",
     "no-internet": "errors.no_internet",
     "sidecar-exit": "errors.sidecar_exit",
+    // AUDIT-2026-06-11 #20: emitted by vpn_disconnect when BOTH kill paths fail —
+    // the sidecar may still be alive holding the killswitch, so the message must
+    // tell the user honestly instead of leaking the raw token.
+    "disconnect-failed": "errors.disconnect_failed",
   };
   const localizeError = (error: string | null | undefined): string | null => {
     if (!error) return error ?? null;
@@ -84,6 +106,12 @@ export function useVpnEvents({
     // string (D-29) — never a raw secret.
     invoke<{ status: VpnStatus; error: string | null }>("check_vpn_status_full")
       .then(({ status, error }) => {
+        // AUDIT-2026-06-11 #14: a live vpn-status event already arrived while this
+        // IPC reply was in flight — the event is strictly newer than the snapshot,
+        // so applying the snapshot now would roll the status BACK (e.g. connected →
+        // reconnecting, permanently, since a settled backend emits nothing further).
+        // Drop the stale snapshot entirely (status AND its error payload).
+        if (sawLiveStatusEventRef.current) return;
         if (status === "connected") {
           setStatus("connected");
           setConnectedSince((prev) => prev ?? new Date());
@@ -133,6 +161,9 @@ export function useVpnEvents({
     const unlistenStatus = listen<{ status: VpnStatus; error?: string; attempt?: number; max?: number }>(
       "vpn-status",
       (event) => {
+        // AUDIT-2026-06-11 #14: mark BEFORE any processing — from this moment the
+        // mount snapshot is stale and must not apply (see the snapshot effect above).
+        sawLiveStatusEventRef.current = true;
         traceLog(`vpn-status: ${event.payload.status}${event.payload.error ? ` error=${event.payload.error}` : ""}`);
 
         // 02-20: surface the per-attempt «Попытка N/N» counter. The backend attaches
@@ -166,7 +197,23 @@ export function useVpnEvents({
           // saved config to reconnect to (WR-03), or a give-up cleanup resolved to
           // Disconnected. The old guard suppressed BOTH, so that legitimate terminal
           // Disconnected was hidden and the UI stuck on red «Восстановление» indefinitely.
-          if (prev === "reconnecting" && event.payload.status === "disconnected") {
+          //
+          // AUDIT-2026-06-11 #8 (NARROWED AGAIN): keying on prev alone also ate a REAL
+          // terminal Disconnected — during a backend AUTO-reconnect (supervisor sets
+          // status "reconnecting") a tray disconnect emits a single "disconnected"
+          // (tray_vpn_disconnect / the supervisor's T-31 forced Disconnected send no
+          // intermediate status), and the unconditional guard suppressed it forever:
+          // the window stuck on yellow «Переподключение» while the tray went grey.
+          // Suppress only while a MANUAL frontend reconnect is actually in flight —
+          // useVpnActions.handleReconnect flips the shared ref true synchronously
+          // before its optimistic setStatus("reconnecting") and clears it before
+          // reconnecting (plus a 5s safety timeout), so the teardown's transient
+          // "disconnected" is hidden exactly for that window and nothing else.
+          if (
+            prev === "reconnecting" &&
+            event.payload.status === "disconnected" &&
+            manualReconnectActiveRef?.current
+          ) {
             return prev;
           }
 

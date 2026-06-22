@@ -109,7 +109,10 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     onConfigChange,
     status,
     onReconnect,
-    onSwitchToSetup,
+    // 06-uat: onSwitchToSetup is intentionally NOT destructured/used here anymore —
+    // deleting the config must NOT auto-switch to the Control Panel (clearConfig only
+    // clears). The prop stays on SettingsProps because ConnectionPanel passes the whole
+    // props object through and other surfaces (ServerPanel install) still rely on it.
     onClearConfig,
     onVpnModeChange,
   } = props;
@@ -281,11 +284,13 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     }
   }, [localPath, config, onConfigChange]);
 
-  // ─── Clear config & switch to setup ───
+  // ─── Clear config ───
+  // 06-uat: clearing the config no longer auto-switches to the Control Panel
+  // (onSwitchToSetup was removed). Deleting the config must not navigate or open the
+  // wizard — it only clears the active config; the user chooses where to go next.
   const clearConfig = useCallback(() => {
     onClearConfig();
-    onSwitchToSetup();
-  }, [onClearConfig, onSwitchToSetup]);
+  }, [onClearConfig]);
 
   return {
     config,

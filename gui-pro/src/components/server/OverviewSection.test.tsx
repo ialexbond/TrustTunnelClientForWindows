@@ -72,14 +72,17 @@ describe("OverviewSection", () => {
     });
   });
 
-  it("renders a Status card with running state when service is active", () => {
+  it("renders a Status card with running state when service is active", async () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
+    // D-07 (Plan 07-06): the real grid renders only after all cards settle; the
+    // Status value lives in the loaded grid (the skeleton shows a placeholder),
+    // so await the resolved running state instead of asserting synchronously.
+    expect(await screen.findByText(i18n.t("server.status.running"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("server.overview.cards.status"))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t("server.status.running"))).toBeInTheDocument();
   });
 
-  it("renders stopped status when service is inactive", () => {
+  it("renders stopped status when service is inactive", async () => {
     const state = makeState({
       serverInfo: {
         installed: true,
@@ -89,7 +92,8 @@ describe("OverviewSection", () => {
       } as ServerState["serverInfo"],
     });
     render(<OverviewSection state={state} />);
-    expect(screen.getByText(i18n.t("server.status.stopped"))).toBeInTheDocument();
+    // D-07: await the loaded grid (stopped status is grid-only content).
+    expect(await screen.findByText(i18n.t("server.status.stopped"))).toBeInTheDocument();
   });
 
   it("renders the 10 overview card titles via i18n", () => {
@@ -123,9 +127,12 @@ describe("OverviewSection", () => {
     expect(screen.queryByTestId("overview-restart-service-button")).not.toBeInTheDocument();
   });
 
-  it("shows host IP only in the dedicated IP card (DC-03 scope)", () => {
+  it("shows host IP only in the dedicated IP card (DC-03 scope)", async () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
+    // D-07 (Plan 07-06): the IP value lives in the loaded grid (the all-cards gate
+    // paints the skeleton first), so wait for the grid to open before scoping.
+    await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
     const matches = screen.getAllByText("10.0.0.1");
     expect(matches).toHaveLength(1);
     // False-green / CSS-coupling FIX (RESEARCH §3 stream 1, was :121):
@@ -178,14 +185,15 @@ describe("OverviewSection", () => {
     });
   });
 
-  it("shows rebooting countdown label when rebooting", () => {
+  it("shows rebooting countdown label when rebooting", async () => {
     const state = makeState({ rebooting: true });
     render(<OverviewSection state={state} />);
-    // Label is "Перезагрузка" / "Rebooting" (i18n) followed by countdown suffix.
+    // D-07 (Plan 07-06): the rebooting Status card is loaded-grid content (the
+    // all-cards gate paints the skeleton first), so await it. Label is
+    // "Перезагрузка"/"Rebooting" + a countdown suffix ("..." or " {N}s").
     const rebootLabel = i18n.t("server.overview.rebootingCountdown");
-    // partial text match — the render appends "..." or " {N}s" to the label.
     expect(
-      screen.getByText((content) => content.startsWith(rebootLabel)),
+      await screen.findByText((content) => content.startsWith(rebootLabel)),
     ).toBeInTheDocument();
   });
 
@@ -193,31 +201,33 @@ describe("OverviewSection", () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
     const refreshAria = i18n.t("server.overview.refreshAria");
+    // D-07: the refresh buttons live in the loaded grid — wait for it to open.
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: refreshAria }).length).toBeGreaterThan(0);
+    });
     const refreshBtns = screen.getAllByRole("button", { name: refreshAria });
-    expect(refreshBtns.length).toBeGreaterThan(0);
     fireEvent.click(refreshBtns[0]);
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("ping_endpoint", expect.any(Object));
     });
   });
 
-  it("shows server version in the protocol-version card", () => {
+  it("shows server version in the protocol-version card", async () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
-    // False-green FIX (RESEARCH §3 stream 1, was :170): the old
-    // `document.body.textContent` scan would pass on cross-test DOM leakage
-    // or on the version appearing anywhere. Scope to the protocol-version
-    // card and assert the value renders INSIDE it.
+    // D-07: await the loaded grid; scope to the protocol-version card and assert
+    // the value renders INSIDE it (False-green FIX RESEARCH §3 stream 1, was :170).
+    await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
     const versionCard = cardOf("server.overview.cards.protocolVersion");
     expect(within(versionCard).getByText("1.0.20")).toBeInTheDocument();
   });
 
-  it("shows user count of 2 in the Users card", () => {
+  it("shows user count of 2 in the Users card", async () => {
     const state = makeState();
     render(<OverviewSection state={state} />);
-    // False-green FIX (RESEARCH §3 stream 1, was :174): bare `getByText("2")`
-    // could match a "2" anywhere in the tree. Scope to the Users card so the
-    // count is proven to be the userCount value (users: ["user1","user2"]).
+    // D-07: await the loaded grid. Scope to the Users card so the count is proven
+    // to be the userCount value (False-green FIX RESEARCH §3 stream 1, was :174).
+    await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
     const usersCard = cardOf("server.overview.cards.userCount");
     expect(within(usersCard).getByText("2")).toBeInTheDocument();
   });
@@ -226,6 +236,8 @@ describe("OverviewSection", () => {
     await i18n.changeLanguage("en");
     const state = makeState();
     render(<OverviewSection state={state} />);
+    // D-07: await the loaded grid (Running status is grid-only content).
+    await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
     // Status card title and running state must appear in English now.
     expect(screen.getByText(i18n.t("server.overview.cards.status"))).toBeInTheDocument();
     expect(screen.getByText(i18n.t("server.status.running"))).toBeInTheDocument();
@@ -468,10 +480,15 @@ describe("OverviewSection", () => {
   // ═══════════════════════════════════════════════════════
 
   describe("OverviewSection drill-down (D-09, D-11)", () => {
+    // D-07 (Plan 07-06): the drill-down ClickableCards only render in the loaded
+    // grid (the all-cards gate paints the skeleton first), so each test waits for
+    // the grid to open (eye button = loaded-grid-only) before reaching for the
+    // role="button" card.
     it("drill-down: calls onNavigate('users') when Users card is clicked", async () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       const usersTitle = screen.getByText(i18n.t("server.overview.cards.userCount"));
       const card = usersTitle.closest('[role="button"]');
@@ -485,6 +502,7 @@ describe("OverviewSection", () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       const versionTitle = screen.getByText(i18n.t("server.overview.cards.protocolVersion"));
       const card = versionTitle.closest('[role="button"]');
@@ -494,7 +512,7 @@ describe("OverviewSection", () => {
       expect(onNavigate).toHaveBeenCalledWith("service");
     });
 
-    it("Phase 19 — Protocol version card shows ArrowUp icon when sidecarAvailable=true", () => {
+    it("Phase 19 — Protocol version card shows ArrowUp icon when sidecarAvailable=true", async () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(
@@ -504,6 +522,8 @@ describe("OverviewSection", () => {
           sidecarAvailable={true}
         />,
       );
+      // D-07: await the loaded grid (the version card renders there, not in skeleton).
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       // False-green FIX (RESEARCH §3 stream 1, was :453): `not.toBeNull()` is
       // weaker than `toBeInTheDocument()` (a detached node is non-null), and
@@ -534,7 +554,7 @@ describe("OverviewSection", () => {
       expect(screen.queryByTestId("overview-protocol-update-arrow")).toBeNull();
     });
 
-    it("Phase 19 cascade fix — ArrowUpCircle becomes visible WITHOUT remount when sidecarAvailable flips false→true", () => {
+    it("Phase 19 cascade fix — ArrowUpCircle becomes visible WITHOUT remount when sidecarAvailable flips false→true", async () => {
       const onNavigate = vi.fn();
       const state = makeState({
         serverInfo: {
@@ -553,6 +573,8 @@ describe("OverviewSection", () => {
           sidecarAvailable={false}
         />,
       );
+      // D-07: wait for the loaded grid to open before asserting on the version card.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       // Initially: no arrow (sidecarAvailable=false)
       expect(screen.queryByTestId("overview-protocol-update-arrow")).toBeNull();
@@ -592,6 +614,7 @@ describe("OverviewSection", () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       const securityTitle = screen.getByText(i18n.t("server.overview.cards.security"));
       const card = securityTitle.closest('[role="button"]');
@@ -625,6 +648,7 @@ describe("OverviewSection", () => {
     it("drill-down: clickable cards have role=button with descriptive aria-label", async () => {
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       const clickableKeys = [
         "server.overview.cards.userCount",
@@ -644,6 +668,7 @@ describe("OverviewSection", () => {
     it("drill-down: does NOT throw when onNavigate is undefined (backward compat)", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />); // no onNavigate
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
 
       const usersTitle = screen.getByText(i18n.t("server.overview.cards.userCount"));
       const card = usersTitle.closest('[role="button"]');
@@ -835,9 +860,11 @@ describe("OverviewSection", () => {
   // ═══════════════════════════════════════════════════════
 
   describe("Speed card render states (G-05, RESEARCH §3 stream 1)", () => {
-    it("never-measured: shows 'Не измерялась' when running and speedtest never ran", () => {
+    it("never-measured: shows 'Не измерялась' when running and speedtest never ran", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
+      // D-07 (Plan 07-06): await the loaded grid before scoping to the Speed card.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
       // Render-branch priority 5: running, speed=null, !speedFailed → initial.
       const speedCard = cardOf("server.overview.cards.speed");
       expect(
@@ -942,6 +969,8 @@ describe("OverviewSection", () => {
         } as ServerState["serverInfo"],
       });
       render(<OverviewSection state={state} />);
+      // D-07 (Plan 07-06): await the loaded grid before scoping to the Speed card.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
       const speedCard = cardOf("server.overview.cards.speed");
       expect(
         within(speedCard).getByText(i18n.t("server.overview.speedRequiresProtocol")),
@@ -951,6 +980,8 @@ describe("OverviewSection", () => {
     it("requires-protocol: shows 'Запустите протокол' when rebooting", async () => {
       const state = makeState({ rebooting: true });
       render(<OverviewSection state={state} />);
+      // D-07: await the loaded grid before scoping to the Speed card.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
       const speedCard = cardOf("server.overview.cards.speed");
       expect(
         within(speedCard).getByText(i18n.t("server.overview.speedRequiresProtocol")),
@@ -968,18 +999,26 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      const pingCard = cardOf("server.overview.cards.ping");
+      // D-07 (Plan 07-06): ping=-1 is a SETTLED (failed) signal, so the all-cards
+      // gate opens and the real grid renders. Re-resolve the card inside waitFor
+      // (the gate paints the skeleton first; that card node is then detached).
       await waitFor(() => {
-        // ping=-1 → dash + "Не удалось получить данные" subtitle.
         expect(
-          within(pingCard).getByText(i18n.t("server.overview.dataUnavailable")),
+          within(cardOf("server.overview.cards.ping")).getByText(i18n.t("server.overview.dataUnavailable")),
         ).toBeInTheDocument();
       });
-      expect(within(pingCard).getByText("—")).toBeInTheDocument();
+      expect(within(cardOf("server.overview.cards.ping")).getByText("—")).toBeInTheDocument();
     });
 
-    it("pending: shows '—' WITHOUT subtitle while initial ping is unresolved", async () => {
-      // Never-settling ping → ping stays null (pending), not -1 (unavailable).
+    it("D-07 (Plan 07-06): a never-settling initial ping holds the all-cards skeleton (was: per-card pending dash)", async () => {
+      // INTENTIONAL D-07 characterization update. Pre-07-06 the Overview revealed
+      // each card progressively, so a pending ping showed a per-card "—" with no
+      // subtitle WHILE the rest of the grid was live. D-07 replaces that with an
+      // all-cards-loaded gate: until EVERY signal settles, the full skeleton shows.
+      // A never-settling ping (ping stays null = pending, not -1) therefore holds
+      // the gate closed → the loaded grid (and its eye toggle) never appears, and
+      // no per-card pending dash is shown in a live grid. (The 60s fallback would
+      // eventually force the grid, but that is covered by the dedicated D-07 test.)
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
         if (cmd === "ping_endpoint") return new Promise<number>(() => {});
         if (cmd === "server_get_stats") return null;
@@ -988,11 +1027,19 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      const pingCard = cardOf("server.overview.cards.ping");
-      // Pending: dash present, but the unavailable subtitle is absent (ping!==-1).
-      expect(within(pingCard).getByText("—")).toBeInTheDocument();
+      // Let geo/stats settle; ping remains pending → gate stays closed.
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith("get_server_geoip", expect.any(Object));
+      });
+      // The loaded grid never opens while ping is pending (no eye toggle).
       expect(
-        within(pingCard).queryByText(i18n.t("server.overview.dataUnavailable")),
+        screen.queryByRole("button", { name: i18n.t("server.overview.ip.show") }),
+      ).not.toBeInTheDocument();
+      // The skeleton still shows the Ping card title (placeholder), but NOT the
+      // live unavailable subtitle (that is a failed-ping signal, not pending).
+      expect(screen.getByText(i18n.t("server.overview.cards.ping"))).toBeInTheDocument();
+      expect(
+        screen.queryByText(i18n.t("server.overview.dataUnavailable")),
       ).not.toBeInTheDocument();
     });
 
@@ -1015,11 +1062,13 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      // Wait for the initial ping value to settle so we start from a clean state.
-      const pingCard = cardOf("server.overview.cards.ping");
+      // D-07 (Plan 07-06): wait for the all-cards gate to open (the loaded grid)
+      // and the initial ping value to settle, re-resolving the card inside waitFor
+      // so we never read from a detached skeleton node.
       await waitFor(() => {
-        expect(within(pingCard).getByText("42")).toBeInTheDocument();
+        expect(within(cardOf("server.overview.cards.ping")).getByText("42")).toBeInTheDocument();
       });
+      const pingCard = cardOf("server.overview.cards.ping");
       const pingRefresh = within(pingCard).getByRole("button", {
         name: i18n.t("server.overview.refreshAria"),
       });
@@ -1062,12 +1111,14 @@ describe("OverviewSection", () => {
       mockSecurity({ installed: true, active: true }, { installed: true, active: false });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      const securityCard = cardOf("server.overview.cards.security");
+      // D-07 (Plan 07-06): re-resolve the card INSIDE waitFor — the all-cards gate
+      // first paints the skeleton, then swaps to the real grid, so a card captured
+      // before the swap would be a detached skeleton node.
       await waitFor(() => {
-        expect(tileLabel(securityCard, i18n.t("server.overview.security.firewall")))
+        expect(tileLabel(cardOf("server.overview.cards.security"), i18n.t("server.overview.security.firewall")))
           .toBe(i18n.t("server.overview.security.active"));
       });
-      expect(tileLabel(securityCard, i18n.t("server.overview.security.fail2ban")))
+      expect(tileLabel(cardOf("server.overview.cards.security"), i18n.t("server.overview.security.fail2ban")))
         .toBe(i18n.t("server.overview.security.inactive"));
     });
 
@@ -1075,12 +1126,11 @@ describe("OverviewSection", () => {
       mockSecurity({ installed: false, active: false }, { installed: true, active: true });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      const securityCard = cardOf("server.overview.cards.security");
       await waitFor(() => {
-        expect(tileLabel(securityCard, i18n.t("server.overview.security.firewall")))
+        expect(tileLabel(cardOf("server.overview.cards.security"), i18n.t("server.overview.security.firewall")))
           .toBe(i18n.t("server.overview.security.notInstalled"));
       });
-      expect(tileLabel(securityCard, i18n.t("server.overview.security.fail2ban")))
+      expect(tileLabel(cardOf("server.overview.cards.security"), i18n.t("server.overview.security.fail2ban")))
         .toBe(i18n.t("server.overview.security.active"));
     });
 
@@ -1098,25 +1148,28 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      const securityCard = cardOf("server.overview.cards.security");
-      // Skeleton branch renders 3 placeholder tiles — no firewall/fail2ban
-      // NAMES (those only render in the loaded grid). Title still shows.
+      // D-07 (Plan 07-06): while security is in flight the all-cards gate holds the
+      // full OverviewSkeleton. Its Security card shows the title + placeholder tiles
+      // (no firewall/fail2ban NAMES — those are loaded-grid only), which is exactly
+      // the pre-gate skeleton-branch contract this test pins.
+      const skeletonSecurityCard = cardOf("server.overview.cards.security");
       expect(
-        within(securityCard).getByText(i18n.t("server.overview.cards.security")),
+        within(skeletonSecurityCard).getByText(i18n.t("server.overview.cards.security")),
       ).toBeInTheDocument();
       expect(
-        within(securityCard).queryByText(i18n.t("server.overview.security.firewall")),
+        within(skeletonSecurityCard).queryByText(i18n.t("server.overview.security.firewall")),
       ).not.toBeInTheDocument();
       expect(
-        within(securityCard).queryByText(i18n.t("server.overview.security.fail2ban")),
+        within(skeletonSecurityCard).queryByText(i18n.t("server.overview.security.fail2ban")),
       ).not.toBeInTheDocument();
-      // Release so the loaded grid renders and act() flush settles.
+      // Release → security settles → the gate opens → the real grid renders.
+      // Re-resolve the card inside waitFor (the skeleton node is now detached).
       await act(async () => {
         releaseSecurity({ firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } });
       });
       await waitFor(() => {
         expect(
-          within(securityCard).getByText(i18n.t("server.overview.security.firewall")),
+          within(cardOf("server.overview.cards.security")).getByText(i18n.t("server.overview.security.firewall")),
         ).toBeInTheDocument();
       });
     });
@@ -1156,10 +1209,14 @@ describe("OverviewSection", () => {
      * helper waits for the "TLS" name to appear before reading its label.
      */
     async function tlsLabel(): Promise<string> {
-      const securityCard = cardOf("server.overview.cards.security");
-      const tlsName = await within(securityCard).findByText(
-        i18n.t("server.overview.security.tls"),
-      );
+      // D-07 (Plan 07-06): the all-cards gate first paints the OverviewSkeleton,
+      // then the real grid. The TLS sub-tile (with its name) only exists in the
+      // loaded grid, so wait for it to appear, re-resolving the card each poll so
+      // we never read from a detached skeleton node.
+      const tlsName = await waitFor(() => {
+        const securityCard = cardOf("server.overview.cards.security");
+        return within(securityCard).getByText(i18n.t("server.overview.security.tls"));
+      });
       const tile = tlsName.parentElement as HTMLElement;
       return (tile.children[1] as HTMLElement).textContent ?? "";
     }
@@ -1228,20 +1285,23 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      const uptimeCard = cardOf("server.overview.cards.uptime");
       // 3661s → "1ч 1м" (hoursMins) from fastUptime, taking priority over stats.
       const fast = i18n.t("server.overview.uptimeFormat.hoursMins", { hours: 1, mins: 1 });
+      // D-07 (Plan 07-06): re-resolve the card inside waitFor (the all-cards gate
+      // paints the skeleton first; the loaded uptime card node arrives after).
       await waitFor(() => {
-        expect(within(uptimeCard).getByText(fast)).toBeInTheDocument();
+        expect(within(cardOf("server.overview.cards.uptime")).getByText(fast)).toBeInTheDocument();
       });
     });
   });
 
   describe("Drill-down by CLICK (RESEARCH §3 stream 1 — was keyboard-only)", () => {
-    it("version card CLICK navigates to the 'service' tab (Phase 19 target)", () => {
+    it("version card CLICK navigates to the 'service' tab (Phase 19 target)", async () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      // D-07 (Plan 07-06): the ClickableCard only renders in the loaded grid.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
       const versionTitle = screen.getByText(i18n.t("server.overview.cards.protocolVersion"));
       const card = versionTitle.closest('[role="button"]');
       expect(card).not.toBeNull();
@@ -1249,10 +1309,11 @@ describe("OverviewSection", () => {
       expect(onNavigate).toHaveBeenCalledWith("service");
     });
 
-    it("security card CLICK navigates to the 'security' tab", () => {
+    it("security card CLICK navigates to the 'security' tab", async () => {
       const onNavigate = vi.fn();
       const state = makeState();
       render(<OverviewSection state={state} onNavigate={onNavigate} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
       const securityTitle = screen.getByText(i18n.t("server.overview.cards.security"));
       const card = securityTitle.closest('[role="button"]');
       expect(card).not.toBeNull();
@@ -1440,6 +1501,60 @@ describe("OverviewSection", () => {
     });
   });
 
+  describe("D-06: reboot-timeout no longer auto-logs-out (Plan 07-05)", () => {
+    it("NEVER calls clear_ssh_credentials on the 120s reboot timeout, while still firing the error toast + ERROR log", async () => {
+      // D-06: plain unreachability (here: a reboot that exceeds 120s) must NOT
+      // wipe stored SSH credentials. The ONLY credential-clear path is the
+      // deliberate handleDisconnect in useControlPanelOrchestrator. This test
+      // FAILS before the fix (the pre-fix code calls clear_ssh_credentials in
+      // the timeout branch) and PASSES after the line is removed. The honest
+      // feedback the C-02 test pins (toast + ERROR log) must REMAIN.
+      vi.useFakeTimers();
+      try {
+        const logged: Array<{ tag: string; message: string }> = [];
+        let clearCalls = 0;
+        vi.mocked(invoke).mockImplementation(async (cmd: string, params?: unknown) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") return null;
+          if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+          if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+          if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+          // Keep the reboot poll failing → drive the elapsed>=120 timeout path.
+          if (cmd === "check_server_installation") throw new Error("still rebooting");
+          if (cmd === "clear_ssh_credentials") { clearCalls++; return null; }
+          if (cmd === "write_activity_log") {
+            const p = params as { tag: string; message: string };
+            logged.push({ tag: p.tag, message: p.message });
+          }
+          return null;
+        });
+        const pushSuccess = vi.fn();
+        const state = makeState({ rebooting: true, pushSuccess });
+        render(<OverviewSection state={state} />);
+
+        // Advance through the full 120s reboot-timeout window (12 × 10s ticks).
+        await act(async () => {
+          for (let i = 0; i < 13; i++) {
+            await vi.advanceTimersByTimeAsync(10_000);
+          }
+        });
+
+        // The credential wipe must NOT happen on plain unreachability (D-06)…
+        expect(clearCalls).toBe(0);
+        // …while the honest feedback is preserved (the toast + the ERROR log).
+        expect(pushSuccess).toHaveBeenCalledWith(
+          i18n.t("server.overview.rebootTimeout"),
+          "error",
+        );
+        expect(
+          logged.some((e) => e.tag === "ERROR" && e.message.includes("overview.reboot.timeout")),
+        ).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("H-03 / L-03: serverInfo-null skeleton matches the loaded layout (Plan 04-14, D-04)", () => {
     it("renders exactly 3 Security skeleton sub-tiles in the pre-data (serverInfo===null) branch", () => {
       // Pre-fix: this branch rendered [1,2,3,4] = 4 tiles, while the loaded
@@ -1468,6 +1583,266 @@ describe("OverviewSection", () => {
       ];
       for (const key of cardKeys) {
         expect(screen.getByText(i18n.t(key))).toBeInTheDocument();
+      }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 7 (Plan 07-06) — D-08 IP eye/blur + D-09 nowrap.
+  // The IP value is rendered (never removed from the DOM) but blurred by
+  // default; an eye IconButton in the IP-card Title action slot reveals it.
+  // Uptime value + error captions stay single-line (whitespace-nowrap).
+  // ═══════════════════════════════════════════════════════
+
+  describe("D-08: IP eye/blur toggle (hidden by default, Plan 07-06)", () => {
+    it("blurs the IP value by default (filter: blur(6px)) and reveals it (blur(0)) on eye click — no aria-hidden on the value", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // D-07 (Plan 07-06): wait for the all-cards gate to open (the eye button is
+      // loaded-grid only) before reading the IP value's blur.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const ipCard = cardOf("server.overview.cards.ip");
+      // Default: the IP value is blurred (shoulder-surfing guard, D-08).
+      const ipValue = within(ipCard).getByText("10.0.0.1");
+      expect(ipValue.style.filter).toBe("blur(6px)");
+      // The blurred value is a CSS guard, not a secret-from-owner guard — it is
+      // NOT hidden from assistive tech (UI-SPEC §D-08 a11y).
+      expect(ipValue).not.toHaveAttribute("aria-hidden");
+      // Hidden state → the eye button offers to SHOW (reveal) the IP.
+      const showBtn = within(ipCard).getByRole("button", {
+        name: i18n.t("server.overview.ip.show"),
+      });
+      fireEvent.click(showBtn);
+      // Revealed → blur cleared.
+      await waitFor(() => {
+        expect(within(ipCard).getByText("10.0.0.1").style.filter).toBe("blur(0)");
+      });
+      // …and the button now offers to HIDE the IP (aria-label flips with action).
+      expect(
+        within(ipCard).getByRole("button", { name: i18n.t("server.overview.ip.hide") }),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the IP value monospaced in both states (no font/box change → no layout shift)", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // D-07: wait for the loaded grid before reading the IP value.
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const ipCard = cardOf("server.overview.cards.ip");
+      const ipValue = within(ipCard).getByText("10.0.0.1");
+      // font-mono is kept in both states so the blurred silhouette holds its
+      // real width and the card never reflows when toggling.
+      expect(ipValue.className).toContain("font-mono");
+    });
+  });
+
+  describe("D-09: single-line Uptime + error captions (Plan 07-06)", () => {
+    it("Uptime value carries whitespace-nowrap so it never wraps to a 2nd line", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // 90061s → "1д 1ч" (ru). D-07 (Plan 07-06): the all-cards gate paints the
+      // skeleton first, so re-resolve the card inside waitFor (the loaded uptime
+      // value node arrives after the gate opens).
+      const expected = i18n.t("server.overview.uptimeFormat.daysHours", { days: 1, hours: 1 });
+      await waitFor(() => {
+        expect(within(cardOf("server.overview.cards.uptime")).getByText(expected)).toBeInTheDocument();
+      }, { timeout: 15_000 });
+      expect(within(cardOf("server.overview.cards.uptime")).getByText(expected).className).toContain("whitespace-nowrap");
+    }, 20_000);
+
+    it("data-unavailable caption carries whitespace-nowrap (Ping failure path)", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") throw new Error("PING_TIMEOUT");
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      // ping=-1 is a settled (failed) signal → the gate opens. Re-resolve the card
+      // inside waitFor (skeleton node is detached once the grid renders).
+      await waitFor(() => {
+        const caption = within(cardOf("server.overview.cards.ping")).getByText(i18n.t("server.overview.dataUnavailable"));
+        expect(caption.className).toContain("whitespace-nowrap");
+      });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 7 (Plan 07-06) — D-10 press-state + D-07 all-cards gate.
+  // ═══════════════════════════════════════════════════════
+
+  describe("D-10: press-state on the clickable drill-down cards ONLY (post-UAT, Plan 07-06)", () => {
+    // The grid only renders once all per-card signals are settled (D-07). The
+    // default beforeEach mock settles ping (42) + geo + stats; security stays
+    // null (no mock) → settles via failure. Wait for the loaded grid (eye button)
+    // before asserting press-state classes.
+    async function waitForGrid() {
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: i18n.t("server.overview.ip.show") }),
+        ).toBeInTheDocument();
+      }, { timeout: 15_000 });
+    }
+
+    it("plain info cards have NO press-state and stay non-interactive (post-UAT: press on a non-clickable card misleads)", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+      await waitForGrid();
+      const plainKeys = [
+        "server.overview.cards.status",
+        "server.overview.cards.ping",
+        "server.overview.cards.speed",
+        "server.overview.cards.ip",
+        "server.overview.cards.country",
+        "server.overview.cards.uptime",
+        "server.overview.cards.load",
+      ];
+      for (const key of plainKeys) {
+        const card = cardOf(key);
+        // The user rejected press feedback on non-clickable cards — a press
+        // animation on a non-actionable card reads as "this is clickable" when it
+        // is not. Plain cards must carry no press-scale.
+        expect(card.className, `card "${key}" must NOT have active:scale press-state`).not.toContain(
+          "active:scale-[0.98]",
+        );
+        // And they stay non-interactive (no button semantics misleading keyboard/AT users).
+        expect(card.getAttribute("role"), `card "${key}" must NOT be role=button`).not.toBe("button");
+        expect(card.getAttribute("tabindex"), `card "${key}" must NOT be focusable`).toBeNull();
+      }
+    }, 20_000);
+
+    it("the three clickable cards keep role=button + tabIndex=0 + the press-state extends them", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+      await waitForGrid();
+      const clickableKeys = [
+        "server.overview.cards.userCount",
+        "server.overview.cards.protocolVersion",
+        "server.overview.cards.security",
+      ];
+      for (const key of clickableKeys) {
+        const title = screen.getByText(i18n.t(key));
+        const card = title.closest('[role="button"]') as HTMLElement;
+        expect(card, `card "${key}" must stay role=button`).not.toBeNull();
+        expect(card.getAttribute("tabindex")).toBe("0");
+        // Focus ring stays intact (the press-scale must not drop it).
+        expect(card.className).toContain("focus-visible:shadow-[var(--focus-ring)]");
+        expect(card.className).toContain("active:scale-[0.98]");
+      }
+    }, 20_000);
+  });
+
+  describe("D-07: all-cards-loaded gate + 60s fallback (Plan 07-06)", () => {
+    it("shows the skeleton while cards are pending, then the real grid once ALL signals settle", async () => {
+      // Defer the ping signal so the gate stays closed (ping===null) until we
+      // release it; geo/stats/security settle immediately from the mock below.
+      let releasePing: (ms: number) => void = () => {};
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return new Promise<number>((resolve) => { releasePing = resolve; });
+        if (cmd === "server_get_stats") return {
+          cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
+          mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
+          unique_ips: 0, total_connections: 0, uptime_seconds: 1,
+        };
+        if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+        if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+        if (cmd === "get_server_geoip") return { country: "United States", country_code: "US", flag_emoji: "🇺🇸" };
+        return null;
+      });
+      const state = makeState();
+      render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+      // While ping is pending the gate is closed → skeleton grid (no eye button,
+      // no drill-down ClickableCards render yet).
+      await waitFor(() => {
+        // geo/stats/security have settled by now; ping is the only hold-out.
+        expect(invoke).toHaveBeenCalledWith("get_server_geoip", expect.any(Object));
+      });
+      expect(
+        screen.queryByRole("button", { name: i18n.t("server.overview.ip.show") }),
+      ).not.toBeInTheDocument();
+      // Settle ping → all signals settled → the real grid renders (eye button shows).
+      await act(async () => { releasePing(42); });
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: i18n.t("server.overview.ip.show") }),
+        ).toBeInTheDocument();
+      }, { timeout: 15_000 });
+    }, 20_000);
+
+    it("latches the gate open — a later stats poll never re-shows the skeleton (post-UAT fix)", async () => {
+      vi.useFakeTimers();
+      try {
+        let statsCalls = 0;
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") {
+            statsCalls += 1;
+            if (statsCalls === 1) return {
+              cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
+              mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
+              unique_ips: 0, total_connections: 0, uptime_seconds: 1,
+            };
+            // 2nd+ poll hangs → statsLoading stays true. Before the latch this
+            // re-closed the all-cards gate (<60s) and flashed the whole grid back
+            // to the skeleton every ~10s — the bug the user reported.
+            return new Promise<never>(() => {});
+          }
+          if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+          if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+          if (cmd === "get_server_geoip") return { country: "United States", country_code: "US", flag_emoji: "🇺🇸" };
+          return null;
+        });
+        render(<OverviewSection state={makeState()} onNavigate={vi.fn()} />);
+        // First load settles → grid shows (eye button present).
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        expect(
+          screen.queryByRole("button", { name: i18n.t("server.overview.ip.show") }),
+        ).toBeInTheDocument();
+        // Fire the 10s stats poll — the refetch hangs → statsLoading true. The gate
+        // must STAY open (latched); the grid must NOT flash back to the skeleton.
+        await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+        expect(
+          screen.queryByRole("button", { name: i18n.t("server.overview.ip.show") }),
+          "gate must stay open after a poll refetch (latched) — no full-grid skeleton flash",
+        ).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20_000);
+
+    it("renders the grid after ~60s even if one card stays hung (fallback)", async () => {
+      vi.useFakeTimers();
+      try {
+        // geo never settles → the all-ready gate would never open without the
+        // 60s fallback. Everything else settles.
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") return {
+            cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
+            mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
+            unique_ips: 0, total_connections: 0, uptime_seconds: 1,
+          };
+          if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+          if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+          if (cmd === "get_server_geoip") return new Promise<never>(() => {}); // hung forever
+          return null;
+        });
+        const state = makeState();
+        render(<OverviewSection state={state} onNavigate={vi.fn()} />);
+        // Flush mounted-effect microtasks (ping/stats/security settle).
+        await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+        // Gate still closed (geo hung) → skeleton, no eye button.
+        expect(
+          screen.queryByRole("button", { name: i18n.t("server.overview.ip.show") }),
+        ).not.toBeInTheDocument();
+        // Advance past the 60s fallback → the grid renders regardless.
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(
+          screen.getByRole("button", { name: i18n.t("server.overview.ip.show") }),
+        ).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
       }
     });
   });

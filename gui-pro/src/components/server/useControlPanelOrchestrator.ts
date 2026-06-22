@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { type SshCredentials } from "./SshConnectForm";
 import { useSidecarUpdateCascade } from "./useSidecarUpdateCascade";
 import { readStoredCredentials } from "./readStoredCredentials";
+import { credentialsMatchTarget } from "../wizard/useWizardState";
 
 // ═══════════════════════════════════════════════════════
 // useControlPanelOrchestrator — container hook (PANEL-02/03, D-04/D-05)
@@ -88,10 +89,31 @@ export function useControlPanelOrchestrator({
 
   useEffect(() => {
     readStoredCredentials().then((c) => {
-      setCreds(c);
-      // BUG-01: при auto-reconnect показываем skeleton (а не полноэкранный лоадер
-      // ServerPanel.state.loading). Сбросится в false по onPanelReady.
-      if (c) setIsFirstConnect(true);
+      // C-23 / D-15: the no-arg load returns the last-active record, which on a
+      // multi-server machine may belong to a DIFFERENT server than the one this
+      // panel last connected to. Validate the loaded bundle's host:port:user
+      // against the persisted last-target BEFORE trusting it for setCreds /
+      // auto-connect — otherwise the panel could install/connect/auto-connect
+      // against the WRONG server. Read the target from localStorage directly so
+      // the gate uses the same source the state was lazy-initialised from.
+      const tgtHost = localStorage.getItem("tt_ssh_last_host") ?? "";
+      const tgtPort = localStorage.getItem("tt_ssh_last_port") ?? "22";
+      const tgtUser = localStorage.getItem("tt_ssh_last_user") ?? "root";
+      // Cold start (no persisted target) → nothing to validate against, the
+      // loaded bundle IS the target. Otherwise it must match host:port:user.
+      const trusted =
+        !tgtHost ||
+        credentialsMatchTarget(c, { host: tgtHost, port: tgtPort, user: tgtUser });
+      if (c && trusted) {
+        setCreds(c);
+        // BUG-01: при auto-reconnect показываем skeleton (а не полноэкранный лоадер
+        // ServerPanel.state.loading). Сбросится в false по onPanelReady.
+        setIsFirstConnect(true);
+      } else {
+        // Mismatch: a stale last-active record belongs to a different server —
+        // never auto-connect on it (the C-23 wrong-server hazard).
+        setCreds(null);
+      }
       setLoading(false);
     });
   }, []);
@@ -117,7 +139,19 @@ export function useControlPanelOrchestrator({
       if (ts && ts !== lastTs) {
         lastTsRef.current = ts;
         readStoredCredentials().then((fresh) => {
-          if (fresh) {
+          // C-23 / D-15: apply the SAME target gate to the refreshed bundle. The
+          // refresh signal can fire after the wizard saved creds for a DIFFERENT
+          // server; we must never setCreds (and thus auto-connect) on a bundle
+          // whose host:port:user differs from this panel's persisted target.
+          // localStorage is read directly (this interval has an empty dep array,
+          // so closed-over state would be stale).
+          const tgtHost = localStorage.getItem("tt_ssh_last_host") ?? "";
+          const tgtPort = localStorage.getItem("tt_ssh_last_port") ?? "22";
+          const tgtUser = localStorage.getItem("tt_ssh_last_user") ?? "root";
+          const trusted =
+            !tgtHost ||
+            credentialsMatchTarget(fresh, { host: tgtHost, port: tgtPort, user: tgtUser });
+          if (fresh && trusted) {
             setCreds(fresh);
             setRefreshKey(k => k + 1);
           } else {
@@ -143,7 +177,9 @@ export function useControlPanelOrchestrator({
 
   const handlePortChanged = useCallback(async (newPort: number) => {
     if (!creds) return;
-    const updated = { ...creds, port: newPort.toString() };
+    const oldPort = creds.port;
+    const newPortStr = newPort.toString();
+    const updated = { ...creds, port: newPortStr };
     setCreds(updated);
     try {
       await invoke("save_ssh_credentials", {
@@ -153,6 +189,18 @@ export function useControlPanelOrchestrator({
         password: updated.password,
         keyPath: updated.keyPath || null,
       });
+      // WR-04: the per-host store is keyed by host:port:user. Saving under the NEW
+      // port creates a SECOND record and leaves the OLD-port record + its keyring
+      // entry orphaned. Clear the old-port record AFTER the new one is saved (so a
+      // failure mid-way never leaves the host with NO record). Skip when the port
+      // is unchanged — there is nothing to re-key.
+      if (oldPort !== newPortStr) {
+        await invoke("clear_ssh_credentials_for", {
+          host: updated.host,
+          port: oldPort,
+          user: updated.user,
+        });
+      }
     } catch (e) {
       console.error("Failed to persist updated SSH port:", e);
     }

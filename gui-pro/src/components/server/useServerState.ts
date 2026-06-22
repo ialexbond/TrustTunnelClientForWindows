@@ -109,7 +109,32 @@ export function useServerState(props: ServerPanelProps) {
     }
     const loadStartMs = Date.now();
     try {
-      const info = await invoke<ServerInfo>("check_server_installation", sshParams);
+      // Cold-start transient guard (UAT 2026-06-19; BROADENED 06-review): when the panel
+      // auto-connects on launch it races with the concurrent sidecar-version probe — two
+      // fresh SSH handshakes to the same sshd at once. The first one frequently fails
+      // transiently, and open_session_with_retry can't recover it (it re-opens a channel
+      // on an already-dead handle). A FRESH reconnect — exactly what «Повторить» does —
+      // succeeds. We used to retry ONLY when the raw error contained "SSH_CHANNEL_FAILED",
+      // but that race surfaces under MANY russh wordings (Disconnected, ChannelOpenFailure,
+      // broken pipe, timeouts), and translateSshError reclassifies several of them as
+      // «Неверный SSH логин или пароль» (G-07) — so the narrow test let a SPURIOUS auth-error
+      // screen through on cold start. Retry ONCE on ANY first-probe failure EXCEPT a changed
+      // host key (deterministic + security-sensitive — it has its own reset flow in the outer
+      // catch and must never be silently retried). A genuine auth failure simply fails the
+      // retry too and surfaces normally (~400ms later), so broadening costs nothing real.
+      let info: ServerInfo;
+      try {
+        info = await invoke<ServerInfo>("check_server_installation", sshParams);
+      } catch (firstErr) {
+        const firstStr = formatError(firstErr);
+        const hostKeyChanged =
+          firstStr.includes("HOST_KEY_CHANGED") || firstStr.includes("Unknown server key");
+        if (hostKeyChanged) {
+          throw firstErr;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        info = await invoke<ServerInfo>("check_server_installation", sshParams);
+      }
       setServerInfo(info);
       if (!silent) setError("");
 

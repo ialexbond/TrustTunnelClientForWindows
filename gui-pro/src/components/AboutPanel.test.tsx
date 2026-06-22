@@ -355,4 +355,15 @@ describe("AboutPanel", () => {
     render(<AboutPanel {...defaultProps} />);
     expect(screen.getByText(i18n.t("about.copyright", { year: new Date().getFullYear() }))).toBeInTheDocument();
   });
+
+  // ─── Manual welcome-tour trigger (user request) ───
+
+  it("«Приветственный тур» button dispatches the tt-show-welcome-tour window event", () => {
+    const spy = vi.fn();
+    window.addEventListener("tt-show-welcome-tour", spy);
+    render(<AboutPanel {...defaultProps} />);
+    fireEvent.click(screen.getByText(i18n.t("about.show_welcome_tour")));
+    expect(spy).toHaveBeenCalledTimes(1);
+    window.removeEventListener("tt-show-welcome-tour", spy);
+  });
 });

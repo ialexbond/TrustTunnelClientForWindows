@@ -175,6 +175,112 @@ describe("useControlPanelOrchestrator", () => {
     expect(mockDismissSidecarUpdate).toHaveBeenCalledWith("1.0.33");
   });
 
+  // ─── WR-04: re-key the per-host credential record on SSH-port change ────────
+  // The per-host store is keyed by host:port:user. Saving under the NEW port must
+  // also clear the OLD-port record (+ keyring entry) — otherwise a port change
+  // accumulates orphaned old-port records.
+  it("handlePortChanged saves the new-port record AND clears the orphaned old-port record (WR-04)", async () => {
+    mockCredsLoaded({ host: "10.0.0.1", port: "22", user: "root", password: "secret" });
+    const { result } = renderHook(() => useControlPanelOrchestrator(defaultParams));
+    await waitFor(() => expect(result.current.creds?.port).toBe("22"));
+
+    await act(async () => {
+      await result.current.handlePortChanged(2222);
+    });
+
+    // The new-port record is saved.
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "save_ssh_credentials",
+      expect.objectContaining({ host: "10.0.0.1", port: "2222", user: "root" }),
+    );
+    // The orphaned OLD-port record (+ keyring entry) is cleared.
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "clear_ssh_credentials_for",
+      { host: "10.0.0.1", port: "22", user: "root" },
+    );
+    // Local state reflects the new port.
+    expect(result.current.creds?.port).toBe("2222");
+  });
+
+  it("handlePortChanged does NOT clear when the port is unchanged (no spurious re-key)", async () => {
+    mockCredsLoaded({ host: "10.0.0.1", port: "22", user: "root", password: "secret" });
+    const { result } = renderHook(() => useControlPanelOrchestrator(defaultParams));
+    await waitFor(() => expect(result.current.creds?.port).toBe("22"));
+
+    await act(async () => {
+      await result.current.handlePortChanged(22); // same port
+    });
+
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "clear_ssh_credentials_for",
+      expect.anything(),
+    );
+  });
+
+  // ─── C-23 / D-15: target validation before setCreds / auto-connect ──────────
+  // On a multi-server machine the no-arg load returns the LAST-active record,
+  // which may belong to a DIFFERENT server than this panel's persisted target.
+  // The orchestrator must NEVER act on (setCreds / auto-connect) a bundle whose
+  // host:port:user does not match the persisted lastHost/lastPort/lastUser.
+  it("C-23 mismatch: loaded bundle for a different server is rejected (creds null, no auto-connect)", async () => {
+    // Persisted target = server A.
+    localStorage.setItem("tt_ssh_last_host", "10.0.0.1");
+    localStorage.setItem("tt_ssh_last_port", "22");
+    localStorage.setItem("tt_ssh_last_user", "root");
+    // But the coarse load returns server B's bundle.
+    mockCredsLoaded({ host: "10.0.0.2", port: "22", user: "deploy", password: "secretB" });
+
+    const { result } = renderHook(() => useControlPanelOrchestrator(defaultParams));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // Wrong-server bundle is dropped — never set, never auto-connect.
+    expect(result.current.creds).toBeNull();
+    expect(result.current.isFirstConnect).toBe(false);
+  });
+
+  it("C-23 match: loaded bundle matching the persisted target is accepted (creds set)", async () => {
+    localStorage.setItem("tt_ssh_last_host", "10.0.0.1");
+    localStorage.setItem("tt_ssh_last_port", "22");
+    localStorage.setItem("tt_ssh_last_user", "root");
+    mockCredsLoaded({ host: "10.0.0.1", port: "22", user: "root", password: "secretA" });
+
+    const { result } = renderHook(() => useControlPanelOrchestrator(defaultParams));
+    await waitFor(() => expect(result.current.creds).not.toBeNull());
+
+    expect(result.current.creds?.host).toBe("10.0.0.1");
+    expect(result.current.isFirstConnect).toBe(true);
+  });
+
+  it("C-23 cold start: with no persisted target the loaded bundle is accepted as before", async () => {
+    // No tt_ssh_last_* keys → nothing to validate against.
+    mockCredsLoaded({ host: "172.16.0.9", port: "22", user: "root", password: "p" });
+
+    const { result } = renderHook(() => useControlPanelOrchestrator(defaultParams));
+    await waitFor(() => expect(result.current.creds).not.toBeNull());
+
+    expect(result.current.creds?.host).toBe("172.16.0.9");
+    expect(result.current.isFirstConnect).toBe(true);
+  });
+
+  it("C-23 refresh-tick mismatch: a refreshed bundle for a different server is rejected", async () => {
+    localStorage.setItem("tt_ssh_last_host", "10.0.0.1");
+    localStorage.setItem("tt_ssh_last_port", "22");
+    localStorage.setItem("tt_ssh_last_user", "root");
+    // Cold mount: matching bundle so the panel is connected to A.
+    mockCredsLoaded({ host: "10.0.0.1", port: "22", user: "root", password: "secretA" });
+    const { result } = renderHook(() => useControlPanelOrchestrator(defaultParams));
+    await waitFor(() => expect(result.current.creds?.host).toBe("10.0.0.1"));
+
+    // Refresh signal flips with a DIFFERENT server's bundle (server B).
+    mockCredsLoaded({ host: "10.0.0.2", port: "22", user: "deploy", password: "secretB" });
+    act(() => {
+      localStorage.setItem("trusttunnel_control_refresh", Date.now().toString());
+    });
+
+    // The gate rejects B → creds cleared, never auto-connect on the wrong server.
+    await waitFor(() => expect(result.current.creds).toBeNull(), { timeout: 3000 });
+  });
+
   // ─── Chrome C-02 regression: polling tick must not double-fire the creds read ──
   // Symptom: when disconnected, the refresh-signal branch (ts !== lastTs) AND the
   // unconditional `if (!creds)` fallback branch both call readStoredCredentials in

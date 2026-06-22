@@ -435,15 +435,35 @@ describe("ServerTabs", () => {
       ).toBeNull();
     });
 
-    it("shows an error message + retry button in the active panel, and retry calls loadServerInfo", () => {
+    // INTENTIONAL D-05 characterization update (Phase 7, plan 07-05):
+    // This single error-state assertion was originally pinned to the PRE-D-05
+    // inline error DOM (raw `state.error` text "Connection refused" + an
+    // `errors.retry`-labelled button). D-05 (locked in 07-CONTEXT.md +
+    // 07-UI-SPEC.md) intentionally REPLACES that inline block with the reusable
+    // ServerUnavailablePlate: the raw error string must NOT show (it reads as
+    // stale data and lies about the connection), and the retry control is now
+    // «Повторить» (server.unavailable.retry). This is deliberate net maintenance
+    // for a user-approved behavior change — NOT silent drift. Scope: ONLY this
+    // error-state assertion is updated; the rest of the Phase-3 ServerTabs net
+    // stays exactly as-is and still catches unrelated chrome regressions.
+    it("shows the server-unavailable plate (not the raw error) + Повторить retry in the active panel, and retry calls loadServerInfo", () => {
       const { state } = renderTabs({
         state: { error: "Connection refused" } as never,
       });
-      // The error branch also renders inside every panel; scope to the active one.
+      // The error branch renders inside every panel; scope to the active one.
       const activePanel = panelFor("overview");
-      expect(within(activePanel).getByText("Connection refused")).toBeInTheDocument();
+      // D-05: the plate's i18n heading shows, and the raw `state.error` string
+      // must NOT (stale text must never display).
+      expect(
+        within(activePanel).getByRole("heading", {
+          name: i18n.t("server.unavailable.heading"),
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(activePanel).queryByText("Connection refused"),
+      ).toBeNull();
       const retry = within(activePanel).getByRole("button", {
-        name: i18n.t("errors.retry"),
+        name: i18n.t("server.unavailable.retry"),
       });
       fireEvent.click(retry);
       expect(state.loadServerInfo).toHaveBeenCalled();

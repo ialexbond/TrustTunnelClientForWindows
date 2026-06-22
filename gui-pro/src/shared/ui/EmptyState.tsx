@@ -36,6 +36,12 @@ export function EmptyState({
         </div>
       )}
       <p
+        // role="heading" + aria-level: the visual heading is a <p> (not an
+        // <hN>) to avoid imposing a fixed document outline level on every
+        // consumer, but it IS the semantic heading of the empty state — so we
+        // expose it to assistive tech (and to getByRole('heading') in tests).
+        role="heading"
+        aria-level={2}
         className="font-semibold text-base"
         style={{
           color: "var(--color-text-secondary)",

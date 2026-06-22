@@ -282,7 +282,10 @@ describe("useSettingsState", () => {
   });
 
   // ─── clearConfig ───
-  it("clearConfig calls onClearConfig and onSwitchToSetup", async () => {
+  // 06-uat: clearing the config must NOT auto-switch to the Control Panel — clearConfig
+  // only calls onClearConfig, never onSwitchToSetup. Deleting the config no longer
+  // navigates or opens the wizard.
+  it("clearConfig calls onClearConfig only (does NOT call onSwitchToSetup)", async () => {
     const props = makeProps();
     const { result } = renderHook(() => useSettingsState(props), { wrapper });
 
@@ -295,7 +298,7 @@ describe("useSettingsState", () => {
     });
 
     expect(props.onClearConfig).toHaveBeenCalledTimes(1);
-    expect(props.onSwitchToSetup).toHaveBeenCalledTimes(1);
+    expect(props.onSwitchToSetup).not.toHaveBeenCalled();
   });
 
   // ─── pushSuccess delegates to SnackBar ───
