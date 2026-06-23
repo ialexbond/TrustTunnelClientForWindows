@@ -27,6 +27,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import i18n from "../../shared/i18n";
 import { renderWithProviders as render } from "../../test/test-utils";
+import { activityLogSpy, expectNoSecretLogged } from "../../test/fixtures";
 import { ProtocolUpdateSection } from "./ProtocolUpdateSection";
 import type { SidecarReleaseInfo, SshParams } from "./useSidecarVersions";
 
@@ -34,8 +35,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
+// D-29 net (09-VALIDATION.md): route the activity-log channel through the shared
+// named spy so a test can prove the GitHub release asset URL never reaches it.
 vi.mock("../../shared/hooks/useActivityLog", () => ({
-  useActivityLog: () => ({ log: vi.fn() }),
+  useActivityLog: () => ({ log: activityLogSpy }),
 }));
 
 const SSH_PARAMS: SshParams = {
@@ -74,6 +77,7 @@ const RELEASES: SidecarReleaseInfo[] = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  activityLogSpy.mockReset();
   // Wipe useSidecarVersions localStorage cache so each test starts with an
   // empty initial state — otherwise tests that need a refresh-fired invoke
   // get a cache short-circuit and the mock is never called.
@@ -906,5 +910,278 @@ describe("ProtocolUpdateSection", () => {
         .mock.calls.filter((c) => c[0] === "list_sidecar_versions").length;
       expect(after).toBeGreaterThan(listCallsBefore);
     });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Phase 9 Plan 09-20 — E-16 / E-7 / E-8 / §K CTA-03 regression net
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ─── E-16: clicking Refresh must NOT snap the chosen version back to the
+  //          installed one. The re-sync effect previously listed `versions`
+  //          in its deps; a refresh returns a NEW array ref (equal content),
+  //          which re-fired the effect → setSelectedVersion(currentVersion).
+  it("E-16: refresh preserves the chosen target version (does not snap to installed)", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.31"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // Pick 1.0.34 (a non-installed target) → Install enabled.
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    await user.click(within(wrapper).getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    const target = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.34"));
+    await user.click(target!);
+
+    const install = screen.getByTestId("protocol-install-button");
+    expect(install).not.toBeDisabled();
+
+    // Click Refresh → list_sidecar_versions re-resolves to an equal-content
+    // but NEW array instance (mock returns a fresh array each call).
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sidecar_versions") return [...RELEASES];
+      return null;
+    });
+    await user.click(screen.getByTestId("protocol-refresh-button"));
+
+    await waitFor(() => {
+      const calls = vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === "list_sidecar_versions").length;
+      expect(calls).toBeGreaterThanOrEqual(2);
+    });
+
+    // The pick must survive: Install still enabled, and the Select still shows
+    // 1.0.34 as its selected option (assert by combobox value text, never CSS).
+    await waitFor(() => {
+      expect(screen.getByTestId("protocol-install-button")).not.toBeDisabled();
+    });
+    const wrapper2 = screen.getByTestId("protocol-version-select");
+    const combobox = within(wrapper2).getByRole("combobox");
+    expect((combobox.textContent ?? "")).toContain("1.0.34");
+  });
+
+  // ─── E-16 positive control: when currentVersion legitimately CHANGES (e.g.
+  //          after a successful update + re-probe), the selection follows it. ───
+  it("E-16 positive control: a real currentVersion change moves the selection", async () => {
+    const { rerender } = render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.31"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // currentVersion changes (parent re-probed after an update) → selection
+    // re-syncs to the new installed version, so Install is disabled again.
+    rerender(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.34"
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    const install = await screen.findByTestId("protocol-install-button");
+    await waitFor(() => {
+      expect(install).toBeDisabled();
+    });
+    const combobox = within(
+      screen.getByTestId("protocol-version-select"),
+    ).getByRole("combobox");
+    expect((combobox.textContent ?? "")).toContain("1.0.34");
+  });
+
+  // ─── E-7: Install must be disabled when the resolved selection is "unknown"
+  //          or empty — never install a literal "unknown" version. With an empty
+  //          GitHub list (but no fetch error) the dropdown renders with no real
+  //          options, so the Install button is present yet DISABLED. ───
+  it("E-7: Install disabled when no real version can be selected (unknown + empty list)", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sidecar_versions") return [];
+      return null;
+    });
+
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="unknown"
+        sidecarAvailable={false}
+        latestVersion=""
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // No real version is selectable (empty list, current="unknown") → the
+    // Install button must be disabled so a literal "unknown"/empty value can
+    // never reach `update_sidecar`.
+    const install = await screen.findByTestId("protocol-install-button");
+    await waitFor(() => {
+      expect(install).toBeDisabled();
+    });
+  });
+
+  // ─── E-7 positive control: a real list + concrete pick → Install enabled,
+  //          and never with a literal "unknown" value. ───
+  it("E-7 positive control: a concrete real pick enables Install (value !== 'unknown')", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="unknown"
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // State G: selection defaults to the newest GitHub release (versions[0]).
+    const install = await screen.findByTestId("protocol-install-button");
+    await waitFor(() => expect(install).not.toBeDisabled());
+
+    const combobox = within(
+      screen.getByTestId("protocol-version-select"),
+    ).getByRole("combobox");
+    // The selected option is a real semver, never the literal "unknown".
+    expect((combobox.textContent ?? "")).not.toContain("unknown");
+    expect((combobox.textContent ?? "")).toMatch(/1\.0\.3\d/);
+
+    // Picking a concrete version keeps Install enabled.
+    await user.click(combobox);
+    const listbox = await screen.findByRole("listbox");
+    const opt = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.33"));
+    await user.click(opt!);
+    expect(screen.getByTestId("protocol-install-button")).not.toBeDisabled();
+  });
+
+  // ─── E-8: a FAILED probe ("") must show the loading/retry affordance, NOT the
+  //          «Протокол не установлен» caption. Empty string ≠ not-installed —
+  //          those are three distinct states ("" loading, "unknown" not
+  //          installed, real semver). ───
+  it("E-8: failed probe ('') shows loading, NOT the «не установлен» caption", async () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion=""
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    // The not-installed caption is reserved for the genuine not-installed signal
+    // (currentVersion === "unknown") — never for an in-flight/failed probe ("").
+    expect(
+      screen.queryByText(i18n.t("server.service.protocol.not_installed_label")),
+    ).not.toBeInTheDocument();
+    // The loading/retry affordance is present: the «Текущая версия:» prefix is
+    // shown (this is not State G), and the Refresh control lets the user retry.
+    expect(
+      screen.getByText(i18n.t("server.service.protocol.current_label_prefix")),
+    ).toBeVisible();
+    expect(screen.getByTestId("protocol-refresh-button")).toBeInTheDocument();
+  });
+
+  it("E-8 positive control: a genuinely not-installed server shows the caption", () => {
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        // "unknown" = sidecar binary missing on the server (State G).
+        currentVersion="unknown"
+        sidecarAvailable={false}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    expect(
+      screen.getByText(i18n.t("server.service.protocol.not_installed_label")),
+    ).toBeVisible();
+  });
+
+  // ─── D-29 (09-VALIDATION.md asset-URL surface): drive the install path so the
+  //          GitHub release asset/download URL flows through, then prove it
+  //          never reaches the activity-log channel. ───
+  it("D-29: the GitHub release asset URL never reaches the activity-log channel", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sidecar_versions") return RELEASES;
+      if (cmd === "update_sidecar") return null;
+      return null;
+    });
+
+    render(
+      <ProtocolUpdateSection
+        sshParams={SSH_PARAMS}
+        currentVersion="1.0.33"
+        sidecarAvailable={true}
+        latestVersion="1.0.34"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_sidecar_versions", { maxCount: 3 }),
+    );
+
+    // Pick a newer release (its asset URL is in RELEASES) + kick off the install.
+    const wrapper = await screen.findByTestId("protocol-version-select");
+    await user.click(within(wrapper).getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox)
+      .getAllByRole("option")
+      .find((o) => (o.textContent ?? "").trim().startsWith("1.0.34"));
+    await user.click(option!);
+    await user.click(screen.getByTestId("protocol-install-button"));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "update_sidecar",
+        expect.objectContaining({ targetVersion: "1.0.34" }),
+      );
+    });
+
+    // The asset/download URL must be ABSENT from every activity-log call.
+    const assetUrl = RELEASES[0].assetDownloadUrl;
+    expectNoSecretLogged(assetUrl);
+    expectNoSecretLogged("github.com/TrustTunnel/TrustTunnel/releases/download");
+    expectNoSecretLogged(".tar.gz");
+    // And the SSH password never leaks into the log channel either.
+    expectNoSecretLogged(SSH_PARAMS.password);
+  });
+
+  // ─── §K CTA-03: the version Install confirm uses an action-verb label
+  //          («Установить» / downgrade «Установить старую версию»), not the
+  //          generic «Подтвердить». This confirm lives in VersionSection (the
+  //          SSH version surface) — asserted in VersionSection.test.tsx. Here we
+  //          pin the i18n keys exist with the expected RU values so the locale
+  //          contract for CTA-03 is covered in this file's surface too. ───
+  it("§K CTA-03: the install-confirm action labels are defined (ru)", () => {
+    expect(i18n.t("server.version.confirm_install")).toBe("Установить");
+    expect(i18n.t("server.version.confirm_install_downgrade")).toBe(
+      "Установить старую версию",
+    );
   });
 });

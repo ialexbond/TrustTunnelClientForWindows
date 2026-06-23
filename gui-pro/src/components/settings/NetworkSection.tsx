@@ -16,7 +16,11 @@ export function NetworkSection({ state }: Props) {
   const { config, updateField } = state;
   if (!config) return null;
 
-  const dnsUpstreams = config.dns_upstreams || [];
+  // dns_upstreams lives under [endpoint] in the real config (sidecar contract) — the
+  // C++ core reads it from endpoint.dns_upstreams, not a top-level key. Reading/writing it
+  // at the top level meant it never hydrated on load (UAT-F06) and adding a DNS created a
+  // stray top-level key that lit up Save even on an empty/cancelled row (UAT-F05/F07).
+  const dnsUpstreams = config.endpoint?.dns_upstreams || [];
 
   return (
     <Card padding="md">
@@ -60,9 +64,9 @@ export function NetworkSection({ state }: Props) {
               onChange={(e) => {
                 const arr = [...dnsUpstreams];
                 arr[idx] = e.target.value;
-                updateField("dns_upstreams", arr);
+                updateField("endpoint.dns_upstreams", arr);
               }}
-              placeholder="8.8.8.8:53 / tls://1.1.1.1 / https://dns.example/dns-query"
+              placeholder="8.8.8.8:53, tls://1.1.1.1, https://dns.example/dns-query"
               fullWidth
             />
             <Button
@@ -72,7 +76,7 @@ export function NetworkSection({ state }: Props) {
               onClick={() => {
                 const arr = [...dnsUpstreams];
                 arr.splice(idx, 1);
-                updateField("dns_upstreams", arr);
+                updateField("endpoint.dns_upstreams", arr);
               }}
               className="shrink-0 self-stretch text-[var(--color-danger-400)] hover:text-[var(--color-danger-500)]"
             />
@@ -84,7 +88,7 @@ export function NetworkSection({ state }: Props) {
           size="sm"
           icon={<Plus className="w-3.5 h-3.5" />}
           fullWidth
-          onClick={() => updateField("dns_upstreams", [...dnsUpstreams, ""])}
+          onClick={() => updateField("endpoint.dns_upstreams", [...dnsUpstreams, ""])}
           className="border border-dashed"
           style={{ borderColor: "var(--color-border)" }}
         >

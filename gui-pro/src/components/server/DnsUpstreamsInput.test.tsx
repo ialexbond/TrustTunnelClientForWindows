@@ -113,4 +113,39 @@ describe("DnsUpstreamsInput", () => {
     const textarea = screen.getByTestId("dns-upstreams-textarea");
     expect(textarea).toHaveAttribute("aria-invalid", "false");
   });
+
+  // E-3 (Phase 9, Behavioral Cluster 6): a restored (not typed) invalid DNS must
+  // notify onError(true) so the parent's Save gate disables. Before the fix,
+  // onError fired only on keystroke (handleChange); the restore path updated the
+  // draft but never called onError, leaving the gate stale (Save enabled on a
+  // visibly-invalid config).
+  it("calls onError(true) when an invalid value is restored without keystroke", () => {
+    const onError = vi.fn();
+    render(
+      <DnsUpstreamsInput value={["not a valid dns!!"]} onChange={vi.fn()} onError={onError} />
+    );
+    // Restore-only path: no typing. The error list renders AND the gate is notified.
+    expect(screen.getByTestId("dns-error")).toBeInTheDocument();
+    expect(onError).toHaveBeenCalledWith(true);
+  });
+
+  it("calls onError(false) when a valid value is restored without keystroke", () => {
+    const onError = vi.fn();
+    render(<DnsUpstreamsInput value={["8.8.8.8"]} onChange={vi.fn()} onError={onError} />);
+    expect(screen.queryByTestId("dns-error")).toBeNull();
+    expect(onError).toHaveBeenLastCalledWith(false);
+  });
+
+  it("calls onError(true) when the value changes from valid to invalid (edit-load)", () => {
+    const onError = vi.fn();
+    const { rerender } = render(
+      <DnsUpstreamsInput value={["8.8.8.8"]} onChange={vi.fn()} onError={onError} />
+    );
+    expect(onError).toHaveBeenLastCalledWith(false);
+    onError.mockClear();
+    rerender(
+      <DnsUpstreamsInput value={["not a valid dns!!"]} onChange={vi.fn()} onError={onError} />
+    );
+    expect(onError).toHaveBeenLastCalledWith(true);
+  });
 });

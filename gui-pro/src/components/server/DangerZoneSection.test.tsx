@@ -94,14 +94,37 @@ describe("DangerZoneSection", () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
     render(<DangerZoneSection state={state} />);
     fireEvent.click(screen.getByTestId("danger-zone-stop-button"));
-    // ConfirmDialog appears from renderWithProviders (ConfirmDialogProvider)
-    const confirmBtn = await screen.findByRole("button", { name: new RegExp(i18n.t("buttons.confirm")) });
+    // ConfirmDialog appears from renderWithProviders (ConfirmDialogProvider).
+    // CTA-01 (09-24): the confirm button now reads the action verb «Остановить»,
+    // not the generic «Подтвердить».
+    // Exact name match: the Stop *trigger* button reads «Остановить сервис»,
+    // while the confirm button is just «Остановить» — a regex would match both.
+    const confirmBtn = await screen.findByRole("button", {
+      name: i18n.t("server.danger.stop_confirm_btn"),
+    });
     fireEvent.click(confirmBtn);
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("server_stop_service", expect.any(Object));
     });
     // runAction called with "stop" action name
     expect(runAction).toHaveBeenCalledWith("stop", expect.any(Function), expect.any(String));
+  });
+
+  // CTA-01 (09-24): the Stop-service confirm button names the action it triggers.
+  it("CTA-01: stop confirm button renders «Остановить» (not the generic «Подтвердить»)", async () => {
+    const state = makeState({
+      serverInfo: { installed: true, version: "1.0", serviceActive: true, users: [] } as ServerState["serverInfo"],
+    });
+    render(<DangerZoneSection state={state} />);
+    fireEvent.click(screen.getByTestId("danger-zone-stop-button"));
+    const confirmBtn = await screen.findByRole("button", {
+      name: i18n.t("server.danger.stop_confirm_btn"),
+    });
+    expect(confirmBtn).toHaveTextContent("Остановить");
+    // The generic «Подтвердить» label must NOT be the confirm action here.
+    expect(
+      screen.queryByRole("button", { name: i18n.t("buttons.confirm") }),
+    ).not.toBeInTheDocument();
   });
 
   it("start_click_no_confirm_invokes_directly server_start_service", async () => {

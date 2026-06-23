@@ -145,7 +145,9 @@ function LogPanel({ logs, onClear, isConnected }: LogPanelProps) {
 
       {/* Filter bar */}
       <div className="px-4 pb-3 flex items-center gap-3">
-        <div className="shrink-0 w-[96px]">
+        {/* F10: widened from w-[96px] so the ERROR option + selected checkmark +
+            scrollbar fit without truncating the label. */}
+        <div className="shrink-0 w-[120px]">
           <Select
             options={levelOptions}
             value={levelFilter}

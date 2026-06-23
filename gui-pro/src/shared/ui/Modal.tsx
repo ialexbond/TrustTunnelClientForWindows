@@ -1,5 +1,7 @@
 import { useEffect, useCallback, useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 
 type ModalSize = "sm" | "md" | "lg";
@@ -25,6 +27,34 @@ interface ModalProps {
   role?: "dialog";
   ariaLabelledby?: string;
   ariaModal?: boolean;
+  /**
+   * Opt-in canonical close button (A-1). When true, renders the standard
+   * absolutely-positioned close `<X>` (lifted from CertModal) wired to
+   * `onClose`. Default `false` so every un-migrated modal stays DOM-byte-stable
+   * until it opts in — the 9-modal adoption happens in plan 09-23, not here.
+   */
+  showCloseButton?: boolean;
+  /**
+   * Disable the canonical close button (09-23). Some modals must block the close
+   * `<X>` while an operation is in flight — e.g. UserConfigModal disables it
+   * during an SSH download (a half-finished config export must not be dismissable),
+   * UserModal disables it while submitting. Mirrors the hand-rolled buttons'
+   * `disabled` + `disabled:opacity-[var(--opacity-disabled)]` behaviour so the
+   * canonical button is a faithful drop-in for those surfaces. Default `false`.
+   */
+  closeButtonDisabled?: boolean;
+  /**
+   * Optional test id for the canonical close button (09-23). Lets a migrated
+   * modal keep a stable `data-testid` its existing suite queries (e.g. UserModal's
+   * `user-modal-close`) without re-querying by SVG/class. Default `undefined`.
+   */
+  closeButtonTestId?: string;
+  /**
+   * Optional header slot rendered above `children` (and above `title` when both
+   * are given). Lets a modal supply a richer header (icon + heading) while
+   * sharing the canonical close button. Undefined = nothing extra rendered.
+   */
+  header?: ReactNode;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -85,10 +115,21 @@ export function Modal({
   role,
   ariaLabelledby,
   ariaModal,
+  showCloseButton = false,
+  closeButtonDisabled = false,
+  closeButtonTestId,
+  header,
 }: ModalProps) {
+  const { t } = useTranslation();
   const isVisible = isOpen ?? open ?? false;
   const [mounted, setMounted] = useState(false);
   const [animating, setAnimating] = useState(false);
+  // Content box ref — the focus-trap boundary (A11Y-01 / A4). Tab/Shift+Tab
+  // cycling and initial-focus are scoped to this element's focusables.
+  const contentRef = useRef<HTMLDivElement>(null);
+  // The element that had focus before the modal opened. Focus is returned here
+  // on close so keyboard users land back on the trigger (focus-restore).
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isVisible) {
@@ -115,6 +156,70 @@ export function Modal({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isVisible, handleKeyDown]);
 
+  // Focus management (A11Y-01 / A4) — built inline (~30 lines) instead of
+  // adding focus-trap-react: single-layer modal, no nested-trap need, and we
+  // avoid a new supply-chain dependency for a VPN app (threat T-09-05).
+  //
+  // Split into two effects on PURPOSE:
+  //   • initial-focus is keyed on `mounted` so it runs once the content box is
+  //     actually in the DOM and its first focusable is queryable. Focus is
+  //     independent of the enter opacity animation, so running before
+  //     `animating` flips is fine.
+  //   • focus-restore is keyed on `isVisible` so focus returns to the trigger
+  //     the instant the modal is asked to close — NOT 200ms later when the
+  //     exit animation finishes and `mounted` flips false. (Keying restore on
+  //     `mounted` would leave focus orphaned on a fading-out dialog.)
+  //
+  // jsdom note: `.focus()` is supported in jsdom but `scrollIntoView` is not —
+  // we never call scrollIntoView here, and tests assert via document.activeElement.
+  useEffect(() => {
+    if (!mounted) return;
+    // Capture the element to return focus to (the trigger) before we steal focus.
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const box = contentRef.current;
+    const FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const first = box?.querySelector<HTMLElement>(FOCUSABLE);
+    // Fall back to the content box itself (tabIndex=-1) when there are no
+    // focusable children, so focus still enters the dialog.
+    (first ?? box)?.focus();
+  }, [mounted]);
+
+  useEffect(() => {
+    if (isVisible) return;
+    // Modal asked to close → return focus to the trigger immediately (don't
+    // wait for the 200ms exit animation). No-op on the initial closed render
+    // because restoreFocusRef is still null until a real open captured it.
+    restoreFocusRef.current?.focus();
+  }, [isVisible]);
+
+  // Tab focus-trap — wrap last→first and first→last so keyboard focus can never
+  // leave the dialog into the page behind it. Scoped to the content box.
+  const handleTrapTab = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const box = contentRef.current;
+    if (!box) return;
+    const FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusables = Array.from(box.querySelectorAll<HTMLElement>(FOCUSABLE));
+    if (focusables.length === 0) return;
+    const firstEl = focusables[0];
+    const lastEl = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey) {
+      if (active === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      }
+    } else {
+      if (active === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    }
+  }, []);
+
   if (!mounted) return null;
 
   // FIX-J: a naïve `onClick` backdrop-close fires when the mouseup happens on
@@ -131,6 +236,12 @@ export function Modal({
       onClose={onClose}
     >
       <div
+        ref={contentRef}
+        // tabIndex=-1 makes the box programmatically focusable so initial-focus
+        // can land here when the dialog has no focusable children (fallback);
+        // it stays out of the Tab sequence.
+        tabIndex={-1}
+        onKeyDown={handleTrapTab}
         className={cn(
           "w-full", sizeClasses[size], "mx-4",
           "bg-[var(--color-bg-surface)]",
@@ -141,6 +252,9 @@ export function Modal({
           "max-h-[calc(100vh-var(--space-8))] overflow-y-auto scroll-visible",
           "transition-all duration-200 ease-out",
           animating ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-2",
+          // `relative` only when the absolutely-positioned close button is on,
+          // so default-off modals keep their exact current class string.
+          showCloseButton && "relative",
           className,
         )}
         // a11y: opt-in dialog role + accessible name (Users H-06). Undefined for
@@ -152,6 +266,31 @@ export function Modal({
         // bubble to the backdrop even when the gesture is clean.
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Canonical close button (A-1) — lifted verbatim from CertModal's
+            hand-rolled markup so the 9-modal adoption (09-23) gets one source
+            of truth. Off by default → un-migrated modals render nothing here. */}
+        {showCloseButton && (
+          <button
+            type="button"
+            aria-label={t("buttons.close")}
+            onClick={onClose}
+            disabled={closeButtonDisabled}
+            data-testid={closeButtonTestId}
+            className={cn(
+              "absolute top-3 right-3 p-1 rounded",
+              "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+              "focus-visible:shadow-[var(--focus-ring)] outline-none",
+              "transition-colors",
+              // Mirror the hand-rolled buttons' disabled styling so modals that
+              // block close during an in-flight operation (UserConfigModal
+              // download, UserModal submit) keep their exact look (09-23).
+              "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]",
+            )}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+        {header}
         {title && (
           <h2
             className="text-lg font-semibold mb-[var(--space-4)]"

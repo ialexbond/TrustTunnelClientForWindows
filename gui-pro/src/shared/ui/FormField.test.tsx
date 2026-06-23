@@ -43,7 +43,7 @@ describe("FormField", () => {
 
   it("shows hint text when hint prop provided and no error", () => {
     render(
-      <FormField label="Field" hint="Enter your full name">
+      <FormField label="Field" helperText="Enter your full name">
         <input />
       </FormField>
     );
@@ -52,7 +52,7 @@ describe("FormField", () => {
 
   it("hides hint when error is present (error takes priority)", () => {
     render(
-      <FormField label="Field" hint="Hint text" error="Error text">
+      <FormField label="Field" helperText="Hint text" error="Error text">
         <input />
       </FormField>
     );

@@ -134,10 +134,11 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
   const [uninstalling, setUninstalling] = useState(false);
 
   // ── Phase 17.1 D-4.3 / Option B (researcher §Migration Plan) ──
-  // legacyMigrationNote стартует null. Устанавливается из event listener когда
-  // backend emit'ит step="cleanup_legacy" с непустым `message` (Wave 2 backend
-  // рендерит локализованный текст про обнаруженный старый MTProxy). НЕ
-  // расширяем MtProtoStatus — это event-based, чтобы не ломать frozen API.
+  // legacyMigrationNote starts as null. It is set from the event listener when
+  // the backend emits step="cleanup_legacy" with a non-empty `message` (the
+  // Wave 2 backend renders localized text about a detected legacy MTProxy). We
+  // do NOT extend MtProtoStatus — this is event-based, to avoid breaking the
+  // frozen API.
   const [legacyMigrationNote, setLegacyMigrationNote] = useState<string | null>(null);
 
   const confirm = useConfirm();
@@ -151,13 +152,18 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
     try {
       const s = await invoke<MtProtoStatus>("mtproto_get_status", { host, port, user, password, keyPath });
       setStatus(s);
-      // Persist to localStorage per MTPROTO-06
+      // Persist to localStorage per MTPROTO-06. Only a SUCCESSFUL probe is
+      // authoritative: if it reports not-installed, saveCache clears the cache.
       saveCache(host, s);
     } catch {
-      // Don't set error -- just means mtg not available, show not_installed
-      const notInstalled: MtProtoStatus = { installed: false, active: false, port: 0, secret: "", proxy_link: "" };
-      setStatus(notInstalled);
-      saveCache(host, notInstalled);
+      // E-13 (09-08): a transient SSH hiccup (channel failure, timeout) is
+      // indistinguishable from "telemt genuinely not installed". Previously the
+      // catch persisted `notInstalled` via saveCache → removeItem, nuking the
+      // cached proxy_link and showing «Не установлен» for an installed proxy.
+      // Fix: on error, do NOT touch the cache and do NOT overwrite the
+      // rehydrated status — keep the last-known cached state. Only the SUCCESS
+      // path above is allowed to clear the cache. We swallow the error (no
+      // red toast) because the cached link is still the user's best guess.
     } finally {
       setLoading(false);
     }
@@ -329,6 +335,9 @@ export function useMtProtoState(sshParams: SshParams, pushSuccess: PushSuccess) 
       title: t("server.service.mtproto.confirm_uninstall_title"),
       message: t("server.service.mtproto.confirm_uninstall_message"),
       variant: "warning",
+      // §K CONF-04 (09-08): action-verb confirm label so the dialog does not
+      // fall back to a generic «Подтвердить» on a destructive action.
+      confirmText: t("server.service.mtproto.confirm_uninstall_action"),
     });
     if (!ok) return;
     void doUninstall();

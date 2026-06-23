@@ -78,6 +78,16 @@ export function CIDRPicker({
   // Sync from external `value` changes only when the parent value didn't come
   // from our own onChange (e.g. parent reset CIDR to "" or loaded a new value).
   useEffect(() => {
+    // E-4 (Phase 9, Behavioral Cluster 6): notify the parent's Save gate from the
+    // external value source — restore AND initial mount — not just emit(). Before
+    // this, onError fired only inside emit() (user-driven octet/prefix changes); a
+    // restored invalid CIDR (e.g. "10.0.0.0/99") left the gate stale and Save stayed
+    // enabled on a visibly-invalid value. This runs before the self-echo guard so
+    // that the very first render (lastEmitted initialised to `value`) still reports
+    // the validation state; it is idempotent for the parent. Our own emit() already
+    // calls onError with the same value, so the self-echo case is a harmless no-op.
+    onError?.(value !== "" && !isValidCidr(value) ? "server.users.cidr_invalid" : "");
+
     if (value === lastEmitted.current) return;
     const parsed = parseCidr(value);
     if (parsed) {
@@ -88,6 +98,10 @@ export function CIDRPicker({
       setPrefix("");
     }
     lastEmitted.current = value;
+    // onError is intentionally omitted from deps: it is a parent callback that may
+    // be re-created each render, and we only want this effect to run on `value`
+    // changes (the external value source), not on every parent re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   const emit = useCallback(

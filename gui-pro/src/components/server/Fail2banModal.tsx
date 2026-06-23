@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Shield } from "lucide-react";
+import { Shield } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { TabsInline } from "../../shared/ui/TabsInline";
@@ -95,7 +95,6 @@ export function Fail2banModal({
   };
 
   const fail2banActive = state.status?.fail2ban.active ?? false;
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Find sshd jail (primary). Phase 16 Plan 04 wires только sshd.
   const sshdJail = state.status?.fail2ban.jails.find((j) => j.name === "sshd");
@@ -104,6 +103,8 @@ export function Fail2banModal({
   // P0-2 #K — track custom-mode dirty state из Fail2banSettingsTab.
   // Used для close-confirm dialog когда юзер закрывает Modal с unsaved edits.
   const [customDirty, setCustomDirty] = useState(false);
+  // Footer divider only shows when «Своя конфигурация» is selected (custom accordion open).
+  const [customActive, setCustomActive] = useState(false);
 
   const handleClose = async () => {
     if (customDirty) {
@@ -128,18 +129,16 @@ export function Fail2banModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: trigger reload only on isOpen flip; state.load identity changes on every render but we don't want recurring reloads
   }, [isOpen]);
 
-  // Auto-focus X button on open (Modal primitive does not trap focus).
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = setTimeout(() => closeButtonRef.current?.focus(), 250);
-    return () => clearTimeout(timer);
-  }, [isOpen]);
+  // T-03 — initial focus is now owned by the Modal primitive (09-05): on open it
+  // focuses the first focusable inside the content box (the canonical close
+  // button). The hand-rolled auto-focus effect + ref were removed in 09-23 when
+  // this modal adopted Modal's showCloseButton.
 
   const tabs = [
     {
       id: "settings",
       label: t("server.security.fail2ban.tabs.settings"),
-      content: <Fail2banSettingsTab state={state} jail={sshdJail} onDirtyChange={setCustomDirty} />,
+      content: <Fail2banSettingsTab state={state} jail={sshdJail} onDirtyChange={setCustomDirty} onCustomActiveChange={setCustomActive} />,
     },
     {
       id: "banned",
@@ -152,29 +151,25 @@ export function Fail2banModal({
 
   // T-03 — NEVER early return null. Modal owns mount/animating lifecycle.
   return (
-    <Modal isOpen={isOpen} onClose={() => void handleClose()} size="md" className="relative">
-      <button
-        ref={closeButtonRef}
-        type="button"
-        aria-label={t("buttons.close")}
-        onClick={() => void handleClose()}
-        className={cn(
-          "absolute top-3 right-3 p-1 rounded",
-          "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
-          "focus-visible:shadow-[var(--focus-ring)] outline-none",
-          "transition-colors",
-        )}
-      >
-        <X className="w-4 h-4" />
-      </button>
-
+    <Modal
+      isOpen={isOpen}
+      onClose={() => void handleClose()}
+      size="md"
+      showCloseButton
+      // a11y (review a11y-3): Modal applies an unconditional focus-trap, so the
+      // trapped container must be announced as a NAMED dialog (role + accessible
+      // name via aria-labelledby → the visible <h2>). Mirrors UserModal.
+      role="dialog"
+      ariaModal
+      ariaLabelledby="fail2ban-modal-title"
+    >
       <div className="flex items-center gap-2 mb-3">
         <Shield
           className="w-5 h-5"
           style={{ color: "var(--color-accent-interactive)" }}
           aria-hidden="true"
         />
-        <h2 className="text-title">
+        <h2 id="fail2ban-modal-title" className="text-title">
           {t("server.security.fail2ban.modal_title")}
         </h2>
       </div>
@@ -207,7 +202,12 @@ export function Fail2banModal({
               - Удалить (apt-get remove — полное удаление пакета).
               Разные impact'ы → разные buttons. */}
           <div
-            className="mt-4 pt-4 border-t flex items-center justify-end gap-2 flex-wrap"
+            className={cn(
+              "mt-4 pt-4 flex items-center justify-end gap-2 flex-wrap",
+              // Divider only when the custom-config accordion is open (no stray line over
+              // the bordered preset cards). UAT 2026-06-22 (owner).
+              customActive && "border-t",
+            )}
             style={{ borderColor: "var(--color-border)" }}
             data-testid="fail2ban-danger-zone"
           >

@@ -90,45 +90,69 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
     for (let i = seenCount.current; i < newCount; i++) {
       const { text, type } = normalize(messages[i]);
 
-      // Task 1b: When a success message arrives, dismiss all existing error snackbars
-      if (type === "success") {
-        setItems(prev => {
-          const updated = prev.map(s =>
-            s.type === "error" && s.phase !== "exit" ? { ...s, phase: "exit" as const } : s,
+      // Helper: schedule the deferred removal of an item that has just been
+      // flagged exit, mirroring the dismiss() teardown (clear its dismiss timer,
+      // then drop it from the list after the 400ms exit animation).
+      const scheduleRemoval = (idToRemove: number) => {
+        const timer = timersRef.current.get(idToRemove);
+        if (timer) {
+          clearTimeout(timer);
+          timersRef.current.delete(idToRemove);
+        }
+        setTimeout(() => {
+          setItems(p => p.filter(x => x.id !== idToRemove));
+        }, 400);
+      };
+
+      // Pre-allocate the id for a potential NEW item. We may not use it if the
+      // message turns out to be a duplicate (decided inside the updater below),
+      // but we need it captured for the enter->visible / dismiss schedules.
+      const id = ++_nextId;
+      // Did the updater decide this was a duplicate of a still-visible item?
+      // Read back synchronously after setItems so we know whether to schedule
+      // the enter/dismiss timers for `id` or just reset the existing one.
+      let duplicateOfId: number | null = null;
+
+      // UAT-F08: a single setItems updater owns BOTH replace-not-stack and
+      // dedup so the decision reads `prev` (never the stale `items` closure,
+      // which lagged across the for-loop and could mis-dedup a batch).
+      setItems(prev => {
+        // Dedup (F08 part 4): identical text+type still showing → no new item;
+        // the caller resets that item's dismiss timer instead.
+        const dup = prev.find(
+          s => s.text === text && s.type === type && s.phase !== "exit",
+        );
+        if (dup) {
+          duplicateOfId = dup.id;
+          return prev;
+        }
+
+        // Replace-not-stack (F08 part 3): a NEW success replaces the current
+        // visible snackbar — mark every still-visible non-exit item as exit so
+        // at most one snackbar is on screen. (Errors arriving keep their own
+        // path below; here success supersedes both prior successes and errors,
+        // preserving the original "success dismisses errors" behavior.)
+        let next = prev;
+        if (type === "success") {
+          next = prev.map(s =>
+            s.phase !== "exit" ? { ...s, phase: "exit" as const } : s,
           );
-          // Schedule removal of exiting errors
-          updated.forEach(s => {
-            if (s.type === "error" && s.phase === "exit") {
-              const timer = timersRef.current.get(s.id);
-              if (timer) {
-                clearTimeout(timer);
-                timersRef.current.delete(s.id);
-              }
-              setTimeout(() => {
-                setItems(p => p.filter(x => x.id !== s.id));
-              }, 400);
-            }
+          next.forEach(s => {
+            if (s.phase === "exit") scheduleRemoval(s.id);
           });
-          return updated;
-        });
-      }
+        }
 
-      // Check for duplicate that is still visible
-      const existing = items.find(
-        (s) => s.text === text && s.type === type && s.phase !== "exit",
-      );
+        return [...next, { id, text, type, phase: "enter" }];
+      });
 
-      if (existing) {
-        // Reset timer for duplicate
-        scheduleDismiss(existing.id, type === "error" ? 5000 : undefined);
+      if (duplicateOfId !== null) {
+        // Duplicate: just reset the dismiss timer (keep prior behavior) and do
+        // not append. _nextId was bumped but the unused id is harmless.
+        scheduleDismiss(duplicateOfId, type === "error" ? 5000 : undefined);
         onShown();
         seenCount.current = i + 1;
         continue;
       }
-
-      const id = ++_nextId;
-
-      setItems(prev => [...prev, { id, text, type, phase: "enter" }]);
 
       // Enter -> visible
       setTimeout(() => {
@@ -144,7 +168,10 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
     }
 
     seenCount.current = newCount;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // No exhaustive-deps suppression needed any more: the dedup/replace
+    // decision now reads `prev` inside the setItems updater (UAT-F08), so the
+    // effect no longer closes over the stale `items` state — every referenced
+    // value (messages, duration, onShown, scheduleDismiss) is in the dep array.
   }, [messages, duration, onShown, scheduleDismiss]);
 
   // Reset counter when parent clears the queue
@@ -167,7 +194,10 @@ export function SnackBar({ messages, onShown, duration = 3000 }: SnackBarProps) 
 
   return (
     <div
-      className="fixed bottom-4 left-1/2 flex flex-col-reverse items-center gap-2 pointer-events-none"
+      // UAT-F08 (position): the snackbar must sit ABOVE the bottom TabNavigation
+      // (~64px tall) so it never overlaps the tab buttons. bottom-[80px] clears
+      // the bar with a small gap (was bottom-4, which sat on top of the tabs).
+      className="fixed bottom-[80px] left-1/2 flex flex-col-reverse items-center gap-2 pointer-events-none"
       style={{
         zIndex: "var(--z-snackbar)",
         transform: "translateX(-50%)",

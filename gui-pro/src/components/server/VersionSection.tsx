@@ -1,18 +1,12 @@
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  ArrowUpCircle,
-  Download,
-  ChevronDown,
-  Check,
-} from "lucide-react";
+import { ArrowUpCircle, Download } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
+import { Select } from "../../shared/ui/Select";
 import { useConfirm } from "../../shared/ui/useConfirm";
-import { useDropdownPortal } from "../../shared/hooks/useDropdownPortal";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 
@@ -48,7 +42,6 @@ export function VersionSection({ state }: Props) {
     setSelectedVersion,
   } = state;
 
-  const dropdown = useDropdownPortal();
   const confirm = useConfirm();
   const [upgradeLoading, setUpgradeLoading] = useState(false);
 
@@ -59,15 +52,18 @@ export function VersionSection({ state }: Props) {
 
   const currentClean = stripV(serverInfo.version || "");
   const selectedClean = stripV(selectedVersion || "");
-  const canInstall = selectedClean && selectedClean !== currentClean;
+  // E-7: Install must only be offered for a REAL version present in the picker
+  // and different from the installed one. A literal "unknown"/empty selection
+  // must never reach the install command (`server_upgrade`). Guard on the
+  // resolved tag being one of the filtered options.
+  const isRealSelection =
+    !!selectedClean &&
+    selectedClean !== "unknown" &&
+    filteredVersions.some((v) => stripV(v) === selectedClean);
+  const canInstall = isRealSelection && selectedClean !== currentClean;
   const isDowngrade = canInstall && !semverGte(selectedClean, currentClean);
   const latestClean = filteredVersions.length > 0 ? stripV(filteredVersions[0]) : "";
   const hasUpdate = latestClean && latestClean !== currentClean;
-
-  const getDisplayLabel = () => {
-    if (!selectedVersion) return t("server.version.latest");
-    return `v${stripV(selectedVersion)}`;
-  };
 
   const handleUpgrade = async () => {
     const ok = await confirm({
@@ -79,7 +75,14 @@ export function VersionSection({ state }: Props) {
         { version: `v${selectedClean}` },
       ),
       variant: isDowngrade ? "danger" : "warning",
-      confirmText: t("buttons.confirm"),
+      // §K CTA-03: action-verb confirm label instead of the generic
+      // «Подтвердить» — «Установить» (or «Установить старую версию» on a
+      // downgrade) so the confirm button states the action it performs.
+      confirmText: t(
+        isDowngrade
+          ? "server.version.confirm_install_downgrade"
+          : "server.version.confirm_install",
+      ),
       cancelText: t("buttons.cancel"),
     });
     if (!ok) return;
@@ -126,75 +129,24 @@ export function VersionSection({ state }: Props) {
         )}
       </div>
 
-      {/* Custom dropdown + install button */}
+      {/* A-1/CC-6: version picker is the shared Select (full keyboard nav +
+       * combobox/listbox ARIA + tokens) — replaces the prior hand-rolled
+       * dropdown (fake hover, no keyboard nav, no combobox role). The Select's
+       * check marks the SELECTED option; the installed version is shown by the
+       * separate "current version" badge above. Options carry the raw tag as
+       * value so setSelectedVersion keeps the `v…` form the install flow uses. */}
       {filteredVersions.length > 0 && (
         <div className="flex gap-2 items-center">
-          <div className="relative" ref={dropdown.containerRef} style={{ width: "240px" }}>
-            {/* Trigger button */}
-            <button
-              ref={dropdown.triggerRef}
-              onClick={dropdown.toggle}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs cursor-pointer transition-all outline-none focus-visible:shadow-[var(--focus-ring)]"
-              style={{
-                backgroundColor: "var(--color-bg-elevated)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text-primary)",
-                height: "34px",
-              }}
-            >
-              <span className="truncate">{getDisplayLabel()}</span>
-              <ChevronDown
-                className="w-3.5 h-3.5 shrink-0 transition-transform duration-200"
-                style={{
-                  color: "var(--color-text-muted)",
-                  transform: dropdown.open ? "rotate(180deg)" : "rotate(0deg)",
-                }}
-              />
-            </button>
-
-            {/* Dropdown menu — portal so it renders under sidebar */}
-            {dropdown.open && createPortal(
-              <div
-                ref={dropdown.portalRef}
-                style={{
-                  ...dropdown.style,
-                  backgroundColor: "var(--color-bg-elevated)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "var(--radius-lg)",
-                  boxShadow: "var(--shadow-lg)",
-                  overflow: "hidden",
-                }}
-              >
-                <div className="max-h-52 overflow-y-auto" style={{ padding: "4px" }}>
-                  {filteredVersions.map((v) => {
-                    const vClean = stripV(v);
-                    const isSelected = v === selectedVersion;
-                    const isCurrent = vClean === currentClean;
-                    return (
-                      <button
-                        key={v}
-                        onClick={() => { setSelectedVersion(v); dropdown.close(); }}
-                        className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs transition-colors rounded-[var(--radius-md)]"
-                        style={{
-                          backgroundColor: isSelected ? "var(--color-accent-tint-10)" : "transparent",
-                          color: isSelected ? "var(--color-accent-500)" : "var(--color-text-primary)",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isSelected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--color-bg-hover)";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isSelected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
-                        }}
-                      >
-                        <span>v{vClean}</span>
-                        {isCurrent && <Check className="w-3 h-3 shrink-0" style={{ color: "var(--color-success-500)" }} />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>,
-              document.body
-            )}
+          <div style={{ width: "240px" }}>
+            <Select
+              value={selectedVersion || ""}
+              onChange={(e) => setSelectedVersion(e.target.value)}
+              placeholder={t("server.version.latest")}
+              options={filteredVersions.map((v) => ({
+                value: v,
+                label: `v${stripV(v)}`,
+              }))}
+            />
           </div>
 
           {canInstall && (

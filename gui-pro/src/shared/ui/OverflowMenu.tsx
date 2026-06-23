@@ -219,7 +219,7 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
             "hover:bg-[var(--color-bg-hover)]",
             "focus-visible:shadow-[var(--focus-ring)] outline-none",
             "transition-colors",
-            item.disabled && "opacity-50 cursor-not-allowed",
+            item.disabled && "opacity-[var(--opacity-disabled)] cursor-not-allowed",
           )}
           style={
             item.destructive

@@ -103,17 +103,35 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
   // of the chain `[state.status?.proxy_link, ...]`.
   const proxyLink = state.status?.proxy_link;
 
-  const handleInstall = useCallback(async () => {
+  // E-14 (09-08): shared port-range guard. Returns the validated port number,
+  // or null after setting portError. Both the install path AND the retry path
+  // MUST go through this — previously retry called
+  // state.retry(parseInt(portInput,10) || 0), which sent port 0 on an empty
+  // field, bypassing this validation.
+  const validatePort = useCallback((): number | null => {
     const parsed = parseInt(portInput, 10);
     if (isNaN(parsed) || parsed < 1024 || parsed > 65535) {
       setPortError(t("server.service.mtproto.port_validation_error"));
-      return;
+      return null;
     }
     setPortError(null);
+    return parsed;
+  }, [portInput, t]);
+
+  const handleInstall = useCallback(async () => {
+    const parsed = validatePort();
+    if (parsed === null) return;
     // D-29: log only metadata (host + port number) — NEVER password or secret
     log("STATE", `mtproto.install.start host=${sshParams.host} port=${parsed}`);
     await state.install(parsed);
-  }, [portInput, sshParams.host, state, log, t]);
+  }, [validatePort, sshParams.host, state, log]);
+
+  const handleRetry = useCallback(() => {
+    // E-14: validate before retrying — never pass parseInt(...) || 0.
+    const parsed = validatePort();
+    if (parsed === null) return;
+    void state.retry(parsed);
+  }, [validatePort, state]);
 
   const handleUninstall = useCallback(async () => {
     // D-29: log only metadata — NEVER password
@@ -137,8 +155,9 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
 
   // T-03: NEVER `if (!isOpen) return null` — Modal primitive owns 200ms exit animation
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md">
-      {/* Header */}
+    <Modal isOpen={isOpen} onClose={onClose} size="md" showCloseButton>
+      {/* Header — the corner × now comes from Modal (showCloseButton, 09-25);
+          this row keeps only the icon + title above the content. */}
       <div className="flex items-center gap-2 mb-4">
         <Send
           className="w-5 h-5 shrink-0"
@@ -160,7 +179,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
           процессе установки, и сразу после её завершения. */}
       {state.legacyMigrationNote && (
         <ErrorBanner
-          severity="info"
+          variant="info"
           message={state.legacyMigrationNote}
           className="mb-3"
           data-testid="mtproto-legacy-banner"
@@ -352,12 +371,18 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
         </div>
       )}
 
-      {/* Footer — Phase 17.1 post-UAT 2026-05-21:
-          - installed (configured view): 3 кнопки в одну строку на всю ширину
-            (Удалить | Start/Stop | Закрыть) — user-requested order 2026-05-21
-          - !installed: Install/Retry + Close (или Cancel пока installing) */}
+      {/* Footer — modal-footer standard (09-25, owner §6):
+          - installed (configured view): content-width, right-aligned. The
+            corner × replaces the old labeled «Закрыть» (F18). Left→right:
+            [Удалить (danger-outline)] then the primary slot [Stop/Start].
+            «Остановить» = solid danger (red), «Запустить» = solid primary
+            (teal) — both real actions, sharing one slot (owner §6.4).
+          - !installed: Install/Retry primary on the right; the corner × is the
+            close affordance (the idle «Закрыть» ghost was dropped). The
+            cancel-install danger-outline stays while installing — a real
+            action, not a redundant close. */}
       {installed ? (
-        <div className="grid grid-cols-3 gap-2 mt-4">
+        <div className="flex justify-end gap-2 mt-4">
           <Button
             variant="danger-outline"
             size="sm"
@@ -365,20 +390,18 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
             loading={state.uninstalling}
             disabled={state.uninstalling || state.toggling}
             onClick={() => void handleUninstall()}
-            className="w-full"
           >
             {t("server.service.mtproto.uninstall")}
           </Button>
           {state.status?.active ? (
             <Button
-              variant="secondary"
+              variant="danger"
               size="sm"
               icon={<Square className="w-3.5 h-3.5" />}
               loading={state.toggling}
               disabled={state.toggling || state.uninstalling}
               onClick={() => void state.stop()}
               data-testid="mtproto-stop-button"
-              className="w-full"
             >
               {t("server.service.mtproto.stop")}
             </Button>
@@ -391,19 +414,10 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               disabled={state.toggling || state.uninstalling}
               onClick={() => void state.start()}
               data-testid="mtproto-start-button"
-              className="w-full"
             >
               {t("server.service.mtproto.start")}
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="w-full"
-          >
-            {t("buttons.close")}
-          </Button>
         </div>
       ) : (
         <div className="flex justify-end gap-2 mt-4">
@@ -413,7 +427,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               size="sm"
               onClick={() => {
                 if (state.error) {
-                  void state.retry(parseInt(portInput, 10) || 0);
+                  handleRetry();
                 } else {
                   void handleInstall();
                 }
@@ -425,7 +439,7 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                 : t("server.service.mtproto.install")}
             </Button>
           )}
-          {state.installing ? (
+          {state.installing && (
             <Button
               variant="danger-outline"
               size="sm"
@@ -440,10 +454,6 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
               {cancelling
                 ? t("server.service.mtproto.cancelling")
                 : t("server.service.mtproto.cancel_install")}
-            </Button>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              {t("buttons.close")}
             </Button>
           )}
         </div>

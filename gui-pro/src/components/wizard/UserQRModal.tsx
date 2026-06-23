@@ -1,4 +1,4 @@
-import { Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../../shared/ui/Modal";
@@ -14,8 +14,8 @@ export function UserQRModal({ qrUser, qrLink, qrLoading, onClose }: UserQRModalP
   const { t } = useTranslation();
 
   return (
-    <Modal isOpen={!!qrUser} onClose={onClose} closeOnBackdrop>
-      <div className="max-w-xs w-full mx-4 p-6 rounded-2xl shadow-2xl text-center bg-[var(--color-bg-elevated)]">
+    <Modal isOpen={!!qrUser} onClose={onClose} closeOnBackdrop size="sm" showCloseButton>
+      <div className="text-center">
         {qrLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-500)]" />
@@ -31,9 +31,6 @@ export function UserQRModal({ qrUser, qrLink, qrLoading, onClose }: UserQRModalP
             <p className="text-xs text-[var(--color-text-muted)]">{t("server.export.scan_qr")}</p>
           </>
         ) : null}
-        <button onClick={onClose} className="absolute top-3 right-3 p-1 rounded-full transition-opacity hover:opacity-70 text-[var(--color-text-muted)]">
-          <X className="w-4 h-4" />
-        </button>
       </div>
     </Modal>
   );

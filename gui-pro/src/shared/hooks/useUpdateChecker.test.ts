@@ -43,6 +43,7 @@ const SIDECAR_INFO_AVAILABLE = {
 describe("useUpdateChecker", () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     vi.clearAllMocks();
     // Default app version stub — может перезаписываться в отдельных тестах
     vi.mocked(getVersion).mockResolvedValue("3.0.0");
@@ -139,10 +140,10 @@ describe("useUpdateChecker", () => {
     expect(result.current.updateInfo.sidecarChecking).toBe(false);
   });
 
-  // ─── Per-version dismissal (REQ-18-UPDATE-FLOW-02) ───
+  // ─── Per-session dismissal (UAT-2, owner 6.8 — per-launch nudge) ───
 
-  it("sidecarDismissed=true когда tt_dismissed_update_<version> существует", async () => {
-    localStorage.setItem("tt_dismissed_update_1.0.33", "true");
+  it("sidecarDismissed=true когда tt_dismissed_update_<version> существует в sessionStorage", async () => {
+    sessionStorage.setItem("tt_dismissed_update_1.0.33", "true");
     vi.mocked(invoke).mockResolvedValueOnce(SIDECAR_INFO_AVAILABLE);
 
     const { result } = renderHook(() => useUpdateChecker());
@@ -156,7 +157,7 @@ describe("useUpdateChecker", () => {
 
   it("новая версия (1.0.34) → sidecarDismissed=false (per-version scope, REQ-18-UPDATE-FLOW-02)", async () => {
     // Пользователь dismissed v1.0.33; сервер обновился до v1.0.34
-    localStorage.setItem("tt_dismissed_update_1.0.33", "true");
+    sessionStorage.setItem("tt_dismissed_update_1.0.33", "true");
     vi.mocked(invoke).mockResolvedValueOnce({
       ...SIDECAR_INFO_AVAILABLE,
       latest_version: "1.0.34",
@@ -173,7 +174,38 @@ describe("useUpdateChecker", () => {
     expect(result.current.updateInfo.sidecarDismissed).toBe(false);
   });
 
-  it("dismissSidecarUpdate(version) пишет localStorage + flips state", async () => {
+  it("fresh session (no flag) → sidecarDismissed=false пока update доступен (UAT-2 per-launch nudge)", async () => {
+    // UAT-2 / owner 6.8: dismiss-флаг живёт в sessionStorage, поэтому новый
+    // запуск приложения (свежая сессия, флага нет) снова показывает точку,
+    // даже если update тот же. Свежая сессия = пустой sessionStorage.
+    vi.mocked(invoke).mockResolvedValueOnce(SIDECAR_INFO_AVAILABLE);
+
+    const { result } = renderHook(() => useUpdateChecker());
+    await act(async () => {
+      await result.current.checkSidecarForServer(SSH_PARAMS);
+    });
+
+    expect(result.current.updateInfo.sidecarAvailable).toBe(true);
+    expect(result.current.updateInfo.sidecarDismissed).toBe(false);
+  });
+
+  it("стейл localStorage-флаг прошлой версии НЕ глушит точку (только sessionStorage учитывается, UAT-2)", async () => {
+    // Регрессия: до UAT-2 dismiss писался в localStorage (постоянно). После
+    // перехода на sessionStorage старый постоянный флаг в localStorage не
+    // должен подавлять точку — читаем ТОЛЬКО sessionStorage.
+    localStorage.setItem("tt_dismissed_update_1.0.33", "true");
+    vi.mocked(invoke).mockResolvedValueOnce(SIDECAR_INFO_AVAILABLE);
+
+    const { result } = renderHook(() => useUpdateChecker());
+    await act(async () => {
+      await result.current.checkSidecarForServer(SSH_PARAMS);
+    });
+
+    expect(result.current.updateInfo.sidecarAvailable).toBe(true);
+    expect(result.current.updateInfo.sidecarDismissed).toBe(false);
+  });
+
+  it("dismissSidecarUpdate(version) пишет sessionStorage (не localStorage) + flips state", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(SIDECAR_INFO_AVAILABLE);
     const { result } = renderHook(() => useUpdateChecker());
 
@@ -186,7 +218,9 @@ describe("useUpdateChecker", () => {
       result.current.dismissSidecarUpdate("1.0.33");
     });
 
-    expect(localStorage.getItem("tt_dismissed_update_1.0.33")).toBe("true");
+    // Per-launch scope: флаг в sessionStorage, НЕ в localStorage (UAT-2 / 6.8)
+    expect(sessionStorage.getItem("tt_dismissed_update_1.0.33")).toBe("true");
+    expect(localStorage.getItem("tt_dismissed_update_1.0.33")).toBeNull();
     expect(result.current.updateInfo.sidecarDismissed).toBe(true);
   });
 

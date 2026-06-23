@@ -107,10 +107,18 @@ vi.mock("./useSidecarVersions", () => ({
 // asserted. The stub does NOT replace the update DETECTION logic — that lives in
 // ServiceTabSection itself (driven by useSidecarVersions, mocked above).
 let capturedOnApplied: (() => void) | undefined;
+let capturedLatestVersion: string | undefined;
+let capturedSidecarAvailable: boolean | undefined;
 
 vi.mock("./ProtocolUpdateSection", () => ({
-  ProtocolUpdateSection: (props: { onSidecarUpdateApplied?: () => void }) => {
+  ProtocolUpdateSection: (props: {
+    onSidecarUpdateApplied?: () => void;
+    latestVersion?: string;
+    sidecarAvailable?: boolean;
+  }) => {
     capturedOnApplied = props.onSidecarUpdateApplied;
+    capturedLatestVersion = props.latestVersion;
+    capturedSidecarAvailable = props.sidecarAvailable;
     return <div data-testid="protocol-update-card">ProtocolUpdateSection(stub)</div>;
   },
 }));
@@ -157,6 +165,8 @@ describe("ServiceTabSection", () => {
     vi.clearAllMocks();
     void i18n.changeLanguage("ru");
     capturedOnApplied = undefined;
+    capturedLatestVersion = undefined;
+    capturedSidecarAvailable = undefined;
     // Restore sane defaults after clearAllMocks wiped the implementations.
     mockedUseBbrState.mockImplementation(() => bbr());
     mockedUseSidecarVersions.mockImplementation(() => sidecar([]));
@@ -249,14 +259,30 @@ describe("ServiceTabSection", () => {
     expect(bbrToggle).not.toBeNull();
   });
 
-  it("bbr_loading_shows_spinner_not_toggle — while detecting, no switch is rendered", () => {
-    mockedUseBbrState.mockImplementation(() => bbr({ loading: true }));
-    render(<ServiceTabSection state={makeState()} />);
+  it("bbr_loading_keeps_switch_mounted_with_aria_busy — no Loader2/Toggle swap, no flicker (B-2.5/A-1)", () => {
+    // B-2.5/A-1: the loading transition must NOT unmount the switch. The shared
+    // Toggle now renders the spinner INSIDE the thumb (loading prop), so the
+    // role="switch" stays in the DOM across loading=false→true (kills the
+    // position jump the old Loader2/Toggle swap produced). aria-busy=true marks
+    // the in-flight apply for assistive tech.
+    const name = i18n.t("server.service.bbr.label");
 
-    const bbrCard = document.querySelector('[data-testid="bbr-card"]');
-    expect(bbrCard).not.toBeNull();
-    // Loading → Loader2 spinner instead of the Toggle switch.
-    expect(bbrCard?.querySelector('[role="switch"]')).toBeNull();
+    const view = render(
+      <ServiceTabSection state={makeState()} />,
+    );
+    // Resting state: the switch is mounted and not busy.
+    const restingSwitch = screen.getByRole("switch", { name });
+    expect(restingSwitch).not.toBeNull();
+    expect(restingSwitch.getAttribute("aria-busy")).toBeNull();
+
+    // Flip to loading and re-render the SAME tree — the switch must persist
+    // (same role queryable before/after), now reporting aria-busy.
+    mockedUseBbrState.mockImplementation(() => bbr({ loading: true }));
+    view.rerender(<ServiceTabSection state={makeState()} />);
+
+    const loadingSwitch = screen.getByRole("switch", { name });
+    expect(loadingSwitch).not.toBeNull();
+    expect(loadingSwitch.getAttribute("aria-busy")).toBe("true");
     // Detecting caption is shown instead of the static description.
     expect(screen.getByText(i18n.t("server.service.bbr.detecting"))).toBeInTheDocument();
   });
@@ -286,8 +312,50 @@ describe("ServiceTabSection", () => {
     expect(toggleSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("onSidecarUpdateSeen_fires_when_update_available — newer GitHub release than installed version", async () => {
-    // Installed 1.0.20, GitHub latest 1.0.34 → computedSidecarAvailable=true → signal fires.
+  it("latest_derives_by_semver_max_not_publish_order — older release first still yields the semver-max (E-17)", () => {
+    // E-17: the GitHub releases feed is ordered by PUBLISH time, not semver.
+    // Here [0] (1.0.30) is an OLDER version than [1] (1.0.34) — the old
+    // `githubReleases[0]?.version` would wrongly pick 1.0.30. With latestSemver
+    // the derived "latest" is the semver-max (1.0.34), so the ProtocolUpdate
+    // card receives 1.0.34 as latestVersion and the update is detected.
+    mockedUseSidecarVersions.mockImplementation(() =>
+      sidecar([release("1.0.30"), release("1.0.34"), release("1.0.33")]),
+    );
+
+    render(
+      <ServiceTabSection
+        state={makeState({ serverInfo: { version: "1.0.20" } as never })}
+      />,
+    );
+
+    // The stub captured the latestVersion forwarded to ProtocolUpdateSection.
+    expect(capturedLatestVersion).toBe("1.0.34");
+    // …and an update is available (installed 1.0.20 < semver-max 1.0.34).
+    expect(capturedSidecarAvailable).toBe(true);
+  });
+
+  it("no_update_when_installed_is_semver_max — installed === highest release (E-17)", () => {
+    // Installed 1.0.34 equals the semver-max of the (publish-ordered) feed →
+    // no update available, even though [0] is the older 1.0.30.
+    mockedUseSidecarVersions.mockImplementation(() =>
+      sidecar([release("1.0.30"), release("1.0.34"), release("1.0.33")]),
+    );
+
+    render(
+      <ServiceTabSection
+        state={makeState({ serverInfo: { version: "1.0.34" } as never })}
+      />,
+    );
+
+    expect(capturedLatestVersion).toBe("1.0.34");
+    expect(capturedSidecarAvailable).toBe(false);
+  });
+
+  it("mounting_does_not_fire_onSidecarUpdateSeen — E-15 mount-effect removed (dismissal moved to ServerTabs in 09-13)", async () => {
+    // E-15: the one-shot mount-effect that fired onSidecarUpdateSeen is gone.
+    // Dismissal of the «Панель управления» dot is now ServerTabs' visit-keyed
+    // effect (Plan 09-13). Even with an update available and the prop supplied,
+    // mounting ServiceTabSection must NOT call it.
     mockedUseSidecarVersions.mockImplementation(() =>
       sidecar([release("1.0.34"), release("1.0.33")]),
     );
@@ -300,24 +368,7 @@ describe("ServiceTabSection", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(onSeen).toHaveBeenCalled();
-    });
-  });
-
-  it("onSidecarUpdateSeen_does_not_fire_when_up_to_date — installed === latest", async () => {
-    // Installed equals latest GitHub release → no update available → no signal.
-    mockedUseSidecarVersions.mockImplementation(() => sidecar([release("1.0.20")]));
-    const onSeen = vi.fn();
-
-    render(
-      <ServiceTabSection
-        state={makeState({ serverInfo: { version: "1.0.20" } as never })}
-        onSidecarUpdateSeen={onSeen}
-      />,
-    );
-
-    // Flush effects, then assert the signal never fired.
+    // Flush effects, then assert the signal never fired on mount.
     await act(async () => {
       await Promise.resolve();
     });

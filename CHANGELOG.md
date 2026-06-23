@@ -1,5 +1,10 @@
 # CHANGELOG
 
+> **Scope:** this is the changelog of the **C++ VPN-core** (the prebuilt `trusttunnel_client` sidecar /
+> VPN library — versions `0.9x` / `1.0.x`), **not** the GUI app. It tracks the tunnelling core's API,
+> protocol and bug-fix history. The GUI desktop app (Pro / Light) is versioned separately and its
+> user-facing release notes live with the app, not here.
+
 ## 1.0.49
 
 - [Fix] Protect service socket for DNS query forwarding with securely generated password #62

@@ -29,13 +29,34 @@ import { listen } from "@tauri-apps/api/event";
 import { useSidecarUpdateCascade } from "./useSidecarUpdateCascade";
 import { type SshCredentials } from "./SshConnectForm";
 
-// Pin latestFromGitHubCP = "1.0.33" deterministically (mirrors the orchestrator test).
+// Pin the GitHub releases list so the cascade derives latest = "1.0.33".
+//
+// E-17 (Plan 09-13): the list is deliberately OUT OF PUBLISH ORDER — [0] is the
+// OLDER "1.0.30" while the real semver-max "1.0.33" sits mid-list. This proves
+// the cascade picks latest via `latestSemver` (semver-max), NOT `versions[0]`
+// (GitHub publish order). With the old `githubReleasesCP?.[0]?.version` logic
+// latestFromGitHubCP would be "1.0.30" and the downgrade assertions below would
+// flip — so this list is a fails-before-fix guard for E-17.
 vi.mock("./useSidecarVersions", () => ({
   useSidecarVersions: () => ({
     versions: [
       {
+        version: "1.0.30",
+        tag: "v1.0.30",
+        assetDownloadUrl: "",
+        assetSizeBytes: 0,
+        publishedAt: "",
+      },
+      {
         version: "1.0.33",
         tag: "v1.0.33",
+        assetDownloadUrl: "",
+        assetSizeBytes: 0,
+        publishedAt: "",
+      },
+      {
+        version: "1.0.31",
+        tag: "v1.0.31",
         assetDownloadUrl: "",
         assetSizeBytes: 0,
         publishedAt: "",
@@ -68,6 +89,7 @@ describe("useSidecarUpdateCascade", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
     vi.mocked(listen).mockResolvedValue(() => {});
   });
 
@@ -125,6 +147,55 @@ describe("useSidecarUpdateCascade", () => {
 
     act(() => result.current.handleSidecarUpdateSeen());
     expect(mockDismissSidecarUpdate).toHaveBeenCalledWith("1.0.33");
+  });
+
+  it("UAT-2: localDismissed reads sessionStorage — a session flag hides the dot, a stale localStorage flag does not", () => {
+    // Stale flag from the old permanent (localStorage) scope must NOT suppress
+    // the dot — per-launch nudge means only sessionStorage gates visibility.
+    localStorage.setItem("tt_dismissed_update_1.0.33", "true");
+    const stale = renderHook(() => useSidecarUpdateCascade({ creds: CREDS }));
+    act(() => stale.result.current.setServerInfoVersion("1.0.31"));
+    expect(stale.result.current.sidecarUpdateVisible).toBe(true);
+    stale.unmount();
+
+    // A session-scoped flag for the visible version hides the dot within the
+    // session (visit-dismiss timing unchanged).
+    sessionStorage.setItem("tt_dismissed_update_1.0.33", "true");
+    const dismissed = renderHook(() => useSidecarUpdateCascade({ creds: CREDS }));
+    act(() => dismissed.result.current.setServerInfoVersion("1.0.31"));
+    expect(dismissed.result.current.localSidecarAvailable).toBe(true);
+    expect(dismissed.result.current.sidecarUpdateVisible).toBe(false);
+  });
+
+  it("E-17: derives latest by semver-max (latestFromGitHubCP), not GitHub publish order [0]", () => {
+    const { result } = renderHook(() => useSidecarUpdateCascade({ creds: CREDS }));
+
+    // The mocked list is ["1.0.30","1.0.33","1.0.31"] — [0] is the OLDER 1.0.30.
+    // latestFromGitHubCP must be the semver-max 1.0.33, NOT versions[0].
+    expect(result.current.latestFromGitHubCP).toBe("1.0.33");
+
+    // A server on 1.0.32 (newer than [0]=1.0.30 but older than max 1.0.33) must
+    // still show an update — this only holds when latest is the semver-max.
+    act(() => result.current.setServerInfoVersion("1.0.32"));
+    expect(result.current.localSidecarAvailable).toBe(true);
+  });
+
+  it("E-10: resets serverInfoVersion and clears availability when creds become null (disconnect / host-switch)", () => {
+    const { result, rerender } = renderHook(
+      ({ creds }: { creds: SshCredentials | null }) =>
+        useSidecarUpdateCascade({ creds }),
+      { initialProps: { creds: CREDS as SshCredentials | null } },
+    );
+
+    // Connected with an older server version → an update is available.
+    act(() => result.current.setServerInfoVersion("1.0.31"));
+    expect(result.current.localSidecarAvailable).toBe(true);
+
+    // Disconnect (creds → null): the cascade must reset serverInfoVersion so the
+    // dot does not stay lit for a server the user has left.
+    rerender({ creds: null });
+    expect(result.current.serverInfoVersion).toBe("");
+    expect(result.current.localSidecarAvailable).toBe(false);
   });
 
   it("checkSidecarForServer fires Stage-2 refresh when creds become available", async () => {

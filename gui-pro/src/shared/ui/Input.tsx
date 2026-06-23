@@ -1,4 +1,4 @@
-import React, { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
+import React, { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -26,11 +26,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       className,
       value,
       onChange,
+      id,
       ...rest
     },
     ref
   ) => {
     const inputRef = React.useRef<HTMLInputElement | null>(null);
+    // A11Y-03: associate the <label> with the <input> via htmlFor/id so screen
+    // readers announce the label on focus and getByLabelText resolves them. An
+    // explicit `id` prop wins; otherwise a stable useId fallback is generated.
+    const generatedId = useId();
+    const inputId = id ?? generatedId;
     const hasAdornment = !!icon || !!clearable;
     const showClear = clearable && value !== undefined && value !== "";
 
@@ -46,6 +52,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       <div className={fullWidth ? "w-full" : ""}>
         {label && (
           <label
+            htmlFor={inputId}
             className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]"
           >
             {label}
@@ -58,6 +65,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             </span>
           )}
           <input
+            id={inputId}
             ref={(node) => {
               inputRef.current = node;
               if (typeof ref === "function") ref(node);

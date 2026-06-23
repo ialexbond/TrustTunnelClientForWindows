@@ -26,9 +26,9 @@
  * worktree mount race), ProtocolUpdateSection still mounts but its internal
  * useSidecarVersions hook short-circuits (null params).
  */
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Zap, Loader2 } from "lucide-react";
+import { AlertTriangle, Zap } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Toggle } from "../../shared/ui/Toggle";
 import { Accordion } from "../../shared/ui/Accordion";
@@ -42,6 +42,7 @@ import { DangerZoneSection } from "./DangerZoneSection";
 import { ProtocolUpdateSection } from "./ProtocolUpdateSection";
 import { useSidecarVersions } from "./useSidecarVersions";
 import { compareSemver } from "../../shared/utils/compareSemver";
+import { latestSemver } from "../../shared/utils/latestSemver";
 
 interface Props {
   state: ServerState;
@@ -82,7 +83,10 @@ export function ServiceTabSection({
   sidecarAvailable: _propSidecarAvailable,
   latestVersion: _propLatestVersion,
   onSidecarUpdateApplied,
-  onSidecarUpdateSeen,
+  // E-15 (Plan 09-21): consumed no longer — dismissal moved to ServerTabs'
+  // visit-keyed effect (Plan 09-13). Kept on Props for backwards compatibility;
+  // underscore marks the intentional non-use.
+  onSidecarUpdateSeen: _onSidecarUpdateSeen,
 }: Props) {
   const { t } = useTranslation();
   const { sshParams, pushSuccess } = state;
@@ -109,7 +113,13 @@ export function ServiceTabSection({
   // backwards compatibility but ignored — the underscore prefix marks intent.
   const serverInfoVersion = state.serverInfo?.version ?? "";
   const { versions: githubReleases } = useSidecarVersions(sshParams);
-  const latestFromGitHub = githubReleases[0]?.version ?? "";
+  // E-17 (Plan 09-21): the GitHub releases feed is ordered by PUBLISH time, not
+  // by semver — a hotfix for an older minor can be published AFTER a newer
+  // release, so `githubReleases[0]` is not reliably the highest version. Derive
+  // "latest" by semver-max via the shared `latestSemver` helper (created in
+  // 09-13, also used by useSidecarUpdateCascade) so the update dot/arrow compare
+  // against the true newest release.
+  const latestFromGitHub = latestSemver(githubReleases.map((r) => r.version));
   const computedCurrentVersion = serverInfoVersion || "unknown";
   const computedSidecarAvailable =
     !!serverInfoVersion &&
@@ -119,16 +129,13 @@ export function ServiceTabSection({
     // (an update is available); the ascending equivalent is `< 0`.
     compareSemver(serverInfoVersion, latestFromGitHub) < 0;
 
-  // One-shot signal к parent: пользователь добрался до Service tab и видит
-  // карточку с Badge + dropdown. Bottom-tab pill dot на «Панель управления»
-  // можно гасить (parent перевернёт `tt_dismissed_update_<version>=true`).
-  // Fires только если есть available + valid latestVersion — иначе нечего
-  // dismiss'ить. Re-fires при изменении latestVersion (новый release вышел).
-  useEffect(() => {
-    if (computedSidecarAvailable && latestFromGitHub) {
-      onSidecarUpdateSeen?.();
-    }
-  }, [computedSidecarAvailable, latestFromGitHub, onSidecarUpdateSeen]);
+  // E-15 (Plan 09-21): the one-shot mount-effect that fired `onSidecarUpdateSeen`
+  // here was removed. Dismissal of the «Панель управления» pill dot now happens
+  // on VISIT — ServerTabs (Plan 09-13) owns a visit-keyed effect that fires when
+  // the user actually opens the «Сервис» tab. Dismissing on this panel's mount
+  // was the prime-suspect bug: the dot cleared before the user ever looked at the
+  // tab. `onSidecarUpdateSeen` is kept on the Props interface for backwards
+  // compatibility but is no longer consumed (ServerTabs no longer forwards it).
 
   // ─── After-update version refresh ───────────────────────────────────────
   //
@@ -170,15 +177,19 @@ export function ServiceTabSection({
               </p>
             </div>
           </div>
-          {bbr.loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <Toggle
-              checked={bbr.enabled}
-              onChange={() => void bbr.toggle()}
-              aria-label={t("server.service.bbr.label")}
-            />
-          )}
+          {/* B-2.5/A-1 (Plan 09-21): single shared Toggle with `loading` — the
+              spinner lives INSIDE the thumb, so the switch keeps its position
+              across the loading transition (no unmount). The former
+              Loader2/Toggle swap removed the switch and dropped a differently
+              sized/positioned spinner in its place → a visible flicker/jump on
+              every toggle. While loading the Toggle is non-interactive and
+              reports aria-busy. */}
+          <Toggle
+            checked={bbr.enabled}
+            loading={bbr.loading}
+            onChange={() => void bbr.toggle()}
+            aria-label={t("server.service.bbr.label")}
+          />
         </div>
       </Card>
 

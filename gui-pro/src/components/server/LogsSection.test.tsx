@@ -1,19 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "../../shared/i18n";
 import { LogsSection } from "./LogsSection";
 import type { ServerState } from "./useServerState";
 import { SnackBarProvider } from "../../shared/ui/SnackBarContext";
 import { ConfirmDialogProvider } from "../../shared/ui/ConfirmDialogProvider";
+import { activityLogSpy, expectNoSecretLogged } from "../../test/fixtures";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
+// D-29: reuse the shared NAMED activity-log spy so the logs body / password
+// absence is proven the same way as every other credential-touching surface.
 vi.mock("../../shared/hooks/useActivityLog", () => ({
-  useActivityLog: () => ({ log: vi.fn() }),
+  useActivityLog: () => ({ log: activityLogSpy }),
 }));
 
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(""),
+  invoke: invokeMock,
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -50,6 +55,9 @@ function renderWithProviders(ui: React.ReactElement) {
 describe("LogsSection (Card preview — Phase 17 rewrite)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    activityLogSpy.mockReset();
+    // Default: server_get_logs resolves empty (overridden per test).
+    invokeMock.mockResolvedValue("");
     i18n.changeLanguage("ru");
   });
 
@@ -132,5 +140,131 @@ describe("LogsSection (Card preview — Phase 17 rewrite)", () => {
     // Verify the JSX pattern we expect (always rendered, isOpen passed, no {open && ...})
     expect(source).toContain("isOpen={open}");
     expect(source).not.toMatch(/\{open\s*&&\s*<LogsViewerModal/);
+  });
+
+  // ─── E-20 + R4-F06: real timestamp from fetch, no log-preview line ─────────
+  //
+  // Root cause (RESEARCH E-20): `handleClose` set `lastUpdate=new Date()`
+  // unconditionally, fabricating "updated now" on every close even when the
+  // fetch failed or returned nothing. `LogsViewerModal` now reports the real
+  // fetch-success time up via `onLogsFetched(text, timestamp)`; `LogsSection`
+  // sets `lastUpdate` only from THAT callback (never from handleClose).
+  //
+  // R4-F06: the card no longer renders a log-preview line at all — only the
+  // title, the last-update timestamp and the «Открыть логи» button. The fetched
+  // text is still kept to seed the modal, but it is never shown on the card.
+
+  describe("E-20 + R4-F06 — real timestamp, no preview line", () => {
+    const SAMPLE = "line A\nERROR line B";
+
+    // ─── R4-F06: a successful fetch never renders the journal text on the card ─
+    it("F06_no_preview_line_after_successful_fetch — fetched lines absent from card", async () => {
+      invokeMock.mockResolvedValue(SAMPLE);
+      const state = makeState({ serverLogs: "" });
+      renderWithProviders(<LogsSection state={state} />);
+
+      // Open the modal → auto-load fires server_get_logs → resolves SAMPLE.
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("server.logs.card.open_button") }),
+      );
+
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("server_get_logs", expect.anything());
+      });
+      // Close the modal so its body rows unmount; only the CARD remains queryable.
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("buttons.close") }));
+      const card = screen.getByTestId("logs-section-card");
+      // The timestamp must show, but the journal preview line must NOT.
+      await waitFor(() => {
+        expect(card).toHaveTextContent(/Последнее обновление/);
+      });
+      expect(card.textContent).not.toContain("ERROR line B");
+      expect(card.textContent).not.toContain("line A");
+      // No mono preview element on the card anymore.
+      expect(card.querySelector(".text-mono-sm")).toBeNull();
+    });
+
+    // ─── R4-F06 negative control: no preview line before any fetch either ──────
+    it("F06_no_preview_before_any_fetch — only the empty-state caption shows", () => {
+      invokeMock.mockResolvedValue("");
+      const state = makeState({ serverLogs: "" });
+      renderWithProviders(<LogsSection state={state} />);
+      // Empty caption visible; no preview line, no last-update label.
+      expect(
+        screen.getByText(i18n.t("server.logs.card.empty")),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/ERROR line B/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Последнее обновление/)).not.toBeInTheDocument();
+    });
+
+    // ─── Test 2 (E-20): fetch rejects → close → NO fabricated timestamp ────────
+    it("E20_no_timestamp_when_fetch_fails — close after a failed fetch leaves empty state", async () => {
+      invokeMock.mockRejectedValue(new Error("SSH connection failed"));
+      const state = makeState({ serverLogs: "" });
+      renderWithProviders(<LogsSection state={state} />);
+
+      const openBtn = screen.getByRole("button", {
+        name: i18n.t("server.logs.card.open_button"),
+      });
+      fireEvent.click(openBtn);
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("server_get_logs", expect.anything());
+      });
+      // Close via the modal's canonical corner X (labeled footer close dropped, F18).
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("buttons.close") }));
+
+      // No fabricated «Последнее обновление»; empty-state caption still shows.
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t("server.logs.card.empty"))).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/Последнее обновление/)).not.toBeInTheDocument();
+    });
+
+    // ─── Test 2b (E-20 positive control): successful fetch → timestamp appears ─
+    it("E20_timestamp_appears_after_successful_fetch — last-update label shows", async () => {
+      invokeMock.mockResolvedValue(SAMPLE);
+      const state = makeState({ serverLogs: "" });
+      renderWithProviders(<LogsSection state={state} />);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("server.logs.card.open_button") }),
+      );
+      await waitFor(() => {
+        expect(screen.getByText(/Последнее обновление/)).toBeInTheDocument();
+      });
+    });
+
+    // ─── §K ELT-09: empty-state copy names the open button by its EXACT label ──
+    //
+    // The empty caption tells the user which control to press. It must name the
+    // button by the IDENTICAL phrase the button shows (`card.open_button`), not a
+    // paraphrase — otherwise the instruction points at a control that doesn't
+    // exist under that name. Asserted for ru source + en mirror.
+    it.each(["ru", "en"])(
+      "ELT09_empty_copy_names_open_button_exactly — [%s] empty text contains the button label",
+      (lang) => {
+        i18n.changeLanguage(lang);
+        const label = i18n.t("server.logs.card.open_button");
+        const empty = i18n.t("server.logs.card.empty");
+        expect(empty).toContain(label);
+      },
+    );
+
+    // ─── Test 3 (D-29): the logs body never reaches the activity-log channel ───
+    it("D29_logs_body_never_logged — fetched lines absent from activityLog", async () => {
+      invokeMock.mockResolvedValue(SAMPLE);
+      const state = makeState({ serverLogs: "" });
+      renderWithProviders(<LogsSection state={state} />);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: i18n.t("server.logs.card.open_button") }),
+      );
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("server_get_logs", expect.anything());
+      });
+      // The logs body (a specific fetched line) must never be a logged argument.
+      expectNoSecretLogged("ERROR line B");
+      expectNoSecretLogged("line A");
+    });
   });
 });

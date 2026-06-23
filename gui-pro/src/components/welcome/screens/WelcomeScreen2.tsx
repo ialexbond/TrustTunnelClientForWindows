@@ -9,8 +9,8 @@ import { useTranslation } from "react-i18next";
  * secondary.
  *
  * 3-block diagram (PC ↔ VPS ↔ Internet) под heading:
- * каждый блок 80×80 (`w-20 h-20`) `rounded-lg` `--color-bg-surface`
- * с border-1px `--color-border`. Lucide icon 24px центрирован, label
+ * каждый блок 64×64 (`w-16 h-16`) `rounded-lg` `--color-bg-surface`
+ * с border-1px `--color-border`. Lucide icon 20px центрирован, label
  * под — `text-caption` `--color-text-muted`. Стрелки между блоками —
  * `<ArrowRight size={16}>` muted, с label-caption под стрелкой.
  * НЕ animate on mount (минимизируем визуальный шум).
@@ -27,10 +27,13 @@ export function WelcomeScreen2() {
         style={{
           backgroundColor: "var(--color-accent-500)",
           boxShadow: "var(--shadow-lg)",
+          // A-3: glyph drawn via currentColor inherits the theme-scoped
+          // on-accent token, replacing hardcoded white (≈3.53:1 on dark teal).
+          color: "var(--color-on-accent)",
         }}
         aria-hidden="true"
       >
-        <Globe size={32} className="text-white" />
+        <Globe size={32} />
       </div>
       <div className="flex flex-col items-center gap-2 text-center">
         <h1
@@ -53,18 +56,19 @@ export function WelcomeScreen2() {
         role="img"
         aria-label={t("app.welcome.screen2.description")}
       >
+        {/* UAT-F02: icons are size-20 (was 24) so each 64×64 block + arrows fit the 432px onboarding width. */}
         <DiagramBlock
-          icon={<Monitor size={24} />}
+          icon={<Monitor size={20} />}
           label={t("app.welcome.screen2.block_pc")}
         />
         <DiagramArrow label={t("app.welcome.screen2.arrow_encrypted")} />
         <DiagramBlock
-          icon={<Server size={24} />}
+          icon={<Server size={20} />}
           label={t("app.welcome.screen2.block_vps")}
         />
         <DiagramArrow label={t("app.welcome.screen2.arrow_secure")} />
         <DiagramBlock
-          icon={<Globe size={24} />}
+          icon={<Globe size={20} />}
           label={t("app.welcome.screen2.block_internet")}
         />
       </div>
@@ -82,7 +86,8 @@ function DiagramBlock({
   return (
     <div className="flex flex-col items-center gap-1">
       <div
-        className="w-20 h-20 rounded-lg flex items-center justify-center"
+        // UAT-F02: 64×64 (was 80×80) keeps the 3-block PC↔VPS↔Internet row inside the 432px width.
+        className="w-16 h-16 rounded-lg flex items-center justify-center"
         style={{
           backgroundColor: "var(--color-bg-surface)",
           border: "1px solid var(--color-border)",

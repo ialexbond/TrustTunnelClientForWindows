@@ -437,6 +437,118 @@ describe("useSecurityState", () => {
     });
   });
 
+  // ── E-6 + run() contract: rejected rule keeps the form open with values ──
+  //
+  // ROOT (shared with E-5): run() used to swallow the backend error and resolve
+  // `void`, so addRule's `setShowAddRule(false)` + reset ran unconditionally —
+  // the form cleared+closed even when the server REJECTED the rule. The additive
+  // fix makes run() return a success boolean; addRule gates the close/clear on it.
+
+  it("run() resolves true on success and false on backend failure (additive contract)", async () => {
+    setupInvokeForLoad();
+    const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let okResult: boolean | undefined;
+    await act(async () => {
+      okResult = await result.current.run("probe-ok", async () => {});
+    });
+    expect(okResult).toBe(true);
+
+    let failResult: boolean | undefined;
+    await act(async () => {
+      failResult = await result.current.run("probe-fail", async () => {
+        throw new Error("BACKEND_REJECT");
+      });
+    });
+    expect(failResult).toBe(false);
+    // Internal toast-on-error preserved: error was surfaced, not thrown.
+    expect(mockPushSuccess).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("E-6: addRule keeps the form open + retains values when the server REJECTS the rule", async () => {
+    // invoke('security_firewall_add_rule') rejects; load() (security_get_status) is fine.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "security_get_status") return makeSecurityStatus();
+      if (cmd === "security_firewall_add_rule") throw new Error("SECURITY_UFW_INVALID_RULE");
+      return null;
+    });
+    const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    const draft = { port: "443", proto: "tcp", action: "allow", from: "", comment: "VPN" };
+    act(() => {
+      result.current.setShowAddRule(true);
+      result.current.setNewRule(draft);
+    });
+
+    await act(async () => {
+      await result.current.addRule();
+    });
+
+    // The rejected rule must NOT clear the form nor close it — the user keeps
+    // their values to correct + retry; the error toast already fired inside run().
+    expect(result.current.showAddRule).toBe(true);
+    expect(result.current.newRule).toEqual(draft);
+    expect(mockPushSuccess).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("E-6 positive control: addRule clears + closes the form on success", async () => {
+    setupInvokeForLoad();
+    const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.setShowAddRule(true);
+      result.current.setNewRule({ port: "443", proto: "tcp", action: "allow", from: "", comment: "VPN" });
+    });
+
+    await act(async () => {
+      await result.current.addRule();
+    });
+
+    // Success path: form closes and resets to the empty default.
+    expect(result.current.showAddRule).toBe(false);
+    expect(result.current.newRule).toEqual({ port: "", proto: "tcp", action: "allow", from: "", comment: "" });
+  });
+
+  it("applyFail2banPreset resolves the run() success boolean (true on success, false on failure)", async () => {
+    // E-5 consumes this — the tab reverts the optimistic radio when this is false.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "security_get_status") return makeSecurityStatus();
+      if (cmd === "security_fail2ban_set_jail") throw new Error("SSH_CHANNEL_FAILED");
+      return null;
+    });
+    const { result } = renderHook(() => useSecurityState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let okFail: boolean | undefined;
+    await act(async () => {
+      okFail = await result.current.applyFail2banPreset("strict");
+    });
+    expect(okFail).toBe(false);
+
+    // Now make it succeed.
+    setupInvokeForLoad();
+    let okSuccess: boolean | undefined;
+    await act(async () => {
+      okSuccess = await result.current.applyFail2banPreset("strict");
+    });
+    expect(okSuccess).toBe(true);
+  });
+
   it("changeSshPort does not call load() directly after success", async () => {
     setupInvokeForLoad();
 

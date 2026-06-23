@@ -78,6 +78,20 @@ export function CertSection({ state, security }: Props) {
 
   const { sshParams, certRaw: preloadedCert, setCertRaw: setPreloadedCert } = state;
   const certInfo = preloadedCert ? parseCertInfo(preloadedCert) : null;
+  // UAT-6: a missing/unreadable cert can arrive as a non-null payload with an
+  // empty notAfter — parseCertInfo then returns a non-null object (certType
+  // unknown), so `disabled={!certInfo}` left the «Подробнее» CTA enabled, opening
+  // a details modal for a cert that is not there. Gate "do we actually have a
+  // cert" on readability (a present notAfter), not on certInfo being non-null.
+  const hasReadableCert = !!certInfo?.notAfter;
+  // R2-F06 (Plan 09-36): distinguish a MISSING/unreadable cert from a present-
+  // but-unrecognized-type one. Prefer the backend `present` flag when defined
+  // (cert_code == 0); fall back to the notAfter readability heuristic for an old
+  // backend that omits `present`. A missing cert gets its own honest label and
+  // its address rendered as a separate neutral fact (R2-F07) — not «Неизвестно»
+  // glued to a known domain (the contradictory shape).
+  const certMissing =
+    certInfo != null && (certInfo.present === false || (certInfo.present === undefined && !hasReadableCert));
   // Loading state — fetch ещё не завершён (preloadedCert === null AND
   // mount-effect ещё в полёте). Показываем Skeleton card.
   const [certFetched, setCertFetched] = useState(preloadedCert !== null);
@@ -119,6 +133,12 @@ export function CertSection({ state, security }: Props) {
 
   const subtitle = useMemo(() => {
     if (!certInfo) return t("server.security.summary.cert_subtitle_loading");
+    // R2-F07 (Plan 09-36): for a MISSING cert the subtitle describes the cert
+    // STATE only — the configured address is rendered separately below as its
+    // own neutral «Адрес сервера: <domain>» element (so a known address is not
+    // glued onto an unknown cert via «issuer • domain • …»). Returning null here
+    // lets the render swap in the dedicated address element instead.
+    if (certMissing) return null;
     const issuer = certInfo.issuerSummary
       ?? (certInfo.certType === "lets_encrypt" ? "Let's Encrypt" : t("server.cert.unknown"));
     const sub = certInfo.subjectCn || certInfo.domain || "—";
@@ -130,22 +150,38 @@ export function CertSection({ state, security }: Props) {
         })
       : null;
     return expires ? `${issuer} • ${sub} • ${expires}` : `${issuer} • ${sub}`;
-  }, [certInfo, i18n.language, t]);
+  }, [certInfo, certMissing, i18n.language, t]);
+
+  // R2-F07 (Plan 09-36): the configured server address as a standalone neutral
+  // fact, shown when the cert is missing (the domain comes from hosts.toml and
+  // is always known, independent of the cert read). Null when there is no
+  // domain to show or the cert is present (the normal subtitle covers it).
+  const addressLine = useMemo(() => {
+    if (!certMissing || !certInfo?.domain) return null;
+    return t("server.security.summary.cert_address", { domain: certInfo.domain });
+  }, [certMissing, certInfo?.domain, t]);
 
   const statusVariant: "success" | "warning" | "danger" | "neutral" = useMemo(() => {
-    if (!certInfo) return "neutral";
+    // UAT-6: a cert without a readable notAfter is neutral, not a warning band —
+    // a missing cert is not "expiring soon", it is simply absent.
+    if (!hasReadableCert) return "neutral";
     if (daysLeft === null) return "warning";
     if (daysLeft <= 7) return "danger";
     if (daysLeft <= 30) return "warning";
     return "success";
-  }, [certInfo, daysLeft]);
+  }, [hasReadableCert, daysLeft]);
 
   const statusLabel = useMemo(() => {
-    if (!certInfo) return t("server.security.summary.cert_status_loading");
+    // R2-F06 (Plan 09-36): a MISSING/unreadable cert reads as an explicit
+    // «Сертификат не найден / не читается» — not the ambiguous «Неизвестно».
+    if (certMissing) return t("server.security.summary.cert_status_missing");
+    // «Неизвестно» is now reserved for a PRESENT-but-unrecognized cert: the
+    // fetch settled, the cert is there, but its validity/type is unreadable.
+    if (!hasReadableCert) return t("server.security.summary.cert_status_unknown");
     if (daysLeft === null) return t("server.security.summary.cert_status_unknown");
     if (daysLeft <= 0) return t("server.security.summary.cert_status_expired");
     return t("server.security.summary.cert_status_valid", { days: shortDays(daysLeft, i18n.language) });
-  }, [certInfo, daysLeft, i18n.language, t]);
+  }, [certMissing, hasReadableCert, daysLeft, i18n.language, t]);
 
   // Initial fetch ещё не завершён → Skeleton placeholder. После fetch
   // (success или fail) показываем actual card даже если certInfo === null
@@ -182,16 +218,47 @@ export function CertSection({ state, security }: Props) {
                 <h3 className="text-subtitle">{t("server.security.summary.cert_card_title")}</h3>
                 <StatusIndicator status={statusVariant} size="sm" label={statusLabel} />
               </div>
-              <p className="text-caption truncate" style={{ color: "var(--color-text-muted)" }}>
-                {subtitle}
-              </p>
+              {/* R2-F07: a missing cert shows the address as its own neutral
+                  element (addressLine) instead of the cert-state subtitle, so a
+                  known address is never glued onto an unknown cert.
+                  R3-F03 (Plan 09-39): the owner could not SEE the explicit
+                  «не найден / не читается» status — after the domain-separation
+                  the prominent text line became the ADDRESS and the status lived
+                  only as the small StatusIndicator dot label. Render the missing
+                  status as its OWN visible text line ABOVE the address so BOTH
+                  are legible. Stays neutral (a missing cert is absent, not
+                  expiring) and uses the muted token like the address line. */}
+              {certMissing ? (
+                <>
+                  <p
+                    className="text-caption truncate"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    data-testid="cert-status-label"
+                  >
+                    {statusLabel}
+                  </p>
+                  {addressLine && (
+                    <p
+                      className="text-caption truncate"
+                      style={{ color: "var(--color-text-muted)" }}
+                      data-testid="cert-address-line"
+                    >
+                      {addressLine}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-caption truncate" style={{ color: "var(--color-text-muted)" }}>
+                  {subtitle}
+                </p>
+              )}
             </div>
           </div>
           <Button
             variant="secondary"
             size="sm"
             onClick={() => setModalOpen(true)}
-            disabled={!certInfo}
+            disabled={!hasReadableCert}
             data-testid="cert-configure-button"
           >
             {t("server.security.summary.configure_button")}

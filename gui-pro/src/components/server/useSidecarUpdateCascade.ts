@@ -3,6 +3,7 @@ import { useUpdateChecker } from "../../shared/hooks/useUpdateChecker";
 import { useUpdateProgress } from "../update/useUpdateProgress";
 import { useSidecarVersions } from "./useSidecarVersions";
 import { compareSemver } from "../../shared/utils/compareSemver";
+import { latestSemver } from "../../shared/utils/latestSemver";
 import { type SshCredentials } from "./SshConnectForm";
 
 // ═══════════════════════════════════════════════════════
@@ -126,10 +127,30 @@ export function useSidecarUpdateCascade({
   // label. Replaces the parallel localInstalledVersion + probeLocalVersion
   // pair (see 19-DIAGNOSIS-card8-arrow.md §4 Option A for rationale).
   const [serverInfoVersion, setServerInfoVersion] = useState("");
+
+  // E-10 (Plan 09-13): reset the lifted serverInfoVersion when creds become
+  // null. handleDisconnect (useControlPanelOrchestrator) sets creds=null but
+  // never cleared serverInfoVersion, so the «Сервис» pill dot + Card #8 arrow
+  // stayed lit for the server the user had just LEFT (the stale comparison kept
+  // returning "update available"). Keying the reset on `creds` (not only the
+  // disconnect handler) also covers a HOST SWITCH — when the user connects to a
+  // different server the old version is cleared until the new probe lands, so a
+  // dot never bleeds across servers. Co-located here because this hook owns
+  // serverInfoVersion (the single cascade source of truth, D-05).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset-on-prop-edge: serverInfoVersion is lifted state owned here that must be cleared when the creds PROP transitions to null (disconnect / host-switch). There is no render-time derivation available — the value is pushed in asynchronously via setServerInfoVersion from ServerPanel's onServerInfoVersionChange — so an effect keyed on `creds` is the correct reset seam (E-10).
+    if (!creds) setServerInfoVersion("");
+  }, [creds]);
+
   const { versions: githubReleasesCP } = useSidecarVersions(sshParamsForLocal);
-  // Defensive null-guard — `useSidecarVersions` now coerces to [] but keep the
-  // optional chain in case the hook contract loosens later.
-  const latestFromGitHubCP = githubReleasesCP?.[0]?.version ?? "";
+  // E-17 (Plan 09-13): derive "latest" by semver-max via the shared
+  // `latestSemver` helper, NOT `githubReleasesCP[0]` (GitHub PUBLISH order — a
+  // hotfix for an older release can be published after a newer one, so [0] is
+  // not reliably the highest version). `latestSemver` returns "" for an empty
+  // list, matching the prior `?? ""` fallback.
+  const latestFromGitHubCP = latestSemver(
+    githubReleasesCP?.map((r) => r.version) ?? [],
+  );
   const localSidecarAvailable =
     !!serverInfoVersion &&
     !!latestFromGitHubCP &&
@@ -174,11 +195,12 @@ export function useSidecarUpdateCascade({
   }, [creds, checkSidecarForServer]);
 
   // Auto-dismiss точек когда пользователь зашёл на Service tab.
-  // UX-логика: точку на bottom-tab «Панель управления» показываем один раз —
-  // пользователь увидел, дошёл до Service tab → точку гасим (записываем
-  // `tt_dismissed_update_<version>=true`). Бейдж «Доступно новое обновление»
-  // внутри карточки `ProtocolUpdateSection` НЕ зависит от dismissed-флага и
-  // продолжает гореть пока не нажмут Install.
+  // UX-логика: точку на bottom-tab «Панель управления» показываем один раз ЗА
+  // СЕССИЮ — пользователь увидел, дошёл до Service tab → точку гасим (записываем
+  // `tt_dismissed_update_<version>=true` в sessionStorage). UAT-2 / owner 6.8:
+  // флаг per-launch, после рестарта приложения точка снова nudge'ит. Бейдж
+  // «Доступно новое обновление» внутри карточки `ProtocolUpdateSection` НЕ
+  // зависит от dismissed-флага и продолжает гореть пока не нажмут Install.
   // Dismiss key matches what `handleSidecarUpdateSeen` writes — use the
   // GitHub-derived latestFromGitHubCP (local probe), NOT the unreliable
   // useUpdateChecker.sidecarLatestVersion which may stay empty.
@@ -188,10 +210,14 @@ export function useSidecarUpdateCascade({
     }
   }, [localSidecarAvailable, latestFromGitHubCP, dismissSidecarUpdate]);
 
+  // UAT-2 / owner 6.8: dismiss-флаг живёт в sessionStorage (per-launch nudge),
+  // не в localStorage. Поэтому новый запуск приложения (свежая сессия) снова
+  // показывает точку, пока обновление доступно. Внутри сессии visit-dismiss
+  // (handleSidecarUpdateSeen → dismissSidecarUpdate) гасит точку как раньше.
   const localDismissed =
     !!latestFromGitHubCP &&
-    typeof localStorage !== "undefined" &&
-    localStorage.getItem(`tt_dismissed_update_${latestFromGitHubCP}`) === "true";
+    typeof sessionStorage !== "undefined" &&
+    sessionStorage.getItem(`tt_dismissed_update_${latestFromGitHubCP}`) === "true";
   const sidecarUpdateVisible = localSidecarAvailable && !localDismissed;
   useEffect(() => {
     if (onSidecarUpdateChange) onSidecarUpdateChange(sidecarUpdateVisible);

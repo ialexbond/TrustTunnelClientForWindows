@@ -21,6 +21,12 @@ export interface SelectProps {
   fullWidth?: boolean;
   disabled?: boolean;
   className?: string;
+  // CC-6: error/helperText mirror Input's treatment verbatim — red border via
+  // --color-danger-500 on the trigger + a role="alert" message in
+  // --color-status-error below. Standardizes Select's validation feedback on
+  // the same tokens Input already uses (CC-1).
+  error?: string;
+  helperText?: string;
 }
 
 export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
@@ -35,6 +41,8 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     fullWidth = true,
     disabled = false,
     className,
+    error,
+    helperText,
   },
   ref,
 ) {
@@ -185,6 +193,10 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
             "border border-[var(--color-input-border)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)]",
             "focus-visible:shadow-[var(--focus-ring)]",
             disabled && "opacity-[var(--opacity-disabled)] cursor-not-allowed",
+            // CC-6: error border copies Input's treatment — red border only,
+            // no tinted background (Input FIX-II rationale: border speaks just
+            // as clearly and keeps the control visually calm).
+            error && "border-[var(--color-danger-500)]",
             icon && "pl-9",
           )}
         >
@@ -268,6 +280,18 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
             document.body,
           )}
       </div>
+      {/* CC-6: error/helper message — reuse Input's exact tokens and layout
+          (--color-status-error message, --color-text-muted helper). */}
+      {error && (
+        <p role="alert" className="text-xs mt-1 text-[var(--color-status-error)]">
+          {error}
+        </p>
+      )}
+      {!error && helperText && (
+        <p className="text-xs mt-1 text-[var(--color-text-muted)]">
+          {helperText}
+        </p>
+      )}
     </div>
   );
 });

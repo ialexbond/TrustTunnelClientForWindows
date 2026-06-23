@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { X, ShieldCheck, RefreshCw, RotateCw } from "lucide-react";
+import { ShieldCheck, RefreshCw, RotateCw } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { formatError } from "../../shared/utils/formatError";
-import { cn } from "../../shared/lib/cn";
 import type { ServerState } from "./useServerState";
 import type { useSecurityState } from "./useSecurityState";
 import { parseCertInfo, daysUntil, pluralRu, type CertInfo } from "./certUtils";
@@ -75,6 +74,28 @@ function formatDateHuman(raw: string | undefined, lang: string): string {
   }
 }
 
+/**
+ * UAT-F09 (owner 6.11): detect a certbot no-op ("not yet due for renewal").
+ *
+ * certbot renew without --force-renewal exits 0 and prints recognizable
+ * not-due lines when nothing was renewed (the cert still has >30 days). The
+ * renew success path must NOT show the green «Сертификат успешно обновлён»
+ * toast in that case — it lies about a renewal that did not happen. We match a
+ * few stable substrings certbot emits (case-insensitive), defensively covering
+ * the common phrasings across certbot versions.
+ */
+function isCertbotNoOp(output: string): boolean {
+  if (!output) return false;
+  const lower = output.toLowerCase();
+  return (
+    lower.includes("not yet due for renewal") ||
+    lower.includes("not due for renewal") ||
+    lower.includes("no renewals were attempted") ||
+    lower.includes("no renewal was attempted") ||
+    lower.includes("cert not yet due for renewal")
+  );
+}
+
 export interface CertModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -85,7 +106,6 @@ export interface CertModalProps {
 export function CertModal({ isOpen, onClose, state, security }: CertModalProps) {
   const { t, i18n } = useTranslation();
   const confirm = useConfirm();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   // H-04 (Plan 15): tracks whether the modal is still mounted. handleRenew's
   // `finally` waits an unconditional 2s before reloading the cert + firing the
   // success toast; if the user closes the server tab during that window the
@@ -106,12 +126,10 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     };
   }, []);
 
-  // T-03 — auto-focus close button on open.
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = setTimeout(() => closeButtonRef.current?.focus(), 250);
-    return () => clearTimeout(timer);
-  }, [isOpen]);
+  // T-03 — initial focus is now owned by the Modal primitive (09-05 focus
+  // management): on open it focuses the first focusable inside the content box
+  // (the canonical close button), so the hand-rolled auto-focus effect + ref
+  // were removed in 09-23 when this modal adopted Modal's showCloseButton.
 
   // T-03 — cleanup transient state на close.
   useEffect(() => {
@@ -140,7 +158,12 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
 
   // P UAT 2026-05-04: показываем certbot output (success + error) в Modal'е.
   // Default closed — user сам открывает «Подробности» если хочет посмотреть.
-  const [renewOutput, setRenewOutput] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  // UAT-F09 (owner 6.11): the renew result can be one of three outcomes.
+  // `not_due` is a CORRECT no-op — certbot renew without --force-renewal does
+  // nothing while >30 days remain (commit cb7adb2c dropped --force-renewal to
+  // spare Let's Encrypt rate limits). We must NOT claim a renewal happened in
+  // that case; we show a neutral message instead of the green success toast.
+  const [renewOutput, setRenewOutput] = useState<{ kind: "success" | "error" | "not_due"; text: string } | null>(null);
   const [renewDetailsOpen, setRenewDetailsOpen] = useState(false);
 
   const handleRenew = async () => {
@@ -156,10 +179,18 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
     setRenewOutput(null);
     setRenewDetailsOpen(false);
     let succeeded = false;
+    // UAT-F09 (owner 6.11): distinguish an actual renewal from a correct no-op.
+    // Only an actual renewal gets the green success toast; a no-op gets a
+    // neutral info message so we never falsely claim the cert was refreshed.
+    let wasNoOp = false;
     try {
       const output = await invoke<string>("server_renew_cert", sshParams);
       succeeded = true;
-      setRenewOutput({ kind: "success", text: output || t("server.cert.no_output_placeholder") });
+      wasNoOp = isCertbotNoOp(output);
+      setRenewOutput({
+        kind: wasNoOp ? "not_due" : "success",
+        text: output || t("server.cert.no_output_placeholder"),
+      });
       // Default closed — user сам click'нёт «Подробности» если хочет посмотреть лог.
     } catch (e) {
       const raw = formatError(e);
@@ -200,12 +231,47 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
       }
       if (isMountedRef.current) {
         setRenewLoading(false);
-        if (succeeded) state.pushSuccess(t("server.cert.renewed"));
+        // UAT-F09 (owner 6.11): only an ACTUAL renewal gets the green success
+        // toast. A no-op (cert still valid) must not claim a renewal happened —
+        // the SnackBar only has success(green)/error(red) tones, so a "neutral"
+        // toast is impossible without touching that shared component (out of
+        // this plan's scope). Instead we suppress the toast on a no-op and
+        // surface the truthful neutral message in-modal (the `not_due` block
+        // rendered below), so the user is never told it was renewed.
+        if (succeeded && !wasNoOp) {
+          state.pushSuccess(t("server.cert.renewed"));
+        }
       }
     }
   };
 
+  // UAT-F09: the validity date shown in the in-modal not-due message. Reuses
+  // the parsed cert (the no-op did not change it). Omitted when unparseable so
+  // we never leak a raw "{{date}}" placeholder.
+  const renewNotDueDate = (() => {
+    const notAfter = certInfo?.notAfter;
+    if (!notAfter) return null;
+    const d = new Date(notAfter);
+    return Number.isNaN(d.getTime()) ? null : formatDateHuman(notAfter, i18n.language);
+  })();
+
+  // R2-F06 (Plan 09-36): the cert is MISSING/unreadable when the backend
+  // `present` flag is false, or (old backend, present undefined) when there is
+  // no readable notAfter. Used to avoid gluing the always-known domain onto the
+  // «Неизвестно» issuer line for a cert that is not actually there (R2-F07).
+  const certMissing =
+    certInfo != null &&
+    (certInfo.present === false || (certInfo.present === undefined && !certInfo.notAfter));
+
   const daysLeft = certInfo?.notAfter ? daysUntil(certInfo.notAfter) : null;
+
+  // R2-F04 (Plan 09-36): the STATIC pre-click renew hint copy. Uses the already-
+  // computed renewNotDueDate (parsed notAfter) — date variant when parseable,
+  // no-date variant otherwise. Shown ABOVE the «Обновить сейчас» button on every
+  // render (before any click), so the user gets renew guidance up front.
+  const renewHint = renewNotDueDate
+    ? t("server.cert.renew_hint", { date: renewNotDueDate })
+    : t("server.cert.renew_hint_no_date");
   // P UAT 2026-05-04: validity tone — color hint inline (green/orange/red text)
   // вместо прежнего Badge. Дни рендерятся в одну строку с датами.
   const validityTone: string =
@@ -218,29 +284,25 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
           : "var(--color-status-connected)";
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" className="relative">
-      <button
-        ref={closeButtonRef}
-        type="button"
-        aria-label={t("buttons.close")}
-        onClick={onClose}
-        className={cn(
-          "absolute top-3 right-3 p-1 rounded",
-          "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
-          "focus-visible:shadow-[var(--focus-ring)] outline-none",
-          "transition-colors",
-        )}
-      >
-        <X className="w-4 h-4" />
-      </button>
-
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="md"
+      showCloseButton
+      // a11y (review a11y-3): Modal applies an unconditional focus-trap, so the
+      // trapped container must be announced as a NAMED dialog (role + accessible
+      // name via aria-labelledby → the visible <h2>). Mirrors UserModal.
+      role="dialog"
+      ariaModal
+      ariaLabelledby="cert-modal-title"
+    >
       <div className="flex items-center gap-2 mb-3">
         <ShieldCheck
           className="w-5 h-5"
           style={{ color: "var(--color-accent-interactive)" }}
           aria-hidden="true"
         />
-        <h2 className="text-title">{t("server.cert.title")}</h2>
+        <h2 id="cert-modal-title" className="text-title">{t("server.cert.title")}</h2>
       </div>
 
       {!certInfo ? (
@@ -259,13 +321,29 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
             </div>
             <div className="text-body">
               {certInfo.issuerSummary ?? (certInfo.certType === "lets_encrypt" ? "Let's Encrypt" : t("server.cert.unknown"))}
-              {certInfo.subjectCn || certInfo.domain ? (
+              {/* R2-F07 (Plan 09-36): do NOT glue the always-known domain onto the
+                  «Неизвестно» issuer when the cert is MISSING — a known address
+                  beside an unknown cert reads as contradictory. The address is
+                  shown as its own neutral fact below instead. */}
+              {!certMissing && (certInfo.subjectCn || certInfo.domain) ? (
                 <span style={{ color: "var(--color-text-muted)" }}>
                   {" • "}
                   <span className="font-mono text-mono-sm">{certInfo.subjectCn || certInfo.domain}</span>
                 </span>
               ) : null}
             </div>
+            {/* R2-F07: the configured server address as a standalone neutral
+                element when the cert is missing (domain comes from hosts.toml,
+                always known, independent of the cert read). */}
+            {certMissing && certInfo.domain ? (
+              <div
+                className="text-body-sm mt-1"
+                style={{ color: "var(--color-text-muted)" }}
+                data-testid="cert-modal-address-line"
+              >
+                {t("server.security.summary.cert_address", { domain: certInfo.domain })}
+              </div>
+            ) : null}
             {certInfo.certType !== "lets_encrypt" && (
               <div className="mt-1">
                 {certInfo.certType === "self_signed" ? (
@@ -358,6 +436,19 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
           {/* Action footer — Renew (Let's Encrypt only) */}
           {certInfo.certType === "lets_encrypt" && (
             <div className="border-t pt-3" style={{ borderColor: "var(--color-border)" }}>
+              {/* R2-F04 (Plan 09-36): STATIC pre-click renew hint. Shown on every
+                  render (before any click), using the pre-computed renewNotDueDate
+                  — date variant when parseable, no-date variant otherwise. Gives
+                  renew guidance up front so the user does not have to click first
+                  to learn the cert is still valid. The post-click `not_due`
+                  confirmation below is kept as an inline confirmation. */}
+              <p
+                className="mb-3 text-body-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+                data-testid="cert-renew-hint"
+              >
+                {renewHint}
+              </p>
               <div className="flex justify-end">
                 <Button
                   variant="secondary"
@@ -380,6 +471,16 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                   to the user (they see the new validity period in the card
                   above). Errors still need the details — that's where the
                   user finds rate-limit / DNS / port-conflict diagnostics. */}
+              {/* R3-F04 (Plan 09-39, owner 2026-06-23): the post-click no-op
+                  («ещё действителен, обновление не требуется») inline block was
+                  DROPPED as redundant — the pre-click `cert-renew-hint` above
+                  already conveys the same thing before the user clicks. The
+                  no-op DETECTION is preserved upstream: handleRenew still sets
+                  renewOutput.kind === "not_due" via isCertbotNoOp(output) and
+                  the `if (succeeded && !wasNoOp)` guard still suppresses the
+                  false green «Сертификат успешно обновлён» toast on a no-op.
+                  Only this VISUAL block is removed; the suppression stays. */}
+
               {renewOutput && renewOutput.kind === "error" && (
                 <div className="mt-3" data-testid="cert-renew-details">
                   <button

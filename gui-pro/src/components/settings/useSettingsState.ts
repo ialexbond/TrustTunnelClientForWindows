@@ -26,6 +26,9 @@ export interface ClientConfig {
     has_ipv6: boolean;
     username: string;
     password: string;
+    // dns_upstreams lives under [endpoint] in the real config (sidecar contract).
+    // The C++ core reads it from here, not from a top-level key (UAT-F05/F06/F07).
+    dns_upstreams?: string[];
     [key: string]: unknown;
   };
   listener: {
@@ -41,7 +44,9 @@ export interface ClientConfig {
       password?: string;
     };
   };
-  dns_upstreams?: string[];
+  // NOTE: dns_upstreams is NOT a top-level key — it belongs under endpoint (see above).
+  // Older configs may still carry a stray top-level key; it is migrated into endpoint on
+  // load and dropped on save so the saved file matches the sidecar contract.
   [key: string]: unknown;
 }
 
@@ -77,6 +82,24 @@ export interface SettingsState {
 // Deep equal for dirty tracking (ignores empty strings in arrays)
 // ═══════════════════════════════════════════════════════
 
+// WR-01: an array key whose values are all empty strings after filtering "" is
+// equivalent to the key being absent. The "Add DNS" button writes
+// endpoint.dns_upstreams = [...prev, ""], which on a config that never carried
+// the key ADDS a new key to endpoint (N → N+1). Without pruning, deepEqual's
+// object branch compares key COUNTS first (aKeys.length !== bKeys.length) and
+// flips dirty=true on a still-empty row — re-triggering the exact UAT-F05/F07
+// symptom (Save lights up on an empty/cancelled row). Pruning these keys before
+// the count comparison makes endpoint.dns_upstreams:[""] compare equal to absent.
+function pruneEmptyArrays(o: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (Array.isArray(v) && v.filter(x => x !== "").length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null && b == null) return true;
@@ -90,12 +113,34 @@ function deepEqual(a: unknown, b: unknown): boolean {
     return fa.every((v, i) => deepEqual(v, fb[i]));
   }
   if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const aObj = a as Record<string, unknown>;
-  const bObj = b as Record<string, unknown>;
+  // Prune empty-array keys so a never-filled row (endpoint.dns_upstreams:[""])
+  // is treated as absent and does not inflate the key count (WR-01).
+  const aObj = pruneEmptyArrays(a as Record<string, unknown>);
+  const bObj = pruneEmptyArrays(b as Record<string, unknown>);
   const aKeys = Object.keys(aObj);
   const bKeys = Object.keys(bObj);
   if (aKeys.length !== bKeys.length) return false;
   return aKeys.every(k => k in bObj && deepEqual(aObj[k], bObj[k]));
+}
+
+// ═══════════════════════════════════════════════════════
+// DNS upstreams normalization (UAT-F05/F06/F07)
+// ═══════════════════════════════════════════════════════
+//
+// dns_upstreams is an [endpoint]-nested field in the real config (sidecar contract).
+// Older configs may carry a stray top-level dns_upstreams; fold it into endpoint when
+// endpoint has none, and always strip the top-level key so the canonical shape is used
+// on both load (baseline) and save (written file).
+function normalizeDnsUpstreams(config: ClientConfig): ClientConfig {
+  const clone: ClientConfig = JSON.parse(JSON.stringify(config));
+  const legacyTop = clone.dns_upstreams as string[] | undefined;
+  if (legacyTop !== undefined) {
+    if (clone.endpoint && clone.endpoint.dns_upstreams === undefined) {
+      clone.endpoint.dns_upstreams = legacyTop;
+    }
+    delete clone.dns_upstreams;
+  }
+  return clone;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -149,8 +194,13 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       const data = await invoke<ClientConfig>("read_client_config", {
         configPath: localPath,
       });
-      setConfig(data);
-      savedConfig.current = JSON.parse(JSON.stringify(data));
+      // Migrate a stray legacy top-level dns_upstreams into endpoint.dns_upstreams.
+      // The sidecar reads it from [endpoint]; a top-level key never hydrated the UI (F06).
+      // We fold it in on load (only when endpoint has none) and drop the top-level key so
+      // the baseline already matches the canonical shape — migration alone is not "dirty".
+      const normalized = normalizeDnsUpstreams(data);
+      setConfig(normalized);
+      savedConfig.current = JSON.parse(JSON.stringify(normalized));
     } catch (e) {
       pushSuccess(formatError(e), "error");
     }

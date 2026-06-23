@@ -30,19 +30,33 @@ export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
   const installed = state.status?.installed ?? false;
   const active = state.status?.active ?? false;
 
-  // StatusIndicator: success = installed && active, warning = installed && !active, danger = !installed
-  const indicatorStatus: "success" | "warning" | "danger" = installed && active
-    ? "success"
-    : installed
-      ? "warning"
-      : "danger";
+  // E-12 (09-08): loading gate. The hook rehydrates from localStorage with a
+  // hardcoded active:false (useMtProtoState.ts:111-124). Without this gate the
+  // card flashed the cached «Установлен, не запущен» (warning) on every tab
+  // open while the real mtproto_get_status probe was still in flight. Mirror
+  // BBR's `loading` handling: while loading, show a neutral state instead of
+  // the stale cached active:false guess. Once the probe resolves the real
+  // status (installed/active or installed/stopped) renders authoritatively.
+  const loading = state.loading;
 
-  // Subtitle label describing current state
-  const subtitleLabel = installed && active
-    ? t("server.service.mtproto.card.active_on_port", { port: state.status?.port })
-    : installed
-      ? t("server.service.mtproto.card.installed_inactive")
-      : t("server.service.mtproto.card.not_installed");
+  // StatusIndicator: neutral while loading; otherwise
+  // success = installed && active, warning = installed && !active, danger = !installed
+  const indicatorStatus: "success" | "warning" | "danger" | "neutral" = loading
+    ? "neutral"
+    : installed && active
+      ? "success"
+      : installed
+        ? "warning"
+        : "danger";
+
+  // Subtitle label describing current state (neutral loading label while probing)
+  const subtitleLabel = loading
+    ? t("server.service.mtproto.card.checking")
+    : installed && active
+      ? t("server.service.mtproto.card.active_on_port", { port: state.status?.port })
+      : installed
+        ? t("server.service.mtproto.card.installed_inactive")
+        : t("server.service.mtproto.card.not_installed");
 
   return (
     <Card data-testid="mtproto-section-card">
@@ -85,7 +99,7 @@ export function MtProtoSection({ state, sshParams }: MtProtoSectionProps) {
       {state.legacyMigrationNote && (
         <div className="mt-[var(--space-3)]">
           <ErrorBanner
-            severity="info"
+            variant="info"
             message={state.legacyMigrationNote}
             data-testid="mtproto-section-legacy-banner"
           />

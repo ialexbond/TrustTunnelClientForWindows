@@ -60,6 +60,9 @@ function makeState(overrides: Partial<ServerState> = {}): ServerState {
     addUserToState: vi.fn(),
     removeUserFromState: vi.fn(),
     setActionLoading: vi.fn(),
+    // UAT-F01: Configuration-tab refresh signal bumped on add/delete.
+    configEpoch: 0,
+    bumpConfigEpoch: vi.fn(),
     ...overrides,
   } as unknown as ServerState;
 }
@@ -178,6 +181,47 @@ describe("UsersSection (Phase 14 redesign)", () => {
       name: i18n.t("server.users.delete_tooltip"),
     });
     expect(deleteBtns.length).toBe(2);
+  });
+
+  // A-1 (Plan 09-24): the 3 row actions adopt the shared IconButton primitive.
+  // IconButton renders its OWN Tooltip, so we must NOT keep the old hand-rolled
+  // outer <Tooltip> (that would double-wrap and produce two tooltip layers /
+  // duplicate accessible descriptions). This test guards two invariants that the
+  // adoption must preserve:
+  //   1. each action is still a single accessible button (role+name unchanged), and
+  //   2. the gear (edit) button keeps its `gear-btn-<user>` data-testid, which
+  //      IconButton must forward via ...rest.
+  it("A-1: row actions are single (non-double-wrapped) IconButtons with data-testid preserved", () => {
+    const state = makeState({
+      serverInfo: {
+        installed: true,
+        version: "1.4.0",
+        serviceActive: true,
+        users: ["alice", "bob"],
+      },
+    });
+    render(<UsersSection state={state} />);
+
+    // Each label resolves to exactly one button per row (no doubled tooltip
+    // wrapper inflating the count or duplicating the accessible name).
+    expect(
+      screen.getAllByRole("button", {
+        name: i18n.t("server.users.show_config_tooltip"),
+      }),
+    ).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", {
+        name: i18n.t("server.users.edit_tooltip"),
+      }),
+    ).toHaveLength(2);
+
+    // data-testid is forwarded through IconButton (...rest).
+    const gearAlice = screen.getByTestId("gear-btn-alice");
+    expect(gearAlice.tagName).toBe("BUTTON");
+    expect(gearAlice).toHaveAttribute(
+      "aria-label",
+      i18n.t("server.users.edit_tooltip"),
+    );
   });
 
   it("D-03: clicking FileText icon opens UserConfigModal for that user", async () => {

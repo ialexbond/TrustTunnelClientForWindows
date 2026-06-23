@@ -104,7 +104,12 @@ describe("UserModal — Add mode", () => {
 
   it("renders add title", () => {
     render(<UserModal {...defaultAddProps} />);
-    expect(screen.getByText("Добавить пользователя")).toBeInTheDocument();
+    // 09-41: add_title and the submit button (add_user_advanced) now share the
+    // label «Добавить пользователя», so getByText is ambiguous. Assert the
+    // dialog heading specifically to keep this test scoped to the title.
+    expect(
+      screen.getByRole("heading", { name: "Добавить пользователя" }),
+    ).toBeInTheDocument();
   });
 
   it("shows both sections: credentials and deeplink", () => {
@@ -117,6 +122,32 @@ describe("UserModal — Add mode", () => {
     render(<UserModal {...defaultAddProps} />);
     expect(screen.getByPlaceholderText(/имя пользователя/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/пароль/i)).toBeInTheDocument();
+  });
+
+  // 09-25: footer is content-width right-aligned (owner §6.2), NOT a full-width
+  // split. «Отмена» (secondary) LEFT, primary submit «Добавить» RIGHT.
+  it("09-25 footer: primary right, cancel left, neither full-width", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const submit = screen.getByTestId("user-modal-submit");
+    const cancel = screen.getByRole("button", { name: i18n.t("buttons.cancel") });
+    // Neither button is full-width (no w-full from fullWidth).
+    expect(submit).not.toHaveClass("w-full");
+    expect(cancel).not.toHaveClass("w-full");
+    // DOM order: cancel (leftmost) precedes submit (rightmost).
+    expect(cancel.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // R2-F02a (09-35): footer buttons use the de-facto modal standard size=sm
+  // (h-8) — matching Firewall/Cert/MtProto/Benchmark — NOT Button's md default
+  // (h-9). Asserts the per-call-site size without coupling to the global default.
+  it("R2-F02a footer: both buttons render size sm (h-8, not h-9)", () => {
+    render(<UserModal {...defaultAddProps} />);
+    const submit = screen.getByTestId("user-modal-submit");
+    const cancel = screen.getByRole("button", { name: i18n.t("buttons.cancel") });
+    expect(submit).toHaveClass("h-8");
+    expect(submit).not.toHaveClass("h-9");
+    expect(cancel).toHaveClass("h-8");
+    expect(cancel).not.toHaveClass("h-9");
   });
 
   it("anti-DPI toggle is ON by default (D-5)", () => {

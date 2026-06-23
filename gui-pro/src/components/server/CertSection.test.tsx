@@ -190,6 +190,18 @@ describe("CertSection summary card", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("UAT-6: «Подробнее» CTA disabled when a cert payload arrives but is unreadable (notAfter empty)", async () => {
+    // A missing/unreadable cert can arrive as a non-null payload with an empty
+    // notAfter. parseCertInfo then returns a non-null object (certType unknown),
+    // so the old `disabled={!certInfo}` gate left the button ENABLED — opening a
+    // details modal for a cert that is not there. The CTA must gate on
+    // readability (certInfo.notAfter present), not on certInfo being non-null.
+    const missingCert = { hostname: "vpn.example.com", notAfter: "", issuer: "", subject: "" };
+    render(<CertSection state={stateWith(missingCert)} security={mockSecurity} />);
+    const btn = await screen.findByTestId("cert-configure-button");
+    expect(btn).toBeDisabled();
+  });
+
   it("«Подробнее» CTA opens Modal when clicked", async () => {
     render(<CertSection state={stateWith(sampleLetsEncryptCert)} security={mockSecurity} />);
     const btn = await screen.findByTestId("cert-configure-button");
@@ -207,5 +219,119 @@ describe("CertSection summary card", () => {
     await waitFor(() => {
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/internal\.local/);
     });
+  });
+
+  // ── R2-F06 / R2-F07 (Plan 09-36): missing-cert label + separated domain ────
+
+  // A missing/unreadable cert now arrives with present:false + empty notAfter,
+  // but the hostname (from hosts.toml) is still populated. The card must:
+  //  - label it «Сертификат не найден / не читается» (NOT «Неизвестно»)
+  //  - render the address as its own «Адрес сервера: <domain>» element instead
+  //    of gluing the domain into the cert-state subtitle.
+  const missingCert = {
+    present: false,
+    hostname: "vpn.example.com",
+    notAfter: "",
+    issuer: "",
+    subject: "",
+  };
+
+  // A PRESENT but unrecognized cert (present:true, the cert is THERE but its
+  // validity is unreadable → daysLeft null) must STILL read «Неизвестно» — the
+  // new missing label must not swallow this legitimate present-but-unknown case.
+  // (A present cert with a readable, valid notAfter shows the validity band
+  // instead; «Неизвестно» is the present-but-unparsed-validity state.)
+  const presentUnknownTypeCert = {
+    present: true,
+    hostname: "vpn.example.com",
+    notAfter: "garbled-unparseable-date",
+    issuer: "C = US, O = Some Other CA, CN = X9",
+    subject: "CN = some.other.host",
+  };
+
+  it("R2-F06: a missing/unreadable cert reads «Сертификат не найден / не читается», not «Неизвестно»", async () => {
+    render(<CertSection state={stateWith(missingCert)} security={mockSecurity} />);
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(new RegExp(i18n.t("server.security.summary.cert_status_missing"), "i")),
+      ).toBeInTheDocument();
+    });
+    // The ambiguous unknown label must NOT appear for a missing cert.
+    expect(
+      screen.queryByLabelText(new RegExp(`^${i18n.t("server.security.summary.cert_status_unknown")}$`, "i")),
+    ).toBeNull();
+  });
+
+  it("R2-F06: a PRESENT cert of an unrecognized type still reads «Неизвестно»", async () => {
+    render(<CertSection state={stateWith(presentUnknownTypeCert)} security={mockSecurity} />);
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(new RegExp(`^${i18n.t("server.security.summary.cert_status_unknown")}$`, "i")),
+      ).toBeInTheDocument();
+    });
+    // The missing label must NOT appear for a present-but-unknown-type cert.
+    expect(
+      screen.queryByLabelText(new RegExp(i18n.t("server.security.summary.cert_status_missing"), "i")),
+    ).toBeNull();
+  });
+
+  it("R2-F07: a missing cert renders the address as its own «Адрес сервера: <domain>» element, not concatenated into the cert state", async () => {
+    render(<CertSection state={stateWith(missingCert)} security={mockSecurity} />);
+    const card = await screen.findByTestId("cert-summary-card");
+    await waitFor(() => {
+      // The dedicated neutral address element is present.
+      expect(
+        screen.getByText(
+          new RegExp(i18n.t("server.security.summary.cert_address", { domain: "vpn\\.example\\.com" })),
+        ),
+      ).toBeInTheDocument();
+    });
+    // The cert-state subtitle must NOT glue the domain onto the cert state via
+    // the «issuer • domain • …» bullet-join (the old contradictory shape).
+    expect(card).not.toHaveTextContent(/•\s*vpn\.example\.com/);
+  });
+
+  // ── R3-F03 (Plan 09-39): VISIBLE missing-cert label alongside the address ──
+
+  // The R2-F07 domain-separation (09-36) left the «не найден / не читается»
+  // status ONLY as the small StatusIndicator aria/dot label (getByLabelText),
+  // so the owner could not SEE the explicit text in the card — the prominent
+  // text line became the address. R3-F03: render the missing label as a VISIBLE
+  // text element (data-testid="cert-status-label") ALONGSIDE the address line so
+  // BOTH are present.
+  it("R3-F03: a missing cert shows the VISIBLE «Сертификат не найден / не читается» label AND the «Адрес сервера: <domain>» line", async () => {
+    render(<CertSection state={stateWith(missingCert)} security={mockSecurity} />);
+    await screen.findByTestId("cert-summary-card");
+    await waitFor(() => {
+      // The missing-cert status now renders as a VISIBLE text element, not only
+      // as the StatusIndicator aria label.
+      const label = screen.getByTestId("cert-status-label");
+      expect(label).toBeVisible();
+      expect(label).toHaveTextContent(
+        new RegExp(i18n.t("server.security.summary.cert_status_missing")),
+      );
+    });
+    // The address line is still present alongside the visible status label.
+    expect(
+      screen.getByText(
+        new RegExp(i18n.t("server.security.summary.cert_address", { domain: "vpn\\.example\\.com" })),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("R3-F03: a present-but-unknown-type cert still reads «Неизвестно» and renders NO visible missing label", async () => {
+    render(<CertSection state={stateWith(presentUnknownTypeCert)} security={mockSecurity} />);
+    await screen.findByTestId("cert-summary-card");
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(new RegExp(`^${i18n.t("server.security.summary.cert_status_unknown")}$`, "i")),
+      ).toBeInTheDocument();
+    });
+    // The new visible missing-cert label must NOT swallow the present-but-unknown
+    // state — no cert-status-label element and no missing text at all.
+    expect(screen.queryByTestId("cert-status-label")).toBeNull();
+    expect(
+      screen.queryByText(new RegExp(i18n.t("server.security.summary.cert_status_missing"))),
+    ).toBeNull();
   });
 });

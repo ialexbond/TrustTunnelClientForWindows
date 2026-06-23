@@ -33,7 +33,7 @@ name: Tauri Rust (gui-pro)
 # redesign milestone).
 
 env:
-  RUST_CHANNEL: 1.88
+  RUST_CHANNEL: stable
 
 on:
   push:

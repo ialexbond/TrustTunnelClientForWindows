@@ -392,4 +392,165 @@ describe("useServerState", () => {
     expect(result.current.serverInfo!.users).not.toContain("bob");
     expect(result.current.serverInfo!.users).toContain("alice");
   });
+
+  // ── usersKnown sentinel: producer logic (R2-F08 review-fix, Plan 09-37) ──
+  //
+  // The original sentinel flipped usersKnown=true on ANY non-silent load via a
+  // `|| !silent` clause. But the cold-start race that produces a false `users:[]`
+  // happens on the NON-SILENT mount load: the backend creds grep fail-softs to an
+  // empty Vec WITHOUT throwing, so the throw-only retry never fires and the empty
+  // result is accepted → usersKnown=true → the Overview Users card flashes «0».
+  // The corrected producer flips usersKnown=true ONLY on proof (populated list),
+  // on a non-installed server, or after a confirming silent re-probe.
+
+  it("does NOT set usersKnown on a NON-SILENT installed load that returns users:[] (the cold-start race)", async () => {
+    vi.useFakeTimers();
+    // Installed, but the creds probe fail-softed to an empty list (no throw).
+    setupInvokeForLoad({ installed: true, version: "1.4.0", serviceActive: true, users: [] });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    // Drain the mount load (and any retry delay) but NOT the confirm re-probe delay.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(result.current.serverInfo).not.toBeNull();
+    // The defect: `|| !silent` flipped this true immediately. It must stay false —
+    // an empty installed list on the mount load is unconfirmed (could be the race).
+    expect(result.current.usersKnown).toBe(false);
+
+    vi.useRealTimers();
+  });
+
+  it("sets usersKnown immediately on a load that returns a POPULATED list (proof)", async () => {
+    setupInvokeForLoad(); // fakeServerInfo has users:["alice","bob"]
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.usersKnown).toBe(true);
+  });
+
+  it("sets usersKnown immediately when the server is NOT installed (Users card is not shown)", async () => {
+    setupInvokeForLoad({ installed: false, version: "", serviceActive: false, users: [] });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.usersKnown).toBe(true);
+  });
+
+  it("fires EXACTLY ONE confirming silent re-probe on an empty installed load; a now-populated re-probe sets usersKnown", async () => {
+    vi.useFakeTimers();
+    let checkCalls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        checkCalls += 1;
+        // First (non-silent) load: empty list (race). Confirming re-probe: populated.
+        return checkCalls === 1
+          ? { installed: true, version: "1.4.0", serviceActive: true, users: [] }
+          : { installed: true, version: "1.4.0", serviceActive: true, users: ["alice"] };
+      }
+      if (cmd === "server_get_config") return "config-data";
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return ["1.4.0"];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    // Mount load settles empty → usersKnown stays false, confirm timer armed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(result.current.usersKnown).toBe(false);
+
+    // Fire the confirm re-probe (delay ~1000-1500ms).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(result.current.usersKnown).toBe(true);
+    expect(result.current.serverInfo!.users).toContain("alice");
+
+    vi.useRealTimers();
+  });
+
+  it("accepts a CONFIRMED zero: a re-probe that is STILL empty sets usersKnown=true (resolves to 0, not stuck on skeleton)", async () => {
+    vi.useFakeTimers();
+    let checkCalls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_server_installation") {
+        checkCalls += 1;
+        // Both the mount load and the confirming re-probe return empty → genuine zero.
+        return { installed: true, version: "1.4.0", serviceActive: true, users: [] };
+      }
+      if (cmd === "server_get_config") return "config-data";
+      if (cmd === "server_get_cert_info") return { cn: "test" };
+      if (cmd === "server_get_available_versions") return ["1.4.0"];
+      return null;
+    });
+
+    const { result } = renderHook(() => useServerState(baseProps), { wrapper });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(result.current.usersKnown).toBe(false);
+
+    // Confirm re-probe fires once and is still empty → CONFIRMED zero.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(result.current.usersKnown).toBe(true);
+    expect(result.current.serverInfo!.users).toEqual([]);
+
+    // And it fired EXACTLY one confirming re-probe (mount load + 1 confirm = 2).
+    expect(checkCalls).toBe(2);
+
+    // Advancing further must NOT fire another re-probe (gated by a ref).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(checkCalls).toBe(2);
+
+    vi.useRealTimers();
+  });
+
+  it("resets usersKnown to false when the host (connection target) changes", async () => {
+    setupInvokeForLoad(); // populated → usersKnown becomes true
+
+    const { result, rerender } = renderHook((p: ServerPanelProps) => useServerState(p), {
+      wrapper,
+      initialProps: baseProps,
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.usersKnown).toBe(true);
+    });
+
+    // Switch to a different server whose installed load fail-softs to an empty list.
+    vi.useFakeTimers();
+    setupInvokeForLoad({ installed: true, version: "1.4.0", serviceActive: true, users: [] });
+
+    rerender({ ...baseProps, host: "10.0.0.2" });
+
+    // After host change the sentinel must reset to false (fresh server → skeleton),
+    // and the empty installed mount load must NOT immediately re-flip it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(result.current.usersKnown).toBe(false);
+
+    vi.useRealTimers();
+  });
 });

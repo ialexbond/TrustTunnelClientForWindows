@@ -175,10 +175,42 @@ describe("SshPortSection", () => {
     await user.click(resetBtn);
 
     // Dialog rendered by ConfirmDialogProvider from renderWithProviders wrapper.
-    // i18n mock returns keys verbatim; ConfirmDialog default label is t("confirmDialog.confirm").
-    const confirmBtn = await screen.findByText("confirmDialog.confirm");
+    // CONF-05 (09-24): the confirm button now uses an explicit action-verb label
+    // (reset_port_confirm_btn), not the dialog's generic default. The i18n mock
+    // returns keys verbatim, so we look up the new key.
+    const confirmBtn = await screen.findByText(
+      "server.security.confirm.reset_port_confirm_btn",
+    );
     await user.click(confirmBtn);
 
     expect(changeSshPort).toHaveBeenCalledWith(22);
+  });
+
+  // CONF-05 (09-24): the reset confirm passes an action-verb label so the user
+  // sees what the button does, not a generic «Подтвердить».
+  it("CONF-05: reset confirm uses an action-verb label (not the generic default)", async () => {
+    const user = userEvent.setup();
+    const state = makeMockState({
+      status: {
+        fail2ban: { installed: false, active: false, jails: [] },
+        firewall: {
+          installed: true, active: true, default_in: "deny", default_out: "allow",
+          default_routed: "disabled", logging: "on", rules: [],
+          current_ssh_port: 2222, vpn_port: 443,
+        },
+      },
+    });
+
+    render(<SshPortSection state={state} />);
+    await user.click(screen.getByText("server.security.ssh_port.reset"));
+
+    // The explicit action-verb confirm label is present; the dialog's generic
+    // default («confirmDialog.confirm») is NOT used as the confirm button.
+    expect(
+      await screen.findByText("server.security.confirm.reset_port_confirm_btn"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("confirmDialog.confirm"),
+    ).not.toBeInTheDocument();
   });
 });

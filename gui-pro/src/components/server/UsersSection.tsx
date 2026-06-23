@@ -6,7 +6,8 @@ import { Users, FileText, Trash2, Settings } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { Divider } from "../../shared/ui/Divider";
-import { Tooltip } from "../../shared/ui/Tooltip";
+import { IconButton } from "../../shared/ui/IconButton";
+import { ICON } from "../../shared/ui/iconScale";
 import { Button } from "../../shared/ui/Button";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
@@ -230,6 +231,9 @@ export function UsersSection({ state, activeServerTab }: Props) {
         `user.add_advanced.state_updated user=${username} deeplink_len=${generatedDeeplink.length}`,
       );
       state.pushSuccess(t("server.users.user_added_advanced", { user: username }));
+      // UAT-F01: bump the Configuration-tab refresh signal so the freshly added
+      // user shows up live in credentials.toml + rules.toml without a reconnect.
+      state.bumpConfigEpoch();
       // FIX-KK: preload the freshly-generated deeplink so UserConfigModal
       // shows it verbatim instead of re-fetching a stripped basic deeplink.
       setPreloadedDeeplink(generatedDeeplink);
@@ -308,6 +312,10 @@ export function UsersSection({ state, activeServerTab }: Props) {
               }
             })();
             removeUserFromState(user);
+            // UAT-F01 (owner clarification): deletion must trigger the SAME
+            // live Configuration refresh as add — bump the epoch so the removed
+            // user disappears from credentials.toml + rules.toml immediately.
+            state.bumpConfigEpoch();
             activityLog("STATE", `user.remove.completed user=${user}`);
             state.pushSuccess(t("server.users.user_deleted", { user }));
           } catch (e) {
@@ -375,87 +383,68 @@ export function UsersSection({ state, activeServerTab }: Props) {
                       );
                     })()}
 
-                    {/* 3-icon cluster: FileText + Gear + Trash (D-3) */}
+                    {/* 3-icon cluster: FileText + Gear + Trash (D-3).
+                        A-1 (09-24): adopted the shared IconButton — it renders its
+                        OWN Tooltip (via `tooltip`), so the old hand-rolled outer
+                        <Tooltip> wrappers were deleted (Pitfall 3: double-wrap). The
+                        row tint (text-secondary, not the IconButton default muted)
+                        and the per-action hover are passed via `className`, which
+                        IconButton merges with cn. Icon sizes use ICON.sm (14px ===
+                        the previous w-3.5 h-3.5 — pixel-identical, ICON-01). */}
                     <div className="flex items-center gap-[var(--space-0-5)] shrink-0 ml-2">
                       {/* FileText — show config QR */}
-                      <Tooltip text={t("server.users.show_config_tooltip")}>
-                        <button
-                          type="button"
-                          aria-label={t("server.users.show_config_tooltip")}
-                          disabled={isBusy}
-                          onClick={() => handleShowConfig(u)}
-                          className={cn(
-                            "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
-                            "transition-colors",
-                            "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                            "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                            "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)]",
-                          )}
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                        </button>
-                      </Tooltip>
+                      <IconButton
+                        aria-label={t("server.users.show_config_tooltip")}
+                        tooltip={t("server.users.show_config_tooltip")}
+                        disabled={isBusy}
+                        onClick={() => handleShowConfig(u)}
+                        className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:hover:text-[var(--color-text-secondary)]"
+                        icon={<FileText size={ICON.sm} />}
+                      />
 
                       {/* Settings/Gear — edit user (D-3) */}
-                      <Tooltip text={t("server.users.edit_tooltip")}>
-                        <button
-                          type="button"
-                          aria-label={t("server.users.edit_tooltip")}
-                          disabled={isBusy}
-                          onClick={() => handleOpenEdit(u)}
-                          className={cn(
-                            "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
-                            "transition-colors",
-                            "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                            "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                            "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)]",
-                          )}
-                          data-testid={`gear-btn-${u}`}
-                        >
-                          <Settings className="w-3.5 h-3.5" />
-                        </button>
-                      </Tooltip>
+                      <IconButton
+                        aria-label={t("server.users.edit_tooltip")}
+                        tooltip={t("server.users.edit_tooltip")}
+                        disabled={isBusy}
+                        onClick={() => handleOpenEdit(u)}
+                        className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:hover:text-[var(--color-text-secondary)]"
+                        data-testid={`gear-btn-${u}`}
+                        icon={<Settings size={ICON.sm} />}
+                      />
 
                       {/* Trash — delete (D-21: disabled when last user) */}
-                      <Tooltip
-                        text={
+                      <IconButton
+                        aria-label={
                           isLast
                             ? t("server.users.cant_delete_last")
                             : t("server.users.delete_tooltip")
                         }
-                      >
-                        <button
-                          type="button"
-                          aria-label={
-                            isLast
-                              ? t("server.users.cant_delete_last")
-                              : t("server.users.delete_tooltip")
+                        tooltip={
+                          isLast
+                            ? t("server.users.cant_delete_last")
+                            : t("server.users.delete_tooltip")
+                        }
+                        aria-disabled={isLast || isBusy}
+                        disabled={isLast || isBusy}
+                        onClick={() => {
+                          if (isLast) {
+                            activityLog(
+                              "USER",
+                              `user.remove.blocked reason=last-user user=${u}`,
+                            );
+                            return;
                           }
-                          aria-disabled={isLast || isBusy}
-                          disabled={isLast || isBusy}
-                          onClick={() => {
-                            if (isLast) {
-                              activityLog(
-                                "USER",
-                                `user.remove.blocked reason=last-user user=${u}`,
-                              );
-                              return;
-                            }
-                            if (isBusy) return;
-                            void handleDeleteUser(u);
-                          }}
-                          className={cn(
-                            "h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)]",
-                            "transition-colors",
-                            "focus-visible:shadow-[var(--focus-ring)] outline-none",
-                            isLast || isBusy
-                              ? "opacity-[var(--opacity-disabled)] cursor-not-allowed text-[var(--color-text-muted)]"
-                              : "text-[var(--color-text-secondary)] hover:text-[var(--color-destructive)]",
-                          )}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </Tooltip>
+                          if (isBusy) return;
+                          void handleDeleteUser(u);
+                        }}
+                        className={cn(
+                          isLast || isBusy
+                            ? "text-[var(--color-text-muted)]"
+                            : "text-[var(--color-text-secondary)] hover:text-[var(--color-destructive)]",
+                        )}
+                        icon={<Trash2 size={ICON.sm} />}
+                      />
                     </div>
                   </div>
 

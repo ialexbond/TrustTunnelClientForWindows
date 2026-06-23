@@ -138,6 +138,25 @@ describe("Fail2banModal", () => {
     ).not.toBeInTheDocument();
   });
 
+  // a11y dialog semantics (Phase-9 review a11y-3): the Modal primitive applies an
+  // unconditional focus-trap, so this modal must be a NAMED dialog or SR/keyboard
+  // users are trapped in an unannounced generic container.
+  it("is exposed as a named dialog (role + accessible name)", async () => {
+    render(
+      <Fail2banModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={buildState({ installed: false })}
+        sshParams={mockSshParams}
+      />,
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: i18n.t("server.security.fail2ban.modal_title"),
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("invokes installFail2ban when install button clicked", async () => {
     const state = buildState({ installed: false });
     render(

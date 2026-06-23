@@ -174,7 +174,7 @@ export function ServerPanelSkeleton() {
           <OverviewSkeletonCard
             flex="1 1 300px"
             body={
-              <div className="space-y-2.5 mt-1">
+              <div className="space-y-2 mt-1">
                 {[1, 2].map((i) => (
                   <div key={i}>
                     <div className="flex items-center justify-between mb-1">

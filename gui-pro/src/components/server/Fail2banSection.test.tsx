@@ -92,7 +92,7 @@ describe("Fail2banSection", () => {
     render(<Fail2banSection status={status} state={state} />);
 
     expect(screen.getByText("Не установлен")).toBeInTheDocument();
-    expect(screen.getByText("Установить и включить")).toBeInTheDocument();
+    expect(screen.getByText("Установить и включить Fail2ban")).toBeInTheDocument();
   });
 
   it("renders 'active' badge + stop/uninstall buttons when active", () => {
@@ -102,8 +102,8 @@ describe("Fail2banSection", () => {
     render(<Fail2banSection status={status} state={state} />);
 
     expect(screen.getByText("Активен")).toBeInTheDocument();
-    expect(screen.getByText("Остановить")).toBeInTheDocument();
-    expect(screen.getByText("Удалить")).toBeInTheDocument();
+    expect(screen.getByText("Остановить Fail2ban")).toBeInTheDocument();
+    expect(screen.getByText("Удалить Fail2ban")).toBeInTheDocument();
   });
 
   it("renders jail cards with banned IP count when jails present", () => {
@@ -131,7 +131,7 @@ describe("Fail2banSection", () => {
     expect(screen.getByText("Время бана")).toBeInTheDocument();
     expect(screen.getByText("Окно поиска")).toBeInTheDocument();
     // Save button
-    expect(screen.getByText("Сохранить")).toBeInTheDocument();
+    expect(screen.getByText("Сохранить настройки")).toBeInTheDocument();
   });
 
   it("clicking install button calls installFail2ban", () => {
@@ -140,7 +140,7 @@ describe("Fail2banSection", () => {
 
     render(<Fail2banSection status={status} state={state} />);
 
-    fireEvent.click(screen.getByText("Установить и включить"));
+    fireEvent.click(screen.getByText("Установить и включить Fail2ban"));
     expect(state.installFail2ban).toHaveBeenCalled();
   });
 
@@ -151,6 +151,6 @@ describe("Fail2banSection", () => {
     render(<Fail2banSection status={status} state={state} />);
 
     expect(screen.getByText("Установлен (неактивен)")).toBeInTheDocument();
-    expect(screen.getByText("Запустить")).toBeInTheDocument();
+    expect(screen.getByText("Запустить Fail2ban")).toBeInTheDocument();
   });
 });

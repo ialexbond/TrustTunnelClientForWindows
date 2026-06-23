@@ -33,6 +33,7 @@ import { useServerGeoIp } from "./useServerGeoIp";
 import { formatServerUptime } from "../../shared/utils/uptime";
 import { parseCertInfo, daysUntil } from "./certUtils";
 import { useActivityLog } from "../../shared/hooks/useActivityLog";
+import { useDocumentVisible } from "../../shared/hooks/useDocumentVisible";
 import type { ServerTabId } from "../../shared/types";
 
 // Re-export ServerTabId as TabId here so this component keeps its existing
@@ -105,17 +106,19 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel,
       <div className="flex items-center h-full shrink-0 ml-2">
         {action}
         {onRefresh && (
-          <button
-            className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--color-bg-hover)] transition-colors"
+          // A-1 (Plan 09-19): adopt the shared IconButton primitive instead of a
+          // hand-rolled <button> with a RefreshCw/Loader2 swap. IconButton owns
+          // the h-8 w-8 box, focus-ring, hover/active states, and the loading
+          // spinner swap (loading → Loader2). aria-busy is forwarded via ...rest
+          // so AT users hear the in-flight state; the button also disables while
+          // loading (IconButton sets disabled = disabled || loading).
+          <IconButton
+            icon={<RefreshCw className="w-4 h-4" />}
             aria-label={refreshAriaLabel}
-            style={muted}
+            aria-busy={refreshing}
+            loading={refreshing}
             onClick={onRefresh}
-            disabled={refreshing}
-          >
-            {refreshing
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <RefreshCw className="w-4 h-4" />}
-          </button>
+          />
         )}
         {clickable && (
           <span className="flex items-center justify-center w-8 h-8">
@@ -206,7 +209,7 @@ function OverviewSkeleton({ t, refreshAriaLabel }: { t: TFunction; refreshAriaLa
       </Card>
       <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
-        <div className="space-y-2.5 mt-1">
+        <div className="space-y-2 mt-1">
           {[1, 2].map(i => (
             <div key={i}>
               <div className="flex items-center justify-between mb-1">
@@ -241,12 +244,17 @@ function getLocalizedCountry(countryCode: string, fallback: string, locale: stri
 export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAvailable = false }: Props) {
   const { t, i18n } = useTranslation();
   const { log: activityLog } = useActivityLog();
-  const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo } = state;
+  const { serverInfo, sshParams, rebooting, setRebooting, setServerInfo, usersKnown } = state;
 
   // ─── Live data hooks (Phase 13) ───
   const isOverviewVisible = activeServerTab === undefined || activeServerTab === "overview";
+  // QE-05 (Plan 09-19): pause the interval pollers when the window is hidden
+  // (minimized / backgrounded tab) — the user can't see the data, so the SSH
+  // polls are pure waste. The reboot poller is the documented EXCEPTION (it must
+  // keep running even when hidden so recovery is detected — see its effect).
+  const windowVisible = useDocumentVisible();
   const { stats, loading: statsLoading } = useServerStats(sshParams, {
-    enabled: isOverviewVisible && !rebooting && !!serverInfo,
+    enabled: isOverviewVisible && windowVisible && !rebooting && !!serverInfo,
     intervalMs: 10_000,
   });
   const { geo, loading: geoLoading } = useServerGeoIp({ host: state.host });
@@ -334,26 +342,35 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   } = sshParams;
 
   useEffect(() => {
-    if (!serverInfo?.serviceActive || rebooting || !isOverviewVisible) return;
+    // E-2 (Plan 09-19): when the protocol is stopped / rebooting / the tab is
+    // hidden, CLEAR the frozen fastUptime so the Uptime card falls through to
+    // stats/skeleton/«—» instead of showing a stale value forever. The pre-fix
+    // effect only early-returned (leaving the last value frozen on screen after
+    // a stop).
+    if (!serverInfo?.serviceActive || rebooting || !isOverviewVisible) {
+      setFastUptime(null);
+      return;
+    }
     let cancelled = false;
-    const fetchUptime = () => {
-      invoke<{ uptime_seconds: number }>("server_get_uptime", {
-        host: uptimeHost,
-        port: uptimePort,
-        user: uptimeUser,
-        password: uptimePassword,
-        keyPath: uptimeKeyPath,
-      })
-        .then((r) => { if (!cancelled) setFastUptime(r.uptime_seconds); })
-        .catch(() => { /* silent — stats fallback handles display */ });
-    };
-    fetchUptime(); // immediate
-    const interval = setInterval(fetchUptime, 10000);
-    return () => { cancelled = true; clearInterval(interval); };
+    // QE-01 (Plan 09-19): uptime is a ONE-SHOT on mount (fast first paint —
+    // `cat /proc/uptime` returns in <100ms, so the card appears almost instantly
+    // without waiting for the ~2s stats poll). The recurring `setInterval` was
+    // dropped: the 10s `useServerStats` poll already returns `uptime_seconds` and
+    // owns steady-state, so the standalone interval was a duplicate SSH poll.
+    invoke<{ uptime_seconds: number }>("server_get_uptime", {
+      host: uptimeHost,
+      port: uptimePort,
+      user: uptimeUser,
+      password: uptimePassword,
+      keyPath: uptimeKeyPath,
+    })
+      .then((r) => { if (!cancelled) setFastUptime(r.uptime_seconds); })
+      .catch(() => { /* silent — stats fallback handles display */ });
+    return () => { cancelled = true; };
     // H-01 / SAFETY-02 (Plan 04-14): depend on the primitive SSH fields the
-    // poller actually forwards, NOT the whole sshParams object — fetchUptime
-    // below now passes only { host, port, user, password, keyPath }, so the
-    // password is never spread into extra IPC arg keys (mirrors useServerStats).
+    // one-shot actually forwards, NOT the whole sshParams object — we pass only
+    // { host, port, user, password, keyPath }, so the password is never spread
+    // into extra IPC arg keys (mirrors useServerStats).
   }, [uptimeHost, uptimePort, uptimeUser, uptimePassword, uptimeKeyPath, serverInfo?.serviceActive, rebooting, isOverviewVisible]);
 
   // ── Security status (firewall + fail2ban) — on-demand, не polling ──
@@ -443,15 +460,18 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   }, [state.host, serverInfo?.serviceActive]);
 
   // ── Background health check: ping every 30s ──
+  // QE-05 (Plan 09-19): gate on `windowVisible` so the 30s ping pauses while the
+  // window is hidden (resumes on visibilitychange — the effect re-runs because
+  // windowVisible is a dep). Saves a needless ping the user can't see anyway.
   useEffect(() => {
-    if (!serverInfo?.serviceActive || rebooting) return;
+    if (!serverInfo?.serviceActive || rebooting || !windowVisible) return;
     healthPollRef.current = setInterval(() => {
       invoke<number>("ping_endpoint", { host: state.host, port: 443 })
         .then((ms) => setPing(ms))
         .catch(() => setPing(-1));
     }, 30000);
     return () => { if (healthPollRef.current) clearInterval(healthPollRef.current); };
-  }, [state.host, serverInfo?.serviceActive, rebooting]);
+  }, [state.host, serverInfo?.serviceActive, rebooting, windowVisible]);
 
   // ── Reboot polling ──
   // WR-01 fix: use a ref-based stable handle so the 1-shot effect (deps=[rebooting]) always
@@ -479,8 +499,23 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
 
   useEffect(() => {
     if (!rebooting) return;
+    // QE-05 exception (Plan 09-19): the reboot poller intentionally does NOT gate
+    // on `windowVisible`. The server may finish rebooting while the window is
+    // minimized; gating this poll would stall recovery detection and leave the
+    // panel stuck on the rebooting spinner until the user re-focuses. Every other
+    // Overview interval poller pauses when hidden — this one must not.
     let elapsed = 0;
+    // WR-04: a local `done` flag + immediate clearInterval on the
+    // success/timeout branch. Previously the success branch called
+    // setRebooting(false) while the interval was still registered; clearInterval
+    // only ran on the next effect re-run / unmount, so between setRebooting(false)
+    // and React committing the teardown the interval body (incl. the ping_endpoint
+    // follow-up) could fire again, and a fast true→false→true toggle could leave
+    // two intervals briefly coexisting — the "SSH-storm on wake" the comment
+    // warns about. We now stop the loop synchronously and early-return if `done`.
+    let done = false;
     const interval = setInterval(async () => {
+      if (done) return;
       elapsed += 10;
       setRebootCountdown(elapsed);
       const refs = rebootRefs.current;
@@ -489,6 +524,8 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
           "check_server_installation", refs.sshParams
         );
         if (info) {
+          done = true;
+          clearInterval(interval);
           refs.setRebooting(false);
           setRebootCountdown(0);
           refs.setServerInfo(info);
@@ -499,6 +536,8 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         }
       } catch {
         if (elapsed >= 120) {
+          done = true;
+          clearInterval(interval);
           refs.setRebooting(false);
           setRebootCountdown(0);
           // C-02 (Plan 04-14): surface an HONEST error when the reboot poll
@@ -524,7 +563,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         }
       }
     }, 10000);
-    return () => clearInterval(interval);
+    return () => { done = true; clearInterval(interval); };
     // Effect intentionally runs once per reboot cycle (deps=[rebooting]). Fresh closures
     // would spawn duplicate intervals → SSH-storm on wake. All mutable refs come via
     // rebootRefs.current, which is updated on every render above.
@@ -611,9 +650,16 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
     return "var(--color-danger-500)";
   })();
 
-  const hasTls = !!state.certRaw;
-  // TLS expiry calculation (3 states: >14d green, 7-14d warning, ≤7d danger)
+  // TLS expiry calculation (3 states: >14d green, 7-14d warning, ≤7d danger).
+  // certInfo is computed BEFORE hasTls because hasTls is now readability-gated
+  // on the parsed cert (UAT-6 reorder).
   const certInfo = state.certRaw ? parseCertInfo(state.certRaw) : null;
+  // UAT-6: hasTls was `!!state.certRaw` — but a missing/unreadable cert can still
+  // arrive as a certRaw payload (the SSH probe returned *something*) with an empty
+  // notAfter, which painted the tile green «Активен». Gate hasTls on notAfter
+  // readability: with no readable expiry the not-hasTls arm paints the neutral
+  // placeholder dash. Valid LE certs have a non-empty notAfter → unaffected.
+  const hasTls = !!certInfo?.notAfter;
   const tlsDaysLeft = certInfo?.notAfter ? daysUntil(certInfo.notAfter) : null;
   const tlsState: "ok" | "warning" | "danger" | null = !hasTls
     ? null
@@ -640,15 +686,21 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
       {/* Status — ECG */}
       <Card padding="md" style={{ flex: "1 1 220px" }}>
         <Title icon={<HeartPulse className="w-5 h-5" />} text={t("server.overview.cards.status")} refreshAriaLabel={refreshAriaLabel} />
+        {/* R4-F01: bound the Status content to the skeleton's height hint (h:56)
+            and vertically center it. The EcgSvg is a fixed 36px-tall SVG; without
+            a bounded, centered envelope the ECG + label stack drifted taller than
+            the other Row-1 cards, ballooning the «Статус протокола» card. minHeight
+            (not a hard height) keeps the rebooting spinner branch — slightly taller
+            — from clipping while still capping the steady ECG state. */}
         {rebooting ? (
-          <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+          <div className="flex flex-col items-center justify-center gap-1.5" style={{ minHeight: 56 }}>
             <Loader2 className="w-8 h-8 animate-spin" style={{ color: "var(--color-warning-500)" }} />
             <span className="text-sm" style={{ color: "var(--color-warning-500)" }}>
               {t("server.overview.rebootingCountdown")}{rebootCountdown > 0 ? ` ${rebootCountdown}s` : "..."}
             </span>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+          <div className="flex flex-col items-center justify-center gap-1.5" style={{ minHeight: 56 }}>
             {/* key={isRunning ? "live" : "dead"} — заставит React unmount + remount SVG
                 при смене состояния, чтобы CSS animationDelay (-0.55s ... 0s) применились
                 к свежим layered paths и фазы layer-ов синхронизировались.
@@ -679,8 +731,12 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         {/* M-07: если ping упал (setPing(-1)) — прочерк + приписка
             «Не удалось получить данные». В pending state (null) тоже
             прочерк, но без приписки. Refresh button в Title (выше)
-            перезапускает measurement. */}
-        <div className="flex flex-col items-center justify-center gap-0.5 py-2">
+            перезапускает measurement.
+            R4-F01: bound the value area to the skeleton's height hint (h:48) and
+            vertically center it (matches the Speed card's minHeight:48 empty/error
+            state). Без minHeight прочерк (32px) + длинная приписка раздували карточку
+            намного выше остальных карточек первого ряда. */}
+        <div className="flex flex-col items-center justify-center gap-0.5" style={{ minHeight: 48 }}>
           {ping !== null && ping > 0 ? (
             <div className="flex items-baseline justify-center gap-1">
               <span className="font-mono" style={{ ...bigNum, color: pingColor }}>{ping}</span>
@@ -690,9 +746,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             <>
               <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
               {ping === -1 && (
-                // D-09: single-line error caption (wrapping a 2nd line breaks the
-                // card-height/row rhythm). nowrap + truncate, keep text-xs muted.
-                <span className="text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-full" style={muted}>
+                // R4-F01: the long «Не удалось получить данные…» caption was
+                // nowrap+truncate (D-09), which clipped the actionable «нажмите
+                // «Обновить»» tail to an ellipsis. The card height is now bounded
+                // by the parent minHeight (h:48) instead, so we let the caption
+                // WRAP — centered, capped at 2 lines (line-clamp-2) — keeping it
+                // readable without re-introducing the vertical blow-up.
+                <span className="text-xs text-center line-clamp-2 max-w-full" style={muted}>
                   {t("server.overview.dataUnavailable")}
                 </span>
               )}
@@ -773,7 +833,19 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
       >
         <Title icon={<Users className="w-5 h-5" />} text={t("server.overview.cards.userCount")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          <span className="font-mono" style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
+          {/* R2-F08 (Plan 09-37): while the user count is not yet authoritatively
+              known (silent cold-start race — serverInfo.users:[] before the real
+              probe ran), show the EXACT loading skeleton OverviewSkeleton uses for
+              this card (:192) instead of the digit 0. A populated/non-silent-settled
+              load flips usersKnown, after which 0 is a CONFIRMED zero, not the race.
+              This sentinel lives strictly inside the Users-card value branch, AFTER
+              the D-07 all-cards gate has already opened — it does NOT feed
+              allReady/gateOpenedRef. See 09-UAT-2-DIAGNOSIS.md (R2-F08). */}
+          {usersKnown ? (
+            <span className="font-mono" style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
+          ) : (
+            <Skeleton variant="line" width={100} height={32} data-testid="users-count-skeleton" />
+          )}
         </div>
       </ClickableCard>
 
@@ -958,8 +1030,22 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             { name: t("server.overview.security.tls"), ok: hasTls, label: tlsLabel, tone: tlsState },
           ].map((item) => {
             // tone — explicit 3-state (ok/warning/danger) for TLS; ok — boolean for firewall/fail2ban.
-            const tone = (item as { tone?: "ok" | "warning" | "danger" | null }).tone
-              ?? (item.ok === null ? null : item.ok ? "ok" : "danger");
+            // E-1 (Plan 09-19): the TLS sub-tile supplies an EXPLICIT 3-state
+            // `tone` (ok/warning/danger/null). The old `item.tone ?? (...)` form
+            // swallowed an explicit `null` tone (no-cert → tlsState=null) and
+            // fell through to the boolean fallback `item.ok===false → "danger"`,
+            // painting a no-cert TLS tile red «Истёк». Distinguish "tone key
+            // present" (TLS — use it verbatim, even when null → neutral) from
+            // "no tone supplied" (firewall/fail2ban — derive from item.ok).
+            const hasExplicitTone = "tone" in item;
+            const tone = hasExplicitTone
+              ? (item as { tone?: "ok" | "warning" | "danger" | null }).tone ?? null
+              : item.ok === null ? null : item.ok ? "ok" : "danger";
+            // tone-conveying attr for a class-free test assertion (D-04). A null
+            // tone surfaces as "neutral" so a no-cert TLS tile is provably not
+            // danger. The TLS tile also gets a stable data-testid for scoping.
+            const dataTone = tone ?? "neutral";
+            const isTls = item.name === t("server.overview.security.tls");
             const bg = tone === null
               ? "var(--color-bg-elevated)"
               : tone === "ok"
@@ -975,7 +1061,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
                   ? "var(--color-warning-500)"
                   : "var(--color-danger-500)";
             return (
-              <div key={item.name} className="rounded-[var(--radius-md)] px-3 py-2" style={{ backgroundColor: bg }}>
+              <div
+                key={item.name}
+                className="rounded-[var(--radius-md)] px-3 py-2"
+                style={{ backgroundColor: bg }}
+                data-tone={dataTone}
+                data-testid={isTls ? "tls-tile" : undefined}
+              >
                 <div className="text-sm font-semibold" style={primary}>{item.name}</div>
                 <div className="text-sm" style={{ color }}>{item.label}</div>
               </div>
@@ -990,7 +1082,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
           flex basis 300 (G-09) — парный с Security чтобы держать Row 3 в одну строку. */}
       <Card padding="md" style={{ flex: "1 1 300px" }}>
         <Title icon={<Gauge className="w-5 h-5" />} text={t("server.overview.cards.load")} refreshAriaLabel={refreshAriaLabel} />
-        <div className="space-y-2.5 mt-1">
+        <div className="space-y-2 mt-1">
           {stats === null && statsLoading ? (
             // Full skeleton state — no labels, just placeholders
             [1, 2].map((i) => (

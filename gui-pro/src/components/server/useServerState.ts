@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { translateSshError } from "../../shared/utils/translateSshError";
@@ -63,6 +63,43 @@ export function useServerState(props: ServerPanelProps) {
 
   // ─── Core Server Info ───
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  // R2-F08 (Plan 09-37, REVISED after adversarial review): "users known" sentinel.
+  // The Overview Users card renders `serverInfo.users?.length ?? 0`, which cannot
+  // tell "users not yet probed" from "genuinely zero" — both render 0. On a fresh
+  // auto-connect the panel load can settle with `users:[]` even on the NON-SILENT
+  // mount load: the backend creds grep fail-softs to an empty Vec WITHOUT throwing
+  // (server_install.rs:138 `... || echo ''`), so the throw-only cold-start retry
+  // never fires and the empty result is accepted. The FIRST sentinel attempt keyed
+  // off `|| !silent`, but that flipped usersKnown=true on exactly that racy mount
+  // load → the card flashed a false «0» (the symptom this was meant to suppress).
+  //
+  // Corrected producer (frontend-only — owner locked R2-F08 to a minimal frontend
+  // fix; no backend present/probed flag):
+  //   • POPULATED list (length > 0) → set true immediately (unambiguous proof).
+  //   • NOT installed → set true immediately (the Users card isn't shown on a
+  //     non-installed server; don't strand the sentinel on the skeleton).
+  //   • installed + EMPTY + still unknown → fire EXACTLY ONE confirming SILENT
+  //     re-probe after a short delay (confirmRef gates it to once per connect):
+  //       – re-probe now populated → set true;
+  //       – re-probe STILL empty → accept as a CONFIRMED zero, set true (so a
+  //         genuinely-zero server resolves to «0» after one extra round-trip
+  //         instead of being stranded on the skeleton forever).
+  // See 09-UAT-2-DIAGNOSIS.md (R2-F08) and the review-fix note in 09-37-SUMMARY.md.
+  const [usersKnown, setUsersKnown] = useState(false);
+  // usersKnownRef mirrors usersKnown so the loadServerInfo callback (whose deps are
+  // only the connection params — see the eslint-disable on its dep array) reads the
+  // CURRENT value, not a stale closure capture. confirmInFlightRef: one-shot gate so
+  // the empty-installed re-probe fires at most once per connect (reset on host change
+  // / disconnect). confirmTimeoutRef: id of the pending re-probe timer so a host
+  // switch can cancel it before a stale timer re-probes the old host (loadServerInfo
+  // already early-returns on empty host, but cancel anyway to be safe).
+  const usersKnownRef = useRef(false);
+  const setUsersKnownSynced = useCallback((v: boolean) => {
+    usersKnownRef.current = v;
+    setUsersKnown(v);
+  }, []);
+  const usersConfirmInFlightRef = useRef(false);
+  const usersConfirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -74,6 +111,13 @@ export function useServerState(props: ServerPanelProps) {
   const [configRaw, setConfigRaw] = useState<string | null>(null);
   const [certRaw, setCertRaw] = useState<unknown>(null);
   const [panelDataLoaded, setPanelDataLoaded] = useState(false);
+
+  // ─── Configuration-tab refresh signal (UAT-F01) ───
+  // configEpoch is bumped on user add/delete so the Configuration tab re-reads
+  // credentials.toml + rules.toml live (silently) — without it, ConfigurationTab
+  // kept showing a stale bundle until the operator manually reconnected.
+  const [configEpoch, setConfigEpoch] = useState(0);
+  const bumpConfigEpoch = useCallback(() => setConfigEpoch((n) => n + 1), []);
 
   // ─── Domain slices ───
   const users = useUsersState();
@@ -136,6 +180,37 @@ export function useServerState(props: ServerPanelProps) {
         info = await invoke<ServerInfo>("check_server_installation", sshParams);
       }
       setServerInfo(info);
+      // R2-F08 (Plan 09-37, REVISED): authoritative-read producer for usersKnown.
+      // The defect was `|| !silent`, which flipped true on the racy NON-SILENT mount
+      // load (where the creds grep fail-softs to []). Corrected rules:
+      if (!info.installed) {
+        // Users card is not shown on a non-installed server — never strand the
+        // sentinel; resolve immediately so the install screen isn't blocked.
+        setUsersKnownSynced(true);
+      } else if (info.users.length > 0) {
+        // Populated list is unambiguous proof the count is known.
+        setUsersKnownSynced(true);
+      } else {
+        // installed + empty: could be the cold-start race OR a genuine zero. Don't
+        // flip yet. Arm EXACTLY ONE confirming SILENT re-probe (gated by the ref).
+        // The re-probe's own settle runs this branch again: populated → set true
+        // above; STILL empty → the confirm-in-flight ref is set, so we accept it as
+        // a CONFIRMED zero here instead of looping.
+        if (usersConfirmInFlightRef.current) {
+          // This IS the confirming re-probe and it's still empty → confirmed zero.
+          setUsersKnownSynced(true);
+        } else if (!usersKnownRef.current) {
+          // First empty installed settle → schedule the single confirming re-probe.
+          usersConfirmInFlightRef.current = true;
+          if (usersConfirmTimeoutRef.current) clearTimeout(usersConfirmTimeoutRef.current);
+          usersConfirmTimeoutRef.current = setTimeout(() => {
+            usersConfirmTimeoutRef.current = null;
+            // Silent so it doesn't toggle loading/skeleton or re-log; loadServerInfo
+            // early-returns if host is empty (e.g. after a disconnect).
+            void loadServerInfo(true);
+          }, 1200);
+        }
+      }
       if (!silent) setError("");
 
       // If installed, load config + cert in parallel
@@ -190,6 +265,30 @@ export function useServerState(props: ServerPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, port, sshUser, sshPassword, sshKeyPath]);
 
+  // R2-F08 (Plan 09-37, REVISED): reset the users sentinel whenever the connection
+  // target changes (server switch) or disconnects. Without this a freshly-selected
+  // server would inherit the previous server's usersKnown=true and skip the skeleton
+  // (showing a stale/0 count for a moment). We key on the same connection identity
+  // the load effect uses. The cleanup also cancels any pending confirm re-probe so a
+  // stale timer can't silently re-probe the OLD host after the user switched servers.
+  useEffect(() => {
+    setUsersKnownSynced(false);
+    usersConfirmInFlightRef.current = false;
+    if (usersConfirmTimeoutRef.current) {
+      clearTimeout(usersConfirmTimeoutRef.current);
+      usersConfirmTimeoutRef.current = null;
+    }
+    return () => {
+      // On host change / unmount: clear the pending confirm timer (loadServerInfo
+      // early-returns on empty host, but cancel anyway so no stale re-probe fires).
+      if (usersConfirmTimeoutRef.current) {
+        clearTimeout(usersConfirmTimeoutRef.current);
+        usersConfirmTimeoutRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host, port, sshUser, sshPassword, sshKeyPath]);
+
   useEffect(() => {
     loadServerInfo();
   }, [loadServerInfo]);
@@ -223,7 +322,12 @@ export function useServerState(props: ServerPanelProps) {
   // ─── Optimistic user state updates ───
   const addUserToState = useCallback((username: string) => {
     setServerInfo((prev) => (prev ? { ...prev, users: [...prev.users, username] } : prev));
-  }, []);
+    // R2-F08 (Plan 09-37): an optimistic add means the user list is now populated,
+    // so users are unambiguously known — flip the sentinel even if a populating
+    // load hasn't landed yet (keeps the Users card off the skeleton). Use the synced
+    // setter so usersKnownRef stays accurate for the loadServerInfo producer.
+    setUsersKnownSynced(true);
+  }, [setUsersKnownSynced]);
 
   const removeUserFromState = useCallback((username: string) => {
     setServerInfo((prev) => (prev ? { ...prev, users: prev.users.filter((u) => u !== username) } : prev));
@@ -241,6 +345,9 @@ export function useServerState(props: ServerPanelProps) {
   return {
     // Core
     serverInfo,
+    // R2-F08 (Plan 09-37): consumed by OverviewSection's Users card to show the
+    // loading skeleton until the user count is authoritatively known.
+    usersKnown,
     loading,
     error,
     actionLoading,
@@ -272,6 +379,10 @@ export function useServerState(props: ServerPanelProps) {
     removeUserFromState,
     setServerInfo,
     setActionLoading,
+
+    // Configuration-tab refresh signal (UAT-F01)
+    configEpoch,
+    bumpConfigEpoch,
 
     // Props pass-through
     host,

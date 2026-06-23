@@ -446,4 +446,105 @@ describe("ConfigurationTab (raw-view)", () => {
       screen.getByText((c) => c.includes("fresh_from_server_b")),
     ).toBeInTheDocument();
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // UAT-F01 (Plan 09-30) — Configuration tab re-reads the bundle live when the
+  // configEpoch prop changes (bumped by UsersSection on user add/delete). Without
+  // this, a freshly added/removed user did not show up in credentials.toml +
+  // rules.toml until the operator manually reconnected. Refresh is silent (no
+  // skeleton flash) per owner preference — the load-fires assertion is the
+  // must-have; the silent-render check is lenient.
+  // ══════════════════════════════════════════════════════════════════════════
+  it("UAT-F01: a configEpoch change re-reads the bundle (second invoke)", async () => {
+    mockInvoke.mockResolvedValue(MOCK_BUNDLE);
+    const { rerender } = render(
+      <SnackBarProvider>
+        <ConfirmDialogProvider>
+          <ConfigurationTab
+            sshParams={SSH_PARAMS}
+            onNavigateToTab={vi.fn()}
+            configEpoch={0}
+          />
+        </ConfirmDialogProvider>
+      </SnackBarProvider>,
+    );
+    // Initial mount load completes.
+    await waitFor(() => {
+      const calls = mockInvoke.mock.calls.filter(
+        (c) => c[0] === "server_get_config_bundle",
+      );
+      expect(calls.length).toBe(1);
+    });
+
+    // Bump configEpoch → the tab must re-read the bundle.
+    await act(async () => {
+      rerender(
+        <SnackBarProvider>
+          <ConfirmDialogProvider>
+            <ConfigurationTab
+              sshParams={SSH_PARAMS}
+              onNavigateToTab={vi.fn()}
+              configEpoch={1}
+            />
+          </ConfirmDialogProvider>
+        </SnackBarProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      const calls = mockInvoke.mock.calls.filter(
+        (c) => c[0] === "server_get_config_bundle",
+      );
+      expect(calls.length).toBe(2);
+    });
+  });
+
+  it("UAT-F01: a silent configEpoch refresh does NOT flash the skeleton", async () => {
+    mockInvoke.mockResolvedValue(MOCK_BUNDLE);
+    const { rerender } = render(
+      <SnackBarProvider>
+        <ConfirmDialogProvider>
+          <ConfigurationTab
+            sshParams={SSH_PARAMS}
+            onNavigateToTab={vi.fn()}
+            configEpoch={0}
+          />
+        </ConfirmDialogProvider>
+      </SnackBarProvider>,
+    );
+    // Initial load resolves → accordions visible.
+    const vpnTrigger = await screen.findByRole("button", { name: /vpn\.toml/i });
+    expect(vpnTrigger).toBeInTheDocument();
+
+    // Hold the refresh pending so we can observe the intermediate render state.
+    let resolveRefresh: (b: typeof MOCK_BUNDLE) => void = () => {};
+    mockInvoke.mockImplementationOnce(
+      () => new Promise((res) => { resolveRefresh = res; }),
+    );
+    await act(async () => {
+      rerender(
+        <SnackBarProvider>
+          <ConfirmDialogProvider>
+            <ConfigurationTab
+              sshParams={SSH_PARAMS}
+              onNavigateToTab={vi.fn()}
+              configEpoch={1}
+            />
+          </ConfirmDialogProvider>
+        </SnackBarProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    // Silent refresh: accordions stay mounted, no skeleton replaces them.
+    expect(
+      screen.getByRole("button", { name: /vpn\.toml/i }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveRefresh(MOCK_BUNDLE);
+      await Promise.resolve();
+    });
+  });
 });

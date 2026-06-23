@@ -77,6 +77,10 @@
      where 4px (--space-1) is too wide. */
   --space-0-5: 2px;
   --space-1: 4px;
+  /* 6px — dash-form like --space-0-5 (the dotted gap-1.5 utility is an INVALID
+     custom property that resolves to 0). Wired to Tailwind's gap-1.5/p-1.5/etc.
+     via tailwind.config.js theme.extend.spacing["1.5"]. */
+  --space-1-5: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
@@ -243,12 +247,29 @@
   --color-accent-hover: var(--color-accent-300);
   --color-accent-active: var(--color-accent-500);
 
+  /* Text rendered ON an accent fill (primary button / chip / segmented control).
+     THEME-SCOPED on purpose: no single value clears WCAG 4.5:1 on BOTH themed
+     accent fills. On the dark-theme teal (#4d9490 = accent-400) dark text wins —
+     accent-900 (#0b2221) ≈ 4.71:1, whereas white would only reach ≈ 3.53:1 and
+     FAIL. (The light theme uses white over its darker teal — see the light block.) */
+  --color-on-accent: var(--color-accent-900);
+
   /* Destructive */
   --color-destructive: #e05545;
+  /* Fill for the danger BUTTON surface (variant="danger") — analog of
+     --color-accent-interactive for the destructive family. THEME-SCOPED and
+     deliberately deeper than --color-destructive on dark: white text on the
+     lighter #e05545 reached only ≈3.78:1 (WCAG AA FAIL, UAT #12). #bd2a1c
+     (same orange-red hue, lower lightness) lifts white to ≈5.98:1 (PASS) while
+     still reading as a vivid red destructive button. Scoped to the button fill
+     so it does NOT ripple into danger TEXT / badges / status-danger tiles,
+     which keep --color-destructive (used as a text/border colour elsewhere). */
+  --color-danger-interactive: #bd2a1c;
 
   /* Status text */
   --color-status-connected: var(--color-success-400);
   --color-status-connecting: var(--color-warning-400);
+  --color-status-warning: var(--color-warning-400);
   --color-status-error: var(--color-danger-400);
   --color-status-disconnected: var(--color-text-muted);
   --color-status-info: var(--color-info-400);
@@ -260,6 +281,9 @@
   --color-status-error-border: rgba(239, 68, 68, 0.15);
   --color-status-connecting-bg: rgba(245, 158, 11, 0.08);
   --color-status-connecting-border: rgba(245, 158, 11, 0.15);
+  /* Warning surface mirrors the connecting-amber family (= warning-tint-08).
+     Previously UNDEFINED → warning UI rendered the empty initial value (invisible). */
+  --color-status-warning-bg: var(--color-warning-tint-08);
   --color-status-info-bg: rgba(59, 130, 246, 0.08);
   --color-status-info-border: rgba(59, 130, 246, 0.15);
 
@@ -353,12 +377,23 @@
   --color-accent-hover: var(--color-accent-600);
   --color-accent-active: var(--color-accent-700);
 
+  /* Text rendered ON an accent fill — THEME-SCOPED (see the dark block for the
+     rationale). The light-theme teal (#2d7a76 = accent-500) is dark enough that
+     WHITE wins — #ffffff ≈ 5.05:1, clearing WCAG 4.5:1. */
+  --color-on-accent: #ffffff;
+
   /* Destructive */
   --color-destructive: #b03020;
+  /* Danger BUTTON fill — THEME-SCOPED (see the dark block for rationale). The
+     light-theme destructive #b03020 is already dark enough that white clears
+     WCAG 4.5:1 (white ≈6.38:1), so the button fill matches --color-destructive
+     here; the token exists in both themes so Button can reference it uniformly. */
+  --color-danger-interactive: #b03020;
 
   /* Status text */
   --color-status-connected: var(--color-success-600);
   --color-status-connecting: var(--color-warning-600);
+  --color-status-warning: var(--color-warning-600);
   --color-status-error: var(--color-danger-600);
   --color-status-disconnected: var(--color-text-muted);
   --color-status-info: var(--color-info-600);
@@ -370,6 +405,8 @@
   --color-status-error-border: rgba(220, 38, 38, 0.15);
   --color-status-connecting-bg: rgba(217, 119, 6, 0.08);
   --color-status-connecting-border: rgba(217, 119, 6, 0.15);
+  /* Warning surface mirrors the connecting-amber family (= warning-tint-08). */
+  --color-status-warning-bg: var(--color-warning-tint-08);
   --color-status-info-bg: rgba(37, 99, 235, 0.08);
   --color-status-info-border: rgba(37, 99, 235, 0.15);
 

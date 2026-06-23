@@ -53,6 +53,40 @@ export function colorizeLogLine(line: string): { color: string } {
   return { color: "var(--color-text-muted)" };
 }
 
+type LogSeverity = "error" | "warn" | "info";
+
+/**
+ * classifyLogSeverity — derive a severity level from a log line (F13).
+ *
+ * Returns the LEVEL only — the renderer picks the matching left-bar token. This
+ * replaces whole-line colouring (owner section 6.3 «calmer default»): instead of
+ * tinting all the text, the row gets a left colour-bar by severity and the text
+ * stays in the normal tone. Mirrors colorizeLogLine's classification rules so the
+ * two stay in lock-step; colorizeLogLine remains exported for other importers.
+ */
+function classifyLogSeverity(line: string): LogSeverity {
+  const lower = line.toLowerCase();
+  if (
+    lower.includes("error") ||
+    lower.includes("err]") ||
+    lower.includes("fatal") ||
+    lower.includes("panic")
+  )
+    return "error";
+  if (lower.includes("warn") || lower.includes("warning")) return "warn";
+  return "info";
+}
+
+/**
+ * severityBarColor — map a severity level to the left-bar colour token. Info
+ * lines get a transparent bar so only error/warn draw attention (calmer default).
+ */
+function severityBarColor(severity: LogSeverity): string {
+  if (severity === "error") return "var(--color-danger-500)";
+  if (severity === "warn") return "var(--color-warning-500)";
+  return "transparent";
+}
+
 /**
  * renderHighlighted — wrap occurrences of `query` (case-insensitive) inside
  * `line` in a <mark> span tinted with --color-warning-tint-25, preserving the
@@ -108,6 +142,18 @@ interface LogsViewerModalProps {
   sshParams: SshParams;
   /** Optional pre-loaded buffer from parent (e.g. useServerState.serverLogs) */
   initialLogs?: string;
+  /**
+   * Fired ONLY on a real successful fetch (E-9 + E-20 fix). Carries the freshly
+   * fetched logs text + the fetch-success time so the card can render a real
+   * preview and a real «Последнее обновление» timestamp. Previously the modal
+   * fetched into its own state and never reported back, so the card preview was
+   * permanently empty (E-9) and the card fabricated a "now" timestamp on every
+   * close regardless of fetch outcome (E-20).
+   *
+   * D-29: the `text` carries the logs body only between the modal and the card
+   * UI — the card must never forward it to the activity-log channel.
+   */
+  onLogsFetched?: (text: string, timestamp: Date) => void;
   /** Storybook escape hatch — force a specific visual state */
   _forceState?: "loading" | "empty" | "loaded" | "downloading" | "error";
 }
@@ -138,6 +184,7 @@ export function LogsViewerModal({
   onClose,
   sshParams,
   initialLogs,
+  onLogsFetched,
   _forceState,
 }: LogsViewerModalProps) {
   const { t } = useTranslation();
@@ -152,7 +199,9 @@ export function LogsViewerModal({
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
-  const preRef = useRef<HTMLPreElement>(null);
+  // Retargeted to the scroll container div (the <pre> was removed in favour of a
+  // per-line render, F13). Auto-scroll-to-bottom now drives this wrapper.
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Apply _forceState for Storybook
   const effectiveLoading = _forceState === "loading" ? true : loading;
@@ -167,12 +216,16 @@ export function LogsViewerModal({
         : logs;
 
   // ─── Auto-load on first open (if no initial logs) ─────────────────────────
-  // We intentionally only depend on isOpen to trigger the initial load.
-  // logs/loading/error are read inside the effect as a guard, not as triggers.
-  // handleRefresh is defined inline below (stable reference pattern not needed here).
-  const hasInitialLogsRef = { current: !!logs };
+  // WR-02: read the guard honestly at effect time. The previous
+  // `const hasInitialLogsRef = { current: !!logs }` was a plain object literal
+  // recreated every render (NOT a useRef), so the *Ref naming was misleading —
+  // it was just the current render's !!logs snapshot. We now inline the same
+  // checks (logs is seeded from initialLogs ?? "", so !logs already covers the
+  // initial-logs case; initialLogs is checked explicitly for clarity). Deps
+  // stay [isOpen] on purpose: the parent toggles isOpen per open, so the load
+  // fires once on the open edge when the buffer is empty.
   useEffect(() => {
-    if (isOpen && !hasInitialLogsRef.current && !_forceState) {
+    if (isOpen && !logs && !initialLogs && !_forceState) {
       void handleRefresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -191,19 +244,24 @@ export function LogsViewerModal({
   }, [isOpen]);
 
   // ─── Auto-scroll to bottom after load ─────────────────────────────────────
+  // Retargeted to the scroll container (the <pre> ref was removed when lines
+  // became per-row divs, F13).
   useEffect(() => {
-    if (logs && preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight;
+    if (logs && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [logs]);
 
   // ─── Filtered lines (client-side, D-2.1) ──────────────────────────────────
+  // Empty lines are dropped so the per-line render (F13) shows one row per real
+  // entry — a trailing newline must not produce a blank trailing row.
   const filteredLines = useMemo(() => {
     const source = effectiveLogs;
     if (!source) return [];
-    if (!searchQuery.trim()) return source.split("\n");
+    const lines = source.split("\n").filter((line) => line.trim().length > 0);
+    if (!searchQuery.trim()) return lines;
     const q = searchQuery.toLowerCase();
-    return source.split("\n").filter((line) => line.toLowerCase().includes(q));
+    return lines.filter((line) => line.toLowerCase().includes(q));
   }, [effectiveLogs, searchQuery]);
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -216,6 +274,11 @@ export function LogsViewerModal({
     try {
       const result = await invoke<string>("server_get_logs", sshParams as unknown as Record<string, unknown>);
       setLogs(result);
+      // E-9 + E-20: report the REAL fetched text + the REAL fetch-success time up
+      // to the card so its preview and «Последнее обновление» reflect actual data.
+      // Fired ONLY here (success path) — a rejected fetch never reaches this line,
+      // so the card never fabricates a timestamp (E-20). D-29: body stays in UI.
+      onLogsFetched?.(result, new Date());
       // D-29: лог только строки count, НЕ контент
       activityLog(
         "STATE",
@@ -267,7 +330,7 @@ export function LogsViewerModal({
 
   // ─── Render (T-03: NEVER return null before <Modal>) ──────────────────────
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} size="lg" showCloseButton>
       <div className="flex flex-col gap-3">
         {/* Title */}
         <h2 className="text-title mb-1">{t("server.logs.modal.title")}</h2>
@@ -300,9 +363,13 @@ export function LogsViewerModal({
           </p>
         </div>
 
-        {/* Scrollable log area */}
+        {/* Scrollable log area.
+            scroll-visible restores a thin themed scrollbar — the wrapper would
+            otherwise inherit the global scrollbar-hidden rule and hide the
+            horizontal bar that long no-wrap lines now need (F13). */}
         <div
-          className="overflow-auto rounded-[var(--radius-md)]"
+          ref={scrollRef}
+          className="overflow-auto rounded-[var(--radius-md)] scroll-visible"
           style={{
             maxHeight: "60vh",
             border: "1px solid var(--color-border)",
@@ -336,25 +403,47 @@ export function LogsViewerModal({
             </p>
           )}
           {!effectiveLoading && !effectiveError && filteredLines.length > 0 && (
-            <pre
-              ref={preRef}
-              className="text-mono-sm whitespace-pre-wrap p-3"
+            // One entry equals one line (F13). whitespace-pre (NOT pre-wrap) keeps
+            // long lines on a single row; the wrapper's horizontal scrollbar lets
+            // the user pan sideways instead of reading an unreadable wrapped block.
+            // data-testid kept as logs-pre for the existing content assertions.
+            <div
+              className="text-mono-sm whitespace-pre p-3"
               data-testid="logs-pre"
             >
-              {filteredLines.map((line, i) => (
-                <span key={i} style={colorizeLogLine(line)}>
-                  {searchQuery.trim() ? renderHighlighted(line, searchQuery) : line}
-                  {"\n"}
-                </span>
-              ))}
-            </pre>
+              {filteredLines.map((line, i) => {
+                const severity = classifyLogSeverity(line);
+                return (
+                  <div
+                    key={i}
+                    data-testid="log-line"
+                    data-severity={severity}
+                    // Severity is a left colour-bar, not a whole-line tint — the
+                    // text stays in the normal tone for a calmer default (owner
+                    // section 6.3 / F13). Info lines get a transparent bar.
+                    style={{
+                      borderLeft: `2px solid ${severityBarColor(severity)}`,
+                      paddingLeft: "var(--space-2)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {searchQuery.trim()
+                      ? renderHighlighted(line, searchQuery)
+                      : line || " "}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* Action row — spans full Modal width to maintain BOTH left and right
-            vertical lines with the search input and log box above.
-            UAT 2026-05-20: «кнопки должны быть по ширине этого блока». */}
-        <div className="flex flex-wrap justify-between gap-2 mt-2">
+        {/* Action row — Refresh / Copy / Download are utility actions. Per the
+            GROUP standard (R2-F02b, 09-35, owner decision #4) they CLUSTER right
+            with an even gap (justify-end), not spread edge-to-edge: unequal label
+            widths under justify-between produced uneven gaps. The redundant
+            labeled «Закрыть» button was dropped (F18) — the Modal's corner X
+            (showCloseButton) is the single close affordance now. */}
+        <div className="flex flex-wrap justify-end gap-2 mt-2">
           <Button
             variant="ghost"
             size="sm"
@@ -388,9 +477,6 @@ export function LogsViewerModal({
             onClick={() => void handleDownload()}
           >
             {t("server.logs.modal.download")}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            {t("buttons.close")}
           </Button>
         </div>
       </div>

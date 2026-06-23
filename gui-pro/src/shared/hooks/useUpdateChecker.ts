@@ -53,8 +53,11 @@ export interface UpdateCheckerSshParams {
  * ProtocolUpdateSection Badge показывается ТОЛЬКО когда `sidecarAvailable && !sidecarDismissed` (Phase 19).
  * Dot indicator показывается когда `appAvailable || sidecarAvailable` (D-2.5).
  *
- * Per-version dismissal (REQ-18-UPDATE-FLOW-02):
- * - localStorage key `tt_dismissed_update_<version>` = `"true"`
+ * Per-version dismissal (REQ-18-UPDATE-FLOW-02), per-launch scope (UAT-2 / owner 6.8):
+ * - sessionStorage key `tt_dismissed_update_<version>` = `"true"`
+ * - Флаг живёт ТОЛЬКО в пределах одного запуска приложения. Новый запуск =
+ *   свежая сессия = флага нет → точка снова nudge'ит, пока обновление доступно
+ *   (UAT-2 per-launch nudge). В пределах сессии visit-dismiss работает как раньше.
  * - Когда выходит более новая sidecar версия — `sidecarDismissed = false`
  *   автоматически (key для новой версии не существует)
  *
@@ -137,8 +140,10 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
         lastChecked: nowIso,
       }));
       // tt_last_update_check для 24h cadence rate-limit + debug visibility
-      // (CLAUDE.md localStorage table)
-      localStorage.setItem("tt_last_update_check", nowIso);
+      // (CLAUDE.md localStorage table). WR-05: guard the write so a
+      // privacy-restricted/quota-exceeded WebView throwing here does not abort
+      // the rest of the path — the cadence key is best-effort debug metadata.
+      try { localStorage.setItem("tt_last_update_check", nowIso); } catch { /* privacy/quota */ }
     } catch (e) {
       // Silent fail per D-2.x — DevTools-only visibility
       console.warn("Update check failed:", e);
@@ -177,9 +182,18 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
           keyData: sshParams.keyData ?? null,
         });
 
-        // Per-version dismissal lookup (REQ-18-UPDATE-FLOW-02)
+        // Per-version dismissal lookup (REQ-18-UPDATE-FLOW-02), per-launch
+        // scope (UAT-2 / owner 6.8): read from sessionStorage so a fresh
+        // launch re-nudges. A stale localStorage flag from the old permanent
+        // scope is intentionally ignored.
+        // WR-05: guard the read like useSidecarUpdateCascade does — on a
+        // platform without sessionStorage this would otherwise throw inside the
+        // try and silently lose the dismissal lookup. Treat absent storage as
+        // "not dismissed".
         const dismissedKey = `tt_dismissed_update_${info.latest_version}`;
-        const dismissed = localStorage.getItem(dismissedKey) === "true";
+        const dismissed =
+          typeof sessionStorage !== "undefined" &&
+          sessionStorage.getItem(dismissedKey) === "true";
 
         const nowIso = new Date().toISOString();
         setUpdateInfo(prev => ({
@@ -193,7 +207,11 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
           sidecarChecking: false,
           lastChecked: nowIso,
         }));
-        localStorage.setItem("tt_last_update_check", nowIso);
+        // WR-05: guard the cadence-key write. As the last statement in the try,
+        // an unguarded throw here (privacy/quota WebView) was swallowed by the
+        // catch and prematurely flipped sidecarChecking off mid-flight after the
+        // state was already set. Best-effort write keeps the happy path intact.
+        try { localStorage.setItem("tt_last_update_check", nowIso); } catch { /* privacy/quota */ }
       } catch (e) {
         // Silent fail per D-2.x — DevTools-only visibility
         console.warn("Sidecar update check failed:", e);
@@ -204,17 +222,20 @@ export function useUpdateChecker(_sshParams?: UpdateCheckerSshParams | null) {
   );
 
   /**
-   * Per-version dismissal (REQ-18-UPDATE-FLOW-02).
+   * Per-version dismissal (REQ-18-UPDATE-FLOW-02), per-launch scope
+   * (UAT-2 / owner 6.8).
    *
-   * Записывает `tt_dismissed_update_<version> = "true"` в localStorage и
-   * flips state.sidecarDismissed = true. НЕ trigger refetch GitHub —
-   * флаг живёт до выхода более новой версии.
+   * Записывает `tt_dismissed_update_<version> = "true"` в sessionStorage и
+   * flips state.sidecarDismissed = true. НЕ trigger refetch GitHub. Флаг живёт
+   * только до перезапуска приложения (свежая сессия) — после рестарта точка
+   * снова nudge'ит, пока обновление доступно (UAT-2 per-launch nudge). В пределах
+   * сессии visit-dismiss работает как раньше.
    *
    * Caller — обычно ProtocolUpdateSection (Phase 19) через ServiceTabSection prop drilling.
    */
   const dismissSidecarUpdate = useCallback((version: string) => {
     const key = `tt_dismissed_update_${version}`;
-    localStorage.setItem(key, "true");
+    sessionStorage.setItem(key, "true");
     setUpdateInfo(prev => ({ ...prev, sidecarDismissed: true }));
   }, []);
 

@@ -329,4 +329,47 @@ mod tests {
             "alice must be removed"
         );
     }
+
+    // ── Relocated from tests/rules_toml_test.rs (H-6, 09-03) ──────────────────
+    // These full-lifecycle round-trips previously lived in the integration
+    // target `tests/rules_toml_test.rs`, which NO documented self-check command
+    // runs: `cargo test --lib` skips `tests/`, and `prerelease` invokes clippy,
+    // not test. They only use the public lib API (the same three fns this module
+    // owns), so moving them into this `#[cfg(test)]` module makes them reachable
+    // by the documented `cargo test --lib` self-check without needing admin
+    // (the integration binary required admin → os error 740). No rule logic
+    // changed — pure test relocation.
+    #[test]
+    fn rules_toml_full_lifecycle_add_find_remove() {
+        let mut content = String::from("# trusttunnel rules.toml\n");
+        content = add_user_rule(&content, "alice", Some("aabbccdd"), Some("10.0.0.0/24")).unwrap();
+        let found = find_user_rule(&content, "alice").unwrap();
+        assert!(found.is_some());
+        let rule = found.unwrap();
+        assert_eq!(rule.client_random_prefix.as_deref(), Some("aabbccdd"));
+        assert_eq!(rule.cidr.as_deref(), Some("10.0.0.0/24"));
+
+        content = remove_user_rule(&content, "alice").unwrap();
+        let found_after = find_user_rule(&content, "alice").unwrap();
+        assert!(found_after.is_none());
+        assert!(content.contains("# trusttunnel rules.toml"));
+    }
+
+    #[test]
+    fn rules_toml_multiple_users_isolated() {
+        let mut content = String::new();
+        content = add_user_rule(&content, "alice", Some("aa"), None).unwrap();
+        content = add_user_rule(&content, "bob", None, Some("192.168.1.0/24")).unwrap();
+        content = add_user_rule(&content, "carol", Some("cc"), Some("10.0.0.0/8")).unwrap();
+
+        assert!(find_user_rule(&content, "alice").unwrap().is_some());
+        assert!(find_user_rule(&content, "bob").unwrap().is_some());
+        assert!(find_user_rule(&content, "carol").unwrap().is_some());
+        assert!(find_user_rule(&content, "ghost").unwrap().is_none());
+
+        content = remove_user_rule(&content, "bob").unwrap();
+        assert!(find_user_rule(&content, "bob").unwrap().is_none());
+        assert!(find_user_rule(&content, "alice").unwrap().is_some());
+        assert!(find_user_rule(&content, "carol").unwrap().is_some());
+    }
 }

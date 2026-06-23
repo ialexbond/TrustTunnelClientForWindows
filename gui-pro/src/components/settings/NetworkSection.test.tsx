@@ -21,6 +21,9 @@ function makeState(overrides: Partial<SettingsState> = {}): SettingsState {
         has_ipv6: false,
         username: "user",
         password: "pass",
+        // UAT-F06/F05/F07: dns_upstreams lives under [endpoint] (sidecar contract),
+        // not as a top-level key.
+        dns_upstreams: ["1.1.1.1", "8.8.8.8"],
       },
       listener: {
         tun: {
@@ -30,7 +33,6 @@ function makeState(overrides: Partial<SettingsState> = {}): SettingsState {
           excluded_routes: [],
         },
       },
-      dns_upstreams: ["1.1.1.1", "8.8.8.8"],
     },
     saving: false,
     error: "",
@@ -75,6 +77,39 @@ describe("NetworkSection", () => {
     expect(screen.getByDisplayValue("8.8.8.8")).toBeInTheDocument();
   });
 
+  // UAT-F06: a loaded config with endpoint.dns_upstreams populated pre-fills the
+  // DNS rows (the bug was the UI reading a top-level dns_upstreams that never hydrated).
+  it("hydrates DNS rows from endpoint.dns_upstreams (F06)", () => {
+    const base = makeState().config!;
+    const state = makeState({
+      config: {
+        ...base,
+        endpoint: { ...base.endpoint, dns_upstreams: ["9.9.9.9", "tls://1.1.1.1"] },
+      },
+    });
+    render(<NetworkSection state={state} />);
+    expect(screen.getByDisplayValue("9.9.9.9")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("tls://1.1.1.1")).toBeInTheDocument();
+  });
+
+  // UAT-F06: a config with a stray legacy top-level dns_upstreams but no
+  // endpoint.dns_upstreams must NOT render any rows (the canonical path is endpoint-nested).
+  it("ignores a legacy top-level dns_upstreams when endpoint has none (F06)", () => {
+    const base = makeState().config!;
+    const { dns_upstreams: _drop, ...endpointNoDns } = base.endpoint;
+    void _drop;
+    const state = makeState({
+      config: {
+        ...base,
+        endpoint: endpointNoDns,
+        dns_upstreams: ["1.1.1.1", "8.8.8.8"],
+      },
+    });
+    render(<NetworkSection state={state} />);
+    expect(screen.queryByDisplayValue("1.1.1.1")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("8.8.8.8")).not.toBeInTheDocument();
+  });
+
   it("renders add DNS button", () => {
     render(<NetworkSection state={makeState()} />);
     expect(screen.getByText("Добавить DNS")).toBeInTheDocument();
@@ -84,7 +119,7 @@ describe("NetworkSection", () => {
     const state = makeState();
     render(<NetworkSection state={state} />);
     fireEvent.click(screen.getByText("Добавить DNS"));
-    expect(state.updateField).toHaveBeenCalledWith("dns_upstreams", ["1.1.1.1", "8.8.8.8", ""]);
+    expect(state.updateField).toHaveBeenCalledWith("endpoint.dns_upstreams", ["1.1.1.1", "8.8.8.8", ""]);
   });
 
   it("returns null when config is null", () => {
@@ -106,7 +141,7 @@ describe("NetworkSection", () => {
     render(<NetworkSection state={state} />);
     const firstInput = screen.getByDisplayValue("1.1.1.1");
     fireEvent.change(firstInput, { target: { value: "9.9.9.9" } });
-    expect(state.updateField).toHaveBeenCalledWith("dns_upstreams", ["9.9.9.9", "8.8.8.8"]);
+    expect(state.updateField).toHaveBeenCalledWith("endpoint.dns_upstreams", ["9.9.9.9", "8.8.8.8"]);
   });
 
   it("calls updateField to remove a DNS upstream when trash button is clicked", () => {
@@ -117,7 +152,7 @@ describe("NetworkSection", () => {
     // Delete buttons for each DNS, then add DNS button
     // With 2 DNS entries, delete buttons are at index 0 and 1
     fireEvent.click(allButtons[0]);
-    expect(state.updateField).toHaveBeenCalledWith("dns_upstreams", ["8.8.8.8"]);
+    expect(state.updateField).toHaveBeenCalledWith("endpoint.dns_upstreams", ["8.8.8.8"]);
   });
 
   it("removes second DNS upstream when its trash button is clicked", () => {
@@ -126,14 +161,15 @@ describe("NetworkSection", () => {
     const allButtons = screen.getAllByRole("button");
     // Second delete button removes the second DNS entry
     fireEvent.click(allButtons[1]);
-    expect(state.updateField).toHaveBeenCalledWith("dns_upstreams", ["1.1.1.1"]);
+    expect(state.updateField).toHaveBeenCalledWith("endpoint.dns_upstreams", ["1.1.1.1"]);
   });
 
   it("renders with empty DNS upstreams", () => {
+    const base = makeState().config!;
     const state = makeState({
       config: {
-        ...makeState().config!,
-        dns_upstreams: [],
+        ...base,
+        endpoint: { ...base.endpoint, dns_upstreams: [] },
       },
     });
     render(<NetworkSection state={state} />);

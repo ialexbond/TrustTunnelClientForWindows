@@ -260,7 +260,14 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     return t("server.security.errors.backend_generic", { msg: raw });
   }, [t]);
 
-  const run = async (key: string, fn: () => Promise<unknown>, successMsg?: string) => {
+  // E-5/E-6 fix (Behavioral Cluster 5): run() now REPORTS its outcome via an
+  // additive success boolean instead of swallowing the error and resolving void.
+  // The internal toast-on-error is preserved (callers still rely on it; we do NOT
+  // make run() throw — see 09-RESEARCH-behavioral.md Pitfall 2), but optimistic-UI
+  // callers can now gate their close/clear/revert on the real result:
+  //   - addRule keeps the form open with values when this is false (E-6)
+  //   - the Fail2ban tab reverts the optimistic preset radio when this is false (E-5)
+  const run = async (key: string, fn: () => Promise<unknown>, successMsg?: string): Promise<boolean> => {
     setBusySet(prev => { const n = new Set(prev); n.add(key); return n; });
     let ok = false;
     try {
@@ -273,6 +280,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
       setBusySet(prev => { const n = new Set(prev); n.delete(key); return n; });
       if (ok && successMsg) pushSuccess(successMsg);
     }
+    return ok;
   };
 
   // Section-level busy flags.
@@ -386,9 +394,15 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     const commentErr = validateComment(newRule.comment);
     if (commentErr) { showError(t(commentErr)); return; }
 
-    await run("add-rule", async () => {
+    // E-6 fix: gate the form close + reset on the real backend outcome. Before
+    // this, the two lines below ran unconditionally after `await run(...)` — so a
+    // REJECTED rule still cleared+closed the form, discarding the user's input.
+    // run() surfaces the error toast internally; on failure we keep the form open
+    // with the entered values so the user can correct and retry.
+    const ok = await run("add-rule", async () => {
       await invoke("security_firewall_add_rule", { ...sshParams, rule: newRule });
     }, t("server.security.snack.rule_added"));
+    if (!ok) return;
     setShowAddRule(false);
     setNewRule({ port: "", proto: "tcp", action: "allow", from: "", comment: "" });
   };
@@ -440,9 +454,12 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
   // Backend command unchanged; frontend just constructs config from PRESETS map.
   // Note: ConfirmDialog NOT here — Fail2banModal owns immediate-apply UX
   // (preset radio click triggers apply; no confirm needed).
-  const applyFail2banPreset = async (preset: keyof typeof FAIL2BAN_PRESETS): Promise<void> => {
+  // E-5 fix: return the run() success boolean (was `void run(...)`, which made the
+  // tab's revert `catch` unreachable). The Fail2ban tab reverts the optimistic
+  // preset radio when this resolves false → the radio snaps back to detectedPreset.
+  const applyFail2banPreset = async (preset: keyof typeof FAIL2BAN_PRESETS): Promise<boolean> => {
     const cfg = FAIL2BAN_PRESETS[preset];
-    void run(
+    return run(
       `f2b-preset-${preset}`,
       () => invoke("security_fail2ban_set_jail", {
         ...sshParams,
@@ -455,8 +472,8 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
     );
   };
 
-  const applyFail2banCustom = async (custom: { maxretry: number; bantime: string; findtime: string }): Promise<void> => {
-    void run(
+  const applyFail2banCustom = async (custom: { maxretry: number; bantime: string; findtime: string }): Promise<boolean> => {
+    return run(
       "f2b-preset-custom",
       () => invoke("security_fail2ban_set_jail", {
         ...sshParams,

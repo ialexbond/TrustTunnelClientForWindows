@@ -32,22 +32,22 @@ describe("ErrorBanner", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it("applies error severity classes by default", () => {
+  it("applies error variant classes by default", () => {
     const { container } = render(<ErrorBanner message="Error" />);
     const banner = container.firstChild as HTMLElement;
     expect(banner.className).toContain("bg-[var(--color-status-error-bg)]");
     expect(banner.className).toContain("text-[var(--color-status-error)]");
   });
 
-  it("applies warning severity classes", () => {
-    const { container } = render(<ErrorBanner message="Warning" severity="warning" />);
+  it("applies warning variant classes", () => {
+    const { container } = render(<ErrorBanner message="Warning" variant="warning" />);
     const banner = container.firstChild as HTMLElement;
     expect(banner.className).toContain("bg-[var(--color-status-connecting-bg)]");
     expect(banner.className).toContain("text-[var(--color-status-connecting)]");
   });
 
-  it("applies info severity classes", () => {
-    const { container } = render(<ErrorBanner message="Info" severity="info" />);
+  it("applies info variant classes", () => {
+    const { container } = render(<ErrorBanner message="Info" variant="info" />);
     const banner = container.firstChild as HTMLElement;
     expect(banner.className).toContain("bg-[var(--color-status-info-bg)]");
     expect(banner.className).toContain("text-[var(--color-status-info)]");

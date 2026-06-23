@@ -94,6 +94,37 @@ describe("Toggle", () => {
     expect(container.firstElementChild!.className).toContain("opacity-[var(--opacity-disabled)]");
   });
 
+  // Loading state — the spinner renders INSIDE the thumb (not as a swapped-out
+  // standalone spinner). While loading the switch must be inert + announce busy,
+  // but must NOT dim like a disabled control (it's mid-apply, still active).
+  it("loading: click does not call onChange", () => {
+    const onChange = vi.fn();
+    render(<Toggle checked={false} onChange={onChange} label="BBR" loading />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("loading: sets aria-busy and disables the switch", () => {
+    render(<Toggle checked={true} onChange={() => {}} label="BBR" loading />);
+    const btn = screen.getByRole("switch");
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    expect(btn).toBeDisabled();
+  });
+
+  it("loading: does NOT dim the wrapper (only `disabled` dims)", () => {
+    const { container } = render(
+      <Toggle checked={false} onChange={() => {}} label="BBR" loading />
+    );
+    expect(container.firstElementChild!.className).not.toContain(
+      "opacity-[var(--opacity-disabled)]"
+    );
+  });
+
+  it("loading: preserves the on/off position (aria-checked unchanged)", () => {
+    render(<Toggle checked={true} onChange={() => {}} label="BBR" loading />);
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("does not import from colors module", () => {
     // This is validated statically — Toggle should only use CSS var tokens
     render(<Toggle checked={true} onChange={() => {}} />);

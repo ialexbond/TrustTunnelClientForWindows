@@ -1,0 +1,98 @@
+########################################################################
+                   IP QUALITY CHECK REPORT: 198.51.*.*
+                   https://github.com/xykt/IPQuality
+                bash <(curl -sL https://Check.Place) -EI
+       Report Time: 2026-06-23 09:13:43 UTC  Version: v2026-03-29
+########################################################################
+1. Basic Information (Maxmind Database)
+ASN:                    AS56971
+Organization:           Cgi Global Limited
+Location:               2°20′58″E, 48°51′21″N
+Map:                    https://check.place/48.8558,2.3494,15,en
+City:                   Île-de-France, Paris, 75001
+Actual Region:          [FR]France, [EU]Europe
+Registered Region:      [BG]Bulgaria
+Time Zone:              Europe/Paris
+IP Type:                 Geo-discrepant
+2. IP Type
+Database:     IPinfo    ipregistry    ipapi    IP2Location   AbuseIPDB
+Usage:       Hosting     Hosting     Hosting     Hosting     Hosting
+Company:     Hosting     Hosting     Hosting     Hosting
+3. Risk Score
+Levels:         VeryLow     Low      Medium      High   VeryHigh
+IP2Location:    3|Low
+Scamalytics:                                57|Medium
+ipapi:                                     5.88%|High
+AbuseIPDB:     0|Low
+IPQS:          0|Low
+DB-IP:          |Low
+4. Risk Factors
+DB:  IP2Location ipapi ipregistry IPQS Scamalytics ipdata IPinfo DB-IP
+Region:   [FR]    [FR]    [FR]    [FR]    [FR]    [FR]    [FR]    [FR]
+Proxy:     No      No      No      No      No      No      No      No
+Tor:       No      No      No      No      No      No      No      N/A
+VPN:       No      No      No      No      No      N/A     No      N/A
+Server:    Yes     Yes     Yes     N/A     No      Yes     Yes     N/A
+Abuser:    No      No      No      No      No      No      N/A     No
+Robot:     No      No      N/A     No      No      N/A     N/A     No
+5. Accessibility check for media and AI services
+Service:  TikTok   Disney+  Netflix Youtube  AmazonPV  Reddit   ChatGPT
+Status:     Yes      Yes      Yes      Yes      Yes      Yes      Yes
+Region:    [FR]     [FR]     [FR]     [HK]     [FR]     []     [FR]
+Type:     Native   Native   Native   Native   Native   Native   Native
+6. Email service availability and blacklist detection
+Local Port 25 Outbound: Blocked
+Conn: Remote Port 25 unreachable
+DNSBL database:   Active 439   Clean 418   Marked 21   Blacklisted 0
+========================================================================
+IP Checks Today: 2779; Total: 1528264. Thanks for running xy scripts!
+Report Link: https://Report.Check.Place/ip/3SAHPEZIJ.svg
+
+########################################################################
+             IP QUALITY CHECK REPORT: 2001:db8:5:*:*:*:*:*
+                   https://github.com/xykt/IPQuality
+                bash <(curl -sL https://Check.Place) -EI
+       Report Time: 2026-06-23 09:13:43 UTC  Version: v2026-03-29
+########################################################################
+1. Basic Information (Maxmind Database)
+ASN:                    AS56971
+Organization:           Cgi Global Limited
+Location:               2°20′58″E, 48°51′21″N
+Map:                    https://check.place/48.8558,2.3494,15,en
+City:                   Île-de-France, Paris, 75001
+Actual Region:          [HK]Hong Kong, [EU]Europe
+Registered Region:      [HK]Hong Kong
+Time Zone:              Europe/Paris
+IP Type:                 Geo-consistent
+2. IP Type
+Database:     IPinfo    ipregistry    ipapi    IP2Location   AbuseIPDB
+Usage:       Hosting     Hosting     Hosting     Hosting     Hosting
+Company:     Business    Hosting     Hosting     Hosting
+3. Risk Score
+Levels:         VeryLow     Low      Medium      High   VeryHigh
+IP2Location:    3|Low
+Scamalytics:                                    67|High
+ipapi:     0.00%|VeryLow
+AbuseIPDB:     0|Low
+IPQS:          0|Low
+DB-IP:          |Low
+4. Risk Factors
+DB:  IP2Location ipapi ipregistry IPQS Scamalytics ipdata IPinfo DB-IP
+Region:   [FR]    [FR]    [FR]    [FR]    [HK]    [FR]    [FR]    [FR]
+Proxy:     No      No      No      No      No      No      No      No
+Tor:       No      No      No      No      No      No      No      N/A
+VPN:       No      No      No      No      No      N/A     No      N/A
+Server:    Yes     Yes     Yes     N/A     No      No      Yes     N/A
+Abuser:    No      No      No      No      No      No      N/A     No
+Robot:     No      No      N/A     No      No      N/A     N/A     No
+5. Accessibility check for media and AI services
+Service:  TikTok   Disney+  Netflix Youtube  AmazonPV  Reddit   ChatGPT
+Status:   Failed     Yes      Yes    NoPrem.   Block     Yes      Yes
+Region:             [FR]     [FR]                       []     [FR]
+Type:              Native   Native                     Native   Native
+6. Email service availability and blacklist detection
+Local Port 25 Outbound: Blocked
+Conn: +Gmail-Outlook-Yahoo-Apple-QQ-MailRU-AOL-GMX-MailCOM-163-Sohu-Sina
+========================================================================
+IP Checks Today: 2787; Total: 1528272. Thanks for running xy scripts!
+Report Link: https://Report.Check.Place/ip/2NR9UEJ9S.svg

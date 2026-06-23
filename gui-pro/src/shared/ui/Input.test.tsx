@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Input } from "./Input";
+import { FormField } from "./FormField";
 
 describe("Input", () => {
   it("renders with placeholder", () => {
@@ -95,5 +96,33 @@ describe("Input", () => {
   it("error text rendered with error prop", () => {
     render(<Input error="Something went wrong" placeholder="test" />);
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+  });
+
+  // A11Y-03: label and input must be programmatically associated so screen
+  // readers announce the label on focus and getByLabelText can resolve them.
+  it("associates label with input (getByLabelText returns the input)", () => {
+    render(<Input label="Server name" placeholder="srv" />);
+    const input = screen.getByLabelText("Server name");
+    expect(input).toBe(screen.getByPlaceholderText("srv"));
+  });
+
+  it("respects an explicit id prop for the label association", () => {
+    render(<Input id="custom-id" label="Port" placeholder="port" />);
+    const input = screen.getByLabelText("Port");
+    expect(input).toHaveAttribute("id", "custom-id");
+  });
+});
+
+describe("FormField", () => {
+  // A11Y-03: FormField's child is opaque, so it associates via aria-labelledby
+  // (the label carries an id the child references) — the lowest-risk linkage.
+  it("associates its label with the child via aria-labelledby", () => {
+    render(
+      <FormField label="Gateway">
+        <input placeholder="gw" />
+      </FormField>
+    );
+    const input = screen.getByLabelText("Gateway");
+    expect(input).toBe(screen.getByPlaceholderText("gw"));
   });
 });

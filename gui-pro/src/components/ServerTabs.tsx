@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useActivityLog } from "../shared/hooks/useActivityLog";
 import {
@@ -12,6 +12,8 @@ import {
 import { cn } from "../shared/lib/cn";
 import { Divider } from "../shared/ui/Divider";
 import { Tooltip } from "../shared/ui/Tooltip";
+import { IconButton } from "../shared/ui/IconButton";
+import { ICON } from "../shared/ui/iconScale";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { useConfirm } from "../shared/ui/useConfirm";
 import type { ServerState } from "./server/useServerState";
@@ -207,6 +209,26 @@ export function ServerTabs({
     }
   };
 
+  // E-15 (Plan 09-13) — dismiss the «Сервис» update-dot on VISIT, not on mount.
+  //
+  // Prime-suspect bug: ServerTabs mounts all five panels at once (cross-fade
+  // pattern below), so ServiceTabSection's mount-effect fired `onSidecarUpdateSeen`
+  // the instant the panel mounted — even while the user was still on Overview —
+  // and the dot never got a chance to nag. The dismissal now lives here, gated on
+  // the user ACTUALLY being on the «Сервис» tab (`activeTab === "service"`), which
+  // is exactly the "now they can see it" moment. `hasSidecarUpdate` mirrors the
+  // dot's own visibility condition, so we only dismiss when there is something to
+  // dismiss. The effect is keyed on both signals, so StrictMode's double-invoke is
+  // harmless (the parent's dismiss handler is idempotent — it writes the same
+  // `tt_dismissed_update_<version>=true`). ServiceTabSection is NOT touched by this
+  // plan; ServerTabs simply stops passing `onSidecarUpdateSeen` down (so its now-
+  // dead mount-effect no-ops) until 09-21 removes that effect outright.
+  useEffect(() => {
+    if (activeTab === "service" && hasSidecarUpdate) {
+      onSidecarUpdateSeen?.();
+    }
+  }, [activeTab, hasSidecarUpdate, onSidecarUpdateSeen]);
+
   // WAI-ARIA Tabs manual activation (Phase 12.5, D-19):
   // Arrow / Home / End move FOCUS only — activation requires Enter/Space/click.
   // This prevents accidental activation of heavy SSH tabs while navigating.
@@ -287,24 +309,22 @@ export function ServerTabs({
       </div>
 
         {/* Separator + Disconnect icon (semi-destructive action — hover красным).
-            Sibling of the tablist (H-07) — reachable via Tab, not Arrow keys. */}
+            Sibling of the tablist (H-07) — reachable via Tab, not Arrow keys.
+            A-1 (09-24): adopted the shared IconButton. The danger hover
+            (red text + danger tint) is passed via `className` (IconButton merges
+            with cn), per the must-have. The outer <Tooltip position="bottom"> is
+            KEPT (and IconButton is used WITHOUT its own `tooltip` prop) so the tip
+            still opens BELOW the button — placing it above would collide with the
+            titlebar. Single tooltip, no double-wrap. Icon = ICON.md (16px === the
+            previous w-4 h-4, pixel-identical, ICON-01). */}
         <Divider orientation="vertical" className="shrink-0 mx-2 my-1.5" />
         <Tooltip text={t("control.disconnect")} position="bottom">
-          <button
-            type="button"
+          <IconButton
             onClick={handleDisconnect}
             aria-label={t("control.disconnect")}
-            className={cn(
-              "shrink-0 flex items-center justify-center",
-              "h-8 w-8 rounded-[var(--radius-md)]",
-              "text-[var(--color-text-muted)]",
-              "hover:text-[var(--color-destructive)] hover:bg-[var(--color-danger-tint-08)]",
-              "transition-colors",
-              "focus-visible:shadow-[var(--focus-ring)] outline-none"
-            )}
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+            className="shrink-0 hover:text-[var(--color-destructive)] hover:bg-[var(--color-danger-tint-08)]"
+            icon={<LogOut size={ICON.md} />}
+          />
         </Tooltip>
       </div>
       </div>
@@ -366,17 +386,24 @@ export function ServerTabs({
                   <ConfigurationTab
                     sshParams={state.sshParams}
                     onNavigateToTab={(targetTab) => void setActiveTab(targetTab)}
+                    // UAT-F01: bumped by UsersSection on user add/delete so the
+                    // Configuration tab re-reads credentials.toml + rules.toml live.
+                    configEpoch={state.configEpoch}
                   />
                 )}
                 {tab.id === "security" && <SecurityTabSection state={state} />}
                 {tab.id === "service" && (
+                  // E-15 (Plan 09-13): `onSidecarUpdateSeen` is intentionally NOT
+                  // forwarded here. ServerTabs now owns dismissal (visit-keyed
+                  // effect above) so the dot dismisses on VISIT, not on the panel's
+                  // mount. ServiceTabSection's own mount-effect therefore no-ops
+                  // (prop undefined) until 09-21 removes it outright.
                   <ServiceTabSection
                     state={state}
                     currentVersion={currentVersion}
                     sidecarAvailable={sidecarAvailable}
                     latestVersion={latestVersion}
                     onSidecarUpdateApplied={onSidecarUpdateApplied}
-                    onSidecarUpdateSeen={onSidecarUpdateSeen}
                   />
                 )}
               </>

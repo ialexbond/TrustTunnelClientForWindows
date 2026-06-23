@@ -424,6 +424,50 @@ describe("ServerTabs", () => {
     });
   });
 
+  // ─── E-15: dismiss-on-VISIT, not on mount (prime-suspect bug) ──────────────
+  //
+  // ServerTabs mounts all five tab panels at once (cross-fade). The old dismissal
+  // lived in ServiceTabSection's mount-effect, so it fired the moment the panel
+  // mounted — even while the user was on Overview — and the dot never nagged.
+  // Plan 09-13 moves dismissal to ServerTabs, keyed on the user actually
+  // VISITING the «Сервис» tab. (09-21 removes the now-dead ServiceTabSection
+  // mount-effect; this plan only stops ServerTabs from passing the prop down.)
+  describe("E-15: update-dot dismisses on VISIT (ServerTabs-only)", () => {
+    it("does NOT call onSidecarUpdateSeen while the user is on Overview (dot still showing)", () => {
+      const onSidecarUpdateSeen = vi.fn();
+      // default tab = overview, update available → the dot is visible, the user
+      // has NOT yet visited «Сервис».
+      renderTabs({ hasSidecarUpdate: true, onSidecarUpdateSeen });
+      expect(screen.getByTestId("service-tab-update-dot")).toBeInTheDocument();
+      // The dot must keep nagging — dismissal happens on VISIT, not on mount.
+      expect(onSidecarUpdateSeen).not.toHaveBeenCalled();
+    });
+
+    it("fires onSidecarUpdateSeen once when the user clicks the «Сервис» tab, and the dot clears", async () => {
+      const onSidecarUpdateSeen = vi.fn();
+      renderTabs({ hasSidecarUpdate: true, onSidecarUpdateSeen });
+      // Baseline: not called yet on Overview.
+      expect(onSidecarUpdateSeen).not.toHaveBeenCalled();
+
+      fireEvent.click(document.getElementById("tab-service")!);
+
+      // StrictMode-safe: assert the call happened RELATIVE to the click (>=1),
+      // not an absolute mount count. The dot disappears once the user is on the
+      // service tab.
+      await waitFor(() =>
+        expect(onSidecarUpdateSeen).toHaveBeenCalled(),
+      );
+      expect(screen.queryByTestId("service-tab-update-dot")).toBeNull();
+    });
+
+    it("does NOT call onSidecarUpdateSeen when there is no update to dismiss", () => {
+      const onSidecarUpdateSeen = vi.fn();
+      renderTabs({ hasSidecarUpdate: false, onSidecarUpdateSeen });
+      fireEvent.click(document.getElementById("tab-service")!);
+      expect(onSidecarUpdateSeen).not.toHaveBeenCalled();
+    });
+  });
+
   // ─── Loading skeleton + error/retry ────────────────────────────────────────
   describe("loading + error states", () => {
     it("shows the loading skeleton (section content absent) when state.loading", () => {

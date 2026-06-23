@@ -47,6 +47,15 @@ export default defineConfig(async () => ({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: true,
+    // ISO-03 (09-03): global mock reset between every test. Without this a spy
+    // that silently inherits a reset state (the H-5 vacuous-spy class) can pass
+    // tautologically. clearMocks/restoreMocks reset call history + original
+    // implementations; unstubGlobals undoes vi.stubGlobal. This is the
+    // structural backstop that makes the next vacuous-spy bug fail loudly
+    // instead of passing silently.
+    clearMocks: true,
+    restoreMocks: true,
+    unstubGlobals: true,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

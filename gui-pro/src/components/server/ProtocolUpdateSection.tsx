@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Package, RefreshCw, Loader2 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
@@ -138,16 +138,41 @@ export function ProtocolUpdateSection({
   // Track refresh re-entry (Pitfall 3 guard).
   const [refreshing, setRefreshing] = useState(false);
 
+  // E-16 fix: re-sync the pick ONLY when `currentVersion` actually changes
+  // (e.g. after a successful update + re-probe), NOT on every `versions`
+  // identity change. The previous effect listed `versions` in its deps; a
+  // Refresh re-fetches `list_sidecar_versions` and `useSidecarVersions` returns
+  // a NEW array ref (equal content), which re-fired the effect and reset
+  // `selectedVersion` back to the installed `currentVersion` — silently
+  // discarding the user's chosen target version on Refresh.
+  //
+  // We track the last currentVersion we synced against in a ref. The effect
+  // still runs on `versions` changes (needed to seed the default while
+  // currentVersion is loading ""), but the `currentVersion`-driven re-sync
+  // fires only on a genuine currentVersion transition.
+  const lastSyncedCurrentRef = useRef<string | null>(null);
   useEffect(() => {
-    // Re-sync selectedVersion whenever currentVersion prop changes (e.g. after
-    // successful update completion — parent re-fetches sidecar version).
-    // While currentVersion is still loading (""), fall back to the newest
-    // version from GitHub so the dropdown shows a sensible default instead of
-    // an empty Select placeholder ("Выберите...").
-    if (currentVersion) {
-      setSelectedVersion(currentVersion);
+    // A real installed version ("1.0.31") snaps the pick to it; "" (loading) and
+    // "unknown" (State G, not installed) instead seed the newest GitHub release
+    // so the Select has a sensible default and E-7 never leaves "unknown" as the
+    // selected/installable value.
+    const isReal = !!currentVersion && currentVersion !== "unknown";
+    if (isReal) {
+      // Only snap to the installed version when currentVersion itself changed —
+      // a Refresh that leaves currentVersion untouched must preserve the pick.
+      if (lastSyncedCurrentRef.current !== currentVersion) {
+        lastSyncedCurrentRef.current = currentVersion;
+        setSelectedVersion(currentVersion);
+      }
     } else if (versions.length > 0) {
-      setSelectedVersion(versions[0].version);
+      // currentVersion loading ("") or not-installed ("unknown"): seed the
+      // newest GitHub release ONCE so the Select shows a sensible default
+      // instead of an empty placeholder. Guard with the ref so a Refresh
+      // doesn't keep re-seeding over the user's pick.
+      if (lastSyncedCurrentRef.current === null) {
+        lastSyncedCurrentRef.current = currentVersion; // "" or "unknown"
+        setSelectedVersion(versions[0].version);
+      }
     }
   }, [currentVersion, versions]);
 
@@ -180,13 +205,23 @@ export function ProtocolUpdateSection({
   }, [versions, currentVersion]);
 
   // Install button enable rule:
-  //   - State G (unknown current): enabled if any version is selected
-  //   - Loading current (""): enabled if any version is selected — user can
+  //   - State G (unknown current): enabled if a REAL version is selected
+  //   - Loading current (""): enabled if a REAL version is selected — user can
   //     still kick off an install even if we haven't yet pinned what's running
   //   - Normal: enabled if selected !== current AND not currently updating
+  //
+  // E-7 fix: the selected version must be a REAL release present in the
+  // dropdown options and never the literal "unknown" / empty string. Without
+  // this gate a State-G default of "unknown" (or a stale empty pick) could
+  // reach `update_sidecar` with `targetVersion: "unknown"` and install a
+  // bogus version.
+  const isRealSelection =
+    !!selectedVersion &&
+    selectedVersion !== "unknown" &&
+    dropdownOptions.some((o) => o.version === selectedVersion);
   const isSelectedCurrent =
     !isUnknown && !isCurrentLoading && selectedVersion === currentVersion;
-  const installEnabled = !isSelectedCurrent && !!selectedVersion && !modalOpen;
+  const installEnabled = !isSelectedCurrent && isRealSelection && !modalOpen;
 
   // Refresh handler with Pitfall 3 re-entry guard.
   const handleRefresh = useCallback(async () => {

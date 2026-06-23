@@ -14,7 +14,7 @@ export const errorBannerVariants = cva(
   ].join(" "),
   {
     variants: {
-      severity: {
+      variant: {
         error: [
           "bg-[var(--color-status-error-bg)]",
           "text-[var(--color-status-error)]",
@@ -33,7 +33,7 @@ export const errorBannerVariants = cva(
       },
     },
     defaultVariants: {
-      severity: "error",
+      variant: "error",
     },
   }
 );
@@ -46,13 +46,13 @@ export interface ErrorBannerProps
 }
 
 export const ErrorBanner = forwardRef<HTMLDivElement, ErrorBannerProps>(
-  ({ severity, message, onDismiss, className, ...props }, ref) => {
-    const Icon = severity === "info" ? Info : AlertTriangle;
+  ({ variant, message, onDismiss, className, ...props }, ref) => {
+    const Icon = variant === "info" ? Info : AlertTriangle;
 
     return (
       <div
         ref={ref}
-        className={cn(errorBannerVariants({ severity }), className)}
+        className={cn(errorBannerVariants({ variant }), className)}
         {...props}
       >
         <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />

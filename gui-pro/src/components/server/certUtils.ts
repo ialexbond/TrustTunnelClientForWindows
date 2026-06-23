@@ -14,6 +14,13 @@ export interface CertInfo {
   sha256Fingerprint?: string;
   subjectCn?: string;
   issuerSummary?: string;
+  // R2-F06 (Plan 09-36) — explicit cert-presence flag, mirrored from the
+  // backend `present` (= openssl exit code 0). Lets consumers distinguish a
+  // MISSING/unreadable cert (present === false) from a present-but-
+  // unrecognized-type one (present === true, certType "unknown"). Optional:
+  // an old backend that omits the key leaves this `undefined`, and callers
+  // fall back to the notAfter-based readability heuristic (no regression).
+  present?: boolean;
 }
 
 interface CertInfoResponse {
@@ -25,6 +32,9 @@ interface CertInfoResponse {
   subject?: string;
   autoRenew?: boolean;
   sha256Fingerprint?: string;
+  // R2-F06 (Plan 09-36) — backend `present` flag (cert_code == 0). Absent on
+  // older backends → parsed as undefined.
+  present?: boolean;
 }
 
 export function parseCertInfo(data: unknown): CertInfo {
@@ -64,8 +74,14 @@ export function parseCertInfo(data: unknown): CertInfo {
     if (issuer.includes("let's encrypt") || issuer.includes("acme") || issuer.includes("letsencrypt") || issuer.includes("r3") || issuer.includes("r10") || issuer.includes("r11")) {
       result.certType = "lets_encrypt";
     } else if (
+      // UAT-F12: self_signed now requires positive evidence — either the issuer
+      // literally names itself ("self"), or issuer and subject are both present
+      // and equal. The old middle clause `(!obj.issuer && obj.hostname)` laundered
+      // a MISSING cert into self_signed: a missing/unreadable cert returns an empty
+      // issuer, but hostname stays populated from hosts.toml (a different source),
+      // so an absent cert looked self-signed. An all-empty payload now falls
+      // through to the neutral `unknown` branch.
       issuer.includes("self") ||
-      (!obj.issuer && obj.hostname) ||
       (issuer && subject && issuer === subject)
     ) {
       result.certType = "self_signed";
@@ -73,6 +89,14 @@ export function parseCertInfo(data: unknown): CertInfo {
     result.domain = obj.hostname || obj.subject?.replace(/^CN\s*=\s*/, "") || "";
     result.notAfter = obj.notAfter || "";
     result.autoRenew = obj.autoRenew ?? false;
+
+    // R2-F06 (Plan 09-36) — carry the backend `present` flag verbatim. Leave it
+    // `undefined` when the key is absent (old backend) so consumers can detect
+    // "presence unknown" and fall back to the notAfter heuristic. Only assign
+    // when the backend actually sent a boolean.
+    if (typeof obj.present === "boolean") {
+      result.present = obj.present;
+    }
 
     // Phase 16 Plan 05 — additive cert fields. All optional → only populate
     // when backend provided values, otherwise leave undefined so renderers

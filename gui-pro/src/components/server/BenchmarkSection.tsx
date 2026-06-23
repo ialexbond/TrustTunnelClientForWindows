@@ -11,15 +11,9 @@ import { useTranslation } from "react-i18next";
 import { Activity } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { formatLastUpdated } from "../../shared/utils/formatLastUpdated";
 import { loadLast } from "./benchmark/history";
 import { BenchmarkModal } from "./BenchmarkModal";
-
-/** Formats ISO timestamp as "HH:MM DD.MM.YYYY" */
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
 
 export interface BenchmarkSectionProps {
   sshParams: {
@@ -59,7 +53,7 @@ export function BenchmarkSection({ sshParams }: BenchmarkSectionProps) {
               >
                 {lastRun
                   ? t("server.service.benchmark.card.last_run", {
-                      time: formatTime(lastRun.timestamp),
+                      time: formatLastUpdated(new Date(lastRun.timestamp)),
                     })
                   : t("server.service.benchmark.card.empty")}
               </p>
@@ -78,10 +72,15 @@ export function BenchmarkSection({ sshParams }: BenchmarkSectionProps) {
       </Card>
 
       {/* T-03: Modal is always in the tree — never conditional before <Modal> */}
+      {/* F17: with no prior result, pressing «Проверить качество» starts the
+          check immediately on open (autoStart). With a prior result the button
+          reads «Открыть результаты» and the modal opens on the completed view
+          (re-run is a deliberate action) — so autoStart is gated on !lastRun. */}
       <BenchmarkModal
         isOpen={open}
         onClose={() => setOpen(false)}
         sshParams={sshParams}
+        autoStart={!lastRun}
       />
     </>
   );

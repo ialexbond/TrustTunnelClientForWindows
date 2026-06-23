@@ -31,10 +31,13 @@ export function WelcomeScreen3({ onStart }: WelcomeScreen3Props) {
         style={{
           backgroundColor: "var(--color-status-connected)",
           boxShadow: "var(--shadow-lg)",
+          // A-3: glyph drawn via currentColor inherits the theme-scoped
+          // on-accent token, replacing hardcoded white.
+          color: "var(--color-on-accent)",
         }}
         aria-hidden="true"
       >
-        <Rocket size={32} className="text-white" />
+        <Rocket size={32} />
       </div>
       <div className="flex flex-col items-center gap-2 text-center">
         <h1
