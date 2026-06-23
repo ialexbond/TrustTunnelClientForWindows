@@ -1,9 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  RefreshCw,
   Download,
-  XCircle,
   Loader2,
   AlertTriangle,
   LogOut,
@@ -11,6 +9,7 @@ import {
 import { Button } from "../shared/ui/Button";
 import { useServerState } from "./server/useServerState";
 import { ServerTabs } from "./ServerTabs";
+import { ServerUnavailablePlate } from "./server/ServerUnavailablePlate";
 import { clearEndpointForm } from "./wizard/persist";
 
 // ═══════════════════════════════════════════════════════
@@ -127,8 +126,6 @@ export function ServerPanel(props: ServerPanelProps) {
 
   // Reboot polling is handled by OverviewSection (inside the Overview tab) —
   // see `useEffect` keyed on `rebooting` there for the 10s poll + 2min timeout.
-  // ServerStatusSection is legacy (kept for backward-compat tests only);
-  // ServerTabs renders OverviewSection instead.
 
   // ─── Loading state ───
   if (state.loading) {
@@ -142,41 +139,36 @@ export function ServerPanel(props: ServerPanelProps) {
     );
   }
 
-  // ─── Error / No connection ───
+  // ─── Error / No connection — calm «Сервер недоступен» plate (E-11) ───
+  //
+  // Plan 09-13: this branch used to render its OWN raw-error screen (XCircle +
+  // `server.status.connection_failed` + the bare `state.error` string) and it
+  // fired BEFORE ServerTabs' calm ServerUnavailablePlate could ever show. A
+  // non-technical user must NOT see the raw SSH/russh error text (D-05/EW-02 —
+  // information-exposure-lite: "Connection refused", "SSH_CHANNEL_FAILURE", …).
+  // We now route this branch to the SAME ServerUnavailablePlate ServerTabs uses,
+  // so the unreachable state is calm and consistent everywhere. «Повторить» runs
+  // the SAME retry as before (onPanelRetry re-arms the H-05 skeleton, then
+  // loadServerInfo) and Disconnect stays — but the retry NEVER clears creds
+  // (D-05/D-06: clearing lives only in handleDisconnect). The distinct
+  // not-installed / rebooting / loading screens below are unchanged.
   if (state.error || !state.serverInfo) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-sm w-full text-center space-y-4">
-          <div
-            className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ backgroundColor: "var(--color-status-error-bg)" }}
-          >
-            <XCircle className="w-6 h-6" style={{ color: "var(--color-danger-500)" }} />
-          </div>
-          <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>
-            {t("server.status.connection_failed")}
-          </h2>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {state.error || t("server.status.check_ssh")}
-          </p>
-          <div className="flex gap-2 justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<RefreshCw className="w-3.5 h-3.5" />}
-              onClick={() => {
-                // H-05: re-show the first-connect skeleton on retry (parent
-                // resets isFirstConnect) BEFORE kicking off the reload, so the
-                // skeleton reappears instead of the latch staying off.
-                props.onPanelRetry?.();
-                void state.loadServerInfo();
-              }}
-            >
-              {t("server.actions.retry")}
-            </Button>
-            {/* Phase 13.UAT G-04: Disconnect → возврат на SshConnectForm login.
-                Раньше был только "Configure SSH" (→ wizard), но это не экран
-                логина, а полноценный мастер настройки. Disconnect = чистый exit. */}
+        <div className="max-w-md w-full space-y-4">
+          <ServerUnavailablePlate
+            onRetry={() => {
+              // H-05: re-show the first-connect skeleton on retry (parent resets
+              // isFirstConnect) BEFORE kicking off the reload, so the skeleton
+              // reappears instead of the latch staying off. Retry NEVER clears
+              // creds — only handleDisconnect does (D-05/D-06).
+              props.onPanelRetry?.();
+              void state.loadServerInfo();
+            }}
+          />
+          {/* Phase 13.UAT G-04: Disconnect → возврат на SshConnectForm login.
+              Kept as a secondary exit alongside the plate's «Повторить». */}
+          <div className="flex justify-center">
             <Button
               variant="ghost"
               size="sm"

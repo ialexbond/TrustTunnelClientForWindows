@@ -195,7 +195,7 @@ export function DeployingStep(w: WizardState) {
               const isActive = stepId === inFlightStepId;
               if (!step) {
                 return (
-                  <div key={stepId} className="flex items-center gap-2.5 text-[var(--color-text-muted)]">
+                  <div key={stepId} className="flex items-center gap-2 text-[var(--color-text-muted)]">
                     <div className="w-4 h-4 rounded-full shrink-0 border border-[var(--color-border)]" />
                     <span className="text-xs">{stepLabels[stepId]}</span>
                   </div>
@@ -213,7 +213,7 @@ export function DeployingStep(w: WizardState) {
                   : "text-[var(--color-danger-500)]";
               return (
                 <div key={stepId} className="space-y-1">
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2">
                     {step.status === "progress" && (
                       <Loader2 className="w-4 h-4 animate-spin shrink-0 text-[var(--color-warning-500)]" />
                     )}

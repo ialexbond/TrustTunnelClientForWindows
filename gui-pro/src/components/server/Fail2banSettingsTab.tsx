@@ -10,6 +10,7 @@ import { Input } from "../../shared/ui/Input";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { durationsEqual, normalizeDurationToSeconds } from "./fail2banUtils";
 import { cn } from "../../shared/lib/cn";
+import { Radio } from "../../shared/ui/Radio";
 
 /**
  * Phase 16 Plan 04 — Fail2banSettingsTab.
@@ -49,9 +50,16 @@ interface Fail2banSettingsTabProps {
    * config. Parent Modal uses this to show close-confirm warning.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Fires `true` while «Своя конфигурация» (custom) is the active preset — its accordion
+   * is open — and `false` otherwise / on unmount. The parent Modal uses this to show the
+   * footer divider ONLY when the custom panel is open (no stray divider over the bordered
+   * preset cards).
+   */
+  onCustomActiveChange?: (active: boolean) => void;
 }
 
-export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSettingsTabProps) {
+export function Fail2banSettingsTab({ state, jail, onDirtyChange, onCustomActiveChange }: Fail2banSettingsTabProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
   // BUG-22 fix: useId() для unique ids (не "f2b-maxretry" hardcode'ы).
@@ -88,6 +96,14 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
   }, [jail]);
 
   const activePreset = selectedPreset ?? detectedPreset;
+
+  // Report custom-preset-open state up so the modal shows its footer divider ONLY while
+  // «Своя конфигурация» is selected (its accordion is open). Reset to false on unmount
+  // (tab switch / modal close) so a stale "custom" never leaves the divider behind.
+  useEffect(() => {
+    onCustomActiveChange?.(activePreset === "custom");
+  }, [activePreset, onCustomActiveChange]);
+  useEffect(() => () => onCustomActiveChange?.(false), [onCustomActiveChange]);
 
   // BUG-01 fix: NumberInput draft нормализуется к canonical seconds string —
   // backend может возвращать "1h"/"10m" (suffix format из install template),
@@ -175,14 +191,15 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
       if (!ok) return;
     }
     setSelectedPreset(preset);
-    try {
-      await state.applyFail2banPreset(preset);
-    } catch {
-      // BUG-16 fix: revert optimistic selection on backend failure (sshd
-      // restart fail / SSH_CHANNEL_FAILED / etc.). Без revert'а radio
-      // оставался highlighted на failed preset, UI lying about backend state.
-      // applyFail2banPreset wraps run() которое catches и shows error toast,
-      // поэтому здесь только revert визуального state — toast already fired.
+    // E-5 fix: gate the optimistic revert on the run() success BOOLEAN, not on a
+    // thrown error. applyFail2banPreset wraps run() which CATCHES the backend
+    // failure (sshd restart fail / SSH_CHANNEL_FAILED / etc.) and shows the error
+    // toast — it never throws, so the old `try/catch` revert was unreachable and
+    // the radio stayed highlighted on the failed preset (UI lying about backend
+    // state). Now a false result reverts selectedPreset → activePreset falls back
+    // to the unchanged detectedPreset and the radio snaps back. Toast already fired.
+    const ok = await state.applyFail2banPreset(preset);
+    if (!ok) {
       setSelectedPreset(null);
     }
   };
@@ -232,9 +249,11 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
       bantime: custom.bantime,
       findtime: custom.findtime,
     };
-    void state.applyFail2banCustom(payload).catch(() => {
-      // BUG-16 mirror: revert optimistic selection on backend failure.
-      setSelectedPreset(null);
+    // E-5 mirror: gate the revert on the run() success boolean (applyFail2banCustom
+    // no longer throws — it resolves false on backend failure). A false result
+    // reverts the optimistic "custom" selection so the radio snaps back.
+    void state.applyFail2banCustom(payload).then((ok) => {
+      if (!ok) setSelectedPreset(null);
     });
   };
 
@@ -266,8 +285,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
                 anyPresetBusy && "opacity-60",
               )}
             >
-              <input
-                type="radio"
+              <Radio
                 name="fail2ban-preset"
                 value={presetId}
                 checked={isActive}
@@ -306,8 +324,7 @@ export function Fail2banSettingsTab({ state, jail, onDirtyChange }: Fail2banSett
             anyPresetBusy && "opacity-60",
           )}
         >
-          <input
-            type="radio"
+          <Radio
             name="fail2ban-preset"
             value="custom"
             checked={activePreset === "custom"}

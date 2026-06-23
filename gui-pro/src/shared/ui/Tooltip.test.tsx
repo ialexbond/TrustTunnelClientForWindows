@@ -128,4 +128,75 @@ describe("Tooltip", () => {
     expect(tip.className).not.toContain("9500");
     expect(tip.className).not.toContain("z-[var(--z-dropdown)]");
   });
+
+  // CC-7: keyboard + screen-reader accessibility.
+  it("shows tooltip on keyboard focus with role=tooltip", () => {
+    render(
+      <Tooltip text="Focus tip" delay={0}>
+        <button>Focusable</button>
+      </Tooltip>
+    );
+
+    fireEvent.focus(screen.getByText("Focusable"));
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Focus tip");
+  });
+
+  it("associates the focusable child via aria-describedby resolving to the tooltip", () => {
+    render(
+      <Tooltip text="Described tip" delay={0}>
+        <button>Focusable</button>
+      </Tooltip>
+    );
+
+    const child = screen.getByText("Focusable");
+    fireEvent.focus(child);
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+
+    const describedBy = child.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveAttribute("id", describedBy);
+  });
+
+  it("hides tooltip on Escape", () => {
+    render(
+      <Tooltip text="Escape tip" delay={0}>
+        <button>Focusable</button>
+      </Tooltip>
+    );
+
+    const child = screen.getByText("Focusable");
+    fireEvent.focus(child);
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+    fireEvent.keyDown(child, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("hides tooltip on blur", () => {
+    render(
+      <Tooltip text="Blur tip" delay={0}>
+        <button>Focusable</button>
+      </Tooltip>
+    );
+
+    const child = screen.getByText("Focusable");
+    fireEvent.focus(child);
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+    fireEvent.blur(child);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
 });

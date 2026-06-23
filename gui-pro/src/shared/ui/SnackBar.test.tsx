@@ -31,7 +31,10 @@ describe("SnackBar", () => {
     expect(screen.getByText("Saved!")).toBeInTheDocument();
   });
 
-  it("shows multiple stacked messages", () => {
+  // UAT-F08 (replace-not-stack): two DIFFERENT success texts arriving in
+  // sequence must NOT stack — the newer one replaces the older. At most one
+  // success snackbar is visible at a time.
+  it("replaces (does not stack) a second different success message", () => {
     render(
       <SnackBar messages={["First", "Second"]} onShown={onShown} />,
     );
@@ -40,8 +43,61 @@ describe("SnackBar", () => {
       vi.advanceTimersByTime(50);
     });
 
-    expect(screen.getByText("First")).toBeInTheDocument();
+    // The newer success is visible…
     expect(screen.getByText("Second")).toBeInTheDocument();
+    // …and the older one has been pushed to exit (no longer in the DOM after
+    // its 400ms exit window).
+    act(() => {
+      vi.advanceTimersByTime(450);
+    });
+    expect(screen.queryByText("First")).not.toBeInTheDocument();
+    // Exactly one live region (the surviving "Second").
+    expect(screen.getByText("Second")).toBeInTheDocument();
+  });
+
+  // UAT-F08 (dedup): the SAME success text fired twice while still showing
+  // must NOT add a second item — the timer resets but only one item exists.
+  it("dedupes an identical success text fired twice while showing", () => {
+    const { rerender } = render(
+      <SnackBar messages={["Saved!"]} onShown={onShown} />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(screen.getAllByText("Saved!")).toHaveLength(1);
+
+    // Fire the same text again while the first is still visible.
+    rerender(<SnackBar messages={["Saved!", "Saved!"]} onShown={onShown} />);
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+
+    // Still a single item — the duplicate only reset the dismiss timer.
+    expect(screen.getAllByText("Saved!")).toHaveLength(1);
+  });
+
+  // UAT-F08 (preserve): an arriving success still dismisses existing errors.
+  it("an arriving success dismisses an existing error snackbar", () => {
+    const { rerender } = render(
+      <SnackBar
+        messages={[{ text: "Boom", type: "error" }]}
+        onShown={onShown}
+      />,
+    );
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(screen.getByText("Boom")).toBeInTheDocument();
+
+    rerender(
+      <SnackBar
+        messages={[{ text: "Boom", type: "error" }, { text: "OK now", type: "success" }]}
+        onShown={onShown}
+      />,
+    );
+    act(() => { vi.advanceTimersByTime(500); });
+
+    expect(screen.queryByText("Boom")).not.toBeInTheDocument();
+    expect(screen.getByText("OK now")).toBeInTheDocument();
   });
 
   it("calls onShown after messages are consumed", () => {

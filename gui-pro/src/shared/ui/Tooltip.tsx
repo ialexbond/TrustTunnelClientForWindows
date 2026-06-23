@@ -1,4 +1,15 @@
-import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useId,
+  cloneElement,
+  isValidElement,
+  type ReactNode,
+  type ReactElement,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { createPortal } from "react-dom";
 
 type TooltipPosition = "top" | "bottom" | "left" | "right";
@@ -16,6 +27,11 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
   const triggerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // CC-7: a generated id ties the tooltip content (role="tooltip") to the
+  // focusable child via aria-describedby, so screen readers announce the tip
+  // when the child receives keyboard focus.
+  const tooltipId = useId();
+
   const handleEnter = () => {
     timerRef.current = setTimeout(() => setShow(true), delay);
   };
@@ -26,6 +42,32 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
       timerRef.current = null;
     }
     setShow(false);
+  };
+
+  // CC-7: keyboard parity with hover. Focus events bubble through the wrapper,
+  // so onFocus/onBlur on the wrapper fire when the interactive child gains or
+  // loses focus. Show immediately on focus (no hover delay — keyboard users
+  // expect instant feedback), hide on blur or Escape.
+  const handleFocus = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setShow(true);
+  };
+
+  const handleBlur = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setShow(false);
+  };
+
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape" && show) {
+      setShow(false);
+    }
   };
 
   // WR-07 fix: clear any pending show-timer on unmount so we don't call setShow
@@ -152,18 +194,33 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
     [position]
   );
 
+  // CC-7: forward aria-describedby to the interactive child (e.g. IconButton's
+  // <button>) rather than the wrapper div, which is not itself describable.
+  // Clone only when the child is a valid element; otherwise render as-is so
+  // plain-text/fragment children still work.
+  const describedChild = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ "aria-describedby"?: string }>, {
+        "aria-describedby": tooltipId,
+      })
+    : children;
+
   return (
     <div
       className="relative inline-flex"
       ref={triggerRef}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
     >
-      {children}
+      {describedChild}
       {show &&
         createPortal(
           <div
             ref={positionTip}
+            id={tooltipId}
+            role="tooltip"
             className="fixed z-[var(--z-tooltip)] px-[var(--space-2)] py-1 rounded-[var(--radius-sm)] shadow-[var(--shadow-md)] pointer-events-none animate-[fadeIn_var(--transition-fast)_var(--ease-out)]"
             style={{
               visibility: "hidden",

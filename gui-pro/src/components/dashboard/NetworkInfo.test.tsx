@@ -61,7 +61,33 @@ describe("NetworkInfo", () => {
     expect(screen.getAllByText("OFF").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("displays DNS server count when dns_upstreams present", () => {
+  // UAT-F05/F06/F07: DNS now lives under endpoint.dns_upstreams (sidecar contract).
+  it("displays DNS server count from endpoint.dns_upstreams", () => {
+    const config = {
+      endpoint: { upstream_protocol: "quic", anti_dpi: false, has_ipv6: false, dns_upstreams: ["1.1.1.1", "8.8.8.8"] },
+      listener: { tun: { mtu_size: 1280 } },
+      killswitch_enabled: false,
+      post_quantum_group_enabled: false,
+    } as unknown as ClientConfig;
+
+    render(<NetworkInfo clientConfig={config} />);
+    expect(screen.getByText("2 servers")).toBeInTheDocument();
+  });
+
+  it("displays 1 server for single DNS from endpoint.dns_upstreams", () => {
+    const config = {
+      endpoint: { upstream_protocol: "quic", anti_dpi: false, has_ipv6: false, dns_upstreams: ["1.1.1.1"] },
+      listener: { tun: { mtu_size: 1280 } },
+      killswitch_enabled: false,
+      post_quantum_group_enabled: false,
+    } as unknown as ClientConfig;
+
+    render(<NetworkInfo clientConfig={config} />);
+    expect(screen.getByText("1 server")).toBeInTheDocument();
+  });
+
+  // Backward-compat: a stray legacy top-level dns_upstreams (older config) still renders.
+  it("falls back to a legacy top-level dns_upstreams when endpoint has none", () => {
     const config = {
       endpoint: { upstream_protocol: "quic", anti_dpi: false, has_ipv6: false },
       listener: { tun: { mtu_size: 1280 } },
@@ -72,19 +98,6 @@ describe("NetworkInfo", () => {
 
     render(<NetworkInfo clientConfig={config} />);
     expect(screen.getByText("2 servers")).toBeInTheDocument();
-  });
-
-  it("displays 1 server for single DNS", () => {
-    const config = {
-      endpoint: { upstream_protocol: "quic", anti_dpi: false, has_ipv6: false },
-      listener: { tun: { mtu_size: 1280 } },
-      killswitch_enabled: false,
-      post_quantum_group_enabled: false,
-      dns_upstreams: ["1.1.1.1"],
-    } as unknown as ClientConfig;
-
-    render(<NetworkInfo clientConfig={config} />);
-    expect(screen.getByText("1 server")).toBeInTheDocument();
   });
 
   it("does not display DNS row when no dns_upstreams", () => {

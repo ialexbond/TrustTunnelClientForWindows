@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { X, Copy, Download } from "lucide-react";
+import { Copy, Download } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
@@ -90,7 +90,6 @@ export function UserConfigModal({
   const [isDownloading, setIsDownloading] = useState(false);
 
   const qrContainerRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // ── Shared deeplink fetch (used by effect + Retry) — WR-04 deduplication. ──
   // WR-05: depend on primitives (host/port/user) rather than the sshParams object
@@ -218,12 +217,10 @@ export function UserConfigModal({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
-  // ── Auto-focus X button on open (Modal primitive does not trap focus) ──
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = setTimeout(() => closeButtonRef.current?.focus(), 250);
-    return () => clearTimeout(timer);
-  }, [isOpen]);
+  // ── Initial focus is now owned by the Modal primitive (09-05): on open it
+  // focuses the first focusable inside the content box (the canonical close
+  // button). The hand-rolled auto-focus effect + ref were removed in 09-23 when
+  // this modal adopted Modal's showCloseButton. ──
 
   // ── Retry deeplink fetch after an error (WR-04 dedup). ──
   const handleRetry = () => {
@@ -383,26 +380,11 @@ export function UserConfigModal({
       closeOnBackdrop={!isDownloading}
       closeOnEscape={!isDownloading}
       size="md"
-      className="relative"
+      showCloseButton
+      // D-10, D-11: close via X / backdrop / Escape, all blocked while a config
+      // download is in flight (a half-finished export must not be dismissable).
+      closeButtonDisabled={isDownloading}
     >
-      {/* X close button — absolute top-right (D-10, D-11). Disabled during isDownloading. */}
-      <button
-        ref={closeButtonRef}
-        type="button"
-        aria-label={t("buttons.close")}
-        onClick={onClose}
-        disabled={isDownloading}
-        className={cn(
-          "absolute top-3 right-3 p-1 rounded",
-          "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
-          "focus-visible:shadow-[var(--focus-ring)] outline-none",
-          "transition-colors",
-          "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
-        )}
-      >
-        <X className="w-4 h-4" />
-      </button>
-
       {effectiveLoading ? (
         // Skeleton, отражающий финальный layout (QR + caption + deeplink + download).
         // Модалка всегда показывает одни и те же 4 блока, поэтому скелетон
@@ -433,7 +415,7 @@ export function UserConfigModal({
       ) : effectiveError ? (
         <div className="flex flex-col items-center gap-[var(--space-3)] py-4">
           <ErrorBanner
-            severity="error"
+            variant="error"
             message={effectiveError}
             className="w-full"
           />

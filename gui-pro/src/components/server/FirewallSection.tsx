@@ -11,6 +11,7 @@ import {
 import { Button } from "../../shared/ui/Button";
 import { Select } from "../../shared/ui/Select";
 import { Modal } from "../../shared/ui/Modal";
+import { Toggle } from "../../shared/ui/Toggle";
 import type { FirewallStatus, SecurityState } from "./useSecurityState";
 import { StatusBadge, Stat, LabeledInput, LogArea } from "./_securityHelpers";
 
@@ -86,51 +87,28 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
             <Stat label={t("server.security.firewall.vpn_port")} value={status.vpn_port?.toString() ?? "\u2014"} />
           </div>
 
-          {/* Port 80 toggle */}
-          <div className="flex items-center justify-between px-3 py-1.5 rounded-[var(--radius-md)]" style={{ borderBottom: "1px solid var(--color-border)" }}>
-            <div className="leading-tight">
-              <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>
-                {t("server.security.firewall.http_mode_title")}
-              </span>
-              <span className="text-xs block" style={{ color: "var(--color-text-muted)", marginTop: "1px" }}>
-                {port80Open ? t("server.security.firewall.http_mode_always") : t("server.security.firewall.http_mode_renewal")}
-              </span>
-            </div>
-            <button
-              onClick={() => state.run(
+          {/* Port 80 toggle.
+              A-1 (09-22): the hand-rolled button+span (no role=switch, no focus
+              ring, hardcoded 40x22 / white thumb / inline SVG spinner) is replaced
+              with the shared <Toggle> (role=switch, aria-checked, aria-busy,
+              spinner-in-thumb, theme tokens). Toggle's onChange passes a boolean,
+              so we wrap the no-arg state.run(...) call. The label/description live
+              inside Toggle now instead of a separate hand-rolled label block. */}
+          <div className="px-3 rounded-[var(--radius-md)]" style={{ borderBottom: "1px solid var(--color-border)" }}>
+            <Toggle
+              checked={port80Open}
+              loading={state.isBusy("http-port")}
+              disabled={state.fwBusy}
+              onChange={() => state.run(
                 "http-port",
                 () => invoke("security_firewall_set_http_port", { ...state.sshParams, open: !port80Open }),
                 port80Open
                   ? t("server.security.snack.firewall_stopped")
                   : t("server.security.snack.rule_added"),
               )}
-              disabled={state.isBusy("http-port") || state.fwBusy}
-              className="shrink-0 rounded-full focus:outline-none relative overflow-hidden"
-              style={{
-                width: "40px",
-                height: "22px",
-                backgroundColor: port80Open ? "var(--color-accent-500)" : "var(--color-border)",
-                transition: "background-color 0.3s ease",
-              }}
-            >
-              <span
-                className="absolute flex items-center justify-center rounded-full"
-                style={{
-                  width: "18px",
-                  height: "18px",
-                  top: "2px",
-                  left: port80Open ? "20px" : "2px",
-                  backgroundColor: "white",
-                  transition: "left 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                }}
-              >
-                {state.isBusy("http-port") && (
-                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 10 10" fill="none">
-                    <circle cx="5" cy="5" r="4" stroke="var(--color-accent-500)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="12 8" />
-                  </svg>
-                )}
-              </span>
-            </button>
+              label={t("server.security.firewall.http_mode_title")}
+              description={port80Open ? t("server.security.firewall.http_mode_always") : t("server.security.firewall.http_mode_renewal")}
+            />
           </div>
 
           {/* Rules table */}
@@ -182,7 +160,7 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                     <button
                       onClick={() => state.deleteRule(r.number)}
                       disabled={state.loading || state.fwWriting}
-                      className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
                       title={t("server.security.firewall.delete")}
                     >
                       {state.isBusy(`del-${r.number}`)

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Globe, FileText, Server, Monitor, Folder, Trash2, ArrowRight } from "lucide-react";
+import { Badge, type BadgeProps } from "../../shared/ui/Badge";
 import type { RuleEntry, RouteAction } from "./useRoutingState";
 
 interface RuleEntryRowProps {
@@ -18,22 +19,32 @@ const typeIcons: Record<string, typeof Globe> = {
   iplist_group: Folder,
 };
 
-const typeBadgeBg: Record<string, string> = {
-  domain: "var(--color-bg-hover)",
-  ip: "transparent",
-  cidr: "transparent",
-  geoip: "var(--color-status-connected-border)",
-  geosite: "var(--color-status-connecting-border)",
-  iplist_group: "var(--color-bg-hover)",
-};
-
-const typeBadgeColor: Record<string, string> = {
-  domain: "var(--color-text-secondary)",
-  ip: "var(--color-accent-400)",
-  cidr: "var(--color-accent-400)",
-  geoip: "var(--color-success-400)",
-  geosite: "var(--color-warning-400)",
-  iplist_group: "var(--color-text-secondary)",
+// R4-F08: the type badge was a hand-rolled <span> with same-hue saturated pairs
+// (success-400 on connected-border, warning-400 on connecting-border) + a fixed
+// 58px width + cramped padding — low contrast AND squeezed. Migrated to the shared
+// Badge: each rule type maps to a semantic variant whose theme-scoped status text
+// (e.g. success-400 on dark / success-600 on light) over a subtle tint-bg + border
+// reads clearly in BOTH themes, while staying distinct (geoip green, geosite amber,
+// ip/cidr blue/info, domain/iplist_group neutral). Padding now comes from the
+// design-system badge (px-2.5 / py-[3px]) instead of the squeezed px-1 / 58px width.
+//
+// R5-F02 (round-5 UAT): the shared Badge sizes to its content, so the six rule
+// types (IP·2 … IPLIST_GROUP·12 chars) rendered at wildly different widths and
+// the added-sites column started at a different x per row → the list looked
+// crooked. Give every rule-type badge a shared min-width (justify-center so short
+// labels sit centred in the box) so the value column aligns.
+// R5-F02b (round-5 re-test): min-w-[112px] (sized to the rare IPLIST_GROUP) was
+// far too WIDE — GEOSITE/GEOIP/DOMAIN had huge empty slack. Owner: size them to
+// GEOSITE (the longest COMMON type). min-w-[80px] ≈ GEOSITE's rendered width, so
+// the common types align tightly; the rare iplist_group just grows past it (it is
+// a min-width, never truncates). Row-LOCAL className — NOT the shared Badge.
+const typeBadgeVariant: Record<string, NonNullable<BadgeProps["variant"]>> = {
+  domain: "neutral",
+  ip: "info",
+  cidr: "info",
+  geoip: "success",
+  geosite: "warning",
+  iplist_group: "neutral",
 };
 
 const moveTargets: Record<RouteAction, RouteAction[]> = {
@@ -51,6 +62,7 @@ const actionColors: Record<RouteAction, string> = {
 export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEntryRowProps) {
   const { t } = useTranslation();
   const Icon = typeIcons[entry.type] || Monitor;
+  const badgeVariant = typeBadgeVariant[entry.type] || "neutral";
   const targets = moveTargets[currentAction];
 
   return (
@@ -59,17 +71,9 @@ export function RuleEntryRow({ entry, currentAction, onRemove, onMove }: RuleEnt
         className="w-3.5 h-3.5 shrink-0"
         style={{ color: "var(--color-text-muted)" }}
       />
-      <span
-        className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-md)] text-xs font-semibold uppercase tracking-wide px-1 py-0.5"
-        style={{
-          width: "58px",
-          textAlign: "center",
-          backgroundColor: typeBadgeBg[entry.type] || "var(--color-bg-hover)",
-          color: typeBadgeColor[entry.type] || "var(--color-text-secondary)",
-        }}
-      >
+      <Badge variant={badgeVariant} className="shrink-0 justify-center min-w-[80px]">
         {entry.type}
-      </span>
+      </Badge>
       <span
         className="flex-1 text-xs font-mono truncate"
         style={{ color: "var(--color-text-primary)" }}

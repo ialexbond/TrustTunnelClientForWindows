@@ -102,7 +102,7 @@ describe("ProcessPickerModal", () => {
 
   it("confirm button is disabled when nothing selected", () => {
     renderModal();
-    const confirmBtn = screen.getByText("Добавить");
+    const confirmBtn = screen.getByText("Добавить выбранные");
     expect(confirmBtn.closest("button")).toBeDisabled();
   });
 
@@ -111,8 +111,8 @@ describe("ProcessPickerModal", () => {
     const codeBtn = screen.getByText("code.exe").closest("button")!;
     await userEvent.click(codeBtn);
     // Confirm button should show count and be enabled
-    expect(screen.getByText("Добавить (1)")).toBeInTheDocument();
-    const confirmBtn = screen.getByText("Добавить (1)").closest("button");
+    expect(screen.getByText("Добавить выбранные (1)")).toBeInTheDocument();
+    const confirmBtn = screen.getByText("Добавить выбранные (1)").closest("button");
     expect(confirmBtn).not.toBeDisabled();
   });
 
@@ -120,7 +120,7 @@ describe("ProcessPickerModal", () => {
     renderModal();
     await userEvent.click(screen.getByText("code.exe").closest("button")!);
     await userEvent.click(screen.getByText("node.exe").closest("button")!);
-    await userEvent.click(screen.getByText("Добавить (2)"));
+    await userEvent.click(screen.getByText("Добавить выбранные (2)"));
     expect(onConfirm).toHaveBeenCalledWith(expect.arrayContaining(["code.exe", "node.exe"]));
   });
 
@@ -134,10 +134,10 @@ describe("ProcessPickerModal", () => {
     renderModal();
     const codeBtn = screen.getByText("code.exe").closest("button")!;
     await userEvent.click(codeBtn);
-    expect(screen.getByText("Добавить (1)")).toBeInTheDocument();
+    expect(screen.getByText("Добавить выбранные (1)")).toBeInTheDocument();
     await userEvent.click(codeBtn);
     // Back to disabled confirm with no count
-    expect(screen.getByText("Добавить")).toBeInTheDocument();
+    expect(screen.getByText("Добавить выбранные")).toBeInTheDocument();
   });
 
   it("deduplicates processes with same name", () => {

@@ -351,15 +351,24 @@ pub struct SshHandler {
     host_key_changed: Arc<AtomicBool>,
 }
 
-#[async_trait::async_trait]
+// russh 0.60 switched `client::Handler` to native `async fn` (RPITIT, returning
+// `impl Future + Send`) — it is no longer an `#[async_trait]` trait. Applying the
+// async_trait attribute here boxes the future and produces a lifetime/signature
+// mismatch against the trait (E0195). We implement the method as a plain `async fn`.
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh_keys::key::PublicKey,
+        // russh 0.60 merged russh-keys into `russh::keys` and the host-key param is now
+        // the re-exported ssh-key `PublicKey` (was `&russh_keys::key::PublicKey` in 0.46).
+        server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        let fingerprint = server_public_key.fingerprint();
+        // ssh-key's `fingerprint` takes a HashAlg and returns a `Fingerprint` (was a bare
+        // `String` in russh-keys 0.46). Mirror server_ssh_key.rs:51 exactly: SHA-256.
+        let fingerprint = server_public_key
+            .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
+            .to_string();
         let mut hosts = load_known_hosts();
 
         match hosts.get(&self.host_key) {
@@ -656,23 +665,36 @@ pub async fn ssh_connect(
     ) -> Result<Option<bool>, String> {
         if let Some(kp) = key_path {
             if !kp.is_empty() {
-                let key = russh_keys::load_secret_key(kp, None)
+                let key = russh::keys::load_secret_key(kp, None)
                     .map_err(|_| "SSH_KEY_REENTER_REQUIRED|file".to_string())?;
-                let ok = handle
-                    .authenticate_publickey(ssh_user, Arc::new(key))
+                // russh 0.60: authenticate_publickey takes a `PrivateKeyWithHashAlg`
+                // (None hash-alg works for Ed25519; RSA would need Sha256/Sha512) and
+                // returns an `AuthResult` enum instead of a bare `bool`. We map
+                // Success → true so the downstream Some(true)/Some(false) arms (and
+                // their exact error codes) stay byte-for-byte unchanged.
+                let result = handle
+                    .authenticate_publickey(
+                        ssh_user,
+                        russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
                     .await
                     .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
+                let ok = matches!(result, russh::client::AuthResult::Success);
                 return Ok(Some(ok));
             }
         }
         if let Some(kd) = key_data {
             if !kd.is_empty() {
-                let key = russh_keys::decode_secret_key(kd, None)
+                let key = russh::keys::decode_secret_key(kd, None)
                     .map_err(|_| "SSH_KEY_REENTER_REQUIRED|pasted".to_string())?;
-                let ok = handle
-                    .authenticate_publickey(ssh_user, Arc::new(key))
+                let result = handle
+                    .authenticate_publickey(
+                        ssh_user,
+                        russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
                     .await
                     .map_err(|e| format!("SSH_KEY_AUTH_ERROR|{e}"))?;
+                let ok = matches!(result, russh::client::AuthResult::Success);
                 return Ok(Some(ok));
             }
         }
@@ -693,11 +715,12 @@ pub async fn ssh_connect(
         }
         AuthAttempt::PasswordOnly => {
             // Explicit "password" choice: attempt ONLY the password, NEVER the key.
-            let auth_ok = handle
+            // russh 0.60: authenticate_password returns `AuthResult` not `bool`.
+            let result = handle
                 .authenticate_password(ssh_user, ssh_password)
                 .await
                 .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
-            if !auth_ok {
+            if !matches!(result, russh::client::AuthResult::Success) {
                 // DISTINCT from SSH_KEY_REJECTED so D-07 can steer toward the key.
                 return Err("SSH_PASSWORD_REJECTED".into());
             }
@@ -711,11 +734,12 @@ pub async fn ssh_connect(
                 Some(false) => return Err("SSH_KEY_REJECTED".into()),
                 None => { /* no key material — fall through to password */ }
             }
-            let auth_ok = handle
+            // russh 0.60: authenticate_password returns `AuthResult` not `bool`.
+            let result = handle
                 .authenticate_password(ssh_user, ssh_password)
                 .await
                 .map_err(|e| format!("SSH_AUTH_ERROR|{e}"))?;
-            if !auth_ok {
+            if !matches!(result, russh::client::AuthResult::Success) {
                 return Err("SSH_AUTH_FAILED".into());
             }
             Ok(handle)

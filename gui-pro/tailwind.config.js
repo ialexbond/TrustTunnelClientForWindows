@@ -59,6 +59,40 @@ export default {
         normal: "var(--tracking-normal)",
         wide:   "var(--tracking-wide)",
       },
+
+      /*
+       * Spacing / radius / opacity wired to the design tokens — Phase 9 plan 09-01.
+       *
+       * Uses `extend` (NOT top-level theme) on purpose: only the keys the app
+       * actually uses are remapped onto CSS variables; every UNmapped key still
+       * falls back to the Tailwind default, so no spacing utility is silently
+       * dropped. Replacing top-level theme.spacing would wipe those defaults.
+       *
+       * `7`/`8` are deliberately LEFT UNMAPPED — the --space-7/--space-8 numbering
+       * is off-by-x4 vs the px value (32/40, not 28/32) and renumbering is deferred
+       * (research §4 N-6). Leaving them unmapped means gap-7/gap-8 keep Tailwind's
+       * own 28px/32px until that cleanup lands, rather than silently shifting.
+       */
+      spacing: {
+        "0.5": "var(--space-0-5)",
+        "1":   "var(--space-1)",
+        "1.5": "var(--space-1-5)",
+        "2":   "var(--space-2)",
+        "3":   "var(--space-3)",
+        "4":   "var(--space-4)",
+        "5":   "var(--space-5)",
+        "6":   "var(--space-6)",
+      },
+      borderRadius: {
+        sm:   "var(--radius-sm)",
+        md:   "var(--radius-md)",
+        lg:   "var(--radius-lg)",
+        xl:   "var(--radius-xl)",
+        full: "var(--radius-full)",
+      },
+      opacity: {
+        disabled: "var(--opacity-disabled)",
+      },
     },
   },
   plugins: [

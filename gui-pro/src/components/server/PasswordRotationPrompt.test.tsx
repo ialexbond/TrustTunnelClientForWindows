@@ -42,14 +42,14 @@ describe("PasswordRotationPrompt", () => {
   it("shows confirm and cancel buttons", () => {
     render(<PasswordRotationPrompt {...defaultProps} />);
     // confirm button (danger variant)
-    expect(screen.getByRole("button", { name: /подтвердить/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /сменить пароль/i })).toBeInTheDocument();
     // cancel button
     expect(screen.getByRole("button", { name: /отмена/i })).toBeInTheDocument();
   });
 
   it("confirm button is disabled when password is empty", () => {
     render(<PasswordRotationPrompt {...defaultProps} />);
-    const confirmBtn = screen.getByRole("button", { name: /подтвердить/i });
+    const confirmBtn = screen.getByRole("button", { name: /сменить пароль/i });
     expect(confirmBtn).toBeDisabled();
   });
 
@@ -57,7 +57,7 @@ describe("PasswordRotationPrompt", () => {
     render(<PasswordRotationPrompt {...defaultProps} />);
     const input = screen.getByPlaceholderText(/новый пароль/i);
     fireEvent.change(input, { target: { value: "ValidPass123" } });
-    const confirmBtn = screen.getByRole("button", { name: /подтвердить/i });
+    const confirmBtn = screen.getByRole("button", { name: /сменить пароль/i });
     expect(confirmBtn).not.toBeDisabled();
   });
 
@@ -66,7 +66,7 @@ describe("PasswordRotationPrompt", () => {
     render(<PasswordRotationPrompt {...defaultProps} onConfirm={onConfirm} />);
     const input = screen.getByPlaceholderText(/новый пароль/i);
     fireEvent.change(input, { target: { value: "ValidPass123" } });
-    fireEvent.click(screen.getByRole("button", { name: /подтвердить/i }));
+    fireEvent.click(screen.getByRole("button", { name: /сменить пароль/i }));
     expect(onConfirm).toHaveBeenCalledWith("ValidPass123");
   });
 
@@ -78,7 +78,7 @@ describe("PasswordRotationPrompt", () => {
     render(<PasswordRotationPrompt {...defaultProps} />);
     const input = screen.getByPlaceholderText(/новый пароль/i);
     fireEvent.change(input, { target: { value: " ValidPass123" } });
-    expect(screen.getByRole("button", { name: /подтвердить/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /сменить пароль/i })).toBeDisabled();
     expect(screen.getByText(/пробелы в начале/i)).toBeInTheDocument();
   });
 

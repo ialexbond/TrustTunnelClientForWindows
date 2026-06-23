@@ -158,7 +158,7 @@ export function ErrorStep(w: WizardState) {
                 id={logsRegionId}
                 role="region"
                 aria-label={t('wizard.error.logs_region_label')}
-                className="mt-1.5 p-2.5 rounded-[var(--radius-lg)] max-h-36 overflow-y-auto text-mono-sm space-y-0.5 text-left select-text cursor-text relative group bg-[var(--color-bg-elevated)]"
+                className="mt-1.5 p-2 rounded-[var(--radius-lg)] max-h-36 overflow-y-auto text-mono-sm space-y-0.5 text-left select-text cursor-text relative group bg-[var(--color-bg-elevated)]"
               >
                 <IconButton
                   aria-label={t('wizard.error.copy_logs_tooltip')}
@@ -185,7 +185,10 @@ export function ErrorStep(w: WizardState) {
         {/* 06-uat: the install wizard is deploy-only — the fetch-mode retry/«Назад»→server
             branch and the fetch-retry «reinstall» prompt were removed with the SSH/fetch
             surface. Only the port-80-busy fast path and the deploy retry remain. */}
-        <div className="flex gap-2 justify-center">
+        {/* Two actions (port-80-busy) STACK full-width — side-by-side in the max-w-sm
+            (384px) hero column cramped the long «Переключиться на самоподписанный» label
+            onto two lines. A single action stays content-width, centered. */}
+        <div className="flex flex-col items-center gap-2 w-full">
           {/* C-06 (06-14): for a port-80-busy Let's Encrypt failure the fastest fix
               is to redeploy with a self-signed certificate. Offer it as the PRIMARY
               action; «Повторить» drops to secondary (ghost). It reuses the same
@@ -197,15 +200,11 @@ export function ErrorStep(w: WizardState) {
               deploy uses self-signed atomically, not the not-yet-committed state. */}
           {isPort80Busy ? (
             <>
-              <Button variant="ghost" size="sm" onClick={() => w.handleDeploy()}>
-                {t('buttons.retry')}
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => { w.setCertType("selfsigned"); w.handleDeploy({ overrideCertType: "selfsigned" }); }}
-              >
+              <Button variant="primary" size="sm" fullWidth onClick={() => { w.setCertType("selfsigned"); w.handleDeploy({ overrideCertType: "selfsigned" }); }}>
                 {t('wizard.error.switch_to_selfsigned')}
+              </Button>
+              <Button variant="ghost" size="sm" fullWidth onClick={() => w.handleDeploy()}>
+                {t('buttons.retry')}
               </Button>
             </>
           ) : (

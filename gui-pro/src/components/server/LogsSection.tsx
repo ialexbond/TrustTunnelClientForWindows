@@ -2,9 +2,14 @@
  * LogsSection — Phase 17 Plan 05 Card preview (D-2.4 rewrite).
  *
  * Replaces old inline expand pattern with Card+Modal compound:
- *   — Card shows: icon + title + «Последнее обновление: HH:MM» (after first load)
- *     OR empty state text + 1-2 last lines preview in mono + «Открыть логи» button.
+ *   — Card shows: icon + title + «Последнее обновление: HH:MM DD.MM.YYYY»
+ *     (after first load) OR empty state text + «Открыть логи» button.
  *   — LogsViewerModal opened via button; Modal owns full fetch/search/download flow.
+ *
+ * R4-F06: the card no longer renders a log-preview line (last journal row). Owner
+ * wanted the card calm — only title, last-update timestamp and the open button.
+ * R4-F07: the timestamp now uses the shared formatLastUpdated («HH:MM DD.MM.YYYY»)
+ * so it matches «Проверка IP сервера» and other Service-tab cards.
  *
  * T-03 invariant: LogsViewerModal is always in the tree — never conditional.
  * No early-return null before <LogsViewerModal>.
@@ -14,15 +19,9 @@ import { useTranslation } from "react-i18next";
 import { ScrollText } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { formatLastUpdated } from "../../shared/utils/formatLastUpdated";
 import { LogsViewerModal } from "./LogsViewerModal";
 import type { ServerState } from "./useServerState";
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-function formatHHMM(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -36,21 +35,31 @@ export function LogsSection({ state }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  // E-9 + E-20 fix: the card's preview and timestamp must reflect a REAL fetch.
+  // The modal fetches into its own state and reports success back via
+  // `onLogsFetched`; we store that text here (NOT state.serverLogs, which is
+  // never written in production — that was the E-9 bug) and derive the preview
+  // from it. `lastUpdate` is set ONLY from this callback, never on close (E-20).
+  const [fetchedLogs, setFetchedLogs] = useState<string | null>(null);
 
-  const { serverLogs, sshParams } = state;
+  const { sshParams } = state;
 
-  // Preview: last 2 non-empty lines, each truncated to 80 chars
-  const previewLines = serverLogs
-    ? serverLogs
-        .split("\n")
-        .filter(Boolean)
-        .slice(-2)
-        .map((l) => l.slice(0, 80))
-    : [];
+  // R4-F06: the card no longer shows a log preview line. `fetchedLogs` is still
+  // kept — it seeds the modal (`initialLogs`) so re-opening shows the last fetch
+  // without re-querying — but it is no longer rendered on the card itself.
+
+  // Real fetch-success callback (E-9 + E-20). D-29: `text` is the logs body and
+  // stays in local UI state — it is never forwarded to the activity-log channel.
+  const handleLogsFetched = (text: string, timestamp: Date) => {
+    setFetchedLogs(text);
+    setLastUpdate(timestamp);
+  };
 
   const handleClose = () => {
     setOpen(false);
-    setLastUpdate(new Date());
+    // E-20: do NOT set lastUpdate here — it would fabricate "updated now" on
+    // every close even when the fetch failed. The timestamp comes only from
+    // handleLogsFetched (a real successful fetch).
   };
 
   return (
@@ -66,24 +75,14 @@ export function LogsSection({ state }: Props) {
             <div className="flex-1 min-w-0">
               <h3 className="text-subtitle">{t("server.logs.card.title")}</h3>
               {lastUpdate ? (
-                <>
-                  <p
-                    className="text-caption"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    {t("server.logs.card.last_update", {
-                      time: formatHHMM(lastUpdate),
-                    })}
-                  </p>
-                  {previewLines.length > 0 && (
-                    <p
-                      className="text-mono-sm truncate"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      {previewLines.join(" / ")}
-                    </p>
-                  )}
-                </>
+                <p
+                  className="text-caption"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {t("server.logs.card.last_update", {
+                    time: formatLastUpdated(lastUpdate),
+                  })}
+                </p>
               ) : (
                 <p
                   className="text-caption"
@@ -105,7 +104,8 @@ export function LogsSection({ state }: Props) {
         isOpen={open}
         onClose={handleClose}
         sshParams={sshParams}
-        initialLogs={serverLogs || undefined}
+        initialLogs={fetchedLogs || undefined}
+        onLogsFetched={handleLogsFetched}
       />
     </>
   );

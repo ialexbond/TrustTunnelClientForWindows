@@ -40,6 +40,13 @@ export interface ConfigurationTabProps {
   sshParams: SshParams;
   /** Switch active tab — preserved для cross-tab navigation API stability. */
   onNavigateToTab: (tabId: "users") => void;
+  /**
+   * UAT-F01: refresh signal threaded from useServerState.configEpoch. Bumped by
+   * UsersSection on user add/delete; when it changes the tab silently re-reads
+   * credentials.toml + rules.toml so the new/removed user shows up live without
+   * a reconnect. Default 0 keeps the prop optional for Storybook/tests.
+   */
+  configEpoch?: number;
   // Storybook escape hatches:
   _storybook?: boolean;
   _mockBundle?: ConfigBundle;
@@ -60,6 +67,7 @@ function maskCredentialsToml(raw: string): string {
 export function ConfigurationTab({
   sshParams,
   onNavigateToTab,
+  configEpoch = 0,
   _storybook,
   _mockBundle,
   _forceLoading,
@@ -87,9 +95,18 @@ export function ConfigurationTab({
 
   // Shared loader so the mount effect and reload() apply byte-identical
   // resolve / cancel / finally semantics against the ACTIVE token.
-  const runLoad = (token: { current: boolean }) => {
-    setLoading(true);
-    setError(null);
+  //
+  // UAT-F01: `silent` skips the skeleton toggle (setLoading) so a background
+  // refresh triggered by configEpoch does NOT flash the loading placeholders
+  // over an already-rendered bundle — the accordions stay mounted and the
+  // content is swapped in place once the fetch resolves. The owner explicitly
+  // preferred this silent refresh. On a silent error we keep the existing
+  // bundle visible (no error state) — the next non-silent load surfaces it.
+  const runLoad = (token: { current: boolean }, silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     invoke<ConfigBundle>("server_get_config_bundle", { ...sshParams })
       .then((b) => {
         if (token.current) return;
@@ -97,10 +114,11 @@ export function ConfigurationTab({
       })
       .catch((e) => {
         if (token.current) return;
-        setError(e instanceof Error ? e.message : String(e));
+        // Silent refresh: don't tear down the current view on a transient error.
+        if (!silent) setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
-        if (!token.current) setLoading(false);
+        if (!token.current && !silent) setLoading(false);
       });
   };
 
@@ -122,6 +140,23 @@ export function ConfigurationTab({
     // unmount) cancels this manual reload too — the H-1 guard parity.
     runLoad(loadTokenRef.current);
   };
+
+  // UAT-F01: re-read the bundle silently when configEpoch changes (UsersSection
+  // bumps it on user add/delete). We track the previous value in a ref so the
+  // initial mount — already covered by the sshParams effect above — does NOT
+  // trigger a redundant second fetch; only an actual bump fires the refresh.
+  const prevConfigEpochRef = useRef(configEpoch);
+  useEffect(() => {
+    if (_storybook) return;
+    if (prevConfigEpochRef.current === configEpoch) return;
+    prevConfigEpochRef.current = configEpoch;
+    // Silent: reuse the active cancellation token (H-1 parity) and skip the
+    // skeleton so the refresh is invisible per owner preference.
+    runLoad(loadTokenRef.current, true);
+    // runLoad closes over sshParams; configEpoch is the only trigger we want
+    // here (sshParams changes are owned by the mount effect above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configEpoch, _storybook]);
 
   const handleNavigateToUsers = () => {
     activityLog("USER", "config.navigate.users", "ConfigurationTab");

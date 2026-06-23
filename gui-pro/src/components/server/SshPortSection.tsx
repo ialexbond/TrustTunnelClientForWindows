@@ -30,6 +30,10 @@ export function SshPortSection({ state }: SshPortSectionProps) {
       title: t("server.security.confirm.reset_port_title"),
       message: t("server.security.confirm.reset_port_message"),
       variant: "warning",
+      // CONF-05 (09-24): action-verb confirm label (not the generic
+      // «Подтвердить»); the message already states the consequence (login
+      // afterwards goes through port 22).
+      confirmText: t("server.security.confirm.reset_port_confirm_btn"),
     });
     if (!ok) return;
     void state.changeSshPort(22);

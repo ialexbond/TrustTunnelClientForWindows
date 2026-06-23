@@ -192,6 +192,11 @@ describe("useMtProtoState", () => {
     expect(mockConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "warning" }),
     );
+    // §K CONF-04 (09-08): the confirm must carry an action-verb confirmText
+    // (e.g. «Удалить»), not fall back to the generic «Подтвердить».
+    const call = mockConfirm.mock.calls[0]?.[0] as { confirmText?: string };
+    expect(call.confirmText).toBeTruthy();
+    expect(call.confirmText).not.toBe("Подтвердить");
     // User cancelled -> no uninstall invoke fired.
     expect(mockInvoke).not.toHaveBeenCalledWith(
       "mtproto_uninstall",
@@ -274,6 +279,75 @@ describe("useMtProtoState", () => {
     const parsed = JSON.parse(raw!) as { proxy_link: string; port: number };
     expect(parsed.proxy_link).toBe(installed.proxy_link);
     expect(parsed.port).toBe(8443);
+  });
+
+  // ─── E-13 (09-08): transient SSH probe error must NOT wipe the cache ───
+  //
+  // Root cause (useMtProtoState.ts:156-160): the load() catch could not tell a
+  // transient SSH hiccup apart from "telemt genuinely not installed", so it
+  // called saveCache(notInstalled) → localStorage.removeItem → the cached
+  // proxy_link was destroyed and an installed proxy showed «Не установлен».
+  // Fix: on a REJECTED probe, keep the last-known cache; only persist
+  // not-installed on a SUCCESSFUL probe.
+  it("E-13: transient probe error keeps the cached proxy_link (no wipe)", async () => {
+    const cachedLink = "tg://proxy?server=cached&port=8443&secret=ee";
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ proxy_link: cachedLink, port: 8443 }),
+    );
+
+    // Probe rejects (SSH channel hiccup / timeout).
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "mtproto_get_status") throw new Error("ssh channel closed");
+      return null;
+    });
+
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    // Cache survives — NOT removed by the error catch.
+    const raw = localStorage.getItem(STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!) as { proxy_link: string; port: number };
+    expect(parsed.proxy_link).toBe(cachedLink);
+
+    // And the in-memory status still surfaces the cached link, not "".
+    expect(result.current.status?.proxy_link).toBe(cachedLink);
+
+    // D-29: the proxy_link (contains the MTProto secret) must never be passed
+    // to the pushSuccess channel on the error path.
+    for (const call of mockPushSuccess.mock.calls) {
+      for (const arg of call) {
+        if (typeof arg === "string") expect(arg).not.toContain(cachedLink);
+      }
+    }
+  });
+
+  it("E-13 positive control: a SUCCESSFUL not-installed probe clears the cache", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ proxy_link: "tg://proxy?server=old&port=8443&secret=ee", port: 8443 }),
+    );
+
+    // Probe RESOLVES with installed:false — this is authoritative, cache clears.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "mtproto_get_status") {
+        return { installed: false, active: false, port: 0, secret: "", proxy_link: "" };
+      }
+      return null;
+    });
+
+    const { result } = renderHook(() => useMtProtoState(mockSshParams, mockPushSuccess));
+
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(result.current.status?.installed).toBe(false);
   });
 
   it("rehydrates proxy_link and port from localStorage on mount (MTPROTO-06)", () => {

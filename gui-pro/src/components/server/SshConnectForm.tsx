@@ -155,7 +155,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
           </div>
 
           {/* IP + Порт */}
-          <div className="flex gap-2.5 items-end">
+          <div className="flex gap-2 items-end">
             <div className="flex-1">
               <Input
                 label={t("labels.server_address")}
@@ -198,7 +198,7 @@ export function SshConnectForm({ onConnect, initialHost, initialUser, initialPor
                     "flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium transition-colors",
                     "border-r border-[var(--color-border)] last:border-r-0",
                     authMode === seg.id
-                      ? "bg-[var(--color-accent-interactive)] text-white"
+                      ? "bg-[var(--color-accent-interactive)] text-[var(--color-on-accent)]"
                       : "bg-[var(--color-input-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
                   )}
                 >

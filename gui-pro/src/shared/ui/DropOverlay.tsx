@@ -27,11 +27,16 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
       <div
         className={cn(
           "flex flex-col items-center gap-3",
-          "text-white",
           "text-lg",
           "font-semibold",
         )}
         style={{
+          // Theme-aware, NOT hardcoded text-white. The glass backdrop is a
+          // translucent tint of the theme bg (dark rgba in dark, light rgba in
+          // light), so white text vanished on the LIGHT glass. text-primary is
+          // #f2f2f2 (dark theme) / #161616 (light theme) — high contrast on both.
+          // The SVG icon uses stroke="currentColor", so it inherits this colour.
+          color: "var(--color-text-primary)",
           textShadow: "0 1px 4px var(--color-glass-bg)",
         }}
       >

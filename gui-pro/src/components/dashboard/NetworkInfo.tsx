@@ -30,8 +30,11 @@ export function NetworkInfo({ clientConfig }: NetworkInfoProps) {
   const antiDpi = clientConfig.endpoint?.anti_dpi;
   const ipv6 = clientConfig.endpoint?.has_ipv6;
   const postQuantum = clientConfig.post_quantum_group_enabled;
-  const dns = clientConfig.dns_upstreams;
-  const hasDns = dns && dns.length > 0;
+  // dns_upstreams is an [endpoint]-nested field (sidecar contract). It used to be read here
+  // as a top-level key, which broke after canonicalizing to endpoint.dns_upstreams (UAT-F05/F06/F07).
+  // Prefer the canonical endpoint path; tolerate a stray legacy top-level key for old dashboards.
+  const dns = clientConfig.endpoint?.dns_upstreams ?? (clientConfig.dns_upstreams as string[] | undefined);
+  const hasDns = !!dns && dns.length > 0;
 
   const items = [
     {

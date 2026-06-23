@@ -226,7 +226,7 @@ export function DeeplinkSection({
                         // chip had no surface colour in light mode. Switch
                         // to the canonical token names that actually resolve.
                         isActive
-                          ? "bg-[var(--color-accent-interactive)] text-white border-[var(--color-accent-interactive)]"
+                          ? "bg-[var(--color-accent-interactive)] text-[var(--color-on-accent)] border-[var(--color-accent-interactive)]"
                           : "bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] border-[var(--color-input-border)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]",
                       )}
                       data-testid={`sni-chip-${sni}`}
@@ -263,7 +263,7 @@ export function DeeplinkSection({
                     "focus-visible:shadow-[var(--focus-ring)] outline-none",
                     "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
                     active
-                      ? "bg-[var(--color-accent-interactive)] text-white"
+                      ? "bg-[var(--color-accent-interactive)] text-[var(--color-on-accent)]"
                       : "bg-[var(--color-input-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
                   )}
                   data-testid={`upstream-${seg.value}`}

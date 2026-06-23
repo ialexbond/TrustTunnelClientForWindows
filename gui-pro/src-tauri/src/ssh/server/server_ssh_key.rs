@@ -124,7 +124,7 @@ pub fn keyring_clear_pem(host: &str) -> Result<(), String> {
 /// Validate user-provided OpenSSH PEM (import recovery flow per D-2.3).
 /// Returns Ok(()) if valid, propagates parse error wrapped в `INVALID_PEM`.
 pub fn validate_pem_format(pem: &str) -> Result<(), String> {
-    russh_keys::decode_secret_key(pem, None).map_err(|e| format!("INVALID_PEM|{e}"))?;
+    russh::keys::decode_secret_key(pem, None).map_err(|e| format!("INVALID_PEM|{e}"))?;
     Ok(())
 }
 
@@ -328,15 +328,16 @@ mod tests {
 
     #[test]
     fn generate_then_parse_roundtrip() {
-        // R-6 mitigation: cross-crate compat ssh-key generated → russh-keys parseable.
-        // Critical: SSH connect helper в `ssh/mod.rs` использует russh-keys
+        // R-6 mitigation: cross-crate compat ssh-key generated → russh parseable.
+        // Critical: SSH connect helper в `ssh/mod.rs` использует russh::keys
         // для key-based auth, поэтому PEM сгенерированный ssh-key 0.6 должен
-        // быть совместим с парсером russh-keys 0.46.
+        // быть совместим с парсером russh 0.60.3 (русх-keys слит в russh::keys).
+        // Canary: проверяет что bump на 0.60.3 сохранил ssh-key-0.6 alignment.
         let result = generate_ssh_keypair("roundtrip-host").expect("generation must succeed");
-        let parsed = russh_keys::decode_secret_key(&result.private_pem, None);
+        let parsed = russh::keys::decode_secret_key(&result.private_pem, None);
         assert!(
             parsed.is_ok(),
-            "russh-keys must parse ssh-key generated PEM, got error: {:?}",
+            "russh::keys must parse ssh-key generated PEM, got error: {:?}",
             parsed.err()
         );
     }

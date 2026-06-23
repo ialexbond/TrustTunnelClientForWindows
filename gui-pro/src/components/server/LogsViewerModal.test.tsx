@@ -101,6 +101,99 @@ describe("LogsViewerModal", () => {
     expect(pre.textContent).toContain("WARN High memory");
   });
 
+  // ─── Test 2b: per-line render (F13) — one row per non-empty line ──────────
+
+  it("renders_one_row_per_line — each non-empty log line is its own data-testid=log-line row", async () => {
+    render(
+      <LogsViewerModal
+        isOpen={true}
+        onClose={() => {}}
+        sshParams={SSH_PARAMS}
+        initialLogs={SAMPLE_LOGS}
+        _forceState="loaded"
+      />,
+    );
+    const rows = await screen.findAllByTestId("log-line");
+    // SAMPLE_LOGS has exactly 3 non-empty lines
+    expect(rows.length).toBe(3);
+  });
+
+  // ─── Test 2c: severity as data attribute, not whole-line colour (F13) ─────
+
+  it("error_line_carries_severity_attribute — severity read via data-severity, not CSS colour", async () => {
+    render(
+      <LogsViewerModal
+        isOpen={true}
+        onClose={() => {}}
+        sshParams={SSH_PARAMS}
+        initialLogs={SAMPLE_LOGS}
+        _forceState="loaded"
+      />,
+    );
+    const rows = await screen.findAllByTestId("log-line");
+    // Find the ERROR line and assert its severity attribute.
+    const errorRow = rows.find((r) =>
+      (r.textContent ?? "").includes("ERROR Failed to connect"),
+    );
+    expect(errorRow).toBeDefined();
+    expect(errorRow?.getAttribute("data-severity")).toBe("error");
+    // The WARN line is classified as warn.
+    const warnRow = rows.find((r) =>
+      (r.textContent ?? "").includes("WARN High memory"),
+    );
+    expect(warnRow?.getAttribute("data-severity")).toBe("warn");
+    // A plain info line carries the info severity.
+    const infoRow = rows.find((r) =>
+      (r.textContent ?? "").includes("INFO TrustTunnel started"),
+    );
+    expect(infoRow?.getAttribute("data-severity")).toBe("info");
+  });
+
+  // ─── Test 2d: corner X present, no labeled close button in footer (F18) ───
+
+  it("has_corner_close_x_and_no_labeled_close_button — canonical close X, footer drops labeled close", async () => {
+    render(
+      <LogsViewerModal
+        isOpen={true}
+        onClose={() => {}}
+        sshParams={SSH_PARAMS}
+        initialLogs={SAMPLE_LOGS}
+        _forceState="loaded"
+      />,
+    );
+    // Canonical corner X exposes the buttons.close accessible name.
+    const closeButtons = await screen.findAllByRole("button", {
+      name: i18n.t("buttons.close"),
+    });
+    // Exactly ONE button carries the buttons.close name (the corner X) —
+    // the redundant labeled footer close button is gone (F18).
+    expect(closeButtons.length).toBe(1);
+  });
+
+  // ─── Test 2e: search highlight still wraps matches in <mark> ──────────────
+
+  it("search_highlight_wraps_matches_in_mark — renderHighlighted still emits mark element", async () => {
+    render(
+      <LogsViewerModal
+        isOpen={true}
+        onClose={() => {}}
+        sshParams={SSH_PARAMS}
+        initialLogs={SAMPLE_LOGS}
+        _forceState="loaded"
+      />,
+    );
+    const searchInput = screen.getByPlaceholderText(
+      i18n.t("server.logs.modal.search_placeholder"),
+    );
+    fireEvent.change(searchInput, { target: { value: "ERROR" } });
+    // Modal renders into a portal on document.body, so query the document, not
+    // the render container.
+    await waitFor(() => {
+      const marks = document.body.querySelectorAll("mark");
+      expect(marks.length).toBeGreaterThan(0);
+    });
+  });
+
   // ─── Test 3: search filter shows only matching lines ─────────────────────
 
   it("search_filter_shows_only_matching_lines — filter by 'error' hides other lines", async () => {

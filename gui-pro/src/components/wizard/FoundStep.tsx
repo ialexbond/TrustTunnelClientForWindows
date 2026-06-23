@@ -146,7 +146,7 @@ function FoundSetupMode(w: WizardState & { pushSuccess: (msg: string) => void })
                       onClick={() => w.setSelectedUser(u)}
                       className={`flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] transition-colors duration-200 cursor-pointer ${isSelected ? "bg-[var(--color-accent-tint-08)]" : "hover:bg-[var(--color-bg-hover)]"}`}
                     >
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2">
                         <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border-2 ${isSelected ? "border-[var(--color-accent-500)]" : "border-[var(--color-border)]"}`}>
                           {isSelected && <div className="w-2 h-2 rounded-full bg-[var(--color-accent-500)]" />}
                         </div>

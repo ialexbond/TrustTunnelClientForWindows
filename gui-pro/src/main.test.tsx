@@ -1,6 +1,17 @@
 import React from "react";
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
+
+// G-8 (09-16): the global crash handlers + ErrorBoundary.componentDidCatch
+// route into the existing `write_activity_log` Tauri sink so a release-build
+// crash leaves a real trace (console.error is lost with no devtools). Mock
+// `invoke` so we can assert it was called with tag:"ERROR" and prove D-29
+// (no raw object / secret ever handed to the sink).
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(() => Promise.resolve()),
+}));
+const invokeMock = vi.mocked(invoke);
 
 /**
  * Tests for main.tsx functionality.
@@ -67,6 +78,16 @@ vi.mock("react-dom/client", () => ({
 let ErrorBoundary: any;
 let rootEl: HTMLDivElement;
 
+// ISO-03 (09-03): createRoot/render are invoked ONCE at module-import time
+// inside beforeAll, but their assertions live in separate `it` blocks. The new
+// global `clearMocks` wipes mock call history before every test, which would
+// erase the import-time calls before those assertions run. So we snapshot the
+// import-time call state in beforeAll (right after the one-shot import) and
+// assert against the snapshot — making these tests independent of cross-test
+// mock state instead of depending on persisted history.
+let createRootCalledWith: unknown;
+let renderCallCount = 0;
+
 describe("main.tsx", () => {
   beforeAll(async () => {
     // Create root element that main.tsx expects
@@ -77,6 +98,10 @@ describe("main.tsx", () => {
     // Import main.tsx — module-level code runs once
     const mod = await import("./main");
     ErrorBoundary = mod.ErrorBoundary;
+
+    // Snapshot the import-time mock state before any per-test clearMocks runs.
+    createRootCalledWith = mockCreateRoot.mock.calls[0]?.[0];
+    renderCallCount = mockRender.mock.calls.length;
   });
 
   afterAll(() => {
@@ -88,11 +113,11 @@ describe("main.tsx", () => {
   // ─── ReactDOM.createRoot ───
 
   it("calls createRoot with #root element", () => {
-    expect(mockCreateRoot).toHaveBeenCalledWith(rootEl);
+    expect(createRootCalledWith).toBe(rootEl);
   });
 
   it("calls render on the created root", () => {
-    expect(mockRender).toHaveBeenCalledTimes(1);
+    expect(renderCallCount).toBe(1);
   });
 
   it("renders App inside ErrorBoundary inside StrictMode", () => {
@@ -181,6 +206,64 @@ describe("main.tsx", () => {
     expect(prevented).toBe(true);
     vi.restoreAllMocks();
   });
+
+  // ─── G-8: crash handlers persist to write_activity_log sink ───
+
+  it("global error handler persists to write_activity_log with tag ERROR", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeMock.mockClear();
+    const event = new ErrorEvent("error", {
+      error: new Error("Boom in render"),
+      cancelable: true,
+      bubbles: true,
+    });
+    window.dispatchEvent(event);
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "write_activity_log",
+      expect.objectContaining({ tag: "ERROR" }),
+    );
+    vi.restoreAllMocks();
+  });
+
+  it("unhandledrejection handler persists to write_activity_log with tag ERROR", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeMock.mockClear();
+    const event = new Event("unhandledrejection", { cancelable: true, bubbles: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (event as any).reason = new Error("rejected");
+    window.dispatchEvent(event);
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "write_activity_log",
+      expect.objectContaining({ tag: "ERROR" }),
+    );
+    vi.restoreAllMocks();
+  });
+
+  // D-29: a rejected promise's reason can carry SSH params/password. The handler
+  // must hand the sink only the message/stack STRING, never the raw object.
+  it("unhandledrejection handler never logs a secret-shaped reason (D-29)", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeMock.mockClear();
+    const SECRET = "TOPSECRET_SSH_PASSWORD_123";
+    // The secret only lives on an extra property of the reason object, NOT in
+    // its .message/.stack — so a correct handler (message/stack only) never
+    // forwards it, while a naive one that stringified the raw object would.
+    const reason = new Error("connection failed") as Error & { password?: string };
+    reason.password = SECRET;
+    const event = new Event("unhandledrejection", { cancelable: true, bubbles: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (event as any).reason = reason;
+    window.dispatchEvent(event);
+
+    // Walk every invoke call + every string-ish arg: the secret must be absent.
+    for (const call of invokeMock.mock.calls) {
+      const serialized = JSON.stringify(call);
+      expect(serialized).not.toContain(SECRET);
+    }
+    vi.restoreAllMocks();
+  });
 });
 
 // ─── ErrorBoundary behavior tests using the REAL class from main.tsx ───
@@ -235,6 +318,21 @@ describe("ErrorBoundary (exported from main.tsx)", () => {
       </ErrorBoundary>
     );
     expect(errorSpy).toHaveBeenCalledWith("[ErrorBoundary]", expect.any(Error), expect.any(String));
+  });
+
+  // G-8: componentDidCatch persists the render crash to the file sink too.
+  it("componentDidCatch persists to write_activity_log with tag ERROR", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    invokeMock.mockClear();
+    render(
+      <ErrorBoundary>
+        <ThrowingChild shouldThrow={true} />
+      </ErrorBoundary>
+    );
+    expect(invokeMock).toHaveBeenCalledWith(
+      "write_activity_log",
+      expect.objectContaining({ tag: "ERROR" }),
+    );
   });
 
   it("getDerivedStateFromError returns correct state shape", () => {

@@ -1,11 +1,17 @@
-import { type ReactNode } from "react";
+import {
+  useId,
+  cloneElement,
+  isValidElement,
+  type ReactNode,
+  type ReactElement,
+} from "react";
 import { cn } from "../lib/cn";
 
 interface FormFieldProps {
   label: string;
   required?: boolean;
   error?: string;
-  hint?: string;
+  helperText?: string;
   children: ReactNode;
   className?: string;
 }
@@ -14,13 +20,24 @@ export function FormField({
   label,
   required = false,
   error,
-  hint,
+  helperText,
   children,
   className,
 }: FormFieldProps) {
+  // A11Y-03: the child control is opaque, so we associate it with the label via
+  // aria-labelledby (the lowest-risk linkage — no need to thread an id into an
+  // unknown child's <input>). The label carries the id; the child references it.
+  const labelId = useId();
+  const labelledChild = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ "aria-labelledby"?: string }>, {
+        "aria-labelledby": labelId,
+      })
+    : children;
+
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <label
+        id={labelId}
         className="text-sm font-normal"
         style={{
           color: "var(--color-text-secondary)",
@@ -37,7 +54,7 @@ export function FormField({
           </span>
         )}
       </label>
-      {children}
+      {labelledChild}
       {error ? (
         <p
           role="alert"
@@ -48,14 +65,14 @@ export function FormField({
         >
           {error}
         </p>
-      ) : hint ? (
+      ) : helperText ? (
         <p
           className="text-xs"
           style={{
             color: "var(--color-text-muted)",
           }}
         >
-          {hint}
+          {helperText}
         </p>
       ) : null}
     </div>

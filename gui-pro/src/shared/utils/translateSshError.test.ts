@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { TFunction } from "i18next";
 import { translateSshError } from "./translateSshError";
+import i18n from "../i18n";
 
 const mockT = ((key: string, params?: Record<string, string>) => {
   if (params) return `${key}:${JSON.stringify(params)}`;
@@ -247,5 +248,38 @@ describe("translateSshError", () => {
     expect(
       translateSshError("GEOIP_INVALID_RESPONSE|Reserved range", mockT),
     ).toBe('geoipErrors.invalidResponse:{"detail":"Reserved range"}');
+  });
+
+  // ─── K-3 / EW-02: raw russh detail must not lead the user-facing message ───
+  // Rendered against the REAL i18n (RU) so we exercise the actual template, not
+  // the mockT pass-through. The raw russh blob is kept (for diagnosis) but
+  // demoted below a plain-RU headline, behind a «Подробности:» label — so it is
+  // never the headline a non-technical user reads first.
+  describe("K-3: raw SSH/russh detail is demoted, not the headline (RU)", () => {
+    const RUSSH_BLOB =
+      "Error in the protocol: KexInit { algorithms: Disconnect }";
+
+    it.each([
+      ["SSH_CONNECT_FAILED", "не удалось подключиться к серверу по ssh"],
+      ["SSH_CHANNEL_FAILED", "не удалось открыть рабочий канал"],
+      ["SSH_EXEC_FAILED", "команда на сервере завершилась с ошибкой"],
+      ["SSH_AUTH_ERROR", "не удалось войти на сервер по ssh"],
+      ["SSH_KEY_AUTH_ERROR", "сервер не принял ssh-ключ"],
+    ])(
+      "%s leads with a plain-RU headline and keeps the russh blob behind «Подробности»",
+      (code, expectedHeadlineFragment) => {
+        i18n.changeLanguage("ru");
+        const msg = translateSshError(`${code}|${RUSSH_BLOB}`, i18n.t);
+
+        const [headline, ...rest] = msg.split("\n\n");
+        // The headline is plain RU, not the raw russh text.
+        expect(headline.toLowerCase()).toContain(expectedHeadlineFragment);
+        expect(headline).not.toContain(RUSSH_BLOB);
+        // The raw blob is still available, but only under the «Подробности» label.
+        const tail = rest.join("\n\n");
+        expect(tail).toContain("Подробности");
+        expect(tail).toContain(RUSSH_BLOB);
+      },
+    );
   });
 });

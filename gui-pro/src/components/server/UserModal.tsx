@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { X, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
@@ -22,7 +22,6 @@ import { DeeplinkSection } from "./DeeplinkSection";
 // handleAdd after a successful submit (the read/write effects now live in the
 // useUserFormState hook).
 import { clearAddUserDraft } from "./addUserDraft";
-import { cn } from "../../shared/lib/cn";
 // Phase 04 Plan 10 (PANEL-02, D-04): all form-state, effects, dirty-tracking
 // and `canSubmit` were lifted VERBATIM into the useUserFormState container
 // hook (mirrors useSecurityState). UserModal keeps handleAdd/handleSave (they
@@ -191,18 +190,10 @@ export function UserModal({
     _storybook,
   });
 
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-
-  // Auto-focus the close button when the modal opens. Kept in UserModal (not
-  // the form-state hook) because closeButtonRef is a render-layer ref. The
-  // 250ms delay matches the prior single-effect timing so focus lands after
-  // the open animation, exactly as before the extraction.
-  useEffect(() => {
-    if (!isOpen) return;
-    const t2 = setTimeout(() => closeButtonRef.current?.focus(), 250);
-    return () => clearTimeout(t2);
-  }, [isOpen]);
-
+  // Initial focus is now owned by the Modal primitive (09-05): on open it
+  // focuses the first focusable inside the content box (the canonical close
+  // button). The hand-rolled auto-focus effect + ref were removed in 09-23 when
+  // this modal adopted Modal's showCloseButton.
 
   // ── Add user handler ──────────────────────────────────────────────────
   const handleAdd = useCallback(async () => {
@@ -623,7 +614,14 @@ export function UserModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={isDisabled ? undefined : () => handleCloseWithSource("backdrop_or_escape")}
+      // 09-23: the canonical close button (showCloseButton) wires the <X> to this
+      // same onClose. The prior hand-rolled <X> logged source=x while
+      // backdrop/escape logged source=backdrop_or_escape; the canonical button
+      // shares one onClose, so all user-initiated closes now record the same
+      // (non-secret) activity event. No test covered the X-specific source, and
+      // the close still logs + fires onClose — the source-string granularity is
+      // the only behavioural delta (see 09-23-SUMMARY deviations).
+      onClose={isDisabled ? undefined : () => handleCloseWithSource("close")}
       closeOnBackdrop={!isDisabled}
       closeOnEscape={!isDisabled}
       size="lg"
@@ -633,26 +631,10 @@ export function UserModal({
       role="dialog"
       ariaModal
       ariaLabelledby="user-modal-title"
+      showCloseButton
+      closeButtonDisabled={isDisabled}
+      closeButtonTestId="user-modal-close"
     >
-      {/* X close button */}
-      <button
-        ref={closeButtonRef}
-        type="button"
-        aria-label={t("buttons.close")}
-        onClick={() => handleCloseWithSource("x")}
-        disabled={isDisabled}
-        className={cn(
-          "absolute top-3 right-3 p-1 rounded",
-          "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
-          "focus-visible:shadow-[var(--focus-ring)] outline-none",
-          "transition-colors",
-          "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
-        )}
-        data-testid="user-modal-close"
-      >
-        <X className="w-4 h-4" />
-      </button>
-
       {/* Title — id target for the dialog's aria-labelledby (Users H-06). */}
       <h2 id="user-modal-title" className="text-lg font-semibold text-[var(--color-text-primary)] mb-[var(--space-5)] pr-8">
         {isEditMode
@@ -687,7 +669,7 @@ export function UserModal({
       {/* Config load error (Edit mode only) */}
       {configError && (
         <ErrorBanner
-          severity="error"
+          variant="error"
           message={configError}
           className="mb-[var(--space-4)]"
         />
@@ -739,7 +721,7 @@ export function UserModal({
       {/* Submit error */}
       {submitError && (
         <ErrorBanner
-          severity="error"
+          variant="error"
           message={submitError}
           className="mt-[var(--space-4)]"
         />
@@ -752,7 +734,7 @@ export function UserModal({
           Save. At the top of the modal it was off-screen during scroll. */}
       {isEditMode && isDeeplinkDirty && !(configLoading || _forceConfigLoading) && (
         <ErrorBanner
-          severity="warning"
+          variant="warning"
           message={t("server.users.regenerate_deeplink_warning")}
           className="mt-[var(--space-4)]"
           data-testid="deeplink-dirty-banner"
@@ -767,7 +749,23 @@ export function UserModal({
           with "start over". Order Add-mode:   [Очистить] [Добавить] [Отмена]
           Order Edit-mode: [Сохранить изменения] [Отмена]
       */}
-      <div className="flex gap-[var(--space-3)] mt-[var(--space-5)]">
+      {/* Footer — modal-footer standard (09-25, owner §6.2): content-width,
+          right-aligned, NOT a full-width split. «Отмена» (secondary) LEFT,
+          primary submit «Добавить/Сохранить» RIGHT (last child). The corner ×
+          (closeButtonTestId user-modal-close, adopted 09-23) is the close
+          affordance — «Отмена» here is a real cancel action. Both buttons use
+          size="sm" (h-8) — the de-facto modal-footer standard shared with
+          Firewall/Cert/MtProto/Benchmark (R2-F02a, 09-35). */}
+      <div className="flex justify-end gap-[var(--space-3)] mt-[var(--space-5)]">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={isDisabled}
+          onClick={onClose}
+        >
+          {t("buttons.cancel")}
+        </Button>
         {!(isEditMode && (configLoading || _forceConfigLoading)) && (
           <>
             {/* UX-clear-removed: «Очистить» убрана по фидбеку. Отмена
@@ -777,7 +775,7 @@ export function UserModal({
             <Button
               type="button"
               variant="primary"
-              fullWidth
+              size="sm"
               disabled={!canSubmit}
               loading={isSubmitting}
               icon={isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
@@ -788,15 +786,6 @@ export function UserModal({
             </Button>
           </>
         )}
-        <Button
-          type="button"
-          variant="secondary"
-          fullWidth
-          disabled={isDisabled}
-          onClick={onClose}
-        >
-          {t("buttons.cancel")}
-        </Button>
       </div>
     </Modal>
   );

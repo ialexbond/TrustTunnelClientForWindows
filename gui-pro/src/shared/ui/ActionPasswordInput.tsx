@@ -132,7 +132,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
                     "p-1 rounded",
                     "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
                     "transition-colors duration-[var(--transition-fast)]",
-                    "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
+                    "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
                   )}
                 >
                   <X className="w-3.5 h-3.5" />
@@ -165,7 +165,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
                   "p-1 rounded",
                   "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
                   "transition-colors duration-[var(--transition-fast)]",
-                  "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
+                  "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-muted)]"
                 )}
               >
                 {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}

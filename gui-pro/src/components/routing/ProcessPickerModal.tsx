@@ -71,24 +71,22 @@ export function ProcessPickerModal({
   };
 
   return (
-    <Modal isOpen={open} onClose={handleClose}>
-      <div
-        className="w-[420px] max-h-[520px] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
-        style={{
-          backgroundColor: "var(--color-bg-elevated)",
-          border: "1px solid var(--color-border)",
-        }}
-      >
-        {/* Header */}
-        <div className="px-5 pt-5 pb-3">
-          <h3
-            className="text-sm font-semibold mb-3"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            {t("routing.selectProcesses")}
-          </h3>
-
-          {/* Search */}
+    // UAT-F04: render directly on the shared Modal surface. Modal already owns
+    // the surface/border/radius/shadow/padding — the old nested rounded-2xl +
+    // shadow-2xl + border box drew a SECOND frame (double border). We keep only
+    // an inner flex column for layout (no frame of its own) and let Modal supply
+    // the corner X (showCloseButton) + title. size="md" replaces the hardcoded
+    // w-[420px] so the width follows the shared sizing scale.
+    <Modal
+      isOpen={open}
+      onClose={handleClose}
+      size="md"
+      title={t("routing.selectProcesses")}
+      showCloseButton
+    >
+      <div className="flex flex-col overflow-hidden">
+        {/* Search */}
+        <div className="pb-3">
           <div className="relative">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
@@ -112,7 +110,7 @@ export function ProcessPickerModal({
 
         {/* Process list */}
         <div
-          className="flex-1 overflow-y-auto px-3 pb-2"
+          className="flex-1 overflow-y-auto -mx-2 px-2 pb-2"
           style={{ minHeight: "200px", maxHeight: "320px" }}
         >
           {loading ? (
@@ -160,7 +158,15 @@ export function ProcessPickerModal({
                           : "var(--color-input-bg)",
                       }}
                     >
-                      {checked && <Check className="w-3 h-3 text-white" />}
+                      {/* UAT-F04 / CLAUDE.md: no hardcoded white — the glyph
+                          uses the on-accent token so it stays legible on the
+                          --color-accent-500 fill across themes. */}
+                      {checked && (
+                        <Check
+                          className="w-3 h-3"
+                          style={{ color: "var(--color-on-accent)" }}
+                        />
+                      )}
                     </div>
 
                     <div
@@ -205,9 +211,11 @@ export function ProcessPickerModal({
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer — Cancel (left) / AddSelected (primary, right) matches the
+            modal action standard. Border-top + top padding only; horizontal
+            padding now comes from the shared Modal surface (UAT-F04). */}
         <div
-          className="flex items-center justify-end gap-2 px-5 py-3 border-t"
+          className="flex items-center justify-end gap-2 pt-3 mt-1 border-t"
           style={{ borderColor: "var(--color-border)" }}
         >
           <Button variant="ghost" size="sm" onClick={handleClose}>

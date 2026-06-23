@@ -166,4 +166,16 @@ describe("Select", () => {
     fireEvent.keyDown(trigger, { key: "Escape" });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  // CC-6: Select gains an error state mirroring Input's error/helperText
+  // treatment — a red border on the trigger plus a role="alert" message.
+  it("renders error message via role=alert when error is set", () => {
+    render(<Select options={options} value="a" error="bad" onChange={onChange} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("bad");
+  });
+
+  it("does not render an alert when error is absent", () => {
+    render(<Select options={options} value="a" onChange={onChange} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

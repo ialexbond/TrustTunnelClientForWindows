@@ -190,7 +190,7 @@ function StatusPanel({
 
       {error && !errorDismissed && (
         <ErrorBanner
-          severity="error"
+          variant="error"
           message={error}
           // F2: offer the dismiss (X) in EVERY banner state. `status === "error"` is the
           // authoritative dismiss (routes through `clear_vpn_error` so it clears across

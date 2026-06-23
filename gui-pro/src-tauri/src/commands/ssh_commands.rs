@@ -451,6 +451,12 @@ ssh_pool_command!(disable_bbr, ssh::disable_bbr);
 ///
 /// **B5:** Returns `BenchmarkResult { raw_stdout, duration_seconds }` — NO parsed sections.
 /// Frontend TypeScript owns section parsing via `parseBenchmarkOutput()` (Plan 17-02).
+///
+/// **UAT-F16 overall timeout:** a real check completes in 1-3 minutes; 300s gives
+/// generous headroom (including the auto-install of missing deps) while still bounding
+/// any unexpected hang so the single-flight slot is freed.
+const BENCHMARK_OVERALL_TIMEOUT_SECS: u64 = 300;
+
 #[tauri::command]
 pub async fn server_run_benchmark(
     app: tauri::AppHandle,
@@ -488,10 +494,33 @@ pub async fn server_run_benchmark(
 
     // Run the streaming benchmark (may take 1-3 minutes).
     // run_benchmark is re-exported via ssh::server::mod.rs pub use server_benchmark::*
-    let result = ssh::run_benchmark(&app, &handle, rx).await;
+    //
+    // UAT-F16 defense-in-depth: the `-y` / stdin-/dev/null guards in run_benchmark's
+    // command (see server_benchmark.rs) eliminate the KNOWN deps-missing hang. This
+    // outer timeout bounds ANY residual/unknown hang so the single-flight slot is
+    // always freed and the frontend gets a distinct, actionable result instead of
+    // spinning forever. A real check completes well under this ceiling (1-3 min).
+    let start = std::time::Instant::now();
+    let timed = tokio::time::timeout(
+        tokio::time::Duration::from_secs(BENCHMARK_OVERALL_TIMEOUT_SECS),
+        ssh::run_benchmark(&app, &handle, rx),
+    )
+    .await;
 
-    // Cleanup on ALL exit paths: success / cancel / error / watchdog-forced (cleanup invariant).
+    // Cleanup on ALL exit paths: success / cancel / error / watchdog-forced / overall-timeout
+    // (cleanup invariant — the slot MUST be cleared whether the inner future completed,
+    // errored, or the outer timeout elapsed, so a future benchmark can start).
     *cancel_state.benchmark_cancel_tx.lock().await = None;
+
+    let result = match timed {
+        Ok(inner) => inner,
+        // Overall timeout elapsed — return a DISTINCT error the frontend can detect,
+        // mirroring the existing BENCHMARK_CANCELLED|dur=N format for parser consistency.
+        Err(_) => {
+            let dur = start.elapsed().as_secs();
+            return Err(format!("BENCHMARK_TIMEOUT|dur={dur}"));
+        }
+    };
 
     // Surface error to TypeScript (BENCHMARK_CANCELLED|dur=N or BENCHMARK_CANCELLED|dur=N|forced).
     let res: ssh::BenchmarkResult = result?;
@@ -610,8 +639,27 @@ fn ssh_creds_path() -> std::path::PathBuf {
     ssh::portable_data_dir().join("ssh_credentials.json")
 }
 
+/// Stable keyring entry name for an SSH (host, port, user) triple.
+///
+/// SEC-04 (09-RESEARCH-security.md §5): the previous shape `ssh-{host}:{port}-{user}`
+/// was AMBIGUOUS because its `-` and `:` separators ALSO occur inside the field
+/// values themselves — IPv6 hosts carry `:` and hyphenated logins carry `-`. Two
+/// distinct triples could therefore serialize to the same string (e.g.
+/// `("a","22-x","b")` and `("a","22","x-b")` both → `ssh-a:22-x-b`), so one
+/// server's stored SSH password could be served for a different server
+/// (T-09-SC-3, Information Disclosure). The fix uses a `|`-delimited, field-tagged
+/// shape: `|` is in NEITHER the host whitelist (`validate_ssh_host`:
+/// `[a-zA-Z0-9.-:[]]`) NOR the user whitelist (`validate_ssh_user`:
+/// `[a-zA-Z0-9._$-]`), so it can never appear inside a real field — the mapping
+/// from (host,port,user) → key is now injective (mirror of the CR-04 delimiter
+/// discipline). NOTE: changing the shape makes pre-existing keyring entries under
+/// the OLD key unreadable — the user is re-prompted ONCE for the password, which
+/// is then written under the new key (recoverable; documented in 09-18-SUMMARY).
+/// We deliberately add NO old-key fallback (accepting the one-time re-prompt is
+/// simpler than carrying legacy-key migration logic). The separate SSH-KEY keyring
+/// service is keyed by a single bare-host field and is unaffected.
 fn keyring_key(host: &str, port: &str, user: &str) -> String {
-    format!("ssh-{host}:{port}-{user}")
+    format!("ssh|h={host}|p={port}|u={user}")
 }
 
 // ─── Per-host credential store (v2) ──────────────────────────────
@@ -1498,6 +1546,41 @@ mod cred_store_tests {
             record_id("h", "22", "u"),
             keyring_key("h", "22", "u"),
             "record_id and keyring_key must stay aligned"
+        );
+    }
+
+    // ─── SEC-04: keyring_key disambiguation ───────────────────────────
+    //
+    // The OLD key shape `ssh-{host}:{port}-{user}` is AMBIGUOUS because `-` and
+    // `:` both appear INSIDE the field values themselves (IPv6 hosts carry `:`,
+    // hyphenated logins carry `-`). Two distinct (host,port,user) triples could
+    // therefore serialize to the same string and have one server's SSH password
+    // served for another (T-09-SC-3, Information Disclosure). The fix uses `|`
+    // plus field tags — `|` is in NEITHER the host whitelist (`validate_ssh_host`:
+    // `[a-zA-Z0-9.-:[]]`) NOR the user whitelist (`validate_ssh_user`:
+    // `[a-zA-Z0-9._$-]`), so it can never appear in a real field and the mapping
+    // from (host,port,user) → key becomes injective.
+
+    #[test]
+    fn keyring_key_disambiguates_hyphen_bearing_fields() {
+        // Old-shape collision via the `-{user}` hyphen separator: both
+        // ("a","22-x","b") and ("a","22","x-b") serialized to `ssh-a:22-x-b`.
+        // The new shape keeps each field tagged + `|`-delimited, so they differ.
+        assert_ne!(
+            keyring_key("a", "22-x", "b"),
+            keyring_key("a", "22", "x-b"),
+            "hyphen-bearing port/user triples must not collide"
+        );
+    }
+
+    #[test]
+    fn keyring_key_disambiguates_colon_bearing_fields() {
+        // Old shape collision via the IPv6 colon: `ssh-fe80::1:22-u` == `ssh-fe80::1:22-u`.
+        // ("fe80::1","22","u") and ("fe80",":1:22","u") MUST map to distinct keys.
+        assert_ne!(
+            keyring_key("fe80::1", "22", "u"),
+            keyring_key("fe80", ":1:22", "u"),
+            "colon-bearing (IPv6) host/port triples must not collide"
         );
     }
 }

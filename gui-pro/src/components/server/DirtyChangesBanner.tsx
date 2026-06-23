@@ -17,7 +17,7 @@ export interface DirtyChangesBannerProps {
  * Phase 15 banner shown above Quick Settings when user has unsaved changes.
  *
  * Self-rendered warning chrome (AlertTriangle icon + dirty count + inline
- * Apply / Discard buttons). The shared severity="warning" banner primitive
+ * Apply / Discard buttons). The shared variant="warning" banner primitive
  * does not expose action / secondaryAction props, so this component builds
  * its own chrome with `<Button>` elements next to the message instead of
  * wrapping it.

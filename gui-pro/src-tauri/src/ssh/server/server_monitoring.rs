@@ -262,6 +262,15 @@ pub async fn get_cert_info(
     Ok(serde_json::json!({
         "hostname": hostname,
         "certPath": resolved_cert_path,
+        // R2-F06 (Plan 09-36): explicit cert-presence flag. The openssl exit
+        // code already distinguishes a readable cert (0) from a failed read
+        // (non-zero) — no new command needed. The frontend reads this in
+        // parseCertInfo so a MISSING/unreadable cert ("present": false) gets an
+        // honest «Сертификат не найден / не читается» label instead of being
+        // confused with a present-but-unrecognized-type cert. D-29: only the
+        // boolean derived from the exit code is exposed — no openssl/cert detail
+        // is logged here.
+        "present": cert_code == 0,
         "notAfter": parsed_obj.get("notAfter").cloned().unwrap_or_default(),
         "notBefore": parsed_obj.get("notBefore").cloned().unwrap_or_default(),
         "issuer": parsed_obj.get("issuer").cloned().unwrap_or_default(),

@@ -136,7 +136,7 @@ export function PasswordRotationPrompt({
               onClick={handleGeneratePassword}
               disabled={isLoading || disabled}
               aria-label={t("common.generate_password")}
-              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
             >
               <Shuffle className="w-3.5 h-3.5" />
             </button>
@@ -146,7 +146,7 @@ export function PasswordRotationPrompt({
 
       {/* Backend error (if rotation failed) */}
       {error && (
-        <ErrorBanner severity="error" message={error} />
+        <ErrorBanner variant="error" message={error} />
       )}
 
       {/* Action buttons */}

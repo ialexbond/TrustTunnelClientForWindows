@@ -89,7 +89,7 @@ describe("FirewallSection", () => {
 
     // P2-15 #BB — RU: «Firewall» → «Брандмауэр».
     expect(screen.getByText(/Брандмауэр не установлен/i)).toBeInTheDocument();
-    expect(screen.getByText("Установить и включить firewall")).toBeInTheDocument();
+    expect(screen.getByText("Установить и включить брандмауэр")).toBeInTheDocument();
     // Lockout warning contains the SSH port
     expect(screen.getByText(/SSH порт 22/)).toBeInTheDocument();
   });
@@ -155,7 +155,7 @@ describe("FirewallSection", () => {
 
     render(<FirewallSection status={status} state={state} />);
 
-    fireEvent.click(screen.getByText("Установить и включить firewall"));
+    fireEvent.click(screen.getByText("Установить и включить брандмауэр"));
     expect(state.installFirewall).toHaveBeenCalled();
   });
 
@@ -166,6 +166,67 @@ describe("FirewallSection", () => {
     render(<FirewallSection status={status} state={state} />);
 
     expect(screen.getByText("Установлен (неактивен)")).toBeInTheDocument();
-    expect(screen.getByText("Включить")).toBeInTheDocument();
+    expect(screen.getByText("Включить брандмауэр")).toBeInTheDocument();
+  });
+
+  // ─── A-1: HTTP-port switch adopts the shared Toggle ──────────────────
+  //
+  // The hand-rolled button+span (no role=switch, no aria, no focus ring) was
+  // replaced with the shared <Toggle>. These assert the accessible switch
+  // contract rather than CSS — role=switch, aria-checked reflects port state,
+  // aria-busy while loading, and the switch stays mounted during loading.
+
+  it("renders the HTTP-port control as a switch reflecting closed state", () => {
+    const status = makeFirewallStatus({ rules: [] });
+    const state = makeSecurityState();
+
+    render(<FirewallSection status={status} state={state} />);
+
+    const sw = screen.getByRole("switch", {
+      name: /Порт 80/,
+    });
+    expect(sw).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("HTTP-port switch reads aria-checked=true when port 80 is open", () => {
+    const status = makeFirewallStatus({
+      rules: [
+        { number: 1, to: "80/tcp", from: "Anywhere", action: "ALLOW IN", proto: "tcp", comment: "HTTP" },
+      ],
+    });
+    const state = makeSecurityState();
+
+    render(<FirewallSection status={status} state={state} />);
+
+    const sw = screen.getByRole("switch", { name: /Порт 80/ });
+    expect(sw).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("clicking the HTTP-port switch invokes state.run with 'http-port'", () => {
+    const status = makeFirewallStatus({ rules: [] });
+    const state = makeSecurityState();
+
+    render(<FirewallSection status={status} state={state} />);
+
+    fireEvent.click(screen.getByRole("switch", { name: /Порт 80/ }));
+    expect(state.run).toHaveBeenCalledWith(
+      "http-port",
+      expect.any(Function),
+      expect.any(String),
+    );
+  });
+
+  it("HTTP-port switch reports aria-busy and stays mounted while loading", () => {
+    const status = makeFirewallStatus({ rules: [] });
+    // isBusy returns true only for the http-port key.
+    const state = makeSecurityState({
+      isBusy: vi.fn((key: string) => key === "http-port"),
+    });
+
+    render(<FirewallSection status={status} state={state} />);
+
+    const sw = screen.getByRole("switch", { name: /Порт 80/ });
+    expect(sw).toBeInTheDocument();
+    expect(sw).toHaveAttribute("aria-busy", "true");
   });
 });

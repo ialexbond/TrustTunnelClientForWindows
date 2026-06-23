@@ -112,7 +112,7 @@ export function ArrayOfTablesBlock({
               "p-1 rounded-sm transition-opacity",
               "text-[var(--color-text-muted)] hover:text-[var(--color-destructive)]",
               "focus-visible:shadow-[var(--focus-ring)] outline-none",
-              trashDisabled && "opacity-30 cursor-not-allowed"
+              trashDisabled && "opacity-[var(--opacity-disabled)] cursor-not-allowed"
             )}
           >
             <Trash2 size={16} aria-hidden="true" />

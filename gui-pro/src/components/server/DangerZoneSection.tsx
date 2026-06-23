@@ -32,7 +32,9 @@ export function DangerZoneSection({ state }: Props) {
       title: t("server.danger.stop_title"),
       message: t("server.danger.stop_message"),
       variant: "danger",
-      confirmText: t("buttons.confirm"),
+      // CTA-01 (09-24): action-verb label instead of the generic «Подтвердить»
+      // so the destructive button names the consequence it triggers.
+      confirmText: t("server.danger.stop_confirm_btn"),
       cancelText: t("buttons.cancel"),
     });
     if (!ok) return;

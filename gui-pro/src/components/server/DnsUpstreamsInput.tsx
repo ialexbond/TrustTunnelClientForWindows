@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../shared/lib/cn";
 
@@ -141,14 +141,12 @@ export function DnsUpstreamsInput({
       // not re-overwrite our draft when the parent echoes it back.
       setLastValueSeen(entries);
       onChange(entries);
-
-      // Validate non-empty lines
-      if (onError) {
-        const hasInvalid = lines.some((l) => l.trim().length > 0 && !isValidDnsEntry(l.trim()));
-        onError(hasInvalid);
-      }
+      // E-3 (Phase 9): keystroke validation now flows through the useEffect below
+      // (keyed on the derived hasError), so we no longer notify onError here. The
+      // effect covers ALL value sources — restore, edit-load AND keystroke — which
+      // fixes the stale Save gate when an invalid config is restored (not typed).
     },
-    [onChange, onError]
+    [onChange]
   );
 
   // Per-line validation with specific error reasons (WR-14.1-UAT-04).
@@ -166,6 +164,18 @@ export function DnsUpstreamsInput({
   }, [value]);
 
   const hasError = invalidDetails.length > 0;
+
+  // E-3 (Phase 9, Behavioral Cluster 6): notify the parent's Save gate from a
+  // proper effect keyed on the derived validation state. This covers EVERY value
+  // source — restore, edit-load AND keystroke — not just keystroke. Before this,
+  // onError fired only inside handleChange, so a restored invalid config left the
+  // gate stale (false) and Save stayed enabled on a visibly-invalid value.
+  // Must be an effect, not a render-body side-effect (calling onError during render
+  // is a React anti-pattern that can trigger parent re-renders mid-render).
+  useEffect(() => {
+    onError?.(hasError);
+  }, [hasError, onError]);
+
   // UX-dns-hint (B): short hint — just explain that ENTER is the separator
   // and each server goes on its own line. Format examples already live in
   // the placeholder, no need to repeat them.

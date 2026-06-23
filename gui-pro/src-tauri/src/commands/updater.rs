@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::Emitter;
 use tauri::Manager;
+use url::Url;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -16,21 +17,154 @@ struct UpdateProgress {
 }
 
 /// Validate download URL is from trusted domains only.
+///
+/// SEC-03: parse with the `url` crate (reqwest's own URL parser) and check the
+/// parsed `.host_str()` instead of hand-rolling string splits. The old
+/// `trim_start_matches("https://").split('/').next()` parser read everything
+/// before the first `/` as the host, so `https://github.com@evil.com/x` was
+/// accepted (it saw host `github.com@evil.com`, then matched the `github.com`
+/// prefix logic) — a userinfo/@-bypass. `url::Url::host_str()` resolves the
+/// authority correctly (it strips the `user@` userinfo and separates the port),
+/// so the host of that URL is `evil.com` and the allow-list rejects it.
 fn validate_download_url(url: &str) -> Result<(), String> {
     let allowed_hosts = ["github.com", "objects.githubusercontent.com"];
-    let lower = url.to_lowercase();
-    if !lower.starts_with("https://") {
+    let parsed = Url::parse(url).map_err(|_| "Invalid download URL".to_string())?;
+    if parsed.scheme() != "https" {
         return Err("Download URL must use HTTPS".into());
     }
-    // Extract host from URL
-    let host = lower.trim_start_matches("https://")
-        .split('/')
-        .next()
-        .unwrap_or("");
+    let host = parsed
+        .host_str()
+        .ok_or("Download URL has no host")?
+        .to_lowercase();
     if !allowed_hosts.iter().any(|d| host == *d || host.ends_with(&format!(".{d}"))) {
         return Err(format!("Downloads only allowed from: {}", allowed_hosts.join(", ")));
     }
     Ok(())
+}
+
+/// Pure integrity gate — fail-CLOSED (SEC-01 / G-2).
+///
+/// An empty/missing expected hash is a HARD reject. Previously `self_update`
+/// SKIPPED verification when the checksum was empty (only a stderr warning),
+/// which meant a missing checksum led to a silently-unverified, elevated `.exe`
+/// install. This helper makes that impossible: it returns `Ok(())` ONLY on an
+/// exact case-insensitive match of a well-formed 64-char hex SHA-256 digest.
+///
+/// Error codes (opaque strings consumed by the frontend update flow):
+/// - `UPDATE_CHECKSUM_MISSING`   — empty / whitespace-only expected hash.
+/// - `UPDATE_CHECKSUM_MALFORMED` — not exactly 64 ASCII hex chars.
+/// - `UPDATE_CHECKSUM_MISMATCH`  — well-formed but does not match the bytes.
+///
+/// Pure (no I/O) so it is unit-testable under `cargo test --lib` without a real
+/// network download or admin rights — mirrors the existing pure-helper test
+/// pattern in this file (e.g. `validate_download_url`).
+fn verify_checksum(file_bytes: &[u8], expected_sha256: &str) -> Result<(), String> {
+    let expected = expected_sha256.trim();
+    if expected.is_empty() {
+        return Err("UPDATE_CHECKSUM_MISSING".into());
+    }
+    // A SHA-256 hex digest is exactly 64 hex chars — anything else is malformed.
+    if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("UPDATE_CHECKSUM_MALFORMED".into());
+    }
+    let actual = format!("{:x}", Sha256::digest(file_bytes));
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err("UPDATE_CHECKSUM_MISMATCH".into());
+    }
+    Ok(())
+}
+
+/// Build an unguessable per-run updater temp dir NAME (SEC-05/06 TOCTOU).
+///
+/// The four updater artifacts (setup.exe / .bat / .vbs / .ps1) used to live in
+/// `%TEMP%` under predictable fixed names, so a local attacker able to write the
+/// world-writable temp dir could pre-stage / swap a file that then ran elevated
+/// (classic time-of-check/time-of-use race). A fresh `tt_update_<uuid>` dir per
+/// run has an unpredictable name, removing the pre-stage window for all four
+/// artifacts at once. Extracted as a pure name-builder so the uniqueness
+/// property is unit-testable without touching the filesystem.
+fn make_run_dir_name() -> String {
+    format!("tt_update_{}", uuid::Uuid::new_v4().simple())
+}
+
+/// Build the updater `.bat` body (pure — no I/O, so the cleanup contract is
+/// unit-testable).
+///
+/// Review be-1 (resource leak): the previous tail ran a NON-recursive
+/// `rmdir "{run_dir}"` while the still-executing `.bat` (and a possibly still-open
+/// `loader.ps1`) physically lived inside `run_dir`. A non-empty dir makes
+/// `rmdir` fail, so every successful update orphaned an empty `tt_update_<uuid>`
+/// dir in `%TEMP%` (a slow temp-space leak introduced by the per-run-UUID TOCTOU
+/// fix — before that, artifacts lived directly in `%TEMP%` with no dir to
+/// orphan).
+///
+/// Fix: the `.bat` deletes the artifacts it safely can, then spawns a DETACHED
+/// `cmd` that waits a few seconds and recursively (`rmdir /S /Q`) removes the
+/// WHOLE run_dir — including the now-finished `.bat` and any released
+/// `loader.ps1`. The detached process outlives the `.bat`'s own self-delete, so
+/// the directory is reliably reclaimed. A best-effort start-time sweep
+/// (`sweep_stale_update_dirs`) is the belt-and-suspenders for the rare case the
+/// delayed cleanup loses a race with the 30s loader window.
+fn build_updater_bat(
+    pid: u32,
+    setup_str: &str,
+    app_str: &str,
+    vbs_str: &str,
+    loader_str: &str,
+    run_dir_str: &str,
+) -> String {
+    format!(
+        r#"@echo off
+title TrustTunnel Updater
+echo Waiting for TrustTunnel to exit (PID {pid})...
+:waitloop
+tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto waitloop
+)
+echo Installing update...
+"{setup_str}" /S
+echo Starting TrustTunnel...
+timeout /t 2 /nobreak >nul
+start "" "{app_str}"
+echo Cleaning up...
+del "{vbs_str}" >nul 2>&1
+del "{loader_str}" >nul 2>&1
+del "{setup_str}" >nul 2>&1
+start "" /b cmd /c "timeout /t 5 /nobreak >nul & rmdir /S /Q ""{run_dir_str}""" >nul 2>&1
+(goto) 2>nul & del "%~f0"
+"#
+    )
+}
+
+/// Best-effort sweep of orphaned `tt_update_*` dirs left in `%TEMP%` by earlier
+/// runs (review be-1 belt-and-suspenders). Removes only dirs matching our own
+/// `tt_update_` prefix, never touching unrelated temp content; all errors are
+/// swallowed (a locked or in-progress dir is simply skipped and retried next
+/// run). Runs at `self_update` start so accumulation can never grow unbounded
+/// even if a previous run's delayed cleanup lost the loader race.
+///
+/// Takes the temp dir as a parameter (instead of reading `std::env::temp_dir()`
+/// internally) so the prefix-filter contract is unit-testable without mutating
+/// process-global env vars.
+fn sweep_stale_update_dirs_in(temp: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(temp) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let is_ours = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("tt_update_"));
+        if is_ours {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 // ─── Phase 18: Sidecar + app version detection helpers ────────────────────
@@ -587,6 +721,13 @@ pub async fn self_update(
 
     validate_download_url(&download_url)?;
 
+    // SEC-01 fail-CLOSED up-front gate: refuse before spending bandwidth if no
+    // checksum was supplied. There is no longer any "skip verification" path —
+    // a missing checksum can never lead to an unverified elevated install.
+    if expected_sha256.trim().is_empty() {
+        return Err("UPDATE_CHECKSUM_MISSING".into());
+    }
+
     let _lang = language.as_deref().unwrap_or("ru");
     let _theme = theme.as_deref().unwrap_or("dark");
 
@@ -597,11 +738,20 @@ pub async fn self_update(
     let app_dir = exe_path
         .parent()
         .ok_or("Cannot determine app directory")?;
-    let temp_dir = std::env::temp_dir();
-    let setup_path = temp_dir.join("trusttunnel_setup.exe");
 
-    // Clean up previous update artifact
-    let _ = std::fs::remove_file(&setup_path);
+    // be-1: reclaim any `tt_update_*` dirs orphaned by an earlier run BEFORE we
+    // create ours (so our fresh dir is never swept). Best-effort; keeps temp
+    // usage bounded even if a prior run's delayed cleanup lost the loader race.
+    sweep_stale_update_dirs_in(&std::env::temp_dir());
+
+    // SEC-05/06 TOCTOU: all four updater artifacts live in a fresh, unguessable
+    // per-run dir (`tt_update_<uuid>`) instead of fixed names in the shared,
+    // world-writable %TEMP%. An attacker cannot predict the path to pre-stage a
+    // malicious file. The .bat removes the whole run_dir on completion.
+    let run_dir = std::env::temp_dir().join(make_run_dir_name());
+    std::fs::create_dir_all(&run_dir)
+        .map_err(|e| format!("Cannot create update dir: {e}"))?;
+    let setup_path = run_dir.join("trusttunnel_setup.exe");
 
     // Download setup.exe with progress
     emit("download", 5, "update.connecting");
@@ -647,23 +797,20 @@ pub async fn self_update(
     file.flush().await.ok();
     drop(file);
 
-    // Verify SHA256 checksum (if provided)
-    if !expected_sha256.is_empty() {
-        emit("verify", 88, "update.verifying");
-        let bytes =
-            std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
-        let hash = Sha256::digest(&bytes);
-        let actual = format!("{:x}", hash);
-        if !actual.eq_ignore_ascii_case(&expected_sha256) {
-            let _ = std::fs::remove_file(&setup_path);
-            return Err(format!(
-                "Checksum mismatch! Expected: {expected_sha256}, Got: {actual}. Download may be corrupted or tampered with."
-            ));
-        }
-        eprintln!("[self_update] SHA256 verified: {actual}");
-    } else {
-        eprintln!("[self_update] WARNING: No checksum provided, skipping verification");
+    // SEC-01 fail-CLOSED: re-verify the downloaded bytes (defence in depth with
+    // the up-front gate + the per-run TOCTOU dir). On ANY failure — missing,
+    // malformed, or mismatched — delete the file and abort with the error code;
+    // the launch path below is never reached. There is no skip-verification else
+    // branch anymore.
+    emit("verify", 88, "update.verifying");
+    let bytes =
+        std::fs::read(&setup_path).map_err(|e| format!("Cannot read downloaded file: {e}"))?;
+    if let Err(code) = verify_checksum(&bytes, &expected_sha256) {
+        let _ = std::fs::remove_file(&setup_path);
+        let _ = std::fs::remove_dir_all(&run_dir);
+        return Err(code);
     }
+    eprintln!("[self_update] SHA256 verified");
 
     emit("install", 92, "update.preparing");
 
@@ -675,33 +822,24 @@ pub async fn self_update(
     emit("install", 96, "update.launching");
 
     // Create updater batch script: run setup /S → wait → launch app
-    let bat_path = temp_dir.join("trusttunnel_updater.bat");
+    // SEC-05/06: all artifacts in the per-run run_dir, not fixed names in %TEMP%.
+    let bat_path = run_dir.join("trusttunnel_updater.bat");
     let pid = std::process::id();
     let app_exe = app_dir.join(exe_path.file_name().unwrap_or_default());
     let setup_str = setup_path.to_string_lossy();
     let app_str = app_exe.to_string_lossy();
-    let vbs_path = temp_dir.join("trusttunnel_updater.vbs");
+    let vbs_path = run_dir.join("trusttunnel_updater.vbs");
 
-    let bat_content = format!(
-        r#"@echo off
-title TrustTunnel Updater
-echo Waiting for TrustTunnel to exit (PID {pid})...
-:waitloop
-tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto waitloop
-)
-echo Installing update...
-"{setup_str}" /S
-echo Starting TrustTunnel...
-timeout /t 2 /nobreak >nul
-start "" "{app_str}"
-echo Cleaning up...
-del "{vbs_str}" >nul 2>&1
-(goto) 2>nul & del "%~f0"
-"#,
-        vbs_str = vbs_path.to_string_lossy(),
+    // be-1: build the .bat via the pure helper so the cleanup contract (no
+    // self-blocking non-recursive rmdir; whole run_dir reclaimed by a detached
+    // delayed `rmdir /S /Q`) is unit-tested in `self_update_cleanup_tests`.
+    let bat_content = build_updater_bat(
+        pid,
+        &setup_str,
+        &app_str,
+        &vbs_path.to_string_lossy(),
+        &run_dir.join("trusttunnel_loader.ps1").to_string_lossy(),
+        &run_dir.to_string_lossy(),
     );
 
     {
@@ -723,6 +861,12 @@ del "{vbs_str}" >nul 2>&1
     std::fs::write(&vbs_path, &vbs_content)
         .map_err(|e| format!("Cannot create VBS launcher: {e}"))?;
 
+    // T-20: gate on WinVerifyTrust here once the binary is signed.
+    // The checksum gate above proves INTEGRITY (the bytes match the published
+    // hash) but NOT AUTHENTICITY — a compromised release could supply a matching
+    // checksum for a malicious .exe. Verifying the installer's Authenticode
+    // signature with WinVerifyTrust before this spawn is the authenticity check;
+    // it requires a code-signing cert + signing pipeline (BACKLOG T-20).
     std::process::Command::new("wscript.exe")
         .arg(&vbs_path)
         .creation_flags(0x08000000)
@@ -740,7 +884,7 @@ del "{vbs_str}" >nul 2>&1
         ("24,24,31", "240,240,245", "120,120,140", "40,40,50")
     };
 
-    let loader_ps = temp_dir.join("trusttunnel_loader.ps1");
+    let loader_ps = run_dir.join("trusttunnel_loader.ps1");
     let loader_content = format!(
         "Add-Type -AssemblyName System.Windows.Forms\n\
          Add-Type -AssemblyName System.Drawing\n\
@@ -800,6 +944,161 @@ del "{vbs_str}" >nul 2>&1
     app.exit(0);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod self_update_integrity_tests {
+    use super::*;
+
+    // SEC-01 fail-CLOSED: an empty/whitespace checksum must REJECT (was: silently
+    // skipped with a stderr-only warning → unverified elevated install).
+    #[test]
+    fn empty_checksum_is_rejected() {
+        assert_eq!(
+            verify_checksum(b"any bytes", ""),
+            Err("UPDATE_CHECKSUM_MISSING".into())
+        );
+        assert_eq!(
+            verify_checksum(b"any bytes", "   "),
+            Err("UPDATE_CHECKSUM_MISSING".into())
+        );
+    }
+
+    // SEC-01: a syntactically invalid digest (wrong length / non-hex) must REJECT.
+    #[test]
+    fn malformed_checksum_is_rejected() {
+        // too short
+        assert_eq!(
+            verify_checksum(b"x", "deadbeef"),
+            Err("UPDATE_CHECKSUM_MALFORMED".into())
+        );
+        // 64 chars but non-hex
+        assert_eq!(
+            verify_checksum(b"x", &"z".repeat(64)),
+            Err("UPDATE_CHECKSUM_MALFORMED".into())
+        );
+    }
+
+    // SEC-01: a well-formed but WRONG digest must REJECT (mismatch).
+    #[test]
+    fn wrong_checksum_is_rejected() {
+        let wrong = "0".repeat(64);
+        assert_eq!(
+            verify_checksum(b"hello", &wrong),
+            Err("UPDATE_CHECKSUM_MISMATCH".into())
+        );
+    }
+
+    // SEC-01: the correct digest passes, case-insensitively.
+    #[test]
+    fn correct_checksum_passes() {
+        // sha256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        let h = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(verify_checksum(b"hello", h).is_ok());
+        assert!(verify_checksum(b"hello", &h.to_uppercase()).is_ok()); // case-insensitive
+    }
+
+    // SEC-03: the url::Url-based validator rejects the userinfo/@-bypass that the
+    // old hand-rolled `trim_start_matches("https://").split('/')` parser accepted
+    // (it read `github.com@evil.com` as host `github.com`). url::Url::host_str()
+    // correctly resolves the authority to `evil.com` → reject.
+    #[test]
+    fn validate_download_url_rejects_userinfo_bypass() {
+        assert!(validate_download_url("https://github.com@evil.com/x").is_err());
+        assert!(validate_download_url("https://github.com:tok@evil.com/x").is_err());
+    }
+
+    // SEC-05/06: per-run temp dirs are unguessable AND distinct across runs, so an
+    // attacker cannot pre-stage a fixed-name artifact (TOCTOU). The dir name uses a
+    // fresh uuid each call.
+    #[test]
+    fn per_run_update_dir_is_unique() {
+        let a = make_run_dir_name();
+        let b = make_run_dir_name();
+        assert_ne!(a, b, "two runs must produce distinct dir names");
+        assert!(a.starts_with("tt_update_"));
+        assert!(b.starts_with("tt_update_"));
+    }
+}
+
+#[cfg(test)]
+mod self_update_cleanup_tests {
+    use super::*;
+
+    // be-1 regression: the updater .bat must NOT try to remove its own run_dir
+    // with a non-recursive `rmdir "{run_dir}"` while the still-running .bat (and
+    // any open loader.ps1) sits inside it — a non-empty dir makes that rmdir fail
+    // and orphans an empty tt_update_<uuid> dir in %TEMP% after every update.
+    // The dir must instead be reclaimed by a DETACHED, delayed, RECURSIVE removal
+    // that outlives the .bat's own self-delete.
+    #[test]
+    fn updater_bat_schedules_detached_recursive_cleanup() {
+        let run_dir = r"C:\Temp\tt_update_abc123";
+        let bat = build_updater_bat(
+            4242,
+            &format!(r"{run_dir}\trusttunnel_setup.exe"),
+            r"C:\Program Files\TrustTunnel\app.exe",
+            &format!(r"{run_dir}\trusttunnel_updater.vbs"),
+            &format!(r"{run_dir}\trusttunnel_loader.ps1"),
+            run_dir,
+        );
+
+        // The leaky inline non-recursive form must be gone.
+        assert!(
+            !bat.contains(&format!("rmdir \"{run_dir}\" >nul")),
+            "must not run a self-blocking non-recursive rmdir of run_dir inline:\n{bat}"
+        );
+
+        // The whole run_dir must be removed recursively and quietly...
+        assert!(
+            bat.contains(&format!("rmdir /S /Q \"\"{run_dir}\"\"")),
+            "must recursively (/S /Q) remove the whole run_dir:\n{bat}"
+        );
+        // ...by a DETACHED process (start "" /b cmd /c ...) so it survives the
+        // .bat's own (goto)/del self-delete on the final line.
+        assert!(
+            bat.contains("start \"\" /b cmd /c"),
+            "recursive cleanup must run in a detached cmd that outlives the .bat:\n{bat}"
+        );
+        // ...after a short delay so the .bat + loader release their handles.
+        assert!(
+            bat.contains("timeout /t 5 /nobreak >nul & rmdir /S /Q"),
+            "detached cleanup must wait before removing the dir:\n{bat}"
+        );
+
+        // The .bat still self-deletes as the very last step.
+        assert!(
+            bat.trim_end().ends_with("(goto) 2>nul & del \"%~f0\""),
+            "the .bat must still self-delete last:\n{bat}"
+        );
+    }
+
+    // be-1 belt-and-suspenders: a start-time sweep removes ONLY our own
+    // tt_update_* orphans and never touches unrelated temp content.
+    #[test]
+    fn sweep_removes_only_our_orphan_dirs() {
+        let base = std::env::temp_dir().join(format!("tt_sweep_test_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&base).unwrap();
+
+        // An orphaned updater dir (our prefix) with a leftover file inside,
+        // a foreign dir we must NOT touch, and a foreign file.
+        let ours = base.join("tt_update_deadbeef");
+        std::fs::create_dir_all(&ours).unwrap();
+        std::fs::write(ours.join("leftover.bat"), b"x").unwrap();
+        let foreign_dir = base.join("someone_elses_dir");
+        std::fs::create_dir_all(&foreign_dir).unwrap();
+        let foreign_file = base.join("tt_update_not_a_dir.txt");
+        std::fs::write(&foreign_file, b"x").unwrap();
+
+        sweep_stale_update_dirs_in(&base);
+
+        assert!(!ours.exists(), "our orphaned tt_update_* dir must be removed (incl. its contents)");
+        assert!(foreign_dir.exists(), "an unrelated dir must be left untouched");
+        assert!(foreign_file.exists(), "a non-dir name must be left untouched");
+
+        // Cleanup the test scratch dir.
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
 #[cfg(test)]

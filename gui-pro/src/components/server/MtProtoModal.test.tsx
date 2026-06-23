@@ -290,6 +290,111 @@ describe("MtProtoModal", () => {
     );
   });
 
+  // ─── E-14 (09-08): retry must validate the port range (never send 0) ───
+  //
+  // Root cause (MtProtoModal.tsx:414-419): the retry branch called
+  // state.retry(parseInt(portInput,10) || 0), bypassing handleInstall's range
+  // validation. An empty port → parseInt("") === NaN → `|| 0` → retry(0) fired
+  // with port 0 and a confusing backend error. Fix routes retry through the
+  // same guard handleInstall uses.
+  it("E-14: retry with a cleared port does NOT call retry/install with 0", async () => {
+    const retryFn = vi.fn();
+    const installFn = vi.fn().mockResolvedValue(undefined);
+    const state = mkState(
+      { installed: false },
+      { error: "network down", retry: retryFn, install: installFn },
+    );
+    render(
+      <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
+    );
+    // In error state the button reads «Повторить».
+    const btn = screen.getByTestId("mtproto-install-button");
+    expect(btn.textContent).toContain("Повторить");
+
+    // Clear the port input (default 8443 → empty).
+    const input = screen.getByPlaceholderText("8443") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "" } });
+
+    fireEvent.click(btn);
+
+    // Neither retry nor install may fire with an invalid/zero port.
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(retryFn).not.toHaveBeenCalled();
+    expect(retryFn).not.toHaveBeenCalledWith(0);
+    expect(installFn).not.toHaveBeenCalled();
+  });
+
+  it("E-14 positive control: retry with a valid port retries with that port", async () => {
+    const retryFn = vi.fn();
+    const state = mkState(
+      { installed: false },
+      { error: "network down", retry: retryFn },
+    );
+    render(
+      <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
+    );
+    const input = screen.getByPlaceholderText("8443") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "9443" } });
+    fireEvent.click(screen.getByTestId("mtproto-install-button"));
+    await waitFor(() => {
+      expect(retryFn).toHaveBeenCalledWith(9443);
+    });
+  });
+
+  // ─── 09-25: footer standard (owner §6) ───
+
+  // Configured-view footer carries NO labeled «Закрыть» text button — the
+  // corner × is the close affordance instead (F18 / owner §6.5).
+  it("09-25 configured footer has NO «Закрыть» text button", () => {
+    const state = mkState({
+      installed: true,
+      active: true,
+      port: 4443,
+      proxy_link: "tg://proxy?x=1",
+    });
+    render(
+      <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
+    );
+    // The corner × uses aria-label buttons.close ("Закрыть") — so query the
+    // labeled FOOTER button specifically: a button whose visible TEXT is
+    // «Закрыть». The corner × has no text content.
+    const labeledClose = screen
+      .queryAllByRole("button")
+      .filter((b) => b.textContent?.trim() === i18n.t("buttons.close"));
+    expect(labeledClose).toHaveLength(0);
+  });
+
+  // Canonical corner × is present (queryable by its close aria-label).
+  it("09-25 renders the canonical corner close button", () => {
+    const state = mkState({ installed: true, active: true, port: 4443, proxy_link: "tg://proxy?x=1" });
+    render(
+      <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
+    );
+    expect(
+      screen.getByRole("button", { name: i18n.t("buttons.close") }),
+    ).toBeInTheDocument();
+  });
+
+  // When active, the stop control is variant=danger (solid red); when inactive
+  // the start control is variant=primary (solid teal). Owner §6.4.
+  it("09-25 stop=danger when active", () => {
+    const state = mkState({ installed: true, active: true, port: 4443, proxy_link: "tg://proxy?x=1" });
+    render(
+      <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
+    );
+    expect(screen.getByTestId("mtproto-stop-button")).toHaveAttribute("data-variant", "danger");
+  });
+
+  it("09-25 start=primary when inactive", () => {
+    const state = mkState({ installed: true, active: false, port: 4443 });
+    render(
+      <MtProtoModal isOpen={true} onClose={vi.fn()} state={state} sshParams={SSH_PARAMS} />,
+    );
+    expect(screen.getByTestId("mtproto-start-button")).toHaveAttribute("data-variant", "primary");
+  });
+
   // Test 10: port validation rejects out-of-range
   it("port_validation_rejects_out_of_range — invalid port 100 does NOT call state.install", async () => {
     const installFn = vi.fn().mockResolvedValue(undefined);

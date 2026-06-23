@@ -69,9 +69,6 @@ export function EndpointStep(w: WizardState) {
                 onChange={(e) => w.setVpnUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, ""))}
                 placeholder="vpnuser"
                 autoFocus
-                // C-02 (06-13): on the reinstall-from-Found path a duplicate first-user name
-                // shows an inline error AND blocks install (canDeploy). No-op on clean install.
-                error={w.isDuplicateVpnUsername ? t('wizard.endpoint.username_taken') : undefined}
                 actions={[
                   <Tooltip key="gen" text={t("common.generate_username")}>
                     <button
@@ -112,6 +109,18 @@ export function EndpointStep(w: WizardState) {
                 ]}
               />
             </div>
+
+            {/* C-02 (06-13): duplicate first-user name on the reinstall-from-Found path.
+                Rendered full-width BELOW the username/password grid (not cramped inside the
+                narrow username column) AND blocks install via canDeploy. */}
+            {w.isDuplicateVpnUsername && (
+              <p
+                className="text-xs mt-1 text-[var(--color-status-error)]"
+                role="alert"
+              >
+                {t('wizard.endpoint.username_taken')}
+              </p>
+            )}
 
             {/* ── First-user «Дополнительно» (D-11, C-04) ──
                 Collapsed-by-default block giving the FIRST user a TRIMMED advanced set:
@@ -353,7 +362,7 @@ export function EndpointStep(w: WizardState) {
                           "border-r border-[var(--color-border)] last:border-r-0",
                           "focus-visible:shadow-[var(--focus-ring)] outline-none",
                           active
-                            ? "bg-[var(--color-accent-interactive)] text-white"
+                            ? "bg-[var(--color-accent-interactive)] text-[var(--color-on-accent)]"
                             : "bg-[var(--color-input-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
                         )}
                       >
@@ -371,7 +380,7 @@ export function EndpointStep(w: WizardState) {
 
           {/* DNS warning */}
           {w.certType === "letsencrypt" && w.domain.trim() && (
-            <div className="flex items-start gap-2.5 p-3 rounded-[var(--radius-xl)] bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-tint-20)]">
+            <div className="flex items-start gap-2 p-3 rounded-[var(--radius-xl)] bg-[var(--color-warning-tint-08)] border border-[var(--color-warning-tint-20)]">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning-500)]" />
               <div className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
                 <span className="font-semibold text-[var(--color-warning-500)]">{t('wizard.endpoint.dns_warning_important')}</span>{' '}

@@ -107,4 +107,42 @@ describe("MtProtoSection", () => {
     // After click, MtProtoModal renders install form — install button inside Modal appears
     expect(screen.getByTestId("mtproto-install-button")).toBeInTheDocument();
   });
+
+  // ─── E-12 (09-08): loading gate — no «Установлен, не запущен» cache flash ───
+  //
+  // Root cause (useMtProtoState.ts:111-124): the hook rehydrates from localStorage
+  // with a hardcoded active:false. With no loading gate, the card flashed the
+  // cached «Установлен, не запущен» (amber/warning) on every tab open while the
+  // real probe was still in flight. Fix: while state.loading is true, the card
+  // shows a neutral loading state instead of the stale cached active:false guess.
+  it("E-12: while loading, does NOT flash «Установлен, не запущен» from cache", () => {
+    // Cached rehydrate look: installed:true + active:false, but probe still loading.
+    const state = mkState({ installed: true, active: false, port: 8443 });
+    (state as { loading: boolean }).loading = true;
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+
+    // The stale cached guess must NOT be shown while the probe is in flight.
+    expect(screen.queryByText(/Установлен, не запущен/)).toBeNull();
+  });
+
+  it("E-12: after probe resolves active, shows «Активен на порту …» (no loading)", () => {
+    const state = mkState({ installed: true, active: true, port: 8443 });
+    (state as { loading: boolean }).loading = false;
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+
+    // Real status surfaced once loading is done.
+    const indicator = screen.getByRole("img");
+    expect(indicator.getAttribute("aria-label")).toContain("Активен на порту 8443");
+  });
+
+  it("E-12: after probe resolves installed-but-stopped, the warning IS shown", () => {
+    // Positive control: once loading is false, the legitimate stopped state
+    // must still render the warning subtitle — the gate only suppresses the
+    // stale flash WHILE loading, not the authoritative stopped status.
+    const state = mkState({ installed: true, active: false, port: 8443 });
+    (state as { loading: boolean }).loading = false;
+    render(<MtProtoSection state={state} sshParams={SSH_PARAMS} />);
+
+    expect(screen.getByText(/Установлен, не запущен/)).toBeInTheDocument();
+  });
 });

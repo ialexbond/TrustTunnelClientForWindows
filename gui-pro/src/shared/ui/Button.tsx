@@ -21,7 +21,11 @@ export const buttonVariants = cva(
           "bg-[var(--color-accent-interactive)]",
           "hover:bg-[var(--color-accent-hover)]",
           "active:bg-[var(--color-accent-active)]",
-          "text-white",
+          // A-3 (WCAG AA): theme-scoped on-accent token, not hardcoded white.
+          // On the dark teal fill white is only ≈3.53:1 (FAIL); the token is
+          // dark text (accent-900) ≈4.71:1 dark / white ≈5.05:1 light. See
+          // tokens.css --color-on-accent (defined 09-01).
+          "text-[var(--color-on-accent)]",
           "border border-transparent",
         ].join(" "),
         secondary: [
@@ -32,14 +36,24 @@ export const buttonVariants = cva(
           "border border-[var(--color-border)]",
         ].join(" "),
         danger: [
-          "bg-[var(--color-destructive)]",
+          // A-3 (WCAG AA): button fill uses the theme-scoped
+          // --color-danger-interactive (analog of --color-accent-interactive),
+          // NOT the broadly-shared --color-destructive. On dark, white over the
+          // lighter --color-destructive (#e05545) reached only ≈3.78:1 (FAIL,
+          // UAT #12); --color-danger-interactive (#bd2a1c dark / #b03020 light)
+          // is deep enough that white clears 4.5:1 in both themes (≈5.98 dark /
+          // ≈6.38 light) while still reading as a vivid red destructive button.
+          // Scoped to the button so danger TEXT/badges keep --color-destructive.
+          "bg-[var(--color-danger-interactive)]",
           "hover:opacity-90",
           "text-white",
           "border border-transparent",
         ].join(" "),
         "danger-outline": [
           "bg-transparent",
-          "hover:bg-[var(--color-destructive)] hover:text-white",
+          // A-3: on hover the outline fills with the destructive colour, so the
+          // text must switch to the on-accent token (was hardcoded white).
+          "hover:bg-[var(--color-destructive)] hover:text-[var(--color-on-accent)]",
           "text-[var(--color-destructive)]",
           "border border-[var(--color-destructive)]",
         ].join(" "),
@@ -93,6 +107,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         disabled={disabled || loading}
+        // data-variant exposes the resolved variant so tests can assert the
+        // semantic intent (e.g. MTProto Stop=danger / Start=primary, 09-25)
+        // without coupling to volatile CVA class strings. Falls back to the
+        // primary default to mirror defaultVariants above.
+        data-variant={variant ?? "primary"}
         className={cn(buttonVariants({ variant, size, fullWidth }), className)}
         {...props}
       >

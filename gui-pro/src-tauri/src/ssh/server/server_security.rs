@@ -905,61 +905,141 @@ where
 }
 
 // ═══════════════════════════════════════════════════════════════
-//   STATUS — single roundtrip, fetches everything
+//   STATUS — batched fetch (QE-02)
+//
+//   Background (QE-02, 09-RESEARCH-quality.md §J): `get_security_status`
+//   previously fired ~9-11 SEQUENTIAL `exec_command` calls per panel mount and
+//   per firewall/fail2ban toggle (detect_sudo, f2b presence/active/status, one
+//   status + up-to-three jail.local reads PER jail, ufw presence/verbose/
+//   numbered, read_vpn_port). Each call opens a fresh SSH channel — the dominant
+//   panel latency.
+//
+//   Fix: run every probe in ONE `bash -c` over a single channel, emitting each
+//   probe's output between unique section markers, then split the combined stdout
+//   by marker and feed each chunk to the EXISTING parsers (parsing is unchanged —
+//   only the fetching is batched). The jail list is dynamic, so we use at most a
+//   SECOND batched pass for the per-jail probes once the jail names are known
+//   (1-2 round-trips total instead of ~10).
+//
+//   Injection safety (T-09-14): the `bash -c` body is a single-quoted heredoc
+//   delivered with a UUID-randomized delimiter (`SEC_EOF_<uuid>` — see CLAUDE.md
+//   SSH rule, mirrors deploy.rs:613-633 / server_config.rs:1035). Server-named
+//   jails are whitelisted via `is_safe_jail` before being interpolated, exactly
+//   as the old path did, and the `sudo` prefix is preserved on every sub-command
+//   that originally had it.
 // ═══════════════════════════════════════════════════════════════
 
-pub async fn get_security_status(
-    app: &tauri::AppHandle,
-    handle: &client::Handle<SshHandler>,
-    ssh_port: u16,
-) -> Result<SecurityStatus, String> {
-    let current_ssh_port = ssh_port;
-    let sudo = detect_sudo(handle, app).await;
+/// Section marker name used by the first-pass batch. The combined stdout is split
+/// by `=== <NAME> ===` lines; each NAME maps to one probe's raw output.
+mod sec_marker {
+    pub const F2B_PRESENCE: &str = "F2B_PRESENCE";
+    pub const F2B_ACTIVE: &str = "F2B_ACTIVE";
+    pub const F2B_STATUS: &str = "F2B_STATUS";
+    pub const UFW_PRESENCE: &str = "UFW_PRESENCE";
+    pub const UFW_VERBOSE: &str = "UFW_VERBOSE";
+    pub const UFW_NUMBERED: &str = "UFW_NUMBERED";
+    pub const VPN_PORT: &str = "VPN_PORT";
+}
 
-    // ── fail2ban presence & jails ──
-    let (f2b_installed_raw, _) = exec_command(
-        handle, app,
-        "command -v fail2ban-client >/dev/null 2>&1 && echo F2B_OK || echo F2B_NO",
-    ).await?;
-    let f2b_installed = f2b_installed_raw.contains("F2B_OK");
+/// Split a combined batched-stdout blob into named sections. Each section begins
+/// at a marker line of the exact form `=== <NAME> ===` (trimmed) and runs until
+/// the next marker (or EOF). Returns a map from NAME → that section's body (the
+/// trailing newline before the next marker is dropped so the chunk matches what a
+/// standalone `exec_command` would have returned).
+///
+/// Pure + side-effect-free so the parser path is unit-testable without SSH.
+fn split_marked_sections(blob: &str) -> std::collections::HashMap<String, String> {
+    let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut current: Option<String> = None;
+    let mut buf: Vec<&str> = Vec::new();
 
+    let flush = |name: &Option<String>, buf: &mut Vec<&str>, out: &mut std::collections::HashMap<String, String>| {
+        if let Some(n) = name {
+            // Join with '\n'; this reproduces the body between two markers minus the
+            // separator newlines that bracket the marker lines themselves.
+            out.insert(n.clone(), buf.join("\n"));
+        }
+        buf.clear();
+    };
+
+    for line in blob.lines() {
+        let t = line.trim();
+        if let Some(name) = t.strip_prefix("===").and_then(|s| s.strip_suffix("===")) {
+            let name = name.trim();
+            if !name.is_empty() {
+                flush(&current, &mut buf, &mut out);
+                current = Some(name.to_string());
+                continue;
+            }
+        }
+        buf.push(line);
+    }
+    flush(&current, &mut buf, &mut out);
+    out
+}
+
+/// Build the first-pass batch command: every static-shaped probe in ONE `bash -c`
+/// single-quoted heredoc, each output fenced by `=== <NAME> ===` markers. The
+/// `run_id` keeps the heredoc delimiter unique per invocation (T-09-14). Returns
+/// the full command string ready for `exec_command`.
+fn build_security_batch_command(sudo: &str, run_id: &str) -> String {
+    use sec_marker::*;
+    let delim = format!("SEC_EOF_{run_id}");
+    // Each probe mirrors its old standalone form 1:1 (same flags, same `2>/dev/null`
+    // / `|| echo` fallbacks, same `sudo` prefix where the original had it). The
+    // markers are echoed literals; bodies are produced by the sub-commands.
+    format!(
+        "bash -s <<'{delim}'\n\
+         echo '=== {F2B_PRESENCE} ==='\n\
+         command -v fail2ban-client >/dev/null 2>&1 && echo F2B_OK || echo F2B_NO\n\
+         echo '=== {F2B_ACTIVE} ==='\n\
+         {sudo}systemctl is-active fail2ban 2>/dev/null || echo inactive\n\
+         echo '=== {F2B_STATUS} ==='\n\
+         {sudo}fail2ban-client status 2>/dev/null\n\
+         echo '=== {UFW_PRESENCE} ==='\n\
+         command -v ufw >/dev/null 2>&1 && echo UFW_OK || echo UFW_NO\n\
+         echo '=== {UFW_VERBOSE} ==='\n\
+         {sudo}ufw status verbose 2>/dev/null\n\
+         echo '=== {UFW_NUMBERED} ==='\n\
+         {sudo}ufw status numbered 2>/dev/null\n\
+         echo '=== {VPN_PORT} ==='\n\
+         {sudo}sed -n 's/^[[:space:]]*listen_address[[:space:]]*=[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' {cfg} 2>/dev/null\n\
+         {delim}\n",
+        cfg = ENDPOINT_CONFIG,
+    )
+}
+
+/// Pure parser for the first-pass batch sections. Reuses the EXISTING parsers
+/// (`ufw_line_is_active`, the Default:/Logging: loop, `parse_ufw_numbered`) so the
+/// produced firewall fields are byte-identical to the old multi-call path. The
+/// jail LIST is extracted here; per-jail details are filled by the second pass.
+///
+/// Returns `(f2b_installed, f2b_active, jail_names, FirewallStatus)`.
+fn parse_security_first_pass(
+    sections: &std::collections::HashMap<String, String>,
+    current_ssh_port: u16,
+) -> (bool, bool, Vec<String>, FirewallStatus) {
+    let get = |k: &str| sections.get(k).map(String::as_str).unwrap_or("");
+
+    // ── fail2ban presence / active / jail list ──
+    let f2b_installed = get(sec_marker::F2B_PRESENCE).contains("F2B_OK");
     let mut f2b_active = false;
-    let mut jails: Vec<JailInfo> = Vec::new();
-
+    let mut jail_names: Vec<String> = Vec::new();
     if f2b_installed {
-        let (active_raw, _) = exec_command(
-            handle, app,
-            &format!("{sudo}systemctl is-active fail2ban 2>/dev/null || echo inactive"),
-        ).await?;
-        f2b_active = active_raw.trim() == "active";
-
+        f2b_active = get(sec_marker::F2B_ACTIVE).trim() == "active";
         if f2b_active {
-            let (status_raw, _) = exec_command(
-                handle, app,
-                &format!("{sudo}fail2ban-client status 2>/dev/null"),
-            ).await?;
-            // Parse: "  `- Jail list: sshd, sshd-ddos"
-            let jail_names: Vec<String> = status_raw
+            // Parse: "  `- Jail list: sshd, sshd-ddos" (unchanged from old path).
+            jail_names = get(sec_marker::F2B_STATUS)
                 .lines()
                 .find(|l| l.contains("Jail list:"))
                 .and_then(|l| l.split("Jail list:").nth(1))
                 .map(|s| s.split(',').map(|j| j.trim().to_string()).filter(|j| !j.is_empty()).collect())
                 .unwrap_or_default();
-
-            for name in jail_names {
-                let info = parse_jail(handle, app, sudo, &name).await;
-                jails.push(info);
-            }
         }
     }
 
-    // ── ufw presence & rules ──
-    let (ufw_installed_raw, _) = exec_command(
-        handle, app,
-        "command -v ufw >/dev/null 2>&1 && echo UFW_OK || echo UFW_NO",
-    ).await?;
-    let ufw_installed = ufw_installed_raw.contains("UFW_OK");
-
+    // ── ufw presence / rules ──
+    let ufw_installed = get(sec_marker::UFW_PRESENCE).contains("UFW_OK");
     let mut ufw_active = false;
     let mut default_in = "unknown".to_string();
     let mut default_out = "unknown".to_string();
@@ -968,10 +1048,7 @@ pub async fn get_security_status(
     let mut rules: Vec<FirewallRule> = Vec::new();
 
     if ufw_installed {
-        let (verbose, _) = exec_command(
-            handle, app,
-            &format!("{sudo}ufw status verbose 2>/dev/null"),
-        ).await?;
+        let verbose = get(sec_marker::UFW_VERBOSE);
         ufw_active = verbose.lines().next().map(ufw_line_is_active).unwrap_or(false);
 
         for line in verbose.lines() {
@@ -990,31 +1067,73 @@ pub async fn get_security_status(
         }
 
         if ufw_active {
-            let (numbered, _) = exec_command(
-                handle, app,
-                &format!("{sudo}ufw status numbered 2>/dev/null"),
-            ).await?;
-            rules = parse_ufw_numbered(&numbered);
+            rules = parse_ufw_numbered(get(sec_marker::UFW_NUMBERED));
         }
     }
 
-    let vpn_port = read_vpn_port(handle, app, sudo).await;
+    // read_vpn_port equivalent — same sed output, same parse.
+    let vpn_port = get(sec_marker::VPN_PORT)
+        .trim()
+        .split(':')
+        .next_back()
+        .and_then(|p| p.parse::<u16>().ok());
 
-    Ok(SecurityStatus {
-        fail2ban: Fail2banStatus { installed: f2b_installed, active: f2b_active, jails },
-        firewall: FirewallStatus {
-            installed: ufw_installed, active: ufw_active,
-            default_in, default_out, default_routed, logging, rules,
-            current_ssh_port, vpn_port,
-        },
-    })
+    let firewall = FirewallStatus {
+        installed: ufw_installed, active: ufw_active,
+        default_in, default_out, default_routed, logging, rules,
+        current_ssh_port, vpn_port,
+    };
+
+    (f2b_installed, f2b_active, jail_names, firewall)
 }
 
-async fn parse_jail(
-    handle: &client::Handle<SshHandler>,
-    app: &tauri::AppHandle,
-    sudo: &str,
+/// Section-marker key for a per-jail `fail2ban-client status <jail>` chunk.
+fn jail_status_key(jail: &str) -> String { format!("JAIL_STATUS|{jail}") }
+/// Section-marker key for a per-jail `key` value (jail.local OR get fallback).
+fn jail_value_key(jail: &str, key: &str) -> String { format!("JAIL_VAL|{jail}|{key}") }
+
+/// Build the second-pass batch: for every (whitelisted) jail, emit its
+/// `fail2ban-client status <jail>` output and the three persisted config values
+/// (maxretry / bantime / findtime) — each between markers. The value sub-command
+/// preserves the OLD jail.local-first-then-`fail2ban-client get`-fallback logic
+/// inline so the parsed value is identical to the old `read_jail_key`. Skips jails
+/// that fail `is_safe_jail` (they would have parsed empty in the old path too).
+///
+/// Returns `None` when there are no safe jails (no second round-trip needed).
+fn build_jail_batch_command(sudo: &str, jail_names: &[String], run_id: &str) -> Option<String> {
+    let safe: Vec<&String> = jail_names.iter().filter(|j| is_safe_jail(j)).collect();
+    if safe.is_empty() { return None; }
+
+    let delim = format!("JAIL_EOF_{run_id}");
+    let keys = ["maxretry", "bantime", "findtime"];
+    let mut body = String::new();
+    for jail in &safe {
+        body.push_str(&format!("echo '=== {} ==='\n", jail_status_key(jail)));
+        body.push_str(&format!("{sudo}fail2ban-client status {jail} 2>/dev/null\n"));
+        for key in keys {
+            body.push_str(&format!("echo '=== {} ==='\n", jail_value_key(jail, key)));
+            // jail.local section value first; fall back to `fail2ban-client get`
+            // (numeric seconds) when the file key is absent — identical to the old
+            // read_jail_key two-step, collapsed into one `||` chain.
+            body.push_str(&format!(
+                "v=$({sudo}sed -n '/^\\[{jail}\\]/,/^\\[/p' /etc/fail2ban/jail.local 2>/dev/null \
+                 | grep -m1 '^[[:space:]]*{key}[[:space:]]*=' \
+                 | sed 's/^[^=]*=[[:space:]]*//'); \
+                 if [ -z \"$v\" ]; then v=$({sudo}fail2ban-client get {jail} {key} 2>/dev/null); fi; \
+                 printf '%s\\n' \"$v\"\n"
+            ));
+        }
+    }
+    Some(format!("bash -s <<'{delim}'\n{body}{delim}\n"))
+}
+
+/// Pure parser for one jail from the second-pass sections. Identical key matching
+/// to the old `parse_jail` (loose, version-drift-tolerant) + the same `is_safe_ip`
+/// filter on banned IPs. The maxretry/bantime/findtime come from the pre-fetched
+/// value sections (old read_jail_key result, batched).
+fn parse_jail_from_sections(
     name: &str,
+    sections: &std::collections::HashMap<String, String>,
 ) -> JailInfo {
     let mut info = JailInfo {
         name: name.to_string(), enabled: true,
@@ -1023,13 +1142,12 @@ async fn parse_jail(
         maxretry: 0, bantime: String::new(), findtime: String::new(),
     };
 
-    // Jail names are validated on the way in from the UI; when called from get_security_status
-    // they come from `fail2ban-client status` output which we also control.
+    // Jails come from `fail2ban-client status` output which we control; an unsafe
+    // name would not have been queried (build_jail_batch_command skips it) so it
+    // parses to the same empty default the old path produced.
     if !is_safe_jail(name) { return info; }
-    let (status, _) = exec_command(
-        handle, app,
-        &format!("{sudo}fail2ban-client status {name} 2>/dev/null"),
-    ).await.unwrap_or_default();
+
+    let status = sections.get(&jail_status_key(name)).map(String::as_str).unwrap_or("");
 
     // Loose keyword-based parsing: tolerates version drift in fail2ban-client output format
     // (which changes tree-drawing characters "|-", "`-", "|  |-" between 0.11/0.10/1.x).
@@ -1057,46 +1175,50 @@ async fn parse_jail(
         }
     }
 
-    // Read persisted config from jail.local (preserves "1h" / "10m" human format).
-    // Falls back to fail2ban-client get (numeric seconds) if the file key is absent.
-    info.maxretry  = read_jail_key(handle, app, sudo, name, "maxretry").await
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    info.bantime   = read_jail_key(handle, app, sudo, name, "bantime").await.unwrap_or_default();
-    info.findtime  = read_jail_key(handle, app, sudo, name, "findtime").await.unwrap_or_default();
+    // Pre-fetched persisted config (jail.local-first, get-fallback already applied
+    // server-side). Empty string ↔ old `unwrap_or_default()`.
+    let val = |key: &str| -> String {
+        sections
+            .get(&jail_value_key(name, key))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
+    info.maxretry = val("maxretry").parse().unwrap_or(0);
+    info.bantime = val("bantime");
+    info.findtime = val("findtime");
 
     info
 }
 
-/// Extract `key = value` from a specific [jail] section of /etc/fail2ban/jail.local.
-/// Falls back to `fail2ban-client get` if the key isn't persisted in the file.
-async fn read_jail_key(
-    handle: &client::Handle<SshHandler>,
+pub async fn get_security_status(
     app: &tauri::AppHandle,
-    sudo: &str,
-    jail: &str,
-    key: &str,
-) -> Option<String> {
-    if !is_safe_jail(jail) || key.contains('\'') { return None; }
-    // Use sed to extract lines between [jail] and the next [section], then grep the key.
-    // Simpler and more portable than awk with variable interpolation.
-    let cmd = format!(
-        "{sudo}sed -n '/^\\[{jail}\\]/,/^\\[/p' /etc/fail2ban/jail.local 2>/dev/null \
-         | grep -m1 '^[[:space:]]*{key}[[:space:]]*=' \
-         | sed 's/^[^=]*=[[:space:]]*//'",
-    );
-    let (raw, _) = exec_command(handle, app, &cmd).await.ok()?;
-    let trimmed = raw.trim();
-    if !trimmed.is_empty() {
-        return Some(trimmed.to_string());
+    handle: &client::Handle<SshHandler>,
+    ssh_port: u16,
+) -> Result<SecurityStatus, String> {
+    let current_ssh_port = ssh_port;
+    let sudo = detect_sudo(handle, app).await;
+
+    // ── Round-trip 1: every static-shaped probe in one batched channel ──
+    let run_id = uuid::Uuid::new_v4().simple().to_string();
+    let (blob, _) = exec_command(handle, app, &build_security_batch_command(sudo, &run_id)).await?;
+    let sections = split_marked_sections(&blob);
+    let (f2b_installed, f2b_active, jail_names, firewall) =
+        parse_security_first_pass(&sections, current_ssh_port);
+
+    // ── Round-trip 2 (only if jails exist): per-jail status + config in one channel ──
+    let mut jails: Vec<JailInfo> = Vec::new();
+    if let Some(jail_cmd) = build_jail_batch_command(sudo, &jail_names, &run_id) {
+        let (jail_blob, _) = exec_command(handle, app, &jail_cmd).await?;
+        let jail_sections = split_marked_sections(&jail_blob);
+        for name in &jail_names {
+            jails.push(parse_jail_from_sections(name, &jail_sections));
+        }
     }
-    // Fallback — fail2ban-client get, which returns seconds for durations.
-    let (raw, _) = exec_command(
-        handle, app,
-        &format!("{sudo}fail2ban-client get {jail} {key} 2>/dev/null"),
-    ).await.ok()?;
-    let v = raw.trim();
-    if v.is_empty() { None } else { Some(v.to_string()) }
+
+    Ok(SecurityStatus {
+        fail2ban: Fail2banStatus { installed: f2b_installed, active: f2b_active, jails },
+        firewall,
+    })
 }
 
 fn parse_ufw_numbered(text: &str) -> Vec<FirewallRule> {
@@ -2019,5 +2141,265 @@ mod tests {
         // (an app profile / CIDR-shaped value) must NOT be rendered as a proto.
         assert_eq!(proto_of("[ 4] 10.0.0.0/8                 ALLOW IN    Anywhere"), "");
         assert_eq!(proto_of("[ 5] Anywhere                   ALLOW IN    192.168.0.0/24"), "");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //   QE-02 — batched get_security_status splitter + parser parity.
+    //
+    //   These prove the batched fetch produces the SAME SecurityStatus the old
+    //   ~10-round-trip path did, for the jail/ufw edge cases called out in
+    //   09-RESEARCH-quality.md §J Pitfall 3 (0 / 1 / 2+ jails, ufw inactive).
+    //   The blobs are exactly what the markered `bash -c` would print, so the
+    //   splitter → parser path is exercised end-to-end without SSH.
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Build a first-pass combined blob from the individual probe outputs, in the
+    /// same marker order `build_security_batch_command` emits them.
+    fn first_pass_blob(
+        f2b_presence: &str,
+        f2b_active: &str,
+        f2b_status: &str,
+        ufw_presence: &str,
+        ufw_verbose: &str,
+        ufw_numbered: &str,
+        vpn_port: &str,
+    ) -> String {
+        format!(
+            "=== {} ===\n{f2b_presence}\n\
+             === {} ===\n{f2b_active}\n\
+             === {} ===\n{f2b_status}\n\
+             === {} ===\n{ufw_presence}\n\
+             === {} ===\n{ufw_verbose}\n\
+             === {} ===\n{ufw_numbered}\n\
+             === {} ===\n{vpn_port}\n",
+            sec_marker::F2B_PRESENCE,
+            sec_marker::F2B_ACTIVE,
+            sec_marker::F2B_STATUS,
+            sec_marker::UFW_PRESENCE,
+            sec_marker::UFW_VERBOSE,
+            sec_marker::UFW_NUMBERED,
+            sec_marker::VPN_PORT,
+        )
+    }
+
+    const UFW_VERBOSE_ACTIVE: &str = "Status: active\n\
+        Logging: on (low)\n\
+        Default: deny (incoming), allow (outgoing), disabled (routed)\n\
+        New profiles: skip\n\n\
+        To                         Action      From\n\
+        --                         ------      ----\n\
+        22/tcp                     ALLOW IN    Anywhere";
+
+    const UFW_NUMBERED_ACTIVE: &str = "Status: active\n\n\
+        \u{20}    To                         Action      From\n\
+        \u{20}    --                         ------      ----\n\
+        [ 1] 22/tcp                     ALLOW IN    Anywhere                   # SSH\n\
+        [ 2] 443/tcp                    ALLOW IN    Anywhere";
+
+    /// 1-jail, ufw-active server — the common case.
+    #[test]
+    fn batch_first_pass_one_jail_ufw_active() {
+        let f2b_status = "Status\n\
+            |- Number of jail:      1\n\
+            `- Jail list:   sshd";
+        let blob = first_pass_blob(
+            "F2B_OK",
+            "active",
+            f2b_status,
+            "UFW_OK",
+            UFW_VERBOSE_ACTIVE,
+            UFW_NUMBERED_ACTIVE,
+            "0.0.0.0:51820",
+        );
+        let sections = split_marked_sections(&blob);
+        let (installed, active, jails, fw) = parse_security_first_pass(&sections, 22);
+
+        assert!(installed);
+        assert!(active);
+        assert_eq!(jails, vec!["sshd".to_string()]);
+
+        assert!(fw.installed);
+        assert!(fw.active);
+        assert_eq!(fw.default_in, "deny");
+        assert_eq!(fw.default_out, "allow");
+        assert_eq!(fw.default_routed, "disabled");
+        assert_eq!(fw.logging, "on");
+        assert_eq!(fw.rules.len(), 2);
+        assert_eq!(fw.rules[0].to, "22/tcp");
+        assert_eq!(fw.rules[0].proto, "tcp");
+        assert_eq!(fw.rules[0].comment, "SSH");
+        assert_eq!(fw.rules[1].to, "443/tcp");
+        assert_eq!(fw.current_ssh_port, 22);
+        assert_eq!(fw.vpn_port, Some(51820));
+    }
+
+    /// 0 jails (fail2ban active but empty jail list) — Pitfall 3 edge.
+    #[test]
+    fn batch_first_pass_zero_jails() {
+        let f2b_status = "Status\n\
+            |- Number of jail:      0\n\
+            `- Jail list:";
+        let blob = first_pass_blob(
+            "F2B_OK", "active", f2b_status,
+            "UFW_OK", UFW_VERBOSE_ACTIVE, UFW_NUMBERED_ACTIVE, "0.0.0.0:443",
+        );
+        let sections = split_marked_sections(&blob);
+        let (installed, active, jails, fw) = parse_security_first_pass(&sections, 22);
+        assert!(installed);
+        assert!(active);
+        assert!(jails.is_empty(), "empty Jail list must yield no jail names");
+        assert_eq!(fw.vpn_port, Some(443));
+    }
+
+    /// 2 jails — Pitfall 3 multi-jail edge.
+    #[test]
+    fn batch_first_pass_two_jails() {
+        let f2b_status = "Status\n\
+            |- Number of jail:      2\n\
+            `- Jail list:   sshd, recidive";
+        let blob = first_pass_blob(
+            "F2B_OK", "active", f2b_status,
+            "UFW_OK", UFW_VERBOSE_ACTIVE, UFW_NUMBERED_ACTIVE, "10.0.0.1:8443",
+        );
+        let sections = split_marked_sections(&blob);
+        let (_, _, jails, _) = parse_security_first_pass(&sections, 22);
+        assert_eq!(jails, vec!["sshd".to_string(), "recidive".to_string()]);
+    }
+
+    /// ufw INSTALLED but inactive — must NOT parse a rules table (the "inactive ends
+    /// with active" trap) and must skip the numbered fetch path.
+    #[test]
+    fn batch_first_pass_ufw_inactive() {
+        let f2b_status = "Status\n`- Jail list:   sshd";
+        let blob = first_pass_blob(
+            "F2B_OK", "active", f2b_status,
+            "UFW_OK", "Status: inactive", "", "0.0.0.0:443",
+        );
+        let sections = split_marked_sections(&blob);
+        let (_, _, _, fw) = parse_security_first_pass(&sections, 22);
+        assert!(fw.installed);
+        assert!(!fw.active, "ufw 'Status: inactive' must NOT read as active");
+        assert!(fw.rules.is_empty(), "no rules table parsed when inactive");
+    }
+
+    /// fail2ban / ufw both ABSENT — installed=false, everything defaults.
+    #[test]
+    fn batch_first_pass_nothing_installed() {
+        let blob = first_pass_blob(
+            "F2B_NO", "inactive", "",
+            "UFW_NO", "", "", "",
+        );
+        let sections = split_marked_sections(&blob);
+        let (installed, active, jails, fw) = parse_security_first_pass(&sections, 2222);
+        assert!(!installed);
+        assert!(!active);
+        assert!(jails.is_empty());
+        assert!(!fw.installed);
+        assert!(!fw.active);
+        assert_eq!(fw.current_ssh_port, 2222);
+        assert_eq!(fw.vpn_port, None);
+    }
+
+    // ── Second pass: per-jail status + config parsing ──
+
+    /// Build a second-pass blob for one jail from its status + the three config
+    /// values, in the marker order `build_jail_batch_command` emits them.
+    fn jail_blob(jail: &str, status: &str, maxretry: &str, bantime: &str, findtime: &str) -> String {
+        format!(
+            "=== {} ===\n{status}\n\
+             === {} ===\n{maxretry}\n\
+             === {} ===\n{bantime}\n\
+             === {} ===\n{findtime}\n",
+            jail_status_key(jail),
+            jail_value_key(jail, "maxretry"),
+            jail_value_key(jail, "bantime"),
+            jail_value_key(jail, "findtime"),
+        )
+    }
+
+    #[test]
+    fn batch_jail_parse_full() {
+        let status = "Status for the jail: sshd\n\
+            |- Filter\n\
+            |  |- Currently failed: 3\n\
+            |  |- Total failed:     42\n\
+            |  `- File list:        /var/log/auth.log\n\
+            `- Actions\n\
+            \u{20}  |- Currently banned: 2\n\
+            \u{20}  |- Total banned:     7\n\
+            \u{20}  `- Banned IP list:   1.2.3.4 5.6.7.8";
+        let blob = jail_blob("sshd", status, "5", "10m", "10m");
+        let sections = split_marked_sections(&blob);
+        let info = parse_jail_from_sections("sshd", &sections);
+
+        assert_eq!(info.name, "sshd");
+        assert_eq!(info.currently_failed, 3);
+        assert_eq!(info.total_failed, 42);
+        assert_eq!(info.currently_banned, 2);
+        assert_eq!(info.total_banned, 7);
+        assert_eq!(info.banned_ips, vec!["1.2.3.4".to_string(), "5.6.7.8".to_string()]);
+        assert_eq!(info.maxretry, 5);
+        assert_eq!(info.bantime, "10m");
+        assert_eq!(info.findtime, "10m");
+    }
+
+    /// Jail with empty config values (jail.local absent AND get returned nothing) →
+    /// numeric maxretry defaults to 0, durations stay empty (old unwrap_or_default).
+    #[test]
+    fn batch_jail_parse_empty_config() {
+        let status = "Status for the jail: recidive\n\
+            \u{20}  `- Banned IP list:";
+        let blob = jail_blob("recidive", status, "", "", "");
+        let sections = split_marked_sections(&blob);
+        let info = parse_jail_from_sections("recidive", &sections);
+        assert_eq!(info.maxretry, 0);
+        assert_eq!(info.bantime, "");
+        assert_eq!(info.findtime, "");
+        assert!(info.banned_ips.is_empty());
+    }
+
+    // ── Command builders: heredoc discipline + safety (T-09-14) ──
+
+    #[test]
+    fn batch_command_uses_uuid_heredoc_no_static_eof() {
+        let cmd = build_security_batch_command("sudo ", "deadbeefcafe");
+        // UUID-delimited single-quoted heredoc (CLAUDE.md SSH rule).
+        assert!(cmd.contains("SEC_EOF_deadbeefcafe"), "must use UUID-suffixed delimiter");
+        assert!(cmd.contains("<<'SEC_EOF_deadbeefcafe'"), "delimiter must be single-quoted");
+        // Never the static delimiters the rule forbids.
+        assert!(!cmd.contains("USER_EOF"));
+        assert!(!cmd.contains("<<'EOF'"));
+        assert!(!cmd.contains("<<EOF"));
+        // sudo prefix preserved on the sub-commands that originally had it.
+        assert!(cmd.contains("sudo systemctl is-active fail2ban"));
+        assert!(cmd.contains("sudo ufw status verbose"));
+        // presence checks intentionally have NO sudo (they didn't before).
+        assert!(cmd.contains("command -v fail2ban-client"));
+    }
+
+    #[test]
+    fn jail_batch_command_skips_unsafe_jails_and_is_none_when_empty() {
+        // No jails → no second round-trip.
+        assert!(build_jail_batch_command("sudo ", &[], "x").is_none());
+        // Only an unsafe jail name → nothing safe to query → None.
+        assert!(build_jail_batch_command("sudo ", &["bad; rm -rf /".to_string()], "x").is_none());
+        // A safe jail produces a UUID-heredoc command with status + 3 value markers.
+        let cmd = build_jail_batch_command("sudo ", &["sshd".to_string()], "feed").unwrap();
+        assert!(cmd.contains("<<'JAIL_EOF_feed'"));
+        assert!(cmd.contains(&jail_status_key("sshd")));
+        assert!(cmd.contains(&jail_value_key("sshd", "maxretry")));
+        assert!(cmd.contains(&jail_value_key("sshd", "bantime")));
+        assert!(cmd.contains(&jail_value_key("sshd", "findtime")));
+        assert!(cmd.contains("sudo fail2ban-client status sshd"));
+    }
+
+    /// The splitter must round-trip arbitrary section bodies including blank lines.
+    #[test]
+    fn splitter_preserves_multiline_bodies() {
+        let blob = "=== A ===\nline1\nline2\n=== B ===\n\n=== C ===\nx";
+        let s = split_marked_sections(blob);
+        assert_eq!(s.get("A").map(String::as_str), Some("line1\nline2"));
+        assert_eq!(s.get("B").map(String::as_str), Some(""));
+        assert_eq!(s.get("C").map(String::as_str), Some("x"));
     }
 }

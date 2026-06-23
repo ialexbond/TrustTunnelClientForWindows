@@ -108,6 +108,57 @@ describe("FirewallModal", () => {
     expect(screen.queryByTestId("show-add-form-button")).not.toBeInTheDocument();
   });
 
+  // a11y dialog semantics (Phase-9 review a11y-3): the Modal primitive applies an
+  // unconditional focus-trap, so this modal must be a NAMED dialog or SR/keyboard
+  // users are trapped in an unannounced generic container.
+  it("is exposed as a named dialog (role + accessible name)", async () => {
+    render(
+      <FirewallModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={buildState({ firewall: { installed: false, active: false, rules: [] } })}
+      />,
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: i18n.t("server.security.firewall.modal_title"),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  // 09-25 (F11): rules are hidden behind the amber plate while the firewall is
+  // inactive, so fetching them on open is wasted work that repeats on enable.
+  // The rules-fetch effect must NOT call state.load when inactive, but MUST
+  // when active.
+  it("F11: does NOT fetch rules on open when firewall inactive", () => {
+    const state = buildState({ firewall: { installed: true, active: false, rules: [] } });
+    render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
+    expect(state.load).not.toHaveBeenCalled();
+  });
+
+  it("F11: fetches rules on open when firewall active", async () => {
+    const state = buildState({ firewall: { installed: true, active: true, rules: [] } });
+    render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
+    await waitFor(() => expect(state.load).toHaveBeenCalledTimes(1));
+  });
+
+  // WR-03: if the modal is open while the firewall flips inactive→active
+  // mid-session, the rules-fetch effect must re-run (it now depends on
+  // fwActive, not just isOpen). Previously it stayed keyed on [isOpen] and
+  // relied on startFirewall's own reload — an undocumented cross-dependency.
+  it("WR-03: fetches rules when firewall enabled while modal is open", async () => {
+    const inactive = buildState({ firewall: { installed: true, active: false, rules: [] } });
+    const { rerender } = render(
+      <FirewallModal isOpen={true} onClose={vi.fn()} state={inactive} />,
+    );
+    expect(inactive.load).not.toHaveBeenCalled();
+
+    // User enables the firewall while the modal stays open → fwActive flips true.
+    const active = buildState({ firewall: { installed: true, active: true, rules: [] } });
+    rerender(<FirewallModal isOpen={true} onClose={vi.fn()} state={active} />);
+    await waitFor(() => expect(active.load).toHaveBeenCalledTimes(1));
+  });
+
   it("shows empty state when installed but no rules", async () => {
     render(
       <FirewallModal
@@ -148,10 +199,13 @@ describe("FirewallModal", () => {
       expect(screen.getByText(/отключить брандмауэр\?/i)).toBeVisible(),
     );
     // Click confirm in ConfirmDialog — disambiguated by button index because
-    // P0-4 #O added a second "Отключить" button (the ufw-toggle-button shows
-    // the same imperative label). The ufw-toggle-button has data-testid; the
-    // remaining "Отключить" button is the ConfirmDialog's confirm CTA.
-    const allDisableButtons = await screen.findAllByRole("button", { name: /^отключить$/i });
+    // P0-4 #O added a second "Отключить брандмауэр" button (the ufw-toggle-button
+    // shows the same imperative label, both bound to action_disable). The
+    // ufw-toggle-button has data-testid; the remaining button is the
+    // ConfirmDialog's confirm CTA.
+    const allDisableButtons = await screen.findAllByRole("button", {
+      name: /^отключить брандмауэр$/i,
+    });
     const confirmButton = allDisableButtons.find(
       (b) => b.getAttribute("data-testid") !== "ufw-toggle-button",
     );

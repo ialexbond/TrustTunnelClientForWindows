@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 import { polyfillCountryFlagEmojis } from "country-flag-emoji-polyfill";
 import App from "./App";
 import { SnackBarProvider } from "./shared/ui/SnackBarContext";
@@ -39,6 +40,23 @@ document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
 
+// G-8 (09-RESEARCH-quality §G-8): frontend crashes were console.error-only,
+// which is lost in a release build (no devtools). Route them into the existing
+// rotating, sanitized activity.log sink so a non-technical user's bug report
+// carries a real trace.
+//
+// D-29 (memory/security-posture.md): a crashed promise's `reason` can carry SSH
+// params / a password (e.g. `e.reason.password`). We therefore extract ONLY the
+// `.message` / `.stack` STRINGS and never hand the raw object to the sink — the
+// Rust side also runs sanitize() (defence in depth), but the handler must not
+// hand-feed credentials in the first place. Fire-and-forget: a logging failure
+// must never replace the crash it is trying to record.
+function persistCrash(message: string, details?: string) {
+  invoke("write_activity_log", { tag: "ERROR", message, details }).catch(() => {
+    // Silent fail — logging the crash must not itself throw.
+  });
+}
+
 // React Error Boundary to catch rendering errors without crashing the page
 export class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -55,6 +73,11 @@ export class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[ErrorBoundary]", error, info.componentStack);
+    // G-8: persist message/stack strings only (D-29 — never the raw error object).
+    persistCrash(
+      `[ErrorBoundary] ${error.message}`,
+      error.stack ?? info.componentStack ?? undefined,
+    );
   }
 
   render() {
@@ -86,10 +109,19 @@ export class ErrorBoundary extends React.Component<
 // Catch ALL unhandled errors and rejections globally
 window.addEventListener("error", (e) => {
   console.error("[global error]", e.error);
+  // G-8: persist message/stack strings only (D-29 — never the raw error object).
+  const err = e.error as Error | undefined;
+  persistCrash(`[global error] ${err?.message ?? e.message}`, err?.stack);
   e.preventDefault();
 });
 window.addEventListener("unhandledrejection", (e) => {
   console.error("[unhandled rejection]", e.reason);
+  // G-8 + D-29: a rejection's `reason` may carry SSH params/password. Pull out
+  // ONLY the message/stack strings — never forward the raw `e.reason` object.
+  const reason = e.reason as { message?: string; stack?: string } | undefined;
+  const message =
+    typeof e.reason === "string" ? e.reason : reason?.message ?? "Unhandled promise rejection";
+  persistCrash(`[unhandled rejection] ${message}`, reason?.stack);
   e.preventDefault();
 });
 

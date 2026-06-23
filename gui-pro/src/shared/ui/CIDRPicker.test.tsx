@@ -103,10 +103,14 @@ describe("CIDRPicker", () => {
     expect(screen.getByText("IP Range")).toBeInTheDocument();
   });
 
-  it("calls onError callback (callable without error)", () => {
+  // E-4 (Phase 9): empty value reports a clean gate ("") on mount. Previously the
+  // component never notified onError until the user interacted, leaving the parent
+  // gate uninitialised; now the external-value effect reports the validation state
+  // for every value source including the initial empty restore.
+  it("calls onError('') on mount for an empty (valid) value", () => {
     const onError = vi.fn();
     render(<CIDRPicker value="" onChange={vi.fn()} onError={onError} />);
-    expect(onError).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenLastCalledWith("");
   });
 
   it("calls onChange and onError when octet changes from filled CIDR", () => {
@@ -258,5 +262,28 @@ describe("CIDRPicker", () => {
     // which after trim() is "24" and passes \d{1,2} + range guard.
     expect(inputs[0]).toHaveValue("10");
     expect(onChange).toHaveBeenLastCalledWith("10.0.0.0/24");
+  });
+
+  // E-4 (Phase 9, Behavioral Cluster 6): a restored (not typed) invalid CIDR must
+  // notify onError with the invalid key so the parent's Save gate disables. Before
+  // the fix, onError fired only inside emit() (user-driven octet/prefix changes);
+  // the external-sync effect updated octets/prefix but never called onError, leaving
+  // the gate stale (Save enabled on a visibly-invalid restored CIDR).
+  it("calls onError with the invalid key when an invalid CIDR is restored", () => {
+    const onError = vi.fn();
+    render(<CIDRPicker value="10.0.0.0/99" onChange={vi.fn()} onError={onError} />);
+    // Restore-only path: no interaction. The gate must be notified of the error.
+    expect(onError).toHaveBeenCalledWith("server.users.cidr_invalid");
+  });
+
+  it("calls onError('') when a valid CIDR is restored after an invalid one", () => {
+    const onError = vi.fn();
+    const { rerender } = render(
+      <CIDRPicker value="10.0.0.0/99" onChange={vi.fn()} onError={onError} />
+    );
+    expect(onError).toHaveBeenLastCalledWith("server.users.cidr_invalid");
+    onError.mockClear();
+    rerender(<CIDRPicker value="10.0.0.0/24" onChange={vi.fn()} onError={onError} />);
+    expect(onError).toHaveBeenLastCalledWith("");
   });
 });

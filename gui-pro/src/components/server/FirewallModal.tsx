@@ -1,13 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Shield, Trash2, Plus, Loader2 } from "lucide-react";
+import { Shield, Trash2, Plus, Loader2 } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import { Input } from "../../shared/ui/Input";
 import { Select } from "../../shared/ui/Select";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import type { SecurityState } from "./useSecurityState";
-import { cn } from "../../shared/lib/cn";
 
 /**
  * Phase 16 Plan 05 — FirewallModal compound (D-3.1 / D-3.2 / D-3.3).
@@ -51,18 +50,15 @@ export interface FirewallModalProps {
 export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: FirewallModalProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const fwInstalled = state.status?.firewall.installed ?? false;
   const fwActive = state.status?.firewall.active ?? false;
   const rules = state.status?.firewall.rules ?? [];
 
-  // T-03 — auto-focus close button on open (Modal primitive does not trap focus).
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = setTimeout(() => closeButtonRef.current?.focus(), 250);
-    return () => clearTimeout(timer);
-  }, [isOpen]);
+  // T-03 — initial focus is now owned by the Modal primitive (09-05): on open
+  // it focuses the first focusable inside the content box (the canonical close
+  // button). The hand-rolled auto-focus effect + ref were removed in 09-23 when
+  // this modal adopted Modal's showCloseButton.
 
   // UAT 2026-05-20 — refresh rules on every open.
   //
@@ -71,11 +67,25 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
   // install runs `ufw allow {port}/tcp`), the rules list shown in this modal
   // keeps the stale snapshot from initial load. Calling state.load() on every
   // open ensures the user always sees ground truth.
+  //
+  // UAT-F11 (09-25): gate the fetch on `fwActive`. While the firewall is
+  // inactive the rules list is hidden behind the amber "disabled" plate, so
+  // loading rules on open is wasted work — and it would just repeat once the
+  // user enables the firewall (which triggers its own reload). Only fetch when
+  // the firewall is active and the rules are actually shown.
+  //
+  // WR-03: depend on `fwActive` too. Previously this was keyed on `[isOpen]`
+  // only, so if the modal was open while the user enabled the firewall
+  // (inactive→active mid-session), the effect did NOT re-run and the rules
+  // table relied entirely on `startFirewall` triggering its own reload — an
+  // undocumented cross-dependency. Re-running on the fwActive edge makes the
+  // "fetch when active and rules are shown" guarantee self-contained while the
+  // `!isOpen` guard keeps the open-edge intent (no fetch while closed).
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !fwActive) return;
     void state.load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fires only on open edge
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isOpen/fwActive are the edges; state.load is stable
+  }, [isOpen, fwActive]);
 
   // T-03 — cleanup form state after close (matches Modal exit animation 200ms).
   useEffect(() => {
@@ -143,29 +153,25 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" className="relative">
-      <button
-        ref={closeButtonRef}
-        type="button"
-        aria-label={t("buttons.close")}
-        onClick={onClose}
-        className={cn(
-          "absolute top-3 right-3 p-1 rounded",
-          "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
-          "focus-visible:shadow-[var(--focus-ring)] outline-none",
-          "transition-colors",
-        )}
-      >
-        <X className="w-4 h-4" />
-      </button>
-
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="md"
+      showCloseButton
+      // a11y (review a11y-3): Modal applies an unconditional focus-trap, so the
+      // trapped container must be announced as a NAMED dialog (role + accessible
+      // name via aria-labelledby → the visible <h2>). Mirrors UserModal.
+      role="dialog"
+      ariaModal
+      ariaLabelledby="firewall-modal-title"
+    >
       <div className="flex items-center gap-2 mb-3">
         <Shield
           className="w-5 h-5"
           style={{ color: "var(--color-accent-interactive)" }}
           aria-hidden="true"
         />
-        <h2 className="text-title">{t("server.security.firewall.modal_title")}</h2>
+        <h2 id="firewall-modal-title" className="text-title">{t("server.security.firewall.modal_title")}</h2>
       </div>
 
       {/* Section 1 — Toggle UFW (D-3.3) — P0-4 #O ФИКС:
@@ -326,7 +332,7 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
               <button
                 onClick={() => void handleDeleteRule(r.number)}
                 disabled={state.loading || state.fwWriting}
-                className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
+                className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
                 title={t("server.security.firewall.delete")}
                 aria-label={`${t("server.security.firewall.delete")} #${r.number}`}
                 data-testid={`delete-rule-${r.number}`}
@@ -471,7 +477,17 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                   data-testid="comment-input"
                 />
               </div>
-              <div className="flex gap-2 pt-1">
+              {/* Modal-footer standard (09-25, owner §6): «Отмена» (ghost)
+                  LEFT, «Добавить правило» (primary) RIGHT, content-width. */}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => state.setShowAddRule(false)}
+                  data-testid="add-rule-cancel"
+                >
+                  {t("buttons.cancel")}
+                </Button>
                 <Button
                   variant="primary"
                   size="sm"
@@ -481,14 +497,6 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                   data-testid="add-rule-submit"
                 >
                   {t("server.security.firewall.add_rule")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => state.setShowAddRule(false)}
-                  data-testid="add-rule-cancel"
-                >
-                  {t("buttons.cancel")}
                 </Button>
               </div>
             </div>

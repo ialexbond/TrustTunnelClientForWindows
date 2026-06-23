@@ -232,6 +232,82 @@ describe("OverviewSection", () => {
     expect(within(usersCard).getByText("2")).toBeInTheDocument();
   });
 
+  // ═══════════════════════════════════════════════════════
+  // R2-F08 (Plan 09-37): Users-card loading sentinel
+  // ─────────────────────────────────────────────────────────
+  // On a fresh app start the Users count was rendered as a premature concrete
+  // `0` before the async users fetch resolved (~10s later it filled to the real
+  // count), because `userCount = serverInfo.users?.length ?? 0` could not tell
+  // "users unknown" from "genuinely 0". The fix adds a `usersKnown` signal: while
+  // !usersKnown the card renders the same <Skeleton variant="line"> the panel
+  // skeleton uses for this card, and reserves the digit `0` for a confirmed-zero
+  // result. See 09-UAT-2-DIAGNOSIS.md (R2-F08).
+  // ═══════════════════════════════════════════════════════
+  describe("Users card loading sentinel (R2-F08)", () => {
+    it("renders the loading skeleton (not a premature 0) while users are unknown", async () => {
+      // Premature-empty window: a silent cold-start load returned users:[] but it
+      // is NOT yet a confirmed zero (usersKnown:false).
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.20",
+          serviceActive: true,
+          users: [],
+          protocol: "WireGuard",
+          listenPort: 51820,
+        } as ServerState["serverInfo"],
+        usersKnown: false,
+      } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      // Await the loaded grid (the all-cards gate is unchanged; the Users card is
+      // not one of its async signals).
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const usersCard = cardOf("server.overview.cards.userCount");
+      // Must NOT show a premature 0…
+      expect(within(usersCard).queryByText("0")).not.toBeInTheDocument();
+      // …and DOES show the loading skeleton sentinel.
+      expect(within(usersCard).getByTestId("users-count-skeleton")).toBeInTheDocument();
+    });
+
+    it("renders the digit 0 for a confirmed-empty users result", async () => {
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.20",
+          serviceActive: true,
+          users: [],
+          protocol: "WireGuard",
+          listenPort: 51820,
+        } as ServerState["serverInfo"],
+        usersKnown: true,
+      } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const usersCard = cardOf("server.overview.cards.userCount");
+      expect(within(usersCard).getByText("0")).toBeInTheDocument();
+      expect(within(usersCard).queryByTestId("users-count-skeleton")).not.toBeInTheDocument();
+    });
+
+    it("renders the real count for a confirmed non-empty users result", async () => {
+      const state = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.20",
+          serviceActive: true,
+          users: ["a", "b", "c"],
+          protocol: "WireGuard",
+          listenPort: 51820,
+        } as ServerState["serverInfo"],
+        usersKnown: true,
+      } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const usersCard = cardOf("server.overview.cards.userCount");
+      expect(within(usersCard).getByText("3")).toBeInTheDocument();
+      expect(within(usersCard).queryByTestId("users-count-skeleton")).not.toBeInTheDocument();
+    });
+  });
+
   it("renders correctly in English locale (i18n switch)", async () => {
     await i18n.changeLanguage("en");
     const state = makeState();
@@ -1252,6 +1328,21 @@ describe("OverviewSection", () => {
       render(<OverviewSection state={state} />);
       expect(await tlsLabel()).toBe(i18n.t("server.overview.security.tlsExpired"));
     });
+
+    it("UAT-6: missing cert (certRaw present but notAfter empty) shows the neutral placeholder dash, not 'Активен' or 'Истёк'", async () => {
+      // A missing/unreadable cert can still arrive as a certRaw payload (the SSH
+      // probe returned *something*) with an empty notAfter. The old hasTls =
+      // !!state.certRaw painted this as green «Активен». hasTls is now gated on
+      // notAfter readability → neutral placeholder dash.
+      const state = makeState({
+        certRaw: JSON.stringify({ hostname: "vpn.example.com", notAfter: "", issuer: "", subject: "" }),
+      } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      const label = await tlsLabel();
+      expect(label).toBe(i18n.t("server.overview.security.placeholder"));
+      expect(label).not.toBe(i18n.t("server.overview.security.tlsActive"));
+      expect(label).not.toBe(i18n.t("server.overview.security.tlsExpired"));
+    });
   });
 
   describe("fastUptime poller (G-01, RESEARCH §3 stream 1)", () => {
@@ -1650,7 +1741,7 @@ describe("OverviewSection", () => {
       expect(within(cardOf("server.overview.cards.uptime")).getByText(expected).className).toContain("whitespace-nowrap");
     }, 20_000);
 
-    it("data-unavailable caption carries whitespace-nowrap (Ping failure path)", async () => {
+    it("data-unavailable caption wraps (≤2 lines) + centered, not truncated (R4-F01 Ping failure path)", async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
         if (cmd === "ping_endpoint") throw new Error("PING_TIMEOUT");
         if (cmd === "server_get_stats") return null;
@@ -1659,11 +1750,17 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      // ping=-1 is a settled (failed) signal → the gate opens. Re-resolve the card
-      // inside waitFor (skeleton node is detached once the grid renders).
+      // R4-F01: the long «Не удалось получить данные…» caption used to be
+      // whitespace-nowrap+truncate, which clipped the actionable «нажмите
+      // «Обновить»» tail. The card height is now bounded by the parent
+      // (minHeight 48), so the caption is allowed to WRAP — centered, capped at
+      // 2 lines (line-clamp-2) — instead of being truncated to one line.
       await waitFor(() => {
         const caption = within(cardOf("server.overview.cards.ping")).getByText(i18n.t("server.overview.dataUnavailable"));
-        expect(caption.className).toContain("whitespace-nowrap");
+        expect(caption.className).toContain("line-clamp-2");
+        expect(caption.className).toContain("text-center");
+        // The old truncate behaviour must be gone (no nowrap on the caption).
+        expect(caption.className).not.toContain("whitespace-nowrap");
       });
     });
   });
@@ -1841,6 +1938,279 @@ describe("OverviewSection", () => {
         expect(
           screen.getByRole("button", { name: i18n.t("server.overview.ip.show") }),
         ).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Plan 09-19 — Overview honesty + perf fixes (regression-test-first).
+  //   E-1  : no-cert TLS sub-tile must render a NEUTRAL tone, not the red
+  //          «Истёк»/danger tone (the `item.tone ?? (...)` fallback swallowed
+  //          the explicit `null` tone and fell through to `item.ok===false →
+  //          danger`). Asserted via the new data-testid="tls-tile" + a
+  //          tone-conveying data-tone attribute (class-free, D-04).
+  //   E-2  : a stopped protocol must clear the frozen fastUptime value so the
+  //          card falls back to stats/«—», not a stale frozen number.
+  //   QE-01: server_get_uptime is a ONE-SHOT on mount (fast first paint); the
+  //          10s useServerStats poll owns steady-state — no duplicate recurring
+  //          uptime poller.
+  // ═══════════════════════════════════════════════════════
+
+  describe("E-1: no-cert TLS sub-tile tone (Plan 09-19)", () => {
+    /**
+     * Resolve the TLS sub-tile by its stable data-testid AFTER the loaded grid
+     * renders. The tile carries a `data-tone` attribute conveying the semantic
+     * tone (neutral / ok / warning / danger) so the test asserts tone WITHOUT
+     * coupling to CSS classes or colour tokens (assertion philosophy D-04).
+     */
+    async function tlsTile(): Promise<HTMLElement> {
+      return waitFor(() => {
+        const securityCard = cardOf("server.overview.cards.security");
+        return within(securityCard).getByTestId("tls-tile");
+      });
+    }
+
+    it("no-cert: TLS tile is NEUTRAL (data-tone='neutral'), not danger, and shows the «—» placeholder", async () => {
+      const state = makeState({ certRaw: null } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      const tile = await tlsTile();
+      // The explicit null tone must survive → neutral, NOT the firewall/fail2ban
+      // boolean fallback (item.ok===false → danger) that produced the red «Истёк».
+      expect(tile).toHaveAttribute("data-tone", "neutral");
+      // Label is the «—» placeholder, and NOT the «Истёк» expired label.
+      expect(within(tile).getByText(i18n.t("server.overview.security.placeholder"))).toBeInTheDocument();
+      expect(
+        within(tile).queryByText(i18n.t("server.overview.security.tlsExpired")),
+      ).not.toBeInTheDocument();
+    });
+
+    it("positive control: an EXPIRED cert renders the danger tone + «Истёк» label", async () => {
+      const state = makeState({ certRaw: makeCertRaw(-2) } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      const tile = await tlsTile();
+      expect(tile).toHaveAttribute("data-tone", "danger");
+      expect(within(tile).getByText(i18n.t("server.overview.security.tlsExpired"))).toBeInTheDocument();
+    });
+
+    it("positive control: a healthy cert (>14d) renders the ok tone", async () => {
+      const state = makeState({ certRaw: makeCertRaw(40) } as Partial<ServerState>);
+      render(<OverviewSection state={state} />);
+      const tile = await tlsTile();
+      expect(tile).toHaveAttribute("data-tone", "ok");
+    });
+  });
+
+  describe("E-2: stopped protocol clears the frozen uptime (Plan 09-19)", () => {
+    it("clears fastUptime when serviceActive flips false → the card no longer shows the stale value", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") return 42;
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_get_uptime") return { uptime_seconds: 3661 }; // 1ч 1м
+        return null;
+      });
+      const state = makeState();
+      const { rerender } = render(<OverviewSection state={state} />);
+      // The fast uptime value (1ч 1м) appears while the protocol is running.
+      const fast = i18n.t("server.overview.uptimeFormat.hoursMins", { hours: 1, mins: 1 });
+      await waitFor(() => {
+        expect(within(cardOf("server.overview.cards.uptime")).getByText(fast)).toBeInTheDocument();
+      });
+      // Stop the protocol — the same component instance re-renders. The frozen
+      // fastUptime MUST be cleared so the card falls back (stats null → «—»),
+      // not keep showing the stale 1ч 1м number.
+      const stoppedState = makeState({
+        serverInfo: {
+          installed: true,
+          version: "1.0.20",
+          serviceActive: false,
+          users: ["user1", "user2"],
+          protocol: "WireGuard",
+          listenPort: 51820,
+        } as ServerState["serverInfo"],
+      });
+      rerender(<OverviewSection state={stoppedState} />);
+      await waitFor(() => {
+        expect(
+          within(cardOf("server.overview.cards.uptime")).queryByText(fast),
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("QE-05: pollers pause when the window is hidden — reboot poller exempt (Plan 09-19)", () => {
+    function setHidden(hidden: boolean) {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    }
+
+    it("does NOT poll server_get_stats while the window is hidden, then resumes when visible", async () => {
+      vi.useFakeTimers();
+      try {
+        let statsCalls = 0;
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") { statsCalls++; return {
+            cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
+            mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
+            unique_ips: 0, total_connections: 0, uptime_seconds: 1,
+          }; }
+          if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+          if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+          if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+          return null;
+        });
+        // Start hidden → the stats poller must be disabled (no immediate fire).
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+        render(<OverviewSection state={makeState()} activeServerTab="overview" />);
+        await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+        expect(statsCalls).toBe(0);
+        // Become visible → the poller turns on and fires.
+        setHidden(false);
+        await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+        expect(statsCalls).toBeGreaterThanOrEqual(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does NOT fire the 30s background ping while hidden", async () => {
+      vi.useFakeTimers();
+      try {
+        let pingCalls = 0;
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+          if (cmd === "ping_endpoint") { pingCalls++; return 42; }
+          if (cmd === "server_get_stats") return null;
+          if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+          if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+          if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+          return null;
+        });
+        render(<OverviewSection state={makeState()} activeServerTab="overview" />);
+        // Let the initial ping settle, then go hidden.
+        await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+        const afterMount = pingCalls;
+        setHidden(true);
+        // Advance past two 30s background-ping windows — none must fire while hidden.
+        await act(async () => { await vi.advanceTimersByTimeAsync(70_000); });
+        expect(pingCalls).toBe(afterMount);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("KEEPS polling check_server_installation (reboot poller) while hidden — the documented exception", async () => {
+      vi.useFakeTimers();
+      try {
+        let rebootCalls = 0;
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") return null;
+          if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+          if (cmd === "check_server_installation") { rebootCalls++; throw new Error("still rebooting"); }
+          return null;
+        });
+        // Start hidden + rebooting — the reboot poller MUST keep running (gating it
+        // would stall recovery).
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+        render(<OverviewSection state={makeState({ rebooting: true })} activeServerTab="overview" />);
+        // Advance two 10s reboot-poll ticks while hidden.
+        await act(async () => { await vi.advanceTimersByTimeAsync(25_000); });
+        expect(rebootCalls).toBeGreaterThanOrEqual(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("A-1: refresh control adopts the shared IconButton (Plan 09-19)", () => {
+    it("the Ping refresh control is a role=button with the refresh aria-label and reflects aria-busy while loading", async () => {
+      // Deferred ping so the manual refresh stays in-flight → aria-busy true.
+      let releasePing: (ms: number) => void = () => {};
+      let initialResolved = false;
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "ping_endpoint") {
+          if (!initialResolved) { initialResolved = true; return 42; }
+          return new Promise<number>((resolve) => { releasePing = resolve; });
+        }
+        if (cmd === "server_get_stats") return null;
+        if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+        if (cmd === "server_get_uptime") return { uptime_seconds: 1 };
+        if (cmd === "security_get_status") return { firewall: { installed: true, active: true }, fail2ban: { installed: true, active: true } };
+        return null;
+      });
+      render(<OverviewSection state={makeState()} />);
+      // Wait for the loaded grid + the settled initial ping.
+      await waitFor(() => {
+        expect(within(cardOf("server.overview.cards.ping")).getByText("42")).toBeInTheDocument();
+      });
+      const pingCard = cardOf("server.overview.cards.ping");
+      const refresh = within(pingCard).getByRole("button", { name: i18n.t("server.overview.refreshAria") });
+      // Not busy at rest.
+      expect(refresh).toHaveAttribute("aria-busy", "false");
+      // Click → manual ping in flight → aria-busy true (IconButton loading state).
+      fireEvent.click(refresh);
+      await waitFor(() => { expect(refresh).toHaveAttribute("aria-busy", "true"); });
+      // It is disabled while loading (IconButton disables on loading).
+      expect(refresh).toBeDisabled();
+      await act(async () => { releasePing(50); });
+    });
+  });
+
+  describe("ELT-02/03/04: enriched Overview empty-state copy (Plan 09-19)", () => {
+    it("the never-measured Speed caption is enriched (longer than the bare placeholder)", async () => {
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const speedCard = cardOf("server.overview.cards.speed");
+      const caption = within(speedCard).getByText(i18n.t("server.overview.speedNotMeasured"));
+      expect(caption).toBeInTheDocument();
+      // Enriched copy explains what/how-to-start, so it is materially longer
+      // than the old two-word «Не измерялась» (13 chars) bare label.
+      expect((caption.textContent ?? "").length).toBeGreaterThan(25);
+    });
+
+    it("the protocol-stopped Speed caption is enriched (what/why context)", async () => {
+      const state = makeState({
+        serverInfo: {
+          installed: true, version: "1.0.0", serviceActive: false, users: [],
+          listenPort: 443, protocol: "x",
+        } as ServerState["serverInfo"],
+      });
+      render(<OverviewSection state={state} />);
+      await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
+      const speedCard = cardOf("server.overview.cards.speed");
+      const caption = within(speedCard).getByText(i18n.t("server.overview.speedRequiresProtocol"));
+      expect((caption.textContent ?? "").length).toBeGreaterThan(25);
+    });
+  });
+
+  describe("QE-01: uptime is a one-shot on mount (Plan 09-19)", () => {
+    it("calls server_get_uptime exactly once after mount (no recurring 10s uptime poller)", async () => {
+      vi.useFakeTimers();
+      try {
+        let uptimeInvokes = 0;
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+          if (cmd === "ping_endpoint") return 42;
+          if (cmd === "server_get_stats") return {
+            cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
+            mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
+            unique_ips: 0, total_connections: 0, uptime_seconds: 90061,
+          };
+          if (cmd === "get_server_geoip") return { country: "X", country_code: "X", flag_emoji: "🏳" };
+          if (cmd === "server_get_uptime") { uptimeInvokes++; return { uptime_seconds: 3661 }; }
+          return null;
+        });
+        render(<OverviewSection state={makeState()} />);
+        // Flush mount effects → the one-shot fires once.
+        await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+        expect(uptimeInvokes).toBe(1);
+        // Advance well past several 10s windows — the pre-fix recurring interval
+        // would have fired again here. The one-shot must NOT.
+        await act(async () => { await vi.advanceTimersByTimeAsync(35_000); });
+        expect(uptimeInvokes).toBe(1);
       } finally {
         vi.useRealTimers();
       }

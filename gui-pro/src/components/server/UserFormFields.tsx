@@ -109,7 +109,7 @@ export function UserFormFields({
                       onClick={() => setUsername(generateUniqueUsername())}
                       disabled={isDisabled}
                       aria-label={t("common.generate_username")}
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
                     >
                       <Shuffle className="w-3.5 h-3.5" />
                     </button>
@@ -167,7 +167,7 @@ export function UserFormFields({
                           onClick={() => setNewPassword(generatePassword())}
                           disabled={isDisabled}
                           aria-label={t("common.generate_password")}
-                          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
                         >
                           <Shuffle className="w-3.5 h-3.5" />
                         </button>
@@ -256,7 +256,7 @@ export function UserFormFields({
                   onClick={() => setPassword(generatePassword())}
                   disabled={isDisabled}
                   aria-label={t("common.generate_password")}
-                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
                 >
                   <Shuffle className="w-3.5 h-3.5" />
                 </button>

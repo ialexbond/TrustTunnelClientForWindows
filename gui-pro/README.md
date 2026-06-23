@@ -1,125 +1,151 @@
-# TrustTunnel GUI
+# TrustTunnel Client Pro — dev README
 
-Современная GUI-оболочка для TrustTunnel VPN Client на базе **Tauri v2** + **React** + **Tailwind CSS**.
+Internal developer README for the **Pro** desktop VPN client (Windows).
+Stack: **Tauri 2** + **React 19** + **Rust** (frontend `src/`, backend `src-tauri/`).
+This is the development reference (architecture, scripts, build) — not the public/contributor
+documentation. For project process and conventions see the repo root `CLAUDE.md`.
 
-## Архитектура
+## Architecture
 
 ```text
 gui-pro/
-├── src/                    # React frontend (Vite + Tailwind)
+├── src/                       # React 19 frontend (Vite + Tailwind)
+│   ├── App.tsx                # App shell: composes layout + the per-tab panels
+│   ├── main.tsx               # Entry point
 │   ├── components/
-│   │   ├── Header.tsx      # Шапка приложения
-│   │   ├── StatusPanel.tsx # Статус подключения + кнопки
-│   │   ├── ConfigPanel.tsx # Настройки (путь к конфигу, log level)
-│   │   └── LogPanel.tsx    # Панель логов в реальном времени
-│   ├── App.tsx             # Главный компонент
-│   └── main.tsx            # Точка входа
-├── src-tauri/              # Tauri backend (Rust)
+│   │   ├── layout/            # Window shell — TitleBar, TabNavigation, WindowControls
+│   │   ├── ControlPanelPage.tsx   # «Панель управления» (server management via SSH)
+│   │   ├── ConnectionPanel.tsx    # «Подключение» (VPN connect / status / logs)
+│   │   ├── RoutingPanel.tsx       # «Маршрутизация»
+│   │   ├── AppSettingsPanel.tsx   # «Настройки»
+│   │   ├── AboutPanel.tsx         # «О программе» (version + build hash)
+│   │   └── server/ routing/ settings/ dashboard/ wizard/ welcome/  # section sub-trees
+│   ├── shared/
+│   │   ├── ui/                # Shared design-system components (Button, Card, Section, …)
+│   │   ├── hooks/             # Shared React hooks (VPN events, theme, language, tabs, …)
+│   │   ├── context/          # React contexts (VpnContext, …)
+│   │   ├── styles/           # tokens.css — the single source of design tokens
+│   │   └── i18n/             # ru.json (primary) + en.json
+│   └── docs/                 # In-app docs content
+├── src-tauri/                 # Tauri backend (Rust, edition 2021)
 │   ├── src/
-│   │   ├── lib.rs          # Tauri-команды: vpn_connect, vpn_disconnect
-│   │   ├── sidecar.rs      # Управление C++ процессом через Sidecar
-│   │   └── main.rs         # Точка входа
-│   ├── binaries/           # Сюда кладётся C++ бинарник
-│   ├── capabilities/       # Tauri v2 permissions
+│   │   ├── lib.rs            # run(): builds the app, registers the invoke_handler
+│   │   ├── main.rs           # Binary entry point (calls into lib)
+│   │   ├── commands/         # Tauri commands, grouped by domain (see below)
+│   │   ├── sidecar.rs        # Spawns / supervises the C++ VPN-core process
+│   │   ├── lifecycle.rs      # Process lifecycle (shutdown, kill, recovery)
+│   │   ├── ssh/              # SSH client used by «Панель управления»
+│   │   └── …                # tray.rs, routing_rules.rs, logging.rs, connectivity.rs, …
+│   ├── trusttunnel_client-x86_64-pc-windows-msvc.exe   # prebuilt C++ VPN-core (sidecar)
+│   ├── wintun.dll, vcruntime140.dll, vcruntime140_1.dll  # bundled runtime deps
+│   ├── capabilities/         # Tauri 2 permissions (default.json)
+│   ├── nsis/                 # NSIS installer hooks + RU/EN language files
 │   ├── Cargo.toml
-│   └── tauri.conf.json
+│   ├── tauri.conf.json       # Production config
+│   └── tauri.dev.conf.json   # Dev overrides (window title «[DEV]», dev identifier)
 ```
 
-## Интеграция C++ бинарника через Sidecar
+### Tauri commands (`src-tauri/src/commands/`)
 
-Tauri **Sidecar** позволяет упаковать внешний исполняемый файл в бандл приложения и управлять им как дочерним процессом.
+Tauri commands are organised by domain inside `commands/` — **not** in `lib.rs`. Each module is
+declared in `commands/mod.rs` and every command is wired into the `invoke_handler` in `lib.rs`.
 
-### Шаг 1: Скомпилировать C++ клиент
+| Module | Responsibility |
+|---|---|
+| `vpn.rs` | VPN connect/disconnect, status (`vpn_connect`, `vpn_disconnect`, `check_vpn_status`, …) |
+| `ssh_commands.rs` | Server deploy/diagnose, SSH credentials, host-key handling |
+| `config.rs` | Reading/writing the VPN config |
+| `network.rs` | Network/connectivity helpers |
+| `geoip.rs` | GeoIP lookups |
+| `updater.rs` | App update checks |
+| `history.rs` | Connection history |
+| `deeplink.rs` | `tt://` deep-link import |
+| `protocol.rs` | URL-protocol registration + cold-start deep-link capture |
+| `activity_log.rs` | Activity log |
 
-```bash
-# Из корня проекта TrustTunnelClient
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target trusttunnel_client
-```
+## C++ VPN-core via Tauri sidecar
 
-### Шаг 2: Поместить бинарник в папку Sidecar
+The tunnel, the WinTUN adapter, route interception and the killswitch belong to a **prebuilt C++
+core** (`trusttunnel_client-*.exe`) whose sources are **not** in this repository. Rust/Tauri only
+spawns and kills that process — it never implements tunnelling itself.
 
-Tauri требует, чтобы имя файла содержало **target triple** платформы:
+### Where the sidecar binary lives
+
+The prebuilt binary sits **directly in `src-tauri/`** (next to `Cargo.toml`), with a platform
+**target-triple** suffix in its name:
 
 ```text
-gui-pro/src-tauri/binaries/
-  trusttunnel_client-x86_64-pc-windows-msvc.exe   # Windows x64
-  trusttunnel_client-aarch64-pc-windows-msvc.exe   # Windows ARM64
-  trusttunnel_client-x86_64-unknown-linux-gnu      # Linux x64
-  trusttunnel_client-x86_64-apple-darwin            # macOS x64
-  trusttunnel_client-aarch64-apple-darwin           # macOS ARM64
+gui-pro/src-tauri/
+  trusttunnel_client-x86_64-pc-windows-msvc.exe   # Windows x64 (the shipped target)
 ```
 
-Скопируйте собранный бинарник с нужным суффиксом:
+The bundled runtime DLLs (`wintun.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`) live alongside it.
+In a git worktree these files are not duplicated — copy them in from the main checkout before running
+Rust commands (see root `CLAUDE.md` § «Критические правила»).
 
-```powershell
-# Windows x64
-copy build\trusttunnel\Release\trusttunnel_client.exe gui-pro\src-tauri\binaries\trusttunnel_client-x86_64-pc-windows-msvc.exe
-```
+### Configuration in `tauri.conf.json`
 
-### Шаг 3: Конфигурация в tauri.conf.json
-
-Уже настроено в `src-tauri/tauri.conf.json`:
+The sidecar is declared via `bundle.externalBin`; the DLLs via `bundle.resources`. The shell plugin
+only exposes `open` (there is no shell-sidecar scope block):
 
 ```json
 {
   "bundle": {
-    "externalBin": ["binaries/trusttunnel_client"]
+    "externalBin": ["trusttunnel_client"],
+    "resources": ["wintun.dll", "vcruntime140.dll", "vcruntime140_1.dll"]
   },
   "plugins": {
-    "shell": {
-      "sidecar": true,
-      "scope": [{
-        "name": "binaries/trusttunnel_client",
-        "sidecar": true,
-        "args": true
-      }]
-    }
+    "shell": { "open": true }
   }
 }
 ```
 
-### Шаг 4: Как это работает в коде
+### How it works in code
 
-**Rust (src-tauri/src/sidecar.rs):**
+**Rust (`src-tauri/src/sidecar.rs`):**
 
-- `spawn_trusttunnel()` — запускает `trusttunnel_client` с аргументами `-c <config> -l <loglevel>`
-- Перехватывает stdout/stderr и отправляет в React через `app.emit("vpn-log", ...)`
-- При завершении процесса отправляет `vpn-status` с соответствующим статусом
+- Spawns `trusttunnel_client` and supervises the child process.
+- Forwards the core's output to the frontend via `app.emit("vpn-log", …)`.
+- Reports connection state changes via `vpn-status` events.
+- Lifecycle (shutdown / kill / recovery) is coordinated in `lifecycle.rs`.
 
-**React (src/App.tsx):**
+**React (`src/`):**
 
-- Вызывает `invoke("vpn_connect", { configPath, logLevel })` для подключения
-- Слушает события `vpn-log` и `vpn-status` через `listen()`
+- VPN actions go through Tauri commands (e.g. `invoke("vpn_connect", …)`), wrapped by shared hooks.
+- The UI subscribes to `vpn-log` / `vpn-status` through the VPN-event hooks and `VpnContext`.
 
-### Преимущества Sidecar-подхода
-
-1. **Нет перекомпиляции** — C++ код не нужно адаптировать
-2. **Изоляция процессов** — VPN-клиент работает в отдельном процессе
-3. **Управление жизненным циклом** — Tauri автоматически завершает sidecar при закрытии GUI
-4. **Кроссплатформенность** — разные бинарники для разных ОС через target triple
-
-## Разработка
+## Development
 
 ```bash
 cd gui-pro
 
-# Установить зависимости
+# Install dependencies
 npm install
 
-# Запустить в режиме разработки (только фронтенд)
+# Frontend only (Vite dev server)
 npm run dev
 
-# Запустить Tauri (фронтенд + бэкенд)
-npm run tauri dev
+# Tauri (frontend + Rust backend) — uses src-tauri/tauri.dev.conf.json
+npm run tauri:dev
 
-# Собрать продакшн-бандл
-npm run tauri build
+# Production bundle (NSIS installer — see root CLAUDE.md for the build-hash rule)
+npx tauri build --bundles nsis
 ```
 
-## Требования
+### Quality gates
+
+```bash
+npm run typecheck    # tsc --noEmit
+npm run lint         # eslint src --max-warnings 0
+npm run test         # vitest run  (test:watch for watch mode)
+npm run rust:check   # cargo clippy -- -D warnings  (run from src-tauri/)
+npm run storybook    # component gallery on :6006
+npm run prerelease   # typecheck + lint + test + rust:check + build
+```
+
+## Requirements
 
 - **Node.js** >= 18
-- **Rust** >= 1.75
-- **Tauri CLI** (установлен как devDependency)
-- Собранный `trusttunnel_client` бинарник в `src-tauri/binaries/`
+- **Rust** stable (1.94) — toolchain inherited from the repo-root pin (no per-crate `rust-toolchain.toml`)
+- **Tauri CLI** (installed as a devDependency)
+- The prebuilt `trusttunnel_client-*.exe` (plus the runtime DLLs) present in `src-tauri/`

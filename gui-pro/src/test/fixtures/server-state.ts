@@ -36,6 +36,10 @@ export function makeState(overrides: Partial<ServerState> = {}): ServerState {
       protocol: "WireGuard",
       listenPort: 51820,
     } as ServerState["serverInfo"],
+    // R2-F08 (Plan 09-37): default to a settled/loaded state — existing tests
+    // model a fully loaded panel, so users are "known" (the loading sentinel is
+    // exercised explicitly by the R2-F08 tests that override this to false).
+    usersKnown: true,
     actionLoading: null,
     sshParams: { host: "10.0.0.1", port: 22, user: "root", password: "pass" },
     runAction: vi.fn(),

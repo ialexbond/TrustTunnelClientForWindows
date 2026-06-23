@@ -46,7 +46,7 @@ describe("BenchmarkSection", () => {
 
   it("empty_state_shows_check_button", () => {
     render(<BenchmarkSection sshParams={mockSshParams} />);
-    const btn = screen.getByRole("button", { name: /проверить качество/i });
+    const btn = screen.getByRole("button", { name: /проверка ip сервера/i });
     expect(btn).toBeVisible();
   });
 
@@ -63,19 +63,19 @@ describe("BenchmarkSection", () => {
     // Subtitle should contain formatted time
     const subtitle = screen.getByText(/последняя проверка/i);
     expect(subtitle).toBeVisible();
-    // Time formatted as HH:MM DD.MM.YYYY — e.g. "17:30 18.05.2026"
-    expect(subtitle.textContent).toMatch(/\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}/);
+    // Time formatted as DD.MM.YYYY HH:MM — e.g. "18.05.2026 17:30" (date-first, round-6)
+    expect(subtitle.textContent).toMatch(/\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/);
   });
 
   it("click_button_opens_modal", async () => {
     const user = userEvent.setup();
     render(<BenchmarkSection sshParams={mockSshParams} />);
 
-    const btn = screen.getByRole("button", { name: /проверить качество/i });
+    const btn = screen.getByRole("button", { name: /проверка ip сервера/i });
     await user.click(btn);
 
-    // Modal should appear — it renders the title as <h2>
-    const modalTitle = screen.getByRole("heading", { level: 2, name: /проверка качества сервера/i });
+    // Modal should appear — it renders the title as <h2> (09-38 rename).
+    const modalTitle = screen.getByRole("heading", { level: 2, name: /проверка ip сервера/i });
     expect(modalTitle).toBeVisible();
   });
 
@@ -121,10 +121,10 @@ describe("BenchmarkSection", () => {
     ).toBeVisible();
     // The empty-state button must NOT be shown.
     expect(
-      screen.queryByRole("button", { name: /проверить качество/i })
+      screen.queryByRole("button", { name: /проверка ip сервера/i })
     ).toBeNull();
     // Subtitle reflects the last-run timestamp.
     const subtitle = screen.getByText(/последняя проверка/i);
-    expect(subtitle.textContent).toMatch(/\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}/);
+    expect(subtitle.textContent).toMatch(/\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/);
   });
 });

@@ -86,7 +86,13 @@ describe("ServerPanel", () => {
     expect(screen.getByText(i18n.t("server.status.checking"))).toBeInTheDocument();
   });
 
-  it("shows error state when connection fails", () => {
+  // E-11 (Plan 09-13) INTENTIONAL D-05 characterization update: the error branch
+  // used to render the raw `state.error` string + a `server.status.connection_failed`
+  // heading. D-05/EW-02 replaces it with the calm ServerUnavailablePlate — the raw
+  // SSH error must NOT show (it reads as stale/technical and lies to a non-techie
+  // user). These assertions now track the plate's i18n copy. Deliberate net
+  // maintenance for a user-approved behavior change, NOT silent drift.
+  it("shows the calm unavailable plate (not the raw error) when connection fails", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -94,12 +100,11 @@ describe("ServerPanel", () => {
       serverInfo: null,
     };
     render(<ServerPanel {...defaultProps} />);
-    // Phase 3 false-green fix (RESEARCH §3 stream 6): was a hardcoded RU literal
-    // that silently rots if the translation key changes. Assert via i18n.t so
-    // the test tracks the real `server.status.connection_failed` value. The
-    // backend error string ("Connection refused") is not translated — kept as-is.
-    expect(screen.getByText(i18n.t("server.status.connection_failed"))).toBeInTheDocument();
-    expect(screen.getByText("Connection refused")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: i18n.t("server.unavailable.heading") }),
+    ).toBeInTheDocument();
+    // The raw backend error string must NOT surface (D-05/EW-02).
+    expect(screen.queryByText("Connection refused")).toBeNull();
   });
 
   it("shows retry and disconnect buttons on error", () => {
@@ -110,10 +115,12 @@ describe("ServerPanel", () => {
       serverInfo: null,
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByRole("button", { name: /Повторить|retry/i })).toBeInTheDocument();
-    // Phase 13.UAT G-04b: "Настроить SSH" replaced с "Отключиться" — чистый exit
-    // на SshConnectForm вместо wizard. "Настроить SSH" вёл в setup wizard, но
-    // юзер ожидал логин-экран.
+    // «Повторить» is now the plate's `server.unavailable.retry`.
+    expect(
+      screen.getByRole("button", { name: i18n.t("server.unavailable.retry") }),
+    ).toBeInTheDocument();
+    // Phase 13.UAT G-04b: Disconnect stays as the secondary exit (chistый exit
+    // на SshConnectForm вместо wizard).
     expect(screen.getByRole("button", { name: /Отключ|disconnect/i })).toBeInTheDocument();
   });
 
@@ -182,7 +189,7 @@ describe("ServerPanel", () => {
     expect(screen.getByText(i18n.t("server.status.loading_panel"))).toBeInTheDocument();
   });
 
-  it("shows error state with fallback message when error is empty but serverInfo is null", () => {
+  it("shows the calm unavailable plate when error is empty but serverInfo is null", () => {
     mockState = {
       ...mockState,
       loading: false,
@@ -190,8 +197,11 @@ describe("ServerPanel", () => {
       serverInfo: null,
     };
     render(<ServerPanel {...defaultProps} />);
-    expect(screen.getByText(i18n.t("server.status.connection_failed"))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t("server.status.check_ssh"))).toBeInTheDocument();
+    // E-11: the !serverInfo path also routes to the calm plate (same branch).
+    expect(
+      screen.getByRole("heading", { name: i18n.t("server.unavailable.heading") }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("server.unavailable.body"))).toBeInTheDocument();
   });
 
   it("retry button calls loadServerInfo", () => {
@@ -340,7 +350,7 @@ describe("ServerPanel", () => {
     expect(screen.getByText(i18n.t("server.status.not_installed_desc", { host: "10.0.0.1" }))).toBeInTheDocument();
   });
 
-  // NOTE: Reboot confirm dialog moved from ServerPanel to ServerStatusSection (Phase 12.5),
+  // NOTE: Reboot confirm dialog moved from ServerPanel to OverviewSection,
   // and now uses global ConfirmDialogProvider (imperative useConfirm) — tests removed.
 
   it("renders main tabbed panel when connected, installed and panel data loaded", () => {
@@ -390,6 +400,55 @@ describe("ServerPanel", () => {
     render(<ServerPanel {...defaultProps} onServerInfoVersionChange={cb2} />);
     await waitFor(() => {
       expect(cb2).toHaveBeenCalledWith("1.0.31");
+    });
+  });
+
+  // ── E-11: unreachable server → calm plate (not the raw SSH error) ──────────
+  //
+  // Plan 09-13: ServerPanel had its OWN early-return error screen that surfaced
+  // the raw `state.error` string (e.g. "Connection refused") and fired BEFORE
+  // ServerTabs' calm ServerUnavailablePlate could ever show. D-05/EW-02: a
+  // non-technical user must NOT see the raw SSH/russh error. The error branch now
+  // routes to the same calm ServerUnavailablePlate ServerTabs uses, keeping
+  // «Повторить» (→ onPanelRetry + loadServerInfo) and Disconnect, and the retry
+  // must NEVER clear creds (D-05/D-06 — clearing lives only in handleDisconnect).
+  describe("E-11: unreachable → calm plate", () => {
+    it("renders the calm «Сервер недоступен» plate and does NOT surface the raw error string", () => {
+      mockState = {
+        ...mockState,
+        loading: false,
+        error: "Connection refused: SSH_CHANNEL_FAILURE",
+        serverInfo: null,
+      };
+      render(<ServerPanel {...defaultProps} />);
+      expect(
+        screen.getByRole("heading", {
+          name: i18n.t("server.unavailable.heading"),
+        }),
+      ).toBeInTheDocument();
+      // The raw SSH error must be absent from the DOM (information-exposure-lite).
+      expect(
+        screen.queryByText(/Connection refused|SSH_CHANNEL_FAILURE/),
+      ).toBeNull();
+    });
+
+    it("«Повторить» calls loadServerInfo + onPanelRetry and does NOT clear creds", () => {
+      const onPanelRetry = vi.fn();
+      mockState = {
+        ...mockState,
+        loading: false,
+        error: "timeout",
+        serverInfo: null,
+      };
+      render(<ServerPanel {...defaultProps} onPanelRetry={onPanelRetry} />);
+      const retry = screen.getByRole("button", {
+        name: i18n.t("server.unavailable.retry"),
+      });
+      retry.click();
+      expect(mockLoadServerInfo).toHaveBeenCalled();
+      expect(onPanelRetry).toHaveBeenCalled();
+      // D-05/D-06: retry must NOT disconnect / wipe creds.
+      expect(mockOnDisconnect).not.toHaveBeenCalled();
     });
   });
 

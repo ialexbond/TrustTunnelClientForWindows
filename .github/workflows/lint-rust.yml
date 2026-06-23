@@ -1,7 +1,7 @@
 name: Lint Rust
 
 env:
-  RUST_CHANNEL: 1.88
+  RUST_CHANNEL: stable
 
 on:
   push:

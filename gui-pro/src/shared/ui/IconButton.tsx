@@ -45,13 +45,21 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
         className={cn(
           "inline-flex items-center justify-center",
           "h-8 w-8 rounded-[var(--radius-md)]",
+          // Default glyph tint. MUST stay a class (not an inline `style`): an
+          // inline color attribute outranks every non-!important Tailwind
+          // utility — incl. `:hover` — so a consumer's `text-*`/`hover:text-*`
+          // className would be inert (resting tint pinned to muted, hover
+          // affordances dead). As a class it sits FIRST in the chain, so a
+          // consumer color className wins via tailwind-merge (resting conflict
+          // resolved) while additive `hover:text-*` classes take effect via the
+          // cascade. Regression: Phase-9 review fe-1/fe-2/a11y-1/a11y-2.
+          "text-[var(--color-text-muted)]",
           "bg-transparent transition-colors",
           "hover:bg-[var(--color-bg-hover)] active:bg-[var(--color-bg-active)]",
           "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
           "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
           className,
         )}
-        style={{ color: "var(--color-text-muted)" }}
         {...rest}
       >
         {loading ? (
