@@ -116,8 +116,13 @@
 }
 
 @keyframes skeleton-pulse {
+  /* Opacity pulse. The fix for "invisible / disappearing" skeletons is the BASE colour
+     (Skeleton fills with --color-bg-hover, one step off the elevated/surface cards it
+     sits on), so the block is always distinct from the card and the pulse just dips it
+     toward the surface — it never fades fully into the card, and it's symmetric across
+     light/dark. The reduced-motion override (--pulse-duration: 0s) still stops it. */
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.45; }
 }
 
 /* Indeterminate horizontal progress bar — sliding stripe l→r continuous loop */

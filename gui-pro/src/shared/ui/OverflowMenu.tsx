@@ -195,6 +195,10 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
       ref={menuRef}
       role="menu"
       aria-label={triggerAriaLabel}
+      // Item list mirrors the Select dropdown (shared/ui/Select.tsx): 4px padding
+      // on ALL sides + gap-0.5 so each row's hover/focus sits as a rounded pill
+      // inset from the menu border, instead of an edge-to-edge square bar.
+      className="flex flex-col gap-0.5"
       style={{
         ...menuStyle,
         backgroundColor: "var(--color-bg-elevated)",
@@ -202,7 +206,7 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
         borderRadius: "var(--radius-md)",
         boxShadow: "var(--shadow-md)",
         minWidth: "160px",
-        padding: "4px 0",
+        padding: "4px",
       }}
     >
       {items.map((item, index) => (
@@ -216,10 +220,14 @@ export function OverflowMenu({ items, triggerAriaLabel, className }: OverflowMen
           onClick={() => handleItemSelect(item)}
           className={cn(
             "px-3 py-2 w-full text-left text-sm flex items-center gap-2",
+            // Rounded pill hover/focus inset from the border — matches Select.
+            "rounded-[var(--radius-sm)]",
             "hover:bg-[var(--color-bg-hover)]",
             "focus-visible:shadow-[var(--focus-ring)] outline-none",
             "transition-colors",
-            item.disabled && "opacity-[var(--opacity-disabled)] cursor-not-allowed",
+            item.disabled
+              ? "opacity-[var(--opacity-disabled)] cursor-not-allowed"
+              : "cursor-pointer",
           )}
           style={
             item.destructive

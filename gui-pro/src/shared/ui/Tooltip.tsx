@@ -20,9 +20,16 @@ interface TooltipProps {
   position?: TooltipPosition;
   maxWidth?: number;
   delay?: number;
+  /** Extra classes for the trigger WRAPPER — REPLACES the default `inline-flex` display so a
+   *  truncation host can pass e.g. `flex min-w-0 max-w-full` to shrink inside a flex/grid
+   *  parent and let a `truncate` child clip. When omitted the wrapper stays `inline-flex`. */
+  className?: string;
+  /** When true the tip never shows (DOM stays identical) — used to gate a tooltip on a
+   *  measured condition (e.g. only-when-truncated) without changing the wrapper structure. */
+  disabled?: boolean;
 }
 
-export function Tooltip({ text, children, position = "top", maxWidth = 224, delay = 400 }: TooltipProps) {
+export function Tooltip({ text, children, position = "bottom", maxWidth = 224, delay = 400, className, disabled = false }: TooltipProps) {
   const [show, setShow] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -32,7 +39,14 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
   // when the child receives keyboard focus.
   const tooltipId = useId();
 
+  // A pointer press (mouse click / tap) also focuses the child, which would pop the
+  // tooltip ON CLICK — annoying, and pointer users already get it via hover. Track the
+  // pointer press so the focus it triggers does NOT show the tooltip; keyboard focus
+  // still does. A click also dismisses any hover-shown tip (the action was taken).
+  const pointerFocusRef = useRef(false);
+
   const handleEnter = () => {
+    if (disabled) return;
     timerRef.current = setTimeout(() => setShow(true), delay);
   };
 
@@ -44,11 +58,25 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
     setShow(false);
   };
 
-  // CC-7: keyboard parity with hover. Focus events bubble through the wrapper,
-  // so onFocus/onBlur on the wrapper fire when the interactive child gains or
-  // loses focus. Show immediately on focus (no hover delay — keyboard users
-  // expect instant feedback), hide on blur or Escape.
+  const handlePointerDown = () => {
+    pointerFocusRef.current = true;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setShow(false);
+  };
+
+  // CC-7: keyboard parity with hover. Focus events bubble through the wrapper, so
+  // onFocus/onBlur on the wrapper fire when the interactive child gains or loses focus.
+  // Show immediately on KEYBOARD focus (no hover delay), but NOT when the focus came
+  // from a pointer press (that path is covered by hover) — see handlePointerDown.
   const handleFocus = () => {
+    if (disabled) return;
+    if (pointerFocusRef.current) {
+      pointerFocusRef.current = false;
+      return;
+    }
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -57,6 +85,7 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
   };
 
   const handleBlur = () => {
+    pointerFocusRef.current = false;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -206,10 +235,11 @@ export function Tooltip({ text, children, position = "top", maxWidth = 224, dela
 
   return (
     <div
-      className="relative inline-flex"
+      className={`relative ${className ?? "inline-flex"}`}
       ref={triggerRef}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
+      onMouseDown={handlePointerDown}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}

@@ -2,6 +2,7 @@ import React, { useState, useRef, forwardRef, type InputHTMLAttributes, type Rea
 import { Eye, EyeOff, Lock, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Tooltip } from "./Tooltip";
+import { FieldError } from "./FieldError";
 
 interface ActionPasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "label"> {
   label?: ReactNode;
@@ -173,11 +174,7 @@ export const ActionPasswordInput = forwardRef<HTMLInputElement, ActionPasswordIn
             </Tooltip>
           </div>
         </div>
-        {error && (
-          <p className="text-xs mt-1 text-[var(--color-status-error)]">
-            {error}
-          </p>
-        )}
+        <FieldError>{error}</FieldError>
         {!error && helperText && (
           <p className="text-xs mt-1 text-[var(--color-text-muted)]">
             {helperText}

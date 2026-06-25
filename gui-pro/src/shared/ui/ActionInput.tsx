@@ -2,6 +2,7 @@ import React, { forwardRef, useRef, type InputHTMLAttributes, type ReactNode } f
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Tooltip } from "./Tooltip";
+import { FieldError } from "./FieldError";
 
 interface ActionInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "label"> {
   label?: ReactNode;
@@ -146,11 +147,7 @@ export const ActionInput = forwardRef<HTMLInputElement, ActionInputProps>(
             </div>
           )}
         </div>
-        {error && (
-          <p className="text-xs mt-1 text-[var(--color-status-error)]">
-            {error}
-          </p>
-        )}
+        <FieldError>{error}</FieldError>
         {!error && helperText && (
           <p className="text-xs mt-1 text-[var(--color-text-muted)]">
             {helperText}

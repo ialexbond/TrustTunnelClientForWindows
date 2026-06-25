@@ -18,6 +18,7 @@ export { Divider } from "./Divider";
 export { DropOverlay } from "./DropOverlay";
 export { EmptyState } from "./EmptyState";
 export { ErrorBanner } from "./ErrorBanner";
+export { FieldError, type FieldErrorProps } from "./FieldError";
 export { FormField } from "./FormField";
 export { IconButton } from "./IconButton";
 export { Input } from "./Input";

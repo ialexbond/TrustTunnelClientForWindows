@@ -1,6 +1,7 @@
 import React, { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { FieldError } from "./FieldError";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   // UAT (06-uat fix 1): ReactNode (was string) so a label can carry the required «*»
@@ -27,6 +28,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       value,
       onChange,
       id,
+      // Destructured out of `...rest` so the clear-× can mirror it: a disabled field keeps
+      // the clear button VISIBLE (so the field looks identical enabled vs disabled — no
+      // layout shift) but disables it, so a locked field can never be wiped. Re-forwarded
+      // to the <input> below since it's no longer in `...rest`.
+      disabled,
       ...rest
     },
     ref
@@ -73,6 +79,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             }}
             value={value}
             onChange={onChange}
+            disabled={disabled}
             className={cn(
               "h-8 w-full rounded-[var(--radius-md)]",
               "border border-[var(--color-input-border)]",
@@ -99,23 +106,23 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               type="button"
               tabIndex={-1}
               onClick={handleClear}
+              // A disabled field must not be wipeable: the clear-× stays VISIBLE (stable look)
+              // but is itself disabled + greyed, so it can't clear a locked field.
+              disabled={disabled}
               aria-label="Clear"
               className={cn(
                 "absolute right-[var(--space-2)] top-1/2 -translate-y-1/2",
                 "p-0.5 rounded",
                 "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]",
-                "transition-colors duration-[var(--transition-fast)]"
+                "transition-colors duration-[var(--transition-fast)]",
+                "disabled:cursor-not-allowed disabled:opacity-[var(--opacity-disabled)] disabled:hover:text-[var(--color-text-muted)]"
               )}
             >
               <X size={14} />
             </button>
           )}
         </div>
-        {error && (
-          <p className="text-xs mt-1 text-[var(--color-status-error)]">
-            {error}
-          </p>
-        )}
+        <FieldError>{error}</FieldError>
         {!error && helperText && (
           <p className="text-xs mt-1 text-[var(--color-text-muted)]">
             {helperText}
