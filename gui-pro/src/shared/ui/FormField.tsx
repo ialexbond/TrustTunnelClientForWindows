@@ -6,6 +6,7 @@ import {
   type ReactElement,
 } from "react";
 import { cn } from "../lib/cn";
+import { FieldError } from "./FieldError";
 
 interface FormFieldProps {
   label: string;
@@ -56,15 +57,7 @@ export function FormField({
       </label>
       {labelledChild}
       {error ? (
-        <p
-          role="alert"
-          className="text-xs"
-          style={{
-            color: "var(--color-status-error)",
-          }}
-        >
-          {error}
-        </p>
+        <FieldError>{error}</FieldError>
       ) : helperText ? (
         <p
           className="text-xs"

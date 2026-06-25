@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { cn } from "../lib/cn";
+import { FieldError } from "./FieldError";
 
 interface NumberInputProps {
   value: string;
@@ -159,10 +160,10 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
             or removing them never pushes the input up or down (matters when
             a NumberInput sits in a flex row with siblings like the CIDR dot
             separators). The parent `div` is `relative` to anchor the message. */}
-        {errorDisplay === "block" && displayError && (
-          <p className="absolute top-full left-0 mt-1 text-xs text-[var(--color-status-error)] whitespace-nowrap pointer-events-none">
+        {errorDisplay === "block" && (
+          <FieldError className="absolute top-full left-0 whitespace-nowrap pointer-events-none">
             {displayError}
-          </p>
+          </FieldError>
         )}
         {errorDisplay === "block" && !displayError && helperText && (
           <p className="absolute top-full left-0 mt-1 text-xs text-[var(--color-text-muted)] whitespace-nowrap pointer-events-none">

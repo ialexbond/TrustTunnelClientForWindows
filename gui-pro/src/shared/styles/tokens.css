@@ -220,6 +220,11 @@
   --color-bg-elevated: #222222;
   --color-bg-hover: #2a2a2a;
   --color-bg-active: #323232;
+  /* Skeleton fill — tuned for VISIBLE-but-subtle contrast against the cards it
+     sits on (surface #1c / elevated #22). In dark it must be a step LIGHTER than
+     the card so the placeholder reads as a shimmer; bg-hover (#2a) was only +8
+     over elevated and washed out, so we go to the bg-active level (#32, +16). */
+  --color-skeleton: #323232;
 
   /* Text */
   --color-text-primary: #f2f2f2;
@@ -350,6 +355,11 @@
   --color-bg-elevated: #e8e8e5;
   --color-bg-hover: #e2e2de;
   --color-bg-active: #d8d8d4;
+  /* Skeleton fill — mirror of the dark token but inverted: in light the cards are
+     pale (surface #f0 / elevated #e8), so the placeholder must be a step DARKER to
+     show. bg-hover (#e2) was only -6 under surface and looked like faint white
+     boxes; bg-active level (#d8, -16) gives real contrast without going harsh. */
+  --color-skeleton: #d8d8d4;
 
   /* Text */
   --color-text-primary: #161616;

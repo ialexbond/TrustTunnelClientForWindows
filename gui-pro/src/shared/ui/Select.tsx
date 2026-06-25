@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
+import { FieldError } from "./FieldError";
 import { cn } from "../lib/cn";
 
 export interface SelectOption {
@@ -282,11 +283,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
       </div>
       {/* CC-6: error/helper message — reuse Input's exact tokens and layout
           (--color-status-error message, --color-text-muted helper). */}
-      {error && (
-        <p role="alert" className="text-xs mt-1 text-[var(--color-status-error)]">
-          {error}
-        </p>
-      )}
+      <FieldError>{error}</FieldError>
       {!error && helperText && (
         <p className="text-xs mt-1 text-[var(--color-text-muted)]">
           {helperText}

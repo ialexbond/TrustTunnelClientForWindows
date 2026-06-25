@@ -177,7 +177,7 @@ describe("StatusPanel", () => {
     render(
       <StatusPanel {...defaultProps} status="error" error="Test error message" />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
     expect(invokeMock).toHaveBeenCalledWith("clear_vpn_error");
     // The banner is optimistically hidden locally too.
     expect(screen.queryByText("Test error message")).not.toBeInTheDocument();
@@ -200,7 +200,7 @@ describe("StatusPanel", () => {
     expect(
       screen.getByText("Переподключение после потери сети")
     ).toBeInTheDocument();
-    const dismissBtn = screen.getByRole("button", { name: "Dismiss" });
+    const dismissBtn = screen.getByRole("button", { name: "Закрыть" });
     expect(dismissBtn).toBeInTheDocument();
 
     // Clicking it hides the banner locally...
@@ -219,7 +219,7 @@ describe("StatusPanel", () => {
       <StatusPanel {...defaultProps} status="error" error="Test error message" />
     );
     expect(
-      screen.getByRole("button", { name: "Dismiss" })
+      screen.getByRole("button", { name: "Закрыть" })
     ).toBeInTheDocument();
   });
 });

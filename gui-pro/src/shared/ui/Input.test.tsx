@@ -93,6 +93,26 @@ describe("Input", () => {
     expect(onChange.mock.calls[0][0].target.value).toBe("");
   });
 
+  it("clear button stays VISIBLE but is disabled (not hidden) on a disabled input", () => {
+    // A disabled field must not be wipeable, but the clear-× should not vanish either
+    // (that would shift the field's layout) — it stays visible and greyed/disabled.
+    const onChange = vi.fn();
+    render(
+      <Input
+        clearable
+        disabled
+        value="some text"
+        onChange={onChange}
+        placeholder="disabled clearable"
+      />
+    );
+    const clearBtn = screen.getByRole("button", { name: /clear/i });
+    expect(clearBtn).toBeInTheDocument();
+    expect(clearBtn).toBeDisabled();
+    fireEvent.click(clearBtn);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("error text rendered with error prop", () => {
     render(<Input error="Something went wrong" placeholder="test" />);
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();

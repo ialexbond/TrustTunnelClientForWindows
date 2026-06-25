@@ -1,6 +1,7 @@
 import { useState, forwardRef, type InputHTMLAttributes } from "react";
 import { Eye, EyeOff, Lock } from "lucide-react";
 import { cn } from "../lib/cn";
+import { FieldError } from "./FieldError";
 
 interface PasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   label?: string;
@@ -58,11 +59,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
         </div>
-        {error && (
-          <p className="text-xs mt-1 text-[var(--color-status-error)]">
-            {error}
-          </p>
-        )}
+        <FieldError>{error}</FieldError>
         {!error && helperText && (
           <p className="text-xs mt-1 text-[var(--color-text-muted)]">
             {helperText}
