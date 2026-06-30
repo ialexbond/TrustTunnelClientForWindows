@@ -21,12 +21,13 @@ vi.mock("../shared/hooks/useFeatureToggles", () => ({
 }));
 
 describe("AppSettingsPanel", () => {
+  // 12-07: AppSettingsPanel no longer takes `hasConfig` (that prop only fed the auto-connect toggle
+  // that has since MOVED out of GeneralSection into «Авто-режим»).
   const defaultProps = {
     theme: "system" as const,
     onThemeChange: vi.fn(),
     language: "ru",
     onLanguageChange: vi.fn(),
-    hasConfig: true,
   };
 
   beforeEach(() => {
@@ -35,6 +36,8 @@ describe("AppSettingsPanel", () => {
     localStorage.clear();
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "get_start_minimized") return false;
+      // 12-07: AutoModeSettings (now mounted here) reads the config manifest via list_configs.
+      if (cmd === "list_configs") return [];
       return null;
     });
   });
@@ -54,9 +57,16 @@ describe("AppSettingsPanel", () => {
     expect(screen.getByText("Экспериментальные функции")).toBeInTheDocument();
   });
 
-  it("renders all three sections together", () => {
+  // 12-07: «Авто-режим» (AutoModeSettings) is now mounted in the Settings panel.
+  it("renders AutoModeSettings («Авто-режим»)", () => {
+    render(<AppSettingsPanel {...defaultProps} />);
+    expect(screen.getByText("Авто-режим")).toBeInTheDocument();
+  });
+
+  it("renders all sections together", () => {
     render(<AppSettingsPanel {...defaultProps} />);
     expect(screen.getByText("Основные")).toBeInTheDocument();
+    expect(screen.getByText("Авто-режим")).toBeInTheDocument();
     expect(screen.getByText("Оформление")).toBeInTheDocument();
     expect(screen.getByText("Экспериментальные функции")).toBeInTheDocument();
   });
@@ -77,10 +87,17 @@ describe("AppSettingsPanel", () => {
     expect(screen.getByText("Язык интерфейса")).toBeInTheDocument();
   });
 
-  it("renders general toggles (autostart, minimized, auto-connect)", () => {
+  it("renders general toggles (autostart, minimized) — NOT the moved auto-connect toggle", () => {
     render(<AppSettingsPanel {...defaultProps} />);
     expect(screen.getByText("Запускать вместе с системой")).toBeInTheDocument();
     expect(screen.getByText("Запускать в свёрнутом режиме")).toBeInTheDocument();
-    expect(screen.getByText("Подключаться автоматически")).toBeInTheDocument();
+    // 12-07: the old GeneralSection auto-connect label is GONE (moved to «Авто-режим»).
+    expect(screen.queryByText("Подключаться автоматически")).not.toBeInTheDocument();
+  });
+
+  // 12-07: the startup auto-connect toggle now lives in «Авто-режим» with its honest last-used label.
+  it("renders the startup auto-connect toggle in «Авто-режим»", () => {
+    render(<AppSettingsPanel {...defaultProps} />);
+    expect(screen.getByText("Автоподключение при запуске")).toBeInTheDocument();
   });
 });

@@ -1338,6 +1338,52 @@ pub fn set_last_used(id: String) -> Result<Vec<ConfigSummary>, String> {
     list_configs()
 }
 
+/// Persist the user-set priority order (D-02 / D-05). The «Авто-режим» priority list
+/// (drag / keyboard reorder) sends the manifest ids in the desired sequence; we assign
+/// `order = 0,1,2,…` in that sequence and persist atomically so the auto-switch engine
+/// reads the user's order on the next tick and across restarts.
+///
+/// Open Q1 split (per 12-RESEARCH): we do NOT special-case the last-used config here —
+/// the priority `order` drives ONLY the engine's switch-target search. `list_configs`
+/// already sorts `last_used DESC, order ASC`, so the last-used config still renders as
+/// the lead card on the Connection tab regardless of the priority order.
+///
+/// Inputs are manifest ids, never filesystem paths (there is no path parameter), so no
+/// path traversal is possible (V5/V12). The atomic writer guarantees no torn write.
+/// D-29: this command never reads `endpoint.password` and logs nothing.
+#[tauri::command]
+pub fn reorder_configs(ids: Vec<String>) -> Result<Vec<ConfigSummary>, String> {
+    // WR-01: serialize read→mutate→write against other manifest mutators.
+    let _guard = lock_manifest();
+    let dir = portable_data_dir();
+    let mut manifest = read_manifest(&dir)?;
+
+    // Rank each supplied id by its position in the sequence (0-based). Ids not present in
+    // the manifest are simply absent from this map — no error, no panic (T-12-02).
+    let rank: std::collections::HashMap<&str, u32> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i as u32))
+        .collect();
+    let supplied_count = ids.len() as u32;
+
+    // Sort: supplied ids first, in the given sequence; configs whose id is NOT in `ids`
+    // keep their existing relative order at the tail (stable sort by current `order`).
+    // Sorting by a (rank, existing-order) key gives a stable, deterministic result.
+    manifest.configs.sort_by(|a, b| {
+        let a_key = rank.get(a.id.as_str()).copied().unwrap_or(supplied_count);
+        let b_key = rank.get(b.id.as_str()).copied().unwrap_or(supplied_count);
+        a_key.cmp(&b_key).then(a.order.cmp(&b.order))
+    });
+    // Re-densify to a clean 0..n so the on-disk values stay small and meaningful.
+    for (i, c) in manifest.configs.iter_mut().enumerate() {
+        c.order = i as u32;
+    }
+
+    write_manifest_atomic(&dir, &manifest)?;
+    list_configs()
+}
+
 // ─── Tests (Wave-0 stubs turned GREEN) ───────────────────────────────────────
 
 #[cfg(test)]
@@ -1940,6 +1986,85 @@ included_routes = ["0.0.0.0/0"]
             1,
             "exactly one last_used (the marker is exclusive)"
         );
+        cleanup(&tmp);
+    }
+
+    /// The same in-memory order transform `reorder_configs` applies for a given id
+    /// sequence: supplied ids first in sequence order, the rest at the tail by existing
+    /// order, then re-densify to 0..n. Mirrors the production sort so the test asserts the
+    /// real behaviour without invoking the #[tauri::command] (which needs the data dir).
+    fn apply_reorder(configs: &mut [ConfigEntry], ids: &[&str]) {
+        let rank: std::collections::HashMap<&str, u32> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i as u32))
+            .collect();
+        let supplied = ids.len() as u32;
+        configs.sort_by(|a, b| {
+            let a_key = rank.get(a.id.as_str()).copied().unwrap_or(supplied);
+            let b_key = rank.get(b.id.as_str()).copied().unwrap_or(supplied);
+            a_key.cmp(&b_key).then(a.order.cmp(&b.order))
+        });
+        for (i, c) in configs.iter_mut().enumerate() {
+            c.order = i as u32;
+        }
+    }
+
+    fn entry(id: &str, order: u32) -> ConfigEntry {
+        ConfigEntry {
+            id: id.into(),
+            name: id.to_uppercase(),
+            path: format!("C:/app/{id}.toml"),
+            order,
+            last_used: false,
+        }
+    }
+
+    // Truth (D-02): reorder_configs assigns order by the given id sequence; atomic write.
+    #[test]
+    fn reorder_configs_applies_given_id_sequence() {
+        let mut configs = vec![entry("a", 0), entry("b", 1), entry("c", 2)];
+        apply_reorder(&mut configs, &["c", "a", "b"]);
+        let order_of = |id: &str| configs.iter().find(|c| c.id == id).unwrap().order;
+        assert_eq!(order_of("c"), 0, "c leads the sequence");
+        assert_eq!(order_of("a"), 1);
+        assert_eq!(order_of("b"), 2);
+    }
+
+    /// Truth (T-12-02): an unknown id in the sequence is ignored without panic; the known
+    /// id still takes its position and the un-mentioned config keeps a tail slot.
+    #[test]
+    fn reorder_configs_ignores_unknown_id() {
+        let mut configs = vec![entry("a", 0), entry("b", 1)];
+        apply_reorder(&mut configs, &["zzz", "a"]); // "zzz" not in manifest
+        let order_of = |id: &str| configs.iter().find(|c| c.id == id).unwrap().order;
+        // "zzz" is dropped from ranking; "a" leads, "b" trails — dense 0..n, no panic.
+        assert_eq!(order_of("a"), 0, "known id gets its position");
+        assert_eq!(order_of("b"), 1, "un-mentioned config keeps a tail slot");
+    }
+
+    /// D-29: a reorder must never surface the password. Build a manifest backed by a real
+    /// `.toml` carrying a secret, apply a reorder + atomic write, and assert the serialized
+    /// manifest JSON never contains the password (the manifest holds only non-secret metadata).
+    #[test]
+    fn reorder_configs_never_leaks_password() {
+        let tmp = tempdir();
+        let secret = "s3cr3t-pw-never-in-manifest";
+        let p = write_toml(&tmp, "x.toml", &sample_config(Some("X"), "h.win", "u", secret));
+        let mut manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            configs: vec![ConfigEntry {
+                id: "x".into(),
+                name: "X".into(),
+                path: p.to_string_lossy().to_string(),
+                order: 0,
+                last_used: true,
+            }],
+        };
+        apply_reorder(&mut manifest.configs, &["x"]);
+        write_manifest_atomic(&tmp, &manifest).unwrap();
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(!json.contains(secret), "password must never appear in the manifest (D-29)");
         cleanup(&tmp);
     }
 

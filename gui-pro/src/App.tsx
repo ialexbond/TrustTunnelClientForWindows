@@ -29,6 +29,9 @@ import { useHostKeyVerification } from "./shared/hooks/useHostKeyVerification";
 import { useDeepLinkImport } from "./shared/hooks/useDeepLinkImport";
 import { useConfigLifecycle } from "./shared/hooks/useConfigLifecycle";
 import { useAutoConnect } from "./shared/hooks/useAutoConnect";
+import { useAutoSwitch } from "./shared/hooks/useAutoSwitch";
+import { useAppSettings } from "./shared/hooks/useAppSettings";
+import { useConfigPingSource } from "./shared/hooks/useConfigPingSource";
 import { useTabPersistence } from "./shared/hooks/useTabPersistence";
 import { useActivityLogStartup } from "./shared/hooks/useActivityLogStartup";
 import { useAppShellActions } from "./shared/hooks/useAppShellActions";
@@ -311,6 +314,49 @@ function App() {
     onDisconnect: handleDisconnect,
   });
   useAutoConnect({ config, status, setStatus, setError });
+
+  // ─── Phase 12 (12-07): smart auto-switch engine ───
+  // The SINGLE App-level config-list + inactive-ping source (T-12-14: exactly one ping loop). It is
+  // passed down to ConnectionPanel as `source` (so the cards reuse it instead of running their own
+  // loop) AND it produces the priority-ordered candidate list the engine consumes.
+  const configPingSource = useConfigPingSource(config.configPath);
+  // The persisted «Авто-режим» prefs (the SAME store the AutoModeSettings section writes). The
+  // master toggle gates the whole engine; threshold/interval/checks tune it.
+  const { settings: autoModeSettings } = useAppSettings();
+  // useAutoSwitch runs window-independently (the window hides-not-destroys to tray, so the FE hook
+  // keeps monitoring while connected). It is INERT unless connected + masterOn (default OFF), so a
+  // fresh install never auto-switches. useAutoConnect (above) is UNCHANGED — startup still targets
+  // the last-used config (D-01); the engine then keeps monitoring the active config (D-05) and, on a
+  // sustained breach, switches to the first healthy candidate via the EXISTING switchTo (D-02/D-04).
+  // The auto-switch engine must PROMOTE the chosen config to the app-level active pointer too —
+  // otherwise after an auto-switch `config.configPath` still points at the OLD config, so the engine
+  // keeps monitoring the wrong (now-inactive) server and the rest of the single-config surface
+  // (Routing/Settings/status panel, tt_config_path) goes stale. Mirror handleConnectConfig's promote,
+  // but awaitable so the engine arms the cooldown only after the disconnect→connect resolves.
+  const handleAutoSwitch = useCallback(
+    async (path: string) => {
+      if (path) {
+        runViewTransition(() => {
+          setConfig((prev) => ({ ...prev, configPath: path }));
+        });
+        localStorage.setItem("tt_config_path", path);
+      }
+      await switchTo(path);
+    },
+    [switchTo],
+  );
+
+  useAutoSwitch({
+    masterOn: autoModeSettings.masterOn,
+    thresholdMs: autoModeSettings.thresholdMs,
+    intervalSec: autoModeSettings.intervalSec,
+    checksN: autoModeSettings.checksN,
+    status,
+    activeConfigPath: config.configPath || undefined,
+    candidates: configPingSource.candidates,
+    switchTo: handleAutoSwitch,
+  });
+
   useTabPersistence({ activeTab, config, status, connectedSince });
   useActivityLogStartup();
 
@@ -604,6 +650,9 @@ function App() {
               onDisconnect={handleDisconnect}
               onSwitchTo={handleConnectConfig}
               onReconnect={handleReconnect}
+              // 12-07: reuse the App-level single config-list + ping source (one inactive-ping loop
+              // shared with the auto-switch engine — no rival loop, T-12-14).
+              source={configPingSource}
             />
             {/* Production ImportModal (Phase 11, Plan 04) — the SINGLE point through which a
                 config is added (two tiles / link / drag, errors-in-modal, host+user
@@ -688,7 +737,6 @@ function App() {
             onThemeChange={handleThemeChange}
             language={i18n.language}
             onLanguageChange={handleLanguageChange}
-            hasConfig={!!config.configPath}
             statusPanel={statusPanelFor("settings")}
           />
         </div>

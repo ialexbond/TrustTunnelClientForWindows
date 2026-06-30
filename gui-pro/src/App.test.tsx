@@ -980,9 +980,12 @@ describe("App", () => {
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") return null;
       // Phase 11 (P11-03): auto-connect now targets the manifest's last-used config
-      // (resolved via list_configs), not the single tt_config_path.
+      // (resolved via list_configs), not the single tt_config_path. 12-07: the App now also
+      // feeds list_configs to useConfigPingSource (dedupe + candidate build), so the fixture
+      // returns the FULL ConfigSummary shape list_configs really emits.
       if (cmd === "list_configs")
-        return [{ id: "id-1", path: "/config.json", last_used: true }];
+        return [{ id: "id-1", name: "Config 1", host: "h1.example.com", user: "u1", path: "/config.json", order: 0, last_used: true }];
+      if (cmd === "ping_config_endpoint") return { status: "no-data" };
       return null;
     });
 
@@ -1033,8 +1036,10 @@ describe("App", () => {
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") throw new Error("Auto-connect failed");
       // Phase 11 (P11-03): auto-connect resolves the last-used config from the manifest.
+      // 12-07: full ConfigSummary shape (App now also feeds it to useConfigPingSource).
       if (cmd === "list_configs")
-        return [{ id: "id-1", path: "/config.json", last_used: true }];
+        return [{ id: "id-1", name: "Config 1", host: "h1.example.com", user: "u1", path: "/config.json", order: 0, last_used: true }];
+      if (cmd === "ping_config_endpoint") return { status: "no-data" };
       return null;
     });
 
@@ -1053,6 +1058,77 @@ describe("App", () => {
     });
 
     expect(statusPanelProps.status).toBe("error");
+  });
+
+  // ─── Smart auto-switch engine wiring (Phase 12, plan 12-07) ───
+
+  it("wires the App-level config-ping source into ConnectionPanel (single ping loop)", async () => {
+    // The engine + the cards must share ONE inactive-ping source (T-12-14). App owns it via
+    // useConfigPingSource and passes it to ConnectionPanel as `source` — assert that prop exists
+    // and carries the candidate list the engine consumes.
+    localStorage.setItem("tt_config_path", "/config.json");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "list_configs")
+        return [
+          { id: "id-1", name: "C1", host: "h1.example.com", user: "u", path: "/config.json", order: 0, last_used: true },
+          { id: "id-2", name: "C2", host: "h2.example.com", user: "u", path: "/other.toml", order: 1, last_used: false },
+        ];
+      if (cmd === "ping_config_endpoint") return { status: "no-data" };
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    // The source prop is wired with a candidate list (the inactive config, excluding the active one).
+    expect(connectionPanelProps.source).toBeDefined();
+    expect(Array.isArray(connectionPanelProps.source.candidates)).toBe(true);
+    const candidatePaths = connectionPanelProps.source.candidates.map((c: { path: string }) => c.path);
+    expect(candidatePaths).toContain("/other.toml");
+    expect(candidatePaths).not.toContain("/config.json"); // the active config is never a candidate
+  });
+
+  it("does NOT auto-switch while the master toggle is OFF (default), even when connected", async () => {
+    // The engine is INERT unless masterOn (default OFF). With a connected tunnel and a healthy
+    // candidate available, no switch (vpn_connect/vpn_disconnect for a switch) must fire.
+    localStorage.setItem("tt_config_path", "/config.json");
+    // tt_auto_switch_enabled is unset → masterOn defaults false. tt_auto_connect unset → no startup connect.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "connected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "list_configs")
+        return [
+          { id: "id-1", name: "C1", host: "h1.example.com", user: "u", path: "/config.json", order: 0, last_used: true },
+          { id: "id-2", name: "C2", host: "h2.example.com", user: "u", path: "/other.toml", order: 1, last_used: false },
+        ];
+      // A HEALTHY candidate — if the engine were live it would switch to it. With master OFF it must not.
+      if (cmd === "ping_config_endpoint") return { status: "ok", ms: 10 };
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    // Mark the tunnel connected so the engine's status gate would be satisfied if master were on.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "connected" });
+    });
+    // Advance well past several engine intervals (default 15s) — the engine must stay inert.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    // No switch was attempted: the only allowed switch path (switchTo → vpn_connect to /other.toml)
+    // never fired. (The startup auto-connect is also off, so vpn_connect must not be called at all.)
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
   });
 
   // ─── Config validation on startup ───

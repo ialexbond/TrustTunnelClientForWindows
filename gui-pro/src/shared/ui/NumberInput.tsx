@@ -36,6 +36,10 @@ interface NumberInputProps {
   /** Passthrough: custom key handler. CIDRPicker использует для
       backspace-переключения между октетами. */
   onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
+  /** Passthrough: custom blur handler, called AFTER the internal min/max validation runs.
+      AutoModeSettings uses it to commit a clamped value to the persisted store only on blur
+      (so typing a multi-digit value is not clamped to the minimum on every keystroke). */
+  onBlur?: (e: FocusEvent<HTMLInputElement>) => void;
   /**
    * How to render the inline error/helper text beneath the input.
    * - "block" (default): renders <p> under the input (parent container grows).
@@ -65,6 +69,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       onErrorChange,
       onPaste,
       onKeyDown,
+      onBlur,
       "aria-label": ariaLabel,
     },
     ref
@@ -96,23 +101,23 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     );
 
     const handleBlur = useCallback(
-      (_e: FocusEvent<HTMLInputElement>) => {
+      (e: FocusEvent<HTMLInputElement>) => {
         if (!value) {
           setInternalError("");
-          return;
+        } else {
+          const num = parseInt(value, 10);
+          if (min !== undefined && num < min) {
+            setInternalError(`Min: ${min}`);
+          } else if (max !== undefined && num > max) {
+            setInternalError(`Max: ${max}`);
+          } else {
+            setInternalError("");
+          }
         }
-        const num = parseInt(value, 10);
-        if (min !== undefined && num < min) {
-          setInternalError(`Min: ${min}`);
-          return;
-        }
-        if (max !== undefined && num > max) {
-          setInternalError(`Max: ${max}`);
-          return;
-        }
-        setInternalError("");
+        // Passthrough AFTER the internal validation so a parent can commit on blur.
+        onBlur?.(e);
       },
-      [value, min, max]
+      [value, min, max, onBlur]
     );
 
     const displayError = externalError || internalError;

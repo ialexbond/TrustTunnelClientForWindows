@@ -12,9 +12,11 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
 }));
 
 describe("GeneralSection", () => {
+  // Phase 12 (12-07): the «Автоподключение при запуске» toggle MOVED to «Авто-режим»
+  // (AutoModeSettings). GeneralSection now only holds autostart / start-minimized / logging —
+  // so the old hasConfig/onAutoConnectChange props (which only fed that toggle) are gone, and
+  // the auto-connect assertions live in AutoModeSettings.test.tsx now.
   const defaultProps = {
-    hasConfig: true,
-    onAutoConnectChange: vi.fn(),
     onSaved: vi.fn(),
   };
 
@@ -48,55 +50,10 @@ describe("GeneralSection", () => {
     expect(screen.getByText("Запускать в свёрнутом режиме")).toBeInTheDocument();
   });
 
-  it("renders auto-connect toggle", () => {
+  // 12-07: the auto-connect toggle MOVED — GeneralSection must NOT render it anymore.
+  it("does NOT render the auto-connect toggle (moved to «Авто-режим»)", () => {
     render(<GeneralSection {...defaultProps} />);
-    expect(screen.getByText("Подключаться автоматически")).toBeInTheDocument();
-  });
-
-  it("auto-connect toggle is enabled when hasConfig is true", () => {
-    render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("switch");
-    // The auto-connect toggle (third one) should not be disabled
-    const autoConnectToggle = toggleButtons[2];
-    expect(autoConnectToggle).not.toBeDisabled();
-  });
-
-  it("auto-connect toggle is disabled when hasConfig is false", () => {
-    render(<GeneralSection {...defaultProps} hasConfig={false} />);
-    const toggleButtons = screen.getAllByRole("switch");
-    const autoConnectToggle = toggleButtons[2];
-    expect(autoConnectToggle).toBeDisabled();
-  });
-
-  it("calls onAutoConnectChange when auto-connect toggle is clicked", () => {
-    render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("switch");
-    fireEvent.click(toggleButtons[2]);
-    expect(defaultProps.onAutoConnectChange).toHaveBeenCalledWith(true);
-  });
-
-  it("calls onSaved when auto-connect is toggled", () => {
-    render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("switch");
-    fireEvent.click(toggleButtons[2]);
-    expect(defaultProps.onSaved).toHaveBeenCalled();
-  });
-
-  it("stores auto-connect value in localStorage when toggled on", () => {
-    render(<GeneralSection {...defaultProps} />);
-    const toggleButtons = screen.getAllByRole("switch");
-    fireEvent.click(toggleButtons[2]);
-    expect(localStorage.getItem("tt_auto_connect")).toBe("true");
-  });
-
-  it("reads auto-connect value from localStorage on mount", () => {
-    localStorage.setItem("tt_auto_connect", "true");
-    render(<GeneralSection {...defaultProps} />);
-    // The toggle should reflect the stored value (true)
-    // Clicking it again should set to false
-    const toggleButtons = screen.getAllByRole("switch");
-    fireEvent.click(toggleButtons[2]);
-    expect(defaultProps.onAutoConnectChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText("Подключаться автоматически")).not.toBeInTheDocument();
   });
 
   it("renders autostart toggle description", () => {
@@ -121,21 +78,5 @@ describe("GeneralSection", () => {
     await waitFor(() => {
       expect(defaultProps.onSaved).toHaveBeenCalled();
     });
-  });
-
-  it("shows tooltip when hasConfig is false", () => {
-    render(<GeneralSection {...defaultProps} hasConfig={false} />);
-    // A help icon tooltip should appear for auto-connect when no config
-    expect(screen.getByText("Подключаться автоматически")).toBeInTheDocument();
-  });
-
-  it("shows auto_connect_no_config description when hasConfig is false", () => {
-    render(<GeneralSection {...defaultProps} hasConfig={false} />);
-    expect(screen.getByText(/Сначала загрузите конфигурацию/)).toBeInTheDocument();
-  });
-
-  it("shows auto_connect_desc description when hasConfig is true", () => {
-    render(<GeneralSection {...defaultProps} />);
-    expect(screen.getByText(/Автоматически подключаться/)).toBeInTheDocument();
   });
 });
