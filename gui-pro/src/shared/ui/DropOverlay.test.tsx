@@ -23,6 +23,23 @@ describe("DropOverlay", () => {
     expect(screen.getByText(/\.toml.*\.json/)).toBeInTheDocument();
   });
 
+  it("overrides the default text/hint when props are provided (config-import TOML-only)", () => {
+    // The config-import surface accepts ONLY a .toml config, so it passes a
+    // TOML-only hint instead of the global .toml/.json window-drop default.
+    render(
+      <DropOverlay
+        isDragging={true}
+        text="Перетащите файл сюда"
+        hint="Только файл конфига в формате .toml"
+      />,
+    );
+    expect(
+      screen.getByText("Только файл конфига в формате .toml"),
+    ).toBeInTheDocument();
+    // The global dual-format (.toml/.json) hint must NOT appear in this context.
+    expect(screen.queryByText(/\.toml.*\.json/)).not.toBeInTheDocument();
+  });
+
   it("has backdrop-filter blur style", () => {
     const { container } = render(<DropOverlay isDragging={true} />);
     const overlay = container.firstChild as HTMLElement;

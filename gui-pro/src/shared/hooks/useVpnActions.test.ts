@@ -310,3 +310,132 @@ describe("useVpnActions.handleReconnect (Plan 02-12 — no dwell on «Отклю
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 11 (P11-04 / D-20) — switchTo: MANUAL config switch is a PLAIN
+// disconnect→connect of the selected config through the existing VPN commands,
+// reusing handleReconnect's teardown-wait, marking the manifest last-used on
+// connect. NO new VpnStatus value, NO `switching` wire-state, NO VPN-core change.
+// A brief gap during the switch is acceptable (P11-04).
+// ─────────────────────────────────────────────────────────────────────────
+describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→connect)", () => {
+  const OTHER_PATH = "/other-config.json";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupListenMock();
+    i18n.changeLanguage("ru");
+    vi.mocked(invoke).mockResolvedValue(null);
+  });
+
+  it("from CONNECTED: tears down (vpn_disconnect) THEN connects the new path THEN marks last-used (order verified)", async () => {
+    // list_configs resolves the manifest id for OTHER_PATH so set_last_used can mark it.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") {
+        return [{ id: "other-id", path: OTHER_PATH }];
+      }
+      return null;
+    });
+
+    const { hook } = renderReconnectHarness("connected");
+
+    let switchPromise: Promise<void>;
+    await act(async () => {
+      switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
+      // Let the synchronous setStatus("disconnecting") + the vpn_disconnect microtask
+      // settle so the teardown-wait is armed before we deliver the disconnected event.
+      await Promise.resolve();
+    });
+
+    // Deliver the real "disconnected" event (sidecar torn down) → resolves the
+    // teardown-wait promise and lets the connect proceed.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await switchPromise;
+    });
+
+    // Assert the call ORDER: vpn_disconnect → vpn_connect(newPath) → set_last_used.
+    const calls = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+    const disconnectIdx = calls.indexOf("vpn_disconnect");
+    const connectIdx = calls.indexOf("vpn_connect");
+    const lastUsedIdx = calls.indexOf("set_last_used");
+    expect(disconnectIdx).toBeGreaterThanOrEqual(0);
+    expect(connectIdx).toBeGreaterThan(disconnectIdx);
+    expect(lastUsedIdx).toBeGreaterThan(connectIdx);
+
+    // vpn_connect targeted the SELECTED path (not the app-level config.configPath).
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: OTHER_PATH,
+      logLevel: "info",
+    });
+    // set_last_used was called with the manifest id resolved from the path.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_last_used", { id: "other-id" });
+  });
+
+  it("from DISCONNECTED: connects directly (no teardown) THEN marks last-used", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") {
+        return [{ id: "other-id", path: OTHER_PATH }];
+      }
+      return null;
+    });
+
+    const { hook } = renderReconnectHarness("disconnected");
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    // No teardown from a disconnected state.
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
+    // Connected the selected path and marked it last-used.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: OTHER_PATH,
+      logLevel: "info",
+    });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_last_used", { id: "other-id" });
+  });
+
+  it("a disconnect REJECT aborts cleanly (no hang, no connect) → status 'error'", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_disconnect") throw new Error("Lock error");
+      return null;
+    });
+
+    const { hook } = renderReconnectHarness("connected");
+
+    // No disconnected event will ever fire on a reject — switchTo must NOT hang on the
+    // teardown-wait; it returns straight away with an error status.
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(hook.result.current.status).toBe("error");
+    // The new config was NEVER connected (we aborted before the connect step).
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "vpn_connect",
+      expect.objectContaining({ configPath: OTHER_PATH }),
+    );
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("set_last_used", expect.anything());
+  });
+
+  it("a failed set_last_used does NOT undo the successful connect (best-effort marker)", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") throw new Error("manifest read failed");
+      return null;
+    });
+
+    const { hook } = renderReconnectHarness("disconnected");
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    // The connect succeeded — the status is NOT flipped to error by a marker failure.
+    expect(hook.result.current.status).not.toBe("error");
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: OTHER_PATH,
+      logLevel: "info",
+    });
+  });
+});

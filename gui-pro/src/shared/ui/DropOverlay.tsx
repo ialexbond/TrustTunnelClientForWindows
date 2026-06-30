@@ -3,9 +3,17 @@ import { cn } from "../lib/cn";
 
 interface DropOverlayProps {
   isDragging: boolean;
+  /**
+   * Optional context-specific overlay copy. Defaults to the global drop i18n
+   * («Перетащите файл сюда» + the .toml/.json dual-format hint used app-wide for
+   * the window-level drop). A surface that accepts ONLY a config — the config
+   * import modal — passes a TOML-only hint here (no routing .json).
+   */
+  text?: string;
+  hint?: string;
 }
 
-export function DropOverlay({ isDragging }: DropOverlayProps) {
+export function DropOverlay({ isDragging, text, hint }: DropOverlayProps) {
   const { t } = useTranslation();
 
   if (!isDragging) return null;
@@ -20,7 +28,10 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
         backgroundColor: "var(--color-glass-bg)",
-        transition: "opacity var(--transition-fast) ease",
+        // WR-05 (10.1 review): removed a dead `transition: opacity` — the overlay
+        // mounts/unmounts on isDragging (returns null when not dragging), so opacity
+        // never animates and the declaration was misleading. (No fade is shown today;
+        // a real fade would require keeping it mounted and animating — deferred.)
         pointerEvents: "none",
       }}
     >
@@ -54,11 +65,11 @@ export function DropOverlay({ isDragging }: DropOverlayProps) {
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        <span>{t("drop.overlay_text")}</span>
+        <span>{text ?? t("drop.overlay_text")}</span>
         <span
           className="text-xs font-normal opacity-70"
         >
-          {t("drop.overlay_hint")}
+          {hint ?? t("drop.overlay_hint")}
         </span>
       </div>
     </div>

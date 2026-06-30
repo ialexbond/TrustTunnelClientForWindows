@@ -1361,10 +1361,10 @@ describe("OverviewSection", () => {
       await waitFor(() => { expect(uptimeInvokes).toBeGreaterThanOrEqual(1); });
     });
 
-    it("prefers fastUptime value over stats: shows the server_get_uptime result", async () => {
+    it("prefers the live stats poll over the one-shot fastUptime (WR-04): shows the stats result once it arrives", async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
         if (cmd === "ping_endpoint") return 42;
-        // stats says 1д 1ч (90061s); fast uptime says 1ч 1м (3661s).
+        // stats (live 10s poll) says 1д 1ч (90061s); fast uptime (one-shot) says 1ч 1м (3661s).
         if (cmd === "server_get_stats") return {
           cpu_percent: 1, load_1m: 0, load_5m: 0, load_15m: 0,
           mem_total: 1, mem_used: 0, disk_total: 1, disk_used: 0,
@@ -1376,12 +1376,14 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      // 3661s → "1ч 1м" (hoursMins) from fastUptime, taking priority over stats.
-      const fast = i18n.t("server.overview.uptimeFormat.hoursMins", { hours: 1, mins: 1 });
+      // WR-04 (10.1 review): the live stats poll is AUTHORITATIVE once available, so the
+      // card shows 90061s → "1д 1ч" (daysHours), NOT the frozen one-shot "1ч 1м". The
+      // fastUptime one-shot is only the fast-first-paint fallback until the poll lands.
+      const live = i18n.t("server.overview.uptimeFormat.daysHours", { days: 1, hours: 1 });
       // D-07 (Plan 07-06): re-resolve the card inside waitFor (the all-cards gate
       // paints the skeleton first; the loaded uptime card node arrives after).
       await waitFor(() => {
-        expect(within(cardOf("server.overview.cards.uptime")).getByText(fast)).toBeInTheDocument();
+        expect(within(cardOf("server.overview.cards.uptime")).getByText(live)).toBeInTheDocument();
       });
     });
   });
@@ -1686,17 +1688,18 @@ describe("OverviewSection", () => {
   // ═══════════════════════════════════════════════════════
 
   describe("D-08: IP eye/blur toggle (hidden by default, Plan 07-06)", () => {
-    it("blurs the IP value by default (filter: blur(6px)) and reveals it (blur(0)) on eye click — no aria-hidden on the value", async () => {
+    it("hides the IP value by default (opacity 0, dust overlay) and reveals it (opacity 1) on eye click — no aria-hidden on the value", async () => {
       const state = makeState();
       render(<OverviewSection state={state} />);
       // D-07 (Plan 07-06): wait for the all-cards gate to open (the eye button is
-      // loaded-grid only) before reading the IP value's blur.
+      // loaded-grid only) before reading the IP value's hidden/revealed state.
       await screen.findByRole("button", { name: i18n.t("server.overview.ip.show") });
       const ipCard = cardOf("server.overview.cards.ip");
-      // Default: the IP value is blurred (shoulder-surfing guard, D-08).
+      // Default: the IP value is masked — rendered transparent (opacity 0) with the animated
+      // dust overlay drawn over it (shoulder-surfing guard, D-08; replaced the old blur(6px)).
       const ipValue = within(ipCard).getByText("10.0.0.1");
-      expect(ipValue.style.filter).toBe("blur(6px)");
-      // The blurred value is a CSS guard, not a secret-from-owner guard — it is
+      expect(ipValue.style.opacity).toBe("0");
+      // The masked value is a CSS guard, not a secret-from-owner guard — it is
       // NOT hidden from assistive tech (UI-SPEC §D-08 a11y).
       expect(ipValue).not.toHaveAttribute("aria-hidden");
       // Hidden state → the eye button offers to SHOW (reveal) the IP.
@@ -1704,9 +1707,9 @@ describe("OverviewSection", () => {
         name: i18n.t("server.overview.ip.show"),
       });
       fireEvent.click(showBtn);
-      // Revealed → blur cleared.
+      // Revealed → value fades in (opacity 1).
       await waitFor(() => {
-        expect(within(ipCard).getByText("10.0.0.1").style.filter).toBe("blur(0)");
+        expect(within(ipCard).getByText("10.0.0.1").style.opacity).toBe("1");
       });
       // …and the button now offers to HIDE the IP (aria-label flips with action).
       expect(
@@ -1741,7 +1744,7 @@ describe("OverviewSection", () => {
       expect(within(cardOf("server.overview.cards.uptime")).getByText(expected).className).toContain("whitespace-nowrap");
     }, 20_000);
 
-    it("data-unavailable caption wraps (≤2 lines) + centered, not truncated (R4-F01 Ping failure path)", async () => {
+    it("data-unavailable caption wraps freely + centered, never truncated or line-capped (owner UAT Ping failure path)", async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
         if (cmd === "ping_endpoint") throw new Error("PING_TIMEOUT");
         if (cmd === "server_get_stats") return null;
@@ -1750,17 +1753,18 @@ describe("OverviewSection", () => {
       });
       const state = makeState();
       render(<OverviewSection state={state} />);
-      // R4-F01: the long «Не удалось получить данные…» caption used to be
-      // whitespace-nowrap+truncate, which clipped the actionable «нажмите
-      // «Обновить»» tail. The card height is now bounded by the parent
-      // (minHeight 48), so the caption is allowed to WRAP — centered, capped at
-      // 2 lines (line-clamp-2) — instead of being truncated to one line.
+      // Error caption rule (owner UAT): the full «Не удалось получить данные…»
+      // text wraps FREELY — centered, NO line cap (no line-clamp), NO truncation
+      // (no whitespace-nowrap, no text-ellipsis). The card is wide enough in the
+      // error state (ERROR_CARD_MIN_BASIS) to land it in ~2 lines, but a narrower
+      // window just wraps it taller; nothing is ever clipped.
       await waitFor(() => {
         const caption = within(cardOf("server.overview.cards.ping")).getByText(i18n.t("server.overview.dataUnavailable"));
-        expect(caption.className).toContain("line-clamp-2");
         expect(caption.className).toContain("text-center");
-        // The old truncate behaviour must be gone (no nowrap on the caption).
+        // No hard line cap and no truncation — the caption must be free to wrap.
+        expect(caption.className).not.toContain("line-clamp");
         expect(caption.className).not.toContain("whitespace-nowrap");
+        expect(caption.className).not.toContain("text-ellipsis");
       });
     });
   });

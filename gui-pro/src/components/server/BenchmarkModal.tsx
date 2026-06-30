@@ -325,13 +325,16 @@ function CompletedView({ record, parsed, onRerun }: CompletedViewProps) {
         </div>
       )}
 
-      {/* No-link fallback banner — no raw output accordion */}
+      {/* No-link fallback banner — no raw output accordion. Owner UAT (P11-18):
+          the text used --color-text-primary, which reads near-black on the warning
+          tint in light theme. Use the warning foreground token so it matches the
+          warning-bg and stays readable in both themes. */}
       {!hasAnyLink && (
         <div
           className="rounded-[var(--radius-md)] p-3 text-body-sm"
           style={{
             background: "var(--color-status-warning-bg)",
-            color: "var(--color-text-primary)",
+            color: "var(--color-status-warning)",
           }}
         >
           {t("server.service.benchmark.no_report_link_banner")}

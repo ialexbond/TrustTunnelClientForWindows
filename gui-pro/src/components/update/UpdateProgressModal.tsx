@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw, AlertTriangle } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
 import {
@@ -117,14 +117,11 @@ export function UpdateProgressModal({
       ? t("app.update.modal.title_error")
       : t("app.update.modal.title_active");
 
+  // Owner UAT: the error phase has NO title icon — the app has no red/iconed error
+  // modals, so the error reads from the copy, not a danger glyph. Active phase keeps
+  // its spinning RefreshCw.
   const titleIcon =
-    state.phase === "error" ? (
-      <AlertTriangle
-        className="w-5 h-5 shrink-0"
-        style={{ color: "var(--color-status-danger)" }}
-        aria-hidden="true"
-      />
-    ) : (
+    state.phase === "error" ? null : (
       <RefreshCw
         className="w-5 h-5 shrink-0 animate-spin"
         style={{ color: "var(--color-accent-interactive)" }}
@@ -159,6 +156,10 @@ export function UpdateProgressModal({
       size="md"
       closeOnBackdrop={canCloseFreely}
       closeOnEscape={canCloseFreely}
+      // Owner UAT: when the modal CAN be closed (error / done — NEVER during the
+      // active update), also show the corner X as the standard duplicate close
+      // affordance alongside the «Закрыть» button (design-system convention).
+      showCloseButton={canCloseFreely}
     >
       {/* EXPLICIT aria — per UI-SPEC §Accessibility, Modal primitive не имеет built-in */}
       <div
@@ -171,6 +172,8 @@ export function UpdateProgressModal({
         <h2
           id="update-modal-title"
           className="text-title flex items-center gap-2"
+          // Owner UAT: the error modal uses the SAME neutral title as every other
+          // modal (text-primary) — no red, no icon. Error reads from the copy.
           style={{ color: "var(--color-text-primary)" }}
         >
           {titleIcon}
@@ -236,26 +239,15 @@ export function UpdateProgressModal({
         )}
 
         {state.phase === "error" && (
-          <div className="space-y-2" data-testid="update-modal-error-block">
-            <p
-              className="text-body"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              {errorLine1}
-            </p>
-            <p
-              className="text-body"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              {errorLine2}
-            </p>
-            <p
-              className="text-body"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              {errorLine3}
-            </p>
-          </div>
+          // Owner UAT: plain neutral body (no red banner) — ONE flowing paragraph
+          // (not a line-per-sentence stack) so the modal stays compact.
+          <p
+            className="text-body"
+            style={{ color: "var(--color-text-secondary)" }}
+            data-testid="update-modal-error-block"
+          >
+            {`${errorLine1} ${errorLine2} ${errorLine3}`}
+          </p>
         )}
 
         {/* Footer — error phase only (active phase intentionally has no

@@ -142,6 +142,20 @@ describe("formatServerUptime", () => {
     );
   });
 
+  it("formats exactly 30 days as 1 month 0 days 0 hours (owner UAT months tier)", () => {
+    expect(formatServerUptime(30 * 86400, mockT)).toBe(
+      'server.overview.uptimeFormat.monthsDaysHours:{"months":1,"days":0,"hours":0}',
+    );
+  });
+
+  it("formats 128 days 19 hours as 4 months 8 days 19 hours (owner UAT)", () => {
+    // 128 = 4*30 + 8; 19 hours preserved.
+    const secs = 128 * 86400 + 19 * 3600;
+    expect(formatServerUptime(secs, mockT)).toBe(
+      'server.overview.uptimeFormat.monthsDaysHours:{"months":4,"days":8,"hours":19}',
+    );
+  });
+
   it("formats fractional seconds by flooring minutes", () => {
     // 3719.9 → 1ч 1м (floor)
     expect(formatServerUptime(3719.9, mockT)).toBe(

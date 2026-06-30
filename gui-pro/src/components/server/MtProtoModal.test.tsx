@@ -129,9 +129,9 @@ describe("MtProtoModal", () => {
     );
     // Port number visible in mono
     expect(screen.getByText("4443")).toBeInTheDocument();
-    // Proxy link visible
+    // Proxy link visible — now a read-only <input>, so assert its display value.
     expect(
-      screen.getByText("tg://proxy?server=example.com&port=4443&secret=aabb"),
+      screen.getByDisplayValue("tg://proxy?server=example.com&port=4443&secret=aabb"),
     ).toBeInTheDocument();
     // Buttons
     expect(screen.getByRole("button", { name: /скопировать/i })).toBeInTheDocument();

@@ -173,9 +173,9 @@ describe("UpdateProgressModal", () => {
     expect(
       screen.getByText(/Сервер продолжает работать на v3\.0\.0/)
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Закрыть/ })
-    ).toBeInTheDocument();
+    // Two «Закрыть» affordances now: the footer button AND the Modal corner X
+    // (owner UAT dup affordance). Assert the footer button by its testid.
+    expect(screen.getByTestId("update-modal-close")).toBeInTheDocument();
   });
 
   it("error state UPDATE_CANCELLED → cancelled copy", async () => {
@@ -211,7 +211,7 @@ describe("UpdateProgressModal", () => {
       />
     );
 
-    const closeBtn = await screen.findByRole("button", { name: /Закрыть/ });
+    const closeBtn = await screen.findByTestId("update-modal-close");
     fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalled();
   });

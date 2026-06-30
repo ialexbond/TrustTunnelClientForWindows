@@ -76,6 +76,11 @@ const INITIAL_STATE: UpdateProgressState = {
   cancelling: false,
 };
 
+// WR-02 (10.1 review): max gap between progress events before an active update is
+// treated as wedged and flipped to a closeable error. Generous (2 min) so a slow
+// but still-progressing update never false-times-out.
+const WATCHDOG_MS = 120_000;
+
 export interface UseUpdateProgressResult {
   state: UpdateProgressState;
   startUpdate: (sshParams: SshParams, targetVersion: string) => Promise<void>;
@@ -117,6 +122,60 @@ export function useUpdateProgress(): UseUpdateProgressResult {
     };
   }, []);
 
+  // ── WR-02 (10.1 review): no-progress watchdog ──────────────────────────────
+  // The active update blocks EVERY close path (no X / backdrop / Esc per
+  // UI-SPEC), and `invoke('update_sidecar')` can hang silently if the SSH
+  // channel wedges (backend neither progresses nor fails). Without a client-side
+  // timeout the user is trapped and must kill the app. If NO progress event
+  // arrives for WATCHDOG_MS we flip to a closeable `error` (UPDATE_TIMEOUT). The
+  // watchdog is re-armed on every real progress event and cleared the moment we
+  // leave `active`, so it only fires on a genuine stall — never on a slow but
+  // progressing update.
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current !== null) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+  }, []);
+
+  const armWatchdog = useCallback(() => {
+    clearWatchdog();
+    watchdogRef.current = setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setState((prev) =>
+        prev.phase === "active"
+          ? {
+              ...prev,
+              phase: "error",
+              errorCode: "UPDATE_TIMEOUT",
+              errorMessage: "UPDATE_TIMEOUT",
+              cancelling: false,
+            }
+          : prev
+      );
+    }, WATCHDOG_MS);
+  }, [clearWatchdog]);
+
+  // Keep a stable ref to the latest armWatchdog so the mount-time (deps: []) event
+  // listener can re-arm on each progress event without re-subscribing.
+  const armWatchdogRef = useRef(armWatchdog);
+  useEffect(() => {
+    armWatchdogRef.current = armWatchdog;
+  }, [armWatchdog]);
+
+  // Arm the watchdog while `active`; clear it on every non-active phase (success /
+  // error / idle) and on unmount. Arming HERE (not in startUpdate) avoids a race:
+  // the idle→active phase change runs this effect's cleanup (clearWatchdog) right
+  // after a startUpdate-side arm would set it, cancelling it. Progress events re-arm
+  // via the listener (phase stays active, so this effect does not re-run).
+  useEffect(() => {
+    if (state.phase === "active") armWatchdog();
+    else clearWatchdog();
+    return clearWatchdog;
+  }, [state.phase, armWatchdog, clearWatchdog]);
+
   // Subscribe to backend event on mount; cleanup unlisten on unmount.
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +187,13 @@ export function useUpdateProgress(): UseUpdateProgressResult {
             if (cancelled || !isMountedRef.current) return;
             const payload = event.payload;
             const uiStep = BACKEND_TO_UI_STEP[payload.step];
+
+            // WR-02: a real step event means the backend is alive — re-arm the
+            // no-progress watchdog. Finalizer events (success/failed) leave `active`,
+            // so the phase-effect clears the watchdog for them instead.
+            if (uiStep !== undefined && uiStep !== "_finalizer") {
+              armWatchdogRef.current();
+            }
 
             setState((prev) => {
               // Finalizer (backend `complete`) — переключаем phase.
@@ -141,11 +207,19 @@ export function useUpdateProgress(): UseUpdateProgressResult {
                   };
                 }
                 if (payload.status === "failed") {
+                  // WR-01 (10.1 review): set errorCode on the EVENT-driven failure too —
+                  // previously only the invoke-reject path set it, so a backend-emitted
+                  // failure left errorCode null. That broke the modal's onError callback
+                  // (never fired) and the cancelled-vs-error copy (couldn't distinguish).
+                  // The step payload carries no separate code field, so the message doubles
+                  // as the code (mirrors the invoke-reject path's String(err)); this also
+                  // lets a backend-emitted «UPDATE_CANCELLED» be recognised as a cancel.
                   return {
                     ...prev,
                     phase: "error",
                     percent: 100,
                     errorMessage: payload.message || null,
+                    errorCode: payload.message || prev.errorCode || "UPDATE_FAILED",
                     cancelling: false,
                   };
                 }
@@ -193,6 +267,8 @@ export function useUpdateProgress(): UseUpdateProgressResult {
         ...INITIAL_STATE,
         phase: "active",
       });
+      // WR-02: the watchdog is armed by the phase-effect when phase becomes "active"
+      // (arming here would be cancelled by that effect's idle→active cleanup).
       try {
         await invoke<void>("update_sidecar", {
           host: sshParams.host,

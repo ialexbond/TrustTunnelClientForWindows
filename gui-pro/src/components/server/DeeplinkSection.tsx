@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Check, AlertTriangle } from "lucide-react";
+import { Check, AlertTriangle, HelpCircle } from "lucide-react";
 import { Input } from "../../shared/ui/Input";
+import { ActionInput } from "../../shared/ui/ActionInput";
+import { Tooltip } from "../../shared/ui/Tooltip";
 import { Toggle } from "../../shared/ui/Toggle";
 import { CIDRPicker } from "../../shared/ui/CIDRPicker";
 import { CharCounter } from "../../shared/ui/CharCounter";
@@ -33,6 +35,25 @@ const UPSTREAM_SEGMENTS: { value: "h2" | "h3"; label: string }[] = [
   { value: "h2", label: "HTTP/2" },
   { value: "h3", label: "HTTP/3" },
 ];
+
+// FieldHelp — owner UAT: a «?» icon that reveals an explanation on hover/focus,
+// for fields whose purpose isn't obvious (anti-DPI, display name, upstream
+// protocol, cert verification, cert pinning). Reuses the shared Tooltip primitive;
+// `text` is the already-resolved RU description (caller owns i18n).
+function FieldHelp({ text }: { text: string }) {
+  return (
+    <Tooltip text={text} delay={300} position="top">
+      <button
+        type="button"
+        aria-label={text}
+        tabIndex={0}
+        className="inline-flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] focus-visible:shadow-[var(--focus-ring)] outline-none rounded-sm transition-colors"
+      >
+        <HelpCircle size={14} aria-hidden="true" />
+      </button>
+    </Tooltip>
+  );
+}
 
 export interface DeeplinkSectionProps {
   /** Current deeplink TLV field values (from useUserFormState). */
@@ -107,41 +128,44 @@ export function DeeplinkSection({
           checked={deeplink.antiDpi}
           onChange={(v) => updateDeeplink("antiDpi", v)}
           label={t("server.users.toggle_anti_dpi")}
-          description={t("server.users.toggle_anti_dpi_help")}
+          labelExtra={<FieldHelp text={t("server.users.toggle_anti_dpi_help")} />}
           disabled={isDisabled || configLoading}
         />
 
-        {/* Display name with CharCounter aligned right above the field (matches Input label styling: text-sm semibold) */}
+        {/* Display name — owner UAT: the character counter now lives INSIDE the
+            field (ActionInput right slot, reusing the existing primitive), the label
+            carries a «?» tooltip with the former bottom hint, and the standalone
+            bottom helper caption is removed. The «?» button sits OUTSIDE the <label>
+            (sibling, not nested) so the label associates only with the input — else
+            getByLabelText matches both the input and the help button. */}
         <div>
-          <div className="flex items-baseline justify-between mb-1.5">
+          <div className="flex items-center gap-1 mb-1.5">
             <label
               htmlFor="user-modal-display-name"
-              className="block text-sm font-medium text-[var(--color-text-secondary)]"
+              className="text-sm font-medium text-[var(--color-text-secondary)]"
             >
               {t("server.users.field_display_name")}
             </label>
-            <CharCounter value={deeplink.displayName.length} max={64} />
+            <FieldHelp text={t("server.users.field_display_name_hint")} />
           </div>
-          <Input
+          <ActionInput
             id="user-modal-display-name"
             value={deeplink.displayName}
             onChange={(e) => updateDeeplink("displayName", e.target.value.slice(0, 64))}
             placeholder={t("server.users.field_display_name_placeholder")}
             aria-label={t("server.users.field_display_name")}
             disabled={isDisabled}
-            // Chrome autofill heuristics залапали поле как «имя» —
-            // всплывало «Сохранённые сведения». autoComplete="off" +
-            // отсутствие name-атрибута даёт браузеру сигнал что
-            // tracking/предложения не нужны. Для password-менеджеров
-            // (1Password/LastPass) — спец data-атрибуты.
+            // Chrome autofill heuristics залапали поле как «имя» — всплывало
+            // «Сохранённые сведения». autoComplete="off" + спец data-атрибуты
+            // глушат браузерный autofill и password-менеджеры.
             autoComplete="off"
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            helperText={
-              localDisplayNameError ? undefined : t("server.users.field_display_name_hint")
-            }
             error={localDisplayNameError ? t(localDisplayNameError) : undefined}
+            actions={[
+              <CharCounter key="counter" value={deeplink.displayName.length} max={64} />,
+            ]}
           />
         </div>
 
@@ -244,8 +268,9 @@ export function DeeplinkSection({
             of a dropdown with «Авто» that mapped to the same h2 anyway.
             Pattern copied from SshConnectForm's auth-method picker. */}
         <div>
-          <label className="block text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
+          <label className="flex items-center gap-1 text-sm font-medium mb-1.5 text-[var(--color-text-secondary)]">
             {t("server.users.field_upstream_protocol")}
+            <FieldHelp text={t("server.users.field_upstream_protocol_help")} />
           </label>
           <div className="flex rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden">
             {UPSTREAM_SEGMENTS.map((seg) => {
@@ -284,6 +309,7 @@ export function DeeplinkSection({
           checked={deeplink.skipVerification}
           onChange={(v) => updateDeeplink("skipVerification", v)}
           label={t("server.users.toggle_skip_verify")}
+          labelExtra={<FieldHelp text={t("server.users.toggle_skip_verify_help")} />}
           description={
             serverCertType === "lets_encrypt"
               ? t("server.users.toggle_le_not_needed")
@@ -310,6 +336,7 @@ export function DeeplinkSection({
               }
             }}
             label={t("server.users.toggle_pin_cert")}
+            labelExtra={<FieldHelp text={t("server.users.toggle_pin_cert_help")} />}
             description={
               serverCertType === "lets_encrypt"
                 ? t("server.users.toggle_le_not_needed")

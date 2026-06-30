@@ -334,6 +334,12 @@
 
   /* Glass */
   --color-glass-bg: rgba(17, 17, 24, 0.45);
+  /* IN-59: a STRONGER frosted-glass tint for the sticky lead card. The 0.45 --color-glass-bg let
+     scrolled-under content read through sharply (the IN-50 bleed); this near-opaque tint + a heavy
+     backdrop-blur keeps the matte-glass LOOK (content behind is a soft, dimmed blur) without any
+     readable bleed. --color-bg-primary (#0d0d0d) at 0.45 alpha — transparent enough to read as
+     glass; the heavy blur keeps the scrolled-under content soft (non-sharp). */
+  --color-glass-bg-strong: rgba(13, 13, 13, 0.45);
 
   /* Shadows */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.20);
@@ -462,6 +468,9 @@
 
   /* Glass */
   --color-glass-bg: rgba(255, 255, 255, 0.45);
+  /* IN-59: stronger frosted tint for the sticky lead card (light theme) — --color-bg-primary
+     (#f9f9f7) at 0.45 alpha. See the dark-theme note above. */
+  --color-glass-bg-strong: rgba(249, 249, 247, 0.45);
 
   /* Shadows */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);

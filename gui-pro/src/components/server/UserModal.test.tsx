@@ -387,6 +387,9 @@ describe("UserModal — Add mode", () => {
     const longName = "a".repeat(80);
     fireEvent.change(displayNameInput, { target: { value: longName } });
     expect((displayNameInput as HTMLInputElement).value.length).toBe(64);
+    // The character counter (moved INSIDE the field — ActionInput action slot,
+    // owner UAT) reflects the clamped length.
+    expect(screen.getByText("64/64")).toBeInTheDocument();
   });
 
   it("GAP: custom SNI with forbidden characters surfaces a format validation error", () => {

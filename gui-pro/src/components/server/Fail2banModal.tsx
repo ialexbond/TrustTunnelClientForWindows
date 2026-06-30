@@ -106,6 +106,12 @@ export function Fail2banModal({
   // Footer divider only shows when «Своя конфигурация» is selected (custom accordion open).
   const [customActive, setCustomActive] = useState(false);
 
+  // WR-06 (10.1 review): customDirty is the COMPLETE unsaved-state surface of this
+  // modal. The «Своя конфигурация» draft is the only thing a user can edit without
+  // committing; the three presets (Мягкая/Сбалансированная/Строгая) AUTO-APPLY the
+  // instant they're selected (Fail2banSettingsTab.handleApplyPreset →
+  // state.applyFail2banPreset), so there is no pending preset edit to lose. The
+  // close-confirm guard below is therefore intentionally scoped to customDirty.
   const handleClose = async () => {
     if (customDirty) {
       const ok = await confirm({
@@ -179,14 +185,20 @@ export function Fail2banModal({
           <p className="text-body-sm">
             {t("server.security.fail2ban.install_help")}
           </p>
-          <Button
-            onClick={() => void handleInstall()}
-            loading={state.isBusy("install-f2b")}
-            disabled={state.isBusy("install-f2b")}
-            data-testid="install-fail2ban-button"
-          >
-            {t("server.security.fail2ban.install_button")}
-          </Button>
+          {/* Install CTA — modal-footer standard (owner UAT): bottom-right, unified
+              with MtProto / Firewall so the install button is always in the same place. */}
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void handleInstall()}
+              loading={state.isBusy("install-f2b")}
+              disabled={state.isBusy("install-f2b")}
+              data-testid="install-fail2ban-button"
+            >
+              {t("server.security.fail2ban.install_button")}
+            </Button>
+          </div>
         </div>
       ) : (
         <>

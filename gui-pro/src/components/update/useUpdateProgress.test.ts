@@ -183,6 +183,31 @@ describe("useUpdateProgress", () => {
     });
     expect(result.current.state.phase).toBe("error");
     expect(result.current.state.errorMessage).toBe("complete.rolled_back");
+    // WR-01 (10.1 review): the EVENT-driven failure now also sets errorCode (so the
+    // modal's onError fires + cancelled-vs-error copy can be classified). With no
+    // separate code field on the payload, the message doubles as the code.
+    expect(result.current.state.errorCode).toBe("complete.rolled_back");
+  });
+
+  it("WR-01: a backend-emitted UPDATE_CANCELLED failure is recognised as a cancel via errorCode", async () => {
+    invokeMock.mockImplementation(() => new Promise(() => {}));
+    const { result } = renderHook(() => useUpdateProgress());
+    await waitFor(() =>
+      expect(listeners.has("update-protocol-step")).toBe(true)
+    );
+    act(() => {
+      void result.current.startUpdate(
+        { host: "1.1.1.1", port: 22, user: "root", password: "x" },
+        "1.0.33"
+      );
+    });
+    act(() => {
+      listeners.get("update-protocol-step")!({
+        payload: { step: "complete", status: "failed", percent: 100, message: "UPDATE_CANCELLED" },
+      });
+    });
+    expect(result.current.state.phase).toBe("error");
+    expect(result.current.state.errorCode).toBe("UPDATE_CANCELLED");
   });
 
   it("invoke reject transitions to 'error' с errorCode", async () => {
@@ -316,6 +341,60 @@ describe("useUpdateProgress", () => {
         targetVersion: "1.0.34",
       })
     );
+  });
+
+  it("WR-02: no-progress watchdog flips a wedged active update to a closeable timeout error", async () => {
+    vi.useFakeTimers();
+    try {
+      invokeMock.mockImplementation(() => new Promise(() => {})); // backend hangs, never resolves/fails
+      const { result } = renderHook(() => useUpdateProgress());
+      act(() => {
+        void result.current.startUpdate(
+          { host: "1.1.1.1", port: 22, user: "root", password: "x" },
+          "1.0.33"
+        );
+      });
+      expect(result.current.state.phase).toBe("active");
+      // No progress event for the watchdog window → flip to a closeable error.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+      expect(result.current.state.phase).toBe("error");
+      expect(result.current.state.errorCode).toBe("UPDATE_TIMEOUT");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("WR-02: progress events re-arm the watchdog so a still-progressing update does not time out", async () => {
+    vi.useFakeTimers();
+    try {
+      invokeMock.mockImplementation(() => new Promise(() => {}));
+      const { result } = renderHook(() => useUpdateProgress());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0); // flush async listen() registration
+      });
+      act(() => {
+        void result.current.startUpdate(
+          { host: "1.1.1.1", port: 22, user: "root", password: "x" },
+          "1.0.33"
+        );
+      });
+      // A progress event every 90s (< the 120s gap) for ~6 minutes keeps it alive.
+      for (let i = 0; i < 4; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(90_000);
+        });
+        act(() => {
+          listeners.get("update-protocol-step")!({
+            payload: { step: "extract", status: "running", percent: 10 * (i + 1), message: "" },
+          });
+        });
+      }
+      expect(result.current.state.phase).toBe("active");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("unmount calls unlisten cleanup", async () => {

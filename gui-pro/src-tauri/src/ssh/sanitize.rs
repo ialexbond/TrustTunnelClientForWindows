@@ -220,6 +220,36 @@ pub fn validate_client_name(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Config display name for the multi-config manifest (`rename_config`, Phase 11).
+///
+/// WR-02 (11-REVIEW.md): the manifest `rename_config` IPC command writes the
+/// frontend-supplied name verbatim into `configs.json`. Per V13 / defence-in-depth the
+/// backend must re-validate even though `ConfigCard` pre-validates client-side: a direct
+/// `invoke("rename_config", {id, name})` bypasses the UI entirely.
+///
+/// Unlike `validate_display_name` (which is interpolated UNQUOTED into a shell `-n` flag,
+/// so it rejects spaces + shell metacharacters), the config name is ONLY stored in the
+/// manifest JSON and rendered as a card label — it never reaches a shell. So we permit
+/// arbitrary printable Unicode (Cyrillic names like «Германия — Frankfurt», spaces,
+/// punctuation) and only guard the trust-boundary invariants: trim, reject empty, cap the
+/// length (an oversized name bloats every `list_configs` read), and reject control chars
+/// (newlines / NUL would corrupt the rendered list and any future log line). Returns the
+/// trimmed, validated name so the caller persists the canonical form.
+pub fn validate_config_name(s: &str) -> Result<String, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("Config name must not be empty".into());
+    }
+    // Count CHARACTERS (not bytes) so a multi-byte Cyrillic name is not unfairly cut.
+    if trimmed.chars().count() > 64 {
+        return Err("Config name too long (max 64 characters)".into());
+    }
+    if trimmed.chars().any(|c| c.is_control()) {
+        return Err("Config name contains invalid characters".into());
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Server-side file path: no shell metacharacters, basic path chars only.
 pub fn validate_server_path(s: &str) -> Result<(), String> {
     if s.is_empty() || s.len() > 512 {
@@ -1171,6 +1201,46 @@ mod tests {
         assert!(validate_display_name("with\nnewline").is_err());
         assert!(validate_display_name("with\0null").is_err());
         assert!(validate_display_name(&"a".repeat(65)).is_err());
+    }
+
+    // ─── Config name (WR-02, Phase 11 manifest rename) ───
+
+    #[test]
+    fn validate_config_name_accepts_unicode_and_trims() {
+        // Cyrillic / spaces / punctuation are fine — the name is a manifest label, never
+        // a shell argument, so it is NOT subject to the shell-metachar whitelist.
+        assert_eq!(validate_config_name("Германия").unwrap(), "Германия");
+        assert_eq!(
+            validate_config_name("Германия — Frankfurt").unwrap(),
+            "Германия — Frankfurt"
+        );
+        assert_eq!(validate_config_name("My Server #1").unwrap(), "My Server #1");
+        // Leading/trailing whitespace is trimmed and the canonical form returned.
+        assert_eq!(validate_config_name("  padded  ").unwrap(), "padded");
+    }
+
+    #[test]
+    fn validate_config_name_rejects_empty() {
+        assert!(validate_config_name("").is_err());
+        assert!(validate_config_name("   ").is_err()); // whitespace-only trims to empty
+        assert!(validate_config_name("\t\n").is_err());
+    }
+
+    #[test]
+    fn validate_config_name_rejects_too_long() {
+        // 64 chars OK, 65 rejected — counted by CHARACTERS so multi-byte names are fair.
+        assert!(validate_config_name(&"a".repeat(64)).is_ok());
+        assert!(validate_config_name(&"a".repeat(65)).is_err());
+        assert!(validate_config_name(&"я".repeat(65)).is_err()); // multi-byte still counts chars
+    }
+
+    #[test]
+    fn validate_config_name_rejects_control_chars() {
+        // Newlines / NUL / other control chars would corrupt the rendered card list.
+        assert!(validate_config_name("name\nwith newline").is_err());
+        assert!(validate_config_name("name\0null").is_err());
+        assert!(validate_config_name("name\twith tab").is_err());
+        assert!(validate_config_name("name\rcarriage").is_err());
     }
 
     // ─── log_level ───────────────────────────────────────

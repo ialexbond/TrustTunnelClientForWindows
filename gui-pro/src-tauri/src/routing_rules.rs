@@ -223,6 +223,21 @@ pub async fn export_routing_rules(
     }
 }
 
+/// IN-57: the shared 64 KiB cap for routing-rules JSON. Both import doors MUST use it — WR-06
+/// originally hardened only the drag-drop door (`config.rs::import_dropped_content`), so the
+/// «Импорт» button below imported a 250 KiB file with no cap (owner hit it).
+pub const MAX_ROUTING_JSON_BYTES: usize = 64 * 1024;
+
+/// Parse routing-rules JSON through the shared size cap. Returns i18n KEY codes for the
+/// user-facing failures (`routing.import_too_large` / `routing.import_invalid`) so the frontend
+/// translates them instead of leaking a raw English string into a Russian UI (owner complaint).
+pub fn parse_routing_rules_capped(content: &str) -> Result<RoutingRules, String> {
+    if content.len() > MAX_ROUTING_JSON_BYTES {
+        return Err("routing.import_too_large".into());
+    }
+    serde_json::from_str(content).map_err(|_| "routing.import_invalid".to_string())
+}
+
 #[tauri::command]
 pub async fn import_routing_rules(
     app: tauri::AppHandle,
@@ -236,12 +251,14 @@ pub async fn import_routing_rules(
 
     if let Some(fp) = file_path {
         let path = fp.as_path().ok_or("Invalid file path")?;
+        // IN-57: cap on the file's on-disk size BEFORE reading, so a multi-GB file is never
+        // slurped into memory (the abuse case WR-06 guarded on the drag door).
+        if std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_ROUTING_JSON_BYTES as u64 {
+            return Err("routing.import_too_large".into());
+        }
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read file: {e}"))?;
-        let rules: RoutingRules = serde_json::from_str(&content)
-            .map_err(|e| format!("Invalid routing rules format: {e}"))?;
-
-        // Save imported rules
+        let rules = parse_routing_rules_capped(&content)?; // shared cap + i18n error codes
         save_routing_rules(rules.clone())?;
         eprintln!("[routing] Imported from {}", path.display());
         Ok(Some(rules))
@@ -734,6 +751,32 @@ mod tests {
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── IN-57: the shared routing-import cap (BOTH the drag door and the «Импорт» button) ──
+
+    #[test]
+    fn parse_routing_rules_capped_rejects_oversized_with_i18n_code() {
+        let big = "x".repeat(MAX_ROUTING_JSON_BYTES + 1);
+        assert_eq!(
+            parse_routing_rules_capped(&big).unwrap_err(),
+            "routing.import_too_large",
+            "oversized input must return the i18n key code, not raw English"
+        );
+    }
+
+    #[test]
+    fn parse_routing_rules_capped_rejects_invalid_json_with_i18n_code() {
+        assert_eq!(
+            parse_routing_rules_capped("not json {").unwrap_err(),
+            "routing.import_invalid"
+        );
+    }
+
+    #[test]
+    fn parse_routing_rules_capped_accepts_valid_under_cap() {
+        let json = r#"{"direct":[],"proxy":[],"block":[],"process_mode":"exclude","processes":[]}"#;
+        assert!(parse_routing_rules_capped(json).is_ok());
     }
 
     // ── T-33: default private/local exclusions in general mode ──

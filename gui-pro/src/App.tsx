@@ -1,5 +1,6 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
@@ -7,7 +8,10 @@ import StatusPanel from "./components/StatusPanel";
 import LogPanel from "./components/LogPanel";
 import { ControlPanelPage } from "./components/ControlPanelPage";
 import SetupWizard from "./components/SetupWizard";
-import ConnectionPanel from "./components/ConnectionPanel";
+import {
+  ConnectionPanel as MultiConfigConnectionPanel,
+  type ConnectionPanelHandle,
+} from "./components/connection/ConnectionPanel";
 import RoutingPanel from "./components/RoutingPanel";
 import AboutPanel from "./components/AboutPanel";
 import AppSettingsPanel from "./components/AppSettingsPanel";
@@ -29,14 +33,14 @@ import { useTabPersistence } from "./shared/hooks/useTabPersistence";
 import { useActivityLogStartup } from "./shared/hooks/useActivityLogStartup";
 import { useAppShellActions } from "./shared/hooks/useAppShellActions";
 import { useTrayNavigate } from "./shared/hooks/useTrayNavigate";
+import { runViewTransition } from "./shared/utils/viewTransition";
 import { DropOverlay } from "./shared/ui/DropOverlay";
-import { EmptyState } from "./shared/ui/EmptyState";
-import { ConfirmDialog, ConfirmDialogProvider, Button } from "./shared/ui";
-import { ImportConfigModal } from "./components/wizard/ImportConfigModal";
+import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
+import { ImportModal } from "./components/connection/ImportModal";
 import { shouldActivateConfig } from "./components/wizard/shouldActivateConfig";
 import { WelcomeTour } from "./components/welcome/WelcomeTour";
 import { useWelcomeTour } from "./shared/hooks/useWelcomeTour";
-import { Settings, Terminal, X, FileText } from "lucide-react";
+import { Terminal, X } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry, ReconnectProgress } from "./shared/types";
 
 function App() {
@@ -87,7 +91,12 @@ function App() {
   // install panel load sticks around and the user sees the «Установить
   // / Выйти» screen even after a successful deploy.
   const [controlKey, setControlKey] = useState(0);
-  const [connectionKey, setConnectionKey] = useState(0);
+  // Phase 11: the old single-config ConnectionPanel (which consumed `connectionKey` as a
+  // remount key) is gone — the multi-config ConnectionPanel refreshes via its ref instead.
+  // The setter is kept because several hooks/handlers (useConfigLifecycle, useAppShellActions,
+  // the wizard/import paths) still signal a "config changed" remount through it; the value
+  // itself is no longer read by any panel.
+  const [, setConnectionKey] = useState(0);
   const [routingKey, setRoutingKey] = useState(0);
 
   // ─── Setup wizard overlay (UAT 2026-05-20) ───
@@ -105,13 +114,12 @@ function App() {
   // background while the user browses other tabs. The × still fully closes.
   const [wizardLaunchTab, setWizardLaunchTab] = useState<AppTab>("control");
 
-  // ─── Connection no-config import relocation (D-02, A1) ───
-  // The wizard no longer hosts the import entry (WelcomeStep is deleted, D-01). It is
-  // relocated onto the connection no-config EmptyState as ONE quiet "У меня уже есть
-  // конфиг" affordance that opens the reused ImportConfigModal. 06-uat: the «Забрать с
-  // сервера» (fetch) choice was removed end-to-end — fetching an existing user's config is
-  // done from the Control Panel (per-user QR/Link), so the affordance now goes straight to
-  // the import modal. `importOpen` mounts the reused ImportConfigModal unchanged.
+  // ─── Connection import (D-06) ───
+  // The import entry lives on the «Подключение» tab — the empty-state CTA and the «Добавить
+  // конфиг» button both call ConnectionPanel's onImport, which opens the production
+  // ImportModal (Phase 11, 11-06). `importOpen` mounts that modal. The «Забрать с сервера»
+  // (fetch) choice was removed end-to-end — fetching an existing user's config is done from
+  // the Control Panel (per-user QR/Link).
   const [importOpen, setImportOpen] = useState(false);
   // C-22 / D-14 — a clicked tt:// / trusttunnel:// deep-link pre-fills the import
   // modal. The URL survives `consume()` here so it can be passed as the modal's
@@ -211,6 +219,47 @@ function App() {
     // render; our local deepLinkUrl copy keeps it for the modal.
     consumeDeepLink();
   }, [deepLinkPendingUrl, consumeDeepLink]);
+  // Phase 11 — handle on the production multi-config ConnectionPanel so an import can
+  // refresh the manifest list without remounting the panel.
+  const connectionPanelRef = useRef<ConnectionPanelHandle>(null);
+
+  // Phase 11 (P11-02) — startup migration of the legacy single tt_config_path into the
+  // configs.json manifest as config #1 + last-used. Runs ONCE before the Connection tab's
+  // list loads. Idempotent on the Rust side (a re-run is a no-op), and once-guarded here
+  // against StrictMode's double-invoke. The legacy active path is read from localStorage
+  // and passed to Rust — the manifest becomes the authoritative source of truth, but the
+  // user's existing working config file is never lost.
+  const didMigrateRef = useRef(false);
+  useEffect(() => {
+    if (didMigrateRef.current) return;
+    didMigrateRef.current = true;
+    const legacyPath = localStorage.getItem("tt_config_path") || null;
+    void invoke("migrate_configs", { legacyActivePath: legacyPath })
+      .then(() => {
+        // Refresh the list once migration has built the manifest (the panel may have
+        // already mounted and loaded an empty list before migration finished).
+        connectionPanelRef.current?.reload();
+      })
+      .catch(() => {
+        // Migration failure must not break the app — the tab still renders (degrading to
+        // the empty state). The legacy config file remains on disk regardless.
+      });
+  }, []);
+
+  // IN-25/IN-49: refresh the Connection list when the WINDOW regains focus (e.g. the user deleted
+  // config files in the file manager while away). The Rust fs-watcher (`configs-changed`, IN-31) is
+  // the PRIMARY real-time trigger for on-disk changes; this focus listener is only a backstop.
+  // NOTE: there is deliberately NO refresh on tab-SHOW — re-fetching the list a frame after the tab
+  // becomes visible was a needless re-render that fought the scroll position; the fs-watcher already
+  // keeps the list current while the tab is hidden, so switching back shows the correct list with the
+  // scroll preserved natively (IN-49).
+  useEffect(() => {
+    if (activeTab !== "connection") return;
+    const onFocus = () => connectionPanelRef.current?.refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [activeTab]);
+
   const reconnectResolve = useRef<(() => void) | null>(null);
   // AUDIT-2026-06-11 #8: true only while useVpnActions.handleReconnect (manual
   // «Сохранить и переподключить») is in flight. Shared with useVpnEvents so its
@@ -232,6 +281,20 @@ function App() {
     manualReconnectActiveRef,
   });
 
+  // ─── VPN Actions ───
+  // IN-32: moved ABOVE useConfigLifecycle so the lifecycle hook can receive handleDisconnect —
+  // when the ACTIVE config file is deleted externally (file manager) while connected, the tunnel
+  // must be torn down. (useVpnActions only depends on state + the refs above, so the move is safe.)
+  const { handleConnect, handleDisconnect, handleReconnect, switchTo } = useVpnActions({
+    config,
+    status,
+    setStatus,
+    setError,
+    i18n,
+    reconnectResolve,
+    manualReconnectActiveRef,
+  });
+
   // ─── Shell hooks (Phase 12.5 decomposition) ───
   useConfigLifecycle({
     config,
@@ -243,6 +306,9 @@ function App() {
     setActiveTab,
     pushSuccess,
     i18n,
+    // IN-32: disconnect the tunnel if the ACTIVE config file disappears on disk while live.
+    status,
+    onDisconnect: handleDisconnect,
   });
   useAutoConnect({ config, status, setStatus, setError });
   useTabPersistence({ activeTab, config, status, connectedSince });
@@ -265,19 +331,43 @@ function App() {
   // loop (froze connect/disconnect/drag/exit) and its shortcut collided with the
   // language toggle. The in-window overlay cannot block the event loop.
 
-  // ─── VPN Actions ───
-  const { handleConnect, handleDisconnect, handleReconnect } = useVpnActions({
-    config,
-    status,
-    setStatus,
-    setError,
-    i18n,
-    reconnectResolve,
-    manualReconnectActiveRef,
-  });
+  // Phase 11 (11-06): the multi-config Connection tab connects/switches an ARBITRARY config
+  // path (the lead card or any inactive card), not just the app-level `config.configPath`.
+  // `switchTo` (useVpnActions) does the disconnect-then-connect + marks the manifest
+  // last-used; here we also promote the chosen path to the app-level active config +
+  // localStorage so the rest of the single-config surface (Routing/Settings/status panel,
+  // tt_config_path) stays consistent with what the user just connected. The optimistic
+  // promote happens up front; if the connect ultimately errors, the status reflects it but
+  // the active-config pointer still points at the user's intended config (matching the old
+  // connect path, which also set the path before awaiting).
+  const handleConnectConfig = useCallback(
+    (path: string) => {
+      if (path) {
+        // 11-UAT gap D: commit the active-path change INSIDE a View Transition so the
+        // «Подключение» list animates the chosen config gliding to the lead (and the previous
+        // lead settling down), instead of snapping. ConfigList tags each card with a stable
+        // view-transition-name; flushSync (inside runViewTransition) makes this re-render
+        // synchronous so the browser captures the before/after frames. Reduced-motion / no-API
+        // (jsdom) fall back to an instant promote.
+        runViewTransition(() => {
+          setConfig((prev) => ({ ...prev, configPath: path }));
+        });
+        localStorage.setItem("tt_config_path", path);
+      }
+      void switchTo(path);
+    },
+    [switchTo],
+  );
 
   // ─── Shell action callbacks ───
-  const { handleClearConfig, handleDropConfig, handleDropRouting } = useAppShellActions({
+  // Phase 11: handleClearConfig (the old single-config "remove config" action wired into
+  // the legacy ConnectionPanel) is no longer surfaced — config removal moves to the
+  // per-card delete flow (delete_config) in a later wave.
+  // IN-18: the CONFIG drop path is now handled by handleImportedConfigDrop below (App-level,
+  // behind the shouldActivateConfig guard) — NOT useAppShellActions.handleDropConfig, which
+  // unconditionally promoted the dropped file to the active config even mid-connection (gap F:
+  // the live card vanished). Only the routing drop still uses the shell-actions hook.
+  const { handleDropRouting } = useAppShellActions({
     status,
     setStatus,
     setConfig,
@@ -286,6 +376,42 @@ function App() {
     setRoutingKey,
     setActiveTab,
   });
+
+  // IN-18 (gap F): an import ADDS a config to the manifest — it must NEVER steal which config
+  // is active while a tunnel is live (P11-02). Promote the imported config to the app-level
+  // active config ONLY when there is no active config AND the VPN is idle (the SAME gate the
+  // install wizard uses, shouldActivateConfig). Otherwise leave the live connection's active
+  // pointer untouched and just refresh the card list so the new card appears below. Shared by
+  // BOTH import routes (drag-drop + the import modal); without this guard, dropping/importing a
+  // config while connected repointed activeConfigPath and the connected lead card disappeared.
+  const promoteImportedConfig = useCallback(
+    (configPath: string) => {
+      if (configPath) {
+        const hasActiveConfig = Boolean(config.configPath);
+        const vpnConnected = status !== "disconnected" && status !== "error";
+        if (shouldActivateConfig({ hasActiveConfig, vpnConnected })) {
+          setConfig((prev) => ({ ...prev, configPath }));
+          localStorage.setItem("tt_config_path", configPath);
+          localStorage.removeItem("tt_config_cleared");
+        }
+      }
+      // Always refresh the manifest list so the newly-added card (or copy) appears, regardless
+      // of whether it was promoted to active.
+      connectionPanelRef.current?.reload();
+      setConnectionKey((k) => k + 1);
+    },
+    [config.configPath, status],
+  );
+
+  // Drag-drop config import: promote (guarded) + show the «Подключение» tab so the user sees
+  // the new card. (Routing drops still go through handleDropRouting.)
+  const handleImportedConfigDrop = useCallback(
+    (configPath: string) => {
+      promoteImportedConfig(configPath);
+      setActiveTab("connection");
+    },
+    [promoteImportedConfig],
+  );
 
   // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..5 = navigate, etc.)
   useKeyboardShortcuts({
@@ -301,10 +427,13 @@ function App() {
   // ─── File drag-and-drop ───
   const { isDragging } = useFileDrop({
     status,
-    onConfigImported: handleDropConfig,
+    onConfigImported: handleImportedConfigDrop,
     onRoutingImported: handleDropRouting,
     pushSuccess,
     isBusy: false,
+    // IN-16: gate the accepted drop format per tab («Подключение» → .toml only, «Маршрутизация»
+    // → .json only) so the overlay label is truthful and a wrong-tab file is rejected clearly.
+    activeTab,
   });
 
   const hasConfig = !!config.configPath;
@@ -349,7 +478,21 @@ function App() {
       className="h-screen flex flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
     >
-      <DropOverlay isDragging={isDragging} />
+      {/* IN-15: gate the window-level drop overlay OFF while the import modal is open — the
+          modal renders its OWN drop overlay (App.tsx ImportModal isDragging), so without this
+          gate BOTH overlays mounted at once (one bleeding through the other) when a file was
+          dragged over the open «Добавить конфиг» modal. */}
+      <DropOverlay
+        isDragging={isDragging && !importOpen}
+        // IN-16: tab-aware hint so the overlay matches what the tab accepts — «Подключение» a
+        // config (.toml), «Маршрутизация» routing rules (.json). Replaces the legacy
+        // dual-format hint («.toml — конфиг VPN, .json — правила маршрутизации»).
+        hint={
+          activeTab === "routing"
+            ? i18n.t("drop.overlay_hint_routing")
+            : i18n.t("drop.overlay_hint_config")
+        }
+      />
 
       {/* Title bar — brand + logs toggle + window controls.
           The logs button lands in the title bar's right-side controls slot
@@ -446,64 +589,49 @@ function App() {
           aria-hidden={activeTab !== "connection"}
         >
           <PanelErrorBoundary onNavigateHome={() => setActiveTab("control")} panelName="Connection">
-            {hasConfig ? (
-              <ConnectionPanel
-                key={connectionKey}
-                configPath={config.configPath}
-                onConfigChange={setConfig}
-                status={status}
-                onReconnect={handleReconnect}
-                onSwitchToSetup={() => setActiveTab("control")}
-                onClearConfig={handleClearConfig}
-                onVpnModeChange={setVpnMode}
-                statusPanel={statusPanelFor("connection")}
-              />
-            ) : (
-              <>
-                <EmptyState
-                  icon={<Settings className="w-6 h-6" />}
-                  heading={i18n.t("connection.noConfig", "Нет подключения")}
-                  body={i18n.t("connection.noConfigHint", "Настройте сервер в «Панель управления», чтобы управлять VPN-подключением")}
-                  className="flex-1"
-                  // D-02 / A1: ONE quiet secondary affordance. 06-uat: it now opens the
-                  // import modal directly — the «Забрать с сервера» (fetch) choice was
-                  // removed (fetching an existing user's config is done from the Control
-                  // Panel via per-user QR/Link). The Connection section itself is NOT
-                  // restyled (v2/CONNECT-01).
-                  action={
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={<FileText className="w-4 h-4" />}
-                      onClick={() => setImportOpen(true)}
-                    >
-                      {i18n.t("connection.importConfig", "Импортировать конфиг")}
-                    </Button>
-                  }
-                />
-                {/* Reused unchanged from the deleted WelcomeStep (single-consumer,
-                    D-02). onImported wires to the same setConfig/tt_config_path writers
-                    the wizard's onSetupComplete uses (App.tsx). */}
-                <ImportConfigModal
-                  open={importOpen}
-                  // C-22 / D-14: pre-fill with the deep-link URL when present.
-                  // undefined for a manual open so the link field stays empty.
-                  initialUrl={deepLinkUrl ?? undefined}
-                  onClose={() => {
-                    setImportOpen(false);
-                    // Clear the stale deep-link URL so a later manual open is not pre-filled.
-                    setDeepLinkUrl(null);
-                  }}
-                  onImported={(path) => {
-                    setConfig((prev) => ({ ...prev, configPath: path }));
-                    if (path) localStorage.setItem("tt_config_path", path);
-                    setConnectionKey((k) => k + 1);
-                    setImportOpen(false);
-                    setDeepLinkUrl(null);
-                  }}
-                />
-              </>
-            )}
+            {/* Phase 11 (11-06): the Connection tab is now FULLY wired. ConnectionPanel owns
+                the multi-config list + the per-config edit modal + delete/duplicate/rename
+                (via the Wave-1 manifest commands) and routes connect/switch/disconnect through
+                the VPN actions passed here. The lead card carries the live status; an inactive
+                card's «Переключиться» calls switchTo. The empty-no-configs state lives inside
+                ConfigList. */}
+            <MultiConfigConnectionPanel
+              ref={connectionPanelRef}
+              onImport={() => setImportOpen(true)}
+              status={status}
+              activeConfigPath={config.configPath}
+              onConnect={handleConnectConfig}
+              onDisconnect={handleDisconnect}
+              onSwitchTo={handleConnectConfig}
+              onReconnect={handleReconnect}
+            />
+            {/* Production ImportModal (Phase 11, Plan 04) — the SINGLE point through which a
+                config is added (two tiles / link / drag, errors-in-modal, host+user
+                duplicate resolution). The deep-link pre-fill seeds the link field but the
+                import fires only on an explicit click (deeplink-never-auto). On success the
+                imported path is appended to the manifest by the backend import path; here we
+                promote it to the app-level active config + reload the card list. */}
+            <ImportModal
+              isOpen={importOpen}
+              // C-22 / D-14: pre-fill with the deep-link URL when present (prefill only —
+              // the import never fires automatically). undefined for a manual open.
+              initialUrl={deepLinkUrl ?? undefined}
+              isDragging={isDragging}
+              onClose={() => {
+                setImportOpen(false);
+                // Clear the stale deep-link URL so a later manual open is not pre-filled.
+                setDeepLinkUrl(null);
+              }}
+              onImported={(path) => {
+                // IN-18 (gap F): promote the imported config to active ONLY when safe (no active
+                // config + VPN idle) — never steal a live connection's active pointer. Always
+                // reloads the list so the new card (or copy) appears. The backend import already
+                // appended the manifest entry (no add_config here — that would double-add).
+                promoteImportedConfig(path);
+                setImportOpen(false);
+                setDeepLinkUrl(null);
+              }}
+            />
           </PanelErrorBoundary>
         </div>
 
@@ -685,6 +813,18 @@ function App() {
               if (activate) {
                 setConfig((prev) => ({ ...prev, configPath }));
                 localStorage.setItem("tt_config_path", configPath);
+              }
+              // 11-UAT IN-10: register the freshly-installed config in the manifest so it shows
+              // as a card in «Подключение». The wizard writes a branded
+              // «[<CC>_]TrustTunnel_<login>.toml» on disk but previously only set the legacy
+              // tt_config_path marker — never add_config — so the install config was missing from
+              // the multi-config list (and startup migrate_configs is idempotent, so it could not
+              // pick it up later). add_config dedups by canonical path (safe no-op if already
+              // tracked); then refresh the list so the new card appears immediately.
+              if (configPath) {
+                void invoke("add_config", { path: configPath })
+                  .then(() => connectionPanelRef.current?.reload())
+                  .catch(() => {});
               }
               setWizardActive(false);
               // UAT 2026-05-21 — honour DoneStep navigation intent. DoneStep

@@ -27,14 +27,22 @@ import type { ServerState } from "./useServerState";
 
 interface Props {
   state: ServerState;
+  /**
+   * Story-only escape hatch: seed the «Последнее обновление» timestamp so the
+   * post-fetch card state (WithLogs) can be shown in isolation. The real
+   * `lastUpdate` is set ONLY by the modal's onLogsFetched callback after a real
+   * fetch, which a static story can't fire — so without this seed the WithLogs
+   * story is visually identical to Empty. Never passed in production.
+   */
+  _lastUpdate?: Date | null;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function LogsSection({ state }: Props) {
+export function LogsSection({ state, _lastUpdate }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(_lastUpdate ?? null);
   // E-9 + E-20 fix: the card's preview and timestamp must reflect a REAL fetch.
   // The modal fetches into its own state and reports success back via
   // `onLogsFetched`; we store that text here (NOT state.serverLogs, which is

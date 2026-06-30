@@ -22,10 +22,26 @@ interface UseAutoConnectParams {
 const NETWORK_READY_MAX_WAIT_MS = 30_000;
 const NETWORK_READY_POLL_MS = 1_000;
 
+// Phase 11 (P11-03 / D-05): one config entry as `list_configs` returns it. We read
+// ONLY id/path/last_used here to resolve the auto-connect target — the rest of the
+// ConfigSummary (name/host/user) is irrelevant to launching the tunnel, and the
+// password is never part of this shape (D-29). Kept local (a structural subset) so
+// this hook does not depend on useConfigList's full type.
+interface LastUsedCandidate {
+  path: string;
+  last_used: boolean;
+}
+
 /**
  * Fires a one-shot VPN auto-connect on startup when `tt_auto_connect=true`
- * is set in localStorage and a config path exists. Uses a 1.5s delay so
- * that the UI mounts before the connect attempt.
+ * is set in localStorage. Uses a 1.5s delay so the UI mounts before the connect.
+ *
+ * Phase 11 (P11-03 / D-05): the target is the MANIFEST's LAST-USED config (resolved
+ * via `list_configs`), NOT the single app-level `config.configPath`. The multi-config
+ * manifest is now the source of truth; there is no "favourite"/star concept — the
+ * last-used config (the one `switchTo`/connect last marked) is what we reconnect to.
+ * If no last-used config exists (empty manifest / none marked) the hook is a clean
+ * no-op (it never invokes vpn_connect). `config.logLevel` still supplies the log level.
  *
  * T-22 B3: before firing, it waits a BOUNDED time for the local network to be
  * ready (so an autostart relaunch at OS boot never engages the killswitch before
@@ -34,7 +50,8 @@ const NETWORK_READY_POLL_MS = 1_000;
  * proceeds immediately (captive-net-safe, and keeps existing call sites/tests that
  * don't mock the probe working).
  *
- * Extracted from App.tsx verbatim (Phase 12.5, D-03); boot guard added (T-22 B3).
+ * Extracted from App.tsx verbatim (Phase 12.5, D-03); boot guard added (T-22 B3);
+ * target switched to the manifest last-used config (Phase 11, P11-03).
  */
 export function useAutoConnect({
   config,
@@ -59,11 +76,17 @@ export function useAutoConnect({
   useEffect(() => {
     if (autoConnectDone.current) return;
     if (localStorage.getItem("tt_auto_connect") !== "true") return;
-    if (!config.configPath) return;
-    // NOTE: stale closure — on the first run this is always "disconnected"
-    // (App initializes status before the snapshot lands). Kept as a cheap
-    // first-render guard; the LIVE checks are the statusRef re-checks below (#15).
-    if (status !== "disconnected") return;
+    // Phase 11: the OLD `if (!config.configPath) return` precondition is dropped — the
+    // target is now the manifest's last-used config, not the single app-level config
+    // path. Whether anything is auto-connected is decided AFTER the network wait, once
+    // we resolve the last-used path from list_configs (no last-used → clean no-op).
+    // IN-02: the old `if (status !== "disconnected") return` guard here was DEAD — `status`
+    // is the FIRST-run closure value (deps = [config.configPath]), which App always
+    // initializes to "disconnected" before the mount snapshot lands, so it never fired. The
+    // ONLY correct status gate is the LIVE `statusRef.current` re-check just before the
+    // optimistic "connecting" mark below (#15) — keeping the dead closure check invited a
+    // future edit to trust the stale value and reintroduce the AUDIT #15 bug, so it is
+    // removed. The one-shot latch stays.
     autoConnectDone.current = true;
 
     let cancelled = false;
@@ -115,9 +138,51 @@ export function useAutoConnect({
       const liveStatus = statusRef.current;
       if (liveStatus !== "disconnected" && liveStatus !== "connecting") return;
 
+      // Phase 11 (P11-03): resolve the LAST-USED config from the manifest and connect
+      // to IT. The manifest is the source of truth; list_configs returns the entries
+      // with their last_used flag. A missing/empty manifest, a failed read, or no
+      // last-used entry all collapse to a clean no-op — auto-connect simply stands down
+      // (we roll our own optimistic "connecting" mark back, exactly like the cancelled
+      // path, so the UI does not stick on a spinner with nothing connecting).
+      let lastUsedPath: string | undefined;
+      try {
+        const list = await invoke<LastUsedCandidate[]>("list_configs");
+        lastUsedPath = list?.find((c) => c.last_used)?.path;
+        // WR-05: reconcile the manifest last-used marker with the app-level active config
+        // (`config.configPath`) that the rest of the UI (status panel / Routing tab / the
+        // lead card) renders as active. The two are normally kept in sync — App.tsx
+        // `handleConnectConfig` promotes the chosen path to `config.configPath` after a
+        // switch — but they CAN diverge (the manifest last-used is mutated at runtime via
+        // set_last_used/switchTo, while the app-level pointer is its own state). If they
+        // disagree, auto-connecting the manifest last-used would silently reconnect a
+        // DIFFERENT server than the one shown active. The displayed active config is the
+        // user-facing source of truth, so prefer `config.configPath` when it is set and
+        // the manifest still lists it — keeping "what auto-connect reconnects to" equal to
+        // "what the UI shows active". Fall back to the manifest last-used only when no
+        // app-level active path exists (cold start before any in-session switch).
+        const activePath = config.configPath;
+        if (
+          activePath &&
+          activePath !== lastUsedPath &&
+          list?.some((c) => c.path === activePath)
+        ) {
+          lastUsedPath = activePath;
+        }
+      } catch {
+        // Manifest unreadable → treat as "no target": stand down without an error.
+        lastUsedPath = undefined;
+      }
+      if (cancelled) return;
+      if (!lastUsedPath) {
+        // No last-used config to connect to. Undo our own optimistic "connecting" mark
+        // (functional updater leaves a backend-owned status untouched) and stop.
+        setStatus((s) => (s === "connecting" ? "disconnected" : s));
+        return;
+      }
+
       try {
         await invoke("vpn_connect", {
-          configPath: config.configPath,
+          configPath: lastUsedPath,
           logLevel: config.logLevel,
         });
       } catch (e) {
@@ -141,6 +206,11 @@ export function useAutoConnect({
       cancelled = true;
       clearTimeout(timer);
     };
+  // WR-05: `config.configPath` is now a genuine read inside the effect (the auto-connect
+  // target is reconciled against it), so it is a legitimate, non-hidden dependency. The
+  // other values read (`config.logLevel`, the setters) are stable for a single one-shot
+  // run guarded by `autoConnectDone`; the disable documents that the one-shot semantics
+  // are intentional and we do not want the effect to re-fire on logLevel/setter identity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.configPath]);
 }
