@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useConfigList, type ConfigSummary } from "../../shared/hooks/useConfigList";
 import { usePerConfigPing, type PingTarget } from "../../shared/hooks/usePerConfigPing";
+import type { ConfigPingSource } from "../../shared/hooks/useConfigPingSource";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { formatError } from "../../shared/utils/formatError";
@@ -36,6 +37,15 @@ interface ConnectionPanelProps {
   onSwitchTo: (path: string) => void;
   /** Reconnect the active tunnel (used by ConfigEditView's save-and-reconnect). */
   onReconnect: () => Promise<void>;
+  /**
+   * 12-07: the App-level SINGLE config-list + inactive-ping source. When supplied, this panel reuses
+   * its already-dedup'd `configs` + `pings` + reload/refresh/loading instead of running its OWN
+   * `useConfigList`/`usePerConfigPing` — so the auto-switch engine and the cards share ONE ping loop
+   * (T-12-14). When OMITTED (the panel's own unit tests render it standalone), it falls back to its
+   * internal hooks and behaves exactly as before. `source.configs` is ALREADY identity-collapsed by
+   * `useConfigPingSource`, so the panel must NOT re-dedup it.
+   */
+  source?: ConfigPingSource;
 }
 
 /**
@@ -58,11 +68,19 @@ interface ConnectionPanelProps {
  */
 export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanelProps>(
   function ConnectionPanel(
-    { onImport, status, activeConfigPath, onConnect, onDisconnect, onSwitchTo, onReconnect },
+    { onImport, status, activeConfigPath, onConnect, onDisconnect, onSwitchTo, onReconnect, source },
     ref,
   ) {
     const { t } = useTranslation();
-    const { configs, reload, refresh, loading } = useConfigList();
+    // 12-07: when an App-level `source` is injected, this panel REUSES it (single ping loop). The
+    // internal hooks below still run (hooks cannot be conditional) but are made inert when source is
+    // present: the internal list is ignored in favour of source.configs, and the internal ping loop
+    // is fed an EMPTY target set so it never probes (the App-level loop is the only one fanning out).
+    const usingSource = source !== undefined;
+    const internal = useConfigList();
+    const reload = source?.reload ?? internal.reload;
+    const refresh = source?.refresh ?? internal.refresh;
+    const loading = source?.loading ?? internal.loading;
     const confirm = useConfirm();
     const pushSnack = useSnackBar();
 
@@ -98,10 +116,14 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
     // .toml files, which migration (path-dedup only) keeps as two manifest entries (11-UAT gap
     // A). This is a presentation-layer collapse; the on-disk manifest is untouched. The
     // active-path-aware winner keeps the connected file so the live status still lands.
-    const visibleConfigs = useMemo(
-      () => dedupeConfigsByIdentity(configs, activeConfigPath),
-      [configs, activeConfigPath],
+    // 12-07: when a `source` is injected its `configs` are ALREADY dedup'd by useConfigPingSource —
+    // re-running the collapse would be redundant, so we take them as-is. Only the standalone (no
+    // source) path dedups the internal list here.
+    const internalVisibleConfigs = useMemo(
+      () => dedupeConfigsByIdentity(internal.configs, activeConfigPath),
+      [internal.configs, activeConfigPath],
     );
+    const visibleConfigs = source?.configs ?? internalVisibleConfigs;
 
     // ─── Scroll handling (IN-49 — trust native preservation) ───
     // The list scroll used to jump to the top in MANY situations. The ONLY real root was reload()
@@ -133,12 +155,16 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
 
     // Ping every config's endpoint for live reachability bands (D-16). The targets are
     // memoized on the joined id|path so a pure re-render does not restart the ping loop.
-    const targets: PingTarget[] = useMemo(
-      () => visibleConfigs.map((c) => ({ id: c.id, path: c.path })),
+    // 12-07: when a `source` is injected the App-level loop already produced `source.pings` — feed
+    // the INTERNAL loop an EMPTY target set so it never probes (exactly ONE inactive-ping loop, the
+    // App-level one). Standalone (no source) keeps the panel's own loop as before.
+    const internalTargets: PingTarget[] = useMemo(
+      () => (usingSource ? [] : internalVisibleConfigs.map((c) => ({ id: c.id, path: c.path }))),
       // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the set changes
-      [visibleConfigs.map((c) => `${c.id}:${c.path}`).join("|")],
+      [usingSource, internalVisibleConfigs.map((c) => `${c.id}:${c.path}`).join("|")],
     );
-    const pings = usePerConfigPing(targets);
+    const internalPings = usePerConfigPing(internalTargets);
+    const pings = source?.pings ?? internalPings;
 
     // ─── ConfigEditView (per-config settings modal) ───
     // Two pieces of state so the modal plays its EXIT animation: `editOpen` drives the Modal's

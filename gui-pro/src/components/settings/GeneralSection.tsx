@@ -1,18 +1,21 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { Settings, Power, EyeOff, Zap, HelpCircle, FileText, FolderOpen } from "lucide-react";
+import { Settings, Power, EyeOff, FileText, FolderOpen } from "lucide-react";
 import { Card, CardHeader } from "../../shared/ui/Card";
 import { Toggle } from "../../shared/ui/Toggle";
-import { Tooltip } from "../../shared/ui/Tooltip";
 
+// Phase 12 (12-07): the «Автоподключение при запуске» toggle MOVED out of «Основные» into
+// «Авто-режим» (AutoModeSettings). It reads/writes the SAME `tt_auto_connect` localStorage key
+// via useAppSettings — exactly ONE control for that setting now lives in the app (no duplicate).
+// The `hasConfig`/`onAutoConnectChange` props (which only fed that toggle's disabled/tooltip
+// state + its change callback) were removed together with it. GeneralSection now holds only the
+// app-startup-behavior toggles: autostart / start-minimized / logging.
 interface Props {
-  hasConfig: boolean;
-  onAutoConnectChange?: (enabled: boolean) => void;
   onSaved?: () => void;
 }
 
-export function GeneralSection({ hasConfig, onAutoConnectChange, onSaved }: Props) {
+export function GeneralSection({ onSaved }: Props) {
   const { t } = useTranslation();
 
   // ─── Autostart (tauri plugin) ───
@@ -81,18 +84,6 @@ export function GeneralSection({ hasConfig, onAutoConnectChange, onSaved }: Prop
     }
   };
 
-  // ─── Auto-connect (localStorage) ───
-  const [autoConnect, setAutoConnect] = useState(() => {
-    return localStorage.getItem("tt_auto_connect") === "true";
-  });
-
-  const handleAutoConnect = (value: boolean) => {
-    setAutoConnect(value);
-    localStorage.setItem("tt_auto_connect", String(value));
-    onAutoConnectChange?.(value);
-    onSaved?.();
-  };
-
   return (
     <Card padding="md">
       <CardHeader
@@ -115,28 +106,6 @@ export function GeneralSection({ hasConfig, onAutoConnectChange, onSaved }: Prop
           label={t("settings.app.start_minimized")}
           description={t("settings.app.start_minimized_desc")}
           icon={<EyeOff className="w-3.5 h-3.5" />}
-        />
-        <Toggle
-          value={autoConnect}
-          onChange={handleAutoConnect}
-          label={t("settings.app.auto_connect")}
-          description={
-            hasConfig
-              ? t("settings.app.auto_connect_desc")
-              : t("settings.app.auto_connect_no_config")
-          }
-          icon={<Zap className="w-3.5 h-3.5" />}
-          disabled={!hasConfig}
-          labelExtra={
-            !hasConfig ? (
-              <Tooltip text={t("settings.app.auto_connect_no_config")}>
-                <HelpCircle
-                  className="w-3 h-3 cursor-help"
-                  style={{ color: "var(--color-text-muted)" }}
-                />
-              </Tooltip>
-            ) : undefined
-          }
         />
         <Toggle
           value={loggingEnabled}

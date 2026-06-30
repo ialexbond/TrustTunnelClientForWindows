@@ -427,6 +427,10 @@ pub fn run() {
             commands::manifest::duplicate_config,
             commands::manifest::rename_config,
             commands::manifest::set_last_used,
+            // Phase 12 (Plan 12-02) — persist the «Авто-режим» priority order (D-02 / D-05)
+            // through the SAME atomic manifest funnel (lock + temp+fsync+rename). The engine
+            // reads this order on the next tick; last-used still leads via list_configs sort.
+            commands::manifest::reorder_configs,
             // Phase 11 (Plan 11-03) — per-config endpoint-reachability ping. Reads
             // host:port Rust-side from the config's own .toml (path-validated, host
             // whitelist-validated); a bounded TCP connect, independent of the VPN core.

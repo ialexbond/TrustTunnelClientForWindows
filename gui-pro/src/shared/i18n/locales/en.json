@@ -195,6 +195,31 @@
       "logging": "Collect logs",
       "logging_desc": "Save application events and VPN engine output to files",
       "logging_show_folder": "Show in folder"
+    },
+    "autoMode": {
+      "title": "Auto mode",
+      "description": "Automatic connection and notifications",
+      "auto_best_label": "Auto-connect to the best server",
+      "auto_best_desc": "If the active connection stays at high latency for a while, the app switches to another working config with a low ping",
+      "auto_best_help": "The app monitors the ping of the active config and, on persistently high latency, switches to the next working config in the priority list.",
+      "threshold_label": "Latency threshold, ms",
+      "threshold_help": "Above this value the connection to the server is treated as poor. This is a separate auto-switch threshold, unrelated to the colored ping bands (150/300 ms) on the cards — it measures the reachability and latency to the server, not the round-trip inside the tunnel.",
+      "interval_label": "Check interval, sec",
+      "interval_help": "How often to check the ping of the active config.",
+      "checks_label": "Consecutive checks",
+      "checks_help": "How many checks in a row the ping must exceed the threshold before switching. For example, at a 15 sec interval and 3 checks the switch happens after about 45 sec of persistently high latency.",
+      "priority_label": "Config priority",
+      "priority_help": "The order in which the app looks for a working config to switch to. There is no «favorite» — only the order matters.",
+      "auto_connect_launch_label": "Auto-connect on startup",
+      "auto_connect_launch_desc": "On startup the app connects to the server you used last time",
+      "auto_connect_launch_help": "On startup the app connects to the last-used config — nothing to pick. No ping is measured at startup.",
+      "notifications_label": "Connection status notifications",
+      "notifications_desc": "Show a notification on connect, disconnect, reconnect, link recovery and VPN auto-switch",
+      "notifications_help": "The app's own notification (not the Windows system toast): it appears in the bottom-right corner of the screen even when the window is closed or minimized to tray, independent of the OS notification settings.",
+      "priority_list_aria": "Config priority for auto-connect",
+      "priority_move_up": "Move up",
+      "priority_move_down": "Move down",
+      "priority_position_announce": "{{name}} — position {{position}} of {{total}}"
     }
   },
   "vpn_modes": {
