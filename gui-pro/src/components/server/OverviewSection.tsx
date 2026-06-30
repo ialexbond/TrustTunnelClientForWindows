@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { IconButton } from "../../shared/ui/IconButton";
+import { IpDustOverlay } from "../../shared/ui/IpDustOverlay";
 import { ProgressBar } from "../../shared/ui/ProgressBar";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { EcgSvg, ecgHeartbeat, ecgFlatline } from "../../shared/ui/EcgSvg";
@@ -84,6 +85,17 @@ const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
 const PRESS_STATE_CLASS =
   "active:bg-[var(--color-bg-active)] active:scale-[0.98] origin-center transition-[transform,background-color] duration-[var(--transition-fast)] ease-[var(--ease-out)]";
 
+// Overview card rule (owner UAT): the error caption is NEVER truncated and NEVER
+// line-capped — it wraps to as many lines as the width needs. This is the shared
+// MINIMUM flex-basis an error-capable card (Ping / Speed) adopts WHILE in its
+// error state: wide enough that the full «Не удалось получить данные. Проверьте
+// подключение и нажмите «Обновить».» caption lands in ~2 lines at the normal
+// width. On a narrower window the card just wraps taller (3–4 lines) and grows —
+// it only stops shrinking at this basis (the floor below which it won't compress).
+// Sized to the same 280px the Speed card uses; Ping's compact 140px basis widens
+// to this only on error.
+const ERROR_CARD_MIN_BASIS = 280;
+
 /* ── Title ── */
 function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel, action }: {
   icon: React.ReactNode;
@@ -99,11 +111,16 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel,
 }) {
   return (
     <div className="flex items-center justify-between mb-3" style={{ height: 32 }}>
-      <div className="flex items-center gap-2 h-full whitespace-nowrap">
+      {/* Title rule (owner UAT): NEVER truncate the title to «…». whitespace-nowrap
+          keeps it on one line and — with NO min-w-0 on this block — the flex item's
+          automatic min-width floors the card to (icon + full title + action) width.
+          So the card grows to fit the whole title AND the chevron never overflows
+          the frame (the card simply can't get narrower than its content). */}
+      <div className="flex items-center gap-2 h-full">
         <span className="flex items-center justify-center w-5 h-5 shrink-0" style={accent}>{icon}</span>
-        <span className="text-title-sm" style={primary}>{text}</span>
+        <span className="text-title-sm whitespace-nowrap" style={primary}>{text}</span>
       </div>
-      <div className="flex items-center h-full shrink-0 ml-2">
+      <div className="flex items-center h-full shrink-0 ml-1">
         {action}
         {onRefresh && (
           // A-1 (Plan 09-19): adopt the shared IconButton primitive instead of a
@@ -121,8 +138,14 @@ function Title({ icon, text, onRefresh, refreshing, clickable, refreshAriaLabel,
           />
         )}
         {clickable && (
-          <span className="flex items-center justify-center w-8 h-8">
-            <ChevronRight className="w-5 h-5" style={muted} />
+          // Chevron affordance rule (owner UAT): the › occupies the SAME 32px box as
+          // the refresh IconButton (w-8 h-8, glyph centered), so the right-side
+          // affordance sits at the same inset from the card edge AND keeps a clear gap
+          // from the (truncating) title — instead of a bare glyph jammed against the
+          // edge. The whole card is the button, so the chevron needs no hover box of
+          // its own; the box is purely for consistent spacing/rhythm with refresh cards.
+          <span className="flex items-center justify-center w-8 h-8 shrink-0" style={muted}>
+            <ChevronRight className="w-5 h-5" />
           </span>
         )}
       </div>
@@ -719,8 +742,11 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         )}
       </Card>
 
-      {/* Ping — refresh скрыт когда протокол off (UAT consistency со Speed карточкой) */}
-      <Card padding="md" style={{ flex: "1 1 140px" }}>
+      {/* Ping — refresh скрыт когда протокол off (UAT consistency со Speed карточкой).
+          Width rule: compact 140px basis for the normal "45 ms" value; widens to
+          ERROR_CARD_MIN_BASIS in the error state so the 2-line caption fits (see
+          the ERROR_CARD_MIN_BASIS note above — keeps Ping & Speed consistent). */}
+      <Card padding="md" style={{ flex: ping === -1 ? `1 1 ${ERROR_CARD_MIN_BASIS}px` : "1 1 140px" }}>
         <Title
           icon={<Activity className="w-5 h-5" />}
           text={t("server.overview.cards.ping")}
@@ -746,13 +772,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
             <>
               <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
               {ping === -1 && (
-                // R4-F01: the long «Не удалось получить данные…» caption was
-                // nowrap+truncate (D-09), which clipped the actionable «нажмите
-                // «Обновить»» tail to an ellipsis. The card height is now bounded
-                // by the parent minHeight (h:48) instead, so we let the caption
-                // WRAP — centered, capped at 2 lines (line-clamp-2) — keeping it
-                // readable without re-introducing the vertical blow-up.
-                <span className="text-xs text-center line-clamp-2 max-w-full" style={muted}>
+                // Error caption rule (owner UAT): show the FULL «Не удалось
+                // получить данные…» text and let it wrap freely — NO line cap, NO
+                // truncation/ellipsis. The card is wide enough (ERROR_CARD_MIN_BASIS)
+                // that this lands in 2 lines at the normal width; on a narrower
+                // window it simply wraps to 3–4 lines and the card grows taller
+                // (minHeight is a floor, not a ceiling). Nothing is ever clipped.
+                <span className="text-xs text-center max-w-full" style={muted}>
                   {t("server.overview.dataUnavailable")}
                 </span>
               )}
@@ -812,9 +838,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
              Refresh в Title перезапустит speedtest_run. */
           <div className="flex flex-col items-center justify-center gap-0.5 py-2" style={{ minHeight: 48 }}>
             <span className="font-mono" style={{ ...bigNum, ...muted }}>—</span>
-            {/* D-09: single-line error caption — nowrap + truncate (same rationale
-                as the Ping caption: a 2nd line breaks the flex-wrap row rhythm). */}
-            <span className="text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-full" style={muted}>
+            {/* Error caption rule (unified with the Ping card): centered, full text,
+                wraps freely — NO line cap, NO ellipsis. The Speed card's 280px basis
+                lands it in 2 lines at the normal width; narrower just wraps taller. */}
+            <span className="text-xs text-center max-w-full" style={muted}>
               {t("server.overview.dataUnavailable")}
             </span>
           </div>
@@ -871,21 +898,34 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
           }
         />
         <div className="flex items-center justify-center py-2">
-          {/* D-08: blur the IP value when hidden (blur(6px)) → readable silhouette
-              but unreadable address; blur(0) when revealed. Only `filter` changes —
-              same font-mono, same box, same real width in both states → no layout
-              shift / card reflow on toggle. transition over --transition-normal
-              (200ms) with --ease-out for a smooth, non-snap reveal (the token
-              collapses to 0ms under prefers-reduced-motion automatically). */}
-          <span
-            className="font-mono"
-            style={{
-              ...bigNum,
-              filter: ipRevealed ? "blur(0)" : "blur(6px)",
-              transition: "filter var(--transition-normal) var(--ease-out)",
-            }}
-          >
-            {state.host || "—"}
+          {/* IP masking: when hidden the address is NOT rendered (opacity 0) and an animated dust
+              field (IpDustOverlay) covers it; revealing CROSS-FADES the value IN as the dust fades
+              OUT (400ms ease-out). The dust is sized to the ADDRESS, not the whole card — a relative
+              inline-block wrapper sized to the value, with the dust as its absolute inset-0 child.
+              Replaced the old blur(6px) (readable silhouette + hard halo edge). The value reserves
+              its width in both states → no layout shift on toggle. */}
+          <span className="relative inline-block" style={bigNum}>
+            <span
+              className="font-mono"
+              style={{
+                opacity: ipRevealed ? 1 : 0,
+                transition: "opacity 400ms var(--ease-out)",
+                // While hidden the value is transparent but still occupies its box, and the dust
+                // canvas above is pointer-events:none — so a hover lands on this text and the UA
+                // paints a text/I-beam cursor over the invisible characters. Suppress it (default
+                // arrow + no text selection) while masked; revealed → normal selectable IP for copy.
+                cursor: ipRevealed ? undefined : "default",
+                userSelect: ipRevealed ? undefined : "none",
+              }}
+            >
+              {state.host || "—"}
+            </span>
+            <span
+              className="absolute inset-0"
+              style={{ opacity: ipRevealed ? 0 : 1, transition: "opacity 400ms var(--ease-out)", pointerEvents: "none" }}
+            >
+              <IpDustOverlay active={!ipRevealed} />
+            </span>
           </span>
         </div>
       </Card>
@@ -926,20 +966,25 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         </div>
       </Card>
 
-      {/* Uptime — fast uptime (server_get_uptime, <100ms) fallback на stats.uptime_seconds.
-          Fast polling независим от server_get_stats (тормозится sleep 1 для CPU%). */}
+      {/* Uptime — the live 10s stats poll (stats.uptime_seconds) is AUTHORITATIVE and
+          advances over the session. The one-shot server_get_uptime (<100ms) is only a
+          FAST-FIRST-PAINT fallback shown until that first poll lands, so the card isn't
+          blank for ~10s on open. (WR-04 10.1 review: prefer the live poll — fastUptime
+          previously won for the whole mount, freezing the value at the open-time snapshot.) */}
       <Card padding="md" style={{ flex: "1 1 160px" }}>
         <Title icon={<Clock className="w-5 h-5" />} text={t("server.overview.cards.uptime")} refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center py-2">
-          {/* D-09 (Plan 07-06): whitespace-nowrap + truncate on the Uptime value.
-              A 2nd line would change this card's height and break the flex-wrap
-              row rhythm (the grid relies on consistent heights to wrap into clean
-              rows). overflow-hidden text-ellipsis is the overflow fallback — the
-              rare long value truncates instead of wrapping. */}
-          {fastUptime !== null ? (
-            <span className="font-mono whitespace-nowrap overflow-hidden text-ellipsis" style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
-          ) : stats ? (
-            <span className="font-mono whitespace-nowrap overflow-hidden text-ellipsis" style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
+          {/* Uptime value rule (owner UAT, overrides D-09): NEVER wrap, NEVER
+              truncate — show the value in full and let the card size to its
+              content. whitespace-nowrap keeps it on one line; dropping
+              overflow-hidden/text-ellipsis means the flex item's automatic
+              min-width (= the value's intrinsic width) floors the card, so it
+              grows to fit instead of clipping to «…». Realistic values stay short
+              ("128д 19ч"), so this never blows up a row. */}
+          {stats ? (
+            <span className="font-mono whitespace-nowrap" style={bigNum}>{formatServerUptime(stats.uptime_seconds, t)}</span>
+          ) : fastUptime !== null ? (
+            <span className="font-mono whitespace-nowrap" style={bigNum}>{formatServerUptime(fastUptime, t)}</span>
           ) : statsLoading ? (
             <Skeleton variant="line" width={80} height={28} />
           ) : (

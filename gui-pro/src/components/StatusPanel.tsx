@@ -7,6 +7,7 @@ import { Button } from "../shared/ui/Button";
 import { StatusBadge } from "../shared/ui/StatusBadge";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
 import { formatUptime } from "../shared/utils/uptime";
+import { statusBadgeVariant } from "../shared/lib/statusBadgeVariant";
 
 interface StatusPanelProps {
   status: VpnStatus;
@@ -29,24 +30,9 @@ function UptimeCounter({ since }: { since: Date }) {
   return <span>{formatUptime(since)}</span>;
 }
 
-const statusBadgeVariant = (s: VpnStatus): "connected" | "connecting" | "error" | "disconnected" => {
-  if (s === "connected") return "connected";
-  // COLOR LOGIC (user decision, supersedes the original SPEC §1): 🟡 yellow = ANY active
-  // state where the app is working toward a connection — connecting, reconnecting AND
-  // recovering. «Восстановление» is a PROCESS that resolves the outage, not the failure
-  // itself, so it must NOT look alarming; only the TERMINAL «Ошибка» (no process running,
-  // gave up) is 🔴 red. This also makes the in-window badge match the tray, where all
-  // active states already share the yellow `reconnect` shield (tray.rs status_bucket) and
-  // only `error` is red — previously the window showed recovering red while the tray
-  // showed it yellow (an inconsistency this removes).
-  // WR-04: `disconnecting` is teardown-in-flight, NOT establishing — SPEC §1 marks it
-  // ⚪ gray (matching the tray `off` bucket), not yellow. It falls through to the gray
-  // `disconnected` variant alongside `disconnected`.
-  if (s === "connecting" || s === "reconnecting" || s === "recovering") return "connecting";
-  if (s === "error") return "error";
-  // disconnecting + disconnected → gray
-  return "disconnected";
-};
+// statusBadgeVariant moved to shared/lib/statusBadgeVariant.ts (imported above) so the
+// Phase-11 ConfigCard lead card reuses the EXACT SAME mapping without StatusPanel having to
+// export a non-component (which would break react-refresh). The colour logic is unchanged.
 
 function StatusPanel({
   status,

@@ -146,5 +146,96 @@ export function useVpnActions({
     await handleConnect();
   }, [status, handleConnect, reconnectResolve, setStatus, setError, manualReconnectActiveRef]);
 
-  return { handleConnect, handleDisconnect, handleReconnect };
+  // Phase 11 (P11-04 / D-20): MANUAL config switch — «Переключиться» on an inactive
+  // ConfigCard. This is intentionally a PLAIN disconnect→connect of the selected
+  // config through the EXISTING vpn_disconnect/vpn_connect commands; it touches NO
+  // VPN-core / killswitch / routing / reconnect-supervisor code, adds NO new VpnStatus
+  // value and NO `switching` wire-state (all deferred to Phase 14). A brief gap with no
+  // killswitch during the teardown→connect window is acceptable this phase — it is the
+  // SAME exposure as today's reconnect, not a new one (see 11-RESEARCH §Pitfall 4).
+  //
+  // The teardown-wait is the EXACT machinery handleReconnect uses (reconnectResolve
+  // promise + 5s safety timeout + the WR-02 reject-abort), reused verbatim so we do not
+  // hand-roll a second sequencer. On a successful connect the manifest last-used marker
+  // is moved to the newly-active config via set_last_used (the Wave-1 manifest command).
+  // set_last_used takes the manifest ID, not the path, so we resolve the ID from the
+  // path via list_configs (the manifest is the source of truth for id↔path).
+  const switchTo = useCallback(
+    async (path: string) => {
+      if (!path) {
+        setError(i18n.t("messages.config_required"));
+        setStatus("error");
+        return;
+      }
+
+      // Tear the existing tunnel down first ONLY if one is up/coming up. From a
+      // disconnected (or error/recovering/reconnecting) state we connect directly —
+      // there is nothing to wait for. NOTE: unlike handleReconnect (which keeps the
+      // status on "reconnecting" to drive its no-dwell guard), a manual switch is a
+      // plain disconnect→connect, so we use the honest "disconnecting" status during
+      // the teardown — there is no no-dwell requirement for switching this phase.
+      if (status === "connected" || status === "connecting") {
+        setStatus("disconnecting");
+        try {
+          await invoke("vpn_disconnect");
+        } catch (e) {
+          // WR-02 abort path (same as handleReconnect lines 108-123): a teardown
+          // REJECT means no "disconnected" event will ever fire — do NOT fall through
+          // to the wait (it would hang on the spinner for the full 5s safety window).
+          // Surface the error now and stop; do not proceed to connect.
+          setError(formatError(e));
+          setStatus("error");
+          return;
+        }
+
+        // Wait for the real "disconnected" event (sidecar fully torn down) before we
+        // connect the new config — the safety timeout resolves after 5s if it never
+        // comes. This is the EXACT reconnectResolve pattern from handleReconnect.
+        await new Promise<void>((resolve) => {
+          reconnectResolve.current = resolve;
+          setTimeout(() => {
+            if (reconnectResolve.current === resolve) {
+              reconnectResolve.current = null;
+              resolve();
+            }
+          }, 5000);
+        });
+      }
+
+      // Connect the selected config. handleConnect is NOT reused here because it always
+      // connects `config.configPath` (the app-level active config); switchTo connects an
+      // ARBITRARY path from the list. The connect shape (setStatus + invoke + catch) is
+      // identical to handleConnect otherwise.
+      try {
+        setStatus("connecting");
+        await invoke("vpn_connect", {
+          configPath: path,
+          logLevel: config.logLevel,
+        });
+      } catch (e) {
+        setError(formatError(e));
+        setStatus("error");
+        return;
+      }
+
+      // The connect was accepted — mark this config last-used so the lead card sorts to
+      // the top and auto-connect-on-launch (useAutoConnect) targets it next boot. Resolve
+      // the manifest id from the path; a missing entry / failed marker must NOT undo the
+      // successful connect (the tunnel is up — the marker is a best-effort UI nicety), so
+      // we swallow any error from this step.
+      try {
+        const list = await invoke<Array<{ id: string; path: string }>>("list_configs");
+        const match = list?.find((c) => c.path === path);
+        if (match) {
+          await invoke("set_last_used", { id: match.id });
+        }
+      } catch {
+        // Best-effort: the connect already succeeded; a last-used-marker failure is not
+        // worth flipping the user into an error state. The list reload will reconcile.
+      }
+    },
+    [status, config, i18n, setStatus, setError, reconnectResolve],
+  );
+
+  return { handleConnect, handleDisconnect, handleReconnect, switchTo };
 }

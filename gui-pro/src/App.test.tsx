@@ -39,17 +39,27 @@ vi.mock("./components/ControlPanelPage", () => ({
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let connectionPanelProps: any = {};
-vi.mock("./components/ConnectionPanel", () => ({
-  __esModule: true,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: (props: any) => {
-    connectionPanelProps = props;
-    // IN-11: App now mounts StatusPanel only on the ACTIVE tab (statusPanelFor). The
-    // default tab in the status tests is "connection", so render the passed statusPanel
-    // here — that is the live probe instance the `statusPanelProps` assertions read.
-    return <div data-testid="connection-panel">ConnectionPanel{props.statusPanel}</div>;
-  },
-}));
+// Phase 11: the Connection tab now renders the multi-config ConnectionPanel
+// (components/connection/ConnectionPanel — a forwardRef). It owns the card list and no
+// longer receives a statusPanel prop (the lead-card lifecycle owns the status, layered on
+// in Plan 03; the StatusPanel strip stays on Settings/About). Status-machine tests below
+// observe StatusPanel from the Settings tab via `gotoSettings()`.
+vi.mock("./components/connection/ConnectionPanel", async () => {
+  const React = await import("react");
+  return {
+    __esModule: true,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ConnectionPanel: React.forwardRef((props: any, ref: any) => {
+      // Test-only prop capture (same pattern as the other panel mocks) — the
+      // react-hooks/globals "no reassign in render" rule does not apply to a test double.
+      // eslint-disable-next-line react-hooks/globals
+      connectionPanelProps = props;
+      // Expose no-op reload()/refresh() so App's connectionPanelRef.current?.reload()/refresh() are safe.
+      React.useImperativeHandle(ref, () => ({ reload: () => {}, refresh: () => {} }), []);
+      return <div data-testid="connection-panel">ConnectionPanel</div>;
+    }),
+  };
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let routingPanelProps: any = {};
@@ -156,6 +166,17 @@ function setupListenMock() {
 function emitEvent(eventName: string, payload: any) {
   const cbs = listenCallbacks[eventName] || [];
   cbs.forEach(cb => cb({ payload }));
+}
+
+// Phase 11: the Connection tab no longer hosts the StatusPanel (the lead-card lifecycle
+// owns the status; the StatusPanel strip stays on Settings/About). The status-machine
+// tests observe StatusPanel through `statusPanelProps`, so they navigate to the Settings
+// tab — where StatusPanel still mounts — before asserting. The status logic itself lives
+// in hooks and is independent of which tab is active.
+async function gotoSettings() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /Настройки/ }));
+  });
 }
 
 describe("App", () => {
@@ -396,44 +417,46 @@ describe("App", () => {
   // removed end-to-end — fetching an existing user's config is done from the Control Panel
   // (per-user QR/Link). The quiet affordance now goes STRAIGHT to the import modal; there
   // is no fetch button. Assert by role + Russian text only.
-  describe("connection no-config import relocation (D-02 / Plan 03 / 06-uat)", () => {
-    it("surfaces an 'Импортировать конфиг' affordance and NO «Забрать с сервера» fetch entry", async () => {
-      // No config → the connection tab renders the noConfig EmptyState (the
-      // relocation target). Default invoke mock already returns no config.
+  describe("connection import entry (Phase 11 — multi-config ConnectionPanel)", () => {
+    // Phase 11: the import affordance moved INTO the multi-config ConnectionPanel
+    // (ConfigList's empty-state «Импортировать конфиг» CTA — covered by
+    // ConfigList.production.test.tsx). At the App level the panel is mocked, so we assert
+    // the App wires an `onImport` callback to the panel and that invoking it opens the
+    // reused ImportConfigModal. There is no «Забрать с сервера» fetch entry anywhere.
+    it("wires an onImport callback into ConnectionPanel and never a «Забрать с сервера» fetch entry", async () => {
       await act(async () => {
         render(<App />);
       });
-
-      // Navigate to the connection tab so its tabpanel is the active (non-aria-hidden)
-      // one — getByRole ignores aria-hidden elements.
       await act(async () => {
         fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
       });
 
-      // The import affordance is present…
-      expect(
-        screen.getByRole("button", { name: /Импортировать конфиг/ }),
-      ).toBeInTheDocument();
-      // …and the removed fetch entry is NOT.
+      // The App passes an import opener to the panel (the affordance lives inside it).
+      expect(typeof connectionPanelProps.onImport).toBe("function");
+      // …and the removed fetch entry is NOT present anywhere.
       expect(
         screen.queryByRole("button", { name: /Забрать с сервера/ }),
       ).not.toBeInTheDocument();
     });
 
-    it("clicking 'Импортировать конфиг' opens the import modal directly", async () => {
+    it("the panel's onImport opens the import modal directly", async () => {
       await act(async () => {
         render(<App />);
       });
       await act(async () => {
         fireEvent.click(screen.getByRole("tab", { name: /Подключение/ }));
       });
+      // Invoke the import opener the panel was given (the empty-state CTA's wiring).
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /Импортировать конфиг/ }));
+        connectionPanelProps.onImport();
       });
-      // The reused ImportConfigModal mounts — its title always renders when open.
+      // Phase 11 (11-06): App now mounts the PRODUCTION ImportModal — its accessible dialog
+      // name «Добавить конфиг» renders when open.
       expect(
-        screen.getByText(i18n.t("wizard.import.title")),
+        screen.getByRole("dialog", { name: i18n.t("connection.import.title") }),
       ).toBeInTheDocument();
+      // The legacy wizard ImportConfigModal is NO LONGER mounted in the Connection tabpanel.
+      expect(screen.queryByText(i18n.t("wizard.import.title"))).not.toBeInTheDocument();
     });
   });
 
@@ -459,12 +482,14 @@ describe("App", () => {
         "false",
       );
 
-      // The import modal is pre-filled: the deeplink helper text renders and the
-      // link field carries the URL.
+      // Phase 11 (11-06): the production ImportModal opens, pre-filled. Its dialog name
+      // «Добавить конфиг» renders and the link field carries the deep-link URL (prefill only).
       expect(
-        screen.getByText(i18n.t("wizard.import.deeplink_received")),
+        screen.getByRole("dialog", { name: i18n.t("connection.import.title") }),
       ).toBeInTheDocument();
-      const linkInput = screen.getByPlaceholderText(/tt:\/\/\?BASE64/) as HTMLInputElement;
+      const linkInput = screen.getByPlaceholderText(
+        i18n.t("connection.import.link_placeholder"),
+      ) as HTMLInputElement;
       expect(linkInput.value).toBe("tt://?ZmFrZQ");
     });
 
@@ -477,9 +502,10 @@ describe("App", () => {
         emitEvent("deep-link-url", { url: "tt://garbage" });
       });
 
-      // Modal is open + pre-filled, but no import command fired without a user click.
+      // Modal is open + pre-filled, but no import command fired without a user click
+      // (deeplink-never-auto). The production ImportModal's dialog renders pre-filled.
       expect(
-        screen.getByText(i18n.t("wizard.import.deeplink_received")),
+        screen.getByRole("dialog", { name: i18n.t("connection.import.title") }),
       ).toBeInTheDocument();
 
       const invokeCalls = vi.mocked(invoke).mock.calls.map((c) => c[0]);
@@ -594,6 +620,27 @@ describe("App", () => {
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("check_vpn_status_full");
   });
 
+  it("fires migrate_configs exactly once on mount (before the Connection list loads)", async () => {
+    // Phase 11 (P11-02): startup migrates the legacy single tt_config_path into the
+    // configs.json manifest. The effect is once-guarded (didMigrateRef) against
+    // StrictMode's double-invoke, so the command must fire EXACTLY ONCE per mount.
+    localStorage.setItem("tt_config_path", "/legacy/config.json");
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Called with the legacy active path read from localStorage (the migration input).
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("migrate_configs", {
+      legacyActivePath: "/legacy/config.json",
+    });
+    // …and only once — the once-guard must not let StrictMode double-run it.
+    const migrateCalls = vi
+      .mocked(invoke)
+      .mock.calls.filter((c) => c[0] === "migrate_configs");
+    expect(migrateCalls).toHaveLength(1);
+  });
+
   // ─── VPN connect/disconnect flow ───
 
   it("vpn-status event updates status to connected", async () => {
@@ -608,6 +655,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     // Simulate VPN connected event
     await act(async () => {
@@ -631,6 +679,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     // Connect then disconnect
     await act(async () => {
@@ -657,6 +706,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
       emitEvent("vpn-status", { status: "error", error: "Connection failed" });
@@ -678,6 +728,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     // 02-20: the AUTHORITATIVE status now comes from vpn-status (the internet-status
     // handler no longer sets status). The backend drives «Восстановление» on a local-net
@@ -719,6 +770,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     // Backend auto-reconnect drives the status to "reconnecting" (no frontend action).
     await act(async () => {
@@ -748,6 +800,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     // Call onConnect via StatusPanel props
     await act(async () => {
@@ -782,6 +835,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
       await statusPanelProps.onConnect();
@@ -806,6 +860,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
       await statusPanelProps.onDisconnect();
@@ -841,6 +896,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
       emitEvent("internet-status", { online: false, action: "disconnect" });
@@ -899,6 +955,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
       emitEvent("internet-status", { online: false, action: "give_up" });
@@ -922,6 +979,10 @@ describe("App", () => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") return null;
+      // Phase 11 (P11-03): auto-connect now targets the manifest's last-used config
+      // (resolved via list_configs), not the single tt_config_path.
+      if (cmd === "list_configs")
+        return [{ id: "id-1", path: "/config.json", last_used: true }];
       return null;
     });
 
@@ -929,9 +990,10 @@ describe("App", () => {
       render(<App />);
     });
 
-    // Auto-connect fires after 1500ms
+    // Auto-connect fires after 1500ms; advance with the async timer so the
+    // list_configs resolve + the connect microtask chain settle.
     await act(async () => {
-      vi.advanceTimersByTime(1600);
+      await vi.advanceTimersByTimeAsync(1600);
     });
 
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
@@ -970,15 +1032,19 @@ describe("App", () => {
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") throw new Error("Auto-connect failed");
+      // Phase 11 (P11-03): auto-connect resolves the last-used config from the manifest.
+      if (cmd === "list_configs")
+        return [{ id: "id-1", path: "/config.json", last_used: true }];
       return null;
     });
 
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
-      vi.advanceTimersByTime(1600);
+      await vi.advanceTimersByTimeAsync(1600);
     });
 
     // Allow microtasks to complete
@@ -1060,6 +1126,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     expect(statusPanelProps.status).toBe("connected");
     expect(statusPanelProps.connectedSince).toBeInstanceOf(Date);
@@ -1078,6 +1145,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     expect(statusPanelProps.status).toBe("connecting");
     expect(statusPanelProps.connectedSince).toBeNull();
@@ -1101,6 +1169,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     expect(statusPanelProps.status).toBe("error");
     expect(statusPanelProps.error).toBe("Configuration parse error. Check your config file.");
@@ -1325,6 +1394,7 @@ describe("App", () => {
       await act(async () => {
         render(<App />);
       });
+      await gotoSettings();
 
       await act(async () => {
         emitEvent("vpn-log", { message: line, source: "stderr" });
@@ -1352,6 +1422,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     await act(async () => {
       emitEvent("vpn-status", { status: "error", error: "Authorization failed" });
@@ -1364,30 +1435,9 @@ describe("App", () => {
   // vpn-log empty messages test removed — LogPanel no longer rendered in App.tsx
 
   // ─── Clear config ───
-
-  it("handleClearConfig disconnects VPN and clears config", async () => {
-    localStorage.setItem("tt_config_path", "/config.json");
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status_full") return { status: "connected", error: null };
-      if (cmd === "read_client_config") return { vpn_mode: "general" };
-      if (cmd === "auto_detect_config") return null;
-      if (cmd === "vpn_disconnect") return null;
-      return null;
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    // connectionPanelProps has onClearConfig
-    await act(async () => {
-      await connectionPanelProps.onClearConfig();
-    });
-
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_disconnect");
-    expect(localStorage.getItem("tt_config_path")).toBeFalsy();
-  });
+  // Phase 11: the per-config "clear/remove" action moved off the Connection panel into
+  // the per-card delete flow (delete_config, covered by manifest.rs tests); the old
+  // handleClearConfig App test was removed with that prop.
 
   // ─── Status panel visibility ───
 
@@ -1402,7 +1452,6 @@ describe("App", () => {
 
   it("shows StatusPanel on settings page when config exists", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
-    localStorage.setItem("tt_active_page", "settings");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "check_vpn_status") return "disconnected";
@@ -1414,11 +1463,12 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    // Phase 11: the StatusPanel strip is no longer injected into the Connection tab (the
+    // lead-card lifecycle owns it; it stays on Settings/About). Navigate to Settings and
+    // assert the StatusPanel actually renders there.
+    await gotoSettings();
 
-    // StatusPanel is passed as prop to ConnectionPanel, not directly rendered
-    // But it is also rendered in logs/about pages
-    // Let's check that connectionPanelProps.statusPanel is not null
-    expect(connectionPanelProps.statusPanel).toBeTruthy();
+    expect(screen.getByTestId("status-panel")).toBeInTheDocument();
   });
 
   // ─── Connected since persistence ───
@@ -1438,6 +1488,7 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
+    await gotoSettings();
 
     expect(statusPanelProps.connectedSince).toBeInstanceOf(Date);
   });

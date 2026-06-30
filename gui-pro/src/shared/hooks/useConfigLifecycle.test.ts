@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useConfigLifecycle } from "./useConfigLifecycle";
 import { captureListeners } from "../../test/fixtures/events";
-import type { AppTab, VpnConfig } from "../types";
+import type { AppTab, VpnConfig, VpnStatus } from "../types";
 import type { i18n as I18nType } from "i18next";
 
 // `@tauri-apps/api/event` listen + `@tauri-apps/api/core` invoke are globally
@@ -24,7 +24,7 @@ import type { i18n as I18nType } from "i18next";
  * test can assert which lifecycle branch fired. `config.configPath` drives the
  * watch effect and the event-payload path-match branches.
  */
-function makeParams(overrides: { configPath?: string } = {}) {
+function makeParams(overrides: { configPath?: string; status?: VpnStatus } = {}) {
   const config: VpnConfig = { configPath: overrides.configPath ?? "", logLevel: "info" };
   const setConfig = vi.fn();
   const setVpnMode = vi.fn();
@@ -32,6 +32,7 @@ function makeParams(overrides: { configPath?: string } = {}) {
   const setConnectionKey = vi.fn();
   const setActiveTab = vi.fn();
   const pushSuccess = vi.fn();
+  const onDisconnect = vi.fn();
   // The hook only calls i18n.t(); a thin stub returning the fallback is enough.
   const i18n = { t: (_key: string, fallback?: string) => fallback ?? _key } as unknown as I18nType;
 
@@ -46,8 +47,12 @@ function makeParams(overrides: { configPath?: string } = {}) {
       setActiveTab,
       pushSuccess,
       i18n,
+      // IN-32: default to disconnected so existing branches keep their original behavior; the
+      // IN-32 tests pass status: "connected" to exercise the external-delete disconnect.
+      status: overrides.status ?? ("disconnected" as VpnStatus),
+      onDisconnect,
     },
-    setters: { setConfig, setVpnMode, setWizardKey, setConnectionKey, setActiveTab, pushSuccess },
+    setters: { setConfig, setVpnMode, setWizardKey, setConnectionKey, setActiveTab, pushSuccess, onDisconnect },
   };
 }
 
@@ -185,6 +190,35 @@ describe("useConfigLifecycle (H-2 characterization)", () => {
     expect(setters.setWizardKey).toHaveBeenCalled();
     // Deletion surfaces an error-variant snackbar.
     expect(setters.pushSuccess).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  // ── IN-32: external delete of the ACTIVE config while CONNECTED tears down the tunnel ──
+  it("IN-32: deleting the active config while connected calls onDisconnect", async () => {
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    const { params, setters } = makeParams({ configPath: "C:/cfg/client.toml", status: "connected" });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+    await act(async () => {
+      events.emitEvent("config-file-changed", { exists: false, path: "C:/cfg/client.toml" });
+    });
+
+    expect(setters.onDisconnect).toHaveBeenCalled();
+    // Still resets the config + warns (existing behavior preserved).
+    expect(setters.setConfig).toHaveBeenCalledWith({ configPath: "", logLevel: "info" });
+  });
+
+  it("IN-32: deleting the active config while already disconnected does NOT call onDisconnect", async () => {
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    const { params, setters } = makeParams({ configPath: "C:/cfg/client.toml", status: "disconnected" });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+    await act(async () => {
+      events.emitEvent("config-file-changed", { exists: false, path: "C:/cfg/client.toml" });
+    });
+
+    expect(setters.onDisconnect).not.toHaveBeenCalled();
   });
 
   // ── config-file-changed: external RESTORE while no config loaded ──────────

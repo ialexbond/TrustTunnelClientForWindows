@@ -209,20 +209,23 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
                 : t("server.security.summary.status_inactive")}
           </span>
         </div>
-        <Button
-          variant={fwActive ? "secondary" : "primary"}
-          size="sm"
-          onClick={handleToggle}
-          loading={state.fwBusy}
-          disabled={state.fwBusy}
-          data-testid="ufw-toggle-button"
-        >
-          {!fwInstalled
-            ? t("server.security.firewall.action_install")
-            : fwActive
+        {/* When installed, the enable/disable action lives here in the status row.
+            The INSTALL action (not-installed) moved to the bottom footer (owner UAT) —
+            unified with MtProto / Fail2ban so the install CTA is always at the bottom. */}
+        {fwInstalled && (
+          <Button
+            variant={fwActive ? "secondary" : "primary"}
+            size="sm"
+            onClick={handleToggle}
+            loading={state.fwBusy}
+            disabled={state.fwBusy}
+            data-testid="ufw-toggle-button"
+          >
+            {fwActive
               ? t("server.security.firewall.action_disable")
               : t("server.security.firewall.action_enable")}
-        </Button>
+          </Button>
+        )}
       </div>
 
       {/* Section 2 — Rules table (D-3.1) */}
@@ -502,6 +505,23 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
             </div>
           )}
         </>
+      )}
+
+      {/* Install CTA — modal-footer standard (owner UAT): bottom-right, unified with
+          MtProtoModal / Fail2banModal so the install button is always in the same place. */}
+      {!fwInstalled && (
+        <div className="flex justify-end gap-2 mt-4">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleToggle}
+            loading={state.fwBusy}
+            disabled={state.fwBusy}
+            data-testid="ufw-toggle-button"
+          >
+            {t("server.security.firewall.action_install")}
+          </Button>
+        </div>
       )}
     </Modal>
   );

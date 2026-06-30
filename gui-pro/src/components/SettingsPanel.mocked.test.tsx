@@ -50,6 +50,7 @@ const baseMockState: SettingsState = {
   setLocalPath: vi.fn(),
   setError: vi.fn(),
   updateField: vi.fn(),
+  setListenerMode: vi.fn(),
   handleSave: vi.fn().mockResolvedValue(undefined),
   browseConfig: vi.fn(),
   clearConfig: vi.fn(),

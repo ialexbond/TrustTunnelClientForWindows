@@ -29,6 +29,19 @@ describe("Input", () => {
     expect(screen.getByText("Required field")).toBeInTheDocument();
   });
 
+  it("counterMax renders an in-field N/max character counter that tracks value (char count)", () => {
+    const { rerender } = render(<Input value="" counterMax={64} onChange={() => {}} placeholder="name" />);
+    expect(screen.getByText("0/64")).toBeInTheDocument();
+    // Multi-byte (Cyrillic) counts by CHARACTERS, not UTF-16 units.
+    rerender(<Input value="Тест" counterMax={64} onChange={() => {}} placeholder="name" />);
+    expect(screen.getByText("4/64")).toBeInTheDocument();
+  });
+
+  it("no counter is rendered when counterMax is omitted", () => {
+    render(<Input value="abc" onChange={() => {}} placeholder="no-counter" />);
+    expect(screen.queryByText(/\/\d+$/)).not.toBeInTheDocument();
+  });
+
   it("passes extra HTML attributes (type, name)", () => {
     render(<Input type="email" name="user-email" placeholder="email" />);
     const input = screen.getByPlaceholderText("email");

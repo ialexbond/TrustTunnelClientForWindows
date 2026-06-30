@@ -14,6 +14,14 @@ const baseConfig: VpnConfig = {
   logLevel: "info",
 } as VpnConfig;
 
+// Phase 11 (P11-03): the auto-connect target is now the MANIFEST's last-used config,
+// resolved via list_configs — NOT config.configPath. Most tests mock list_configs to
+// return this single entry whose path matches the legacy "/config.json" so the existing
+// connect-target assertions still read "/config.json" (now sourced from the manifest).
+const LAST_USED_LIST = [
+  { id: "id-1", path: "/config.json", last_used: true },
+];
+
 const setStatus = vi.fn();
 const setError = vi.fn();
 
@@ -72,6 +80,7 @@ describe("useAutoConnect — T-22 B3 boot guard", () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return true;
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -95,6 +104,7 @@ describe("useAutoConnect — T-22 B3 boot guard", () => {
         return ready;
       }
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -124,6 +134,7 @@ describe("useAutoConnect — T-22 B3 boot guard", () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return false; // never ready
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -142,6 +153,7 @@ describe("useAutoConnect — T-22 B3 boot guard", () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") throw new Error("unknown command");
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -167,6 +179,7 @@ describe("useAutoConnect — AUDIT-2026-06-11 #15 (live-status re-check, no stal
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return true;
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -193,6 +206,7 @@ describe("useAutoConnect — AUDIT-2026-06-11 #15 (live-status re-check, no stal
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return ready;
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -225,6 +239,7 @@ describe("useAutoConnect — AUDIT-2026-06-11 #15 (live-status re-check, no stal
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return ready;
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -256,6 +271,7 @@ describe("useAutoConnect — AUDIT-2026-06-11 #23 (cancel mid-wait rolls back th
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return false; // never ready → keeps polling
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -300,6 +316,7 @@ describe("useAutoConnect — AUDIT-2026-06-11 #23 (cancel mid-wait rolls back th
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "network_ready") return true; // ready at once → connect fires
       if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") return LAST_USED_LIST;
       return null;
     });
 
@@ -315,5 +332,206 @@ describe("useAutoConnect — AUDIT-2026-06-11 #23 (cancel mid-wait rolls back th
     });
 
     expect(setStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("useAutoConnect — Phase 11 (P11-03 / D-05): targets the manifest last-used config", () => {
+  it("connects to the manifest LAST-USED path, NOT config.configPath", async () => {
+    // The manifest last-used config is a DIFFERENT file than the app-level
+    // config.configPath — proving the target is sourced from list_configs, not the
+    // single config path. The list also carries a non-last-used entry that must be
+    // ignored.
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") {
+        return [
+          { id: "id-other", path: "/other.json", last_used: false },
+          { id: "id-last", path: "/last-used.json", last_used: true },
+        ];
+      }
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    // Connected the manifest last-used path — NOT the app-level "/config.json".
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/last-used.json",
+      logLevel: "info",
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
+  });
+
+  it("does NOT connect when the manifest has NO last-used config (clean no-op)", async () => {
+    // Empty/none-marked manifest → no target → vpn_connect must never fire and the
+    // optimistic "connecting" mark is rolled back to "disconnected".
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return []; // empty manifest — nothing last-used
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
+    // The optimistic "connecting" was rolled back (functional updater), not left stuck.
+    expect(setStatus).toHaveBeenCalledWith("connecting");
+    const updaterCalls = setStatus.mock.calls.filter(
+      (c) => typeof c[0] === "function",
+    );
+    expect(updaterCalls.length).toBeGreaterThanOrEqual(1);
+    const updater = updaterCalls[updaterCalls.length - 1][0] as (
+      s: VpnStatus,
+    ) => VpnStatus;
+    expect(updater("connecting")).toBe("disconnected");
+    // setError must NOT have fired — a missing last-used config is not an error.
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("stands down (no connect, no error) when list_configs throws", async () => {
+    // An unreadable manifest is treated as "no target" — auto-connect must not surface
+    // a hard error, just quietly stand down.
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") throw new Error("manifest read failed");
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
+    expect(setStatus).not.toHaveBeenCalledWith("error");
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("still honours the network_ready boot-guard before resolving the last-used target", async () => {
+    // Boot-guard preserved: while network_ready is false, NEITHER list_configs' result
+    // nor vpn_connect should drive a connect; once the network comes up, it connects to
+    // the last-used path.
+    localStorage.setItem("tt_auto_connect", "true");
+    let ready = false;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return ready;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+
+    // 1.5s mount delay → first probe false → no connect yet (boot-guard holds).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", expect.anything());
+
+    // Network comes up → next probe true → connect to the resolved last-used path.
+    ready = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
+  });
+
+  it("WR-05: reconciles to the app-level active config when it differs from manifest last-used", async () => {
+    // The manifest last-used marker and the app-level active config (config.configPath,
+    // what the status panel / Routing tab show as active) can diverge at runtime. When
+    // they disagree AND the active path is still a tracked config, auto-connect must
+    // target the DISPLAYED active config — not silently reconnect a different server.
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") {
+        // last_used points at /stale.json, but the app-level active is /config.json,
+        // which is ALSO a tracked entry → the active config must win.
+        return [
+          { id: "id-active", path: "/config.json", last_used: false },
+          { id: "id-stale", path: "/stale.json", last_used: true },
+        ];
+      }
+      return null;
+    });
+
+    // baseConfig.configPath === "/config.json" — the displayed active config.
+    renderAutoConnect();
+    await flush();
+
+    // Auto-connect targets the displayed active config, NOT the divergent last-used.
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/stale.json",
+      logLevel: "info",
+    });
+  });
+
+  it("WR-05: falls back to manifest last-used when the app-level active path is not tracked", async () => {
+    // If config.configPath is not (or no longer) a manifest entry, the app-level pointer
+    // is stale/unknown — fall back to the manifest last-used so auto-connect still works.
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "vpn_connect") return null;
+      if (cmd === "list_configs") {
+        // /config.json (the app-level active) is NOT in the list → cannot reconcile to it.
+        return [{ id: "id-last", path: "/last-used.json", last_used: true }];
+      }
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/last-used.json",
+      logLevel: "info",
+    });
+  });
+
+  it("preserves the once-guard: a re-render does not trigger a second connect", async () => {
+    // The autoConnectDone once-guard must survive the target change — StrictMode / a
+    // status re-render must not fire a second auto-connect.
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    const { rerender } = renderAutoConnect();
+    await flush();
+
+    const connectCallsAfterFirst = mockInvoke.mock.calls.filter(
+      (c) => c[0] === "vpn_connect",
+    ).length;
+    expect(connectCallsAfterFirst).toBe(1);
+
+    // A re-render with the same config must not re-arm auto-connect.
+    rerender({ status: "connected", config: baseConfig });
+    await flush();
+
+    const connectCallsAfterRerender = mockInvoke.mock.calls.filter(
+      (c) => c[0] === "vpn_connect",
+    ).length;
+    expect(connectCallsAfterRerender).toBe(1);
   });
 });

@@ -8,10 +8,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-// Mock react-i18next
+// Mock react-i18next. `i18n.language` drives the IN-41 plural branch; "ru" exercises the real
+// pluralRu path so the batch toast declines «конфиг». The single-config add (IN-43) calls
+// t("connection.snackbar.config_added") with no fallback, so resolve that key explicitly.
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback: string) => fallback,
+    t: (key: string, fallback?: string) =>
+      key === "connection.snackbar.config_added" ? "Конфиг добавлен" : fallback,
+    i18n: { language: "ru" },
   }),
 }));
 
@@ -69,6 +73,50 @@ describe("useFileDrop", () => {
       expect.stringContaining(".toml or .json"),
       "error"
     );
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  // IN-16: on the «Подключение» tab only a .toml config is accepted — a .json file is rejected
+  // with a clear message (no import) so the overlay's «только .toml» label stays truthful.
+  it("rejects a non-.toml file on the «Подключение» tab", async () => {
+    const pushSuccess = vi.fn();
+    renderHook(() =>
+      useFileDrop({ ...defaultOptions, activeTab: "connection", pushSuccess })
+    );
+
+    const file = new File(["{}"], "rules.json", { type: "application/json" });
+
+    await act(async () => {
+      const event = new Event("drop", { bubbles: true }) as DragEvent;
+      Object.defineProperty(event, "dataTransfer", { value: { files: [file] } });
+      Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+      Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+      document.dispatchEvent(event);
+    });
+
+    expect(pushSuccess).toHaveBeenCalledWith(expect.stringContaining(".toml"), "error");
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  // IN-16: on the «Маршрутизация» tab only a .json routing file is accepted — a .toml file is
+  // rejected (no import).
+  it("rejects a non-.json file on the «Маршрутизация» tab", async () => {
+    const pushSuccess = vi.fn();
+    renderHook(() =>
+      useFileDrop({ ...defaultOptions, activeTab: "routing", pushSuccess })
+    );
+
+    const file = new File(["[endpoint]"], "config.toml", { type: "" });
+
+    await act(async () => {
+      const event = new Event("drop", { bubbles: true }) as DragEvent;
+      Object.defineProperty(event, "dataTransfer", { value: { files: [file] } });
+      Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+      Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+      document.dispatchEvent(event);
+    });
+
+    expect(pushSuccess).toHaveBeenCalledWith(expect.stringContaining(".json"), "error");
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
@@ -176,9 +224,9 @@ describe("useFileDrop", () => {
       fileName: "config.toml",
     });
     expect(onConfigImported).toHaveBeenCalledWith("/path/to/config.toml");
-    expect(pushSuccess).toHaveBeenCalledWith(
-      expect.stringContaining("config imported")
-    );
+    // IN-43: a single config now says «Конфиг добавлен» (connection.snackbar.config_added) on the
+    // drag-drop path too — same copy as the modal, not the old «Конфигурация VPN импортирована».
+    expect(pushSuccess).toHaveBeenCalledWith("Конфиг добавлен");
   });
 
   it("calls import_dropped_content for .json routing rules", async () => {
@@ -230,6 +278,63 @@ describe("useFileDrop", () => {
     });
 
     expect(pushSuccess).toHaveBeenCalledWith("Server error", "error");
+  });
+
+  // IN-24: dropping several files at once imports ALL of them (the old code took only files[0]).
+  it("imports every file when several are dropped", async () => {
+    const onConfigImported = vi.fn();
+    const pushSuccess = vi.fn();
+    mockInvoke.mockResolvedValue({ file_type: "config", config_path: "/path/c.toml" });
+    renderHook(() => useFileDrop({ ...defaultOptions, onConfigImported, pushSuccess }));
+
+    const f1 = new File(["[endpoint]"], "a.toml", { type: "" });
+    const f2 = new File(["[endpoint]"], "b.toml", { type: "" });
+
+    await act(async () => {
+      const event = new Event("drop", { bubbles: true }) as DragEvent;
+      Object.defineProperty(event, "dataTransfer", { value: { files: [f1, f2] } });
+      Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+      Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+      document.dispatchEvent(event);
+    });
+
+    const importCalls = mockInvoke.mock.calls.filter((c) => c[0] === "import_dropped_content");
+    expect(importCalls).toHaveLength(2);
+    expect(importCalls[0][1]).toMatchObject({ fileName: "a.toml" });
+    expect(importCalls[1][1]).toMatchObject({ fileName: "b.toml" });
+    // Promote/refresh fires once after the batch; a batch summary toast is shown.
+    expect(onConfigImported).toHaveBeenCalledTimes(1);
+    // IN-41: the batch toast declines «конфиг» — 2 → few form «конфига» (was the noun-less
+    // «Добавлено 2»). The mocked language is "ru", so this exercises the real pluralRu path.
+    expect(pushSuccess).toHaveBeenCalledWith("Добавлено 2 конфига");
+  });
+
+  // IN-24 + IN-16: a mixed drop on «Подключение» imports the .toml configs and rejects the
+  // .json, processing the rest instead of aborting on the first wrong-format file.
+  it("imports the .toml and rejects the .json in a mixed drop on the «Подключение» tab", async () => {
+    const onConfigImported = vi.fn();
+    const pushSuccess = vi.fn();
+    mockInvoke.mockResolvedValue({ file_type: "config", config_path: "/path/c.toml" });
+    renderHook(() =>
+      useFileDrop({ ...defaultOptions, activeTab: "connection", onConfigImported, pushSuccess }),
+    );
+
+    const cfg = new File(["[endpoint]"], "good.toml", { type: "" });
+    const rules = new File(["{}"], "rules.json", { type: "application/json" });
+
+    await act(async () => {
+      const event = new Event("drop", { bubbles: true }) as DragEvent;
+      Object.defineProperty(event, "dataTransfer", { value: { files: [cfg, rules] } });
+      Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+      Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+      document.dispatchEvent(event);
+    });
+
+    const importCalls = mockInvoke.mock.calls.filter((c) => c[0] === "import_dropped_content");
+    expect(importCalls).toHaveLength(1); // only the .toml is imported
+    expect(importCalls[0][1]).toMatchObject({ fileName: "good.toml" });
+    expect(pushSuccess).toHaveBeenCalledWith(expect.stringContaining(".toml"), "error");
+    expect(onConfigImported).toHaveBeenCalledTimes(1);
   });
 
   it("removes event listeners on unmount", () => {

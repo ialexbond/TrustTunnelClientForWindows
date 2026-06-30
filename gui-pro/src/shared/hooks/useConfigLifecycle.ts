@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { i18n as I18nType } from "i18next";
-import type { AppTab, VpnConfig } from "../types";
+import type { AppTab, VpnConfig, VpnStatus } from "../types";
 
 interface UseConfigLifecycleParams {
   config: VpnConfig;
@@ -14,6 +14,12 @@ interface UseConfigLifecycleParams {
   setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
   pushSuccess: (message: string, variant?: "success" | "error") => void;
   i18n: I18nType;
+  /** IN-32: live VPN status — to decide whether an external delete of the active config must
+   *  tear down a running tunnel. */
+  status: VpnStatus;
+  /** IN-32: the normal disconnect (vpn_disconnect). Called when the ACTIVE config file is
+   *  deleted on disk while the tunnel is live. */
+  onDisconnect: () => Promise<void> | void;
 }
 
 /**
@@ -34,7 +40,18 @@ export function useConfigLifecycle({
   setActiveTab,
   pushSuccess,
   i18n,
+  status,
+  onDisconnect,
 }: UseConfigLifecycleParams) {
+  // IN-32: keep the latest status + disconnect handler in refs so the config-file-changed
+  // listener (which only re-subscribes on config.configPath) always reads the CURRENT values
+  // without re-subscribing on every status tick.
+  const statusRef = useRef(status);
+  const onDisconnectRef = useRef(onDisconnect);
+  useEffect(() => {
+    statusRef.current = status;
+    onDisconnectRef.current = onDisconnect;
+  });
   // ─── Config validation on startup ───
   // WR-05 fix: explicit startup-once guard via useRef. Without this the
   // effect would re-run in React.StrictMode (DEV), double-clearing the
@@ -94,7 +111,13 @@ export function useConfigLifecycle({
     const unlisten = listen<{ exists: boolean; path: string }>("config-file-changed", (event) => {
       const { exists, path } = event.payload;
       if (!exists && path === config.configPath) {
-        // Config file was deleted externally
+        // Config file was deleted externally.
+        // IN-32: if the deleted file is the ACTIVE config and a tunnel is live, tear it down
+        // FIRST — the sidecar is still running on a now-gone file. Reuse the normal disconnect
+        // (never touch the killswitch/sidecar internals). Read the live values from refs.
+        if (statusRef.current !== "disconnected" && statusRef.current !== "error") {
+          void onDisconnectRef.current();
+        }
         localStorage.removeItem("tt_config_path");
         setConfig({ configPath: "", logLevel: "info" });
         setWizardKey((k) => k + 1);

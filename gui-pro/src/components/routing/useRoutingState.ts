@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
@@ -181,6 +182,7 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
   const [geodataDownloading, setGeodataDownloading] = useState(false);
 
   const pushSuccess = useSnackBar();
+  const { t } = useTranslation();
 
   const baselineRef = useRef<string>("");
   const baselineVpnModeRef = useRef<string>(vpnMode);
@@ -497,9 +499,13 @@ export function useRoutingState({ configPath, status, vpnMode, onReconnect }: Us
       markDirty(imported);
       pushSuccess("Правила импортированы");
     } catch (e) {
-      pushSuccess(formatError(e), "error");
+      // IN-57: the «Импорт» button now shares the drag door's 64 KiB cap; the backend returns
+      // i18n key codes (routing.import_too_large / routing.import_invalid) so the error shows
+      // localized instead of raw English. Other failures fall back to formatError.
+      const msg = e instanceof Error ? e.message : String(e);
+      pushSuccess(msg.startsWith("routing.import_") ? t(msg) : formatError(e), "error");
     }
-  }, [markDirty, pushSuccess]);
+  }, [markDirty, pushSuccess, t]);
 
   // ─── GeoData download ──────────────────────────────
 

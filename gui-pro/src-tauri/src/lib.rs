@@ -240,6 +240,10 @@ pub fn run() {
             let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
             geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
 
+            // IN-31: watch the config data dir so the «Подключение» list refreshes the instant a
+            // config .toml is added/removed on disk (e.g. deleted in the file manager).
+            commands::manifest::start_configs_watcher(app.handle().clone());
+
             // Deep-link URL protocol wiring (C-22 / D-14). A clicked tt:// /
             // trusttunnel:// link must reach the app no matter HOW it arrives.
             // Three arrival channels all funnel into ONE `deep-link-url` event so
@@ -412,6 +416,23 @@ pub fn run() {
             commands::config::unwatch_config_file,
             commands::config::read_client_config,
             commands::config::save_client_config,
+            // Phase 11 — multi-config manifest (configs.json) mutation funnel + safe
+            // startup migration. Registered here in the foundation plan (11-02) so no
+            // later Wave-2/3 plan needs to edit lib.rs for manifest ops.
+            commands::manifest::migrate_configs,
+            commands::manifest::list_configs,
+            commands::manifest::summarize_config,
+            commands::manifest::add_config,
+            commands::manifest::delete_config,
+            commands::manifest::duplicate_config,
+            commands::manifest::rename_config,
+            commands::manifest::set_last_used,
+            // Phase 11 (Plan 11-03) — per-config endpoint-reachability ping. Reads
+            // host:port Rust-side from the config's own .toml (path-validated, host
+            // whitelist-validated); a bounded TCP connect, independent of the VPN core.
+            // Named ping_config_endpoint to avoid colliding with the existing
+            // network::ping_endpoint(host, port) used by the Control Panel.
+            commands::ping::ping_config_endpoint,
             commands::ssh_commands::check_server_installation,
             commands::ssh_commands::uninstall_server,
             commands::ssh_commands::fetch_server_config,
@@ -525,6 +546,7 @@ pub fn run() {
             commands::updater::list_sidecar_versions,
             commands::deeplink::decode_deeplink,
             commands::deeplink::import_config_from_string,
+            commands::deeplink::read_config_file_for_import,
             commands::protocol::register_url_protocols,
             commands::protocol::check_url_protocols,
             commands::protocol::poll_pending_deeplink,

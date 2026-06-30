@@ -20,7 +20,7 @@ import type { DeeplinkFields } from "../server/useUserFormState";
  * stay identical:
  *
  *   1. Защита от DPI    — Toggle bound to deeplink.antiDpi
- *   2. Отображаемое имя — label + CharCounter + Input with validateDisplayName
+ *   2. Имя конфига       — label + CharCounter + Input with validateDisplayName
  *   3. DNS серверы      — DnsUpstreamsInput bound to deeplink.dnsUpstreams
  *
  * REMOVED from the first-user block (user decision): custom SNI + allowlist chips,

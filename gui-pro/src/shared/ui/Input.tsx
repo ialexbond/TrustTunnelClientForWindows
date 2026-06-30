@@ -2,6 +2,7 @@ import React, { forwardRef, useId, type InputHTMLAttributes, type ReactNode } fr
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { FieldError } from "./FieldError";
+import { CharCounter } from "./CharCounter";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   // UAT (06-uat fix 1): ReactNode (was string) so a label can carry the required «*»
@@ -13,6 +14,11 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   helperText?: string;
   clearable?: boolean;
   fullWidth?: boolean;
+  /** When set, render an `N/max` character counter INSIDE the field box (right-aligned),
+   *  reusing the shared CharCounter (muted → amber ≥85% → red over max). This makes the input
+   *  itself a "text field with a counter" so callers never bolt a counter on above the field.
+   *  The count is the character length of `value`. */
+  counterMax?: number;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
@@ -24,6 +30,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       helperText,
       clearable,
       fullWidth = true,
+      counterMax,
       className,
       value,
       onChange,
@@ -43,7 +50,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     // explicit `id` prop wins; otherwise a stable useId fallback is generated.
     const generatedId = useId();
     const inputId = id ?? generatedId;
-    const hasAdornment = !!icon || !!clearable;
+    const showCounter = counterMax != null;
+    const counterCount = [...String(value ?? "")].length;
+    const hasAdornment = !!icon || !!clearable || showCounter;
     const showClear = clearable && value !== undefined && value !== "";
 
     const handleClear = () => {
@@ -88,7 +97,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               "text-sm text-[var(--color-text-primary)]",
               "placeholder:text-[var(--color-text-muted)]",
               "outline-none",
-              "transition-all duration-[var(--transition-fast)]",
+              // IN-20: scope the transition to the focus affordance (border + ring) ONLY.
+              // The old blanket `transition-all` also animated the right padding, so when the
+              // clear-✕ appears (showClear → pr-8: 12px→32px) a freshly PASTED value visibly
+              // reflowed/wiped over 150ms. Animating just border-color/box-shadow keeps the
+              // focus fade while the padding change applies instantly — no text wipe.
+              "transition-[border-color,box-shadow] duration-[var(--transition-fast)]",
               "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
               "disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed",
               // FIX-II: error state = red border only, no tinted background.
@@ -97,6 +111,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               error && "border-[var(--color-danger-500)]",
               icon && "pl-9",
               showClear && "pr-8",
+              // Reserve room on the right for the in-field counter so the typed text never
+              // slides under it. Widened pad fits up to «888/888».
+              showCounter && "pr-14",
               className
             )}
             {...rest}
@@ -120,6 +137,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             >
               <X size={14} />
             </button>
+          )}
+          {/* In-field character counter (right-aligned, vertically centred). pointer-events-none
+              so it never intercepts clicks meant for the input. */}
+          {showCounter && (
+            <span className="pointer-events-none absolute right-[var(--space-3)] top-1/2 -translate-y-1/2">
+              <CharCounter value={counterCount} max={counterMax} />
+            </span>
           )}
         </div>
         <FieldError>{error}</FieldError>

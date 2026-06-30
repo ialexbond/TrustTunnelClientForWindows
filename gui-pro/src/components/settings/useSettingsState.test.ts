@@ -545,4 +545,135 @@ describe("useSettingsState", () => {
     // Error is now pushed via useSnackBar
     expect(result.current.config).toBeNull();
   });
+
+  // 11-06: read_client_config rejection must raise the loadError flag (so ConfigEditView
+  // renders the in-modal load-error branch); a successful load keeps it false.
+  it("sets loadError=true when config load fails, stays false on success", async () => {
+    // Failing load → loadError true.
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") throw new Error("file not found");
+      return null as never;
+    });
+
+    const failProps = makeProps();
+    const { result: failResult } = renderHook(() => useSettingsState(failProps), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(failResult.current.loadError).toBe(true);
+
+    // Successful load → loadError stays false.
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return fakeConfig as never;
+      return null as never;
+    });
+
+    const okProps = makeProps();
+    const { result: okResult } = renderHook(() => useSettingsState(okProps), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(okResult.current.config).toEqual(fakeConfig);
+    expect(okResult.current.loadError).toBe(false);
+  });
+
+  // ─── setListenerMode (IN-54): mode switch must not destroy routing data ───
+
+  // The original bug: switching a TUN config to SOCKS5 deleted [listener.tun] (routes), and
+  // switching back recreated a bare tun with NO routes → "connects but no traffic". A round-trip
+  // must restore the exact routes.
+  it("switching TUN→SOCKS→TUN restores the original tun routes (no data loss)", async () => {
+    const tunCfg: ClientConfig = {
+      ...fakeConfig,
+      listener: {
+        tun: {
+          mtu_size: 1400,
+          change_system_dns: true,
+          included_routes: ["0.0.0.0/0"],
+          excluded_routes: ["10.0.0.0/8"],
+        },
+      },
+    };
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return tunCfg as never;
+      return null as never;
+    });
+
+    const props = makeProps();
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.setListenerMode("socks");
+    });
+    expect(result.current.config!.listener.socks).toBeDefined();
+    expect(result.current.config!.listener.tun).toBeUndefined();
+
+    act(() => {
+      result.current.setListenerMode("tun");
+    });
+    expect(result.current.config!.listener.socks).toBeUndefined();
+    expect(result.current.config!.listener.tun).toEqual({
+      mtu_size: 1400,
+      change_system_dns: true,
+      included_routes: ["0.0.0.0/0"],
+      excluded_routes: ["10.0.0.0/8"],
+    });
+  });
+
+  // A genuinely fresh TUN (no routes to restore) must default to a FULL tunnel so it routes.
+  it("a SOCKS-only config switched to TUN defaults to a full tunnel (0.0.0.0/0)", async () => {
+    const socksCfg: ClientConfig = {
+      ...fakeConfig,
+      listener: { socks: { address: "127.0.0.1:1080" } },
+    };
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return socksCfg as never;
+      return null as never;
+    });
+
+    const props = makeProps();
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.setListenerMode("tun");
+    });
+    expect(result.current.config!.listener.socks).toBeUndefined();
+    expect(result.current.config!.listener.tun?.included_routes).toEqual(["0.0.0.0/0"]);
+    expect(result.current.config!.listener.tun?.change_system_dns).toBe(true);
+  });
+
+  // Regression: the mode toggle flips on a SINGLE call (the old chained updateField calls
+  // collided on a stale closure and needed two clicks).
+  it("setListenerMode flips on a single call (no two-click)", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return fakeConfig as never; // TUN
+      return null as never;
+    });
+
+    const props = makeProps();
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.setListenerMode("socks");
+    });
+    expect(result.current.config!.listener.socks).toBeDefined();
+    expect(result.current.config!.listener.tun).toBeUndefined();
+  });
 });

@@ -107,31 +107,19 @@ describe("RecoveryStep", () => {
     expect(handleStartOver).not.toHaveBeenCalled();
   });
 
-  // ─── Apply-my-settings ONLY when configDiverges (round-2 finding C) ──
+  // ─── Apply-my-settings removed (owner UAT): recovery is now a two-way fork ──
 
-  it("does NOT render 'apply my settings' when configDiverges is false", () => {
+  it("NEVER renders 'apply my settings' — the config-diverge action was removed (owner UAT)", () => {
+    // Even with configDiverges=true the button must not appear: the recovery
+    // screen is now just Continue / Start over.
     const w = makeWizardState({
       step: "recovery",
-      recoveryProbe: probe({ configDiverges: false }),
+      recoveryProbe: probe({ configDiverges: true }),
     });
     render(<RecoveryStep {...w} />);
     expect(
       screen.queryByRole("button", { name: i18n.t("wizard.recovery.applySettings") }),
     ).not.toBeInTheDocument();
-  });
-
-  it("renders 'apply my settings' ONLY when configDiverges is true", () => {
-    const handleApplyConfig = vi.fn();
-    const w = makeWizardState({
-      step: "recovery",
-      recoveryProbe: probe({ configDiverges: true }),
-      handleApplyConfig,
-    });
-    render(<RecoveryStep {...w} />);
-    const btn = screen.getByRole("button", { name: i18n.t("wizard.recovery.applySettings") });
-    expect(btn).toBeInTheDocument();
-    fireEvent.click(btn);
-    expect(handleApplyConfig).toHaveBeenCalledOnce();
   });
 
   // ─── Host-key-changed fork (D-09, Gemini #11 + finding B) ────────────

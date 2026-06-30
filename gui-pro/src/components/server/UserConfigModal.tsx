@@ -413,13 +413,15 @@ export function UserConfigModal({
           />
         </div>
       ) : effectiveError ? (
-        <div className="flex flex-col items-center gap-[var(--space-3)] py-4">
+        // Owner UAT: the Retry action is full-width (like the Download button),
+        // not a centred content-width button — banner + button align as one column.
+        <div className="flex flex-col gap-[var(--space-3)] py-4">
           <ErrorBanner
             variant="error"
             message={effectiveError}
             className="w-full"
           />
-          <Button variant="secondary" onClick={handleRetry}>
+          <Button variant="secondary" fullWidth onClick={handleRetry}>
             {t("buttons.retry")}
           </Button>
         </div>

@@ -64,6 +64,16 @@ export interface SettingsState {
   config: ClientConfig | null;
   saving: boolean;
   error: string;
+  /**
+   * Phase 11 (11-06): true once a `read_client_config` attempt for the current path has
+   * FAILED (corrupt/unreadable .toml). Lets a consumer (ConfigEditView) render an in-modal
+   * load-error branch instead of the form, distinguishing a real read failure from the
+   * transient null-config window during the initial load. Empty path / a pending read / a
+   * successful read all leave it false. Optional so existing settings-section test mocks
+   * that construct a full SettingsState by hand keep type-checking without it (they predate
+   * the field and never exercise the load-error branch).
+   */
+  loadError?: boolean;
   localPath: string;
   dirty: boolean;
   status: VpnStatus;
@@ -71,7 +81,12 @@ export interface SettingsState {
   setLocalPath: (path: string) => void;
   setError: (msg: string) => void;
   updateField: (path: string, value: unknown) => void;
-  handleSave: (reconnect?: boolean) => Promise<void>;
+  /** Switch the listener mode (TUN ↔ SOCKS5) in one atomic write, preserving the other block's
+   *  data for a round-trip and defaulting a fresh TUN to a full tunnel (0.0.0.0/0). */
+  setListenerMode: (mode: "tun" | "socks") => void;
+  /** Save the per-config .toml. Resolves to `true` on success, `false` on failure — lets a
+   *  caller (ConfigEditView) close the modal only when the save actually succeeded. */
+  handleSave: (reconnect?: boolean) => Promise<boolean>;
   browseConfig: () => Promise<void>;
   clearConfig: () => void;
   pushSuccess: (msg: string, type?: "success" | "error") => void;
@@ -165,6 +180,9 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   const [config, setConfig] = useState<ClientConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Phase 11 (11-06): a read_client_config failure flag, surfaced so ConfigEditView can
+  // render an in-modal load-error branch instead of the form. Reset on every (re)load.
+  const [loadError, setLoadError] = useState(false);
   const [localPath, setLocalPath] = useState(configPath);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -175,13 +193,20 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   const savedConfig = useRef<ClientConfig | null>(null);
   const dirty = config !== null && savedConfig.current !== null && !deepEqual(config, savedConfig.current);
 
+  // IN-54: stash for the listener block we are leaving on a mode switch, so a TUN→SOCKS→TUN
+  // round-trip restores the original routes. Reset when the edited config changes (below) so one
+  // config's routes can never leak into another.
+  const stashedListenerRef = useRef<{ tun?: unknown; socks?: unknown }>({});
+
   // ─── Sync path from parent ───
   useEffect(() => {
     setLocalPath(configPath);
     setReloadKey(k => k + 1);
+    stashedListenerRef.current = {}; // IN-54: drop a prior config's stashed listener block
     if (!configPath) {
       setConfig(null);
       setError("");
+      setLoadError(false);
       savedConfig.current = null;
     }
   }, [configPath]);
@@ -191,6 +216,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     if (!localPath) return;
     try {
       setError("");
+      setLoadError(false);
       const data = await invoke<ClientConfig>("read_client_config", {
         configPath: localPath,
       });
@@ -202,6 +228,9 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       setConfig(normalized);
       savedConfig.current = JSON.parse(JSON.stringify(normalized));
     } catch (e) {
+      // 11-06: flag the load failure so ConfigEditView can render the in-modal load-error
+      // branch (the SnackBar still fires for the settings-tab surface that has no banner).
+      setLoadError(true);
       pushSuccess(formatError(e), "error");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,27 +241,77 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   }, [loadConfig]);
 
   // ─── Update a nested field ───
+  // Phase 11 (IN-54): use a FUNCTIONAL setState updater (read `prev`, not the closed-over
+  // `config`). The old form cloned the render-time `config` and was memoized with [config], so
+  // two updateField calls fired in ONE handler both saw the SAME stale config → last-write-wins
+  // dropped the first change. That is exactly why the TUN/SOCKS mode toggle needed two clicks
+  // (three chained writes collided). A functional updater makes each chained call see the prior
+  // result, so the deps can be [] and the callback identity is stable.
   const updateField = useCallback(
     (path: string, value: unknown) => {
-      if (!config) return;
-      const clone = JSON.parse(JSON.stringify(config));
-      const parts = path.split(".");
-      let obj = clone;
-      for (let i = 0; i < parts.length - 1; i++) {
-        if (obj[parts[i]] == null || typeof obj[parts[i]] !== "object") {
-          obj[parts[i]] = {};
+      setConfig((prev) => {
+        if (!prev) return prev;
+        const clone = JSON.parse(JSON.stringify(prev));
+        const parts = path.split(".");
+        let obj = clone;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (obj[parts[i]] == null || typeof obj[parts[i]] !== "object") {
+            obj[parts[i]] = {};
+          }
+          obj = obj[parts[i]];
         }
-        obj = obj[parts[i]];
-      }
-      if (value === undefined) {
-        delete obj[parts[parts.length - 1]];
-      } else {
-        obj[parts[parts.length - 1]] = value;
-      }
-      setConfig(clone);
+        if (value === undefined) {
+          delete obj[parts[parts.length - 1]];
+        } else {
+          obj[parts[parts.length - 1]] = value;
+        }
+        return clone;
+      });
     },
-    [config]
+    []
   );
+
+  // ─── Switch the listener mode (TUN ↔ SOCKS5) atomically ───
+  // Phase 11 (IN-54): the sidecar config can hold ONLY ONE listener type, so switching modes
+  // must drop the other block. The old toggle did this with several chained updateField calls
+  // AND it DESTROYED the routing data: TUN→SOCKS deleted the whole [listener.tun] (the
+  // `included_routes`/`excluded_routes` that actually carry traffic), and SOCKS→TUN recreated a
+  // bare tun with NO routes → the config "connects but passes no traffic". We instead:
+  //   1) stash whichever block we are leaving, so a round-trip (TUN→SOCKS→TUN) RESTORES the
+  //      original routes instead of losing them, and
+  //   2) when creating a fresh TUN with nothing to restore, default to a FULL tunnel
+  //      (`included_routes = ["0.0.0.0/0"]`) so a TUN config always routes — the server
+  //      configs are full-tunnel and that is the expected default.
+  // One setConfig write = no stale-closure collision, so the toggle also flips on the FIRST click.
+  const setListenerMode = useCallback((mode: "tun" | "socks") => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const clone: ClientConfig = JSON.parse(JSON.stringify(prev));
+      const cur = clone.listener ?? {};
+      // Remember what we are leaving so switching back can restore it (esp. TUN routes).
+      if (cur.tun) stashedListenerRef.current.tun = cur.tun;
+      if (cur.socks) stashedListenerRef.current.socks = cur.socks;
+      if (mode === "tun") {
+        const restored = (cur.tun ?? stashedListenerRef.current.tun) as
+          | ClientConfig["listener"]["tun"]
+          | undefined;
+        clone.listener = {
+          tun: restored ?? {
+            mtu_size: 1280,
+            change_system_dns: true,
+            included_routes: ["0.0.0.0/0"],
+            excluded_routes: [],
+          },
+        };
+      } else {
+        const restored = (cur.socks ?? stashedListenerRef.current.socks) as
+          | ClientConfig["listener"]["socks"]
+          | undefined;
+        clone.listener = { socks: restored ?? { address: "127.0.0.1:1080" } };
+      }
+      return clone;
+    });
+  }, []);
 
   // ─── Build config for saving (preserve only active listener) ───
   const buildConfigToSave = useCallback(() => {
@@ -268,8 +347,10 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   }, [config, localPath, buildConfigToSave, onConfigChange, pushSuccess, t]);
 
   // ─── Manual save (with UI feedback, snackbar, reconnect) ───
-  const handleSave = useCallback(async (reconnect = false) => {
-    if (!config || !localPath) return;
+  // Returns true on a successful save (so ConfigEditView can close the modal only then),
+  // false on failure. The error is surfaced as a SnackBar (the modal stays open to retry).
+  const handleSave = useCallback(async (reconnect = false): Promise<boolean> => {
+    if (!config || !localPath) return false;
     setSaving(true);
     setError("");
     try {
@@ -286,9 +367,11 @@ export function useSettingsState(props: SettingsProps): SettingsState {
       if (reconnect && (status === "connected" || status === "connecting")) {
         await onReconnect();
       }
+      return true;
     } catch (e) {
       pushSuccess(formatError(e), "error");
       setSaving(false);
+      return false;
     }
   }, [config, localPath, buildConfigToSave, onConfigChange, status, onReconnect, pushSuccess, t]);
 
@@ -346,6 +429,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     config,
     saving,
     error,
+    loadError,
     localPath,
     dirty,
     status,
@@ -353,6 +437,7 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     setLocalPath,
     setError,
     updateField,
+    setListenerMode,
     handleSave,
     browseConfig,
     clearConfig,

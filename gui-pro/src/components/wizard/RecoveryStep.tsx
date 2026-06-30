@@ -1,6 +1,6 @@
 import { useContext } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, ChevronRight, Trash2, RefreshCw, KeyRound } from "lucide-react";
+import { AlertTriangle, ChevronRight, Trash2, KeyRound } from "lucide-react";
 import { Button } from "../../shared/ui/Button";
 import { ConfirmDialogContext } from "../../shared/ui/ConfirmDialogProvider";
 import { StepBar } from "./StepBar";
@@ -82,11 +82,11 @@ export function RecoveryStep(w: WizardState) {
                 {t("wizard.recovery.hostKeyChanged.explain")}
               </p>
             </div>
-            <div className="space-y-2 pt-1">
+            {/* Owner UAT: compact, centered buttons (no full-width bars), no hint caption. */}
+            <div className="flex flex-col items-center gap-2 pt-1">
               <Button
                 variant="primary"
                 size="sm"
-                fullWidth
                 loading={busy}
                 disabled={busy}
                 icon={<KeyRound className="w-4 h-4" />}
@@ -94,23 +94,19 @@ export function RecoveryStep(w: WizardState) {
               >
                 {busy ? t("wizard.recovery.working") : t("wizard.recovery.hostKeyChanged.trust")}
               </Button>
-              <p className="text-body-sm text-[var(--color-text-muted)]">
-                {t("wizard.recovery.hostKeyChanged.trust_hint")}
-              </p>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => w.onClose?.()}>
+                {t("buttons.back")}
+              </Button>
             </div>
-            <Button variant="ghost" size="sm" fullWidth disabled={busy} onClick={() => w.onClose?.()}>
-              {t("buttons.back")}
-            </Button>
           </div>
         </div>
       </>
     );
   }
 
-  // Standard recovery fork: Continue (safe default) / Start over (destructive)
-  // + Apply my settings (only when configDiverges).
-  const showApplySettings = !!w.recoveryProbe?.configDiverges;
-
+  // Standard recovery fork: Continue (safe default) / Start over (destructive),
+  // side by side. The «Apply my settings» config-diverge action was removed at the
+  // owner's request (UAT) — recovery is now the two-way Continue / Start over fork.
   return (
     <>
       <StepBar step={w.step} />
@@ -128,61 +124,33 @@ export function RecoveryStep(w: WizardState) {
             </p>
           </div>
 
-          <div className="space-y-3 pt-1 text-left">
+          {/* Owner UAT: the two compact actions sit in ONE ROW — Continue (primary,
+              safe default) and Start over (danger). No full-width bars, no hint
+              captions. The config-diverge «Apply my settings» action was removed. */}
+          <div className="flex flex-row items-center justify-center gap-2 pt-1">
             {/* Continue — primary, safe default (re-runs probe + resolveResume). */}
-            <div className="space-y-1">
-              <Button
-                variant="primary"
-                size="sm"
-                fullWidth
-                loading={busy}
-                disabled={busy}
-                icon={<ChevronRight className="w-4 h-4" />}
-                onClick={() => w.handleContinue()}
-              >
-                {busy ? t("wizard.recovery.working") : t("wizard.recovery.continue")}
-              </Button>
-              <p className="text-body-sm text-[var(--color-text-muted)]">
-                {t("wizard.recovery.continue_hint")}
-              </p>
-            </div>
-
-            {/* Apply my settings — ONLY when the probe reports config divergence. */}
-            {showApplySettings && (
-              <div className="space-y-1">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  fullWidth
-                  disabled={busy}
-                  icon={<RefreshCw className="w-4 h-4" />}
-                  onClick={() => w.handleApplyConfig()}
-                >
-                  {t("wizard.recovery.applySettings")}
-                </Button>
-                <p className="text-body-sm text-[var(--color-text-muted)]">
-                  {t("wizard.recovery.applySettings_hint")}
-                </p>
-              </div>
-            )}
+            <Button
+              variant="primary"
+              size="sm"
+              loading={busy}
+              disabled={busy}
+              icon={<ChevronRight className="w-4 h-4" />}
+              onClick={() => w.handleContinue()}
+            >
+              {busy ? t("wizard.recovery.working") : t("wizard.recovery.continue")}
+            </Button>
 
             {/* Start over — destructive, irreversible. Gated behind a danger confirm
                 dialog (T-06-08); on confirm it runs the same handleStartOver. */}
-            <div className="space-y-1">
-              <Button
-                variant="danger"
-                size="sm"
-                fullWidth
-                disabled={busy}
-                icon={<Trash2 className="w-4 h-4" />}
-                onClick={() => { void handleStartOverPrompt(); }}
-              >
-                {t("wizard.recovery.startOver")}
-              </Button>
-              <p className="text-body-sm text-[var(--color-text-muted)]">
-                {t("wizard.recovery.startOver_hint")}
-              </p>
-            </div>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={busy}
+              icon={<Trash2 className="w-4 h-4" />}
+              onClick={() => { void handleStartOverPrompt(); }}
+            >
+              {t("wizard.recovery.startOver")}
+            </Button>
           </div>
 
           {w.errorMessage && (

@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Trash2, Loader2, Play, Square } from "lucide-react";
+import { Send, Trash2, Loader2, Play, Square, Copy } from "lucide-react";
 import { Modal } from "../../shared/ui/Modal";
 import { Button } from "../../shared/ui/Button";
+import { Tooltip } from "../../shared/ui/Tooltip";
+import { cn } from "../../shared/lib/cn";
 import { NumberInput, Skeleton } from "../../shared/ui";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
@@ -319,35 +321,47 @@ export function MtProtoModal({ isOpen, onClose, state, sshParams }: MtProtoModal
                 {t("server.service.mtproto.proxy_link_label")}
               </p>
               {proxyLink ? (
-                // UAT 2026-05-23: aligned the readonly-link block with the
-                // canonical copyable-link pattern from UserConfigModal —
-                // neutral input-style surface (input-bg + input-border) with
-                // text-primary content, instead of the accent-tinted look
-                // that was reading as a status/success colour. Still
-                // click-anywhere-to-copy (preserves the multi-line wrap UX
-                // that a single-line <input> can't give for the long
-                // tg://proxy?... payload).
-                <code
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t("server.service.mtproto.copy")}
-                  onClick={() => void handleCopy()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      void handleCopy();
-                    }
-                  }}
-                  className="text-mono-sm break-all block py-2 px-3 rounded-[var(--radius-md)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-interactive)]"
-                  style={{
-                    color: "var(--color-text-primary)",
-                    backgroundColor: "var(--color-input-bg)",
-                    border: "1px solid var(--color-input-border)",
-                  }}
-                  data-testid="mtproto-proxy-link"
-                >
-                  {proxyLink}
-                </code>
+                // Owner UAT: single-line read-only field + a copy ICON button,
+                // reusing the canonical copyable-link pattern from UserConfigModal
+                // (deeplink field) verbatim — readonly <input> that selects all on
+                // focus, with an absolutely-positioned Copy button in the right
+                // slot. Replaces the old multi-line click-anywhere <code> block.
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={proxyLink}
+                    aria-label={t("server.service.mtproto.proxy_link_label")}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className={cn(
+                      "h-8 w-full pl-3 pr-10 text-sm font-mono rounded-[var(--radius-md)]",
+                      "border border-[var(--color-input-border)]",
+                      "bg-[var(--color-input-bg)]",
+                      "text-[var(--color-text-primary)]",
+                      "outline-none",
+                      "focus-visible:border-[var(--color-input-focus)] focus-visible:shadow-[var(--focus-ring)]",
+                    )}
+                    data-testid="mtproto-proxy-link"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center leading-none">
+                    <Tooltip text={t("server.service.mtproto.copy")}>
+                      <button
+                        type="button"
+                        aria-label={t("server.service.mtproto.copy")}
+                        onClick={() => void handleCopy()}
+                        className={cn(
+                          "p-1 rounded flex items-center",
+                          "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
+                          "focus-visible:shadow-[var(--focus-ring)] outline-none",
+                          "transition-[color,transform] duration-[var(--transition-fast)]",
+                          "active:scale-[0.92]",
+                        )}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
               ) : (
                 <div
                   className="block py-2 px-3 rounded-[var(--radius-md)] space-y-1.5"
