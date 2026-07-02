@@ -32,6 +32,23 @@ interface LastUsedCandidate {
   last_used: boolean;
 }
 
+// Phase 13 (13-09, Fix 1): the Rust `PingResult` discriminated union (serde tag = "status",
+// kebab-case) — the SAME shape usePerConfigPing consumes. At LAUNCH auto-connect we probe the
+// last-used config's endpoint reachability DIRECTLY (the config is still DISCONNECTED at launch,
+// so `ping_config_endpoint` measures a real number — unlike pinging an already-active endpoint,
+// which reads Unreachable by design). Only an `ok` result carries a number; unreachable/no-data
+// push null so the plate honestly renders «—».
+type PingResult =
+  | { status: "ok"; ms: number }
+  | { status: "unreachable" }
+  | { status: "no-data" };
+
+// Phase 13 (13-09, Fix 1): SHORT probe timeout for the launch reachability ping. Kept small so a
+// slow/unreachable endpoint does not appreciably delay the auto-connect — on a slow/no answer we
+// simply push null («—») rather than blocking the connect. (usePerConfigPing uses 3s for the
+// background per-config sweep; the launch path is latency-sensitive, so it uses a tighter bound.)
+const LAUNCH_PING_TIMEOUT_MS = 1500;
+
 /**
  * Fires a one-shot VPN auto-connect on startup when `tt_auto_connect=true`
  * is set in localStorage. Uses a 1.5s delay so the UI mounts before the connect.
@@ -181,6 +198,37 @@ export function useAutoConnect({
       }
 
       try {
+        // Phase 13 (Pitfall 2): mark the pending connect ORIGIN as AutoConnectLaunch RIGHT BEFORE
+        // the launch auto-connect, so the next Rust `Connected` edge emits «Автоподключение при
+        // запуске» instead of the generic «Подключено». This sits INSIDE the one-shot guarded block
+        // (`autoConnectDone` latch, above) so it marks ONLY the launch connect — the Rust decider
+        // consumes + resets the origin on the connected, so any later MANUAL connect reads Manual
+        // and shows «Подключено». No secret crosses (a bare enum — D-29).
+        await invoke("set_pending_connect_origin", { origin: "autoConnectLaunch" });
+        // Phase 13 (13-09, Fix 1): measure the launch connect-time PING the plate shows. Previously
+        // (13-08b) this pushed a bare `null` because there is no per-config ping map at launch
+        // (usePerConfigPing never pings the ACTIVE config, and at startup nothing is active) — so the
+        // plate always rendered «—» for AUTO-CONNECT-ON-LAUNCH. But the last-used config is still
+        // DISCONNECTED at this point, so we CAN probe its endpoint reachability directly here: a fresh
+        // `ping_config_endpoint` against a not-yet-active endpoint returns a real number (this is the
+        // exact case that reads Unreachable ONLY once the endpoint is the live tunnel). We use a SHORT
+        // timeout (LAUNCH_PING_TIMEOUT_MS) so a slow/unreachable endpoint does not stall the connect —
+        // on any non-`ok` result we push null (honest «—»). Pushed right before vpn_connect so the
+        // Rust Connected edge reads it (mirrors the origin push above). A bare number|null crosses —
+        // no config content / password (D-29).
+        let launchPingMs: number | null = null;
+        try {
+          const pingResult = await invoke<PingResult>("ping_config_endpoint", {
+            configPath: lastUsedPath,
+            timeoutMs: LAUNCH_PING_TIMEOUT_MS,
+          });
+          launchPingMs = pingResult.status === "ok" ? pingResult.ms : null;
+        } catch {
+          // Probe unavailable (older backend / test mock) or threw → push null («—»), never block.
+          launchPingMs = null;
+        }
+        if (cancelled) return;
+        await invoke("set_pending_connect_ping", { ms: launchPingMs });
         await invoke("vpn_connect", {
           configPath: lastUsedPath,
           logLevel: config.logLevel,

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * App-level «Авто-режим» settings store (Phase 12, plan 12-03).
@@ -180,6 +181,20 @@ export function useAppSettings(): UseAppSettings {
     };
   }, [syncFromStorage]);
 
+  // Phase 13 (D-06 / §C): mirror the PERSISTED master-toggle value into the Rust gate ONCE at
+  // startup, so `notify::maybe_fire` gates correctly BEFORE the first in-session toggle (the Rust
+  // pre-seed default is `true` — this reconciles it to the user's saved preference). Read from
+  // localStorage (the source of truth) rather than the reactive `settings` so this fires exactly
+  // once on mount and does not re-push on every settings change (the change-path push in
+  // `setNotificationsOn` covers those). Fire-and-forget; a bare bool only (no secret — D-29).
+  useEffect(() => {
+    const persisted = readBoolean(
+      APP_SETTINGS_KEYS.notificationsOn,
+      APP_SETTINGS_DEFAULTS.notificationsOn,
+    );
+    void invoke("set_notifications_enabled", { enabled: persisted });
+  }, []);
+
   function persistBoolean(key: string, value: boolean): void {
     localStorage.setItem(key, String(value));
   }
@@ -243,6 +258,13 @@ export function useAppSettings(): UseAppSettings {
     persistBoolean(APP_SETTINGS_KEYS.notificationsOn, value);
     setSettings((s) => ({ ...s, notificationsOn: value }));
     broadcastSettingsChanged();
+    // Phase 13 (D-06 / §C): mirror the master toggle into the Rust gate
+    // (`AppState.notifications_enabled`) so `notify::maybe_fire` gates the plate even with the
+    // main window closed to tray — localStorage is NOT shared across webview windows (Pitfall 5),
+    // so the gate MUST live in Rust, not localStorage. Fire-and-forget (`void`): the toggle write
+    // is already persisted; a failed mirror push (e.g. no backend in a test) must not throw in a
+    // UI event handler. The payload is a bare bool — never config content or a password (D-29).
+    void invoke("set_notifications_enabled", { enabled: value });
   };
 
   return {

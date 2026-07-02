@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import "../../test/tauri-mock";
+import { invoke } from "@tauri-apps/api/core";
 import {
   useAppSettings,
   APP_SETTINGS_DEFAULTS,
@@ -8,9 +9,14 @@ import {
   APP_SETTINGS_KEYS,
 } from "./useAppSettings";
 
+// `../../test/tauri-mock` replaces `@tauri-apps/api/core` `invoke` with a vi.fn() — grab the typed
+// mock so Phase 13 can assert the Rust master-gate mirror pushes (set_notifications_enabled).
+const mockInvoke = vi.mocked(invoke);
+
 describe("useAppSettings", () => {
   beforeEach(() => {
     localStorage.clear();
+    mockInvoke.mockClear();
   });
 
   // ─── Locked defaults on empty storage (Pattern 4) ───
@@ -84,6 +90,39 @@ describe("useAppSettings", () => {
     expect(localStorage.getItem(APP_SETTINGS_KEYS.notificationsOn)).toBe(
       "false",
     );
+  });
+
+  // ─── Phase 13 (D-06 / §C): mirror the master toggle into the Rust gate ───
+  it("mirrors the notifications toggle into Rust on change (set_notifications_enabled)", () => {
+    const { result } = renderHook(() => useAppSettings());
+    mockInvoke.mockClear(); // drop the startup mirror push so we assert only the change-path push
+    act(() => {
+      result.current.setNotificationsOn(false);
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("set_notifications_enabled", {
+      enabled: false,
+    });
+    act(() => {
+      result.current.setNotificationsOn(true);
+    });
+    expect(mockInvoke).toHaveBeenLastCalledWith("set_notifications_enabled", {
+      enabled: true,
+    });
+  });
+
+  it("mirrors the persisted notifications value into Rust ONCE at startup", () => {
+    // Persist OFF, then mount: the startup effect must push the saved value to the Rust gate so
+    // the gate is correct before the first in-session toggle (the Rust pre-seed is `true`).
+    localStorage.setItem(APP_SETTINGS_KEYS.notificationsOn, "false");
+    renderHook(() => useAppSettings());
+    expect(mockInvoke).toHaveBeenCalledWith("set_notifications_enabled", {
+      enabled: false,
+    });
+    // Exactly one startup mirror push (no re-push on every render).
+    const startupPushes = mockInvoke.mock.calls.filter(
+      (c) => c[0] === "set_notifications_enabled",
+    );
+    expect(startupPushes).toHaveLength(1);
   });
 
   it("setThresholdMs / setIntervalSec / setChecksN persist in-range values", () => {

@@ -56,7 +56,12 @@ const CONFIG: VpnConfig = {
 // no-dwell guard in useVpnEvents actually runs against handleReconnect's
 // "reconnecting" set. We record every status the reducer ever produced so a test
 // can assert "disconnected" never appears mid-reconnect.
-function renderReconnectHarness(initialStatus: VpnStatus) {
+// Fable-A review #3: `opts.pushPendingConnectPing` mirrors the App.tsx wiring — the App-owned
+// ping+origin push threaded into useVpnActions so handleReconnect can push the plate ping.
+function renderReconnectHarness(
+  initialStatus: VpnStatus,
+  opts?: { pushPendingConnectPing?: (path: string) => Promise<void> },
+) {
   const statusHistory: VpnStatus[] = [];
 
   const hook = renderHook(() => {
@@ -91,6 +96,7 @@ function renderReconnectHarness(initialStatus: VpnStatus) {
       i18n,
       reconnectResolve,
       manualReconnectActiveRef,
+      pushPendingConnectPing: opts?.pushPendingConnectPing,
     });
 
     return { status, actions, reconnectResolve, manualReconnectActiveRef };
@@ -309,6 +315,127 @@ describe("useVpnActions.handleReconnect (Plan 02-12 — no dwell on «Отклю
     expect(statusHistory).not.toContain("reconnecting");
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
   });
+
+  it("BL-01: raises the switch/reconnect-pending signal BEFORE the teardown and clears it on completion", async () => {
+    // A manual reconnect is disconnect→connect from a healthy session. Its teardown leg
+    // writes a genuine Connected → Disconnected transition; without a signal the Rust
+    // decider fired a spurious «Отключено» before «Подключено». handleReconnect must set
+    // set_switch_or_reconnect_pending(true) BEFORE the vpn_disconnect (so the intermediate
+    // Disconnected is suppressed) and set it back to false once the flow finishes.
+    const { hook } = renderReconnectHarness("connected");
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+
+    // The pending(true) was invoked, and it came BEFORE the vpn_disconnect teardown.
+    const calls = vi.mocked(invoke).mock.calls;
+    const pendingTrueIdx = calls.findIndex(
+      (c) => c[0] === "set_switch_or_reconnect_pending" && (c[1] as { pending: boolean }).pending === true,
+    );
+    const disconnectIdx = calls.findIndex((c) => c[0] === "vpn_disconnect");
+    expect(pendingTrueIdx).toBeGreaterThanOrEqual(0);
+    expect(disconnectIdx).toBeGreaterThan(pendingTrueIdx);
+
+    // Finish the flow — the pending signal is cleared (false) on completion.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise;
+    });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_switch_or_reconnect_pending", {
+      pending: false,
+    });
+  });
+
+  it("BL-01: clears the switch/reconnect-pending signal on the teardown-reject error path", async () => {
+    // If vpn_disconnect rejects, handleReconnect aborts to 'error'. The pending signal must
+    // NOT stay latched true (a stale true would swallow the next genuine user disconnect's
+    // «Отключено» until the Rust terminal-outcome backstop clears it).
+    const { hook } = renderReconnectHarness("connected");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_disconnect") throw new Error("Lock error");
+      return null;
+    });
+
+    await act(async () => {
+      await hook.result.current.actions.handleReconnect();
+    });
+
+    expect(hook.result.current.status).toBe("error");
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_switch_or_reconnect_pending", {
+      pending: false,
+    });
+  });
+
+  it("Fable-A #3: awaits the threaded pushPendingConnectPing AFTER the teardown wait and BEFORE the reconnect vpn_connect", async () => {
+    // handleReconnect was the ONLY connect initiator reaching vpn_connect without pushing
+    // pending_connect_ping / stamping origin=Manual — so the save-and-reconnect's terminal
+    // «Подключено» plate deterministically rendered ping «—». It now awaits the App-threaded
+    // pushPendingConnectPing at the only correct moment: AFTER the teardown-disconnect wait
+    // resolved (the endpoint is inactive again, so a fresh probe reads a real number — probing
+    // while the tunnel is still up reads Unreachable by design) and BEFORE handleConnect.
+    let disconnectsAtPush = -1;
+    let connectsAtPush = -1;
+    const pushPendingConnectPing = vi.fn(async () => {
+      // Snapshot the invoke ledger AT PUSH TIME so the test can prove the push landed between
+      // the teardown vpn_disconnect and the reconnect vpn_connect.
+      const names = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+      disconnectsAtPush = names.filter((n) => n === "vpn_disconnect").length;
+      connectsAtPush = names.filter((n) => n === "vpn_connect").length;
+    });
+    const { hook } = renderReconnectHarness("connected", { pushPendingConnectPing });
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+
+    // Mid-teardown (the "disconnected" event has not fired yet) the push must NOT have run.
+    expect(pushPendingConnectPing).not.toHaveBeenCalled();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise;
+    });
+
+    // The push ran exactly once, targeting the active config path…
+    expect(pushPendingConnectPing).toHaveBeenCalledTimes(1);
+    expect(pushPendingConnectPing).toHaveBeenCalledWith(CONFIG.configPath);
+    // …strictly AFTER the teardown vpn_disconnect and BEFORE the reconnect vpn_connect.
+    expect(disconnectsAtPush).toBe(1);
+    expect(connectsAtPush).toBe(0);
+    // The reconnect itself still fired.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: CONFIG.configPath,
+      logLevel: CONFIG.logLevel,
+    });
+  });
+
+  it("Fable-A #6: raises the pending intent with the RECONNECT hint (isSwitch: false → «Переподключение» start plate)", async () => {
+    // A save-and-reconnect and a manual switch BOTH carry origin=Manual, so the Rust seam needs
+    // the explicit hint to keep this flow on the `reconnecting` start plate (owner-accepted in
+    // UAT test 12) while the manual switch moves to the neutral `switching` one.
+    const { hook } = renderReconnectHarness("connected");
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_switch_or_reconnect_pending", {
+      pending: true,
+      isSwitch: false,
+    });
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise;
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -436,6 +563,106 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
       configPath: OTHER_PATH,
       logLevel: "info",
+    });
+  });
+
+  it("BL-01: raises the switch/reconnect-pending signal BEFORE the teardown (from CONNECTED) and clears it on completion", async () => {
+    // A manual «Переключиться» from a live session is disconnect→connect; its teardown
+    // Disconnected must be suppressed by the Rust decider. switchTo must set
+    // set_switch_or_reconnect_pending(true) BEFORE the vpn_disconnect and clear it (false)
+    // once the switch completes.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    let switchPromise: Promise<void>;
+    await act(async () => {
+      switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
+      await Promise.resolve();
+    });
+
+    const calls = vi.mocked(invoke).mock.calls;
+    const pendingTrueIdx = calls.findIndex(
+      (c) => c[0] === "set_switch_or_reconnect_pending" && (c[1] as { pending: boolean }).pending === true,
+    );
+    const disconnectIdx = calls.findIndex((c) => c[0] === "vpn_disconnect");
+    expect(pendingTrueIdx).toBeGreaterThanOrEqual(0);
+    expect(disconnectIdx).toBeGreaterThan(pendingTrueIdx);
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await switchPromise;
+    });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_switch_or_reconnect_pending", {
+      pending: false,
+    });
+  });
+
+  it("BL-01: from DISCONNECTED (no teardown) does NOT raise the pending signal", async () => {
+    // Connecting directly from a disconnected state has NO teardown Disconnected to
+    // suppress, so switchTo must NOT set the pending signal true (the origin/label path
+    // handles the destination plate). This keeps the signal reserved for real teardowns.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("disconnected");
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "set_switch_or_reconnect_pending",
+      { pending: true },
+    );
+  });
+
+  it("BL-01: a teardown REJECT clears the pending signal (no latch)", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_disconnect") throw new Error("Lock error");
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(hook.result.current.status).toBe("error");
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_switch_or_reconnect_pending", {
+      pending: false,
+    });
+  });
+
+  it("Fable-A #6: raises the pending intent with the SWITCH hint (isSwitch: true → neutral «Переключаю сервер…» start plate)", async () => {
+    // A MANUAL server switch shares origin=Manual with the save-and-reconnect, so without the
+    // hint the Rust seam fired the `reconnecting` start plate whose body «Связь прервалась —
+    // восстанавливаю» falsely claimed the link dropped — the user just picked another healthy
+    // server. The explicit isSwitch:true routes it to the neutral `switching` plate instead
+    // (the auto-switch also flows through switchTo, so it keeps `switching` unchanged).
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    let switchPromise: Promise<void>;
+    await act(async () => {
+      switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
+      await Promise.resolve();
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_switch_or_reconnect_pending", {
+      pending: true,
+      isSwitch: true,
+    });
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await switchPromise;
     });
   });
 });

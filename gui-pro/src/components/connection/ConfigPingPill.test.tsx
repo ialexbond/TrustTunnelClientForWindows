@@ -54,7 +54,7 @@ describe("ConfigPingPill", () => {
   });
 
   // Truth: the measuring (first-ever probe) state announces itself via role="status" with
-  // the «Измеряю…» accessible label and shows NO text — the loader is a decorative skeleton.
+  // the «Измерение…» accessible label and shows NO text — the loader is a decorative skeleton.
   it("measuring band is a role=status loader with no text", () => {
     renderWithProviders(<ConfigPingPill ping={{ band: "measuring" }} />);
     const status = screen.getByRole("status");
@@ -65,9 +65,9 @@ describe("ConfigPingPill", () => {
   });
 
   // Truth: a re-measure of an already-known config (measuring:true + a prior valueMs) keeps
-  // the same role=status «Измеряю…» loader. It reserves the prior value's width with an
+  // the same role=status «Измерение…» loader. It reserves the prior value's width with an
   // INVISIBLE, aria-hidden copy — so the value is not announced, and the only accessible
-  // name is «Измеряю…» (the screen reader hears the probe in flight, not a stale number).
+  // name is «Измерение…» (the screen reader hears the probe in flight, not a stale number).
   it("re-measuring a known band stays a role=status loader, prior value aria-hidden", () => {
     renderWithProviders(<ConfigPingPill ping={{ band: "green", valueMs: 88, measuring: true }} />);
     const status = screen.getByRole("status");

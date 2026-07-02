@@ -92,6 +92,135 @@ describe("useAutoConnect — T-22 B3 boot guard", () => {
       configPath: "/config.json",
       logLevel: "info",
     });
+    // Phase 13 (Pitfall 2): the launch auto-connect marks the AutoConnectLaunch origin so the next
+    // Rust `Connected` edge emits «Автоподключение при запуске» (camelCase serde wire value).
+    expect(mockInvoke).toHaveBeenCalledWith("set_pending_connect_origin", {
+      origin: "autoConnectLaunch",
+    });
+  });
+
+  it("marks the AutoConnectLaunch origin in Rust right BEFORE vpn_connect (Phase 13, Pitfall 2)", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    // Record, at the moment vpn_connect is invoked, whether the origin mark already fired — proving
+    // the mark PRECEDES the launch connect (and only the guarded launch path, not a manual connect).
+    let originMarkedBeforeConnect = false;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "vpn_connect") {
+        originMarkedBeforeConnect = mockInvoke.mock.calls.some(
+          (c) =>
+            c[0] === "set_pending_connect_origin" &&
+            (c[1] as { origin?: string })?.origin === "autoConnectLaunch",
+        );
+        return null;
+      }
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
+    expect(originMarkedBeforeConnect).toBe(true);
+  });
+
+  it("measures the launch reachability ping and pushes the ms when ok (Phase 13, 13-09 Fix 1)", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    // 13-09 Fix 1: at LAUNCH the last-used config is still DISCONNECTED, so ping_config_endpoint
+    // measures a REAL reachability number. An `ok` result must push its ms (the plate shows a
+    // number instead of «—»). Also record, at the moment vpn_connect fires, whether the ping push
+    // already happened, proving it PRECEDES the connect (mirrors the origin push).
+    let pingPushedBeforeConnect = false;
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "ping_config_endpoint") {
+        // Probe the resolved last-used config path with a short timeout.
+        expect(args).toEqual({ configPath: "/config.json", timeoutMs: 1500 });
+        return { status: "ok", ms: 42 };
+      }
+      if (cmd === "vpn_connect") {
+        pingPushedBeforeConnect = mockInvoke.mock.calls.some(
+          (c) =>
+            c[0] === "set_pending_connect_ping" &&
+            (c[1] as { ms?: number | null })?.ms === 42,
+        );
+        return null;
+      }
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("ping_config_endpoint", {
+      configPath: "/config.json",
+      timeoutMs: 1500,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 42 });
+    expect(pingPushedBeforeConnect).toBe(true);
+  });
+
+  it("pushes null when the launch reachability probe is unreachable (Phase 13, 13-09 Fix 1)", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    // A filtered/closed endpoint reads Unreachable → push null so the plate honestly shows «—».
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "ping_config_endpoint") return { status: "unreachable" };
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("set_pending_connect_ping", { ms: null });
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
+  });
+
+  it("pushes null when the launch reachability probe returns no-data (Phase 13, 13-09 Fix 1)", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "ping_config_endpoint") return { status: "no-data" };
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("set_pending_connect_ping", { ms: null });
+  });
+
+  it("pushes null and still connects when the launch reachability probe throws (Phase 13, 13-09 Fix 1)", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    // Older backend / unavailable probe → the try/catch pushes null and the connect proceeds.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "ping_config_endpoint") throw new Error("unknown command");
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("set_pending_connect_ping", { ms: null });
+    expect(mockInvoke).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/config.json",
+      logLevel: "info",
+    });
   });
 
   it("WAITS while network_ready is false, then connects once it returns true (boot guard)", async () => {
