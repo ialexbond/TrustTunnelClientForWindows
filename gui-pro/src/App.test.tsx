@@ -514,6 +514,74 @@ describe("App", () => {
     });
   });
 
+  // ─── Plate body-click → Connection tab (Phase 13, 13-09 Fix 2) ───
+  // Clicking the connection notification plate's BODY invokes Rust `restore_main_window`, which
+  // shows+focuses the window and then emits `navigate-to-tab` with the tab id ("connection"). App
+  // listens (useNavigateToTab) and switches the active tab. This proves the FE side of Fix 2: the
+  // event lands the user on the Connection tab regardless of which tab they were last on.
+  describe("navigate-to-tab event (Phase 13 — plate body-click opens Connection)", () => {
+    it("switches the active tab to Connection when a navigate-to-tab 'connection' event arrives", async () => {
+      // Start on a DIFFERENT tab (routing) so we can prove the event actually switches TO Connection.
+      localStorage.setItem("tt_config_path", "/config.json");
+      localStorage.setItem("tt_active_page", "routing");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      // Move to the Routing tab so Connection is definitively NOT the active tab beforehand.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Маршрутизация/ }));
+      });
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "true");
+
+      // The plate body-click path: Rust emits navigate-to-tab with the Connection tab id.
+      await act(async () => {
+        emitEvent("navigate-to-tab", "connection");
+      });
+
+      // Now the Connection tab is the visible one.
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "false");
+      expect(document.getElementById("tabpanel-routing")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("ignores a navigate-to-tab event carrying an unknown tab id", async () => {
+      // Only the known "connection" id is honoured — a stray/unknown payload must NOT move the tab.
+      localStorage.setItem("tt_config_path", "/config.json");
+      localStorage.setItem("tt_active_page", "routing");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      // Sit on the Routing tab.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /Маршрутизация/ }));
+      });
+      expect(document.getElementById("tabpanel-routing")).toHaveAttribute("aria-hidden", "false");
+
+      await act(async () => {
+        emitEvent("navigate-to-tab", "totally-unknown");
+      });
+
+      // Still on Routing — the unknown id was ignored.
+      expect(document.getElementById("tabpanel-routing")).toHaveAttribute("aria-hidden", "false");
+      expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "true");
+    });
+  });
+
   // ─── Theme management ───
 
   it("sets data-theme attribute on document element", async () => {
@@ -811,6 +879,385 @@ describe("App", () => {
       configPath: "/my/config.json",
       logLevel: "debug",
     });
+    // Phase 13 (13-08b): the active-config connect pushes the config's known reachability ping BEFORE
+    // vpn_connect so the notification plate shows a real number (replacing the fresh probe of the
+    // active endpoint, which read Unreachable by design → «—»). No ping probe has resolved for this
+    // config in this test, so the pushed value is `null` (→ the plate renders «—», honest no-data).
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: null });
+    // The push must PRECEDE the connect (mirrors the origin-before-connect pattern).
+    const pingIdx = vi
+      .mocked(invoke)
+      .mock.calls.findIndex(
+        (c) => c[0] === "set_pending_connect_ping" && (c[1] as { ms?: number | null })?.ms === null,
+      );
+    const connectIdx = vi
+      .mocked(invoke)
+      .mock.calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(pingIdx).toBeGreaterThanOrEqual(0);
+    expect(pingIdx).toBeLessThan(connectIdx);
+  });
+
+  it("manual connect stamps origin=Manual before vpn_connect (13-10 §B no origin leak)", async () => {
+    // Phase 13 (13-10 / §B): the manual connect path must explicitly set origin=Manual right before
+    // connecting, so a STALE AutoConnectLaunch/AutoSwitch origin (a shared AppState cell whose Connected
+    // was only observed via the mount snapshot, so it was never consumed) can never leak in and
+    // mislabel a manual connect «Автоподключение при запуске». Assert the manual connect pushes
+    // set_pending_connect_origin { origin: "manual" } BEFORE vpn_connect.
+    localStorage.setItem("tt_config_path", "/my/config.json");
+    localStorage.setItem("tt_log_level", "debug");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await gotoSettings();
+
+    await act(async () => {
+      await statusPanelProps.onConnect();
+    });
+
+    // The manual connect explicitly asserts its own origin.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_origin", {
+      origin: "manual",
+    });
+    // …and it must PRECEDE the connect, so the Rust Connected edge reads Manual → «Подключено».
+    const originIdx = vi
+      .mocked(invoke)
+      .mock.calls.findIndex(
+        (c) =>
+          c[0] === "set_pending_connect_origin" &&
+          (c[1] as { origin?: string })?.origin === "manual",
+      );
+    const connectIdx = vi
+      .mocked(invoke)
+      .mock.calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(originIdx).toBeGreaterThanOrEqual(0);
+    expect(originIdx).toBeLessThan(connectIdx);
+  });
+
+  // ─── Manual connect/switch plate ping (13-12: fresh-probe fallback mirrors the launch path) ───
+  //
+  // Owner UAT (phase 13): the connect plate showed «—» on a MANUAL connect/switch but a real
+  // number on the LAUNCH auto-connect — asymmetric ping supply. The manual path read ONLY the
+  // background usePerConfigPing map (numeric `valueMs` exists just for an ok band; a timed-out /
+  // not-yet-probed target pushed null), while the launch path fresh-probed the still-disconnected
+  // target. pushPendingConnectPing now mirrors the launch probe as a SLOW-PATH fallback, and every
+  // caller AWAITS the push before connecting (a direct connect has no teardown window, so a
+  // fire-and-forget probe would land its push AFTER the Rust Connected edge already peeked the cell).
+
+  it("manual switch pushes the target's numeric map ping before vpn_connect (fast path — no fresh probe)", async () => {
+    localStorage.setItem("tt_config_path", "/config.json");
+    localStorage.setItem("tt_log_level", "info");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "list_configs")
+        return [
+          { id: "id-1", name: "C1", host: "h1.example.com", user: "u", path: "/config.json", order: 0, last_used: true },
+          { id: "id-2", name: "C2", host: "h2.example.com", user: "u", path: "/other.toml", order: 1, last_used: false },
+        ];
+      // The background per-config sweep lands a NUMERIC band for the target (ok → valueMs).
+      if (cmd === "ping_config_endpoint") return { status: "ok", ms: 42 };
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    // Let the background sweep land its numeric readings in the App-level ping map.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    const probesBefore = vi
+      .mocked(invoke)
+      .mock.calls.filter((c) => c[0] === "ping_config_endpoint").length;
+
+    // Manual switch to the inactive config (ConnectionPanel's onSwitchTo → handleConnectConfig).
+    await act(async () => {
+      await connectionPanelProps.onSwitchTo("/other.toml");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    // The EXACT map number was pushed…
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 42 });
+    // …with NO fresh probe (the fast path reads the map synchronously — the 15s background sweep
+    // did not tick during the switch, so any new probe here would be the — forbidden — fallback)…
+    const probesAfter = vi
+      .mocked(invoke)
+      .mock.calls.filter((c) => c[0] === "ping_config_endpoint").length;
+    expect(probesAfter).toBe(probesBefore);
+    // …and BEFORE vpn_connect (mirrors the origin-before-connect ordering contract).
+    const calls = vi.mocked(invoke).mock.calls;
+    const pingIdx = calls.findIndex(
+      (c) => c[0] === "set_pending_connect_ping" && (c[1] as { ms?: number | null })?.ms === 42,
+    );
+    const connectIdx = calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(pingIdx).toBeGreaterThanOrEqual(0);
+    expect(connectIdx).toBeGreaterThanOrEqual(0);
+    expect(pingIdx).toBeLessThan(connectIdx);
+  });
+
+  it("manual switch with NO numeric band falls back to a fresh ping_config_endpoint probe and pushes its ms before vpn_connect", async () => {
+    localStorage.setItem("tt_config_path", "/config.json");
+    localStorage.setItem("tt_log_level", "info");
+    // The background sweep answers no-data (a band WITHOUT valueMs — e.g. a timed-out sweep);
+    // the switch-time FRESH probe then answers ok/87. This is the exact owner-UAT case: a
+    // genuinely reachable target whose background band is non-numeric must still show a real
+    // plate ping instead of «—».
+    let probeResult: { status: string; ms?: number } = { status: "no-data" };
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "list_configs")
+        return [
+          { id: "id-1", name: "C1", host: "h1.example.com", user: "u", path: "/config.json", order: 0, last_used: true },
+          { id: "id-2", name: "C2", host: "h2.example.com", user: "u", path: "/other.toml", order: 1, last_used: false },
+        ];
+      if (cmd === "ping_config_endpoint") return probeResult;
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    // From now on the endpoint answers — only the fresh switch-time probe sees this.
+    probeResult = { status: "ok", ms: 87 };
+
+    await act(async () => {
+      await connectionPanelProps.onSwitchTo("/other.toml");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    // The fallback probe targeted the SWITCH TARGET with the launch-path bound (1500ms — not the
+    // 3000ms background-sweep bound; distinguishes the fresh probe from sweep probes)…
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("ping_config_endpoint", {
+      configPath: "/other.toml",
+      timeoutMs: 1500,
+    });
+    // …its number was pushed…
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 87 });
+    // …BEFORE vpn_connect (the awaited push means the Rust Connected edge cannot outrun it).
+    const calls = vi.mocked(invoke).mock.calls;
+    const pingIdx = calls.findIndex(
+      (c) => c[0] === "set_pending_connect_ping" && (c[1] as { ms?: number | null })?.ms === 87,
+    );
+    const connectIdx = calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(pingIdx).toBeGreaterThanOrEqual(0);
+    expect(connectIdx).toBeGreaterThanOrEqual(0);
+    expect(pingIdx).toBeLessThan(connectIdx);
+  });
+
+  it("manual switch fallback pushes null when the fresh probe answers non-ok (honest «—»)", async () => {
+    localStorage.setItem("tt_config_path", "/config.json");
+    localStorage.setItem("tt_log_level", "info");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "list_configs")
+        return [
+          { id: "id-1", name: "C1", host: "h1.example.com", user: "u", path: "/config.json", order: 0, last_used: true },
+          { id: "id-2", name: "C2", host: "h2.example.com", user: "u", path: "/other.toml", order: 1, last_used: false },
+        ];
+      // Both the background sweep AND the fresh fallback probe read unreachable → no number exists.
+      if (cmd === "ping_config_endpoint") return { status: "unreachable" };
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    await act(async () => {
+      await connectionPanelProps.onSwitchTo("/other.toml");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    // A non-ok fresh probe pushes an honest null («—») — and the switch still connects.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: null });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/other.toml",
+      logLevel: "info",
+    });
+    const calls = vi.mocked(invoke).mock.calls;
+    const pingIdx = calls.findIndex(
+      (c) => c[0] === "set_pending_connect_ping" && (c[1] as { ms?: number | null })?.ms === null,
+    );
+    const connectIdx = calls.findIndex((c) => c[0] === "vpn_connect");
+    expect(pingIdx).toBeGreaterThanOrEqual(0);
+    expect(connectIdx).toBeGreaterThanOrEqual(0);
+    expect(pingIdx).toBeLessThan(connectIdx);
+  });
+
+  it("manual connect pushes null and still connects when the fresh probe THROWS (never blocks the connect)", async () => {
+    localStorage.setItem("tt_config_path", "/my/config.json");
+    localStorage.setItem("tt_log_level", "debug");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      // Older backend / non-Tauri env: the probe command itself rejects — the push must
+      // degrade to null and the connect must proceed (no error state, no hang).
+      if (cmd === "ping_config_endpoint") throw new Error("unknown command");
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await gotoSettings();
+
+    // The ACTIVE-config entry point (handleConnectActive — status panel / shortcut).
+    await act(async () => {
+      await statusPanelProps.onConnect();
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: null });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: "/my/config.json",
+      logLevel: "debug",
+    });
+    // The throw was contained: the connect flow reached "connecting", not "error".
+    expect(statusPanelProps.status).toBe("connecting");
+  });
+
+  // ─── Fable-A review #1/#2: the synchronous in-flight guard over the manual connect initiators ───
+  //
+  // The 13-12 awaited pre-connect probe opened a ≤1500ms window in which status stays
+  // "disconnected" while nothing is visibly happening — the «Подключить» button and the
+  // Ctrl-connect shortcut gate stayed live. A second activation in that window ran a FULL second
+  // connect: it either hit the Rust R8 guard («VPN is already running» → the FE catch flipped to
+  // "error" over a live tunnel) or, in the tighter race, two vpn_connect calls both passed the
+  // guard.is_none() pre-flight window and spawned TWO sidecars (leaking the first
+  // killswitch-owning process). connectInFlightRef closes the window synchronously.
+
+  it("a second manual activation during the awaited pre-connect probe window is a NO-OP (in-flight guard)", async () => {
+    localStorage.setItem("tt_config_path", "/my/config.json");
+    localStorage.setItem("tt_log_level", "info");
+    // Hold the slow-path fresh probe OPEN so the test can activate again mid-await — the exact
+    // window the guard exists to close.
+    let resolveProbe: ((v: unknown) => void) | undefined;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "ping_config_endpoint")
+        return new Promise((res) => {
+          resolveProbe = res;
+        });
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    await gotoSettings();
+
+    await act(async () => {
+      const first = statusPanelProps.onConnect();
+      // The double-fire: a second click / Ctrl-shortcut while the first is still awaiting the
+      // probe. The guard must swallow it — NOT run a second connect.
+      const second = statusPanelProps.onConnect();
+      resolveProbe?.({ status: "ok", ms: 55 });
+      await Promise.all([first, second]);
+    });
+
+    // Exactly ONE vpn_connect fired for the two activations.
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_connect").length).toBe(1);
+
+    // The guard was RELEASED in the `finally` — a later, deliberate re-activation still works
+    // (a failed/hung guard would have wedged the button forever).
+    await act(async () => {
+      const third = statusPanelProps.onConnect();
+      resolveProbe?.({ status: "ok", ms: 56 });
+      await third;
+    });
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_connect").length).toBe(2);
+  });
+
+  // ─── Fable-A review #3: the save-and-reconnect plate ping ───
+
+  it("save-and-reconnect pushes origin=manual + the fresh-probe ping AFTER the teardown and BEFORE its vpn_connect", async () => {
+    // handleReconnect («Сохранить и переподключить») was the ONLY initiator reaching vpn_connect
+    // without pushing pending_connect_ping / stamping origin=Manual — its terminal «Подключено»
+    // plate deterministically rendered ping «—». It now runs App's pushPendingConnectPing (threaded
+    // into useVpnActions) after the teardown wait (endpoint inactive → the fresh probe reads a real
+    // number) and before the reconnect's vpn_connect.
+    localStorage.setItem("tt_config_path", "/my/config.json");
+    localStorage.setItem("tt_log_level", "info");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "check_vpn_status") return "disconnected";
+      if (cmd === "read_client_config") return { vpn_mode: "general" };
+      if (cmd === "auto_detect_config") return null;
+      if (cmd === "ping_config_endpoint") return { status: "ok", ms: 33 };
+      return null;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    // A live session: the reconnect is only reachable while connected.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "connected" });
+    });
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      // RoutingPanel stays mounted on every tab; its onReconnect is App's guarded reconnect.
+      reconnectPromise = routingPanelProps.onReconnect();
+      await Promise.resolve();
+    });
+    // The teardown completes (sidecar down) → resolves the reconnect wait; push + connect follow.
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise!;
+    });
+
+    // The reconnect leg now wears the same belts as every other connect initiator:
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_origin", {
+      origin: "manual",
+    });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 33 });
+    // Ordering: teardown vpn_disconnect → ping push → reconnect vpn_connect. Pushing BEFORE the
+    // teardown would probe the still-active endpoint (reads Unreachable by design → «—»); pushing
+    // after vpn_connect could lose to the Rust Connected edge.
+    const calls = vi.mocked(invoke).mock.calls;
+    const names = calls.map((c) => c[0]);
+    const disconnectIdx = names.indexOf("vpn_disconnect");
+    const pingIdx = calls.findIndex(
+      (c) => c[0] === "set_pending_connect_ping" && (c[1] as { ms?: number | null })?.ms === 33,
+    );
+    const connectIdx = names.indexOf("vpn_connect");
+    expect(disconnectIdx).toBeGreaterThanOrEqual(0);
+    expect(pingIdx).toBeGreaterThan(disconnectIdx);
+    expect(connectIdx).toBeGreaterThan(pingIdx);
   });
 
   // IN-04: removed the "handleConnect sets error when configPath is empty"

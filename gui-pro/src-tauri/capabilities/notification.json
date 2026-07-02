@@ -1,0 +1,9 @@
+{
+  "identifier": "notification-plate",
+  "description": "Phase 13 — the desktop connection-notification plate is its OWN webview window (label 'notification'), built at runtime in lib.rs. Tauri v2 scopes IPC/event/window permissions PER WINDOW LABEL via capabilities; the 'default' capability targets only ['main'], so without this file the plate window is denied listen()/invoke()/hide() and can never receive its notify-plate payload or auto-dismiss — it renders as an empty opaque box (the UAT test-1 blocker). Grant it the minimum it needs: core:default (events — listen('notify-plate') — plus the base app/window/webview surface), plus the ONE window command the plate's own JS calls: hide (auto-dismiss + × close + the mount-time heal). Main-window focus on body click is Rust-side (restore_main_window), which needs no capability. Custom app commands the plate invokes (pull_pending_plate, restore_main_window) are app commands, permitted the same way main's are — no per-command permission entry (mirrors the 'default' capability, which lists none of main's custom commands).",
+  "windows": ["notification"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-hide"
+  ]
+}

@@ -118,9 +118,10 @@ export interface ConfigCardProps {
   onDelete?: () => void;
   onDuplicate?: () => void;
   /**
-   * Commit a rename (D-14). Receives the trimmed new name; returns an error i18n-resolved
-   * string when the name is rejected (empty/duplicate) so the card can render a FieldError
-   * and keep the rename open, or void/undefined on success (the card exits edit mode).
+   * Commit a rename (D-14). Receives the trimmed new name ("" is a valid clear — IN-58);
+   * returns an error i18n-resolved string when the name is rejected (duplicate / backend
+   * failure) so the card can render a FieldError and keep the rename open, or
+   * void/undefined on success (the card exits edit mode).
    * Only the resting (inactive) row exposes rename — the lead card's name is read-only.
    */
   onRename?: (newName: string) => Promise<string | void> | string | void;
@@ -149,11 +150,21 @@ export function ConfigCard({
   const effectivePing: ConfigPing = ping ?? { band: "no-data" };
   const isConnected = status === "connected";
 
+  // IN-58: an EMPTY name is VALID, and the card TITLE then falls back to the config's
+  // username (owner: «при пустом имени отображается username из конфига»). The Rust list
+  // already derives endpoint.name → username on read (manifest.rs::summarize_unchecked),
+  // so a blank name normally never reaches this card via list_configs — this render-level
+  // fallback keeps the rule true at the COMPONENT contract too (stories/tests/any caller
+  // can pass a raw empty name). NOTE: the rename DRAFT below still starts from the RAW
+  // config.name — the pencil edits the real (possibly empty) name, never the fallback.
+  const displayName = config.name.trim() ? config.name : config.user;
+
   // ─── Inline rename state (D-14, resting/inactive row ONLY) ───
-  // The name is the config's user-facing TITLE (source: top-level `name` → else username).
+  // The name is the config's user-facing TITLE (source: endpoint.name → else username).
   // It is committed ONLY by Enter/✓ and ONLY when valid; ✗/Escape (and any other action via
-  // runAction) discards the draft. An empty or duplicate name shows a FieldError and never
-  // commits. INLINE rename via the pencil is offered ONLY on the resting (inactive) card; the
+  // runAction) discards the draft. A DUPLICATE name shows a FieldError and never commits;
+  // an EMPTY name is a valid clear (IN-58 — the title falls back to the username).
+  // INLINE rename via the pencil is offered ONLY on the resting (inactive) card; the
   // ACTIVE/lead card's title is read-only here and is edited in «Изменить» → «Настройки
   // конфигурации» → «Имя конфига» instead (ConfigEditView), then applied on save.
   const renameEnabled = !leadCard && Boolean(onRename);
@@ -183,7 +194,7 @@ export function ConfigCard({
     setEditing(false);
   };
   const commitRename = async () => {
-    if (localError) return; // never commit an empty/duplicate name
+    if (localError) return; // never commit a duplicate name (empty is a valid clear, IN-58)
     if (trimmed === config.name) {
       // No change — just close the editor (no-op commit).
       setEditing(false);
@@ -225,7 +236,8 @@ export function ConfigCard({
           autoFocus
         />
         {/* ✓ commits (disabled while invalid), ✗ discards — nothing saves without an explicit
-            ✓/Enter, and an empty/duplicate name can never save (D-14). */}
+            ✓/Enter, and a duplicate name can never save (D-14). An EMPTY draft commits a
+            valid clear (IN-58) — the title then falls back to the username. */}
         <IconButton
           aria-label={t("connection.rename.commit")}
           tooltip={t("connection.rename.commit")}
@@ -251,9 +263,17 @@ export function ConfigCard({
   // (the stronger success-ramp token so the ring survives on a near-white light surface).
   // There is deliberately NO single-sided (left-edge) accent rail (feedback_no_left_accent_rail).
   const highlightActive = leadCard && isConnected;
+  // The lead card ALWAYS sits inside ConfigList's frosted-glass wrapper (leadCard ⟺ a live hero:
+  // connecting / connected / disconnecting / reconnecting / recovering). For that frost to show
+  // through, the lead-card body must stay TRANSPARENT in EVERY live state — an opaque Card surface
+  // hides the glass (owner: «отключение»/«подключение» read as solid grey). Connected additionally
+  // gets the 8% green tint + ring (the active marker); the other live states show the neutral frost
+  // alone. Resting (inactive) rows keep Card's opaque surface (no wrapper behind them).
   const activeHighlightClass = highlightActive
     ? "bg-[var(--color-status-connected-bg)] ring-1 ring-[var(--color-success-tint-25)]"
-    : "";
+    : leadCard
+      ? "bg-transparent"
+      : "";
 
   // Lead-card status label — short state word (no trailing «…» in the badge). Uses the
   // existing status.* i18n keys (the _short variants for in-flight states).
@@ -309,7 +329,9 @@ export function ConfigCard({
   return (
     <Card
       padding="sm"
-      hover={!highlightActive}
+      // The hero (any live state) never hover-highlights its border — it is the frosted focal card,
+      // not an actionable row. Only resting (inactive) rows get the hover affordance.
+      hover={!leadCard}
       data-testid="config-card"
       data-lead={leadCard ? "true" : undefined}
       // data-active-highlight is an inert testability hook: tests assert the green-active
@@ -335,7 +357,7 @@ export function ConfigCard({
               inline — inline rename is a resting-row affordance only. */}
           <div className="flex min-w-0 flex-col items-center gap-[var(--space-1)] text-center">
             <TruncatedText
-              text={config.name}
+              text={displayName}
               className="max-w-full text-base font-semibold text-[var(--color-text-primary)]"
             />
             <div className="flex min-w-0 max-w-full items-center justify-center gap-[var(--space-3)] text-xs text-[var(--color-text-muted)]">
@@ -411,7 +433,7 @@ export function ConfigCard({
             ) : (
               <div className="flex items-center gap-[var(--space-1)] min-w-0 min-h-8">
                 <TruncatedText
-                  text={config.name}
+                  text={displayName}
                   className="min-w-0 text-sm font-medium text-[var(--color-text-primary)]"
                 />
                 {renameEnabled && (

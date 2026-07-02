@@ -180,18 +180,19 @@ export function ConfigList({
       <div className="flex flex-col gap-[var(--space-2)]">
         {leadIsLive ? (
           <>
-            {/* LIVE connection — the connected config is the wide, sticky, OPAQUE hero at the top;
+            {/* LIVE connection — the connected config is the wide, sticky, FROSTED hero at the top;
                 every other card sits 10px in on each side (IN-46) so the active card stands out by
                 width (IN-52: the wide/lead treatment exists ONLY while a tunnel is live).
 
-                IN-59 (restores the MATTE-GLASS look the owner wants): the hero wrapper is a FROSTED
-                surface — a semi-transparent glass tint (--color-glass-bg-strong, 0.45) + a heavy
-                backdrop-blur(20px) saturate(150%). The lead-card body is ~92% transparent (the active green tint
-                replaces Card's opaque surface), so the wrapper does the hiding: the strong blur turns
-                anything scrolling beneath into a soft, dimmed blur (the frosted-glass aesthetic)
-                while the 0.45 tint stops it reading through SHARPLY (the IN-50 bleed the 0.45 frost
-                had). It is SQUARE so the blur is not clipped to a radius and fills the rounded card's
-                corner triangles (IN-38). No gap mask above (owner dropped it, IN-52). */}
+                IN-59 (the MATTE-GLASS look the owner wants): the hero wrapper is a FROSTED surface —
+                a semi-transparent glass tint (--color-glass-bg-strong, 0.45) + a heavy
+                backdrop-blur(20px) saturate(150%). The lead-card BODY stays transparent in EVERY live
+                state (connecting / connected / disconnecting / reconnecting / recovering) so the frost
+                shows through — connected additionally adds the 8% green tint + ring (see ConfigCard
+                `activeHighlightClass`). The strong blur turns anything scrolling beneath into a soft,
+                dimmed blur while the 0.45 tint stops it reading through SHARPLY (the IN-50 bleed the
+                0.45 frost had). It is SQUARE so the blur is not clipped to a radius and fills the
+                rounded card's corner triangles (IN-38). No gap mask above (owner dropped it, IN-52). */}
             <div
               className="sticky top-0 z-10"
               style={{

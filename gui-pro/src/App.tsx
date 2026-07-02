@@ -36,7 +36,9 @@ import { useTabPersistence } from "./shared/hooks/useTabPersistence";
 import { useActivityLogStartup } from "./shared/hooks/useActivityLogStartup";
 import { useAppShellActions } from "./shared/hooks/useAppShellActions";
 import { useTrayNavigate } from "./shared/hooks/useTrayNavigate";
+import { useNavigateToTab } from "./shared/hooks/useNavigateToTab";
 import { runViewTransition } from "./shared/utils/viewTransition";
+import { samePath } from "./shared/utils/samePath";
 import { DropOverlay } from "./shared/ui/DropOverlay";
 import { ConfirmDialog, ConfirmDialogProvider } from "./shared/ui";
 import { ImportModal } from "./components/connection/ImportModal";
@@ -45,6 +47,23 @@ import { WelcomeTour } from "./components/welcome/WelcomeTour";
 import { useWelcomeTour } from "./shared/hooks/useWelcomeTour";
 import { Terminal, X } from "lucide-react";
 import type { AppTab, VpnStatus, VpnConfig, LogEntry, ReconnectProgress } from "./shared/types";
+
+// Phase 13 (13-12): the Rust `PingResult` discriminated union (serde tag = "status", kebab-case) —
+// the SAME shape useAutoConnect / usePerConfigPing consume. Declared locally (a structural subset,
+// same pattern as useAutoConnect's own copy) so App.tsx does not grow a cross-hook type import for
+// the manual connect-time fresh probe below.
+type PingResult =
+  | { status: "ok"; ms: number }
+  | { status: "unreachable" }
+  | { status: "no-data" };
+
+// Phase 13 (13-12): SHORT fresh-probe timeout for the MANUAL connect/switch plate ping — the same
+// bound the LAUNCH auto-connect uses (useAutoConnect's LAUNCH_PING_TIMEOUT_MS = 1500). The probe is
+// AWAITED before the connect fires (see pushPendingConnectPing), so it must stay tight: on a
+// slow/unreachable endpoint the manual connect is delayed by at most this before an honest
+// null («—») is pushed. (usePerConfigPing's background sweep uses 3s; this path is
+// latency-sensitive, so it mirrors the launch path's tighter bound.)
+const MANUAL_PING_TIMEOUT_MS = 1500;
 
 function App() {
   // ─── Theme & Language ───
@@ -214,7 +233,12 @@ function App() {
     // and the import modal is NOT mounted (App.tsx no-config branch). The deep-link
     // primarily serves the not-yet-configured user receiving a config link;
     // re-import-over-existing is out of round-2 scope.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: synchronizing shell state with an external deep-link arrival; bounded to one run per distinct URL (consume() clears the source)
+    // Deliberate sync setState in an effect: synchronizing shell state with an external
+    // deep-link arrival; bounded to one run per distinct URL (consume() clears the source).
+    // (The react-hooks/set-state-in-effect disable that used to sit here became UNUSED after
+    // Fable-A: the rule's compiler-based analysis no longer reports this effect once the
+    // guarded connect handlers below entered the component — eslint then flags the stale
+    // directive itself under --max-warnings 0, so it had to go.)
     setDeepLinkUrl(deepLinkPendingUrl);
     setActiveTab("connection");
     setImportOpen(true);
@@ -270,6 +294,19 @@ function App() {
   // a tray disconnect during a backend auto-reconnect must land as a real
   // terminal «Отключено», not be swallowed (UI used to stick on «Переподключение»).
   const manualReconnectActiveRef = useRef(false);
+  // Fable-A review #1/#2: SYNCHRONOUS in-flight guard over the MANUAL connect initiators
+  // (handleConnectActive / handleConnectConfig / handleReconnectGuarded). The 13-12 fix made those
+  // paths `await pushPendingConnectPing(...)` BEFORE connecting; on the slow path that await spans a
+  // ≤1500ms fresh probe during which NOTHING sets status — the «Подключить» button and the
+  // Ctrl-connect shortcut gate (both keyed on status === "disconnected") stay live. A second
+  // activation in that window ran a FULL second connect: it either hit the Rust R8 guard («VPN is
+  // already running» → FE flipped to "error" over a live tunnel) or, in the tighter race, two
+  // vpn_connect calls both passed the guard.is_none() pre-flight window and spawned TWO sidecars
+  // (leaking the first killswitch-owning process). A plain ref — NOT React state — because the guard
+  // must flip synchronously within the same event-handler tick (state commits a render later, which
+  // is exactly the window being closed). Set true before the first await of every manual initiator,
+  // released in a `finally` so a failed/rejected connect never wedges the button.
+  const connectInFlightRef = useRef(false);
   const pushSuccess = useSnackBar();
 
   useVpnEvents({
@@ -284,10 +321,85 @@ function App() {
     manualReconnectActiveRef,
   });
 
+  // ─── App-level config-list + inactive-ping source (Phase 12, 12-07) ───
+  // The SINGLE App-level config-list + inactive-ping source (T-12-14: exactly one ping loop). It is
+  // passed down to ConnectionPanel as `source` (so the cards reuse it instead of running their own
+  // loop) AND it produces the priority-ordered candidate list the auto-switch engine (below)
+  // consumes. Declared ABOVE useVpnActions because pushPendingConnectPing (next) reads it and is
+  // now ALSO threaded INTO useVpnActions for the save-and-reconnect ping push (Fable-A review #3).
+  const configPingSource = useConfigPingSource(config.configPath);
+
+  // Phase 13 (13-08b, reworked 13-12): push the connect-time PING the notification plate shows,
+  // RIGHT BEFORE a manual connect/switch. Two-tier source, mirroring the LAUNCH path's fresh probe
+  // (useAutoConnect, 13-09 Fix 1):
+  //   - FAST PATH: the config's last-known reachability ping from the SINGLE App-level
+  //     `usePerConfigPing` map (measured while the config was still INACTIVE — the map never pings
+  //     the active one). A numeric `valueMs` (green/yellow/red band) is pushed synchronously.
+  //   - SLOW PATH (13-12 owner-UAT fix): a non-numeric band (timeout / no-data / measuring) or a
+  //     target ABSENT from the map does NOT mean the endpoint is down — the last 15s background
+  //     sweep may have timed out or simply not landed yet. The old code pushed null here, so a
+  //     manual connect/switch to a perfectly reachable server rendered «—» while the SAME server
+  //     showed a real number on the launch auto-connect (asymmetric ping supply). Now we run the
+  //     SAME fresh `ping_config_endpoint` probe the launch path runs — the target is still
+  //     DISCONNECTED at this point, so the probe reads a real number — and push ok→ms, else null.
+  // The result promise is AWAITED by every caller BEFORE the connect/switch fires: on a DIRECT
+  // connect (disconnected state → no teardown) vpn_connect follows almost immediately, so a
+  // fire-and-forget probe would land its push AFTER the Rust Connected edge already peeked
+  // `pending_connect_ping` (→ still «—»). A bare number|null crosses — no config content /
+  // password (D-29). Every invoke is caught, so a non-Tauri / test env never rejects the connect.
+  const pushPendingConnectPing = useCallback(
+    async (path: string): Promise<void> => {
+      // Phase 13 (13-10 / §B): explicitly stamp origin=Manual right before EVERY manual connect/switch,
+      // alongside the ping push. FIX for the origin-leak mislabel: `pending_connect_origin` is a single
+      // shared AppState cell. A launch AutoConnectLaunch origin whose Connected is observed only via the
+      // mount snapshot is never consumed, so it survived into the NEXT connect — and the manual connect
+      // path (unlike useAutoSwitch → AutoSwitch and useAutoConnect → AutoConnectLaunch) never set its
+      // own origin, so it read the STALE cell and mislabelled itself «Автоподключение при запуске». By
+      // asserting Manual here (this callback fires at every manual connect/switch site, right before the
+      // connect), a stale origin can never leak into a manual connect: every initiator now sets its own
+      // origin (manual→Manual, launch→AutoConnectLaunch, switch→AutoSwitch). This is a FE belt only — the
+      // Rust origin CONSUME logic is untouched. A bare enum crosses (no config content / password — D-29).
+      // No-op-safe .catch so a non-Tauri / test env (invoke unmocked) never rejects the connect path.
+      void invoke("set_pending_connect_origin", { origin: "manual" }).catch(() => {});
+
+      const match = configPingSource.configs.find((c) => samePath(c.path, path));
+      const ping = match ? configPingSource.pings[match.id] : undefined;
+      // FAST PATH: `valueMs` is set only when the band is a numeric quality (green/yellow/red) —
+      // push it fire-and-forget (no probe, no await cost; the shipped 13-08b ordering — push IPC
+      // posted before vpn_connect — is proven adequate in the field for this path).
+      if (typeof ping?.valueMs === "number") {
+        void invoke("set_pending_connect_ping", { ms: ping.valueMs }).catch(() => {});
+        return;
+      }
+      // SLOW PATH: fresh reachability probe of the still-disconnected target, exact same invoke
+      // shape + result handling as useAutoConnect's launch probe. On any non-`ok` result — or a
+      // throw (older backend / unmocked test invoke) — push null so the plate honestly reads «—»
+      // and the connect is never blocked or rejected. (No initializer: both the try and the catch
+      // assign, and eslint's no-useless-assignment rejects a dead `= null` up front.)
+      let ms: number | null;
+      try {
+        const result = await invoke<PingResult>("ping_config_endpoint", {
+          configPath: path,
+          timeoutMs: MANUAL_PING_TIMEOUT_MS,
+        });
+        ms = result.status === "ok" ? result.ms : null;
+      } catch {
+        ms = null;
+      }
+      // Awaited (unlike the fast path): the probe already cost a round-trip, and the callers'
+      // await must cover the push itself so the Rust Connected edge cannot outrun it.
+      await invoke("set_pending_connect_ping", { ms }).catch(() => {});
+    },
+    [configPingSource.configs, configPingSource.pings],
+  );
+
   // ─── VPN Actions ───
   // IN-32: moved ABOVE useConfigLifecycle so the lifecycle hook can receive handleDisconnect —
   // when the ACTIVE config file is deleted externally (file manager) while connected, the tunnel
   // must be torn down. (useVpnActions only depends on state + the refs above, so the move is safe.)
+  // Fable-A review #3: pushPendingConnectPing is threaded in so handleReconnect («Сохранить и
+  // переподключить») pushes the SAME ping+origin every other connect initiator pushes — it was the
+  // only path reaching vpn_connect without it, so its «Подключено» plate deterministically read «—».
   const { handleConnect, handleDisconnect, handleReconnect, switchTo } = useVpnActions({
     config,
     status,
@@ -296,6 +408,7 @@ function App() {
     i18n,
     reconnectResolve,
     manualReconnectActiveRef,
+    pushPendingConnectPing,
   });
 
   // ─── Shell hooks (Phase 12.5 decomposition) ───
@@ -316,10 +429,8 @@ function App() {
   useAutoConnect({ config, status, setStatus, setError });
 
   // ─── Phase 12 (12-07): smart auto-switch engine ───
-  // The SINGLE App-level config-list + inactive-ping source (T-12-14: exactly one ping loop). It is
-  // passed down to ConnectionPanel as `source` (so the cards reuse it instead of running their own
-  // loop) AND it produces the priority-ordered candidate list the engine consumes.
-  const configPingSource = useConfigPingSource(config.configPath);
+  // (The config-list + inactive-ping source it consumes — configPingSource — now lives ABOVE
+  // useVpnActions, see Fable-A review #3.)
   // The persisted «Авто-режим» prefs (the SAME store the AutoModeSettings section writes). The
   // master toggle gates the whole engine; threshold/interval/checks tune it.
   const { settings: autoModeSettings } = useAppSettings();
@@ -333,6 +444,43 @@ function App() {
   // keeps monitoring the wrong (now-inactive) server and the rest of the single-config surface
   // (Routing/Settings/status panel, tt_config_path) goes stale. Mirror handleConnectConfig's promote,
   // but awaitable so the engine arms the cooldown only after the disconnect→connect resolves.
+
+  // Phase 13 (13-08b / 13-12): the ACTIVE-config connect (status-panel «Подключить», keyboard
+  // shortcut, About/Connection panels) goes through `handleConnect`, which connects
+  // `config.configPath`. Wrap it so it FIRST pushes that config's connect-time ping — AWAITED
+  // (13-12): a direct connect has NO teardown window, so vpn_connect fires immediately after; an
+  // un-awaited slow-path probe would land its push AFTER the Rust Connected edge already read the
+  // cell (→ «—»). pushPendingConnectPing never rejects, so the await cannot break the connect.
+  // Fable-A review #1/#2: guarded by connectInFlightRef — a second activation while the probe (or
+  // the connect itself) is in flight is a NO-OP instead of a second vpn_connect. The guard flips
+  // synchronously BEFORE the first await and is released in `finally`, so a rejected/failed connect
+  // can never wedge the button.
+  const handleConnectActive = useCallback(async (): Promise<void> => {
+    if (connectInFlightRef.current) return;
+    connectInFlightRef.current = true;
+    try {
+      if (config.configPath) await pushPendingConnectPing(config.configPath);
+      await handleConnect();
+    } finally {
+      connectInFlightRef.current = false;
+    }
+  }, [config.configPath, pushPendingConnectPing, handleConnect]);
+
+  // Fable-A review #1/#2/#3: the guarded save-and-reconnect («Сохранить и переподключить») — the
+  // third MANUAL connect initiator under the same connectInFlightRef. handleReconnect now awaits
+  // its own pushPendingConnectPing (threaded into useVpnActions) after the teardown, so it too has
+  // an in-flight window a second activation must not re-enter. Every consumer (VpnContext /
+  // ConnectionPanel / RoutingPanel) gets THIS wrapper, never the raw handleReconnect.
+  const handleReconnectGuarded = useCallback(async (): Promise<void> => {
+    if (connectInFlightRef.current) return;
+    connectInFlightRef.current = true;
+    try {
+      await handleReconnect();
+    } finally {
+      connectInFlightRef.current = false;
+    }
+  }, [handleReconnect]);
+
   const handleAutoSwitch = useCallback(
     async (path: string) => {
       if (path) {
@@ -369,6 +517,19 @@ function App() {
     }, []),
   );
 
+  // Phase 13 (13-09, Fix 2): clicking the connection notification plate's BODY restores the main
+  // window (Rust `restore_main_window`) AND steers here via a `navigate-to-tab` event — the plate
+  // is a connection notification, so a body-click should open the Connection tab (not whatever tab
+  // the user was last on). We switch the active tab to the emitted target. This works whether the
+  // window was closed to tray or just on another tab: the Rust side shows+focuses the window first,
+  // then emits this. The × close path does NOT emit (it only hides the plate), so a dismiss never
+  // navigates. Only the known "connection" id is honoured — anything else is ignored.
+  useNavigateToTab(
+    useCallback((tab: string) => {
+      if (tab === "connection") setActiveTab("connection");
+    }, []),
+  );
+
   // ─── Log viewing ───
   // Logs are surfaced exclusively through the in-window LogPanel overlay
   // (toggled by the title-bar Terminal button, see showLogs above). An earlier
@@ -387,22 +548,49 @@ function App() {
   // the active-config pointer still points at the user's intended config (matching the old
   // connect path, which also set the path before awaiting).
   const handleConnectConfig = useCallback(
-    (path: string) => {
-      if (path) {
-        // 11-UAT gap D: commit the active-path change INSIDE a View Transition so the
-        // «Подключение» list animates the chosen config gliding to the lead (and the previous
-        // lead settling down), instead of snapping. ConfigList tags each card with a stable
-        // view-transition-name; flushSync (inside runViewTransition) makes this re-render
-        // synchronous so the browser captures the before/after frames. Reduced-motion / no-API
-        // (jsdom) fall back to an instant promote.
-        runViewTransition(() => {
-          setConfig((prev) => ({ ...prev, configPath: path }));
-        });
-        localStorage.setItem("tt_config_path", path);
+    async (path: string) => {
+      // Fable-A review #1/#2: the in-flight guard — a second activation (another card's
+      // «Переключиться» / «Подключить», or the status-panel button racing this one) while the
+      // awaited probe or the switch itself is in flight is a NO-OP. This also kills the
+      // stale-closure hazard: a second switchTo captured against pre-teardown state can no longer
+      // interleave/reorder with the first, and a stale slow-probe push can no longer overwrite a
+      // newer target's ping (only one manual initiator runs at a time). Flipped synchronously
+      // BEFORE the first await; released in `finally`.
+      if (connectInFlightRef.current) return;
+      connectInFlightRef.current = true;
+      try {
+        if (path) {
+          // 11-UAT gap D: commit the active-path change INSIDE a View Transition so the
+          // «Подключение» list animates the chosen config gliding to the lead (and the previous
+          // lead settling down), instead of snapping. ConfigList tags each card with a stable
+          // view-transition-name; flushSync (inside runViewTransition) makes this re-render
+          // synchronous so the browser captures the before/after frames. Reduced-motion / no-API
+          // (jsdom) fall back to an instant promote. NOTE (13-12): this promote must stay ABOVE the
+          // first await — runViewTransition needs to run synchronously inside the event handler so
+          // the transition captures the before frame.
+          runViewTransition(() => {
+            setConfig((prev) => ({ ...prev, configPath: path }));
+          });
+          localStorage.setItem("tt_config_path", path);
+        }
+        // Phase 13 (13-08b / 13-12): push the selected config's connect-time ping BEFORE switchTo —
+        // AWAITED (13-12): when nothing is live, switchTo skips the teardown and goes straight to
+        // vpn_connect, so an un-awaited slow-path probe would land its push after the Rust Connected
+        // edge already read the cell (→ «—»). (On a live switch the ~5s teardown window would mask
+        // that race, but awaiting makes BOTH entry points correct.) pushPendingConnectPing never
+        // rejects, so this async handler never rejects either — the ConnectionPanel call sites
+        // (typed `(path) => void`) can keep fire-and-forgetting it safely.
+        await pushPendingConnectPing(path);
+        // AWAITED (was `void` pre-Fable-A): the guard must stay raised through the whole
+        // disconnect→connect so a second manual initiator cannot slip in mid-switch. switchTo
+        // never rejects (every failure path inside resolves after setting status/error), so the
+        // `finally` below always releases the guard.
+        await switchTo(path);
+      } finally {
+        connectInFlightRef.current = false;
       }
-      void switchTo(path);
     },
-    [switchTo],
+    [switchTo, pushPendingConnectPing],
   );
 
   // ─── Shell action callbacks ───
@@ -463,8 +651,8 @@ function App() {
   useKeyboardShortcuts({
     onToggleConnect: useCallback(() => {
       if (status === "connected") handleDisconnect();
-      else if (status === "disconnected" && config.configPath) handleConnect();
-    }, [status, config.configPath, handleConnect, handleDisconnect]),
+      else if (status === "disconnected" && config.configPath) handleConnectActive();
+    }, [status, config.configPath, handleConnectActive, handleDisconnect]),
     onNavigate: setActiveTab as (page: string) => void,
     onToggleTheme: toggleTheme,
     onToggleLanguage: toggleLanguage,
@@ -491,11 +679,11 @@ function App() {
       connectedSince,
       configPath: config.configPath,
       vpnMode,
-      onConnect: handleConnect,
+      onConnect: handleConnectActive,
       onDisconnect: handleDisconnect,
-      onReconnect: handleReconnect,
+      onReconnect: handleReconnectGuarded,
     }),
-    [status, connectedSince, config.configPath, vpnMode, handleConnect, handleDisconnect, handleReconnect],
+    [status, connectedSince, config.configPath, vpnMode, handleConnectActive, handleDisconnect, handleReconnectGuarded],
   );
 
   // IN-11 (06-review): the tabpanels stay MOUNTED (hidden via opacity/visibility, not
@@ -510,7 +698,7 @@ function App() {
       status={status}
       error={error}
       connectedSince={connectedSince}
-      onConnect={handleConnect}
+      onConnect={handleConnectActive}
       onDisconnect={handleDisconnect}
       reconnectProgress={reconnectProgress}
     />
@@ -649,7 +837,7 @@ function App() {
               onConnect={handleConnectConfig}
               onDisconnect={handleDisconnect}
               onSwitchTo={handleConnectConfig}
-              onReconnect={handleReconnect}
+              onReconnect={handleReconnectGuarded}
               // 12-07: reuse the App-level single config-list + ping source (one inactive-ping loop
               // shared with the auto-switch engine — no rival loop, T-12-14).
               source={configPingSource}
@@ -708,9 +896,9 @@ function App() {
               vpnMode={vpnMode}
               connectedSince={connectedSince}
               vpnError={error}
-              onConnect={handleConnect}
+              onConnect={handleConnectActive}
               onDisconnect={handleDisconnect}
-              onReconnect={handleReconnect}
+              onReconnect={handleReconnectGuarded}
               onVpnModeChange={setVpnMode}
             />
           </PanelErrorBoundary>

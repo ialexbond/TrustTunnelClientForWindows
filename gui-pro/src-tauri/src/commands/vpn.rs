@@ -153,6 +153,108 @@ pub struct AppState {
     /// decision point (including AFTER a successful respawn) to abort to a clean
     /// Disconnected instead of Connected. Starts at `false`.
     pub user_disconnect_requested: Arc<AtomicBool>,
+    /// Phase 13 (D-06 / §C) — the master notifications gate, MIRRORED from the FE.
+    ///
+    /// The «Авто-режим» → «Уведомления» toggle lives in the main webview's localStorage
+    /// (`tt_notifications_enabled`), but a notification plate must be GATED even with the
+    /// main window closed to tray — and localStorage is NOT shared across webview windows
+    /// (Pitfall 5). So the FE pushes the toggle value into this AtomicBool mirror via the
+    /// `set_notifications_enabled` command (on change AND once at startup), and the Rust
+    /// firing seam (`notify::maybe_fire`) reads THIS mirror — never localStorage — so the
+    /// gate holds window-closed. Default `true` matches the D-06 locked default, so the
+    /// gate is correct BEFORE the first FE mirror push lands (a safe pre-seed: nothing is
+    /// silenced that the user did not silence). AtomicBool because the read/write is a
+    /// single bool with no compound invariant.
+    pub notifications_enabled: Arc<AtomicBool>,
+    /// Phase 13 (Pitfall 2 / §B) — the pending connect ORIGIN the next `Connected` consumes.
+    ///
+    /// A `Connecting → Connected` transition alone cannot tell «пользователь нажал» from
+    /// «движок сам переключил» from «автоподключение при запуске» — the sidecar exposes no
+    /// "was this auto?" bit. Before an AUTO action (auto-switch or launch auto-connect) the
+    /// FE sets this durable signal via `set_pending_connect_origin`; `notify::maybe_fire`
+    /// reads it on the next `Connected` to pick «Переключено автоматически» /
+    /// «Автоподключение при запуске» over the generic «Подключено», then RESETS it back to
+    /// `Manual` so it marks ONLY the one intended auto action and every subsequent manual
+    /// connect reads `Manual`. `Mutex` (not Atomic) because `ConnectOrigin` is a 3-variant
+    /// enum, not a bool. Starts at `Manual`.
+    pub pending_connect_origin: Arc<Mutex<crate::notify::ConnectOrigin>>,
+    /// Phase 13 (13-08b) — the pending connect-time reachability PING (ms) the next `Connected`
+    /// consumes for the plate's detail block.
+    ///
+    /// FOLLOW-UP fix (build 2cr041 defect): the plate USED to ping the ACTIVE endpoint fresh at
+    /// connect time via `ping_config_endpoint`, but a direct TCP connect to the active/connected
+    /// endpoint reads Unreachable while the tunnel is up — BY DESIGN (see `usePerConfigPing.ts`
+    /// "the active/connected config is NOT pinged here" and `ping.rs` "a tunnel-internal IP will
+    /// fail a direct TCP connect and read Unreachable forever, even [connected]"). So the fresh
+    /// connect-time ping of the active server was architecturally wrong and always rendered «—».
+    /// The RELIABLE source is the config's reachability ping measured JUST BEFORE connecting (while
+    /// it was still INACTIVE), which the FE already has in the `usePerConfigPing` map. The FE pushes
+    /// that known ping here via `set_pending_connect_ping` right before each connect (at the SAME
+    /// sites that set `pending_connect_origin`), and `notify::maybe_fire` READS AND CONSUMES it on
+    /// the terminal Connected edge — exactly like the origin — using it as the plate's `ping_ms`.
+    /// `None` → the plate renders «—» (honest no-data). Consumed (reset to `None`) whenever the
+    /// origin is consumed so a failed attempt cannot leak a stale ping into the next connect.
+    /// `Mutex<Option<u32>>` mirrors `pending_connect_origin`'s lock shape. D-29: a numeric ms — no
+    /// config content or password. Starts at `None`.
+    pub pending_connect_ping: Arc<Mutex<Option<u32>>>,
+    /// Phase 13 (BL-01/WR-01) — a compound switch/reconnect TEARDOWN is in flight.
+    ///
+    /// `switchTo` and `handleReconnect` are plain `disconnect → connect`; their teardown leg writes
+    /// a genuine `Connected → Disconnected` transition through the single status writer. Without a
+    /// signal, `notify::maybe_fire` fired a spurious «Отключено» plate on that intermediate step
+    /// before the real destination plate («Переключено автоматически» / «Подключено») — the true
+    /// state mid-switch is "switching", never "disconnected" (D-03 / D-01). The FE raises THIS
+    /// durable flag via `set_switch_or_reconnect_pending(true)` BEFORE the teardown-disconnect and
+    /// clears it on the destination terminal outcome; `maybe_fire` reads it to SUPPRESS the
+    /// intermediate «Отключено», and ALSO clears it on the terminal outcome (Connected / Error) as a
+    /// durable backstop so a dropped FE promise can never wedge it `true` and swallow a later genuine
+    /// user disconnect. AtomicBool because it is a single bool with no compound invariant. Auto-
+    /// recovery does NOT set it (that path's Reconnecting/Recovering plates are intended — D-01), so
+    /// it never blocks recovery notifications. Starts at `false`.
+    pub switch_or_reconnect_pending: Arc<AtomicBool>,
+    /// Phase 13 (13-05) — the LATEST notify-plate payload staged by `maybe_fire` before its emit.
+    ///
+    /// This closes the emit-before-listener race behind the UAT test-1 blocker (the empty black
+    /// plate at launch): `maybe_fire` emits `notify-plate` then `win.show()` unconditionally, but
+    /// the plate webview subscribes only in a post-mount effect, and Tauri v2 does not buffer
+    /// events for a not-yet-subscribed webview — so a startup auto-connect fire that beats the
+    /// mount is dropped while the window still shows. `maybe_fire` now stages the payload here
+    /// BEFORE it emits; the plate PULLS-and-clears it once (`pull_pending_plate`, read-and-clear via
+    /// `take()`) after its listener attaches, so a fire that beat the mount is redelivered — the
+    /// same read-and-clear pattern the deep-link `poll_pending_deeplink` uses, here staged IN-MEMORY
+    /// on AppState (like `pending_connect_origin`) rather than on disk. Process-scoped AppState
+    /// resets it to `None` at every launch, so nothing stale survives a restart. Latest-wins (each
+    /// fire overwrites) so a pull always redelivers the CURRENT state (D-03). `Mutex<Option<…>>`
+    /// mirrors `pending_connect_origin`'s lock shape. D-29: `PendingPlate` carries only the kind
+    /// wire_key + the config display name — no `.toml` content, host, or password. Starts at `None`.
+    pub pending_plate: Arc<Mutex<Option<crate::notify::PendingPlate>>>,
+    /// Phase 13 (13-06) — the app's EFFECTIVE theme ("dark" | "light"), MIRRORED from the FE.
+    ///
+    /// The theme lives in the MAIN webview's localStorage (`tt_theme`) and `useTheme` applies it as
+    /// `data-theme` only on the MAIN window's `<html>`. The notification plate is a SEPARATE webview
+    /// with its OWN (empty) localStorage, so it never learns the theme and its tokens fall back to the
+    /// `:root` dark defaults — the plate stays dark even when the app is in the light theme (UAT
+    /// round-2 defect 1). Same shape as the notifications gate (Pitfall 5: localStorage is not shared
+    /// across webview windows), so the FE pushes the effective theme into this mirror via
+    /// `set_plate_theme` (on change AND once at startup), and `notify::maybe_fire` includes it in the
+    /// emitted payload so the plate applies the correct `data-theme` before every render. `Mutex`
+    /// (not Atomic) because it holds a `String`. Starts `"dark"` — a safe default: the pre-seed dark
+    /// value matches the `:root` fallback, so the plate looks correct BEFORE the first FE mirror push
+    /// lands. Only ever holds one of the two whitelisted values ("dark"/"light") — `set_plate_theme`
+    /// coerces any other input to "dark" (never trust a raw FE string blindly). D-29: a 2-value theme
+    /// enum-like string, no secret.
+    pub plate_theme: Arc<Mutex<String>>,
+    /// Phase 13 (13-07) — the app's UI language ("ru" | "en") MIRRORED from the FE, so the desktop
+    /// plate picks the right-language copy. The plate copy was hardcoded Russian and the plate webview
+    /// has its OWN (empty) localStorage (Pitfall 5), so it stayed Russian on the English app language
+    /// (UAT round-3 defect 2). Same shape as `plate_theme`: the FE (`useLanguage`) pushes the language
+    /// into this mirror via `set_plate_language` (on change AND once at startup), and
+    /// `notify::maybe_fire` includes it in the emitted payload so the plate selects the correct-language
+    /// copy before every render. Starts `"ru"` — the app's primary language, matching the previously
+    /// hardcoded copy, so the plate is correct BEFORE the first FE mirror push lands. Only ever holds
+    /// one of the two whitelisted values ("ru"/"en") — `set_plate_language` coerces any other input to
+    /// "ru". D-29: a 2-value language enum-like string, no secret.
+    pub plate_language: Arc<Mutex<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -244,10 +346,16 @@ fn write_vpn_status_and_emit(
     // the exact status drift this phase exists to eliminate. Mirrors the
     // `unwrap_or_else(|e| e.into_inner())` pattern already used for tray_notified
     // in lib.rs. Drop the guard before emit so no listener can observe a held lock.
-    {
+    // Phase 13: capture the PREVIOUS status BEFORE overwriting it — the notification decider is
+    // edge-triggered (it fires on a genuine prev != next transition, Pitfall 3), so it needs the
+    // value this write is about to replace. Reading it inside the same guarded scope keeps the
+    // single-writer invariant intact.
+    let prev = {
         let mut g = vpn_status.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = *g;
         *g = status;
-    }
+        prev
+    };
     // Persist the error detail alongside the status so a late-mounting window can
     // restore BOTH via the snapshot (Codex MEDIUM). `error` is already the derived/
     // sanitized message every caller passes (D-29), so the stored copy is safe too.
@@ -262,6 +370,15 @@ fn write_vpn_status_and_emit(
         VpnStatusPayload { status, error, attempt, max },
     )
     .ok();
+
+    // Phase 13: fire the desktop connection-notification plate from the SINGLE status writer,
+    // AFTER the vpn-status emit — the same seam the tray fans out from, so a fired plate inherits
+    // the "survives the main window closed to tray" property (Pattern 3 / Pitfall 1: the trigger
+    // is Rust-owned, never a main-webview React effect). maybe_fire runs the pure decider (a
+    // prev == next snapshot or a transient landing fires nothing) and only shows the plate on a
+    // real outcome transition. The snapshot path (check_vpn_status_full) does NOT route through
+    // this writer, so it never reaches the decider (Pitfall 3).
+    crate::notify::maybe_fire(app, prev, status);
 }
 
 /// 02-20 status-UX split: write+emit a `Reconnecting` status carrying the per-attempt
@@ -1556,6 +1673,175 @@ pub fn clear_vpn_error(app: tauri::AppHandle, state: tauri::State<'_, AppState>)
     set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
 }
 
+/// Phase 13 (D-06 / §C) — mirror the FE master notifications toggle into the Rust gate.
+///
+/// The FE calls this whenever `useAppSettings.setNotificationsOn` writes the toggle AND once at
+/// startup, so the Rust firing seam (`notify::maybe_fire`) can gate the plate even with the main
+/// window closed to tray (localStorage is NOT shared across webview windows — Pitfall 5). This
+/// carries ONLY a `bool` — never config content or a password (D-29 / T-13-SEC-01), and it writes
+/// no log line. The mirror is `Relaxed`: there is no ordering dependency between this store and the
+/// status write; a fire either sees the pre- or post-toggle value, both consistent.
+#[tauri::command]
+pub fn set_notifications_enabled(enabled: bool, state: tauri::State<'_, AppState>) {
+    state.notifications_enabled.store(enabled, Ordering::Relaxed);
+}
+
+/// Phase 13 (Pitfall 2 / §B) — set the pending connect ORIGIN the next `Connected` consumes.
+///
+/// The FE calls this right BEFORE an AUTO action (auto-switch → `AutoSwitch`; launch auto-connect
+/// → `AutoConnectLaunch`) so `notify::maybe_fire`, on the next `Connected`, emits the auto copy
+/// instead of the generic «Подключено». `maybe_fire` RESETS the origin to `Manual` after that
+/// connected, so it marks only the one intended auto action — a later manual connect reads
+/// `Manual`. This carries ONLY a small `ConnectOrigin` enum (no config content / no password —
+/// D-29), and writes no log line. Poison-recovering the lock (`into_inner`) so a prior panic on a
+/// holder can never wedge the setter.
+#[tauri::command]
+pub fn set_pending_connect_origin(
+    origin: crate::notify::ConnectOrigin,
+    state: tauri::State<'_, AppState>,
+) {
+    let mut g = state
+        .pending_connect_origin
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    *g = origin;
+}
+
+/// Phase 13 (13-08b) — set the pending connect-time PING (ms) the next `Connected` consumes for
+/// the plate's detail block.
+///
+/// FOLLOW-UP fix: the plate used to ping the ACTIVE endpoint fresh at connect time, but a direct
+/// TCP connect to the active/connected endpoint reads Unreachable while the tunnel is up (BY DESIGN
+/// — see `pending_connect_ping`'s doc on AppState). So the FE pushes the config's RELIABLE
+/// reachability ping — measured JUST BEFORE connecting, while it was still inactive, from the
+/// `usePerConfigPing` map — via THIS command right before each connect (at the SAME sites that set
+/// `set_pending_connect_origin`). `notify::maybe_fire` reads AND consumes it on the terminal
+/// `Connected` edge (exactly like the origin) as the plate's `ping_ms`. `None` → the plate renders
+/// «—» (honest no-data — e.g. a launch auto-connect before any probe, or an unreachable config).
+/// This carries ONLY a numeric ms (no config content / no password — D-29) and writes no log line.
+/// Poison-recovering the lock (`into_inner`) mirrors `set_pending_connect_origin` so a prior panic
+/// on a holder can never wedge the setter.
+#[tauri::command]
+pub fn set_pending_connect_ping(ms: Option<u32>, state: tauri::State<'_, AppState>) {
+    let mut g = state
+        .pending_connect_ping
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    *g = ms;
+}
+
+/// Phase 13 (BL-01/WR-01) — mark whether a compound switch/reconnect TEARDOWN is in flight.
+///
+/// `switchTo` and `handleReconnect` are plain `disconnect → connect`; their teardown leg writes a
+/// genuine `Connected → Disconnected` transition. The FE calls this with `true` BEFORE that teardown
+/// so `notify::maybe_fire` SUPPRESSES the intermediate «Отключено» (the true state mid-switch is
+/// "switching", not "disconnected" — D-03/D-01), and clears it (`false`) on the destination terminal
+/// outcome. This is a SEPARATE command — it does NOT change `vpn_connect`/`vpn_disconnect`
+/// signatures (the C++ sidecar and the connect contract stay untouched). It carries ONLY a `bool`
+/// (no config content / no password — D-29) and writes no log line. `Relaxed`: no ordering
+/// dependency with the status write — a fire either sees the pre- or post-toggle value, both correct
+/// (maybe_fire also clears the flag on the terminal outcome as a durable backstop).
+///
+/// Phase 13 (13-10 / §A): on `pending == true` this ALSO fires a TRANSIENT START plate so the owner
+/// SEES a deliberate switch / manual reconnect in progress (the terminal outcome plate then REPLACES
+/// it via the latest-wins staging — D-03). The start kind is picked by the pure
+/// `notify::start_plate_wire_key` from the FE-threaded `is_switch` hint (Fable-A review #6: a SERVER
+/// SWITCH — manual or auto — fires the NEUTRAL `switching` kind; a same-server save-and-reconnect
+/// fires the existing `reconnecting`; the hint exists because BOTH manual flows carry origin=Manual)
+/// with the 13-10 pending-ORIGIN mapping as the hintless fallback. The fire is gated by the master
+/// notifications mirror (OFF fires nothing) inside `notify::fire_start_plate`. On `false` (the
+/// intent-clear leg) it fires nothing. The flag-store behaviour is UNCHANGED — the bool is still
+/// stored on both edges. `app: tauri::AppHandle` is INJECTED by Tauri, not passed by the FE (the FE
+/// invokes with `{ pending, isSwitch }`; `isSwitch` is an `Option` so the clear legs — and an older
+/// FE — may omit it), so this stays a notification-side command: `vpn_connect`/`vpn_disconnect`
+/// signatures are untouched. `is_switch` carries ONLY a bool — no config content / password (D-29).
+#[tauri::command]
+pub fn set_switch_or_reconnect_pending(
+    app: tauri::AppHandle,
+    pending: bool,
+    is_switch: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) {
+    // Fire the start plate BEFORE storing the flag on the `true` edge. The FE `is_switch` hint picks
+    // the start kind (switch → `switching`, reconnect → `reconnecting`); the pending origin (set by
+    // the FE just before this) is only the hintless fallback. The gate + config-name/theme/language
+    // threading live in `notify::fire_start_plate`.
+    if pending {
+        let origin = state
+            .pending_connect_origin
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(crate::notify::ConnectOrigin::Manual);
+        // The hint/origin→wire_key mapping is the pure `start_plate_wire_key` (single source of
+        // truth, unit-tested): hint Some(true) → `switching`, Some(false) → `reconnecting`,
+        // None → the 13-10 origin fallback (AutoSwitch → `switching`, else `reconnecting`).
+        let wire_key = crate::notify::start_plate_wire_key(origin, is_switch);
+        crate::notify::fire_start_plate(&app, wire_key);
+    }
+
+    state
+        .switch_or_reconnect_pending
+        .store(pending, Ordering::Relaxed);
+}
+
+/// Phase 13 (13-06) — coerce a raw FE theme string to one of the two whitelisted plate themes.
+///
+/// The notification plate's tokens must resolve to the app's EFFECTIVE theme, but a raw string
+/// arriving over the IPC boundary must never be trusted blindly (it becomes a `data-theme` attribute
+/// value the plate applies). Any value other than the two known-good themes is coerced to `"dark"`
+/// — the safe default that matches the `:root` token fallback. Kept as a small pure helper so the
+/// whitelist is unit-testable without a live Tauri `State`.
+fn normalize_plate_theme(theme: &str) -> String {
+    match theme {
+        "light" => "light".to_string(),
+        // "dark" and anything else (empty / junk / unexpected) → the safe dark default.
+        _ => "dark".to_string(),
+    }
+}
+
+/// Phase 13 (13-06) — mirror the FE effective theme ("dark" | "light") into the Rust plate-theme cell.
+///
+/// The FE (`useTheme`) calls this whenever the effective theme changes AND once at startup, so
+/// `notify::maybe_fire` can stamp the plate's `data-theme` even with the main window closed to tray
+/// (localStorage is NOT shared across webview windows — Pitfall 5; the plate webview has its own empty
+/// store). Whitelisted to "dark"/"light" via `normalize_plate_theme` — a raw FE string is never
+/// trusted blindly. This carries ONLY a short theme string (a 2-value enum-like — no config content
+/// or password, D-29) and writes no log line. Poison-recovering the lock (`into_inner`) mirrors
+/// `set_pending_connect_origin` so a prior panic on a holder can never wedge the setter.
+#[tauri::command]
+pub fn set_plate_theme(theme: String, state: tauri::State<'_, AppState>) {
+    let mut g = state.plate_theme.lock().unwrap_or_else(|e| e.into_inner());
+    *g = normalize_plate_theme(&theme);
+}
+
+/// Phase 13 (13-07) — coerce a raw FE language string to one of the two whitelisted plate languages.
+///
+/// Mirrors `normalize_plate_theme`: a raw string arriving over the IPC boundary must never be trusted
+/// blindly (it selects which hardcoded copy the plate renders). Any value other than "en" is coerced
+/// to "ru" — the safe default (the app's primary language, matching the previously-hardcoded copy).
+/// A small pure helper so the whitelist is unit-testable without a live Tauri `State`.
+fn normalize_plate_language(language: &str) -> String {
+    match language {
+        "en" => "en".to_string(),
+        // "ru" and anything else (empty / junk / an unexpected locale) → the safe ru default.
+        _ => "ru".to_string(),
+    }
+}
+
+/// Phase 13 (13-07) — mirror the FE UI language ("ru" | "en") into the Rust plate-language cell.
+///
+/// The FE (`useLanguage`) calls this whenever the language changes AND once at startup, so
+/// `notify::maybe_fire` can select the plate's copy language even with the main window closed to tray
+/// (localStorage is NOT shared across webview windows — Pitfall 5; the plate webview has its own empty
+/// store). Whitelisted to "ru"/"en" via `normalize_plate_language`. This carries ONLY a short language
+/// string (a 2-value enum-like — no config content or password, D-29) and writes no log line.
+/// Poison-recovering the lock (`into_inner`) mirrors `set_plate_theme`.
+#[tauri::command]
+pub fn set_plate_language(language: String, state: tauri::State<'_, AppState>) {
+    let mut g = state.plate_language.lock().unwrap_or_else(|e| e.into_inner());
+    *g = normalize_plate_language(&language);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1965,5 +2251,35 @@ mod tests {
             filter_out_own_adapter(raw).is_empty(),
             "own adapter must be excluded regardless of letter case",
         );
+    }
+
+    #[test]
+    fn normalize_plate_theme_whitelists_to_dark_or_light() {
+        // Truth (13-06): the plate-theme mirror is a 2-value whitelist. The two known-good themes
+        // pass through unchanged; ANY other value (empty, junk, an unexpected string, or even a
+        // markup-looking payload) is coerced to the safe "dark" default — the raw FE string that
+        // becomes the plate's `data-theme` is never trusted blindly.
+        assert_eq!(normalize_plate_theme("dark"), "dark");
+        assert_eq!(normalize_plate_theme("light"), "light");
+        // A junk value → the safe dark default (never echoed back into the attribute).
+        assert_eq!(normalize_plate_theme("system"), "dark");
+        assert_eq!(normalize_plate_theme(""), "dark");
+        assert_eq!(normalize_plate_theme("<script>"), "dark");
+        assert_eq!(normalize_plate_theme("DARK"), "dark", "case-sensitive: only exact 'light' passes");
+    }
+
+    #[test]
+    fn normalize_plate_language_whitelists_to_ru_or_en() {
+        // Truth (13-07): the plate-language mirror is a 2-value whitelist. The two known-good languages
+        // pass through unchanged; ANY other value (empty, junk, an unexpected locale, or a
+        // markup-looking payload) is coerced to the safe "ru" default (the app's primary language) —
+        // the raw FE string that selects the plate's copy language is never trusted blindly.
+        assert_eq!(normalize_plate_language("ru"), "ru");
+        assert_eq!(normalize_plate_language("en"), "en");
+        // A junk / unexpected value → the safe ru default.
+        assert_eq!(normalize_plate_language("de"), "ru");
+        assert_eq!(normalize_plate_language(""), "ru");
+        assert_eq!(normalize_plate_language("<script>"), "ru");
+        assert_eq!(normalize_plate_language("EN"), "ru", "case-sensitive: only exact 'en' passes");
     }
 }

@@ -457,11 +457,12 @@ pub fn tray_menu_reposition(app: tauri::AppHandle, width: u32, height: u32) {
 /// к конкретной windows-crate версии, а cross-version HWND types в
 /// Rust считаются разными нарошно даже если ABI identical.
 ///
-/// Dead reference per CLAUDE.md «Tray menu = native only» — оставлено как
-/// шаблон для восстановления custom-webview tray, если Tauri issue #13859
-/// будет закрыт.
+/// 13-06: теперь ЖИВОЙ вызов — применяется к OPAQUE notification-plate окну в
+/// `lib.rs .setup()`, чтобы round-corners без transparency обошли #13859 (transparent
+/// Win11 dark window рендерится чёрным). Изначально был шаблоном для custom-webview
+/// tray (native-only per CLAUDE.md); тот сценарий остаётся заблокированным #13859, но
+/// сам DWM-шим здесь и переиспользуется плитой уведомления.
 #[cfg(target_os = "windows")]
-#[allow(dead_code)]
 pub fn apply_win11_rounded_corners(win: &tauri::WebviewWindow) {
     #[link(name = "dwmapi")]
     unsafe extern "system" {

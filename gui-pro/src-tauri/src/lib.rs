@@ -7,6 +7,7 @@ mod geodata_v2ray;
 mod job_object;
 mod lifecycle;
 mod logging;
+pub mod notify;
 mod processes;
 mod routing_rules;
 mod sidecar;
@@ -46,6 +47,35 @@ fn get_start_minimized() -> bool {
         .unwrap_or(false)
 }
 
+/// Phase 13 (D-04) — restore the main window from the tray and hide the notification plate.
+///
+/// Invoked by the plate's BODY click: show + focus the main window (reusing the EXACT tray "show"
+/// path used elsewhere in this file — `get_webview_window("main").show()+set_focus()`), then hide
+/// the plate so the two windows stay in step. The × close path does NOT call this (it only hides
+/// the plate), so a dismiss never brings the window forward.
+///
+/// Phase 13 (13-09, Fix 2) — after showing the window, ALSO steer the FE to the Connection tab.
+/// The plate is a CONNECTION notification, so a body-click should land the user on the Connection
+/// section — not on whatever tab they were last on. We emit `navigate-to-tab` with the tab id the
+/// FE App uses (`"connection"`); App listens via `useNavigateToTab` and switches the active tab.
+/// The payload carries ONLY a bare tab-id string — no config content, no credentials (D-29). Emit
+/// AFTER show/focus so the window is already up when the tab switch lands. The × path does NOT call
+/// this, so a dismiss neither restores the window nor navigates.
+#[tauri::command]
+fn restore_main_window(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        w.show().ok();
+        w.set_focus().ok();
+    }
+    if let Some(p) = app.get_webview_window("notification") {
+        p.hide().ok();
+    }
+    // Steer the FE to the Connection tab (the notification is about the connection). A bare tab-id
+    // string only — no secret crosses (D-29). Emitted after the window is shown so the switch lands
+    // on an already-visible window.
+    app.emit("navigate-to-tab", "connection").ok();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Install the global panic hook FIRST — before Tauri builder runs.
@@ -80,7 +110,12 @@ pub fn run() {
             // при следующем запуске (объясняет «работает только после
             // полного uninstall» — window-state.json хранит stale
             // размеры от предыдущей установки).
-            .with_denylist(&["tray-menu"])
+            //
+            // notification — Phase 13 desktop-notification plate. Built at runtime in
+            // .setup() (NOT from tauri.conf.json) and repositioned bottom-right of the
+            // work area on every fire, so persisting its size/position would restore stale
+            // geometry that fights the runtime placement — deny it for the same reason.
+            .with_denylist(&["tray-menu", "notification"])
             .build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
@@ -117,6 +152,49 @@ pub fn run() {
             // vpn_disconnect and cleared by the next vpn_connect, so a user disconnect
             // wins over an in-flight auto-reconnect (no flip back to Connected).
             user_disconnect_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Phase 13 (D-06) — master notifications gate mirror. Starts `true` (the D-06
+            // locked default) so the Rust firing gate is correct BEFORE the FE's startup
+            // mirror push lands — a safe pre-seed that silences nothing the user did not
+            // silence. The FE overwrites it via set_notifications_enabled on toggle AND
+            // once at startup; notify::maybe_fire reads THIS mirror (never localStorage,
+            // which is not shared across webview windows — Pitfall 5) so the gate holds
+            // with the main window closed to tray.
+            notifications_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            // Phase 13 (Pitfall 2) — pending connect origin the next Connected consumes.
+            // Starts Manual; the FE sets it to AutoSwitch / AutoConnectLaunch right before
+            // an auto action, and notify::maybe_fire resets it back to Manual after the
+            // connected so it marks only the one intended auto action.
+            pending_connect_origin: Arc::new(Mutex::new(notify::ConnectOrigin::Manual)),
+            // Phase 13 (13-08b) — the pending connect-time ping (ms) the next Connected consumes
+            // for the plate's detail block. Starts None; the FE pushes the config's known
+            // reachability ping (measured while the config was still inactive) via
+            // set_pending_connect_ping right before each connect, and notify::maybe_fire reads +
+            // consumes it on the Connected edge (like the origin). None → the plate shows «—». This
+            // replaces the fresh connect-time ping of the ACTIVE endpoint, which read Unreachable
+            // BY DESIGN (a direct TCP connect to a tunnel-internal IP fails while connected).
+            pending_connect_ping: Arc::new(Mutex::new(None)),
+            // Phase 13 (BL-01/WR-01) — a compound switch/reconnect teardown is in flight.
+            // Starts false; the FE raises it before switchTo/handleReconnect's teardown-
+            // disconnect so notify::maybe_fire suppresses the intermediate «Отключено», and
+            // both the FE and maybe_fire clear it on the destination terminal outcome.
+            switch_or_reconnect_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Phase 13 (13-05) — staged pending plate for the pull-model redelivery. None until
+            // the first fire; maybe_fire stages the latest {kind, config_name} before its emit and
+            // the plate pull-and-clears it once its listener attaches, so a fire that beat the
+            // plate's mount is redelivered instead of leaving an empty black window (UAT test-1).
+            pending_plate: Arc::new(Mutex::new(None)),
+            // Phase 13 (13-06) — the plate's effective theme mirror. Starts "dark" (the :root token
+            // fallback) so the plate looks correct BEFORE the FE's startup mirror push lands. useTheme
+            // pushes the effective "dark"/"light" via set_plate_theme on change AND once at startup;
+            // notify::maybe_fire includes it in the emitted payload so the plate applies the right
+            // data-theme (its own webview has an empty localStorage — Pitfall 5).
+            plate_theme: Arc::new(Mutex::new("dark".to_string())),
+            // Phase 13 (13-07) — the plate's UI language mirror. Starts "ru" (the app's primary
+            // language, matching the previously-hardcoded copy) so the plate is correct BEFORE the
+            // FE's startup mirror push lands. useLanguage pushes "ru"/"en" via set_plate_language on
+            // change AND once at startup; notify::maybe_fire includes it in the payload so the plate
+            // picks the right-language copy (its own webview has an empty localStorage — Pitfall 5).
+            plate_language: Arc::new(Mutex::new("ru".to_string())),
         })
         .manage(Arc::new(geodata_v2ray::GeoDataState::new()))
         .manage(ssh::SshPool::new())
@@ -231,6 +309,73 @@ pub fn run() {
                     .expect("Failed to load window icon");
                 w.set_icon(icon).ok();
             }
+
+            // Phase 13 — build the desktop connection-notification plate window ONCE, hidden.
+            // It is shown/hidden (never rebuilt) per VPN status change by notify::maybe_fire,
+            // which repositions it bottom-right of the work area first. Flags (Research Pattern 1):
+            //   - decorations(false)   — frameless plate (no titlebar/border)
+            //   - transparent(false)   — OPAQUE: transparent Win11 windows render black in dark
+            //                            theme (#13859, the bug that killed the custom tray-menu)
+            //   - always_on_top(true)  — floats over other windows like an OS toast
+            //   - skip_taskbar(true)   — never in the taskbar / Alt+Tab
+            //   - focused(false)       — do NOT steal focus on show (non-activating)
+            //   - resizable(false), shadow(false), visible(false) — fixed, built hidden
+            //   - inner_size(360, 68)  — sized to the Storybook design's content height (360×67 for a
+            //     2-line title+body; +1 so the 1px border is not clipped) so the plate FILLS the window
+            //     with no «подложка». The plate content top-aligns (items-start); a rare 3-line wrap
+            //     (a very long config name) is the only case that would clip — acceptable vs a taller
+            //     window that would show empty space under short 2-line plates.
+            // Build failures must not abort startup (the plate is non-critical), so log-and-continue.
+            match tauri::WebviewWindowBuilder::new(
+                app,
+                "notification",
+                tauri::WebviewUrl::App("notification.html".into()),
+            )
+            .decorations(false)
+            .transparent(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .resizable(false)
+            .shadow(false)
+            .visible(false)
+            .inner_size(360.0, 68.0)
+            .build()
+            {
+                Ok(notification_win) => {
+                    // 13-06 (UAT round-2 defect 2 — the "black square"): the plate is OPAQUE
+                    // (transparent(false) — a transparent Win11 dark window renders black, #13859, an
+                    // OS won't-fix), so ConnectionToast's CSS rounding/border/shadow are invisible
+                    // against the same-coloured opaque window body and the plate reads as a hard
+                    // rectangle. Give the WINDOW itself native Win11 rounded corners via DWM
+                    // (DwmSetWindowAttribute / DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND) instead of
+                    // enabling transparency — this rounds the opaque window without hitting #13859.
+                    // Reuses the existing `tray::apply_win11_rounded_corners` helper (the same
+                    // #13859-era DWM rounding shim, previously dead-code), which is best-effort
+                    // (log-and-continue: a failed DWM call leaves square corners but never aborts
+                    // startup — rounded corners are purely cosmetic). Windows-only (the app is
+                    // Windows-only); the non-Windows stub is a no-op.
+                    tray::apply_win11_rounded_corners(&notification_win);
+                }
+                Err(e) => {
+                    eprintln!("[notify] failed to build notification plate window: {e}");
+                }
+            }
+
+            // Phase 13 (D-06 / §C) — master notifications gate SEED ORDER.
+            //
+            // The gate mirror (`AppState.notifications_enabled`) is already pre-seeded to `true`
+            // (the D-06 locked default) at `.manage(AppState{…})` above — a SAFE default: it
+            // silences nothing the user did not silence, so a fire before the FE mirror lands is
+            // correct-by-default. The LIVE value comes from the FE: `useAppSettings` reads
+            // `tt_notifications_enabled` and pushes it once on mount via `set_notifications_enabled`
+            // (Task 2). We deliberately do NOT read localStorage here in Rust — it lives only in the
+            // main webview and is not reachable from the backend (Pitfall 5); the FE mirror push is
+            // the single source that reconciles the pre-seed to the persisted value. Seed order is
+            // therefore: (1) AppState default `true` (compile-time), (2) FE startup mirror push
+            // (runtime, right after the main webview mounts) — so the only window where the gate
+            // could differ from the persisted value is the sub-second before the FE mounts, during
+            // which no VPN transition has fired yet.
 
             // Start connectivity monitor — reads the single vpn_status owner (D-01)
             let vpn_status_for_monitor = Arc::clone(&app.state::<AppState>().vpn_status);
@@ -385,6 +530,21 @@ pub fn run() {
             tray::tray_menu_reposition,
             set_start_minimized,
             get_start_minimized,
+            // Phase 13 — desktop connection-notification plate: body-click → restore main + hide plate (D-04)
+            restore_main_window,
+            // Phase 13 — master notifications gate mirror (D-06) + auto-vs-manual origin (Pitfall 2).
+            // The FE pushes the toggle + the pending origin so notify::maybe_fire gates/labels the
+            // plate window-closed. Both carry only a bool / a small enum — no config content (D-29).
+            commands::vpn::set_notifications_enabled,
+            commands::vpn::set_pending_connect_origin,
+            commands::vpn::set_pending_connect_ping,
+            commands::vpn::set_switch_or_reconnect_pending,
+            commands::vpn::set_plate_theme,
+            // Phase 13 (13-07) — mirror the app UI language ("ru"/"en") so the plate copy follows it.
+            commands::vpn::set_plate_language,
+            // Phase 13 (13-05) — the plate pull-and-clears a fire that beat its listener (read-and-
+            // clear, mirroring poll_pending_deeplink) so no empty black plate persists at launch.
+            notify::pull_pending_plate,
             logging::set_logging_enabled,
             logging::get_logging_enabled,
             logging::open_logs_folder,

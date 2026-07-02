@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { ThemeMode } from "../types";
 
 export function useTheme() {
@@ -21,6 +22,17 @@ export function useTheme() {
   // Apply theme to DOM
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  // Phase 13 (13-06) — mirror the EFFECTIVE theme into the Rust plate-theme cell whenever it changes
+  // AND once at startup (this effect runs on mount too). The notification plate is a separate webview
+  // with its OWN empty localStorage, so it never learns `data-theme` from here; notify::maybe_fire
+  // reads THIS mirror and stamps the plate's theme so a light-theme plate is actually light (UAT
+  // round-2 defect 1). Fire-and-forget, guarded for the non-Tauri/test env (jsdom has no IPC bridge —
+  // the invoke rejects; a bare `.catch` swallows it so a test render never throws). Mirrors the
+  // useAppSettings `set_notifications_enabled` push discipline. A 2-value theme string, no secret (D-29).
+  useEffect(() => {
+    void invoke("set_plate_theme", { theme }).catch(() => {});
   }, [theme]);
 
   // Listen for system theme changes when mode is "system"

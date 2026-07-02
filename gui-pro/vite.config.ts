@@ -25,9 +25,12 @@ export default defineConfig(async () => ({
       // HTML entries, each with its own React root:
       //  - main: the app
       //  - trayMenu: custom tray context menu (small popup at cursor on right click)
+      //  - notification: custom desktop connection-notification plate (Phase 13) — a hidden
+      //    always-on-top window shown bottom-right of the desktop on a VPN status change
       input: {
         main: "index.html",
         trayMenu: "tray-menu.html",
+        notification: "notification.html",
       },
     },
   },

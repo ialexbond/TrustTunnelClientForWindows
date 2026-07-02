@@ -320,7 +320,7 @@
       "unreachable": "Недоступен",
       "no_data": "—",
       "no_data_tooltip": "ещё не измеряли / нет сети",
-      "measuring": "Измеряю…",
+      "measuring": "Измерение…",
       "unit": "ms"
     },
     "editView": {
@@ -377,7 +377,6 @@
       "edit_aria": "Новое имя конфига",
       "commit": "Сохранить имя",
       "cancel": "Отмена",
-      "error_empty": "Имя не может быть пустым.",
       "error_duplicate": "Конфиг с таким именем уже есть."
     },
     "delete": {

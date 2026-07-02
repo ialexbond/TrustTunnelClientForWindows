@@ -217,6 +217,30 @@ async fn probe_tcp(host: &str, port: u16, timeout_ms: u64) -> PingResult {
     }
 }
 
+/// Phase 13 (13-08): the endpoint address as a DISPLAY string `"host:port"` from a config's TOML
+/// CONTENT — the value the CONNECT notification plate shows in its address row. Pure (content in,
+/// display string out) so it is unit-testable exactly like `read_endpoint_host_port`, without a real
+/// data-dir path. Reuses `read_endpoint_host_port` (the same reader the ping uses) + the same host
+/// whitelist, so the plate address matches exactly what would be probed. `None` when the endpoint is
+/// missing / unparseable / has a metachar host. D-29: reads ONLY host + port — NEVER the password.
+fn endpoint_address_from_content(content: &str) -> Option<String> {
+    let (host, port) = read_endpoint_host_port(content).ok()?;
+    // Whitelist-validate the host before displaying it (defense-in-depth; a corrupt config fails
+    // closed rather than surfacing a metachar host on the plate).
+    validate_ping_host(&host).ok()?;
+    Some(format!("{host}:{port}"))
+}
+
+/// Phase 13 (13-08): the endpoint address `"host:port"` for a config PATH — the plate address row.
+/// Path-validates to the data dir (defense-in-depth, like the ping command), reads the `.toml`, then
+/// delegates to the pure `endpoint_address_from_content`. `None` on an invalid/unreadable path or a
+/// config with no usable endpoint (the plate then omits the address row). D-29: never the password.
+pub fn endpoint_address_for_config(config_path: &str) -> Option<String> {
+    validate_app_path(config_path).ok()?;
+    let content = std::fs::read_to_string(config_path).ok()?;
+    endpoint_address_from_content(&content)
+}
+
 /// Ping a config's endpoint for reachability (D-16). Reads host:port Rust-side from the
 /// config's own `.toml` (path-validated to the data dir, host whitelist-validated, port
 /// range-checked), then does a bounded TCP connect. Returns a numeric-ms / unreachable /
@@ -433,6 +457,38 @@ mod tests {
         // D-29: the parsed host/port never carry the password.
         assert!(!host.contains("SECRET"));
         cleanup(&tmp);
+    }
+
+    /// Phase 13 (13-08): the plate address helper formats `"host:port"` from a config's content,
+    /// preferring the named hostname + the address port (matching `read_endpoint_host_port`), and it
+    /// NEVER carries the password (D-29). This is the exact display string the CONNECT plate shows in
+    /// its address row.
+    #[test]
+    fn endpoint_address_from_content_formats_host_port_and_never_the_password() {
+        // Named hostname + an address port → "hostname:port".
+        let content = sample_config("de-fra.trusttunnel.net", "203.0.113.42:8443");
+        let addr = endpoint_address_from_content(&content).expect("a usable endpoint → an address");
+        assert_eq!(addr, "de-fra.trusttunnel.net:8443");
+        // D-29: the address must never carry the fixture password.
+        assert!(
+            !addr.contains("SUPER-SECRET-XYZ"),
+            "the plate address must never carry the config password (D-29)"
+        );
+
+        // No named hostname → falls back to the bare IP; no port suffix → the 443 default.
+        let content_ip =
+            "[endpoint]\naddresses = [\"203.0.113.42\"]\nusername = \"u\"\npassword = \"p\"\n";
+        assert_eq!(
+            endpoint_address_from_content(content_ip).as_deref(),
+            Some("203.0.113.42:443"),
+        );
+
+        // A metachar host fails closed (None) rather than surfacing on the plate.
+        let content_bad = sample_config("evil;rm -rf /", "203.0.113.10:443");
+        assert!(endpoint_address_from_content(&content_bad).is_none());
+
+        // A config with no [endpoint] at all → None (the plate omits the address row).
+        assert!(endpoint_address_from_content("loglevel = \"info\"\n").is_none());
     }
 
     /// D-29 spy (canonical): prove — not by static grep, but by EXERCISING the ping path —

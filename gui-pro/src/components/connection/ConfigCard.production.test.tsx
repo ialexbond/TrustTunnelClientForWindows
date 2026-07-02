@@ -78,6 +78,78 @@ describe("ConfigCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  // Truth (IN-58): an EMPTY config name is VALID — the card TITLE falls back to the config's
+  // username. The lead card's meta line has NO username (host · ping · uptime only), so the
+  // username text appearing at all proves it landed as the hero title.
+  it("empty name falls back to the username as the lead-card title", () => {
+    renderWithProviders(
+      <ConfigCard config={{ ...cfg, name: "" }} leadCard status="connected" />,
+    );
+    expect(screen.getByText(cfg.user)).toBeInTheDocument();
+  });
+
+  // Truth (IN-58): the resting row title falls back to the username too. The resting meta
+  // line always shows «host · username», so with an empty name the username paints TWICE —
+  // once as the title fallback, once in the meta line. A non-empty name paints it only once.
+  it("empty name falls back to the username on the resting-row title", () => {
+    renderWithProviders(<ConfigCard config={{ ...cfg, name: "" }} status="disconnected" />);
+    expect(screen.getAllByText(cfg.user)).toHaveLength(2);
+  });
+
+  // Truth: a NON-empty name renders as the title (no username fallback in the title slot).
+  it("non-empty name renders the name as the title", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="connected" />);
+    expect(screen.getByText(cfg.name)).toBeInTheDocument();
+    // Lead meta has no username line, so the username must NOT appear anywhere.
+    expect(screen.queryByText(cfg.user)).not.toBeInTheDocument();
+  });
+
+  // Truth (IN-58): clearing the name inline is a VALID commit — no error paints while the
+  // draft is empty, and ✓ commits onRename("") (the backend then clears endpoint.name and
+  // the title falls back to the username).
+  it("clearing the name commits an empty rename with no error", async () => {
+    const onRename = vi.fn().mockResolvedValue(undefined);
+    renderWithProviders(
+      <ConfigCard
+        config={cfg}
+        status="disconnected"
+        onRename={onRename}
+        existingNames={["Нидерланды"]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: i18n.t("connection.rename.aria") }));
+    await userEvent.clear(
+      screen.getByRole("textbox", { name: i18n.t("connection.rename.edit_aria") }),
+    );
+    // No FieldError while the draft is empty (the empty-name rule was removed).
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: i18n.t("connection.rename.commit") }));
+    expect(onRename).toHaveBeenCalledWith("");
+  });
+
+  // Truth: a DUPLICATE name is still an error — the FieldError shows the duplicate message
+  // and ✓ never commits.
+  it("duplicate name surfaces the duplicate error and never commits", async () => {
+    const onRename = vi.fn();
+    renderWithProviders(
+      <ConfigCard
+        config={cfg}
+        status="disconnected"
+        onRename={onRename}
+        existingNames={["Нидерланды"]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: i18n.t("connection.rename.aria") }));
+    const input = screen.getByRole("textbox", { name: i18n.t("connection.rename.edit_aria") });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Нидерланды");
+    expect(
+      screen.getByText(i18n.t("connection.rename.error_duplicate")),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: i18n.t("connection.rename.commit") }));
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
   // Truth: a resting (inactive) card DOES expose the inline rename pencil → editor → onRename.
   it("resting card name is editable inline (pencil → edit → onRename)", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined);

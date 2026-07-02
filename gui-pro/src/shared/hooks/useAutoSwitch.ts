@@ -155,6 +155,24 @@ export function useAutoSwitch({
       // (f) On a switch verdict, fire the EXISTING switchTo then re-arm the cooldown so no second
       // switch fires during the settle window even if the new active config also reads bad at first.
       if (action.kind === "switch") {
+        // Phase 13 (Pitfall 2 / A4): mark the pending connect ORIGIN as AutoSwitch RIGHT BEFORE
+        // the switch, so the next Rust `Connected` edge emits «Переключено автоматически» instead
+        // of the generic «Подключено». The origin is a durable AppState signal the Rust decider
+        // consumes + resets on the connected, so it labels ONLY this auto-switch's reconnect — a
+        // later manual connect reads Manual. This does NOT add a parallel switch path: `doSwitch`
+        // (the EXISTING `switchTo`) remains the ONLY switch mechanism; we only set the label first.
+        await invoke("set_pending_connect_origin", { origin: "autoSwitch" });
+        // Phase 13 (13-08b): push the TARGET config's KNOWN reachability ping the plate shows. The
+        // engine just decided this target is healthy from its own candidate reading, so we already
+        // have it — no fresh probe needed (and a fresh probe of the soon-to-be-active endpoint would
+        // read Unreachable by design once connected). Take the target candidate's reading: a numeric
+        // ms only when it read `ok`, else null → the plate renders «—». Pushed right before the
+        // switch so the Rust Connected edge reads it (mirrors the origin push above). A bare
+        // number|null — no config content / password (D-29).
+        const targetReading = cands.find((c) => c.path === action.targetPath)?.reading;
+        const targetPingMs =
+          targetReading?.status === "ok" ? targetReading.ms : null;
+        await invoke("set_pending_connect_ping", { ms: targetPingMs });
         await doSwitch(action.targetPath);
         if (cancelled) return;
         engineStateRef.current = {

@@ -890,6 +890,18 @@ pub fn current_display_name(path: &str) -> Option<String> {
         .filter(|n| !n.is_empty())
 }
 
+/// Phase 13 (13-08): the endpoint LOGIN (username) of a config read from its `.toml` — the value
+/// the CONNECT notification plate shows in its login row. Reuses `summarize_unchecked` (the same
+/// name/host/user reader `list_configs` uses), which reads `endpoint.username` and NEVER
+/// `endpoint.password` (D-29). `None` when the file can't be read or the username is empty (the
+/// plate then omits the login row rather than showing a placeholder).
+pub fn username_for_config(path: &str) -> Option<String> {
+    summarize_unchecked(path)
+        .ok()
+        .map(|s| s.user)
+        .filter(|u| !u.is_empty())
+}
+
 /// Re-sync a manifest entry's display name from its `.toml` (the file is the source of truth for
 /// the name). Best-effort: a no-op when the path isn't manifest-tracked or is unreadable. Called
 /// after `save_client_config` so an «Имя конфига» edit in ConfigEditView (which rewrites the
@@ -1944,6 +1956,71 @@ included_routes = ["0.0.0.0/0"]
         assert_eq!(summary.host, "de1.example.com");
         assert_eq!(summary.user, "swift-fox");
 
+        cleanup(&tmp);
+    }
+
+    /// Truth (WR-03 / D-29 / T-13-SEC-01): the NOTIFICATION PAYLOAD path resolves the config
+    /// DISPLAY NAME only — never the `.toml` password. `notify::maybe_fire` builds the plate payload
+    /// as `{ kind, config_name: current_display_name(&path) }`; the pure decider is string-free
+    /// (covered by notify::d29_no_secret_in_notify_payload_or_log), but the one string the emit path
+    /// touches is `current_display_name`, and no test previously locked that it returns the display
+    /// name and NEVER the password. This is that lock, mirroring the SUPER-SECRET fixture discipline
+    /// the notify.rs module docstring cites.
+    #[test]
+    fn d29_notify_payload_display_name_never_leaks_the_password() {
+        let tmp = tempdir();
+        // A distinctive sentinel a leak would surface (mirrors ping.rs / the manifest D-29 fixture).
+        let secret = "SUPER-SECRET-NOTIFY-PAYLOAD-XYZ";
+        let p = write_toml(
+            &tmp,
+            "TrustTunnel_user.toml",
+            &sample_config(Some("Германия"), "de1.example.com", "swift-fox", secret),
+        );
+
+        // The exact value maybe_fire puts into the `notify-plate` payload's `configName` field.
+        let config_name = current_display_name(&p.to_string_lossy());
+
+        // (1) It resolves to the DISPLAY NAME — proving the payload carries the human-readable name.
+        assert_eq!(
+            config_name.as_deref(),
+            Some("Германия"),
+            "the notification payload must carry the config display name",
+        );
+        // (2) And it NEVER contains the endpoint password — the D-29 leak the plate payload guards.
+        assert!(
+            !config_name.as_deref().unwrap_or_default().contains(secret),
+            "the notification payload's configName must never contain the password (WR-03 / D-29)",
+        );
+        cleanup(&tmp);
+    }
+
+    /// Phase 13 (13-08): `username_for_config` returns the endpoint LOGIN — the value the CONNECT
+    /// plate shows in its login row — and NEVER the password (D-29). An unreadable path / empty
+    /// username yields None so the plate omits the row rather than showing a placeholder.
+    #[test]
+    fn username_for_config_reads_login_and_never_the_password() {
+        let tmp = tempdir();
+        let secret = "SUPER-SECRET-LOGIN-XYZ";
+        let p = write_toml(
+            &tmp,
+            "TrustTunnel_user.toml",
+            &sample_config(Some("Германия"), "de1.example.com", "ivan_petrov", secret),
+        );
+        let path = p.to_string_lossy().to_string();
+
+        // (1) It resolves the endpoint username.
+        assert_eq!(
+            username_for_config(&path).as_deref(),
+            Some("ivan_petrov"),
+            "the plate login row must carry the endpoint username",
+        );
+        // (2) It NEVER carries the password — the D-29 leak the login row guards.
+        assert!(
+            !username_for_config(&path).as_deref().unwrap_or_default().contains(secret),
+            "the plate login must never contain the password (D-29)",
+        );
+        // (3) An unreadable path yields None (the plate omits the row).
+        assert!(username_for_config("Z:/does/not/exist.toml").is_none());
         cleanup(&tmp);
     }
 

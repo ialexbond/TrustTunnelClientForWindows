@@ -377,7 +377,6 @@
       "edit_aria": "New config name",
       "commit": "Save name",
       "cancel": "Cancel",
-      "error_empty": "Name cannot be empty.",
       "error_duplicate": "A config with this name already exists."
     },
     "delete": {
