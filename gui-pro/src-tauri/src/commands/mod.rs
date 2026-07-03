@@ -6,6 +6,7 @@ pub mod geoip;
 pub mod updater;
 pub mod history;
 pub mod deeplink;
+pub mod deeplink_local;
 pub mod protocol;
 pub mod activity_log;
 pub mod manifest;

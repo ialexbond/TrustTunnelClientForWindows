@@ -236,8 +236,10 @@ describe("FirewallModal", () => {
   it("Delete rule button opens ConfirmDialog → invokes deleteRule on confirm", async () => {
     // P UAT 2026-05-03: hook-internal confirm removed; FirewallModal owns confirm UX.
     // Click trash → confirm dialog → click "Удалить" → deleteRule(1).
+    // NOTE: uses a NON-SSH port (8080) — the active SSH port (22) is now non-deletable
+    // (post-UAT brick fix), so a deletable-rule test must target a different port.
     const rules: FirewallRule[] = [
-      { number: 1, action: "ALLOW IN", to: "22/tcp", from: "Anywhere", proto: "tcp", comment: "" },
+      { number: 1, action: "ALLOW IN", to: "8080/tcp", from: "Anywhere", proto: "tcp", comment: "" },
     ];
     const state = buildState({ firewall: { installed: true, active: true, rules } });
     render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
@@ -249,6 +251,21 @@ describe("FirewallModal", () => {
     expect(buttons.length).toBeGreaterThan(0);
     fireEvent.click(buttons[buttons.length - 1]);
     await waitFor(() => expect(state.deleteRule).toHaveBeenCalledWith(1));
+  });
+
+  it("delete button is DISABLED for the active SSH port row (never lock the admin out)", async () => {
+    // post-UAT server-brick fix: the rule for the connected SSH port must not be
+    // deletable from the table — deleting it (with ufw default-deny) locks the admin
+    // out of the server entirely. The 22 row (= current_ssh_port) is disabled; a
+    // non-SSH row (8080) stays deletable.
+    const rules: FirewallRule[] = [
+      { number: 1, action: "ALLOW IN", to: "22/tcp", from: "Anywhere", proto: "tcp", comment: "SSH (TrustTunnel)" },
+      { number: 2, action: "ALLOW IN", to: "8080/tcp", from: "Anywhere", proto: "tcp", comment: "" },
+    ];
+    const state = buildState({ firewall: { installed: true, active: true, rules, current_ssh_port: 22 } });
+    render(<FirewallModal isOpen={true} onClose={vi.fn()} state={state} />);
+    expect(await screen.findByTestId("delete-rule-1")).toBeDisabled();
+    expect(screen.getByTestId("delete-rule-2")).not.toBeDisabled();
   });
 
   it("Add Rule submit disabled when port empty", async () => {

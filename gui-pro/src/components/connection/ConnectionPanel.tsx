@@ -12,6 +12,7 @@ import { samePath } from "../../shared/utils/samePath";
 import { dedupeConfigsByIdentity } from "../../shared/utils/dedupeConfigsByIdentity";
 import { ConfigList } from "./ConfigList";
 import { ConfigEditView } from "./ConfigEditView";
+import { ConfigQr } from "./ConfigQr";
 import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 
 export interface ConnectionPanelHandle {
@@ -208,6 +209,31 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
       editCloseTimer.current = setTimeout(() => setEditConfig(null), 200);
     }, []);
 
+    // ─── ConfigQr (per-config QR/link transfer modal, Phase 15 D-09) ───
+    // Mirrors the ConfigEditView open/close pattern above: `qrOpen` drives the Modal's isOpen
+    // (false → 200ms exit animation), and `qrConfig` (the content) is cleared only AFTER that
+    // fade so the modal does not snap shut mid-transition (Modal lifecycle contract). Opened from
+    // any card's «…» → «QR-код» — active OR inactive (no state gating).
+    const [qrConfig, setQrConfig] = useState<ConfigSummary | null>(null);
+    const [qrOpen, setQrOpen] = useState(false);
+    const qrCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const openQr = useCallback((config: ConfigSummary) => {
+      if (qrCloseTimer.current) clearTimeout(qrCloseTimer.current);
+      setQrConfig(config);
+      setQrOpen(true);
+    }, []);
+    const closeQr = useCallback(() => {
+      setQrOpen(false);
+      qrCloseTimer.current = setTimeout(() => setQrConfig(null), 200);
+    }, []);
+    // Clear the pending cleanup timer on unmount (like the edit timer) so a late setState never
+    // fires on an unmounted panel.
+    useEffect(() => {
+      return () => {
+        if (qrCloseTimer.current) clearTimeout(qrCloseTimer.current);
+      };
+    }, []);
+
     // A config is "live-active" only when its path matches AND a tunnel is actually up/in-flight
     // (not merely the last-used pointer). After a disconnect the former-active config is NO LONGER
     // live-active, so it behaves like any inactive config: its primary CONNECTS (not disconnects),
@@ -324,6 +350,7 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           activeConfigPath={activeConfigPath}
           onConnect={handleCardConnect}
           onEdit={openEdit}
+          onQr={openQr}
           onDelete={handleDelete}
           onDuplicate={handleDuplicate}
           onRename={handleRename}
@@ -349,6 +376,12 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
             // would fire a competing reconnect). ConfigEditView only acts on isActiveConfig.
             isSwitching={isSwitching}
           />
+        )}
+        {/* Per-config QR/link transfer modal (D-09) — kept MOUNTED while a config is selected
+            so the Modal exit animation plays on close (parent must not early-return null). The
+            deeplink is generated LOCALLY (export_config_deeplink_local) inside ConfigQr — no SSH. */}
+        {qrConfig && (
+          <ConfigQr isOpen={qrOpen} onClose={closeQr} config={qrConfig} />
         )}
       </div>
     );

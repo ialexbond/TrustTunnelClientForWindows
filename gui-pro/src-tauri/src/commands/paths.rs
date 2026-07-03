@@ -26,6 +26,9 @@ pub fn validate_app_path(path: &str) -> Result<(), String> {
 /// `starts_with` is a lexical prefix check on the canonical buffer (both sides canonicalized,
 /// so it is symlink-free for the parent chain).
 pub fn validate_path_in_dir(path: &str, allowed_dir: &Path) -> Result<(), String> {
+    let allowed =
+        std::fs::canonicalize(allowed_dir).unwrap_or_else(|_| allowed_dir.to_path_buf());
+
     let canonical = std::fs::canonicalize(path)
         .or_else(|_| {
             // File may not exist yet (e.g. copy destination) — canonicalize the parent and
@@ -39,16 +42,38 @@ pub fn validate_path_in_dir(path: &str, allowed_dir: &Path) -> Result<(), String
                     "Invalid path",
                 ))
             }
-        })
-        .map_err(|e| format!("Invalid path: {e}"))?;
+        });
 
-    let allowed =
-        std::fs::canonicalize(allowed_dir).unwrap_or_else(|_| allowed_dir.to_path_buf());
-
-    if !canonical.starts_with(&allowed) {
-        return Err("Access denied: path is outside the application data directory".into());
+    match canonical {
+        Ok(c) => {
+            if !c.starts_with(&allowed) {
+                return Err(
+                    "Access denied: path is outside the application data directory".into(),
+                );
+            }
+            Ok(())
+        }
+        // The path AND its parent are both non-existent, so we cannot canonicalize it
+        // to compare symlink-free. Fail CLOSED: a security guard must not report a
+        // non-existent path differently (which would leak "this file/dir doesn't
+        // exist" AND let an outside-but-missing path slip through with a generic
+        // "Invalid path" that callers might treat as a distinct, non-access error).
+        // Fall back to a LEXICAL prefix check: an absolute path that does not start
+        // with the allowed dir is unambiguously outside → the same access-denied
+        // message. Since neither side is fully canonicalized here this is a coarser
+        // check, but it only ever REJECTS more (never loosens): the earlier
+        // Ok-branch already handles every path that DOES canonicalize inside.
+        Err(_) => {
+            let p = Path::new(path);
+            if p.is_absolute() && !p.starts_with(&allowed) {
+                Err("Access denied: path is outside the application data directory".into())
+            } else {
+                // Relative or ambiguous non-existent path: preserve the prior
+                // "Invalid path" behaviour (cannot resolve → reject).
+                Err("Invalid path: unable to resolve path".into())
+            }
+        }
     }
-    Ok(())
 }
 
 /// IN-05: the ONE extension classifier shared by both import doors (the file-picker read in

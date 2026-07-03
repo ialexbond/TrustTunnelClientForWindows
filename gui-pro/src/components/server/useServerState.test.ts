@@ -80,7 +80,7 @@ describe("useServerState", () => {
 
   // ── loadServerInfo error ───────────────────────────
 
-  it("sets translated error when loadServerInfo fails", async () => {
+  it("sets translated error when loadServerInfo fails (after the R-6 retry budget)", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "check_server_installation") throw "SSH_TIMEOUT|10.0.0.1";
       if (cmd === "server_get_available_versions") return [];
@@ -89,19 +89,20 @@ describe("useServerState", () => {
 
     const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
+    // R-6: the probe now retries up to 3× with ~1.5s between attempts, so the error
+    // surfaces ~3s later — widen the waitFor + test timeouts accordingly.
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
-    });
+    }, { timeout: 8000 });
 
-    // translateSshError maps SSH_TIMEOUT via t("sshErrors.timeout", ...)
-    // i18n returns the key or interpolated string
+    // translateSshError maps SSH_TIMEOUT via t("sshErrors.timeout", ...).
     expect(result.current.error).toBeTruthy();
     expect(result.current.serverInfo).toBeNull();
-  });
+  }, 10000);
 
   // ── cold-start transient: one-shot fresh retry (UAT 2026-06-19) ──
 
-  it("retries check_server_installation ONCE on a transient SSH_CHANNEL_FAILED, then succeeds without error", async () => {
+  it("retries the probe on a transient SSH_CHANNEL_FAILED, then succeeds without error", async () => {
     let calls = 0;
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "check_server_installation") {
@@ -121,13 +122,14 @@ describe("useServerState", () => {
       () => {
         expect(result.current.loading).toBe(false);
       },
-      { timeout: 3000 },
+      { timeout: 5000 },
     );
 
-    expect(calls).toBe(2); // first attempt transient → one fresh retry
+    // R-6: a transient first probe is retried (≥2 attempts) and the second succeeds.
+    expect(calls).toBeGreaterThanOrEqual(2);
     expect(result.current.serverInfo).toEqual(fakeServerInfo);
     expect(result.current.error).toBe("");
-  });
+  }, 8000);
 
   // 06-review: the retry trigger was BROADENED. The cold-start double-handshake race
   // surfaces under many russh wordings (not just SSH_CHANNEL_FAILED), and translateSshError
@@ -157,12 +159,12 @@ describe("useServerState", () => {
     expect(result.current.error).toBe("");
   });
 
-  it("a genuine PERSISTENT failure still surfaces after the one retry (broadening hides nothing)", async () => {
+  it("a genuine PERSISTENT failure surfaces the error after the R-6 retries are exhausted", async () => {
     let calls = 0;
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "check_server_installation") {
         calls += 1;
-        throw "SSH_AUTH_FAILED|10.0.0.1"; // fails on BOTH attempts
+        throw "SSH_AUTH_FAILED|10.0.0.1"; // fails on every attempt
       }
       if (cmd === "server_get_available_versions") return [];
       return null;
@@ -170,14 +172,15 @@ describe("useServerState", () => {
 
     const { result } = renderHook(() => useServerState(baseProps), { wrapper });
 
-    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 3000 });
+    await vi.waitFor(() => { expect(result.current.loading).toBe(false); }, { timeout: 8000 });
 
-    expect(calls).toBe(2); // retried once, then surfaced
+    // R-6: retried up to the 3-attempt budget before giving up.
+    expect(calls).toBeGreaterThanOrEqual(3);
     expect(result.current.error).toBeTruthy();
     expect(result.current.serverInfo).toBeNull();
-  });
+  }, 10000);
 
-  it("does NOT retry on a changed host key (deterministic + security-sensitive → single attempt)", async () => {
+  it("does NOT run the R-6 retry loop on a changed host key (deterministic + security-sensitive)", async () => {
     let calls = 0;
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "check_server_installation") {
@@ -193,7 +196,10 @@ describe("useServerState", () => {
 
     await vi.waitFor(() => { expect(result.current.loading).toBe(false); });
 
-    expect(calls).toBe(1); // host-key change is excluded from the broadened retry
+    // A changed host key short-circuits the retry loop (thrown immediately) → it is NEVER
+    // probed the full 3-attempt budget; the reset flow (forget_ssh_host_key) runs instead.
+    expect(calls).toBeLessThan(3);
+    expect(mockInvoke).toHaveBeenCalledWith("forget_ssh_host_key", expect.anything());
     expect(result.current.error).toBeTruthy();
     expect(result.current.serverInfo).toBeNull();
   });

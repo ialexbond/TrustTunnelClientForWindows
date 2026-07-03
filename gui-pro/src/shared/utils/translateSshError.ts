@@ -129,6 +129,18 @@ export function translateSshError(error: string, t: TFunction): string {
       return t("sshErrors.dpkgLocked");
     case "SSH_UNINSTALL_FAILED":
       return t("sshErrors.uninstallFailed", { code: parts[1] || "" });
+    // Install couldn't download the TrustTunnel package from github.com (server DNS/network).
+    case "SSH_PACKAGE_DOWNLOAD_FAILED":
+      return t("sshErrors.packageDownloadFailed");
+    // Generic install failure (translatable) — replaces the raw «Installation failed (code N)».
+    case "SSH_INSTALL_FAILED":
+      return t("sshErrors.installFailed", { code: parts[1] || "" });
+    // Single-flight guard: a second install/uninstall was triggered while one was still
+    // running (e.g. the ~15s connect of the first). Shown RAW English before this case.
+    case "SSH_DEPLOY_IN_PROGRESS":
+      return t("sshErrors.deployInProgress");
+    case "SSH_DEPLOY_CANCELLED":
+      return t("sshErrors.deployCancelled");
     case "SSH_CERT_RENEW_FAILED":
       return t("sshErrors.certRenewFailed", { code: parts[1] || "" });
 

@@ -42,10 +42,10 @@ describe("DoneStep", () => {
     expect(setWizardStep).not.toHaveBeenCalledWith("welcome");
   });
 
-  it("renders go-to-connection button when configPath exists", () => {
+  it("renders the «Добавить конфиг» button when configPath exists (R-7)", () => {
     const w = makeWizardState({ step: "done", configPath: "/tmp/c.toml" });
     render(<DoneStep {...w} />);
-    expect(screen.getByText(i18n.t("wizard.done.go_to_connection"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("wizard.done.add_config"))).toBeInTheDocument();
   });
 
   it("renders save-as button when configPath exists and calls handleSaveAs", () => {
@@ -60,7 +60,7 @@ describe("DoneStep", () => {
     const w = makeWizardState({ step: "done", configPath: "" });
     render(<DoneStep {...w} />);
     expect(screen.queryByText(i18n.t("buttons.save_as"))).not.toBeInTheDocument();
-    expect(screen.queryByText(i18n.t("wizard.done.go_to_connection"))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("wizard.done.add_config"))).not.toBeInTheDocument();
   });
 
   // ── Save-as button flow ──
@@ -73,7 +73,7 @@ describe("DoneStep", () => {
 
   // ── Go to connection button ──
 
-  it("go-to-connection button sets localStorage and calls callbacks", () => {
+  it("«Добавить конфиг» sets localStorage and calls callbacks (R-7)", () => {
     const setWizardStep = vi.fn();
     const onSetupComplete = vi.fn();
     const w = makeWizardState({
@@ -83,7 +83,7 @@ describe("DoneStep", () => {
       onSetupComplete,
     });
     render(<DoneStep {...w} />);
-    fireEvent.click(screen.getByText(i18n.t("wizard.done.go_to_connection")));
+    fireEvent.click(screen.getByText(i18n.t("wizard.done.add_config")));
     // Phase 17 fix-marathon (commit ~e5af18ea..9a11bb0a) bug-fixed
     // DoneStep "Go to connection" to actually route to the `connection`
     // tab instead of `settings` (the old value silently broke navigation
@@ -189,7 +189,7 @@ describe("DoneStep", () => {
     expect(cta.closest("button")).not.toBeDisabled();
   });
 
-  it("keeps «Перейти к панели управления» as the SINGLE primary CTA (D-03)", () => {
+  it("renders «Добавить конфиг» (primary, R-7) + «Перейти к панели» + «Сохранить как» — 3 buttons", () => {
     const w = makeWizardState({
       step: "done",
       configPath: "/tmp/c.toml",
@@ -197,12 +197,11 @@ describe("DoneStep", () => {
       vpnPassword: "Gen3ratedPass!",
     });
     const { container } = render(<DoneStep {...w} />);
-    // Exactly one button renders the go_to_panel label — the single primary CTA.
-    const goToPanel = screen.getAllByText(i18n.t("wizard.done.go_to_panel"));
-    expect(goToPanel).toHaveLength(1);
-    // UAT #20: after removing the password-reveal card, Done renders three buttons —
-    // go_to_panel (primary) + go_to_connection + save_as (both secondary). The two
-    // alternates are NOT additional primaries.
+    // R-7: «Добавить конфиг» is now THE primary next step (was «Перейти к панели»); the
+    // panel nav is demoted to secondary. Each label renders exactly once.
+    expect(screen.getAllByText(i18n.t("wizard.done.add_config"))).toHaveLength(1);
+    expect(screen.getAllByText(i18n.t("wizard.done.go_to_panel"))).toHaveLength(1);
+    // Three buttons: add_config (primary) + go_to_panel + save_as (both secondary).
     expect(container.querySelectorAll("button").length).toBe(3);
   });
 });

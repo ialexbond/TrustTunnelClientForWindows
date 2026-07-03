@@ -1314,7 +1314,30 @@ pub async fn install_fail2ban(
     // backend = auto: fail2ban auto-detects the best available backend.
     // On systems with python3-systemd -> uses journald. Without it -> falls back to
     // polling /var/log/auth.log.
-    let jail_local = "[DEFAULT]\nbackend  = auto\n\n[sshd]\nenabled  = true\nport     = ssh\nfilter   = sshd\nmaxretry = 5\nbantime  = 10m\nfindtime = 10m\n";
+    // ── ignoreip: whitelist the admin's own IP so a self-ban can't lock everyone out
+    // (post-UAT server-brick fix). With NO ignoreip, 5 failed logins from the admin's
+    // own machine — or the app's own repeated SSH attempts during a flaky deploy — banned
+    // that IP for 10m (a DROP that reads as an SSH timeout, indistinguishable from the
+    // firewall brick). Capture the client IP as the server sees THIS session (sshd sets
+    // SSH_CONNECTION for exec channels; first field = client IP, v4 or v6), validate it
+    // against the strict is_safe_ip whitelist, and bake it into ignoreip with loopback.
+    // Validation is MANDATORY — the value lands in a config file, so an unvalidated
+    // shell-captured value would be an injection seam (T-06-42). The heredoc is quoted
+    // ('F2BEOF') so nothing in the body is shell-expanded — the IP is a literal we build.
+    let (client_ip_raw, _) = exec_command(
+        handle, app,
+        "echo \"${SSH_CONNECTION:-}\" | awk '{print $1}'",
+    ).await.unwrap_or_default();
+    let client_ip = client_ip_raw.trim();
+    let ignoreip = if !client_ip.is_empty() && is_safe_ip(client_ip) {
+        format!("127.0.0.1/8 ::1 {client_ip}")
+    } else {
+        // Fallback: loopback only. The uninstall unban + orphan-chain sweep is the net.
+        "127.0.0.1/8 ::1".to_string()
+    };
+    let jail_local = format!(
+        "[DEFAULT]\nbackend  = auto\nignoreip = {ignoreip}\n\n[sshd]\nenabled  = true\nport     = ssh\nfilter   = sshd\nmaxretry = 5\nbantime  = 10m\nfindtime = 10m\n"
+    );
     // Pipe heredoc directly to `tee` — no bash -c wrapping. The quoted delimiter 'F2BEOF'
     // disables parameter expansion inside the body, so arbitrary characters are safe.
     let cmd = format!(
@@ -1346,9 +1369,15 @@ pub async fn uninstall_fail2ban(
     emit_step(app, "security", "progress", "Uninstalling fail2ban...");
     let sudo = detect_sudo(handle, app).await;
 
-    // Full removal: stop service -> purge (removes config) -> autoremove deps -> wipe
-    // /etc/fail2ban directory just in case any local files remain. Each step is its own
+    // Full removal: unban -> stop -> purge (removes config) -> autoremove deps -> wipe
+    // /etc/fail2ban AND the ban DB, then sweep orphan DROP chains. Each step is its own
     // command so a failure in one (e.g. service already stopped) doesn't mask the rest.
+    //
+    // SACRED SSH (post-UAT brick fix): a fail2ban ban is an iptables/nft DROP that can
+    // OUTLIVE `apt purge` and the ban DB restores bans on reboot. So UNBAN first (only a
+    // live daemon can), drop the ban DB, and sweep any orphan f2b chain — otherwise a
+    // self-ban of the admin's IP survives removing the very tool that made it.
+    let _ = exec_command(handle, app, &format!("{sudo}fail2ban-client unban --all 2>/dev/null; true")).await?;
     let _ = exec_command(handle, app, &format!("{sudo}systemctl stop fail2ban 2>/dev/null; true")).await?;
     let _ = exec_command(handle, app, &format!("{sudo}systemctl disable fail2ban 2>/dev/null; true")).await?;
     let (_, code) = exec_command(
@@ -1361,6 +1390,24 @@ pub async fn uninstall_fail2ban(
     }
     let _ = exec_command(handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
     let _ = exec_command(handle, app, &format!("{sudo}rm -rf /etc/fail2ban")).await?;
+    // Drop the persisted ban DB so a residual boot-time restore can't re-ban the admin.
+    let _ = exec_command(handle, app, &format!("{sudo}rm -rf /var/lib/fail2ban 2>/dev/null; true")).await?;
+    // Backend-agnostic orphan-DROP sweep (daemon is now gone → safe to flush f2b chains).
+    let orphan_sweep = format!(
+        "if command -v iptables >/dev/null 2>&1; then \
+           for tt_ch in $({sudo}iptables -S 2>/dev/null | grep -oE 'f2b-[A-Za-z0-9_.-]+' | sort -u); do \
+             {sudo}iptables -F \"$tt_ch\" 2>/dev/null || true; \
+             {sudo}iptables -S INPUT 2>/dev/null | grep -- \"-j $tt_ch\" | sed 's/^-A/-D/' | while read -r tt_rule; do {sudo}iptables $tt_rule 2>/dev/null || true; done; \
+             {sudo}iptables -X \"$tt_ch\" 2>/dev/null || true; \
+           done; \
+         fi; \
+         if command -v nft >/dev/null 2>&1; then \
+           {sudo}nft list tables 2>/dev/null | grep -E '[[:space:]]f2b-' | while read -r _tt_kw tt_fam tt_tname; do \
+             [ -n \"$tt_fam\" ] && [ -n \"$tt_tname\" ] && {sudo}nft delete table \"$tt_fam\" \"$tt_tname\" 2>/dev/null || true; \
+           done; \
+         fi; true"
+    );
+    let _ = exec_command(handle, app, &orphan_sweep).await?;
 
     emit_step(app, "security", "ok", "fail2ban removed");
     Ok(())
@@ -1711,13 +1758,71 @@ fn build_ufw_rule_cmd(rule: &NewFirewallRule) -> Option<String> {
     })
 }
 
+/// Pure: does the ufw `To` token (first column of a `ufw status numbered` line) refer to
+/// the active SSH port? Handles every shape that can carry the SSH port so the delete
+/// guard cannot be bypassed (Fable HIGH-1):
+///   • exact `<port>` or `<port>/tcp` (with or without a trailing ` (v6)` — the marker is
+///     a separate whitespace token, so the port token itself is unaffected),
+///   • the `OpenSSH` / `ssh` APP PROFILE (the canonical `ufw allow OpenSSH`), which opens
+///     port 22 — matched only when the active SSH port IS 22,
+///   • a port RANGE `a:b` that CONTAINS the SSH port (`ufw allow 2222:2230/tcp`).
+fn ufw_to_token_is_ssh_port(to: &str, ssh_port: u16) -> bool {
+    // Strip the proto suffix (/tcp,/udp); the `(v6)` marker is a separate token, not here.
+    let base = to.split('/').next().unwrap_or(to);
+    let lower = base.to_ascii_lowercase();
+    if (lower == "openssh" || lower == "ssh") && ssh_port == 22 {
+        return true;
+    }
+    if base == ssh_port.to_string() {
+        return true;
+    }
+    if let Some((a, b)) = base.split_once(':') {
+        if let (Ok(a), Ok(b)) = (a.parse::<u16>(), b.parse::<u16>()) {
+            return a <= ssh_port && ssh_port <= b;
+        }
+    }
+    false
+}
+
+/// Pure: does ufw rule `number` (as listed by `ufw status numbered`) target `ssh_port`?
+/// Used to REFUSE deleting the active SSH port's allow so the admin can never be locked
+/// out. Scans the raw listing directly (NOT via `parse_ufw_numbered`, which drops `(v6)`
+/// twins — a v6 SSH row must still be protected, Fable MEDIUM-2) and matches the `To`
+/// token via `ufw_to_token_is_ssh_port` (exact / OpenSSH / range / v6). Unit-testable.
+fn ufw_rule_number_is_ssh_port(status: &str, number: u32, ssh_port: u16) -> bool {
+    for line in status.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix('[') else { continue };
+        let Some(end) = rest.find(']') else { continue };
+        if rest[..end].trim().parse::<u32>().ok() != Some(number) {
+            continue;
+        }
+        // The `To` column is the first whitespace-delimited token after `]`
+        // (split_whitespace already skips leading spaces — no trim needed).
+        let to = rest[end + 1..].split_whitespace().next().unwrap_or("");
+        return ufw_to_token_is_ssh_port(to, ssh_port);
+    }
+    false
+}
+
 pub async fn firewall_delete_rule(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
     number: u32,
+    ssh_port: u16,
 ) -> Result<(), String> {
     if number == 0 || number > 10_000 { return Err("SECURITY_UFW_INVALID_NUMBER".into()); }
     let sudo = detect_sudo(handle, app).await;
+    // SACRED SSH PORT (post-UAT brick fix): never delete the ufw rule the CURRENT SSH
+    // session rides on. The Security-tab firewall table renders a delete button for every
+    // rule; deleting the active SSH allow while ufw default-denies locks the admin out —
+    // no app, no terminal. Resolve the target number to its port via `ufw status numbered`
+    // and REFUSE when it is the connected SSH port. The frontend also disables the trash
+    // on that row; this backend guard is the hard guarantee that it can never happen.
+    let (status, _) = exec_command(handle, app, &format!("{sudo}ufw status numbered 2>/dev/null")).await?;
+    if ufw_rule_number_is_ssh_port(&status, number, ssh_port) {
+        return Err("SECURITY_UFW_REFUSE_DELETE_SSH".into());
+    }
     // `ufw --force delete N` skips the "Proceed?" confirmation without piping anything.
     // Previous attempt (`yes | sudo ufw delete N`) broke because `yes` fed its stdin to
     // `sudo`, not to `ufw`, so the prompt was never answered.
@@ -1779,6 +1884,39 @@ pub async fn firewall_set_http_port(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ufw_rule_number_is_ssh_port (SACRED SSH PORT guard) ──
+
+    #[test]
+    fn ufw_rule_number_is_ssh_port_matches_only_the_ssh_port_line() {
+        // `ufw status numbered` sample: rule 1 is the active SSH port, rule 2 is a VPN
+        // port, rule 3 is the SSH port's IPv6 twin. The guard must refuse deleting rule 1
+        // AND rule 3 (would lock the admin out) and allow deleting rule 2. A non-standard
+        // SSH port (2222) proves the match is by exact port token, not a hardcoded 22.
+        let status = "Status: active\n\n     To                         Action      From\n     --                         ------      ----\n[ 1] 2222/tcp                    ALLOW IN    Anywhere                   # SSH (TrustTunnel)\n[ 2] 443/tcp                     ALLOW IN    Anywhere                   # TrustTunnel VPN\n[ 3] 2222/tcp (v6)               ALLOW IN    Anywhere (v6)              # SSH (TrustTunnel)\n";
+        assert!(ufw_rule_number_is_ssh_port(status, 1, 2222), "rule 1 IS the SSH port → must refuse");
+        assert!(!ufw_rule_number_is_ssh_port(status, 2, 2222), "rule 2 is a VPN port → deletable");
+        assert!(!ufw_rule_number_is_ssh_port(status, 1, 22), "a different SSH port must not match the 2222 row");
+        // Fable MEDIUM-2: the v6 twin (rule 3) of the SSH port must ALSO be protected.
+        assert!(ufw_rule_number_is_ssh_port(status, 3, 2222), "the v6 SSH twin must be protected too");
+    }
+
+    #[test]
+    fn ufw_to_token_openssh_profile_and_ranges_are_protected() {
+        // Fable HIGH-1: `ufw allow OpenSSH` (the canonical way to open SSH) yields a `To`
+        // token "OpenSSH", not "22" — it must still be protected when the SSH port is 22.
+        assert!(ufw_to_token_is_ssh_port("OpenSSH", 22));
+        assert!(ufw_to_token_is_ssh_port("ssh", 22));
+        assert!(!ufw_to_token_is_ssh_port("OpenSSH", 2222), "OpenSSH profile only maps to port 22");
+        // Exact port (with/without proto).
+        assert!(ufw_to_token_is_ssh_port("22/tcp", 22));
+        assert!(ufw_to_token_is_ssh_port("2222", 2222));
+        // A port RANGE that CONTAINS the SSH port must be protected; one that excludes it must not.
+        assert!(ufw_to_token_is_ssh_port("2222:2230/tcp", 2225));
+        assert!(ufw_to_token_is_ssh_port("20:22/tcp", 22));
+        assert!(!ufw_to_token_is_ssh_port("2000:2100/tcp", 2222), "range excluding the SSH port → deletable");
+        assert!(!ufw_to_token_is_ssh_port("443/tcp", 22), "a different port never matches");
+    }
 
     // ── is_safe_port ──
 

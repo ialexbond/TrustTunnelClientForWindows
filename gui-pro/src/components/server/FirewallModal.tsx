@@ -152,6 +152,27 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
     void onSecurityChanged?.();
   };
 
+  // SACRED SSH PORT (post-UAT brick fix): the rule for the port THIS session rides on
+  // must never be deletable — deleting it (with ufw default-deny) locks the admin out
+  // entirely (no app, no terminal). The backend also refuses it (SECURITY_UFW_REFUSE_
+  // DELETE_SSH); disabling the trash here hides the trap so the user never triggers it.
+  const sshPortStr = String(state.status?.firewall?.current_ssh_port ?? "");
+  const isSshRule = (to: string) => {
+    if (sshPortStr === "") return false;
+    const base = to.split("/")[0];
+    const lower = base.toLowerCase();
+    // `ufw allow OpenSSH`/`ssh` app profile opens port 22 (Fable HIGH-1).
+    if ((lower === "openssh" || lower === "ssh") && sshPortStr === "22") return true;
+    if (base === sshPortStr) return true;
+    // Port range a:b that contains the SSH port.
+    const [a, b] = base.split(":");
+    if (b !== undefined) {
+      const lo = Number(a), hi = Number(b), p = Number(sshPortStr);
+      if (Number.isFinite(lo) && Number.isFinite(hi)) return lo <= p && p <= hi;
+    }
+    return false;
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -334,9 +355,9 @@ export function FirewallModal({ isOpen, onClose, state, onSecurityChanged }: Fir
               </span>
               <button
                 onClick={() => void handleDeleteRule(r.number)}
-                disabled={state.loading || state.fwWriting}
+                disabled={state.loading || state.fwWriting || isSshRule(r.to)}
                 className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
-                title={t("server.security.firewall.delete")}
+                title={isSshRule(r.to) ? t("server.security.firewall.delete_ssh_protected") : t("server.security.firewall.delete")}
                 aria-label={`${t("server.security.firewall.delete")} #${r.number}`}
                 data-testid={`delete-rule-${r.number}`}
               >

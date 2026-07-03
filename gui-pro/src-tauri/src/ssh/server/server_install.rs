@@ -243,7 +243,7 @@ fi
 /// `host` is validated upstream by `validate_ssh_host` before it reaches here (no
 /// shell metacharacters), so it is safe to interpolate. Pure fn → unit-testable under
 /// `cargo test --lib` without a live server.
-pub(crate) fn build_uninstall_extras(sudo: &str, host: &str) -> String {
+pub(crate) fn build_uninstall_extras(sudo: &str, host: &str, ssh_port: u16) -> String {
     format!(
         r#"echo "=== Step 5b: Remove Let's Encrypt state ({host}) ==="
 {sudo}certbot delete --cert-name {host} --non-interactive 2>/dev/null || true
@@ -262,9 +262,31 @@ echo "=== Step 5c: Remove TrustTunnel ufw rules BY COMMENT (ownership-scoped) ==
 # BUGFIX (post-UAT): the old pattern grepped only 'trusttunnel-acme|trusttunnel-tls',
 # which the install_firewall comments NEVER contain — so NO ufw rule was ever removed
 # on uninstall (confirmed on a live server: all TrustTunnel rules survived).
+#
+# SACRED SSH PORT (post-UAT server-brick fix): install_firewall tags the SSH allow
+# 'SSH (TrustTunnel)' (server_security.rs) — which the 'trusttunnel' grep MATCHES, so
+# the old sweep DELETED the active SSH port's allow. If ufw then stayed enabled with
+# default-deny (marker-less / admin-pre-active ufw — Step 5e below), the port was left
+# closed → SSH timed out from BOTH the app and a terminal (the reported brick). Two
+# guards make port {ssh_port} un-closable:
+#   (1) RE-ASSERT the allow BEFORE the sweep — idempotent (ufw dedups), so the live
+#       session survives even if a later `ufw reload` flushes conntrack mid-script.
+#   (2) EXCLUDE the SSH port from the sweep by PORT TOKEN, never by comment tag
+#       (change_ssh_port retags the rule plain 'SSH', so only the numeric port is a
+#       reliable guard). The `(^|[^0-9])…([^0-9]|$)` anchor stops 22 from matching
+#       2222 / 443 from matching 4433, and the trailing space/`(v6)` is `[^0-9]` so
+#       BOTH the v4 rule and its IPv6 twin are spared.
 if command -v ufw >/dev/null 2>&1; then
-  for tt_num in $({sudo}ufw status numbered 2>/dev/null | grep -iE 'trusttunnel|HTTP cert renewal' | grep -oE '^\[[ ]*[0-9]+\]' | grep -oE '[0-9]+' | sort -rn); do
-    yes | {sudo}ufw delete "$tt_num" 2>/dev/null || true
+  # Re-assert the SSH allow BEFORE the sweep, but only when ufw is ACTIVE — an inactive
+  # ufw has no lockout to defend against, and we must not write a rule into an admin's
+  # stored-but-inactive ruleset (ownership boundary, Fable LOW-4). Idempotent when active.
+  # `-w` matches the WHOLE word «active» so the «inactive» status never false-matches.
+  {sudo}ufw status 2>/dev/null | head -1 | grep -qiw active && {sudo}ufw allow {ssh_port}/tcp comment 'SSH keep active session' >/dev/null 2>&1 || true
+  # Delete via `ufw --force delete` — NOT `yes | ufw delete`: in this russh exec env `yes`
+  # feeds sudo's stdin (not ufw's), the confirm is never answered, and NOTHING is deleted
+  # (firewall_delete_rule documents the same trap — Fable MEDIUM-3).
+  for tt_num in $({sudo}ufw status numbered 2>/dev/null | grep -iE 'trusttunnel|HTTP cert renewal' | grep -vE '(^|[^0-9]){ssh_port}/tcp([^0-9]|$)' | grep -oE '^\[[ ]*[0-9]+\]' | grep -oE '[0-9]+' | sort -rn); do
+    {sudo}ufw --force delete "$tt_num" 2>/dev/null || true
   done
 fi
 
@@ -344,10 +366,12 @@ fi
 /// metacharacters) before reaching here; no NEW free-text SSH-reaching field is
 /// introduced by this helper. `build_stop_in_progress` + `build_uninstall_extras`
 /// are interpolated in (no inline duplicate of their bodies).
-pub(crate) fn build_uninstall_script(sudo: &str, dir: &str, svc: &str, host: &str) -> String {
+pub(crate) fn build_uninstall_script(sudo: &str, dir: &str, svc: &str, host: &str, ssh_port: u16) -> String {
     // OWNERSHIP-SCOPED extended cleanup (LE state + ufw-by-comment + iptables-by-tag)
     // — see build_uninstall_extras doc. host already whitelist-validated upstream.
-    let uninstall_extras = build_uninstall_extras(sudo, host);
+    // ssh_port = the port THIS session is riding (SshParams.port); made SACRED so the
+    // firewall/fail2ban teardown can never close the admin out (post-UAT brick fix).
+    let uninstall_extras = build_uninstall_extras(sudo, host, ssh_port);
     // Step 0: stop an in-progress deploy (kill OUR recorded process group + heal
     // dpkg) so a mid-install cancel leaves a clean, re-runnable server — never
     // touches the system's own apt (05-UAT 2026-06-09).
@@ -368,6 +392,10 @@ TT_INSTALLED_UFW=0; TT_ENABLED_UFW=0; TT_INSTALLED_F2B=0
 [ -f {dir}/.tt-enabled-ufw ] && TT_ENABLED_UFW=1
 [ -f {dir}/.tt-installed-fail2ban ] && TT_INSTALLED_F2B=1
 echo "markers: ufw_installed=$TT_INSTALLED_UFW ufw_enabled=$TT_ENABLED_UFW f2b_installed=$TT_INSTALLED_F2B"
+# Capture the admin's own client IP (as the server sees THIS session) so the scoped
+# fail2ban unban in Step 5e can lift a self-ban of exactly this address. sshd sets
+# SSH_CONNECTION for exec channels; first field = client IP (v4 or v6). Empty is fine.
+TT_SSH_IP=$(echo "${{SSH_CONNECTION:-}}" | awk '{{print $1}}')
 
 echo "=== Step 1: Stop systemd service ==="
 {sudo}systemctl stop trusttunnel 2>/dev/null || true
@@ -402,18 +430,54 @@ echo "=== Step 5: Remove certbot cron ==="
 {uninstall_extras}
 echo "=== Step 5e: Smart de-provision of TrustTunnel-managed security (ownership-scoped) ==="
 # fail2ban: always remove OUR jail config; purge the package only if WE installed it.
+# SACRED SSH (post-UAT brick fix): a fail2ban ban is an iptables/nft DROP that can
+# OUTLIVE `apt purge` (purge removes config/db, not live kernel rules) and the ban DB
+# (/var/lib/fail2ban) restores bans on the next boot. So we (a) UNBAN before stopping
+# the daemon (only a live daemon can unban), (b) drop the ban DB, and (c) sweep any
+# orphaned f2b chains in Step 5f — so a self-ban can never strand SSH after uninstall.
 if command -v fail2ban-client >/dev/null 2>&1 || dpkg -s fail2ban >/dev/null 2>&1; then
   if [ "$TT_INSTALLED_F2B" = "1" ]; then
     # We installed fail2ban (it was absent) → full purge, back to pre-TrustTunnel.
+    # Unban EVERYTHING first (we own the whole install) while the daemon is still up.
+    {sudo}fail2ban-client unban --all 2>/dev/null || true
     {sudo}systemctl stop fail2ban 2>/dev/null || true
     {sudo}systemctl disable fail2ban 2>/dev/null || true
     {sudo}DEBIAN_FRONTEND=noninteractive apt-get purge -y fail2ban 2>/dev/null || true
     {sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
     {sudo}rm -rf /etc/fail2ban 2>/dev/null || true
+    # Drop the persisted ban DB so a residual boot-time restore can't re-ban the admin.
+    {sudo}rm -rf /var/lib/fail2ban 2>/dev/null || true
   else
-    # Admin already had fail2ban → keep the package; remove ONLY our jail.local + reload.
+    # Admin already had fail2ban → keep the package + their jails. Lift ONLY a ban of
+    # THIS session's IP on the sshd jail (never `unban --all` — that would clear the
+    # admin's other jails), then remove our jail.local + reload.
+    [ -n "$TT_SSH_IP" ] && {sudo}fail2ban-client set sshd unbanip "$TT_SSH_IP" 2>/dev/null || true
     {sudo}rm -f /etc/fail2ban/jail.local 2>/dev/null || true
     {sudo}systemctl reload fail2ban 2>/dev/null || {sudo}systemctl restart fail2ban 2>/dev/null || true
+  fi
+fi
+echo "=== Step 5f: Sweep orphaned fail2ban DROP chains (backend-agnostic, dead-daemon safe) ==="
+# unban only works against a LIVE daemon; a wedged/killed fail2ban (or a re-run after a
+# prior purge) can leave an f2b DROP chain with no daemon to lift it. Sweep those — but
+# ONLY when fail2ban is NOT active, so a LIVE admin fail2ban's chains are never touched.
+if ! {sudo}systemctl is-active --quiet fail2ban 2>/dev/null; then
+  if command -v iptables >/dev/null 2>&1; then
+    for tt_ch in $({sudo}iptables -S 2>/dev/null | grep -oE 'f2b-[A-Za-z0-9_.-]+' | sort -u); do
+      # Flush FIRST — an emptied chain implicitly RETURNs, so the ban is neutralized even
+      # if the jump-rule delete below fails (Fable LOW-5). Then remove the jump rule by
+      # replaying its EXACT spec from `-S INPUT` (a bare `-D INPUT -j f2b-x` never matches
+      # fail2ban's `--dports … -j f2b-x` multiport jump), then drop the freed chain.
+      {sudo}iptables -F "$tt_ch" 2>/dev/null || true
+      {sudo}iptables -S INPUT 2>/dev/null | grep -- "-j $tt_ch" | sed 's/^-A/-D/' | while read -r tt_rule; do {sudo}iptables $tt_rule 2>/dev/null || true; done
+      {sudo}iptables -X "$tt_ch" 2>/dev/null || true
+    done
+  fi
+  if command -v nft >/dev/null 2>&1; then
+    # `[[:space:]]f2b-` matches fail2ban's own `f2b-…` table name token only — never an
+    # admin table that merely contains "f2b" mid-name (Fable LOW-6).
+    {sudo}nft list tables 2>/dev/null | grep -E '[[:space:]]f2b-' | while read -r _tt_kw tt_fam tt_tname; do
+      [ -n "$tt_fam" ] && [ -n "$tt_tname" ] && {sudo}nft delete table "$tt_fam" "$tt_tname" 2>/dev/null || true
+    done
   fi
 fi
 # ufw: the TrustTunnel rules were removed above (Step 5c). Now the package / state.
@@ -430,6 +494,17 @@ if command -v ufw >/dev/null 2>&1; then
     # off (its prior state). Keep the package — it is the admin's base tool.
     {sudo}ufw --force disable 2>/dev/null || true
   fi
+fi
+# SACRED SSH (post-UAT brick fix): FINAL unconditional re-assert of the active SSH
+# port's allow — the last word on firewall state. If ufw was purged above,
+# `command -v ufw` is now false → skipped (enforcement gone, port already open). If ufw
+# is kept (admin's firewall stays on), this GUARANTEES port {ssh_port} is allowed before
+# the script returns — regardless of markers, the sweep, or any race. Only when ufw is
+# ACTIVE (the only state with lockout risk): an inactive/absent ufw is already open, and
+# we avoid writing a rule into an admin's inactive ruleset (Fable LOW-4). `-w` word-match
+# so «inactive» never false-matches «active». Idempotent.
+if command -v ufw >/dev/null 2>&1 && {sudo}ufw status 2>/dev/null | head -1 | grep -qiw active; then
+  {sudo}ufw allow {ssh_port}/tcp comment 'SSH keep active session' >/dev/null 2>&1 || true
 fi
 echo "=== Step 6: Remove binaries from PATH ==="
 {sudo}rm -fv /usr/local/bin/trusttunnel* 2>/dev/null || true
@@ -489,7 +564,7 @@ pub async fn uninstall_server(
     // by the pure, unit-testable `build_uninstall_script` (06-16 C-18: pinned to the
     // deploy.rs COCOON MANIFEST by a symmetry test). host is validated upstream by
     // `validate_ssh_host` (no shell metacharacters).
-    let uninstall_script = build_uninstall_script(sudo, ENDPOINT_DIR, ENDPOINT_SERVICE, &params.host);
+    let uninstall_script = build_uninstall_script(sudo, ENDPOINT_DIR, ENDPOINT_SERVICE, &params.host, params.port);
 
     let (output, code) = exec_command(&handle, app, &uninstall_script).await?;
 
@@ -1300,7 +1375,7 @@ mod tests {
         // here we pin the EXTRAS to the cert/firewall tail of that lifecycle (the
         // systemd unit removal lives in the outer script; the LE + firewall removal
         // is what build_uninstall_extras owns). Assert the LE + both firewall layers.
-        let s = build_uninstall_extras("sudo ", "example.com");
+        let s = build_uninstall_extras("sudo ", "example.com", 2222);
         assert!(s.contains("certbot delete"), "LE certbot delete missing");
         assert!(s.contains("/etc/letsencrypt/live/example.com"), "LE live dir removal missing");
         assert!(s.contains("ufw status numbered"), "ownership-scoped ufw removal missing");
@@ -1312,7 +1387,7 @@ mod tests {
 
     #[test]
     fn uninstall_extras_removes_letsencrypt_state() {
-        let s = build_uninstall_extras("sudo ", "example.com");
+        let s = build_uninstall_extras("sudo ", "example.com", 2222);
         // certbot delete for the host AND rm -rf of the LE state dirs.
         assert!(s.contains("certbot delete --cert-name example.com"));
         assert!(s.contains("/etc/letsencrypt/live/example.com"));
@@ -1322,7 +1397,7 @@ mod tests {
 
     #[test]
     fn uninstall_extras_deletes_iptables_by_tag_not_by_port_shape() {
-        let s = build_uninstall_extras("sudo ", "example.com");
+        let s = build_uninstall_extras("sudo ", "example.com", 2222);
         // iptables removal must carry the ownership TAG on the -D for 80 AND 443.
         assert!(s.contains("iptables -D INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment trusttunnel-managed"));
         assert!(s.contains("iptables -D INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment trusttunnel-managed"));
@@ -1348,7 +1423,7 @@ mod tests {
 
     #[test]
     fn uninstall_extras_deletes_ufw_by_comment_not_by_spec() {
-        let s = build_uninstall_extras("sudo ", "example.com");
+        let s = build_uninstall_extras("sudo ", "example.com", 2222);
         // ufw removal must scope to OUR comments via `ufw status numbered`.
         assert!(s.contains("ufw status numbered"));
         assert!(s.contains("trusttunnel-acme"));
@@ -1367,7 +1442,7 @@ mod tests {
         // injection vector. (The script's own ufw loop legitimately uses `$(...)`/`;`
         // — that is OUR shell, not attacker-controlled host content.)
         let host = "vpn-1.example.com";
-        let s = build_uninstall_extras("sudo ", host);
+        let s = build_uninstall_extras("sudo ", host, 2222);
         assert!(s.contains(&format!("--cert-name {host}")));
         assert!(s.contains(&format!("/etc/letsencrypt/renewal/{host}.conf")));
         // The validated host carries no metacharacters of its own.
@@ -1386,7 +1461,7 @@ mod tests {
         // (it is a DIRECTORY — `rm -f` cannot remove it, the root cause) and the
         // removal must come BEFORE `systemctl daemon-reload` so the reload re-reads
         // units without our drop-in.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
         assert!(
             s.contains("rm -rf /etc/systemd/system/trusttunnel.service.d"),
             "must rm -rf the .service.d drop-in dir (rm -f cannot remove a dir): {s}"
@@ -1408,7 +1483,7 @@ mod tests {
         // C-16: the cert-renew helper deploy.rs writes to /usr/local/sbin must be
         // removed. The glob must be prefixed with `trusttunnel` (OUR files only) —
         // never a bare /usr/local/sbin/* that could match a foreign admin script.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
         assert!(
             s.contains("/usr/local/sbin/trusttunnel*"),
             "must remove the orphaned /usr/local/sbin/trusttunnel* cert-renew helper: {s}"
@@ -1425,7 +1500,7 @@ mod tests {
         // install_fail2ban can apt-install) ARE purged — but ONLY inside the
         // ownership-marker branches. Admin-shared certbot/curl/iptables are STILL
         // never purged.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
         // The ufw/fail2ban purges exist…
         assert!(s.contains("apt-get purge -y fail2ban"), "fail2ban smart-purge missing");
         assert!(s.contains("apt-get purge -y ufw"), "ufw smart-purge missing");
@@ -1454,7 +1529,7 @@ mod tests {
         // which the install_firewall comments NEVER contain (they are 'SSH (TrustTunnel)',
         // 'TrustTunnel VPN/QUIC', 'HTTP cert renewal …') → on a live server NO ufw rule was
         // ever removed. The sweep must match the comments install_firewall actually writes.
-        let s = build_uninstall_extras("sudo ", "example.com");
+        let s = build_uninstall_extras("sudo ", "example.com", 2222);
         assert!(
             s.contains("grep -iE 'trusttunnel|HTTP cert renewal'"),
             "ufw sweep must match the real install_firewall comments (trusttunnel / HTTP cert renewal)"
@@ -1466,9 +1541,59 @@ mod tests {
         // Still ownership-scoped: parse `ufw status numbered`, delete BY RULE NUMBER,
         // never a broad `delete allow <port>/tcp` by port spec.
         assert!(s.contains("ufw status numbered"), "ufw sweep must stay comment-scoped");
-        assert!(s.contains(r#"ufw delete "$tt_num""#), "ufw sweep must delete by rule number");
+        assert!(s.contains(r#"ufw --force delete "$tt_num""#), "ufw sweep must delete by rule number via --force (not `yes | ufw delete`)");
         assert!(!s.contains("delete allow 80/tcp"), "no broad ufw delete on 80/tcp");
         assert!(!s.contains("delete allow 443/tcp"), "no broad ufw delete on 443/tcp");
+    }
+
+    #[test]
+    fn uninstall_protects_active_ssh_port_never_deletes_reasserts_it() {
+        // post-UAT server-brick fix: the active SSH port must be SACRED. The ufw sweep
+        // must EXCLUDE it by an ANCHORED port token (so 22 never matches 2222), and the
+        // port must be re-asserted `ufw allow` both before the sweep and as the final
+        // word — so a marker-less / admin-pre-active ufw can never leave SSH closed.
+        let extras = build_uninstall_extras("sudo ", "example.com", 2222);
+        assert!(
+            extras.contains(r#"grep -vE '(^|[^0-9])2222/tcp([^0-9]|$)'"#),
+            "sweep must exclude the SSH port by anchored token (not a bare digit): {extras}"
+        );
+        assert!(
+            extras.contains("ufw allow 2222/tcp comment 'SSH keep active session'"),
+            "must re-assert the SSH allow BEFORE the sweep (survives a conntrack flush)"
+        );
+
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        let reassert = "ufw allow 2222/tcp comment 'SSH keep active session'";
+        // Re-asserted at least twice: pre-sweep (in extras) AND as the final word.
+        assert!(
+            s.matches(reassert).count() >= 2,
+            "SSH allow must be re-asserted pre-sweep AND as the final word"
+        );
+        // The FINAL re-assert must come AFTER the marker-gated ufw disable/purge block.
+        let last_reassert = s.rfind(reassert).expect("final SSH re-assert must exist");
+        let disable_off = s.rfind("ufw --force disable").expect("ufw disable present");
+        assert!(
+            last_reassert > disable_off,
+            "the FINAL SSH re-assert must come after the ufw disable/purge block"
+        );
+    }
+
+    #[test]
+    fn uninstall_fail2ban_unbans_before_stop_and_clears_ban_db_and_orphans() {
+        // post-UAT brick fix: a fail2ban self-ban must never outlive uninstall. Unban
+        // BEFORE stop (only a live daemon can unban), drop the persisted ban DB, and
+        // sweep orphan f2b chains ONLY when the daemon is not active.
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
+        let unban = s.find("fail2ban-client unban --all").expect("must unban-all in the we-installed branch");
+        let stop = s.find("systemctl stop fail2ban").expect("must stop fail2ban");
+        assert!(unban < stop, "unban-all must come BEFORE systemctl stop (a live daemon is needed to unban)");
+        assert!(s.contains("rm -rf /var/lib/fail2ban"), "must drop the persisted ban DB (survives reboot otherwise)");
+        assert!(
+            s.contains(r#"fail2ban-client set sshd unbanip "$TT_SSH_IP""#),
+            "admin-preexisting branch must scope-unban THIS session's IP (never unban --all)"
+        );
+        assert!(s.contains("systemctl is-active --quiet fail2ban"), "orphan sweep must be gated on an INACTIVE fail2ban");
+        assert!(s.contains("f2b-"), "orphan sweep must target f2b-* chains");
     }
 
     #[test]
@@ -1476,7 +1601,7 @@ mod tests {
         // Behavior-preserving: the extraction into build_uninstall_script must keep
         // the same lifecycle (Step 0..7 + VERIFY) AND interpolate the
         // ownership-scoped extras (no broad firewall delete introduced).
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
         // Step 0 stop-in-progress (interpolated build_stop_in_progress)
         assert!(s.contains("/tmp/tt_deploy.pid"), "Step 0 stop-in-progress must be interpolated");
         // Step 1 stop/disable, Step 2 kill, Step 4 rm dir, Step 5 cron
@@ -1505,7 +1630,7 @@ mod tests {
         // COCOON MANIFEST in deploy.rs). build_uninstall_script (which interpolates
         // build_uninstall_extras) must contain a removal targeting EACH. Adding a fake
         // path here would turn the test red — that is the drift guard working.
-        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com");
+        let s = build_uninstall_script("sudo ", "/opt/trusttunnel", "trusttunnel_endpoint", "example.com", 2222);
         let owned: &[&str] = &[
             // ENDPOINT_DIR — all config + certs + binaries (Step 4)
             "/opt/trusttunnel",

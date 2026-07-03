@@ -5,6 +5,7 @@ import { CardHeader } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { formatError } from "../../shared/utils/formatError";
+import { translateSshError } from "../../shared/utils/translateSshError";
 import type { ServerState } from "./useServerState";
 
 interface Props {
@@ -69,7 +70,11 @@ export function DangerZoneSection({ state }: Props) {
       state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
       state.pushSuccess(t("server.danger.uninstalled", "VPN удалён с сервера"));
     } catch (e) {
-      setActionResult({ type: "error", message: formatError(e) });
+      // R-11 (fix-all-paths): surface the failure in the snackbar, not the unrendered
+      // actionResult, so a failed uninstall is never silent.
+      const message = translateSshError(formatError(e), t);
+      setActionResult({ type: "error", message });
+      state.pushSuccess(message, "error");
     } finally {
       setUninstallLoading(false);
     }

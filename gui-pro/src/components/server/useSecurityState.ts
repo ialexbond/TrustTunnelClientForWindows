@@ -212,6 +212,7 @@ export function useSecurityState(sshParams: SshParams, pushSuccess: PushSuccess,
 
   const formatBackendError = useCallback((e: unknown): string => {
     const raw = formatError(e);
+    if (raw.includes("SECURITY_UFW_REFUSE_DELETE_SSH")) return t("server.security.errors.refuse_delete_ssh");
     if (raw.includes("SECURITY_UFW_INVALID_RULE")) return t("server.security.errors.generic_rule_rejected");
     if (raw.includes("SECURITY_F2B_INVALID_IP"))   return t("server.security.errors.ip_invalid");
     if (raw.includes("SECURITY_F2B_INVALID_JAIL")) return t("server.security.errors.generic_rule_rejected");

@@ -221,7 +221,30 @@ ssh_pool_command!(security_fail2ban_set_jail, ssh::fail2ban_set_jail_config, jai
 ssh_pool_command!(security_fail2ban_tail_log, ssh::fail2ban_tail_log, lines: u32);
 ssh_pool_command!(security_uninstall_firewall, ssh::uninstall_firewall);
 ssh_pool_command!(security_firewall_add_rule, ssh::firewall_add_rule, rule: ssh::NewFirewallRule);
-ssh_pool_command!(security_firewall_delete_rule, ssh::firewall_delete_rule, number: u32);
+// SACRED SSH PORT (post-UAT brick fix): manual (not macro) so the connected SSH `port`
+// is threaded to firewall_delete_rule, which refuses to delete the active SSH port's
+// rule — deleting it (with ufw default-deny) would lock the admin out entirely.
+#[tauri::command]
+pub async fn security_firewall_delete_rule(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, crate::ssh::SshPool>,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    key_path: Option<String>,
+    key_data: Option<String>,
+    // D-06 parity (Fable LOW-7): thread auth_method exactly like the ssh_pool_command!
+    // macro so this command shares the SAME pooled connection key as the other security_*
+    // commands — the pool fingerprint hashes auth_method, so hardcoding None here would
+    // fork a second connection if the security tab ever starts sending it.
+    auth_method: Option<String>,
+    number: u32,
+) -> Result<(), String> {
+    let params = ssh::SshParams { host, port, ssh_user: user, ssh_password: password, key_path, key_data, auth_method };
+    let handle = pool.acquire(&params, Some(app.clone())).await?;
+    ssh::firewall_delete_rule(&app, &handle, number, port).await
+}
 ssh_pool_command!(security_firewall_set_logging, ssh::firewall_set_logging, level: String);
 ssh_pool_command!(security_firewall_tail_log, ssh::firewall_tail_log, lines: u32);
 ssh_pool_command!(security_firewall_set_http_port, ssh::firewall_set_http_port, open: bool);

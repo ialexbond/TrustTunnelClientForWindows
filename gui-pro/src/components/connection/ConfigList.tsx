@@ -21,6 +21,8 @@ interface ConfigListProps {
   /** Per-card action callbacks (wired by ConnectionPanel). */
   onConnect?: (config: ConfigSummary) => void;
   onEdit?: (config: ConfigSummary) => void;
+  /** Open the ConfigQr transfer modal for a config (D-09) — threaded to every card's «QR-код». */
+  onQr?: (config: ConfigSummary) => void;
   onDelete?: (config: ConfigSummary) => void;
   onDuplicate?: (config: ConfigSummary) => void;
   /** Commit a rename for a config; resolves to an error string on rejection (D-14). */
@@ -99,6 +101,7 @@ export function ConfigList({
   pings = {},
   onConnect,
   onEdit,
+  onQr,
   onDelete,
   onDuplicate,
   onRename,
@@ -301,6 +304,7 @@ export function ConfigList({
                 existingNames={allNames}
                 onConnect={onConnect ? () => onConnect(lead) : undefined}
                 onEdit={onEdit ? () => onEdit(lead) : undefined}
+                onQr={onQr ? () => onQr(lead) : undefined}
                 onDelete={onDelete ? () => onDelete(lead) : undefined}
                 onDuplicate={onDuplicate ? () => onDuplicate(lead) : undefined}
                 onRename={onRename ? (newName) => onRename(lead, newName) : undefined}
@@ -322,6 +326,7 @@ export function ConfigList({
                   connectPending={pendingConnectPath != null && samePath(config.path, pendingConnectPath)}
                   onConnect={onConnect ? () => onConnect(config) : undefined}
                   onEdit={onEdit ? () => onEdit(config) : undefined}
+                  onQr={onQr ? () => onQr(config) : undefined}
                   onDelete={onDelete ? () => onDelete(config) : undefined}
                   onDuplicate={onDuplicate ? () => onDuplicate(config) : undefined}
                   onRename={onRename ? (newName) => onRename(config, newName) : undefined}
@@ -349,6 +354,10 @@ export function ConfigList({
                 connectPending={pendingConnectPath != null && samePath(config.path, pendingConnectPath)}
                 onConnect={onConnect ? () => onConnect(config) : undefined}
                 onEdit={onEdit ? () => onEdit(config) : undefined}
+                // D-09: «QR-код» must reach EVERY card. This not-connected uniform list is the COMMON
+                // state (nothing connected, e.g. right after launch), so omitting onQr here made the
+                // card's «…»→«QR-код» a silent no-op in the app's default state (15-VERIFICATION gap).
+                onQr={onQr ? () => onQr(config) : undefined}
                 onDelete={onDelete ? () => onDelete(config) : undefined}
                 onDuplicate={onDuplicate ? () => onDuplicate(config) : undefined}
                 onRename={onRename ? (newName) => onRename(config, newName) : undefined}

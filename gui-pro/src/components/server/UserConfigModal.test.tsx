@@ -195,9 +195,9 @@ describe("UserConfigModal", () => {
     );
   });
 
-  it("falls back to text copy when ClipboardItem is unavailable (D-09)", async () => {
-    delete (globalThis as unknown as { ClipboardItem?: unknown }).ClipboardItem;
-
+  it("clicking the QR copies the tt:// link as TEXT (image copy was removed, D-09)", async () => {
+    // The QR image-clipboard path was removed (it did not work in the WebView2), so
+    // clicking the QR copies the link — the same as the link copy icon.
     render(
       <UserConfigModal
         isOpen={true}
@@ -218,7 +218,7 @@ describe("UserConfigModal", () => {
     });
     expect(activityLogSpy).toHaveBeenCalledWith(
       "USER",
-      expect.stringContaining("fallback=no-clipboarditem"),
+      expect.stringContaining("user.config.link_copied user=swift-fox"),
     );
   });
 

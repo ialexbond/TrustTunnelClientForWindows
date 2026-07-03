@@ -296,6 +296,33 @@ fn classify_update_failure(output: &str) -> Option<String> {
     }
 }
 
+/// Classify a FAILED install.sh run's captured output (post-UAT install-error UX).
+///
+/// WHY: `build_install_command` fetches the TrustTunnel package from github.com with curl.
+/// On a fresh VPS with no working DNS / no outbound network the fetch fails with
+/// «curl: (6) Could not resolve host: github.com» + «Failed to download …», and the wrapper
+/// echoes SSH_INSTALL_SH_INTEGRITY_OR_RUN_FAILED — previously surfaced to the non-technical
+/// user as the opaque raw English «Installation failed with error (code 1)». This detects
+/// the DNS/download case and returns a specific, actionable code; any other failure falls
+/// back to the generic (now translatable) SSH_INSTALL_FAILED|{code}. Pure substring test —
+/// the server-controlled text is never executed or re-interpolated into a shell (T-06-42).
+fn classify_install_failure(output: &str, code: i32) -> String {
+    let lower = output.to_lowercase();
+    let dns_or_download = [
+        "could not resolve host",
+        "failed to download",
+        "curl: (6)", // couldn't resolve host
+        "curl: (7)", // couldn't connect to host
+        "temporary failure in name resolution",
+        "name or service not known",
+    ];
+    if dns_or_download.iter().any(|p| lower.contains(p)) {
+        "SSH_PACKAGE_DOWNLOAD_FAILED".to_string()
+    } else {
+        format!("SSH_INSTALL_FAILED|{code}")
+    }
+}
+
 /// Detect whether an existing server config file DIVERGES from the content the
 /// wizard intends to write (Codex #3, round-2 finding C). Returns true when the
 /// trimmed existing content differs from the trimmed intended content.
@@ -851,12 +878,15 @@ async fn deploy_install_binary(
     let install_cmd = build_install_command(sudo);
 
     // 06-uat: cancellable — the download+install.sh span must abort on cancel.
-    let (_, install_code) = exec_command_cancellable(handle, app, &install_cmd).await?;
+    // Capture the output so a DNS/download failure (the server can't reach github.com —
+    // «Could not resolve host» / «Failed to download») is classified into a specific,
+    // translatable code instead of the opaque raw English «Installation failed (code 1)».
+    let (install_out, install_code) = exec_command_cancellable(handle, app, &install_cmd).await?;
 
     if install_code != 0 {
-        let msg = format!("Installation failed with error (code {install_code})");
-        emit_step(app, "install", "error", &msg);
-        return Err(msg);
+        let code = classify_install_failure(&install_out, install_code);
+        emit_step(app, "install", "error", &code);
+        return Err(code);
     }
 
     // Verify installation
@@ -2089,6 +2119,30 @@ mod tests {
             None,
             "a transient non-lock warning should keep warn-and-continue"
         );
+    }
+
+    #[test]
+    fn test_classify_install_failure_detects_dns_download_failure() {
+        // The exact fresh-VPS-no-DNS output the owner hit → a specific translatable code
+        // (not the opaque raw «Installation failed (code 1)»).
+        let out = "Downloading TrustTunnel package: https://github.com/...\ncurl: (6) Could not resolve host: github.com\nFailed to download trusttunnel-v1.0.33-linux-x86_64.tar.gz: 0\nSSH_INSTALL_SH_INTEGRITY_OR_RUN_FAILED";
+        assert_eq!(classify_install_failure(out, 1), "SSH_PACKAGE_DOWNLOAD_FAILED");
+        assert_eq!(
+            classify_install_failure("Temporary failure in name resolution", 1),
+            "SSH_PACKAGE_DOWNLOAD_FAILED"
+        );
+        assert_eq!(
+            classify_install_failure("curl: (7) Failed to connect", 1),
+            "SSH_PACKAGE_DOWNLOAD_FAILED"
+        );
+    }
+
+    #[test]
+    fn test_classify_install_failure_falls_back_to_generic_translatable_code() {
+        // Any other install failure → SSH_INSTALL_FAILED|{code} (translatable), never the
+        // raw English string that used to reach the user.
+        assert_eq!(classify_install_failure("tar: corrupt archive", 2), "SSH_INSTALL_FAILED|2");
+        assert_eq!(classify_install_failure("", 1), "SSH_INSTALL_FAILED|1");
     }
 
     #[test]

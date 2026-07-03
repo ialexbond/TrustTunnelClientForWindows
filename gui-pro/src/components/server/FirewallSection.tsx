@@ -23,6 +23,25 @@ interface FirewallSectionProps {
 export function FirewallSection({ status, state }: FirewallSectionProps) {
   const { t } = useTranslation();
 
+  // SACRED SSH PORT (post-UAT brick fix): the rule for the port THIS session rides on
+  // must never be deletable from the table — deleting it (with ufw default-deny) would
+  // lock the admin out entirely. The backend also refuses it; this just hides the trap.
+  const sshPortStr = String(status.current_ssh_port ?? "");
+  const isSshRule = (to: string) => {
+    if (sshPortStr === "") return false;
+    const base = to.split("/")[0];
+    const lower = base.toLowerCase();
+    // `ufw allow OpenSSH`/`ssh` app profile opens port 22 (Fable HIGH-1).
+    if ((lower === "openssh" || lower === "ssh") && sshPortStr === "22") return true;
+    if (base === sshPortStr) return true;
+    const [a, b] = base.split(":");
+    if (b !== undefined) {
+      const lo = Number(a), hi = Number(b), p = Number(sshPortStr);
+      if (Number.isFinite(lo) && Number.isFinite(hi)) return lo <= p && p <= hi;
+    }
+    return false;
+  };
+
   return (
     <div className="pt-3 border-t space-y-2" style={{ borderColor: "var(--color-border)" }}>
       <div className="flex items-center justify-between">
@@ -159,9 +178,9 @@ export function FirewallSection({ status, state }: FirewallSectionProps) {
                     </span>
                     <button
                       onClick={() => state.deleteRule(r.number)}
-                      disabled={state.loading || state.fwWriting}
+                      disabled={state.loading || state.fwWriting || isSshRule(r.to)}
                       className="justify-self-end p-1 rounded hover:bg-[var(--color-bg-secondary)] disabled:opacity-[var(--opacity-disabled)] disabled:cursor-not-allowed"
-                      title={t("server.security.firewall.delete")}
+                      title={isSshRule(r.to) ? t("server.security.firewall.delete_ssh_protected") : t("server.security.firewall.delete")}
                     >
                       {state.isBusy(`del-${r.number}`)
                         ? <Loader2 className="w-3 h-3 animate-spin" style={{ color: "var(--color-danger-500)" }} />

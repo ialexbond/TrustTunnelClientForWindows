@@ -210,8 +210,9 @@ describe("ConfigCard", () => {
   });
 
   // Truth: the overflow menu is collapsed by default (D-26) and exposes Edit / Duplicate /
-  // Delete (QR deferred). Opening it surfaces the three items.
-  it("overflow menu holds Edit / Duplicate / Delete (no QR)", async () => {
+  // QR / Delete. Opening it surfaces the four items. Phase 15 (D-09) added «QR-код» — the
+  // pre-15 «no QR» assertion was FLIPPED to expect it present (B-16 lands the item + onQr).
+  it("overflow menu holds Edit / Duplicate / QR / Delete", async () => {
     const onEdit = vi.fn();
     renderWithProviders(<ConfigCard config={cfg} status="disconnected" onEdit={onEdit} />);
     const trigger = screen.getByRole("button", {
@@ -222,8 +223,8 @@ describe("ConfigCard", () => {
     expect(within(menu).getByText(i18n.t("connection.card.edit"))).toBeInTheDocument();
     expect(within(menu).getByText(i18n.t("connection.card.duplicate"))).toBeInTheDocument();
     expect(within(menu).getByText(i18n.t("connection.card.delete"))).toBeInTheDocument();
-    // QR is DEFERRED this phase — not in the menu.
-    expect(within(menu).queryByText(i18n.t("connection.card.qr"))).not.toBeInTheDocument();
+    // Phase 15 (D-09): «QR-код» is now the 4th item (opens the ConfigQr transfer modal).
+    expect(within(menu).getByText(i18n.t("connection.card.qr"))).toBeInTheDocument();
   });
 
   // ─── Phase 14 (Wave 0, plan 14-01): the switching face ───
