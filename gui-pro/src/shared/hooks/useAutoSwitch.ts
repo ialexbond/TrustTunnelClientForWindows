@@ -50,14 +50,24 @@ import type { VpnStatus } from "../types";
 export const COOLDOWN_MS = 60_000;
 
 /**
+ * F24 / Fable R4 (MAJOR-1) loop-break window. After a switch fires, the target is excluded from the
+ * candidate list for this long. A switch that FAILED and silently reverted leaves the target frozen at
+ * its stale-good pre-connect band (F24 freezes inactive cards while connected + the retained cache only
+ * stores GOOD bands), so it looks perpetually healthy — without the exclusion the engine would re-pick
+ * the same DEAD target every ~60–90 s forever (switch→fail→revert→switch), churning the tunnel. Set WELL
+ * above COOLDOWN_MS so a failed target is not retried the instant the settle window lapses; after this
+ * window it may be re-tried once (it might have recovered), so at worst one failed attempt per window —
+ * never a tight loop. Harmless on a SUCCESSFUL switch: the target is then the active config, already
+ * absent from the candidate list.
+ */
+export const SKIP_WINDOW_MS = 300_000;
+
+/**
  * Defense-in-depth floor for the schedule interval (seconds). `useAppSettings` already clamps the
  * stored value to >= 5 s (AUTO_SWITCH_BOUNDS.intervalSec.min), so this is a second guard against a
  * 0/NaN interval ever reaching `setTimeout` and causing a tight ping-storm.
  */
 const MIN_INTERVAL_SEC = 5;
-
-/** The Rust `PingResult` discriminated union — identical shape to the decision `Reading`. */
-type PingResult = Reading;
 
 export interface UseAutoSwitchParams {
   /** Master toggle from `useAppSettings` — the whole engine is inert while false. */
@@ -77,8 +87,24 @@ export interface UseAutoSwitchParams {
    * caller from the existing `usePerConfigPing` map. The hook does NOT ping these itself.
    */
   candidates: Candidate[];
-  /** The EXISTING `useVpnActions.switchTo` — the ONLY allowed switch mechanism (disconnect→connect). */
-  switchTo: (path: string) => Promise<void>;
+  /**
+   * The EXISTING switch mechanism (App's `handleAutoSwitch` → `performSwitch`). FAB-06: it now
+   * resolves `{ accepted }` — `accepted:false` when the App REFUSED the switch (a switch already in
+   * flight, or status `reconnecting`/`recovering`), `accepted:true` when it ran. The engine consumes
+   * the breach (reset counter + arm the ~60 s cooldown) ONLY when the switch was accepted, so a
+   * swallowed verdict keeps the breach count and re-fires on a later tick (matching the existing
+   * comment). A plain `Promise<void>` is still accepted (treated as accepted) for standalone tests.
+   */
+  switchTo: (path: string) => Promise<void> | Promise<{ accepted: boolean }>;
+  /**
+   * Phase 14 (D-13 / Pitfall 5): the App-owned `isSwitching` flag — true while a seamless A→B swap is
+   * in flight. A belt-and-suspenders guard: when true the tick short-circuits BEFORE doSwitch, so a
+   * second auto-switch cannot fire mid-swap. This is DEFENSE-IN-DEPTH only — the engine is already
+   * inert while `status !== "connected"` (a switch's teardown leaves connected) and the ~60s cooldown
+   * covers the just-switched window (D-09). It does NOT replace those guards or change COOLDOWN_MS /
+   * the consecutive-checks gate / the no-auto-return logic. Optional so standalone tests can omit it.
+   */
+  isSwitching?: boolean;
 }
 
 export function useAutoSwitch({
@@ -90,6 +116,7 @@ export function useAutoSwitch({
   activeConfigPath,
   candidates,
   switchTo,
+  isSwitching = false,
 }: UseAutoSwitchParams): void {
   // Mutable engine state held BETWEEN ticks (not React state — it must not trigger re-renders, and
   // the loop reads/writes it synchronously). The pure fn owns the transition rules; we just persist.
@@ -101,6 +128,10 @@ export function useAutoSwitch({
   statusRef.current = status;
   const masterOnRef = useRef(masterOn);
   masterOnRef.current = masterOn;
+  // Phase 14 (D-13): LIVE mirror of the App-owned isSwitching flag, read inside the tick so the
+  // belt-and-suspenders guard never trusts a stale closure (same discipline as statusRef).
+  const isSwitchingRef = useRef(isSwitching);
+  isSwitchingRef.current = isSwitching;
 
   // Latest tunable inputs, read inside the loop WITHOUT restarting the interval on every render —
   // changing threshold/interval/checks/candidates just takes effect on the next tick (the same
@@ -118,6 +149,14 @@ export function useAutoSwitch({
     // Inert unless connected + master ON. (The cleanup of the prior run already cancelled it.)
     if (status !== "connected" || !masterOn || !activeConfigPath) return;
 
+    // Fable R3 (MINOR): each (re)entry into a CONNECTED+masterOn span is a FRESH health epoch. Reset the
+    // consecutive-breach counter so breaches counted just before a drop (this effect re-seeds on
+    // connected→reconnecting→connected, and on a switch's activeConfigPath change) do NOT glue onto
+    // post-recovery breaches as "consecutive" — with the live tunnel probe they would otherwise survive
+    // the drop, and 1–2 bad ticks would fire a switch instead of the full checksN. PRESERVE cooldownUntil
+    // so a just-fired switch's ~60s settle window still holds across the reconnect.
+    engineStateRef.current = { ...engineStateRef.current, consecutiveBad: 0 };
+
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -130,31 +169,86 @@ export function useAutoSwitch({
       const { thresholdMs: thr, checksN: n, candidates: cands, switchTo: doSwitch } =
         inputsRef.current;
 
-      // (b) Ping the ACTIVE config. A failed invoke (backend down / bad path) reads honest
-      // no-data — treated as a breach by decideAutoSwitch (status !== "ok"), never thrown.
-      const reading = await invoke<PingResult>("ping_config_endpoint", {
-        configPath: activeConfigPath,
+      // (b) F23 (14-UAT round 2, owner-chosen design): measure the ACTIVE TUNNEL's REAL current
+      // latency by probing neutral reference hosts THROUGH the tunnel (client → VPN server →
+      // reference). The endpoint itself can't be honestly probed while connected — a direct connect to
+      // it (it IS the VPN server) rides the tunnel to the-server-and-back = the ~2× / «Недоступен»
+      // noise that caused the false switches. The reference probe reflects the honest in-session
+      // tunnel health: a slow tunnel → high ms (breach), a dead tunnel → Unreachable (breach), a
+      // healthy one → normal ms (no switch off a good server). A failed invoke reads no-data (neutral,
+      // handled below), never thrown.
+      const reading = await invoke<Reading>("probe_tunnel_latency", {
         timeoutMs: PING_TIMEOUT_MS,
       }).catch((): Reading => ({ status: "no-data" }));
 
       if (cancelled) return;
 
-      // (d) Run the pure decision over the latest reading + priority-ordered candidates, passing
-      // the SAME COOLDOWN_MS so the fn stamps the cooldown consistently with this engine.
+      // (c) A `no-data` reading here means the IPC invoke itself failed (a transient error), NOT that
+      // the tunnel is failing (a dead tunnel reads `Unreachable`, which IS a breach). Treat the
+      // transient failure as neutral — reset the breach counter and wait for the next tick — so an IPC
+      // hiccup never accumulates toward a false switch off a healthy, user-chosen server.
+      if (reading.status === "no-data") {
+        engineStateRef.current = { ...engineStateRef.current, consecutiveBad: 0 };
+        const intervalMs = Math.max(inputsRef.current.intervalSec, MIN_INTERVAL_SEC) * 1000;
+        timer = setTimeout(() => void tick(), intervalMs);
+        return;
+      }
+
+      // (d0) F24 / Fable R4 (MAJOR-1) loop-break: exclude the MOST RECENT switch target from the
+      // candidate list for SKIP_WINDOW_MS. A switch that FAILED and reverted leaves that target frozen at
+      // its stale-good pre-connect band (F24 freezes inactive cards while connected + the cache only
+      // stores GOOD bands), so it looks perpetually healthy — without this the engine would re-pick the
+      // same DEAD target every cooldown forever (switch→fail→revert→switch). Excluding it briefly lets the
+      // engine fall through to the next healthy candidate (or silently stay put — D-03) instead of
+      // looping. Harmless when the switch SUCCEEDED: the target is then the ACTIVE config, already absent
+      // from the candidate list. Consistent with D-05 (no auto-return to the just-left server).
+      const st = engineStateRef.current;
+      const skipPath =
+        st.lastSwitchPath && Date.now() - (st.lastSwitchAt ?? 0) < SKIP_WINDOW_MS
+          ? st.lastSwitchPath
+          : undefined;
+      const eligibleCands = skipPath ? cands.filter((c) => c.path !== skipPath) : cands;
+
+      // (d) Run the pure decision over the latest reading + priority-ordered ELIGIBLE candidates,
+      // passing the SAME COOLDOWN_MS so the fn stamps the cooldown consistently with this engine.
       const { nextState, action } = decideAutoSwitch(
         reading,
         engineStateRef.current,
         { thresholdMs: thr, checksN: n },
-        cands,
+        eligibleCands,
         Date.now(),
         COOLDOWN_MS,
       );
-      // (e) Persist the next state.
-      engineStateRef.current = nextState;
+      // (e) Persist the next state — BUT for a `switch` verdict, FAB-06: do NOT commit the breach
+      // RESET + cooldown ARM until the switch is actually ACCEPTED. `decideAutoSwitch` returns a
+      // switch `nextState` of `{ consecutiveBad: 0, cooldownUntil: now + COOLDOWN_MS }`; persisting
+      // that up front would reset the breach + arm the 60 s cooldown even when the App SWALLOWS the
+      // verdict (a switch already in flight, or status reconnecting/recovering) — delaying recovery
+      // for a full cooldown while nothing switched. So on a switch verdict we PRESERVE the breach
+      // count here (increment, no cooldown) and only stamp the reset+cooldown after doSwitch reports
+      // accepted:true (below). A `noop` verdict persists its nextState as before.
+      if (action.kind !== "switch") {
+        engineStateRef.current = nextState;
+      } else {
+        // Preserve the just-incremented breach (never below checksN so a still-breaching next tick
+        // re-fires immediately once the swallow clears); do NOT arm the cooldown yet. Spread the current
+        // state so cooldownUntil + the lastSwitchPath/At loop-break memory survive.
+        engineStateRef.current = {
+          ...engineStateRef.current,
+          consecutiveBad: Math.max(engineStateRef.current.consecutiveBad, n),
+        };
+      }
 
       // (f) On a switch verdict, fire the EXISTING switchTo then re-arm the cooldown so no second
       // switch fires during the settle window even if the new active config also reads bad at first.
-      if (action.kind === "switch") {
+      //
+      // Phase 14 (D-13 / Pitfall 5): belt-and-suspenders — if an App-owned switch is ALREADY in
+      // flight, do NOT fire a second one (nor push the origin/ping side-effects that precede it). The
+      // engine is normally inert while status≠"connected" and the ~60s cooldown covers the
+      // just-switched window (D-09); this guard is defense-in-depth, NOT a replacement — it does not
+      // touch COOLDOWN_MS, the consecutive-checks gate, or the no-auto-return logic. The breach count
+      // is preserved above (FAB-06), so a switch fires on a later tick once the App flag clears.
+      if (action.kind === "switch" && !isSwitchingRef.current) {
         // Phase 13 (Pitfall 2 / A4): mark the pending connect ORIGIN as AutoSwitch RIGHT BEFORE
         // the switch, so the next Rust `Connected` edge emits «Переключено автоматически» instead
         // of the generic «Подключено». The origin is a durable AppState signal the Rust decider
@@ -173,12 +267,28 @@ export function useAutoSwitch({
         const targetPingMs =
           targetReading?.status === "ok" ? targetReading.ms : null;
         await invoke("set_pending_connect_ping", { ms: targetPingMs });
-        await doSwitch(action.targetPath);
+        // FAB-06: doSwitch (App's performSwitch) resolves `{ accepted }`. Only when the switch was
+        // ACTUALLY accepted do we consume the breach (reset counter + arm the ~60 s cooldown). A
+        // swallowed verdict (App refused: a switch already in flight, or status reconnecting/
+        // recovering) returns accepted:false — the breach count preserved above then re-fires the
+        // switch on a later tick once the swallow clears, instead of resetting + arming a cooldown
+        // for a switch that never happened. A legacy `Promise<void>` (standalone tests) resolves
+        // undefined → treated as accepted (accepted !== false).
+        const outcome = await doSwitch(action.targetPath);
         if (cancelled) return;
-        engineStateRef.current = {
-          consecutiveBad: 0,
-          cooldownUntil: Date.now() + COOLDOWN_MS,
-        };
+        const accepted = (outcome as { accepted?: boolean } | void)?.accepted !== false;
+        if (accepted) {
+          // Reset the breach + arm the cooldown, AND record this switch target + time so (d0) can
+          // exclude it for SKIP_WINDOW_MS — if it turns out to have reverted (target dead), the engine
+          // won't re-pick the same frozen-healthy-but-dead target on the next cycle.
+          const nowMs = Date.now();
+          engineStateRef.current = {
+            consecutiveBad: 0,
+            cooldownUntil: nowMs + COOLDOWN_MS,
+            lastSwitchPath: action.targetPath,
+            lastSwitchAt: nowMs,
+          };
+        }
       }
 
       // (g) Schedule the next tick. Floor the interval (defense-in-depth against a 0/NaN value).

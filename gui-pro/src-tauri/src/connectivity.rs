@@ -49,15 +49,21 @@ impl Drop for ReconnectInProgressGuard {
 // 02-07 (UAT Gap #1, tests 6/7/8): the OLD cadence (POLL=20s × MAX_FAILURES=4)
 // gave an ~80s sleep floor before a drop could even be declared, plus ~15-60s of
 // per-check timeouts — a ~95-140s "phantom connected" window. The cadence is now
-// tightened so a real drop is declared in ~10-15s and handed to the reconnect
-// supervisor. The probe was ALSO retargeted from the local gateway to the
+// tightened. NOTE (F21, 14-UAT round 2 — accuracy fix, no behavior change): the
+// often-quoted "~10-15s" is only the SLEEP-CADENCE FLOOR (POLL 4s × MAX_FAILURES
+// 3 ≈ 12s). The REAL end-to-end declaration window adds a ~3s `check_tunnel_alive`
+// probe to EACH failing iteration plus the final reason-gate probe → ~20-25s worst
+// case (matches the observed «поздно ловит обрыв»). Still collapses the old
+// ~80-140s floor and is handed to the reconnect supervisor. The probe was ALSO
+// retargeted from the local gateway to the
 // TUNNEL/SERVER path (see `check_tunnel_alive`), so a server-silent drop (LAN up,
 // server dead) is caught at the same speed as an Ethernet unplug — the old
 // gateway probe stayed "online" when only the server died.
 /// How often the monitor checks tunnel liveness while VPN is connected.
-/// 4s × MAX_FAILURES gives an offline floor of ~12s of cadence; with the tight
-/// per-probe timeout (`TUNNEL_PROBE_TIMEOUT_SECS`) the worst-case declaration
-/// window stays ~10-15s — collapsing the old ~80-140s floor (UAT Gap #1).
+/// 4s × MAX_FAILURES gives an offline SLEEP floor of ~12s of cadence; the REAL
+/// end-to-end declaration window is ~20-25s once the ~3s per-iteration
+/// `check_tunnel_alive` probe + the reason-gate probe are counted (F21, round 2) —
+/// still collapsing the old ~80-140s floor (UAT Gap #1).
 const POLL_INTERVAL_SECS: u64 = 4;
 /// Consecutive failed tunnel probes before declaring the tunnel down (~12-15s).
 /// Requiring N>1 failures (not a single miss) tolerates one transient probe miss
@@ -1667,7 +1673,12 @@ pub fn start_reconnect_supervisor(
                 let last_error_arc = Arc::clone(&last_error_arc);
                 async move {
                     let start = Instant::now();
-                    let ok = respawn_and_wait(&app, &config_path, &log_level, &status_arc).await;
+                    // FAB-R1: pass the supervisor's captured `generation` so the respawn
+                    // can re-check ownership before storing its child (a mid-respawn switch
+                    // bump makes this attempt stale).
+                    let ok =
+                        respawn_and_wait(&app, &config_path, &log_level, &status_arc, generation)
+                            .await;
                     // On failure, read the specific Error reason the attempt landed so
                     // the loop can short-circuit a terminal one. Only meaningful when
                     // !ok; on success the reason is irrelevant (loop returns Recovered).
@@ -1801,24 +1812,69 @@ async fn respawn_and_wait(
     config_path: &str,
     log_level: &str,
     status_arc: &Arc<Mutex<VpnStatus>>,
+    captured_generation: u64,
 ) -> bool {
-    crate::commands::vpn::respawn_sidecar(app, config_path, log_level).await;
+    // FAB-R1 (Fable-5 review of Phase 14): thread the supervisor's captured
+    // generation into `respawn_sidecar` so it can re-check ownership right before
+    // storing the fresh child — a config switch's `vpn_connect(B)` that bumped the
+    // generation mid-respawn makes this A-retry stale and it must not store a second
+    // live sidecar.
+    crate::commands::vpn::respawn_sidecar(app, config_path, log_level, captured_generation).await;
 
-    // Poll the single status owner for up to the attempt window. A short poll over
-    // the existing lock (poison-recover like set_vpn_status) reuses the one status
-    // source of truth instead of a parallel channel.
+    // 3.8 F-2 (Fable-5 review): the respawned child's `Connected` edge is now gated on real
+    // traffic-readiness (up to ~45s on http3 — the 3.8 delay-green). The old flat 15s poll counted
+    // every still-warming respawn as a FAILED attempt, and the NEXT attempt killed the warming
+    // child — so auto-reconnect became STRUCTURALLY unable to succeed on a slow-warmup protocol.
+    // Poll instead until the FIRST of:
+    //   - status == Connected                     → attempt succeeded,
+    //   - status terminal (Error / Disconnected)  → attempt failed (fatal marker / user cancel),
+    //   - the respawned child DIED (dead PID / slot cleared by a newer session) → fail now,
+    //   - the per-attempt CEILING (RECONNECT_ATTEMPT_WINDOW, now 55s) → wedged-but-alive backstop.
+    // A child that is still ALIVE and still `Reconnecting` past the old 15s is IN-PROGRESS
+    // (warming), NOT failed — keep waiting. The supervisor holds `reconnect_in_progress`, so the
+    // Terminated arm DEFERS and a dead respawn stays `Reconnecting` on the wire — status alone
+    // can't reveal the death, so we probe the PID directly (still poison-recover on the locks).
     let deadline = Instant::now() + crate::lifecycle::RECONNECT_ATTEMPT_WINDOW;
-    while Instant::now() < deadline {
-        let connected = status_arc
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .eq(&VpnStatus::Connected);
-        if connected {
+    loop {
+        let status = *status_arc.lock().unwrap_or_else(|e| e.into_inner());
+        if status == VpnStatus::Connected {
             return true;
+        }
+        if matches!(status, VpnStatus::Error | VpnStatus::Disconnected) {
+            return false; // fatal marker landed, or a user disconnect superseded the attempt
+        }
+        // Is the respawned child still alive? Read its PID from the shared slot and probe it.
+        let child_pid = match app.try_state::<crate::commands::AppState>() {
+            Some(state) => state
+                .sidecar_child
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .map(|c| c.child.pid()),
+            None => None,
+        };
+        match child_pid {
+            // Alive → still warming (3.8 delay-green) → keep waiting.
+            Some(pid) if crate::sidecar::process_is_alive(pid) => {}
+            // Spawned then DIED (connection refused / server rebooting). R2-5 (Fable-5 re-review):
+            // fail the attempt, but SPACE it. A fast connection-refused exit would otherwise let the
+            // 10-attempt budget burn in seconds (fast-fail skips the inter-attempt sleep) and give up
+            // BEFORE a rebooting server returns — regressing the UAT'd reboot-recovery guarantee.
+            // Sleeping the interval here pushes the attempt's elapsed past FAST_FAIL_GRACE so the
+            // retries stay spaced (~10 attempts over a reboot-sized window). A spawn-FAILURE (no
+            // child stored — a local problem, not a transient server drop) stays fast: nothing to
+            // wait out.
+            Some(_) => {
+                tokio::time::sleep(crate::lifecycle::RECONNECT_INTERVAL).await;
+                return false;
+            }
+            None => return false,
+        }
+        if Instant::now() >= deadline {
+            return false; // wedged-but-alive backstop
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    false
 }
 
 /// Physical adapter info: IP address + gateway IP.

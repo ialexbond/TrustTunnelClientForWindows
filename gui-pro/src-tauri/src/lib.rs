@@ -133,6 +133,10 @@ pub fn run() {
             locale: Arc::new(Mutex::new("ru".to_string())),
             // Phase 17: benchmark cancel channel (None = no benchmark running)
             benchmark_cancel_tx: Arc::new(tokio::sync::Mutex::new(None)),
+            // 3.3 R-SERIAL — the lifecycle-command serializer mutex (starts unlocked). Held for the
+            // whole body of vpn_connect / vpn_disconnect + the tray twins so a connect cannot
+            // interleave with an in-flight teardown (F13/F14).
+            lifecycle_flow: Arc::new(tokio::sync::Mutex::new(())),
             // Phase 17 UAT 2026-05-20: MTProto install cancel flag (false = no install running / not cancelled)
             mtproto_install_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             // Phase 18 Plan 05 — sidecar update cancel flag (REQ-18-UPDATE-FLOW-07)
@@ -178,6 +182,17 @@ pub fn run() {
             // disconnect so notify::maybe_fire suppresses the intermediate «Отключено», and
             // both the FE and maybe_fire clear it on the destination terminal outcome.
             switch_or_reconnect_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // F17 (14-UAT round 2) — the FE mirrors its whole-switch-window isSwitching here so
+            // maybe_fire (and, via the FE ref, the disconnect snackbars) stay silent across a
+            // seamless switch+revert. Starts false; the FE owns its lifecycle (never cleared Rust-side).
+            seamless_switch_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // FAB-R4 (Fable-5 review of Phase 14) — the connection_generation stamped when a
+            // config switch is authorized (the isSwitch:true edge of
+            // set_switch_or_reconnect_pending). u64::MAX = "no switch authorized"; lets
+            // vpn_connect tell the switch's OWN teardown advance from a genuine tray disconnect
+            // in the teardown→connect gap so an explicit «Отключить» is not erased. Starts at the
+            // no-switch sentinel.
+            switch_authorized_generation: Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX)),
             // Phase 13 (13-05) — staged pending plate for the pull-model redelivery. None until
             // the first fire; maybe_fire stages the latest {kind, config_name} before its emit and
             // the plate pull-and-clears it once its listener attaches, so a fire that beat the
@@ -451,6 +466,8 @@ pub fn run() {
                                 match status {
                                     VpnStatus::Connected => "connected",
                                     VpnStatus::Connecting => "connecting",
+                                    // 3.4 R-DCT: teardown-in-progress is now a real wire status.
+                                    VpnStatus::Disconnecting => "disconnecting",
                                     VpnStatus::Error => "error",
                                     // 02-20 status-UX split: a language change mid-recovery
                                     // or mid-reconnect must keep the TRUE state's icon/menu,
@@ -539,12 +556,17 @@ pub fn run() {
             commands::vpn::set_pending_connect_origin,
             commands::vpn::set_pending_connect_ping,
             commands::vpn::set_switch_or_reconnect_pending,
+            commands::vpn::set_seamless_switch_active,
             commands::vpn::set_plate_theme,
             // Phase 13 (13-07) — mirror the app UI language ("ru"/"en") so the plate copy follows it.
             commands::vpn::set_plate_language,
             // Phase 13 (13-05) — the plate pull-and-clears a fire that beat its listener (read-and-
             // clear, mirroring poll_pending_deeplink) so no empty black plate persists at launch.
             notify::pull_pending_plate,
+            // F15 (14-UAT round 2) — the FE measures the plate's content height and asks Rust to
+            // resize the notification window to fit (dynamic plate sizing; custom command, no per-
+            // command capability needed — mirrors pull_pending_plate).
+            notify::resize_notification_plate,
             logging::set_logging_enabled,
             logging::get_logging_enabled,
             logging::open_logs_folder,
@@ -597,6 +619,10 @@ pub fn run() {
             // Named ping_config_endpoint to avoid colliding with the existing
             // network::ping_endpoint(host, port) used by the Control Panel.
             commands::ping::ping_config_endpoint,
+            // F23 (14-UAT round 2): measure the ACTIVE tunnel's real latency for the auto-switch
+            // engine by probing neutral reference hosts THROUGH the tunnel (the endpoint itself can't
+            // be honestly probed while connected — that was the x2 noise). Fixed reference hosts only.
+            commands::ping::probe_tunnel_latency,
             commands::ssh_commands::check_server_installation,
             commands::ssh_commands::uninstall_server,
             commands::ssh_commands::fetch_server_config,

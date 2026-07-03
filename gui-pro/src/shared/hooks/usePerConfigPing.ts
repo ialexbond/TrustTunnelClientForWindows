@@ -14,15 +14,20 @@ import type { ConfigPing, PingBand } from "../../components/connection/ConfigPin
  *     (the Rust side reads host:port from the config's own .toml — SSRF-safe).
  *
  * It returns a map of config id → resolved `ConfigPing` band the `ConfigPingPill` renders.
- * The active/connected config is NOT pinged here — its live ping is the tunnel-side signal
- * carried by the lead card; the per-config probe is endpoint reachability for the others.
+ * F23 (14-UAT round 2): the active/connected config is genuinely NOT pinged here — the caller
+ * (`useConfigPingSource`) now EXCLUDES it from `targets`, because a direct probe of the active
+ * endpoint travels through the tunnel (~2× the real RTT / Unreachable) and is meaningless while
+ * connected. The active lead card instead shows the config's retained DIRECT pre-connect band
+ * (`useConfigPingSource.lastGoodByPath`); this loop only probes the INACTIVE configs' reachability.
  *
  * The interval default is 15 s (D-23). The value is a local constant THIS phase; the
  * configurable «Авто-режим» setting that drives it is a later phase.
  */
 
-/** The Rust `PingResult` discriminated union (serde tag = "status", kebab-case). */
-type PingResult =
+/** The Rust `PingResult` discriminated union (serde tag = "status", kebab-case). Exported so the
+ *  App-level tunnel-latency probe (`useConfigPingSource`) reuses the SAME shape + mapper — the active
+ *  card and this inactive-ping loop then band identical readings (owner: "везде одинаково"). */
+export type PingResult =
   | { status: "ok"; ms: number }
   | { status: "unreachable" }
   | { status: "no-data" };
@@ -49,8 +54,10 @@ function bandForMs(ms: number): PingBand {
   return "red";
 }
 
-/** Map a Rust `PingResult` to the `ConfigPing` the pill renders. */
-function toConfigPing(result: PingResult): ConfigPing {
+/** Map a Rust `PingResult` to the `ConfigPing` the pill renders. Exported so the active card's live
+ *  tunnel-latency reading (`useConfigPingSource`) bands through the EXACT same thresholds — one mapper,
+ *  identical bands whether the number came from an inactive direct probe or the active tunnel probe. */
+export function toConfigPing(result: PingResult): ConfigPing {
   if (result.status === "ok") {
     return { band: bandForMs(result.ms), valueMs: result.ms };
   }
@@ -184,6 +191,11 @@ export function usePerConfigPing(targets: PingTarget[]): Record<string, ConfigPi
       if (cancelled) return;
       await pingAll();
       if (cancelled) return;
+      // NIT (Fable R4): with NO targets (e.g. while connected — useConfigPingSource freezes the cards
+      // and probes nothing), do not schedule empty 15 s rounds forever. A genuine target-set change
+      // re-seeds this effect with a fresh loop (the `[targetsKey]` dep), so stopping here when idle
+      // loses nothing and drops a pointless recurring timer.
+      if (targetsRef.current.length === 0) return;
       timer = setTimeout(() => void loop(), PING_INTERVAL_MS);
     };
 

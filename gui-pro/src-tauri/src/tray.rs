@@ -87,7 +87,9 @@ pub fn build_tray_menu(app: &tauri::AppHandle, status: &str) -> tauri::Result<ta
         "connected" => (
             if is_ru { "Подключен" } else { "Connected" },
             "disconnect",
-            if is_ru { "Отключиться" } else { "Disconnect" },
+            // F22 (14-UAT round 2): the tray toggle must match the Connection-tab buttons
+            // (buttons.disconnect = «Отключить»), not the reflexive «Отключиться».
+            if is_ru { "Отключить" } else { "Disconnect" },
             true,
         ),
         "connecting" => (
@@ -101,7 +103,7 @@ pub fn build_tray_menu(app: &tauri::AppHandle, status: &str) -> tauri::Result<ta
         // единый recovering показывал «Переподключение…»; теперь у каждого свой
         // ярлык. Toggle во время обоих — «Отмена» (можно прервать ожидание/ретрай,
         // см. 02-STATUS-SPEC.md §4). Без отдельной ветки `reconnecting` падал бы в
-        // `_` → «Отключен»/«Подключиться» (неверный текст и действие).
+        // `_` → «Отключен»/«Подключить» (неверный текст и действие).
         "reconnecting" => (
             if is_ru { "Переподключение..." } else { "Reconnecting..." },
             "disconnect",
@@ -123,13 +125,13 @@ pub fn build_tray_menu(app: &tauri::AppHandle, status: &str) -> tauri::Result<ta
         "error" => (
             if is_ru { "Ошибка" } else { "Error" },
             "connect",
-            if is_ru { "Подключиться" } else { "Connect" },
+            if is_ru { "Подключить" } else { "Connect" },
             true,
         ),
         _ => (
             if is_ru { "Отключен" } else { "Disconnected" },
             "connect",
-            if is_ru { "Подключиться" } else { "Connect" },
+            if is_ru { "Подключить" } else { "Connect" },
             true,
         ),
     };
@@ -225,6 +227,9 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
                 | VpnStatus::Connected
                 | VpnStatus::Reconnecting
                 | VpnStatus::Recovering
+                // 3.4 R-DCT: teardown-in-progress counts as active (defense-in-depth; 3.3 serialization
+                // makes a tray connect wait for the teardown, so status is Disconnected here).
+                | VpnStatus::Disconnecting
         );
         if let Ok(mut guard) = state.sidecar_child.lock() {
             if guard.is_some() {
@@ -272,11 +277,78 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
 
     let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
 
+    // 3.6 F-TRAY (F10): mirror the tray connect to the window so its active-config pointer + hero
+    // follow the config the tray actually connected, instead of a stale/reverted FE pointer (the
+    // owner's "tray icon green while the tab shows all «Подключить» / no active card" split). Carries
+    // origin + the config PATH only — paths already cross this boundary via the config commands; no
+    // secret (D-29).
+    app.emit(
+        "vpn-flow",
+        serde_json::json!({ "action": "connect", "origin": "tray", "configPath": config_path }),
+    )
+    .ok();
+
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<AppState>() else { return; };
 
-        // Emit connecting status through the single mutator (STATUS-02).
+        // 3.3 R-SERIAL (F13/F14): serialize this tray connect body against vpn_connect / vpn_disconnect
+        // and the tray disconnect twin (the shared lifecycle_flow mutex) so it cannot interleave with
+        // an in-flight teardown. Held across the whole spawned body; dropped when the task ends.
+        let flow = Arc::clone(&state.lifecycle_flow);
+        let _flow_guard = flow.lock().await;
+
+        // Fable R3 (MAJOR-A belt): re-check liveness INSIDE the lock, mirroring `vpn_connect`'s R8 guard
+        // which sits AFTER its `_flow_guard` (vpn.rs:1191). The ENTRY guard (top of this fn) reads status
+        // OUTSIDE `lifecycle_flow`, so between it passing and this body acquiring the lock a RIVAL connect
+        // (a second tray click, or a window `vpn_connect`) can have gone live and released the lock.
+        // Proceeding would then run a FULL second connect whose `kill_stale_sidecar` reads the PID file the
+        // rival just wrote and force-kills the rival's LIVE child mid-handshake. If a session is already
+        // active here, bail — the rival owns the adapter.
+        {
+            let status_now = *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner());
+            let session_active = matches!(
+                status_now,
+                VpnStatus::Connecting
+                    | VpnStatus::Connected
+                    | VpnStatus::Reconnecting
+                    | VpnStatus::Recovering
+                    | VpnStatus::Disconnecting
+            );
+            if session_active {
+                crate::logging::log_app(
+                    "INFO",
+                    "[tray] a session went live while awaiting lifecycle_flow — aborting this duplicate tray connect (MAJOR-A belt)",
+                );
+                return;
+            }
+        }
+
+        // Fable R3 (MAJOR-A): emit `Connecting` FIRST — BEFORE the pre-connect ping probe below. The probe
+        // eats its FULL 1.5s timeout on an unreachable endpoint, and it used to run while status was still
+        // `Disconnected` → up to 1.5s of ZERO feedback (grey tray icon, menu still «Подключить») AND an
+        // extended window where an impatient second «Подключить» click passes the entry R8 guard (which
+        // reads status OUTSIDE `lifecycle_flow`) and queues a full second connect. Staging the ping is only
+        // read by the FAR-LATER Connected edge (`maybe_fire`, after spawn + handshake), so emitting
+        // Connecting first still lands the ping before Connected — while collapsing the guard window back
+        // to ~ms and giving instant feedback.
         set_vpn_status(&app, &state, VpnStatus::Connecting, None);
+
+        // F23 (14-UAT round 2): stage the config's DIRECT pre-connect ping so the connect notification
+        // shows a REAL number, not «—». A tray-initiated connect never set it (the window paths push it
+        // from the FE, the tray path runs entirely in Rust), so the plate rendered «—» on every tray
+        // connect. The endpoint is still DISCONNECTED here (the tunnel comes up only when the sidecar
+        // spawns below), so a direct probe measures the real RTT — the SAME reachability ping the cards
+        // use (SSRF-safe, D-29: never the password). Bounded 1.5s; any non-ok result stages None → the
+        // plate keeps the honest «—». Done SYNCHRONOUSLY before the tunnel comes up so it is set before
+        // the Connected edge `maybe_fire` reads it — no race, no leak into the next connect.
+        let tray_connect_ping: Option<u32> =
+            match crate::commands::ping::ping_config_endpoint(config_path.clone(), 1500).await {
+                Ok(crate::commands::ping::PingResult::Ok { ms }) => Some(ms as u32),
+                _ => None,
+            };
+        if let Ok(mut g) = state.pending_connect_ping.lock() {
+            *g = tray_connect_ping;
+        }
 
         // Kill stale sidecar processes
         kill_stale_sidecar();
@@ -298,6 +370,17 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         // Disconnected on the first drop — i.e. tray sessions silently lost ALL
         // auto-reconnect.
         state.user_disconnect_requested.store(false, Ordering::SeqCst);
+        // FAB-R4 (Fable-5 review of Phase 14) — CONSUME the switch-authorized stamp on
+        // this connect entry point too. A tray «Подключиться» is a fresh user-initiated
+        // connect, NOT a switch destination, so it must NEVER bail on the stamp — but a
+        // stamp left alive by an aborted switch (whose `vpn_connect(B)` never ran, so it
+        // never consumed the stamp) must not survive PAST this connect into a later
+        // `vpn_connect` and false-bail it. Resetting the stamp to the sentinel here makes
+        // that leftover harmless (mirrors the consume-once reset `vpn_connect` performs at
+        // its guard read). `swap` to keep it a single atomic op.
+        state
+            .switch_authorized_generation
+            .swap(u64::MAX, Ordering::SeqCst);
 
         // CR-03: bump the connection generation so THIS tray-started session owns a
         // distinct number, exactly like `vpn_connect` does. Without this bump a stale
@@ -328,9 +411,44 @@ pub fn tray_vpn_connect(app: tauri::AppHandle) {
         crate::dns_guard::snapshot_system_dns();
         crate::dns_guard::flush_dns_cache();
 
-        match sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc).await {
+        // F-6: map the non-Send `Box<dyn StdError>` spawn error to a Send `String` BEFORE the match.
+        // The Ok arm's new cancel-re-check kill (`kill_sidecar(child).await`) is an await point, and a
+        // `match` keeps the scrutinee temporary (the whole Result, incl. its non-Send Err) alive
+        // across the arm body — so without this the spawned task's future is no longer `Send`.
+        let spawn_result = sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
+            .await
+            .map_err(|e| e.to_string());
+        match spawn_result {
             Ok(child) => {
                 eprintln!("[tray_vpn_connect] Sidecar spawned OK (PID {})", child.child.pid());
+                // 3.3 F-6 (Fable-5): mirror vpn_connect's #19 post-spawn cancel re-check on the tray
+                // path. `spawn_trusttunnel` is async; a tray/window disconnect can land (and complete)
+                // WHILE the spawn is in flight — and even under the 3.3 lock the tray-DISCONNECT twin's
+                // intent preamble + child-take run OUTSIDE the lock, so it can set the durable intent +
+                // take None while THIS connect still holds the lock. Without this re-check the fresh
+                // child is stored anyway → a live sidecar behind a Disconnected status (a zombie the
+                // probe/watchdog then suppress, killed only by the next connect's stale-sweep). On
+                // cancel: mark the kill intentional, kill the fresh child, write Disconnected, don't
+                // store. Placed BEFORE save_sidecar_pid so the PID file never records a child we tear
+                // down immediately.
+                if crate::commands::vpn::connect_cancelled(
+                    state.disconnecting.lock().map(|g| *g).unwrap_or(false),
+                    state.user_disconnect_requested.load(Ordering::SeqCst),
+                ) {
+                    crate::logging::log_app(
+                        "INFO",
+                        "[tray] cancel observed after spawn — killing fresh child, not storing it (F-6, mirrors #19)",
+                    );
+                    if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
+                    sidecar::kill_sidecar(child).await.ok();
+                    set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+                    if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+                    return;
+                }
+                // 3.6 F-TRAY: save the PID file for crash-cleanup fallback, exactly like vpn_connect
+                // does — this was the drift Fable found: a tray-started session had NO PID-file sweep,
+                // so a crash between spawn and app-death could leave an orphan the next launch missed.
+                crate::commands::vpn::save_sidecar_pid(child.child.pid());
                 if let Ok(mut guard) = state.sidecar_child.lock() {
                     *guard = Some(child);
                 }
@@ -543,6 +661,9 @@ pub fn tray_menu_current_status(app: tauri::AppHandle) -> String {
         match status {
             VpnStatus::Connected => return "connected".into(),
             VpnStatus::Connecting => return "connecting".into(),
+            // 3.4 R-DCT: teardown-in-progress is now a real wire status — surface it directly
+            // (supersedes the `disconnecting` bool fallback below, kept as a legacy backstop).
+            VpnStatus::Disconnecting => return "disconnecting".into(),
             VpnStatus::Error => return "error".into(),
             // 02-20 status-UX split: surface the TRUE state from the tray-webview
             // snapshot so a tray menu opened mid-recovery/mid-reconnect shows the right
@@ -588,6 +709,16 @@ pub fn tray_menu_has_config(app: tauri::AppHandle) -> bool {
 pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return; };
 
+    // 3.6 F-TRAY (F10/F11): mirror the tray disconnect to the window at the START of the teardown so a
+    // config switch in flight ABORTS its FE settle-park WITHOUT a revert (the user's disconnect wins —
+    // no stuck amber, no phantom «остались на A» notice) and the window shows the teardown truthfully.
+    // Origin only — no path, no secret (D-29).
+    app.emit(
+        "vpn-flow",
+        serde_json::json!({ "action": "disconnect", "origin": "tray" }),
+    )
+    .ok();
+
     // AUDIT-2026-06-11 #2: mirror `vpn_disconnect`'s intent preamble UNCONDITIONALLY,
     // BEFORE the child slot is even inspected. Previously ALL bookkeeping (including
     // `disconnecting=true`) lived inside `if let Some(child)`, so a tray cancel during
@@ -602,8 +733,11 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
     state.user_disconnect_requested.store(true, Ordering::SeqCst);
     // Codex HIGH stale-actor guard: bump the generation so any in-flight
     // connect-timeout watchdog / supervisor attempt from the session being torn down
-    // sees a mismatch and neutralizes itself (mirrors `vpn_disconnect`).
-    state.connection_generation.fetch_add(1, Ordering::SeqCst);
+    // sees a mismatch and neutralizes itself (mirrors `vpn_disconnect`). 3.3 F-5 (Fable-5): CAPTURE
+    // the post-bump generation so the spawned task's DNS/hosts/status tail can re-check it — the
+    // preamble + child-take run OUTSIDE the lock, so a vpn_connect(B) that WINS the lock race can
+    // store a live B before this tail runs; the guard stops us from tearing B's state down.
+    let teardown_generation = state.connection_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
     let child = {
         // Poison-recovery instead of the old `else { return; }`: bailing here AFTER
@@ -622,43 +756,83 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
     if let Some(ref child) = child {
         if let Ok(mut d) = child.disconnecting.lock() { *d = true; }
 
-        // WR-06: kill_sidecar can take seconds (it force-runs taskkill). The tray
-        // icon is driven only by vpn-status events, and no event fires until the
-        // kill completes — so without this the icon would keep showing the previous
-        // (e.g. green "connected") state while the menu text already says
-        // "Отключение...". Proactively move the icon to the "disconnecting"
-        // (reconnect bucket) so icon and menu agree during the kill. No visible
-        // vocabulary change (D-09): "disconnecting" is the existing FE-local
-        // transient label, not a new backend status — vpn_status stays untouched.
-        // Kill path only: the empty-slot path below either writes Disconnected
-        // promptly (which refreshes the icon via the mutator) or leaves a settled
-        // status alone — a proactive gray flip would wrongly mask e.g. a red Error.
-        update_tray_icon(&app, "disconnecting");
+        // WR-06 / 3.4 R-DCT: kill_sidecar can take seconds (graceful wait + confirm-exit poll). The
+        // tray icon AND the window are driven by vpn-status events, and previously no event fired
+        // until the kill completed — so the UI kept showing the previous (e.g. green "connected")
+        // state during the whole teardown while the menu text already said "Отключение...". Emit the
+        // REAL `Disconnecting` wire status now (was an out-of-band `update_tray_icon` hack that only
+        // moved the icon, leaving the window stale — F10 mechanism #1): the single mutator drives BOTH
+        // the icon (via the status→icon handler) and the window truthfully. Kill path only; the
+        // empty-slot path below writes Disconnected promptly, so a settled Error is never masked.
+        set_vpn_status(&app, &state, VpnStatus::Disconnecting, None);
     }
 
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
+        // 3.3 R-SERIAL (F13/F14): serialize this tray teardown against vpn_connect / vpn_disconnect and
+        // the tray connect twin (shared lifecycle_flow) so the kill cannot interleave with a connect.
+        // The preamble above already ran (fast sync cancel + generation bump); this gates the actual
+        // kill. OwnedMutexGuard so it is held for the whole 'static task; if AppState is gone, proceed
+        // ungated (best-effort teardown — a stuck lock must never strand a disconnect).
+        let _flow_guard = match app_clone.try_state::<AppState>() {
+            Some(state) => Some(Arc::clone(&state.lifecycle_flow).lock_owned().await),
+            None => None,
+        };
         if let Some(child) = child {
             // D-08 lifecycle marker (8): sidecar killed on exit (tray quit path) —
-            // fixed phrase, DEV-gated (D-11).
+            // fixed phrase, DEV-gated (D-11). Our own child C_A — killing it is idempotent (a
+            // newer session's stale-sweep may have already reaped it), so it is safe to run
+            // regardless of the generation guard below.
             sidecar::emit_killed_on_exit_marker(&app_clone);
             sidecar::kill_sidecar(child).await.ok();
         }
-        // AUDIT-2026-06-11 #7: cleanup runs even when the child slot was empty — a
-        // tray cancel mid-respawn / mid-recovery must still tear the session down
-        // (the supervisor's T-31 Aborted branch handles any in-flight respawn).
-        routing_rules::cleanup_hosts_block().ok();
-        // AUDIT-2026-06-11 #5 / FIX-A (RC-2): restore the pre-VPN system DNS, exactly
-        // like `vpn_disconnect`. The hard-killed sidecar never restores it itself, so
-        // without this a tray disconnect stranded the whole machine on the dead
-        // tunnel resolver until the next app launch's startup sweep.
-        crate::dns_guard::restore_system_dns();
         // Re-look up state inside the 'static task and route through the mutator.
         if let Some(state) = app_clone.try_state::<AppState>() {
+            // 3.3 F-5 (Fable-5): the preamble + child-take ran OUTSIDE the lock, so a vpn_connect(B)
+            // that was already in flight can WIN this lock race — sweep C_A, reset the intent flags,
+            // and store a live B — before this tail runs. If a NEWER session now owns the shared
+            // state, restoring DNS / clearing hosts / writing Disconnected here would tear down B's
+            // LIVE tunnel behind a "disconnected" UI (DNS restore under B's killswitch = no-DNS).
+            // Re-check the generation bumped in the preamble: on mismatch SKIP the state-owning
+            // teardown entirely — B's own connect owns the DNS/hosts/status now, and B's own later
+            // teardown will restore them. (B's connect also already reset `disconnecting=false`.)
+            let live_gen = state.connection_generation.load(Ordering::SeqCst);
+            if !crate::lifecycle::is_current_generation(teardown_generation, live_gen) {
+                // R2-4 (Fable-5 re-review): normally the newer session owns the DNS/hosts (its own
+                // connect applied them; its later teardown restores them), so we skip. BUT if that
+                // newer connect's SPAWN FAILED it left NO live child AND never restored the pre-VPN
+                // DNS — the machine would stay on the dead tunnel resolver until the next user action.
+                // So when the newer session has no live child, restore DNS here (safe: no tunnel to
+                // break). Still skip the status write — the newer session owns vpn_status.
+                let newer_has_live_child = state
+                    .sidecar_child
+                    .lock()
+                    .map(|g| g.is_some())
+                    .unwrap_or(false);
+                if !newer_has_live_child {
+                    crate::dns_guard::restore_system_dns();
+                }
+                crate::logging::log_app(
+                    "INFO",
+                    "[tray] disconnect superseded by a newer session — skipping status teardown (F-5/R2-4)",
+                );
+                return;
+            }
+            // AUDIT-2026-06-11 #7: cleanup runs even when the child slot was empty — a tray cancel
+            // mid-respawn / mid-recovery must still tear the session down (the supervisor's T-31
+            // Aborted branch handles any in-flight respawn). Moved INSIDE the state block so the
+            // generation guard above covers it (F-5): DNS/hosts belong to whichever session is live.
+            routing_rules::cleanup_hosts_block().ok();
+            // AUDIT-2026-06-11 #5 / FIX-A (RC-2): restore the pre-VPN system DNS, exactly like
+            // `vpn_disconnect`. The hard-killed sidecar never restores it itself.
+            crate::dns_guard::restore_system_dns();
             // AUDIT-2026-06-11 #7: on the empty-slot path only write Disconnected
             // when the session is genuinely active (the supervisor/recovery states a
             // tray «Отмена» is cancelling). A settled Disconnected/Error stays put —
             // overwriting a terminal Error here would erase its reason for nothing.
+            // R2-1 (Fable-5 re-review): `Disconnecting` is ACTIVE here too — when a rapid twin tray
+            // disconnect already wrote «Отключение» and THIS surviving actor's slot is empty, the
+            // settling Disconnected must still be written, else the wire strands on «Отключение».
             let write_disconnected = had_child || {
                 let status_now = *state
                     .vpn_status
@@ -670,6 +844,7 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
                         | VpnStatus::Connected
                         | VpnStatus::Reconnecting
                         | VpnStatus::Recovering
+                        | VpnStatus::Disconnecting
                 )
             };
             if write_disconnected {
@@ -684,6 +859,10 @@ pub fn tray_vpn_disconnect(app: tauri::AppHandle) {
             // AUDIT-2026-06-11 #2/#7 it now runs on the empty-slot path too, so the
             // unconditional preamble can never strand the flag.
             if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
+        } else {
+            // AppState gone (app shutting down): best-effort cleanup, nothing to gate or write.
+            routing_rules::cleanup_hosts_block().ok();
+            crate::dns_guard::restore_system_dns();
         }
     });
 }

@@ -1,4 +1,4 @@
-import React, { createElement, useEffect, useRef, useState } from "react";
+import React, { createElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -221,6 +221,25 @@ export function NotificationPlate() {
       }
     };
   }, []);
+
+  // F15 (14-UAT round 2): after the plate content lays out (useLayoutEffect — before paint, keyed on
+  // the plate object so it re-runs on EVERY applyPlate, latest-wins/D-03), GROW the window to fit when
+  // the content OVERFLOWS the current window. Rust already set the per-kind base height (68/140) in
+  // fire_plate_tail; this only needs to grow when a long config name wraps to extra lines
+  // (`overflow:hidden` was clipping the bottom padding — owner: «не хватает отступа снизу»). The plate
+  // toast is now `min-h-full` (ConnectionToast), so its border-box grows with content and
+  // #notification-root.scrollHeight includes the toast's FULL height (content + top/bottom padding +
+  // border). GUARD on `scrollHeight > clientHeight` (genuine overflow): (1) it never sends a value
+  // smaller than the window, so a stale (not-yet-shrunk) viewport right after Rust set a shorter base
+  // is not echoed back to re-grow the window; (2) jsdom reports 0 for both, so the resize is a no-op
+  // in tests unless a test stubs scrollHeight.
+  useLayoutEffect(() => {
+    if (!plate) return;
+    const root = document.getElementById("notification-root");
+    if (root && root.scrollHeight > root.clientHeight) {
+      void invoke("resize_notification_plate", { height: root.scrollHeight }).catch(() => {});
+    }
+  }, [plate]);
 
   // Nothing to render before the first event (the window is built hidden).
   if (!plate) return null;

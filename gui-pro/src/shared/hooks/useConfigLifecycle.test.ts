@@ -24,7 +24,7 @@ import type { i18n as I18nType } from "i18next";
  * test can assert which lifecycle branch fired. `config.configPath` drives the
  * watch effect and the event-payload path-match branches.
  */
-function makeParams(overrides: { configPath?: string; status?: VpnStatus } = {}) {
+function makeParams(overrides: { configPath?: string; status?: VpnStatus; isSwitching?: boolean } = {}) {
   const config: VpnConfig = { configPath: overrides.configPath ?? "", logLevel: "info" };
   const setConfig = vi.fn();
   const setVpnMode = vi.fn();
@@ -51,6 +51,8 @@ function makeParams(overrides: { configPath?: string; status?: VpnStatus } = {})
       // IN-32 tests pass status: "connected" to exercise the external-delete disconnect.
       status: overrides.status ?? ("disconnected" as VpnStatus),
       onDisconnect,
+      // FAB-05: default false; the switch-in-flight test sets it true to assert the delete is deferred.
+      isSwitching: overrides.isSwitching ?? false,
     },
     setters: { setConfig, setVpnMode, setWizardKey, setConnectionKey, setActiveTab, pushSuccess, onDisconnect },
   };
@@ -206,6 +208,29 @@ describe("useConfigLifecycle (H-2 characterization)", () => {
     expect(setters.onDisconnect).toHaveBeenCalled();
     // Still resets the config + warns (existing behavior preserved).
     expect(setters.setConfig).toHaveBeenCalledWith({ configPath: "", logLevel: "info" });
+  });
+
+  it("FAB-05: an external delete of the active config while a switch is in flight is DEFERRED (no ungated disconnect, no path wipe)", async () => {
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    // A seamless A→B switch is in flight AND the tunnel is live (connected transiently during the
+    // swap). An fs-watcher delete event landing here must NOT tear down the tunnel (it would race the
+    // swap) NOR wipe config.configPath (blanking it strands the swap + unmounts the frosted hero).
+    const { params, setters } = makeParams({
+      configPath: "C:/cfg/client.toml",
+      status: "connected",
+      isSwitching: true,
+    });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+    await act(async () => {
+      events.emitEvent("config-file-changed", { exists: false, path: "C:/cfg/client.toml" });
+    });
+
+    // Deferred: no disconnect, no config wipe, no warning snackbar — the switch owns the lifecycle.
+    expect(setters.onDisconnect).not.toHaveBeenCalled();
+    expect(setters.setConfig).not.toHaveBeenCalled();
+    expect(localStorage.getItem("tt_config_path")).toBe("C:/cfg/client.toml");
   });
 
   it("IN-32: deleting the active config while already disconnected does NOT call onDisconnect", async () => {

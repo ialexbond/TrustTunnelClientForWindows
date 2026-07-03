@@ -21,6 +21,12 @@ export interface ConfirmOptions {
   confirmText?: string;
   cancelText?: string;
   /**
+   * Phase 14 (FAB-05): disable the confirm button while the dialog is open (Cancel stays enabled).
+   * Static per call — used when the action is unsafe at open time. A switch that STARTS while the
+   * dialog is already open is additionally caught by the caller re-checking at confirm time.
+   */
+  confirmDisabled?: boolean;
+  /**
    * Optional async action invoked when the user clicks "Confirm".
    * While the returned promise is pending, the modal stays open with
    * a visible loading state (Cancel + backdrop disabled, Confirm shows
@@ -195,6 +201,7 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
           variant={displayed.variant}
           confirmLabel={displayed.confirmText}
           cancelLabel={displayed.cancelText}
+          confirmDisabled={displayed.confirmDisabled}
           loading={actionRunning}
           onConfirm={handleConfirm}
           onCancel={handleCancel}

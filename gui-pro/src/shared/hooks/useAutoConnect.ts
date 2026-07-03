@@ -8,6 +8,12 @@ interface UseAutoConnectParams {
   status: VpnStatus;
   setStatus: React.Dispatch<React.SetStateAction<VpnStatus>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
+  /**
+   * F29: deliver the honest launch-time DIRECT ping (measured right before `vpn_connect`) into the card
+   * freeze cache so the auto-connected card shows the real ping instead of «—» / a cold-boot 200/500.
+   * Optional — standalone tests omit it. Only called with a numeric ms on an `ok` probe (never fabricated).
+   */
+  seedConfigPing?: (path: string, ms: number) => void;
 }
 
 // T-22 B3 (boot guard): how long auto-connect-on-launch will WAIT for the local
@@ -75,6 +81,7 @@ export function useAutoConnect({
   status,
   setStatus,
   setError,
+  seedConfigPing,
 }: UseAutoConnectParams) {
   const autoConnectDone = useRef(false);
 
@@ -229,6 +236,12 @@ export function useAutoConnect({
         }
         if (cancelled) return;
         await invoke("set_pending_connect_ping", { ms: launchPingMs });
+        // F29: also deliver this honest pre-connect number into the CARD freeze cache (lastGoodByPath),
+        // not just the notification plate. On autostart the background probe loop has no warm reading yet,
+        // so without this the connected card shows «—» or a cold-boot 200/500 for the whole session;
+        // seeding it here (the same number the plate shows, measured after `network_ready`) makes the card
+        // show the real ping. null → no seed (honest «—», never a fabricated number).
+        if (launchPingMs !== null) seedConfigPing?.(lastUsedPath, launchPingMs);
         await invoke("vpn_connect", {
           configPath: lastUsedPath,
           logLevel: config.logLevel,

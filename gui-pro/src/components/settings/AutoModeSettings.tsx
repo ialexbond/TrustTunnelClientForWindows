@@ -46,7 +46,7 @@ function HelpHint({ text }: { text: string }) {
  *  errorDisplay="none" so there is NO muted helper line under the field (the «?» carries the help).
  *
  *  UAT (Phase 12 owner test): the bounds must NOT be clamped on every keystroke — otherwise typing
- *  «150» into the threshold field snapped to the 50 minimum after the first digit and the value could
+ *  «300» into the threshold field snapped to the 150 minimum after the first digit and the value could
  *  never be reached. Fix: keep a LOCAL draft string for free typing; clamp + commit to the persisted
  *  store ONLY on blur (`commit`). The committed `value` prop flows back in (the store re-broadcasts on
  *  write — see useAppSettings CR-01) and re-seeds the draft via the effect, so the field shows the
@@ -119,7 +119,7 @@ function NumberParam({
  * `aria-live="polite"` region pushes «<имя> — позиция N из M» on EACH move. After a keyboard move,
  * focus follows the row to its new slot so repeated presses keep moving it.
  */
-function PriorityList({ configs }: { configs: ConfigSummary[] }) {
+function PriorityList({ configs, locked = false }: { configs: ConfigSummary[]; locked?: boolean }) {
   const { t } = useTranslation();
   const [order, setOrder] = useState<ConfigSummary[]>(configs);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -167,6 +167,9 @@ function PriorityList({ configs }: { configs: ConfigSummary[] }) {
 
   // Move a row by ±1 via the keyboard arrows. Persists, announces, and returns focus to the row.
   const moveBy = (id: string, dir: "up" | "down") => {
+    // Phase 14 (D-13): a mid-switch reorder is a competing state change (it re-persists priority
+    // order that useAutoSwitch reads). While locked, swallow the move — no reorder_configs fires.
+    if (locked) return;
     setOrder((prev) => {
       const from = prev.findIndex((c) => c.id === id);
       if (from === -1) return prev;
@@ -194,6 +197,7 @@ function PriorityList({ configs }: { configs: ConfigSummary[] }) {
   // Live reorder while dragging: entering another row moves the dragged item to that slot, so the
   // list rearranges under the cursor. Plain state update — no View Transitions / flushSync.
   const reorderOver = (overId: string) => {
+    if (locked) return; // D-13: no drag reorder while a switch is in flight
     if (!dragId || dragId === overId) return;
     setOrder((prev) => {
       const from = prev.findIndex((c) => c.id === dragId);
@@ -218,14 +222,30 @@ function PriorityList({ configs }: { configs: ConfigSummary[] }) {
                 rowRefs.current.set(cfg.id, el);
               }}
               tabIndex={0}
-              draggable
+              // D-13: while a switch is in flight the row is not draggable (a drag reorder persists a
+              // competing priority order). Keyboard moves are swallowed in moveBy; drag is blocked here.
+              draggable={!locked}
               onDragStart={(e) => {
+                if (locked) {
+                  e.preventDefault();
+                  return;
+                }
                 setDragId(cfg.id);
                 e.dataTransfer.effectAllowed = "move";
               }}
               onDragEnter={() => reorderOver(cfg.id)}
               onDragOver={(e) => e.preventDefault()}
               onDragEnd={() => {
+                // Phase 14 (IN-01): if a switch STARTED while this drag was already underway, `locked`
+                // flipped true mid-drag. reorderOver already refuses NEW moves while locked, but the
+                // drag-end still reached persistOrder here — persisting a competing priority order the
+                // auto-switch engine reads mid-switch. Bail out cleanly (drop the drag, persist
+                // nothing) so the lock is atomic against an in-flight drag too. The optimistic local
+                // order equals the pre-lock order, so nothing visible is lost.
+                if (locked) {
+                  setDragId(null);
+                  return;
+                }
                 // WR-03: persist/announce from the LATEST committed order, not the `order`
                 // captured by this row's render closure. The functional updater always sees the
                 // current state.
@@ -281,9 +301,17 @@ interface AutoModeSettingsProps {
   /** Fired after any setting change persists — App wires it to the «Сохранено» snackbar, the
    *  SAME affordance the sibling sections (GeneralSection/AppearanceSection) use (12-07). */
   onSaved?: () => void;
+  /**
+   * Phase 14 (D-13): a seamless A→B switch is in flight (App-owned isSwitching, threaded down). While
+   * true, the master toggle + priority reorder are LOCKED — a mid-switch master-on arms useAutoSwitch
+   * (Pitfall 5: it re-seeds on [masterOn, status, activeConfigPath]) and a reorder re-persists priority
+   * order the engine reads, either of which could fire a COMPETING switch. Reuses the existing disabled
+   * idiom (no parallel lock); re-enables atomically when the single App flag flips on settle.
+   */
+  locked?: boolean;
 }
 
-export function AutoModeSettings({ onSaved }: AutoModeSettingsProps = {}) {
+export function AutoModeSettings({ onSaved, locked = false }: AutoModeSettingsProps = {}) {
   const { t } = useTranslation();
   const {
     settings,
@@ -338,6 +366,9 @@ export function AutoModeSettings({ onSaved }: AutoModeSettingsProps = {}) {
         <Toggle
           value={masterOn}
           onChange={saved(setMasterOn)}
+          // D-13: locked while a switch is in flight — flipping master-on mid-switch would arm
+          // useAutoSwitch and could fire a competing switch (Pitfall 5).
+          disabled={locked}
           label={t("settings.autoMode.auto_best_label")}
           description={t("settings.autoMode.auto_best_desc")}
           labelExtra={<HelpHint text={t("settings.autoMode.auto_best_help")} />}
@@ -381,7 +412,7 @@ export function AutoModeSettings({ onSaved }: AutoModeSettingsProps = {}) {
                 <span className="text-sm font-medium text-[var(--color-text-secondary)]">{t("settings.autoMode.priority_label")}</span>
                 <HelpHint text={t("settings.autoMode.priority_help")} />
               </div>
-              <PriorityList configs={orderedConfigs} />
+              <PriorityList configs={orderedConfigs} locked={locked} />
             </div>
           </div>
         )}

@@ -29,6 +29,7 @@
     "recovering_short": "Recovering",
     "reconnecting": "Reconnecting...",
     "reconnecting_short": "Reconnecting",
+    "switching_short": "Switching",
     "recovering_detail": "Internet connection lost. Recovering, please wait…",
     "reconnecting_server_lost": "Lost connection to the server",
     "reconnect_attempt": "Attempt {{attempt}} of {{max}}",
@@ -203,7 +204,7 @@
       "auto_best_desc": "If the active connection stays at high latency for a while, the app switches to another working config with a low ping",
       "auto_best_help": "The app monitors the ping of the active config and, on persistently high latency, switches to the next working config in the priority list.",
       "threshold_label": "Latency threshold, ms",
-      "threshold_help": "Above this value the connection to the server is treated as poor. This is a separate auto-switch threshold, unrelated to the colored ping bands (150/300 ms) on the cards — it measures the reachability and latency to the server, not the round-trip inside the tunnel.",
+      "threshold_help": "Above this value the tunnel is treated as slow and the app switches to a better server. This is a separate auto-switch threshold, unrelated to the colored ping bands (150/300 ms) on the cards. While connected it measures the REAL tunnel latency — to a neutral host THROUGH your tunnel — because the direct ping to the server itself cannot be measured honestly through the tunnel. A tunnel that stops responding altogether is also treated as a reason to switch.",
       "interval_label": "Check interval, sec",
       "interval_help": "How often to check the ping of the active config.",
       "checks_label": "Consecutive checks",
@@ -261,6 +262,8 @@
     "no_internet": "No internet connection. Check your network.",
     "sidecar_exit": "The VPN core exited unexpectedly. Try connecting again.",
     "disconnect_failed": "Could not stop the VPN core — it may still be blocking traffic. Try disconnecting again or restart the application.",
+    "connection_failed": "Failed to connect to the server.",
+    "config_parse_error": "Configuration parse error. Check your config file.",
     "adapter_timeout": "VPN adapter creation timed out. Restart the application as administrator.",
     "adapter_conflict": "Detected VPN adapters from other software: {{adapters}}. This may cause connection issues. Consider disabling them.",
     "panelCrash": "An error occurred in the {{panel}} panel. Other panels still work.",
@@ -279,6 +282,10 @@
     "noConfig": "No connection",
     "noConfigHint": "Set up a server in the Control Panel to manage your VPN connection",
     "importConfig": "Import config",
+    "revert": {
+      "body": "Switch failed. Connection to «{{name}}» restored.",
+      "fallback_name": "the previous server"
+    },
     "empty": {
       "heading": "No configs",
       "body": "Import a ready config from a file or a link.",

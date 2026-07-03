@@ -59,28 +59,29 @@ describe("AutoModeSettings", () => {
   });
 
   it("threshold accepts a multi-digit value — no clamp-to-min on each keystroke (owner UAT)", async () => {
-    // Regression: the field clamped the persisted value to the 50 minimum on EVERY keystroke, so
-    // typing «150» snapped to 50 after the first digit and the value could never be reached. The
-    // draft + commit-on-blur fix keeps the typed string free until blur.
+    // Regression: the field clamped the persisted value to the min on EVERY keystroke, so typing a
+    // multi-digit value snapped to the min after the first digit and could never be reached. The
+    // draft + commit-on-blur fix keeps the typed string free until blur. (Min is 150 since F24 — the
+    // threshold measures tunnel latency — so we type 250 to stay clearly ABOVE the floor.)
     render(<AutoModeSettings />);
     await screen.findByText("Авто-режим");
     fireEvent.click(screen.getAllByRole("switch")[0]); // master ON → params appear
 
     const input = (await screen.findByLabelText("Порог задержки, мс")) as HTMLInputElement;
-    // Mid-typing must NOT snap to 50.
-    fireEvent.change(input, { target: { value: "1" } });
-    expect(input.value).toBe("1");
-    fireEvent.change(input, { target: { value: "150" } });
-    expect(input.value).toBe("150");
-    // Commit on blur persists the in-range value as-typed (NOT 50).
+    // Mid-typing must NOT snap to the 150 minimum.
+    fireEvent.change(input, { target: { value: "2" } });
+    expect(input.value).toBe("2");
+    fireEvent.change(input, { target: { value: "250" } });
+    expect(input.value).toBe("250");
+    // Commit on blur persists the in-range value as-typed (NOT clamped to 150).
     fireEvent.blur(input);
-    expect(localStorage.getItem("tt_auto_switch_threshold_ms")).toBe("150");
+    expect(localStorage.getItem("tt_auto_switch_threshold_ms")).toBe("250");
 
-    // A genuinely below-min value still clamps — but only on blur, not while typing.
+    // A genuinely below-min value still clamps — but only on blur, not while typing. (Min is 150.)
     fireEvent.change(input, { target: { value: "10" } });
     expect(input.value).toBe("10");
     fireEvent.blur(input);
-    expect(localStorage.getItem("tt_auto_switch_threshold_ms")).toBe("50");
+    expect(localStorage.getItem("tt_auto_switch_threshold_ms")).toBe("150");
   });
 
   it("priority list has NO per-row arrow buttons (owner UAT — keyboard arrows on the row instead)", async () => {
@@ -221,5 +222,61 @@ describe("AutoModeSettings", () => {
     expect(rows[0]).toHaveTextContent("Config A");
     expect(rows[1]).toHaveTextContent("Config B");
     expect(rows[2]).toHaveTextContent("Config C");
+  });
+
+  // ─── Phase 14 (Wave 0, plan 14-01): lock the auto-mode controls while switching ───
+  //
+  // GREEN as of 14-03 (D-13) — a mid-switch auto-mode toggle or priority reorder could fire a
+  // COMPETING switch (Pitfall 5: useAutoSwitch re-seeds on [masterOn, status, activeConfigPath]). So
+  // while a switch is in flight the master toggle + priority reorder are LOCKED via the `locked` prop
+  // (App threads isSwitching → AppSettingsPanel → here). Assert behavior/aria (disabled switch,
+  // non-actionable reorder), never CSS classes.
+  describe("Phase 14 — lock while switching (GREEN in 14-03)", () => {
+    // D-13: with the lock engaged the master toggle is DISABLED — a click cannot flip it (so it can
+    // never arm the auto-switch engine mid-switch). The prop name (`locked`, OR'd with isSwitching
+    // upstream) mirrors the existing ConfigCard.locked idiom (D-21) — do NOT invent a parallel one.
+    it("disables the master toggle while locked", () => {
+      render(<AutoModeSettings locked />);
+      const masterToggle = screen.getAllByRole("switch")[0];
+      // A locked master toggle is non-interactive: aria-disabled or the native disabled attribute.
+      const isDisabled =
+        masterToggle.getAttribute("aria-disabled") === "true" ||
+        (masterToggle as HTMLButtonElement).disabled === true;
+      expect(isDisabled).toBe(true);
+    });
+
+    // D-13: the master toggle is ENABLED again when the lock clears (atomic re-enable on settle).
+    it("enables the master toggle when not locked", () => {
+      render(<AutoModeSettings locked={false} />);
+      const masterToggle = screen.getAllByRole("switch")[0];
+      const isDisabled =
+        masterToggle.getAttribute("aria-disabled") === "true" ||
+        (masterToggle as HTMLButtonElement).disabled === true;
+      expect(isDisabled).toBe(false);
+    });
+
+    // D-13: the priority reorder is locked too — a keyboard ArrowUp on a focused row must NOT persist
+    // a new order while switching (a mid-switch reorder is a competing state change). Master is ON so
+    // the priority list is present; with the lock engaged, a reorder keypress fires no reorder_configs.
+    it("does not persist a priority reorder while locked", async () => {
+      localStorage.setItem("tt_auto_switch_enabled", "true");
+      render(<AutoModeSettings locked />);
+      await screen.findByText("Авто-режим");
+      const list = await screen.findByRole("list", {
+        name: "Приоритет конфигов для авто-подключения",
+      });
+      await waitFor(() =>
+        expect(within(list).getAllByRole("listitem")).toHaveLength(3),
+      );
+
+      const items = within(list).getAllByRole("listitem");
+      fireEvent.keyDown(items[1], { key: "ArrowUp" });
+
+      // No reorder was persisted — the reorder is locked while switching.
+      expect(invoke).not.toHaveBeenCalledWith(
+        "reorder_configs",
+        expect.anything(),
+      );
+    });
   });
 });

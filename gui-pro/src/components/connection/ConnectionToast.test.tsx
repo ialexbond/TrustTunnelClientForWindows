@@ -134,11 +134,12 @@ describe("ConnectionToast", () => {
   it("variant=plate fills the window, keeps the border, drops rounding+shadow; card keeps all (13-07)", () => {
     // variant="plate" (production desktop plate): the DWM-rounded opaque WINDOW provides the rounding,
     // so the toast must NOT draw its OWN rounding or shadow — but it KEEPS the 1px border and top-aligns
-    // (items-start) to match the Storybook design 1:1, and it FILLS the window (h-full w-full) so the
-    // window (sized to the content height) has no «подложка».
+    // (items-start) to match the Storybook design 1:1, and it FILLS the window (min-h-full w-full) so the
+    // window (sized to the content height) has no «подложка». F15: `min-h-full` (not `h-full`) lets the
+    // toast GROW with wrapped content so the F15 resize measures the full height incl. the bottom inset.
     const { unmount } = renderKind("connected", "Sweden", { variant: "plate" });
     const plate = screen.getByRole("status");
-    expect(plate.className).toContain("h-full");
+    expect(plate.className).toContain("min-h-full");
     expect(plate.className).toContain("w-full");
     expect(plate.className).toContain("items-start");
     expect(plate.className).toMatch(/\bborder\b/); // border KEPT (matches the design edge)

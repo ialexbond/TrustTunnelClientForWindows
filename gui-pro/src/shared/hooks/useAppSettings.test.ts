@@ -45,7 +45,7 @@ describe("useAppSettings", () => {
 
   it("exposes the locked clamp bounds for 12-05/12-06 to import (no drift)", () => {
     expect(AUTO_SWITCH_BOUNDS).toEqual({
-      thresholdMs: { min: 50, max: 5000 },
+      thresholdMs: { min: 150, max: 5000 },
       intervalSec: { min: 5, max: 300 },
       checksN: { min: 1, max: 10 },
     });
@@ -147,10 +147,10 @@ describe("useAppSettings", () => {
     expect(result.current.settings.thresholdMs).toBe(5000);
   });
 
-  it("clamps a stored thresholdMs below the min to 50", () => {
+  it("clamps a stored thresholdMs below the min to 150", () => {
     localStorage.setItem(APP_SETTINGS_KEYS.thresholdMs, "0");
     const { result } = renderHook(() => useAppSettings());
-    expect(result.current.settings.thresholdMs).toBe(50);
+    expect(result.current.settings.thresholdMs).toBe(150);
   });
 
   it("clamps a stored intervalSec below the min to 5 (no tight ping-storm — T-12-05)", () => {

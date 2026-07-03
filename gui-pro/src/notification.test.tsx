@@ -106,6 +106,57 @@ describe("NotificationPlate — pull-and-redeliver on mount (13-05)", () => {
     expect(hideMock).toHaveBeenCalledTimes(1);
   });
 
+  it("F15 — grows the window to the content height when the content OVERFLOWS the window", async () => {
+    // jsdom has no layout, so stub a #notification-root whose content (scrollHeight) overflows the
+    // window (clientHeight). The plate's useLayoutEffect invokes resize_notification_plate with the
+    // full content height (grow for a long wrapped config name so the bottom padding is never clipped).
+    const root = document.createElement("div");
+    root.id = "notification-root";
+    Object.defineProperty(root, "scrollHeight", { configurable: true, value: 180 });
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 140 });
+    document.body.appendChild(root);
+    try {
+      invokeMock.mockResolvedValue(null); // pull → nothing staged
+      render(<NotificationPlate />);
+      await flushMicrotasks();
+      invokeMock.mockClear();
+      await deliverLiveEvent("connected", "My VPN");
+      expect(invokeMock).toHaveBeenCalledWith("resize_notification_plate", { height: 180 });
+    } finally {
+      root.remove();
+    }
+  });
+
+  it("F15 — does NOT resize when the content fits the window (no overflow → no stale-viewport echo)", async () => {
+    // scrollHeight === clientHeight: the content fits (or the viewport hasn't shrunk yet). The guard
+    // must NOT invoke — never echo a stale/equal height back to re-grow a window Rust just shrank.
+    const root = document.createElement("div");
+    root.id = "notification-root";
+    Object.defineProperty(root, "scrollHeight", { configurable: true, value: 140 });
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 140 });
+    document.body.appendChild(root);
+    try {
+      invokeMock.mockResolvedValue(null);
+      render(<NotificationPlate />);
+      await flushMicrotasks();
+      invokeMock.mockClear();
+      await deliverLiveEvent("connected", "My VPN");
+      expect(invokeMock).not.toHaveBeenCalledWith("resize_notification_plate", expect.anything());
+    } finally {
+      root.remove();
+    }
+  });
+
+  it("F15 — skips the resize when there is no measurable content", async () => {
+    // No #notification-root (jsdom default) → the guard skips the resize invoke.
+    invokeMock.mockResolvedValue(null);
+    render(<NotificationPlate />);
+    await flushMicrotasks();
+    invokeMock.mockClear();
+    await deliverLiveEvent("connected", "My VPN");
+    expect(invokeMock).not.toHaveBeenCalledWith("resize_notification_plate", expect.anything());
+  });
+
   it("Test A (sticky) — a sticky kind (connectionError) redelivers WITHOUT arming a timer", async () => {
     invokeMock.mockResolvedValue({ kind: "connectionError", configName: "My VPN" });
     render(<NotificationPlate />);

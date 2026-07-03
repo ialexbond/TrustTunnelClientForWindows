@@ -188,4 +188,40 @@ describe("ImportModal (production)", () => {
     expect(importCalls[1][1]).toMatchObject({ originalFileName: "RU_TrustTunnel_b.toml" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  // ─── Phase 14 (14-03): lock the import CTA while a switch is in flight (D-13) ───
+  //
+  // RED until 14-03 — `isSwitching` is not yet on ImportModal. D-13: importing mid-switch adds a
+  // config and may auto-promote/open a competing flow while the swap is in flight, so the
+  // «Импортировать» CTA must be disabled while isSwitching (OR'd into the existing importDisabled),
+  // even for a valid tt:// link. The existing in-flight (loading) lock is unchanged.
+  describe("Phase 14 — lock import while switching (RED until 14-03)", () => {
+    // D-13: while a switch is in flight NO import door may be entered — both the «Из файла» and «По
+    // ссылке» tiles are disabled (the file tile imports directly on pick; the link tile enters an
+    // import flow). This is the honest lock: a mid-switch import cannot be started at all.
+    it("disables both import entry tiles while isSwitching", () => {
+      setup({ isSwitching: true });
+      expect(screen.getByRole("button", { name: new RegExp(L.tileFile) })).toBeDisabled();
+      expect(screen.getByRole("button", { name: new RegExp(L.tileLink) })).toBeDisabled();
+    });
+
+    // D-13: on the expanded link view, the «Импортировать» CTA stays disabled while switching even
+    // for a valid tt:// link (defense-in-depth if the modal is already on the link view when a switch
+    // starts — importDisabled OR's isSwitching).
+    it("keeps the import CTA disabled while isSwitching even for a valid link", () => {
+      // Seed the modal ALREADY on the expanded link view via initialUrl (a valid-link prefill expands
+      // it), so the «Импортировать» CTA is present without clicking the now-locked tile. The prefilled
+      // valid link would normally ENABLE import; the switch lock (importDisabled OR's isSwitching)
+      // keeps it disabled — defense-in-depth if a switch starts while the modal is on the link view.
+      setup({ isSwitching: true, initialUrl: "tt://example-placeholder-config" });
+      const importBtn = screen.getByRole("button", { name: L.cta });
+      expect(importBtn).toBeDisabled();
+    });
+
+    it("re-enables the import entry tiles when not switching", () => {
+      setup({ isSwitching: false });
+      expect(screen.getByRole("button", { name: new RegExp(L.tileFile) })).toBeEnabled();
+      expect(screen.getByRole("button", { name: new RegExp(L.tileLink) })).toBeEnabled();
+    });
+  });
 });

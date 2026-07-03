@@ -12,7 +12,7 @@ import { samePath } from "../../shared/utils/samePath";
 import { dedupeConfigsByIdentity } from "../../shared/utils/dedupeConfigsByIdentity";
 import { ConfigList } from "./ConfigList";
 import { ConfigEditView } from "./ConfigEditView";
-import type { VpnStatus } from "../../shared/types";
+import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 
 export interface ConnectionPanelHandle {
   /** Re-fetch the manifest list WITH the loading skeleton (initial/explicit reload). */
@@ -38,6 +38,25 @@ interface ConnectionPanelProps {
   /** Reconnect the active tunnel (used by ConfigEditView's save-and-reconnect). */
   onReconnect: () => Promise<void>;
   /**
+   * Phase 14 (D-12): a seamless A→B switch is in flight (App-level FE-only flag). Threaded
+   * straight through to ConfigList, where it is OR'd into the leadIsLive gate so the frosted
+   * hero stays mounted + hoisted through the transient teardown `disconnected`. No panel-level
+   * logic keys on it — pure pass-through (mirrors the existing prop threading).
+   */
+  isSwitching?: boolean;
+  /**
+   * F28 (14-UAT round 3): the path of the config whose connect was JUST clicked, for the window before
+   * the live status becomes `connecting`. Pure pass-through to ConfigList → the target card shows an
+   * instant spinner + the list locks. Set/cleared by App around the connect initiators.
+   */
+  pendingConnectPath?: string | null;
+  /**
+   * Phase 14 (F6, 14-UAT): the switch-failed-reverted notice — pure pass-through to ConfigList's
+   * lead card, where it renders EMBEDDED inside the active card. Set/cleared by App.
+   */
+  revertNotice?: string | null;
+  onRevertDismiss?: () => void;
+  /**
    * 12-07: the App-level SINGLE config-list + inactive-ping source. When supplied, this panel reuses
    * its already-dedup'd `configs` + `pings` + reload/refresh/loading instead of running its OWN
    * `useConfigList`/`usePerConfigPing` — so the auto-switch engine and the cards share ONE ping loop
@@ -46,6 +65,12 @@ interface ConnectionPanelProps {
    * `useConfigPingSource`, so the panel must NOT re-dedup it.
    */
   source?: ConfigPingSource;
+  /**
+   * F20 (14-UAT round 2): the live reconnect attempt progress {attempt, max}, threaded straight to
+   * ConfigList's lead card where it renders «Переподключение · Попытка N из M». `null` when no
+   * per-attempt counter is live. Pure pass-through — no panel logic keys on it.
+   */
+  reconnectProgress?: ReconnectProgress | null;
 }
 
 /**
@@ -68,7 +93,7 @@ interface ConnectionPanelProps {
  */
 export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanelProps>(
   function ConnectionPanel(
-    { onImport, status, activeConfigPath, onConnect, onDisconnect, onSwitchTo, onReconnect, source },
+    { onImport, status, activeConfigPath, onConnect, onDisconnect, onSwitchTo, onReconnect, isSwitching, pendingConnectPath, revertNotice, onRevertDismiss, source, reconnectProgress },
     ref,
   ) {
     const { t } = useTranslation();
@@ -229,21 +254,34 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
     // ─── Delete (LIVE active = disconnect-then-delete, D-03; last → empty) ───
     const handleDelete = useCallback(
       async (config: ConfigSummary) => {
-        const active = isLiveActive(config.path);
+        // Phase 14 (FAB-05): the delete confirm is ASYNC — the user may sit on the dialog while a
+        // switch starts (or the active config changes underneath). The copy is chosen at OPEN time
+        // (active-vs-inactive wording), but the DESTRUCTIVE decision — whether to disconnect first —
+        // is RE-EVALUATED at CONFIRM time below against live `isLiveActive`/`isSwitching`. And the
+        // confirm button is DISABLED while a switch is in flight so the user cannot delete a config
+        // (least of all the active one) out from under a mid-flight swap.
+        const activeAtOpen = isLiveActive(config.path);
         const ok = await confirm({
-          title: active ? t("connection.delete.title_active") : t("connection.delete.title"),
-          message: active
+          title: activeAtOpen ? t("connection.delete.title_active") : t("connection.delete.title"),
+          message: activeAtOpen
             ? t("connection.delete.body_active", { name: config.name })
             : t("connection.delete.body", { name: config.name }),
           variant: "danger",
-          confirmText: active ? t("connection.delete.confirm_active") : t("connection.delete.confirm"),
+          confirmText: activeAtOpen ? t("connection.delete.confirm_active") : t("connection.delete.confirm"),
           cancelText: t("connection.delete.cancel"),
+          // FAB-05: block the confirm while a switch is in flight — a delete landing mid-swap would
+          // race the teardown/reconnect (and delete the .toml the swap is connecting).
+          confirmDisabled: isSwitching,
         });
         if (!ok) return;
+        // FAB-05: re-check at CONFIRM time. If a switch is in flight now (started while the dialog was
+        // open), abort the delete entirely — the swap owns the connection lifecycle right now.
+        if (isSwitching) return;
         try {
           // D-03: an ACTIVE config must disconnect BEFORE the file is removed — never delete
-          // the .toml out from under a live tunnel.
-          if (active) await onDisconnect();
+          // the .toml out from under a live tunnel. Re-evaluate active at CONFIRM time (the active
+          // config may have changed while the dialog was open).
+          if (isLiveActive(config.path)) await onDisconnect();
           await invoke("delete_config", { id: config.id });
           await reload();
           pushSnack(t("connection.snackbar.config_deleted"));
@@ -251,7 +289,7 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           pushSnack(formatError(e), "error");
         }
       },
-      [isLiveActive, confirm, onDisconnect, reload, pushSnack, t],
+      [isLiveActive, isSwitching, confirm, onDisconnect, reload, pushSnack, t],
     );
 
     // ─── Rename (Enter/✓ commits via rename_config; returns an error string on failure) ───
@@ -289,6 +327,11 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           onDelete={handleDelete}
           onDuplicate={handleDuplicate}
           onRename={handleRename}
+          isSwitching={isSwitching}
+          pendingConnectPath={pendingConnectPath}
+          revertNotice={revertNotice}
+          onRevertDismiss={onRevertDismiss}
+          reconnectProgress={reconnectProgress}
         />
         {/* Per-config settings modal — kept MOUNTED while a config is selected so the
             Modal exit animation plays on close (parent must not early-return null). */}
@@ -302,6 +345,9 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
             status={status}
             onReconnect={onReconnect}
             onConfigChange={handleConfigChanged}
+            // Phase 14 (D-13): lock the active-config save while a switch is in flight (a re-save
+            // would fire a competing reconnect). ConfigEditView only acts on isActiveConfig.
+            isSwitching={isSwitching}
           />
         )}
       </div>

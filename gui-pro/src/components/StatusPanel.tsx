@@ -19,6 +19,12 @@ interface StatusPanelProps {
   // `reconnecting` retry (the backend attaches attempt/max to that vpn-status event).
   // null whenever no counter is live.
   reconnectProgress?: ReconnectProgress | null;
+  /**
+   * F28 (14-UAT round 3): a connect was just clicked and is in its pre-`connecting` window (awaited
+   * pre-connect probe). The «Подключить» button shows an instant spinner so the click on THIS surface
+   * (Settings/About tabs render StatusPanel) is not a silent no-op either. Cleared by App.
+   */
+  connectPending?: boolean;
 }
 
 function UptimeCounter({ since }: { since: Date }) {
@@ -41,6 +47,7 @@ function StatusPanel({
   onConnect,
   onDisconnect,
   reconnectProgress = null,
+  connectPending = false,
 }: StatusPanelProps) {
   const { t } = useTranslation();
   const [errorDismissed, setErrorDismissed] = useState(false);
@@ -167,7 +174,8 @@ function StatusPanel({
             </Button>
           )}
           {(status === "error" || status === "disconnected") && (
-            <Button variant="ghost" size="sm" onClick={onConnect}>
+            // F28: instant spinner while the click's pre-connect probe runs, before status→connecting.
+            <Button variant="ghost" size="sm" onClick={onConnect} loading={connectPending}>
               {t("buttons.connect")}
             </Button>
           )}

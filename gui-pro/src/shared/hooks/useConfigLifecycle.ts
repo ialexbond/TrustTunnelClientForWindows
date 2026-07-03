@@ -18,8 +18,19 @@ interface UseConfigLifecycleParams {
    *  tear down a running tunnel. */
   status: VpnStatus;
   /** IN-32: the normal disconnect (vpn_disconnect). Called when the ACTIVE config file is
-   *  deleted on disk while the tunnel is live. */
+   *  deleted on disk while the tunnel is live.
+   *  FAB-05: App now passes the SWITCH-GUARDED disconnect so an external delete mid-switch cannot
+   *  fire an ungated teardown that races the swap. */
   onDisconnect: () => Promise<void> | void;
+  /**
+   * Phase 14 (FAB-05): true while a seamless A→B switch is in flight. When a switch is running the
+   * active pointer is mid-transition to B; an fs-watcher external-delete event must NOT wipe
+   * config.configPath (blanking it strands the swap + unmounts the hero) nor issue an ungated
+   * disconnect. The delete-handling is DEFERRED — the switch settles on its own, and a genuinely-gone
+   * file surfaces on the next watcher event / focus refresh once the swap is done. Optional so
+   * standalone tests keep type-checking (absent = never switching, the pre-fix behaviour).
+   */
+  isSwitching?: boolean;
 }
 
 /**
@@ -42,15 +53,20 @@ export function useConfigLifecycle({
   i18n,
   status,
   onDisconnect,
+  isSwitching = false,
 }: UseConfigLifecycleParams) {
   // IN-32: keep the latest status + disconnect handler in refs so the config-file-changed
   // listener (which only re-subscribes on config.configPath) always reads the CURRENT values
   // without re-subscribing on every status tick.
+  // FAB-05: isSwitching is mirrored the same way so the external-delete branch can defer while a
+  // switch is in flight without re-subscribing the listener on every flag flip.
   const statusRef = useRef(status);
   const onDisconnectRef = useRef(onDisconnect);
+  const isSwitchingRef = useRef(isSwitching);
   useEffect(() => {
     statusRef.current = status;
     onDisconnectRef.current = onDisconnect;
+    isSwitchingRef.current = isSwitching;
   });
   // ─── Config validation on startup ───
   // WR-05 fix: explicit startup-once guard via useRef. Without this the
@@ -112,9 +128,17 @@ export function useConfigLifecycle({
       const { exists, path } = event.payload;
       if (!exists && path === config.configPath) {
         // Config file was deleted externally.
+        // Phase 14 (FAB-05): DEFER the whole delete-handling while a seamless A→B switch is in flight.
+        // During a switch config.configPath is mid-transition to B; an fs-watcher event here (e.g. the
+        // teardown briefly touches the file, or a real delete lands in the swap window) must NOT wipe
+        // the path (blanking it strands the swap + unmounts the frosted hero) nor fire an ungated
+        // disconnect that races the swap. The switch is self-terminating; a genuinely-gone file
+        // resurfaces on the next watcher event / focus refresh once the swap has settled.
+        if (isSwitchingRef.current) return;
         // IN-32: if the deleted file is the ACTIVE config and a tunnel is live, tear it down
-        // FIRST — the sidecar is still running on a now-gone file. Reuse the normal disconnect
-        // (never touch the killswitch/sidecar internals). Read the live values from refs.
+        // FIRST — the sidecar is still running on a now-gone file. Reuse the switch-GUARDED disconnect
+        // (FAB-05 — App passes handleDisconnectGuarded; never touch the killswitch/sidecar internals).
+        // Read the live values from refs.
         if (statusRef.current !== "disconnected" && statusRef.current !== "error") {
           void onDisconnectRef.current();
         }

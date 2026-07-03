@@ -26,19 +26,19 @@ describe("plateDetails — isIpAddress (domain vs IP)", () => {
   });
 });
 
-describe("plateDetails — pingColor (quality thresholds)", () => {
-  it("maps < 100 ms to the connected (green) token", () => {
+describe("plateDetails — pingColor (quality thresholds, unified with the card ≤150/≤300)", () => {
+  it("maps <= 150 ms to the connected (green) token", () => {
     expect(pingColor(0)).toBe("var(--color-status-connected)");
-    expect(pingColor(99)).toBe("var(--color-status-connected)");
+    expect(pingColor(150)).toBe("var(--color-status-connected)");
   });
 
-  it("maps 100–199 ms to the warning (amber) token", () => {
-    expect(pingColor(100)).toBe("var(--color-status-warning)");
-    expect(pingColor(199)).toBe("var(--color-status-warning)");
+  it("maps 151–300 ms to the warning (amber) token", () => {
+    expect(pingColor(151)).toBe("var(--color-status-warning)");
+    expect(pingColor(300)).toBe("var(--color-status-warning)");
   });
 
-  it("maps >= 200 ms to the error (red) token", () => {
-    expect(pingColor(200)).toBe("var(--color-status-error)");
+  it("maps > 300 ms to the error (red) token", () => {
+    expect(pingColor(301)).toBe("var(--color-status-error)");
     expect(pingColor(999)).toBe("var(--color-status-error)");
   });
 });

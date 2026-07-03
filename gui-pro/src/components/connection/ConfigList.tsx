@@ -9,7 +9,7 @@ import { samePath } from "../../shared/utils/samePath";
 import { ConfigCard } from "./ConfigCard";
 import type { ConfigPing } from "./ConfigPingPill";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
-import type { VpnStatus } from "../../shared/types";
+import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 
 interface ConfigListProps {
   configs: ConfigSummary[];
@@ -32,6 +32,32 @@ interface ConfigListProps {
    *  (samePath), not raw `===`, because this path and the manifest paths come from different
    *  string sources (11-UAT gaps B/C). */
   activeConfigPath?: string;
+  /**
+   * Phase 14 (D-12): a seamless A→B switch is in flight (App-level FE-only flag, threaded
+   * App→ConnectionPanel→here). OR'd into the leadIsLive gate below so the frosted sticky hero
+   * stays mounted + hoisted through the transient `disconnected` the teardown emits, and the
+   * lead card renders the amber «Переключение» face (passed as `switching` to the lead ConfigCard).
+   */
+  isSwitching?: boolean;
+  /**
+   * F28 (14-UAT round 3): the path of the config whose connect was just clicked (pre-`connecting`
+   * window). The card matching it (samePath) shows an instant spinner; ANY non-null value locks the whole
+   * list. Cleared by App once the live status takes over. `null`/absent → nothing pending.
+   */
+  pendingConnectPath?: string | null;
+  /**
+   * Phase 14 (F6, 14-UAT): the switch-failed-reverted notice, threaded to the LEAD ConfigCard where
+   * it renders EMBEDDED inside the active card (not a floating window-level banner). Only the lead
+   * card shows it; set/cleared by App.
+   */
+  revertNotice?: string | null;
+  onRevertDismiss?: () => void;
+  /**
+   * F20 (14-UAT round 2): the live reconnect attempt progress {attempt, max}, shown ONLY on the LEAD
+   * card as «Переподключение · Попытка N из M» (a resting inactive card has no reconnect state). `null`
+   * whenever no per-attempt counter is live. Pure pass-through from App→ConnectionPanel→here.
+   */
+  reconnectProgress?: ReconnectProgress | null;
 }
 
 /** The active card carries the live status only while a tunnel is actually up or in flight.
@@ -78,6 +104,11 @@ export function ConfigList({
   onRename,
   status = "disconnected",
   activeConfigPath = "",
+  isSwitching = false,
+  pendingConnectPath = null,
+  revertNotice,
+  onRevertDismiss,
+  reconnectProgress,
 }: ConfigListProps) {
   const { t } = useTranslation();
 
@@ -93,7 +124,44 @@ export function ConfigList({
   // card the same full width, in manifest sort order, so a freshly-added config lands at the BOTTOM
   // (not hoisted to the top, not rendered wider). A disconnected former-active config is NO longer
   // pinned/widened on top (that overrides the old IN-14 pin-on-top behaviour).
-  const leadIsLive = Boolean(activeMatchId) && isTunnelLive(status);
+  //
+  // Phase 14 (D-12): OR in isSwitching. During an A→B switch the teardown emits a TRANSIENT
+  // `disconnected` for which isTunnelLive is false — that would demote the frosted hero to a plain
+  // resting row mid-switch (the "dead-air" the owner reported: the active card reads as "gone").
+  // Holding leadIsLive true while isSwitching keeps the sticky/frosted hero mounted + hoisted
+  // continuously (activeConfigPath is already promoted to the TARGET at switch start, so the hero
+  // shows the target server). IN-52 is UNCHANGED: with NO switch in flight and a SETTLED disconnect,
+  // isSwitching is false → leadIsLive false → the hero treatment vanishes (the regression must-keep).
+  const leadIsLive = Boolean(activeMatchId) && (isTunnelLive(status) || isSwitching);
+
+  // Phase 14 (FAB-01): the cards are LOCKED not only during an App-owned switch (isSwitching) but
+  // ALSO while the backend reconnect supervisor is running (`reconnecting`/`recovering`). A manual
+  // «Переключиться» clicked during «Переподключение»/«Восстановление» would race the Rust
+  // respawn_sidecar (silent wrong-server / double-spawn — FAB-01). Extending `locked` to those
+  // states makes the cards VISIBLY locked (greyed primary + overflow + rename) exactly when a switch
+  // is unsafe, matching performSwitch's early refusal in those states. Reuses the EXISTING `locked`
+  // idiom (D-21) — no parallel mechanism. (The full Rust generation re-check FAB-R1 is BACKLOGGED.)
+  // 3.4 R-DCT (14-UAT F13/Test-5): also lock while a teardown is in flight (the real `disconnecting`
+  // wire status). The owner reported that during a disconnect the other cards' buttons stayed
+  // clickable — a connect landing mid-teardown raced the kill. With the cards locked here AND the Rust
+  // serializer (3.3), an action cannot start until the teardown settles.
+  const listLocked =
+    isSwitching ||
+    // F28: a connect was just clicked and is in its pre-`connecting` window (awaited pre-connect probe).
+    // Lock the whole list instantly so no rival action can start (same D-21 idiom) and every card reads
+    // as busy — the target card also gets a spinner via `connectPending` below.
+    Boolean(pendingConnectPath) ||
+    // F31 (14-UAT round 3): also lock while `connecting` — a FRESH «Подключить» (not a switch, so
+    // isSwitching is false) left the OTHER cards' «Переключиться» clickable for the whole «Подключение»
+    // phase (the owner: switch locks everything, a plain connect did NOT — inconsistent, and clicking a
+    // rival «Переключиться» mid-connect races the in-flight connect). `pendingConnectPath` covered only
+    // the pre-`connecting` gap and is cleared once status flips to `connecting`; adding `connecting` here
+    // completes the lock continuously through a connect AND a switch (a real switch's B is also
+    // `connecting`, already covered by isSwitching — this is harmless overlap).
+    status === "connecting" ||
+    status === "reconnecting" ||
+    status === "recovering" ||
+    status === "disconnecting";
 
   // Hoist the live/active config to the top ONLY when it is live; otherwise keep the manifest sort
   // order (no hoist). Pure render — the reorder animation is driven by the caller wrapping the
@@ -191,10 +259,13 @@ export function ConfigList({
                 shows through — connected additionally adds the 8% green tint + ring (see ConfigCard
                 `activeHighlightClass`). The strong blur turns anything scrolling beneath into a soft,
                 dimmed blur while the 0.45 tint stops it reading through SHARPLY (the IN-50 bleed the
-                0.45 frost had). It is SQUARE so the blur is not clipped to a radius and fills the
-                rounded card's corner triangles (IN-38). No gap mask above (owner dropped it, IN-52). */}
+                0.45 frost had). F9 (14-UAT): the wrapper is ROUNDED + clipped to --radius-lg so no
+                SHARP frost corners peek out below/around the rounded card (the owner reported the
+                square frost's bottom corners showing under the card) — the frost now matches the
+                card's rounded box exactly. This supersedes the old IN-38 «square frost fills the
+                corner triangles» treatment. No gap mask above (owner dropped it, IN-52). */}
             <div
-              className="sticky top-0 z-10"
+              className="sticky top-0 z-10 overflow-hidden rounded-[var(--radius-lg)]"
               style={{
                 ...vtName(lead.id),
                 backgroundColor: "var(--color-glass-bg-strong)",
@@ -207,6 +278,24 @@ export function ConfigList({
                 config={lead}
                 leadCard
                 status={status}
+                // Phase 14 (D-12): the lead card shows the amber «Переключение» face while a switch
+                // is in flight — forces the amber band + label over the grey teardown status.
+                switching={isSwitching}
+                // F6 (14-UAT): the switch-failed-reverted notice renders EMBEDDED inside this lead card.
+                revertNotice={revertNotice}
+                onRevertDismiss={onRevertDismiss}
+                // F20 (14-UAT round 2): the reconnect attempt counter — only the lead card is ever
+                // in a reconnecting state.
+                reconnectProgress={reconnectProgress}
+                // Phase 14 (D-13): while a switch is in flight, LOCK the hero's overflow
+                // (Изменить/Дублировать/Удалить) so a mid-switch action cannot race the swap. The
+                // primary is already an inert spinner via `switching`, but `locked` also greys the
+                // overflow menu. Reuse the EXISTING `locked` idiom (D-21) OR'd with isSwitching — do
+                // NOT invent a parallel mechanism.
+                locked={listLocked}
+                // F28: instant spinner if THIS card's connect was just clicked (harmless alongside
+                // `switching`, which already spins during a real switch).
+                connectPending={pendingConnectPath != null && samePath(lead.path, pendingConnectPath)}
                 activeElsewhere={false}
                 ping={pings[lead.id]}
                 existingNames={allNames}
@@ -224,6 +313,13 @@ export function ConfigList({
                   ping={pings[config.id]}
                   existingNames={allNames}
                   activeElsewhere
+                  // Phase 14 (D-13): a mid-switch action on a resting card (a second
+                  // «Переключиться», overflow edit/duplicate/delete, inline rename) must be inert
+                  // until the swap settles — reuse the existing `locked` idiom (D-21) OR'd with
+                  // isSwitching so ConfigCard disables its primary + overflow + rename in one shot.
+                  locked={listLocked}
+                  // F28: instant spinner if THIS resting card's «Переключиться»/connect was just clicked.
+                  connectPending={pendingConnectPath != null && samePath(config.path, pendingConnectPath)}
                   onConnect={onConnect ? () => onConnect(config) : undefined}
                   onEdit={onEdit ? () => onEdit(config) : undefined}
                   onDelete={onDelete ? () => onDelete(config) : undefined}
@@ -244,6 +340,13 @@ export function ConfigList({
                 ping={pings[config.id]}
                 existingNames={allNames}
                 activeElsewhere={false}
+                // Phase 14 (D-13): lock every card while switching — even in the not-live list a
+                // switch may be tearing down (transient disconnected), so an action here could race
+                // the swap. Same `locked` idiom (D-21) OR'd with isSwitching, atomic re-enable on settle.
+                locked={listLocked}
+                // F28: instant spinner if THIS card's «Подключить» was just clicked (the common fresh-
+                // connect path — the uniform not-connected list).
+                connectPending={pendingConnectPath != null && samePath(config.path, pendingConnectPath)}
                 onConnect={onConnect ? () => onConnect(config) : undefined}
                 onEdit={onEdit ? () => onEdit(config) : undefined}
                 onDelete={onDelete ? () => onDelete(config) : undefined}

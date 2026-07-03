@@ -210,6 +210,10 @@ pub async fn spawn_trusttunnel(
     log_level: &str,
     child_state: Arc<Mutex<Option<SidecarChild>>>,
     disconnecting: Arc<Mutex<bool>>,
+    // 3.1 R-GEN (F12): the connection_generation of the session this sidecar belongs to (captured by
+    // the caller AFTER its pre-spawn generation bump). The reader task uses it to drop the status
+    // side effects of a SUPERSEDED child's late exit (see terminated_arm_may_write_status).
+    session_generation: u64,
 ) -> Result<SidecarChild, Box<dyn std::error::Error>> {
     let shell = app.shell();
 
@@ -280,6 +284,9 @@ pub async fn spawn_trusttunnel(
     // side effect (PID-file removal / sidecar_child slot clear / status write), so
     // a LATE Terminated from an OLD child can never act on a NEWER session's state.
     let my_pid = child.pid();
+    // 3.1 R-GEN (F12): capture THIS session's generation alongside my_pid; the Terminated arm gates
+    // its status writes on it so a superseded child's late exit cannot corrupt a newer session.
+    let my_generation = session_generation;
     tokio::spawn(async move {
         let mut handshake_done = false;
         let mut dns_proxy_ready = false;
@@ -364,7 +371,7 @@ pub async fn spawn_trusttunnel(
                     check_sidecar_markers(
                         trimmed, &app_handle, &disc_for_task,
                         &mut handshake_done, &mut dns_proxy_ready,
-                        &mut connected_emitted, &spawn_time,
+                        &mut connected_emitted, &spawn_time, my_generation,
                     ).await;
 
                     // CR-01: a fatal marker can arrive on stdout too — run the
@@ -392,7 +399,7 @@ pub async fn spawn_trusttunnel(
                     check_sidecar_markers(
                         trimmed, &app_handle, &disc_for_task,
                         &mut handshake_done, &mut dns_proxy_ready,
-                        &mut connected_emitted, &spawn_time,
+                        &mut connected_emitted, &spawn_time, my_generation,
                     ).await;
 
                     // Authoritative backend Error for the fatal markers the frontend
@@ -467,20 +474,46 @@ pub async fn spawn_trusttunnel(
                         }
                         owns
                     };
-                    if !owns_shared_state {
-                        // AUDIT-2026-06-11 #4: a NEWER live child is stored — that session
-                        // owns the shared state now and its OWN reader task reports for
-                        // it. Skip the status write / supervisor handoff below: acting
-                        // here would e.g. flip the new session's fresh Connecting to
-                        // Error("sidecar-exit") via the else-branch, or hand a competing
-                        // supervisor a drop that belongs to a dead session. All
-                        // legitimate own-child paths (intentional disconnect, error
-                        // preservation, reconnect handoff) still run when the slot is
-                        // ours or already empty.
-                        crate::logging::log_app(
-                            "INFO",
-                            "[sidecar] late Terminated from an old child — a newer child owns the state; skipping cleanup/status (AUDIT #4)",
-                        );
+                    // 3.1 R-GEN (F12): the pid-gated PID-file cleanup + slot clear above are this
+                    // child's own housekeeping and run regardless. But the SESSION-STATUS side effects
+                    // below (Error/Disconnected write, supervisor handoff) must fire ONLY when this
+                    // child still owns the LIVE session — it owns the slot (identity) AND its captured
+                    // generation is still live. Under a rapid disconnect→connect churn the slot is
+                    // TRANSIENTLY empty (owns==true) yet the generation has already advanced, so an OLD
+                    // child's late non-zero exit would otherwise write Error("sidecar-exit") onto the
+                    // fresh Connecting (the churn-log F12 window: the error lands between "Spawning..."
+                    // and the new PID line). Read the live generation and gate both dimensions.
+                    let live_generation = state_opt
+                        .as_ref()
+                        .map(|s| {
+                            use std::sync::atomic::Ordering;
+                            s.connection_generation.load(Ordering::SeqCst)
+                        })
+                        .unwrap_or(my_generation); // no AppState (unit context) → treat as current
+                    if !crate::lifecycle::terminated_arm_may_write_status(
+                        owns_shared_state,
+                        my_generation,
+                        live_generation,
+                    ) {
+                        if !owns_shared_state {
+                            // AUDIT-2026-06-11 #4: a NEWER live child is STORED — that session owns
+                            // the shared state now and its OWN reader task reports for it. Acting here
+                            // would flip the new session's fresh Connecting to Error("sidecar-exit"),
+                            // or hand a competing supervisor a drop that belongs to a dead session.
+                            crate::logging::log_app(
+                                "INFO",
+                                "[sidecar] late Terminated from an old child — a newer child owns the state; skipping cleanup/status (AUDIT #4)",
+                            );
+                        } else {
+                            // 3.1 R-GEN (F12): this child owns the (transiently empty) slot, but a
+                            // newer session generation is live — a disconnect→connect churn superseded
+                            // it. Drop the status write / supervisor handoff so its exit cannot corrupt
+                            // the fresh Connecting. Its pid-gated cleanup already ran above.
+                            crate::logging::log_app(
+                                "INFO",
+                                "[sidecar] superseded sidecar exit — a newer session generation is live; dropping status/supervisor (3.1 R-GEN, F12)",
+                            );
+                        }
                         continue;
                     }
 
@@ -656,6 +689,55 @@ const GRACEFUL_SHUTDOWN_TIMEOUT_MS: u64 = 1500;
 /// Poll cadence while waiting for the graceful terminate to take effect.
 const GRACEFUL_SHUTDOWN_POLL_MS: u64 = 100;
 
+/// 3.2 R-KILL (F13): after the HARD kill, how long to poll for the process to actually EXIT before
+/// reporting the teardown complete. `child.kill()` (TerminateProcess) only INITIATES termination and
+/// `taskkill /F` waits for the taskkill TOOL, not the target's exit — so a fast reconnect that lands
+/// while the .exe is still terminating (and the WinTUN adapter still releasing) races the teardown
+/// (F13). 5s is a generous ceiling for a TerminateProcess to finish; the common case breaks out of
+/// the poll in a few ticks.
+const HARD_KILL_CONFIRM_TIMEOUT_MS: u64 = 5000;
+/// Poll cadence while confirming the hard kill took effect.
+const HARD_KILL_CONFIRM_POLL_MS: u64 = 100;
+
+/// 3.8 delay-green (owner decision): how long to HOLD «Подключение» while waiting for real
+/// traffic-readiness (a DNS query THROUGH the tunnel) after the C++ core's "Successfully connected"
+/// handshake edge, before emitting Connected anyway as an honest fallback. The handshake edge is
+/// tunnel-UP, not traffic-READY — on http3/QUIC the tunnel can be up while real traffic does not flow
+/// for ~30-40s. `dns_probe` polls every 500ms and returns the moment traffic works, so http2 (already
+/// traffic-ready) flips green ~instantly; only http3's warmup shows «Подключение» up to this cap. We
+/// cannot wait forever, so at the cap we flip green regardless (better than an endless «Подключение»).
+///
+/// MUST stay BELOW `lifecycle::CONNECT_TIMEOUT` (60s): the connect-timeout watchdog waits for the
+/// Connected STATUS and kills the session if it never arrives within 60s. Since delay-green DELAYS
+/// that status, the cap has to emit Connected (at the latest) before the watchdog's deadline — 45s
+/// leaves a comfortable margin while still covering the ~30-40s http3 warmup.
+const TRAFFIC_READINESS_CAP: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// 3.8 F-3 (Fable-5 review): safety margin between the traffic-readiness fallback emit and the
+/// connect-timeout watchdog's deadline. The honest Connected fallback must land at least this
+/// long BEFORE the watchdog would fire, so a nearly-ready session is never killed a hair before
+/// it flips green.
+const TRAFFIC_READINESS_WATCHDOG_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// 3.8 F-3: the ACTUAL traffic-readiness probe budget, bounded so the honest fallback emit always
+/// precedes the connect-timeout watchdog deadline.
+///
+/// The watchdog (`lifecycle::CONNECT_TIMEOUT`, 60s) runs from the CONNECT and kills the session if
+/// the Connected STATUS never arrives. This probe, however, starts at the HANDSHAKE — `elapsed`
+/// after the child spawned. The old code always waited the flat `TRAFFIC_READINESS_CAP` (45s) from
+/// the handshake, so a LATE handshake (e.g. flaky QUIC retries land it at T+20s) pushed the honest
+/// fallback emit to T+65s — PAST the 60s deadline — and the watchdog killed a healthy, nearly-ready
+/// session (the "45s < 60s" comment was a wrong-origin invariant: it only held when the handshake
+/// landed within the first ~15s). Budget = min(CAP, CONNECT_TIMEOUT − elapsed − margin): a late
+/// handshake SHRINKS the budget instead of overrunning the watchdog. Pure so the cap-vs-watchdog
+/// invariant is unit-tested (`traffic_readiness_budget_stays_under_watchdog`).
+fn traffic_readiness_budget(elapsed_since_spawn: std::time::Duration) -> std::time::Duration {
+    let watchdog_budget = crate::lifecycle::CONNECT_TIMEOUT
+        .saturating_sub(elapsed_since_spawn)
+        .saturating_sub(TRAFFIC_READINESS_WATCHDOG_MARGIN);
+    std::cmp::min(TRAFFIC_READINESS_CAP, watchdog_budget)
+}
+
 /// Pure decision for T-22 B2 (honest `kill_sidecar`): given the outcomes of the
 /// two HARD-kill paths (the in-process `child.kill()` == `TerminateProcess`, and
 /// the out-of-band `taskkill /F /PID`), should `kill_sidecar` report FAILURE?
@@ -671,14 +753,29 @@ fn kill_succeeded(hard_kill_ok: bool, taskkill_ok: bool) -> bool {
     hard_kill_ok || taskkill_ok
 }
 
+/// 3.2 R-KILL (F13): after the bounded post-hard-kill liveness poll, is the sidecar teardown
+/// CONFIRMED complete? `child.kill()`/`taskkill` only INITIATE termination, so the ONLY authoritative
+/// signal is the process actually being GONE (`!alive_after_poll`). The kill-call outcomes are
+/// advisory (the caller logs them): a reported success with the process still alive is NOT confirmed
+/// (it did not take — a fast reconnect would race a live sidecar holding the killswitch/adapter); a
+/// reported failure with the process gone IS confirmed (it exited on its own between the poll and the
+/// calls). Pure + IO-free so the alive/gone decision is unit-testable without a real process.
+fn hard_kill_confirmed(alive_after_poll: bool) -> bool {
+    !alive_after_poll
+}
+
 /// Is the process with `pid` still alive? Windows-only liveness probe used to tell
 /// whether the GRACEFUL terminate (T-22 B1) let the sidecar exit on its own before
 /// we escalate to the hard kill. Returns `false` (treat as gone) on any probe error
 /// so we never BLOCK escalation on a flaky query — a false "gone" only means we skip
 /// the redundant hard kill on an already-dead process, and the Job Object still
 /// guarantees no zombie.
+// 3.8 F-2: pub(crate) so the reconnect supervisor (connectivity.rs) can detect a respawned
+// child's death directly. During a reconnect attempt the supervisor holds `reconnect_in_progress`,
+// so the Terminated arm DEFERS and the status stays `Reconnecting` — a dead respawn is invisible
+// via status alone, so respawn_and_wait probes the PID's liveness to fail the attempt promptly.
 #[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
+pub(crate) fn process_is_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -710,7 +807,7 @@ fn process_is_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(windows))]
-fn process_is_alive(_pid: u32) -> bool {
+pub(crate) fn process_is_alive(_pid: u32) -> bool {
     // Non-Windows builds don't run the real sidecar; assume gone so the kill path
     // is a no-op-friendly success (mirrors the job_object non-windows twin).
     false
@@ -809,20 +906,48 @@ pub async fn kill_sidecar(sidecar: SidecarChild) -> Result<(), Box<dyn std::erro
         .map(|o| o.status.success())
         .unwrap_or(false);
 
-    // ── 3. B2 — honest result: Err when BOTH hard paths failed ───────────────
-    // If BOTH the graceful kill AND taskkill report failure, the sidecar may still be
-    // alive holding the WinTUN adapter / fail-closed killswitch, which the NEXT connect
-    // would trip over (only partially mitigated by kill_stale_sidecar). The old code
-    // logged a WARN and STILL returned Ok(()) (T-22 leak — deferred IN-02): the caller
-    // believed teardown succeeded while an orphan kept the all-traffic block. We now
-    // surface the failure. The PID is non-secret (A2) — no D-29 concern.
-    if !kill_succeeded(hard_kill_ok, taskkill_ok) {
+    // ── 3. R-KILL (F13) — CONFIRM the process is actually GONE before reporting success ──
+    // `child.kill()` (TerminateProcess) only INITIATES termination and `taskkill /F` waits for the
+    // taskkill TOOL, not the target's exit — so both can "report success" while the .exe is still
+    // terminating and the WinTUN adapter still releasing. The old code returned Ok as soon as EITHER
+    // reported success (kill_succeeded), so `vpn_disconnect` wrote Disconnected while teardown was
+    // still in flight → a fast reconnect raced it ("connection failed" + the churn-log WINTUN
+    // "adapter not found" on the very next spawn — F13). Poll `process_is_alive` for a bounded window
+    // and report success ONLY when the process is provably gone. The kill_succeeded outcomes are now
+    // advisory (logged); the liveness poll is authoritative. The KILL_ON_JOB_CLOSE Job Object stays
+    // armed via the SidecarChild drop as the last-resort guarantee. PID is non-secret (A2 / D-29 ok).
+    let mut confirm_waited_ms: u64 = 0;
+    let mut alive_after_poll = true;
+    while confirm_waited_ms < HARD_KILL_CONFIRM_TIMEOUT_MS {
+        if !process_is_alive(pid) {
+            alive_after_poll = false;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(HARD_KILL_CONFIRM_POLL_MS)).await;
+        confirm_waited_ms += HARD_KILL_CONFIRM_POLL_MS;
+    }
+    if !hard_kill_confirmed(alive_after_poll) {
+        // Still alive after the confirm window → genuinely stuck; it may still hold the fail-closed
+        // killswitch / WinTUN adapter. Surface the honest failure so the disconnect does not claim a
+        // completed teardown (the Job Object remains the last-resort kill on app exit).
         let msg = format!(
-            "[vpn] kill_sidecar: both hard kill and taskkill failed for PID {pid} — sidecar may still be alive holding the killswitch/adapter"
+            "[vpn] kill_sidecar: PID {pid} still alive {HARD_KILL_CONFIRM_TIMEOUT_MS}ms after hard kill (hard_kill_ok={hard_kill_ok}, taskkill_ok={taskkill_ok}) — sidecar may still hold the killswitch/adapter"
         );
         crate::logging::log_app("WARN", &msg);
         return Err(msg.into());
     }
+    if !kill_succeeded(hard_kill_ok, taskkill_ok) {
+        // Confirmed gone even though neither kill call reported success — it exited on its own
+        // between the poll and the calls. Teardown still succeeded (the process is provably gone).
+        crate::logging::log_app(
+            "INFO",
+            &format!("[vpn] kill_sidecar: PID {pid} confirmed gone though no kill path reported success (raced exit)"),
+        );
+    }
+    crate::logging::log_app(
+        "INFO",
+        &format!("[vpn] kill_sidecar: PID {pid} confirmed gone after hard kill (T-22 B2 / 3.2 R-KILL)"),
+    );
     Ok(())
 }
 
@@ -855,8 +980,15 @@ pub async fn spawn_with_args(
     Ok(result)
 }
 
-/// Check sidecar log lines for connection milestones and emit "connected" only
-/// after both handshake AND DNS proxy are ready (or DNS probe succeeds).
+/// Check sidecar log lines for connection milestones. Emits "connected" only after the handshake AND
+/// a real traffic-readiness probe succeeds (3.8 delay-green) — a DNS query THROUGH the tunnel — capped
+/// at TRAFFIC_READINESS_CAP, then emitted anyway as an honest fallback so http2 stays fast while http3
+/// holds «Подключение» until traffic actually flows.
+// Internal reader-task helper: the args are the line + the app handle + the three mutable
+// per-lifetime latches (handshake/dns/connected) + the shared disconnecting Arc + spawn_time + the
+// session generation (3.1b). They are all genuinely distinct inputs threaded straight from the
+// reader loop; bundling them into a struct would only move the noise, so allow the arg count here.
+#[allow(clippy::too_many_arguments)]
 async fn check_sidecar_markers(
     line: &str,
     app: &tauri::AppHandle,
@@ -865,6 +997,11 @@ async fn check_sidecar_markers(
     dns_proxy_ready: &mut bool,
     connected_emitted: &mut bool,
     spawn_time: &Instant,
+    // 3.1b R-GEN (F14): the generation of the session this reader task belongs to. Used to gate the
+    // Connected emit (both the sync and the detached-probe path) against a superseded/cancelled
+    // session — a buffered "Successfully connected" from a dead session must not write a bogus
+    // Connected (the sync path previously had no staleness guard at all).
+    session_generation: u64,
 ) {
     let cancelled = disconnecting.lock().map(|g| *g).unwrap_or(false);
     if cancelled {
@@ -902,37 +1039,44 @@ async fn check_sidecar_markers(
         // below) cannot double-enter; emit_connected's own is_already_connected guard
         // still prevents a duplicate "vpn-status" event.
         *connected_emitted = true;
-        if *dns_proxy_ready {
-            // DNS proxy already reported ready — emit immediately
-            emit_connected(app, spawn_time);
-        } else {
-            // DNS proxy not yet ready — run a quick probe instead of waiting for log line.
-            //
-            // AUDIT-2026-06-11 #1: this probe task is DETACHED and can call
-            // emit_connected up to 10s later, and emit_connected's only guard is
-            // `is_already_connected`. Without a staleness re-check the late emit
-            // overwrote a user's Disconnected (cancel during the probe window — the
-            // probe then resolves via the restored SYSTEM DNS and "succeeds") or a
-            // terminal Error (connect-timeout watchdog killing at T+60s after the
-            // handshake landed at ~T+55s) with a bogus Connected: stuck-green with no
-            // tunnel. Capture the session identity NOW — the disconnecting flag Arc +
-            // the live connection generation — and re-check it INSIDE the task right
-            // before emitting, mirroring the generation re-check every other
-            // stale-able actor performs (decide_timeout_action, run_reconnect_loop —
-            // lifecycle::is_current_generation).
+        // 3.8 delay-green (owner decision — HOLD «Подключение» until traffic actually flows): the
+        // "Successfully connected" handshake edge is TUNNEL-UP, not TRAFFIC-READY. On http3/QUIC the
+        // tunnel can be up while real traffic does not flow for ~30-40s (the «зелёная карточка
+        // ≠ рабочий интернет»). So instead of flipping to Connected on the handshake edge, ALWAYS run a
+        // traffic-readiness probe first (a DNS query THROUGH the tunnel — with killswitch ON it fails
+        // exactly as long as real traffic fails, so it is honest by construction), capped at
+        // TRAFFIC_READINESS_CAP, and emit Connected on success OR at the cap (honest fallback — we
+        // cannot hold «Подключение» forever). For http2 the probe succeeds ~instantly, so it stays
+        // fast; only http3's warmup shows «Подключение» longer. `dns_proxy_ready` is still tracked and
+        // logged above but no longer gates the emit — the probe implicitly waits for the DNS proxy too
+        // (it resolves through it).
+        //
+        // AUDIT-2026-06-11 #1 / 3.1b R-GEN: this probe task is DETACHED and calls emit_connected up to
+        // TRAFFIC_READINESS_CAP later. It captures the SESSION identity NOW (the disconnecting Arc +
+        // THIS session's generation) and re-checks it via probe_task_may_emit right before emitting —
+        // a cancel / a newer session / a terminal Error during the window can never let a stale
+        // Connected through (this is the risk Fable flagged for the delay-green variant).
+        {
             let app_clone = app.clone();
             let t = *spawn_time;
             let disc_for_probe = Arc::clone(disconnecting);
-            let captured_generation = app
-                .try_state::<AppState>()
-                .map(|s| s.connection_generation.load(std::sync::atomic::Ordering::SeqCst));
+            // 3.1b R-GEN (F14): gate the detached probe against THIS session's generation (captured by
+            // the reader task at spawn) rather than re-reading the live generation here — if the
+            // generation already advanced by the time this marker was processed, a re-read would
+            // capture the NEW generation and wrongly pass the gate for a superseded session.
+            let captured_generation = Some(session_generation);
             tokio::spawn(async move {
-                let probe_ok = dns_probe(std::time::Duration::from_secs(10)).await;
+                // 3.8 F-3: bound the probe budget so the honest fallback emit precedes the 60s
+                // connect-timeout watchdog. The cap alone (measured from the handshake) could
+                // exceed the deadline on a late handshake and let the watchdog kill a nearly-ready
+                // session. `t.elapsed()` here is the time since spawn at probe-start (≈ handshake).
+                let probe_budget = traffic_readiness_budget(t.elapsed());
+                let probe_ok = dns_probe(probe_budget).await;
                 let elapsed = t.elapsed().as_millis();
                 if probe_ok {
-                    crate::logging::log_app("INFO", &format!("[vpn] T+{elapsed}ms: DNS probe success"));
+                    crate::logging::log_app("INFO", &format!("[vpn] T+{elapsed}ms: traffic-ready (probe ok) — emitting Connected (3.8 delay-green)"));
                 } else {
-                    crate::logging::log_app("WARN", &format!("[vpn] T+{elapsed}ms: DNS probe timeout — emitting connected anyway"));
+                    crate::logging::log_app("WARN", &format!("[vpn] T+{elapsed}ms: traffic-readiness cap reached — emitting Connected anyway (3.8 delay-green)"));
                 }
                 // AUDIT-2026-06-11 #1: bail when the session this latch belonged to is
                 // no longer live. All four signals are needed: the transient
@@ -1292,6 +1436,47 @@ mod tests {
         assert!(kill_succeeded(true, true), "both hard kills succeeded ⇒ success");
         assert!(kill_succeeded(true, false), "in-process kill succeeded ⇒ success");
         assert!(kill_succeeded(false, true), "taskkill /F succeeded ⇒ success");
+    }
+
+    #[test]
+    fn hard_kill_confirmed_only_when_process_is_gone() {
+        // 3.2 R-KILL (F13): after the bounded liveness poll, the teardown is confirmed ONLY when the
+        // process is provably gone — child.kill()/taskkill merely INITIATE termination, so a
+        // "reported success" is not proof and disconnect must not complete while the .exe lingers.
+        assert!(hard_kill_confirmed(false), "process gone after poll ⇒ confirmed teardown");
+        assert!(!hard_kill_confirmed(true), "still alive after poll ⇒ NOT confirmed (F13 race)");
+    }
+
+    // ── 3.8 F-3: traffic-readiness budget stays under the connect-timeout watchdog ──
+
+    #[test]
+    fn traffic_readiness_budget_stays_under_watchdog() {
+        use std::time::Duration;
+        // Early handshake (the common case): the full cap fits under the watchdog, so the budget
+        // is the cap unchanged — http3 warmup still gets its ~45s.
+        assert_eq!(traffic_readiness_budget(Duration::ZERO), TRAFFIC_READINESS_CAP);
+        assert_eq!(
+            traffic_readiness_budget(Duration::from_secs(3)),
+            TRAFFIC_READINESS_CAP,
+            "a 3s handshake still leaves room for the full cap (60-3-5=52 > 45)"
+        );
+        // Late handshake: the budget SHRINKS so the fallback emit still precedes the 60s deadline.
+        assert_eq!(
+            traffic_readiness_budget(Duration::from_secs(20)),
+            Duration::from_secs(35),
+            "handshake at T+20 ⇒ 60-20-5 = 35s budget (< cap), fallback lands at T+55 < T+60"
+        );
+        // The core invariant (this is what F-3 fixes): for ANY handshake time, the fallback emit
+        // (handshake + budget) always lands at least the margin before the watchdog deadline.
+        for e_secs in [0u64, 1, 5, 10, 15, 20, 30, 45, 55, 60, 90] {
+            let e = Duration::from_secs(e_secs);
+            let emit_at = e + traffic_readiness_budget(e);
+            assert!(
+                emit_at + TRAFFIC_READINESS_WATCHDOG_MARGIN <= crate::lifecycle::CONNECT_TIMEOUT
+                    || traffic_readiness_budget(e) == Duration::ZERO,
+                "handshake at {e_secs}s: emit_at {emit_at:?} must precede watchdog by the margin"
+            );
+        }
     }
 
     // ── AUDIT-2026-06-11 #1: DNS-probe staleness gate ────────────────────────

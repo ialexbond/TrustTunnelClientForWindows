@@ -80,6 +80,14 @@ export interface ConfigEditViewProps {
   /** Called after a successful save so the caller can re-summarise the card / refresh the
    *  manifest entry (name/host may have changed). */
   onConfigChange?: (config: VpnConfig) => void;
+  /**
+   * Phase 14 (D-13): a seamless A→B switch is in flight (App-owned FE-only flag, threaded
+   * App→ConnectionPanel→here). While it is true AND this is the ACTIVE config, the save is LOCKED —
+   * «Сохранить и переподключить» would fire a competing reconnect that races the in-flight swap.
+   * An INACTIVE-config edit does not touch the live tunnel, so its save stays enabled. Re-enables
+   * atomically when the single App flag flips on settle (no per-control timer).
+   */
+  isSwitching?: boolean;
 }
 
 /** «?» help on a label — extra detail on hover (HelpCircle in a Tooltip), the canonical
@@ -148,6 +156,7 @@ export function ConfigEditView({
   status,
   onReconnect,
   onConfigChange,
+  isSwitching = false,
 }: ConfigEditViewProps) {
   const { t } = useTranslation();
 
@@ -230,10 +239,17 @@ export function ConfigEditView({
   // blocked (you cannot change settings mid-handshake). «connecting» on the active config.
   const firstConnectLocked = isActiveConfig && status === "connecting";
 
+  // Phase 14 (D-13): while a switch is in flight, re-saving the ACTIVE config would fire
+  // «Сохранить и переподключить» → a competing reconnect that races the in-flight swap. Lock the
+  // save for the active config only (an inactive-config edit does not touch the live tunnel, so it
+  // stays editable). Reuses the existing disabled idiom — OR'd into saveDisabled, no parallel lock.
+  const switchLocked = isActiveConfig && isSwitching;
+
   // Save is disabled when: nothing changed, a field is invalid (MTU/DNS/name/SOCKS address —
-  // WR-07), the first-connect lock is on, or a save is already in flight.
+  // WR-07), the first-connect lock is on, a save is already in flight, or a switch is in flight on
+  // the active config (D-13).
   const saveDisabled =
-    !dirty || mtuError || dnsError || nameInvalid || socksError || firstConnectLocked || saving;
+    !dirty || mtuError || dnsError || nameInvalid || socksError || firstConnectLocked || saving || switchLocked;
 
   const handleSaveClick = async () => {
     // Save the file WITHOUT awaiting a reconnect inside, so on success we can close the modal
@@ -294,14 +310,18 @@ export function ConfigEditView({
       >
         {t("connection.editView.title")}
       </h2>
-      <p className="mt-0.5 text-sm text-[var(--color-text-secondary)]">
-        {configName} ·{" "}
+      {/* F5 (14-UAT): keep the config name + its active/inactive status on ONE line. A long name
+          must TRUNCATE with «…» instead of pushing the status onto a second line — flex + min-w-0 on
+          the row lets the name span shrink/ellipsize while the separator and status stay `shrink-0`. */}
+      <p className="mt-0.5 flex min-w-0 items-center gap-1 text-sm text-[var(--color-text-secondary)]">
+        <span className="truncate">{configName}</span>
+        <span className="shrink-0" aria-hidden="true">·</span>
         {isActiveConfig ? (
-          <span className="font-medium text-[var(--color-status-connected)]">
+          <span className="shrink-0 font-medium text-[var(--color-status-connected)]">
             {t("connection.editView.active")}
           </span>
         ) : (
-          t("connection.editView.inactive")
+          <span className="shrink-0">{t("connection.editView.inactive")}</span>
         )}
       </p>
 

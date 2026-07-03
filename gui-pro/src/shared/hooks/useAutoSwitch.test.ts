@@ -7,15 +7,16 @@
 //   - clean cancel on unmount (no leaked timers/loops),
 //   - it keeps monitoring after a manual pick (D-05 — no manual-mode freeze).
 //
-// `ping_config_endpoint` (the only invoke the hook makes) is mocked to return a controllable
-// `{status, ms}` union; `switchTo` is a spy passed as a prop. Fake timers + `advanceTimersByTimeAsync`
-// inside `act` drive the interval ticks deterministically.
+// `probe_tunnel_latency` (the tunnel-latency probe the engine invokes each tick) is mocked to return a
+// controllable `{status, ms}` union; `switchTo` is a spy passed as a prop. Fake timers +
+// `advanceTimersByTimeAsync` inside `act` drive the interval ticks deterministically.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useAutoSwitch, COOLDOWN_MS, type UseAutoSwitchParams } from "./useAutoSwitch";
 import type { Candidate, Reading } from "../lib/decideAutoSwitch";
 
-// Mock @tauri-apps/api/core — the hook only ever invokes "ping_config_endpoint".
+// Mock @tauri-apps/api/core — the engine invokes "probe_tunnel_latency" each tick (the F23
+// tunnel-latency signal) plus "set_pending_connect_origin"/"set_pending_connect_ping" on a switch.
 const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
@@ -58,9 +59,9 @@ async function advanceOneTick() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
-  // Default: the active config pings BAD every tick (most tests want breaches).
+  // Default: the tunnel-latency probe reads BAD (Unreachable) every tick (most tests want breaches).
   mockInvoke.mockImplementation(async (cmd: string) => {
-    if (cmd === "ping_config_endpoint") return BAD;
+    if (cmd === "probe_tunnel_latency") return BAD;
     return null;
   });
 });
@@ -76,13 +77,14 @@ describe("useAutoSwitch", () => {
       useAutoSwitch(makeProps({ status: "disconnected", switchTo })),
     );
 
-    // Advance several intervals — the loop must be inert: no active-config ping, no switch.
+    // Advance several intervals — the loop must be inert: no switch, no switch-side effects (F23: the
+    // engine no longer probes at all, so a disconnected engine must make NO switch-origin mark either).
     await advanceOneTick();
     await advanceOneTick();
     await advanceOneTick();
 
     expect(
-      mockInvoke.mock.calls.filter((c) => c[0] === "ping_config_endpoint"),
+      mockInvoke.mock.calls.filter((c) => c[0] === "set_pending_connect_origin"),
     ).toHaveLength(0);
     expect(switchTo).not.toHaveBeenCalled();
   });
@@ -111,6 +113,88 @@ describe("useAutoSwitch", () => {
     // Another bad tick WITHIN the 60s cooldown must NOT fire a second switch.
     await advanceOneTick();
     expect(switchTo).toHaveBeenCalledTimes(1);
+  });
+
+  // FAB-06: a SWALLOWED verdict (the App refused the switch — a switch already in flight, or status
+  // reconnecting/recovering — so performSwitch returns { accepted: false }) must NOT consume the
+  // breach: the counter is preserved and the 60 s cooldown is NOT armed, so the switch RE-FIRES on
+  // the next breaching tick once the swallow clears. The old code reset the breach + armed the
+  // cooldown up front, delaying recovery for a full cooldown while nothing switched.
+  it("FAB-06: a refused switch (accepted:false) keeps the breach + does NOT arm the cooldown → re-fires next tick", async () => {
+    // switchTo reports the App REFUSED the switch on every call.
+    const switchTo = vi.fn().mockResolvedValue({ accepted: false });
+    renderHook(() =>
+      useAutoSwitch(
+        makeProps({
+          checksN: 3,
+          switchTo,
+          candidates: makeCandidates(HEALTHY),
+        }),
+      ),
+    );
+
+    await advanceOneTick(); // breach 1
+    await advanceOneTick(); // breach 2
+    await advanceOneTick(); // breach 3 → verdict fires but is REFUSED
+    expect(switchTo).toHaveBeenCalledTimes(1);
+
+    // The NEXT breaching tick must RE-FIRE the switch (breach preserved, no cooldown armed).
+    await advanceOneTick();
+    expect(switchTo).toHaveBeenCalledTimes(2);
+    // And again — it keeps trying until the App accepts.
+    await advanceOneTick();
+    expect(switchTo).toHaveBeenCalledTimes(3);
+  });
+
+  // FAB-06 counterpart: an ACCEPTED switch (accepted:true) DOES consume the breach + arm the cooldown,
+  // so a second switch does NOT fire within the settle window (the must-keep D-09 anti-oscillation).
+  it("FAB-06: an accepted switch (accepted:true) arms the cooldown (no second switch in the settle window)", async () => {
+    const switchTo = vi.fn().mockResolvedValue({ accepted: true });
+    renderHook(() =>
+      useAutoSwitch(
+        makeProps({
+          checksN: 3,
+          switchTo,
+          candidates: makeCandidates(HEALTHY),
+        }),
+      ),
+    );
+
+    await advanceOneTick(); // breach 1
+    await advanceOneTick(); // breach 2
+    await advanceOneTick(); // breach 3 → switch fires + arms cooldown
+    expect(switchTo).toHaveBeenCalledTimes(1);
+
+    // Another bad tick WITHIN the 60 s cooldown must NOT fire a second switch.
+    await advanceOneTick();
+    expect(switchTo).toHaveBeenCalledTimes(1);
+  });
+
+  // F24 / Fable R4 (MAJOR-1) loop-break: the just-switched target is excluded from the candidate list
+  // for SKIP_WINDOW_MS, so a switch that (unknown to the engine) failed + reverted does NOT get the same
+  // frozen-healthy-but-dead target re-picked next cooldown — the engine falls through to the NEXT one.
+  it("loop-break: the next switch after a switch skips the just-tried target and picks a different candidate", async () => {
+    const switchTo = vi.fn().mockResolvedValue({ accepted: true });
+    // Two healthy candidates in priority order: B first, then C.
+    const candidates: Candidate[] = [
+      { path: "/b.toml", order: 1, reading: HEALTHY },
+      { path: "/c.toml", order: 2, reading: HEALTHY },
+    ];
+    renderHook(() => useAutoSwitch(makeProps({ checksN: 3, switchTo, candidates })));
+
+    await advanceOneTick(); // breach 1
+    await advanceOneTick(); // breach 2
+    await advanceOneTick(); // breach 3 → first switch = top-priority B
+    expect(switchTo).toHaveBeenCalledTimes(1);
+    expect(switchTo).toHaveBeenNthCalledWith(1, "/b.toml");
+
+    // Pass the 60 s cooldown; the accumulated breaches then fire the SECOND switch the moment it lapses.
+    // B is still inside the skip window, so the engine must pick C — never B again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(COOLDOWN_MS + INTERVAL_MS);
+    });
+    expect(switchTo).toHaveBeenCalledTimes(2);
+    expect(switchTo).toHaveBeenNthCalledWith(2, "/c.toml");
   });
 
   it("marks the AutoSwitch origin in Rust right BEFORE doSwitch (Phase 13, Pitfall 2)", async () => {
@@ -216,27 +300,27 @@ describe("useAutoSwitch", () => {
   });
 
   it("cancels on unmount", async () => {
-    const switchTo = vi.fn().mockResolvedValue(undefined);
-    const { unmount } = renderHook(() => useAutoSwitch(makeProps({ switchTo })));
+    // F23: the engine no longer probes, so use the switch verdict itself as the "loop alive" proxy —
+    // checksN:1 + BAD active (default) + a HEALTHY candidate + a REFUSED switch (accepted:false, so the
+    // cooldown is never armed) makes a switch fire on EVERY tick, so switchTo's call count tracks the
+    // live loop.
+    const switchTo = vi.fn().mockResolvedValue({ accepted: false });
+    const { unmount } = renderHook(() =>
+      useAutoSwitch(makeProps({ checksN: 1, switchTo, candidates: makeCandidates(HEALTHY) })),
+    );
 
-    // One tick to prove the loop is alive, then unmount mid-loop.
+    // One tick to prove the loop is alive.
     await advanceOneTick();
-    const pingsBefore = mockInvoke.mock.calls.filter(
-      (c) => c[0] === "ping_config_endpoint",
-    ).length;
-    expect(pingsBefore).toBeGreaterThan(0);
+    const callsBefore = switchTo.mock.calls.length;
+    expect(callsBefore).toBeGreaterThan(0);
 
     unmount();
 
-    // After unmount, advancing timers must produce NO further pings or switches (cancelled flag +
-    // clearTimeout). A leaked timer would keep pinging here.
+    // After unmount, advancing timers must produce NO further switches (cancelled flag + clearTimeout).
+    // A leaked timer would keep firing here.
     await advanceOneTick();
     await advanceOneTick();
-    const pingsAfter = mockInvoke.mock.calls.filter(
-      (c) => c[0] === "ping_config_endpoint",
-    ).length;
-    expect(pingsAfter).toBe(pingsBefore);
-    expect(switchTo).not.toHaveBeenCalled();
+    expect(switchTo.mock.calls.length).toBe(callsBefore);
   });
 
   it("keeps monitoring after a manual pick", async () => {
@@ -281,5 +365,95 @@ describe("useAutoSwitch", () => {
     await advanceOneTick();
     expect(switchTo).toHaveBeenCalledTimes(2);
     expect(switchTo).toHaveBeenLastCalledWith("/candidate-2.toml");
+  });
+
+  // ─── Phase 14 (14-03): belt-and-suspenders isSwitching short-circuit (D-13 / Pitfall 5) ───
+  //
+  // RED until 14-03 — `isSwitching` is not yet a hook param. D-13/Pitfall 5: even though the engine
+  // already goes inert while status≠"connected" and the ~60s cooldown covers the just-switched
+  // window, a defensive guard must prevent a second auto-switch from firing while an App-owned switch
+  // is in flight. When isSwitching is true the tick must NOT call doSwitch even after N breaches. This
+  // is defense-in-depth ONLY — it must NOT change COOLDOWN_MS, the consecutive-checks gate, or the
+  // no-auto-return logic (D-09), which the sibling tests above continue to pin.
+  it("does not doSwitch while isSwitching (defensive guard, D-13)", async () => {
+    const switchTo = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      useAutoSwitch(
+        makeProps({
+          checksN: 1, // would switch on the very first breach if not for the guard
+          switchTo,
+          candidates: makeCandidates(HEALTHY),
+          isSwitching: true,
+        }),
+      ),
+    );
+
+    // Several breaching ticks — with isSwitching held true the engine must never fire a switch.
+    await advanceOneTick();
+    await advanceOneTick();
+    await advanceOneTick();
+    expect(switchTo).not.toHaveBeenCalled();
+  });
+
+  // ─── F23 (14-UAT round 2): the engine reads the TUNNEL-LATENCY probe, never the endpoint ───
+  // The endpoint itself can't be honestly probed while connected (a direct connect goes through the
+  // tunnel to the-server-and-back = the ~2× / Unreachable noise that caused the false switches). The
+  // engine now probes neutral reference hosts THROUGH the tunnel (`probe_tunnel_latency`).
+  it("F23: probes probe_tunnel_latency (never ping_config_endpoint), and a HEALTHY tunnel never switches", async () => {
+    const switchTo = vi.fn().mockResolvedValue(undefined);
+    // The tunnel latency reads healthy (below threshold) every tick.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "probe_tunnel_latency") return HEALTHY;
+      return null;
+    });
+    renderHook(() =>
+      useAutoSwitch(
+        makeProps({
+          checksN: 1, // would switch on the first breach — but a healthy tunnel is never a breach
+          switchTo,
+          candidates: makeCandidates(HEALTHY),
+        }),
+      ),
+    );
+
+    await advanceOneTick();
+    await advanceOneTick();
+
+    // The engine measures the tunnel via the reference probe, NEVER the endpoint directly (the x2 source).
+    expect(mockInvoke.mock.calls.filter((c) => c[0] === "probe_tunnel_latency").length).toBeGreaterThan(0);
+    expect(mockInvoke.mock.calls.filter((c) => c[0] === "ping_config_endpoint")).toHaveLength(0);
+    // A healthy tunnel reading is never a breach → the engine never switches off a healthy server.
+    expect(switchTo).not.toHaveBeenCalled();
+  });
+
+  // A dead tunnel reads Unreachable (all reference hosts failed) → that IS a breach → switch.
+  it("F23: a dead tunnel (Unreachable) IS a breach → switches to a healthy candidate", async () => {
+    const switchTo = vi.fn().mockResolvedValue(undefined);
+    // Default mock already returns BAD (Unreachable) for probe_tunnel_latency.
+    renderHook(() =>
+      useAutoSwitch(makeProps({ checksN: 1, switchTo, candidates: makeCandidates(HEALTHY) })),
+    );
+
+    await advanceOneTick();
+    expect(switchTo).toHaveBeenCalledWith("/candidate.toml");
+  });
+
+  // A no-data reading here means the IPC invoke itself failed (transient), NOT tunnel distress — it
+  // must be NEUTRAL, never accumulate breaches toward a false switch off a healthy server.
+  it("F23: a failed probe (no-data) is neutral — never switches", async () => {
+    const switchTo = vi.fn().mockResolvedValue(undefined);
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "probe_tunnel_latency") throw new Error("ipc failed");
+      return null;
+    });
+    renderHook(() =>
+      useAutoSwitch(makeProps({ checksN: 1, switchTo, candidates: makeCandidates(HEALTHY) })),
+    );
+
+    await advanceOneTick();
+    await advanceOneTick();
+    await advanceOneTick();
+
+    expect(switchTo).not.toHaveBeenCalled();
   });
 });

@@ -777,10 +777,12 @@ describe("App", () => {
     await gotoSettings();
 
     await act(async () => {
-      emitEvent("vpn-status", { status: "error", error: "Connection failed" });
+      emitEvent("vpn-status", { status: "error", error: "Server refused the connection" });
     });
 
-    expect(statusPanelProps.error).toBe("Connection failed");
+    // F16: the core's fixed English phrase is localized on the StatusPanel banner (ru locale here),
+    // never leaked raw — proves localizeError maps the core strings, not just the ASCII reason codes.
+    expect(statusPanelProps.error).toBe(i18n.t("errors.connection_refused"));
   });
 
   it("vpn-status recovering → disconnected resolves to Disconnected (terminal NoConfig — F0)", async () => {
@@ -977,26 +979,40 @@ describe("App", () => {
       await vi.advanceTimersByTimeAsync(50);
     });
 
-    const probesBefore = vi
+    // F23 (14-UAT round 2): count probes of the SWITCH TARGET only. Switching makes the FORMER active
+    // config a new INACTIVE ping target, so useConfigPingSource fires an unrelated probe of IT; the
+    // fast-path contract is only that the TARGET (/other.toml) is not freshly probed (its map value
+    // is used), so a total-count assertion would wrongly trip on that unrelated probe.
+    const targetProbesBefore = vi
       .mocked(invoke)
-      .mock.calls.filter((c) => c[0] === "ping_config_endpoint").length;
+      .mock.calls.filter(
+        (c) => c[0] === "ping_config_endpoint" && (c[1] as { configPath?: string })?.configPath === "/other.toml",
+      ).length;
 
     // Manual switch to the inactive config (ConnectionPanel's onSwitchTo → handleConnectConfig).
+    // FAB-02: performSwitch now PARKS on the terminal `vpn-status` edge after B spawns, so fire the
+    // switch (capturing its promise), let the ping/connect chain run, then settle it with a
+    // `connected` edge. The ping-before-connect ordering asserted below all happens BEFORE the park.
+    let switchPromise: Promise<unknown> | undefined;
     await act(async () => {
-      await connectionPanelProps.onSwitchTo("/other.toml");
+      switchPromise = connectionPanelProps.onSwitchTo("/other.toml");
+      await vi.advanceTimersByTimeAsync(10);
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
+      emitEvent("vpn-status", { status: "connected" });
+      await switchPromise;
     });
 
     // The EXACT map number was pushed…
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 42 });
     // …with NO fresh probe (the fast path reads the map synchronously — the 15s background sweep
     // did not tick during the switch, so any new probe here would be the — forbidden — fallback)…
-    const probesAfter = vi
+    const targetProbesAfter = vi
       .mocked(invoke)
-      .mock.calls.filter((c) => c[0] === "ping_config_endpoint").length;
-    expect(probesAfter).toBe(probesBefore);
+      .mock.calls.filter(
+        (c) => c[0] === "ping_config_endpoint" && (c[1] as { configPath?: string })?.configPath === "/other.toml",
+      ).length;
+    expect(targetProbesAfter).toBe(targetProbesBefore);
     // …and BEFORE vpn_connect (mirrors the origin-before-connect ordering contract).
     const calls = vi.mocked(invoke).mock.calls;
     const pingIdx = calls.findIndex(
@@ -1040,11 +1056,15 @@ describe("App", () => {
     // From now on the endpoint answers — only the fresh switch-time probe sees this.
     probeResult = { status: "ok", ms: 87 };
 
+    // FAB-02: fire the switch, let the probe/connect chain run, then settle on the terminal edge.
+    let switchPromise: Promise<unknown> | undefined;
     await act(async () => {
-      await connectionPanelProps.onSwitchTo("/other.toml");
+      switchPromise = connectionPanelProps.onSwitchTo("/other.toml");
+      await vi.advanceTimersByTimeAsync(10);
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
+      emitEvent("vpn-status", { status: "connected" });
+      await switchPromise;
     });
 
     // The fallback probe targeted the SWITCH TARGET with the launch-path bound (1500ms — not the
@@ -1091,11 +1111,15 @@ describe("App", () => {
       await vi.advanceTimersByTimeAsync(50);
     });
 
+    // FAB-02: fire the switch, let the probe/connect chain run, then settle on the terminal edge.
+    let switchPromise: Promise<unknown> | undefined;
     await act(async () => {
-      await connectionPanelProps.onSwitchTo("/other.toml");
+      switchPromise = connectionPanelProps.onSwitchTo("/other.toml");
+      await vi.advanceTimersByTimeAsync(10);
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
+      emitEvent("vpn-status", { status: "connected" });
+      await switchPromise;
     });
 
     // A non-ok fresh probe pushes an honest null («—») — and the switch still connects.
@@ -1695,7 +1719,8 @@ describe("App", () => {
     await gotoSettings();
 
     expect(statusPanelProps.status).toBe("error");
-    expect(statusPanelProps.error).toBe("Configuration parse error. Check your config file.");
+    // F16: the core's fixed English phrase is localized on the StatusPanel banner (ru locale), never raw.
+    expect(statusPanelProps.error).toBe(i18n.t("errors.config_parse_error"));
     expect(statusPanelProps.connectedSince).toBeNull();
   });
 
@@ -1952,7 +1977,8 @@ describe("App", () => {
     });
 
     expect(statusPanelProps.status).toBe("error");
-    expect(statusPanelProps.error).toBe("Authorization failed");
+    // F16: the core's fixed «Authorization failed» phrase is localized on the banner (ru locale).
+    expect(statusPanelProps.error).toBe(i18n.t("errors.auth_required"));
   });
 
   // vpn-log empty messages test removed — LogPanel no longer rendered in App.tsx
@@ -2390,6 +2416,686 @@ describe("App", () => {
 
       expect(document.getElementById("tabpanel-control")).toHaveAttribute("aria-hidden", "false");
       expect(document.getElementById("tabpanel-connection")).toHaveAttribute("aria-hidden", "true");
+    });
+  });
+
+  // ─── Phase 14 (Wave 0, plan 14-01): the App-level isSwitching lifecycle + revert ───
+  //
+  // RED SCAFFOLD — these tests pin Phase-14's seamless-switch contract (D-07/D-12/D-13/D-05/
+  // D-05-impl) BEFORE any production code exists. They MUST FAIL until the later vertical slices
+  // land (isSwitching state in App, the `isSwitching` prop threaded to ConnectionPanel, the
+  // capture-before-promote revert, and the info-variant revert banner). The whole describe is
+  // scaffolded RED via `it` (not `it.todo`) so the failure is observable in the suite; the
+  // pre-existing App tests above stay GREEN (no production change in this plan).
+  //
+  // OBSERVABLE SEAM: ConnectionPanel is mocked here (connectionPanelProps captures its props), so
+  // App-level `isSwitching` is asserted through the prop the panel WILL receive
+  // (connectionPanelProps.isSwitching) and through activeConfigPath repointing on revert. The
+  // amber card FACE / control lock themselves are unit-tested at the ConfigList/ConfigCard tier.
+  describe("Phase 14 — isSwitching lifecycle + revert (RED until 14-02/14-03/14-04)", () => {
+    // The two-config manifest every switch test drives: A is the live/last-used config, B is the
+    // inactive target the user switches to. list_configs returns them last-used-first (Rust order).
+    const CFG_A = "/config-a.toml";
+    const CFG_B = "/config-b.toml";
+    // WR-02: `extra` also receives the invoke ARGS so a test can branch on the vpn_connect target
+    // (e.g. fail only CFG_B but let the A-reconnect succeed). Existing single-arg overrides keep
+    // working — the second parameter is simply ignored by them.
+    function twoConfigInvoke(extra?: (cmd: string, args?: unknown) => unknown) {
+      return async (cmd: string, args?: unknown) => {
+        if (cmd === "check_vpn_status") return "disconnected";
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "list_configs")
+          return [
+            { id: "id-a", name: "A", host: "a.example.com", user: "u", path: CFG_A, order: 0, last_used: true },
+            { id: "id-b", name: "B", host: "b.example.com", user: "u", path: CFG_B, order: 1, last_used: false },
+          ];
+        // 14-02 fix: consult the per-test `extra` override BEFORE the default ping response, so a
+        // test that holds `ping_config_endpoint` open (to park the switch handler at its first await
+        // and observe the synchronously-set isSwitching flag) actually takes effect. Previously the
+        // default `{status:"ok", ms:30}` returned first, so config B always had a NUMERIC ping →
+        // pushPendingConnectPing took the fast path (no await), the switch completed synchronously,
+        // and the finally cleared isSwitching before the assertion could see it true.
+        const e = extra?.(cmd, args);
+        if (e !== undefined) return e;
+        if (cmd === "ping_config_endpoint") return { status: "ok", ms: 30 };
+        if (cmd === "vpn_connect") return null;
+        if (cmd === "vpn_disconnect") return null;
+        return null;
+      };
+    }
+
+    // GREEN in 14-02/14-03: isSwitching is set SYNCHRONOUSLY in the same handler window as the
+    // config promote — before any await resolves — so the very first re-render already carries the
+    // hero-preserving gate + control lock (Pitfall 1: a flag set after the first await flickers one
+    // frame). Assert the panel sees isSwitching===true on the first re-render after the switch is
+    // triggered, WITHOUT flushing the awaited probe/switch.
+    it("sets isSwitching synchronously on switch start (before any await resolves)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      // Hold the pre-connect probe OPEN so the switch handler is suspended at its FIRST await — the
+      // exact window in which the sync-set flag must already be true. F23 (14-UAT round 2): promoting
+      // to B makes the FORMER active A a NEW inactive ping target, so useConfigPingSource fires an
+      // EXTRA ping_config_endpoint(A) that would overwrite a single resolver — collect ALL held probe
+      // resolvers and settle them together so the switch's own B-probe is always resolved.
+      const probeResolvers: Array<(v: unknown) => void> = [];
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd) => {
+          if (cmd === "ping_config_endpoint")
+            return new Promise((res) => {
+              probeResolvers.push(res);
+            });
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Trigger the switch but DO NOT resolve the probe yet — the handler is parked at its first
+      // await. A synchronously-set flag is already visible on the re-render that the promote caused.
+      let switchPromise: Promise<void> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      expect(connectionPanelProps.isSwitching).toBe(true);
+
+      // Let it settle: resolve the probe → switchTo tears down A (disconnected) → connects B → the
+      // terminal connected edge it parks on (FAB-02) settles the switch.
+      await act(async () => {
+        probeResolvers.forEach((res) => res({ status: "ok", ms: 30 }));
+        await vi.advanceTimersByTimeAsync(1);
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "connected" });
+        await switchPromise;
+      });
+    });
+
+    // 3.7 F-SWITCHDEF (F3): a FRESH connect from a DISCONNECTED state is NOT a switch — isSwitching
+    // must stay FALSE (the card shows «Подключение», never the amber «Переключение»). The inverse of
+    // the switch tests above (which seed a live tunnel first).
+    it("3.7 F-SWITCHDEF: a fresh connect from disconnected keeps isSwitching FALSE", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(twoConfigInvoke());
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // NO connected edge — the app is DISCONNECTED. Connecting CFG_B is a FRESH connect, not a switch.
+      await act(async () => {
+        await connectionPanelProps.onSwitchTo(CFG_B);
+      });
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // 3.7 F-SWITCHDEF (F3): a FRESH connect that FAILS has NO A to revert to — no revert notice; the
+    // status lands on error honestly (a switch would revert; a fresh connect does not).
+    it("3.7 F-SWITCHDEF: a fresh connect that fails shows no revert notice", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd) => {
+          if (cmd === "vpn_connect") throw new Error("connect failed");
+          return undefined;
+        }),
+      );
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      await act(async () => {
+        await connectionPanelProps.onSwitchTo(CFG_B);
+      });
+      expect(connectionPanelProps.revertNotice).toBeFalsy();
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // FAB-02: isSwitching clears when the TERMINAL connected edge arrives. B's process spawns
+    // (vpn_connect accepts), then performSwitch PARKS on the real terminal `vpn-status` edge — the
+    // switch does NOT settle on switchTo's spawn-accept return. So we fire the switch (capturing its
+    // promise WITHOUT awaiting — it is parked on the terminal edge), emit `connected`, THEN await.
+    it("clears isSwitching atomically on the terminal connected edge (FAB-02)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(twoConfigInvoke());
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch (a fresh
+      // connect keeps isSwitching false — tested separately).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Fire the switch; a real switch first tears down A (waits for "disconnected") then connects B
+      // and parks on B's terminal edge. Do NOT await here — it stays in flight.
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      // Still in flight (amber lock held) whether parked at the teardown wait or the terminal edge.
+      expect(connectionPanelProps.isSwitching).toBe(true);
+
+      // Teardown A completes → switchTo connects B → B reaches Connected → the switch settles.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "connected" });
+        await switchPromise;
+      });
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // FAB-02: the DOMINANT real "B не подключается" case — B's process SPAWNS (vpn_connect accepts)
+    // but B then dies never-connected (broken auth / connect-timeout), emitting a terminal `error`.
+    // The silent revert MUST fire on that POST-SPAWN error edge (the old code settled on switchTo's
+    // ok:true and skipped the revert). Assert the active pointer reverts to A and the flag clears.
+    it("FAB-02: reverts on a POST-SPAWN B failure (B spawns then errors never-connected)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      // B's vpn_connect ACCEPTS (spawns) — default mock returns null for vpn_connect. B then dies via
+      // the terminal error edge below. The revert's A-reconnect (vpn_connect CFG_A) also accepts.
+      vi.mocked(invoke).mockImplementation(twoConfigInvoke());
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      // B spawned → the pointer optimistically shows B while the switch is parked.
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_B);
+      expect(connectionPanelProps.isSwitching).toBe(true);
+
+      // Teardown A completes → switchTo connects B → B dies never-connected (terminal error) → revert.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "error", error: "sidecar-exit" });
+        await switchPromise;
+      });
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // R2-2 (Fable-5 re-review): a FAILED switch (B errors) must revert to A INSTANTLY — skipTeardown,
+    // no spurious SECOND vpn_disconnect (and thus no 5s F-4-silenced «Отключение» dwell). The revert's
+    // skipTeardown is now derived from the park OUTCOME (`error` ⇒ B settled), not a stale statusRef
+    // re-read in the settle microtask. Lock it: exactly ONE vpn_disconnect (the initial A→B teardown).
+    it("R2-2: an error-edge revert uses skipTeardown — exactly one vpn_disconnect, no second teardown", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      let disconnectCalls = 0;
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd) => {
+          if (cmd === "vpn_disconnect") disconnectCalls += 1;
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" }); // A→B teardown settles (1st vpn_disconnect)
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "error", error: "sidecar-exit" }); // B dies → revert to A
+        await switchPromise;
+      });
+
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+      // Exactly ONE vpn_disconnect (the initial teardown). A second would mean the error-edge revert
+      // ran a spurious teardown (the R2-2 stale-statusRef regression).
+      expect(disconnectCalls).toBe(1);
+    });
+
+    // FAB-02 + F-1 (Fable-5) status-aware backstop: B spawns but NEVER reaches connected AND never
+    // emits a terminal edge (a wedged connect that stays «Подключение»). Under 3.8 delay-green a
+    // HEALTHY http3 B legitimately warms this long, so the backstop RE-ARMS while the status is still
+    // "connecting" and reverts only after the ceiling (SWITCH_SETTLE_MAX_TICKS × 15s = 75s), NOT the
+    // first 15s tick — that first-tick revert was the F-1 blocker (phantom revert of a warming B).
+    it("FAB-02/F-1: reverts only after the ceiling when B stays «Подключение» with no terminal edge", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(twoConfigInvoke());
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      expect(connectionPanelProps.isSwitching).toBe(true);
+
+      // Teardown A completes → switchTo connects B → B stays «Подключение». Emit the Connecting edge
+      // Rust sends for B so the LIVE status is deterministically "connecting" during the park (the
+      // exact 3.8 delay-green warming window). F-1: the status-aware backstop then RE-ARMS across the
+      // ticks instead of reverting a warming B at the first 15s tick.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "connecting" });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      // Advance to one tick short of the ceiling (4 × 15s): still parked, no revert yet (re-arm).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_B);
+      expect(connectionPanelProps.isSwitching).toBe(true);
+      await act(async () => {
+        // Cross the ceiling → timeout → revert. F-1 defensive: the still-"connecting" B is torn down
+        // first (skipTeardown:false), so its teardown wait falls through the 5s safety (no
+        // disconnected event follows) before A reconnects.
+        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.advanceTimersByTimeAsync(5_000);
+        await switchPromise;
+      });
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // FAB-02: a failed B is NEVER stamped last-used. `set_last_used` must be called for B ONLY after
+    // B's terminal `connected` edge — never on a spawn-accept that then fails. Here B spawns then
+    // errors; assert set_last_used was NOT called with B's id.
+    it("FAB-02: does NOT stamp last-used for a B that spawns then fails (only after connected)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      const setLastUsedIds: unknown[] = [];
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd, args) => {
+          if (cmd === "set_last_used") {
+            setLastUsedIds.push((args as { id?: string } | undefined)?.id);
+          }
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "error", error: "sidecar-exit" });
+        await switchPromise;
+      });
+
+      // B (id-b) must never have been stamped last-used — it never reached connected. (id-a MAY be
+      // stamped by the revert's A-reconnect, which is correct — A is the server we stayed on.)
+      expect(setLastUsedIds).not.toContain("id-b");
+    });
+
+    // FAB-02: the happy path DOES stamp B last-used — but ONLY after the terminal connected edge.
+    it("FAB-02: stamps last-used for B only after the terminal connected edge", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      const setLastUsedIds: unknown[] = [];
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd, args) => {
+          if (cmd === "set_last_used") {
+            setLastUsedIds.push((args as { id?: string } | undefined)?.id);
+          }
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      // Not yet stamped — B has only spawned (still tearing down A / connecting B).
+      expect(setLastUsedIds).not.toContain("id-b");
+      // Teardown A → B connects → terminal connected → NOW stamp B.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "connected" });
+        await switchPromise;
+      });
+      expect(setLastUsedIds).toContain("id-b");
+    });
+
+    // FAB-03: the hero + card lock stay held through the ENTIRE revert leg. On B's error edge the
+    // onSettled defensive clear must NOT release isSwitching while the switch guard is held — the
+    // revert is still running. Assert isSwitching is still true immediately after the error edge (the
+    // revert's A-reconnect is parked at its own await), and only clears once the switch fully settles.
+    it("FAB-03: keeps isSwitching held through the revert (onSettled does not release it mid-revert)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      // B spawns then errors; the revert's A-reconnect is held OPEN so we can observe the mid-revert
+      // window (isSwitching must still be true while the revert leg runs).
+      let resolveAConnect: ((v: unknown) => void) | undefined;
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd, args) => {
+          if (cmd === "vpn_connect") {
+            const path = (args as { configPath?: string } | undefined)?.configPath;
+            if (path === CFG_A)
+              return new Promise((res) => {
+                resolveAConnect = res;
+              });
+          }
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      // Teardown A → B connects → parks; then B dies → revert starts, parked on A's (held-open) reconnect.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "error", error: "sidecar-exit" });
+        await Promise.resolve();
+      });
+      // MID-REVERT: the guard is still held, so onSettled's defensive clear did NOT release the lock.
+      expect(connectionPanelProps.isSwitching).toBe(true);
+
+      // Release A's reconnect → the whole switch+revert settles and the lock clears atomically.
+      await act(async () => {
+        resolveAConnect?.(null);
+        await switchPromise;
+      });
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // FAB-01: a manual «Переключиться» while status is `reconnecting`/`recovering` is REFUSED (early
+    // no-op) — it must not race the Rust reconnect supervisor. Drive status to `reconnecting`, fire a
+    // switch, and assert the active pointer never moved to B (no switch happened) and no vpn_connect
+    // for B fired.
+    it("FAB-01: refuses a switch while status is reconnecting (races the reconnect supervisor)", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      const connectPaths: unknown[] = [];
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd, args) => {
+          if (cmd === "vpn_connect") {
+            connectPaths.push((args as { configPath?: string } | undefined)?.configPath);
+          }
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // Drive the backend reconnect supervisor status.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "reconnecting" });
+      });
+
+      // Attempt a manual switch to B — it must be REFUSED (no-op).
+      await act(async () => {
+        await connectionPanelProps.onSwitchTo(CFG_B);
+      });
+
+      // The active pointer never moved to B, and B's vpn_connect never fired.
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+      expect(connectPaths).not.toContain(CFG_B);
+    });
+
+    // GREEN in 14-04: the revert shows a calm INFO banner (ErrorBanner variant="info"), NEVER the
+    // red error banner (D-05). B's vpn_connect THROWS at spawn-accept → switchTo returns ok:false →
+    // performSwitch reverts immediately (no terminal-edge wait for this leg); the revert's A-reconnect
+    // succeeds so the calm notice shows. Key on the banner ROLE + info tone (role="status").
+    it("shows a calm info-variant revert banner (never the red error banner) on failure", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      // WR-02: the calm blue «остались на A» info notice is shown ONLY when the A-reconnect ACTUALLY
+      // succeeds. Only B (CFG_B) throws; the A-reconnect (vpn_connect with CFG_A) resolves.
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd, args) => {
+          if (cmd === "vpn_connect") {
+            const path = (args as { configPath?: string } | undefined)?.configPath;
+            if (path === CFG_B) throw new Error("B connect failed");
+          }
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch (only a real
+      // switch reverts to A — a fresh connect has no revert target).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Teardown A → B's vpn_connect throws → switchTo ok:false → revert to A (resolves) → notice STAGED.
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        await switchPromise;
+      });
+
+      // F30 (14-UAT round 3): the calm «…восстановлено» notice is STAGED after the revert's switchTo(A)
+      // spawn-accept, but must NOT be shown while A is still «Подключение» — the owner saw it pop over the
+      // amber connecting badge, i.e. "restored before it was restored". So it is still null here.
+      expect(connectionPanelProps.revertNotice).toBeNull();
+
+      // Only A's REAL `connected` edge commits it (the true moment A is back).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+      // F6 (14-UAT): the revert notice renders EMBEDDED inside the lead ConfigCard (not a window-level
+      // banner), so App passes it DOWN as the `revertNotice` prop naming the server we stayed on (the
+      // info-variant / role="status" / never-red rendering is covered by ConfigCard's own tests).
+      expect(connectionPanelProps.revertNotice).toMatch(/восстановлено/);
+    });
+
+    // WR-02: the honesty case — when the revert's A-reconnect ALSO fails, the calm blue «остались на A»
+    // info notice is SUPPRESSED so the user sees ONLY the honest red error status. B fails AND A fails
+    // (any vpn_connect throws) — both at spawn-accept, so the switch+revert settle on this await.
+    it("WR-02: suppresses the calm revert notice when the A-reconnect also fails", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd) => {
+          if (cmd === "vpn_connect") throw new Error("connect failed");
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+
+      // 3.7 F-SWITCHDEF: seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Teardown A → B's vpn_connect throws → revert → A's vpn_connect ALSO throws → notice suppressed.
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        await switchPromise;
+      });
+
+      // No calm info notice — only the honest red error remains (the revert's switchTo returned
+      // ok:false, so setRevertNotice was never called). The active pointer still repointed to A.
+      // F6 (14-UAT): the notice is now the `revertNotice` prop (embedded in the card) — assert unset.
+      expect(connectionPanelProps.revertNotice).toBeFalsy();
+      expect(connectionPanelProps.activeConfigPath).toBe(CFG_A);
+    });
+
+    // 3.5 F-VERDICT (F11): a genuine tray/manual disconnect that supersedes a switch mid-flight makes
+    // Rust bail vpn_connect(B) to a clean Disconnected WITHOUT spawning (ConnectOutcome spawned:false).
+    // performSwitch must then NOT park on a terminal edge (no 15s stuck amber), NOT revert, and NOT
+    // show the phantom «остались на A» notice — it just releases the lock and leaves the app disconnected.
+    it("F11: a superseded switch (disconnect mid-switch) does NOT revert or show a notice, releases the lock", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(
+        twoConfigInvoke((cmd, args) => {
+          if (cmd === "vpn_connect") {
+            const path = (args as { configPath?: string } | undefined)?.configPath;
+            if (path === CFG_B) return { spawned: false, reason: "superseded-by-disconnect" };
+          }
+          return undefined;
+        }),
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      await act(async () => {
+        await connectionPanelProps.onSwitchTo(CFG_B);
+      });
+
+      // No phantom revert notice, and the amber switch lock was released (no stuck «Переключение»).
+      expect(connectionPanelProps.revertNotice).toBeFalsy();
+      expect(connectionPanelProps.isSwitching).toBe(false);
+    });
+
+    // 3.6 F-TRAY (F10/F11): a genuine tray «Отключить» that lands DURING a switch (while performSwitch
+    // is parked on the settle edge) arrives as a `vpn-flow` disconnect@tray event. It must ABORT the
+    // park WITHOUT a revert — the user's disconnect wins — releasing the lock and clearing any notice.
+    it("F10: a vpn-flow tray disconnect during a switch aborts the park without a revert", async () => {
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      // Default mock: vpn_connect(CFG_B) resolves (treated as spawned) so performSwitch PARKS.
+      vi.mocked(invoke).mockImplementation(twoConfigInvoke());
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+
+      // Fire the switch but do NOT settle it — it parks waiting for a terminal edge.
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await vi.advanceTimersByTimeAsync(10);
+      });
+
+      // Mid-park, a genuine tray «Отключить» arrives → vpn-flow disconnect@tray resolves it "external".
+      await act(async () => {
+        emitEvent("vpn-flow", { action: "disconnect", origin: "tray" });
+        await switchPromise;
+      });
+
+      // Aborted without a revert: no notice, lock released.
+      expect(connectionPanelProps.revertNotice).toBeFalsy();
+      expect(connectionPanelProps.isSwitching).toBe(false);
     });
   });
 });

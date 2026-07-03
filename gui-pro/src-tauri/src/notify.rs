@@ -111,6 +111,13 @@ pub enum ConnectOrigin {
 /// routes `Error → Disconnected` to clear the banner, detected purely from `prev == Error`). A
 /// GENUINE user disconnect (`prev != Error`, no teardown in flight) STILL fires «Отключено».
 ///
+/// F17 (14-UAT round 2): `switch_teardown_pending` is now an AGGREGATE the caller (`maybe_fire`)
+/// computes as `switch_or_reconnect_pending || seamless_switch_active` — see `maybe_fire` for why the
+/// whole-switch-window flag must also suppress the intermediate «Отключено» (a failed B / the revert
+/// leg produce transient `→ Disconnected` edges after the teardown flag has already been dropped).
+/// The pure policy is unchanged: a `Disconnected` under this aggregate (or an error-acknowledge) is
+/// suppressed; a genuine user disconnect still fires «Отключено».
+///
 /// It reads NO I/O and touches NO window.
 pub fn decide_notification(
     prev: VpnStatus,
@@ -132,15 +139,17 @@ pub fn decide_notification(
         return None;
     }
 
-    // The transient wire-state `Connecting` is deliberately NOT a NotifyKind (D-01): a plate
-    // that fired on every in-flight flicker would be noise. A transition LANDING on it fires
-    // nothing. NOTE: at the `VpnStatus` level there is no `Disconnecting` variant — the
-    // "отключение…" phase is tracked as a separate boolean (`AppState.disconnecting`), and its
-    // terminal wire-state is `Disconnected`; so the only transient VpnStatus the decider can
-    // receive is `Connecting`. The D-01 "two transient states" pair (Connecting/Disconnecting)
-    // is a UI-copy concept; only `Connecting` reaches this pure decider as a status.
+    // The transient wire-states `Connecting` and (3.4 R-DCT) `Disconnecting` are deliberately NOT
+    // NotifyKinds (D-01): a plate that fired on every in-flight flicker would be noise. A transition
+    // LANDING on either fires nothing — the genuine outcome plate fires on the SETTLED edge
+    // (`Disconnecting → Disconnected` fires «Отключено» via the `Disconnected` arm below, gated by
+    // `switch_teardown_pending` exactly as before). Before 3.4 the «отключение…» phase was only a
+    // boolean (`AppState.disconnecting`) and its terminal wire-state was `Disconnected`; now the
+    // teardown is a real transient status, so BOTH `Connecting` and `Disconnecting` reach this decider
+    // and both map to None.
     match next {
         VpnStatus::Connecting => None,
+        VpnStatus::Disconnecting => None,
 
         // A genuine transition to an OUTCOME state maps `next` to a NotifyKind.
         VpnStatus::Error => Some(NotifyKind::ConnectionError),
@@ -429,6 +438,18 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
         })
         .unwrap_or(false);
 
+    // F17: read the whole-switch-window intent the FE mirrors from `isSwitching` (raised on switch
+    // start, cleared in performSwitch's finally after the whole switch+revert). While set, a transient
+    // `→ Disconnected` from a failed B or the revert leg is suppressed so the seamless revert stays
+    // calm (amber card + embedded «…восстановлено» banner only). NOT cleared Rust-side — the FE owns it.
+    let seamless_switch_active = state
+        .as_ref()
+        .map(|s| {
+            s.seamless_switch_active
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
+        .unwrap_or(false);
+
     // Consume the origin on ANY terminal outcome of the attempt it was set for (Connected / Error /
     // Disconnected) — reset it to `Manual` so it marks only the one intended auto action (Pitfall 2
     // + CR-01: a FAILED auto attempt must not leave a stale origin for a later manual connect to
@@ -473,8 +494,20 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
     // The pure decider owns the whole firing policy (edge-detect, gate, origin-map, Disconnected
     // suppression). It gets the real mirrored gate, the peeked origin (already consumed above for a
     // terminal edge), and the peeked teardown intent (used to suppress an intermediate «Отключено»).
-    let Some(kind) = decide_notification(prev, next, origin, notifications_on, switch_teardown_pending)
-    else {
+    // F17: fold the whole-switch-window flag into the intermediate-«Отключено» suppression the
+    // decider already applies for `switch_teardown_pending`. The teardown flag is dropped before
+    // vpn_connect(B), so a failed B / the revert-to-A leg's transient Disconnected edges would
+    // otherwise fire a phantom «Отключено» mid-seamless-switch; `seamless_switch_active` (mirrored
+    // from the FE's isSwitching, held across the whole switch+revert) keeps them silent. The REAL
+    // `switch_teardown_pending` value above is still used for the origin/ping consume + clear logic.
+    let suppress_intermediate_disconnected = switch_teardown_pending || seamless_switch_active;
+    let Some(kind) = decide_notification(
+        prev,
+        next,
+        origin,
+        notifications_on,
+        suppress_intermediate_disconnected,
+    ) else {
         return;
     };
 
@@ -672,6 +705,65 @@ const CONNECT_PLATE_HEIGHT: f64 = 140.0;
 /// the shared fire tail resizes both dimensions consistently before positioning.
 const PLATE_WIDTH: f64 = 360.0;
 
+/// F15 (14-UAT round 2): the fixed per-kind heights (68/140) clip the plate when a long config name
+/// wraps to extra lines — `overflow:hidden` bottom-clips the content so the ping row's bottom padding
+/// is eaten (owner: «не хватает отступа снизу»). The FE measures its rendered content height after
+/// layout and calls `resize_notification_plate` to grow/shrink the window to fit, preserving the
+/// design paddings for ANY content length. The measured value is clamped to a sane band so a bogus
+/// measurement (0 / NaN / absurd) can never create an off-screen, zero, or giant window.
+const MIN_PLATE_HEIGHT: f64 = 56.0;
+const MAX_PLATE_HEIGHT: f64 = 320.0;
+
+/// Pure: coerce a raw FE-measured height to the safe plate band. NaN / non-finite / below-min → MIN;
+/// above-max → MAX; otherwise passthrough. Unit-tested without a live window.
+fn clamp_plate_height(raw: f64) -> f64 {
+    if !raw.is_finite() || raw < MIN_PLATE_HEIGHT {
+        MIN_PLATE_HEIGHT
+    } else if raw > MAX_PLATE_HEIGHT {
+        MAX_PLATE_HEIGHT
+    } else {
+        raw
+    }
+}
+
+/// F15: shared "position the plate bottom-right of the work area" step, extracted so BOTH the initial
+/// fire (`fire_plate_tail`) and the FE-driven `resize_notification_plate` size FIRST then position —
+/// `outer_size()` reflects the just-set height, so the plate stays flush to the bottom-right corner at
+/// any height. WR-04 `center()` fallback preserved (an unresolved monitor/size must not leave the
+/// plate off-screen).
+fn anchor_plate_bottom_right(win: &tauri::WebviewWindow) {
+    let positioned = match (win.primary_monitor(), win.outer_size()) {
+        (Ok(Some(monitor)), Ok(win_size)) => {
+            let wa = monitor.work_area();
+            let margin = (12.0 * monitor.scale_factor()) as i32;
+            let x = wa.position.x + wa.size.width as i32 - win_size.width as i32 - margin;
+            let y = wa.position.y + wa.size.height as i32 - win_size.height as i32 - margin;
+            win.set_position(tauri::PhysicalPosition::<i32> { x, y }).is_ok()
+        }
+        _ => false,
+    };
+    if !positioned {
+        // Positioning could not be resolved — at least keep the plate on-screen (Tauri 2 center()).
+        let _ = win.center();
+    }
+}
+
+/// F15: resize the `notification` plate window to the FE-measured content height, then re-anchor
+/// bottom-right (size FIRST so `outer_size()` reads the new height). Runs on EVERY applyPlate render
+/// (latest-wins, D-03: a shorter next plate must SHRINK the window too). Custom app command → needs no
+/// per-command capability entry (mirrors `pull_pending_plate`). Best-effort: a missing window no-ops,
+/// the clamp guards a bogus height, and the DWM-rounded opaque window is untouched (no transparency —
+/// #13859 — only `set_size`/`set_position` are called).
+#[tauri::command]
+pub fn resize_notification_plate(height: f64, app: tauri::AppHandle) {
+    let Some(win) = app.get_webview_window("notification") else {
+        return;
+    };
+    let clamped = clamp_plate_height(height);
+    let _ = win.set_size(tauri::LogicalSize::new(PLATE_WIDTH, clamped));
+    anchor_plate_bottom_right(&win);
+}
+
 /// 13-08: the SHARED "resize + position + stage + emit + show" tail both fire paths (connect / compact)
 /// reuse. It takes the fully-resolved payload fields plus the target window HEIGHT so the connect
 /// plate (with details) gets a taller window and the compact plate keeps the short one.
@@ -703,30 +795,10 @@ fn fire_plate_tail(
     // resize fails we still position/show at whatever the current size is (best-effort — never abort).
     let _ = win.set_size(tauri::LogicalSize::new(PLATE_WIDTH, window_height));
 
-    // Position bottom-right of the primary monitor's WORK AREA (excludes the taskbar — Pattern 2),
-    // mirroring tray.rs's primary_monitor precedent but using work_area() rather than size() so the
-    // plate clears the taskbar. work_area is physical px; set_position takes physical px — only the
-    // gap margin is DPI-scaled. `outer_size()` is read AFTER the set_size above, so the anchor uses
-    // the NEW (taller for connect) height and the plate still sits flush to the bottom-right corner.
-    //
-    // WR-04: if EITHER primary_monitor() or outer_size() fails to resolve (transient on some Win11
-    // DPI / monitor-hotplug states), fall back to win.center() BEFORE show() rather than silently
-    // leaving the plate at a stale/default coordinate that could be off-screen after a resolution
-    // change — an off-screen, non-interactive plate is a silently-lost notification.
-    let positioned = match (win.primary_monitor(), win.outer_size()) {
-        (Ok(Some(monitor)), Ok(win_size)) => {
-            let wa = monitor.work_area();
-            let margin = (12.0 * monitor.scale_factor()) as i32;
-            let x = wa.position.x + wa.size.width as i32 - win_size.width as i32 - margin;
-            let y = wa.position.y + wa.size.height as i32 - win_size.height as i32 - margin;
-            win.set_position(tauri::PhysicalPosition::<i32> { x, y }).is_ok()
-        }
-        _ => false,
-    };
-    if !positioned {
-        // Positioning could not be resolved — at least keep the plate on-screen (Tauri 2 center()).
-        let _ = win.center();
-    }
+    // Position bottom-right of the primary monitor's WORK AREA (excludes the taskbar). Shared with the
+    // F15 resize command via `anchor_plate_bottom_right` — size FIRST (above) so `outer_size()` reflects
+    // the new height and the plate sits flush to the bottom-right corner (WR-04 center() fallback inside).
+    anchor_plate_bottom_right(&win);
 
     // 13-05: STAGE the pending plate BEFORE the emit so a fire whose emit beats the plate's
     // not-yet-attached listener is recoverable via `pull_pending_plate` (the emit-before-listener
@@ -789,6 +861,25 @@ mod tests {
     // mirroring the vpn.rs `decide_timeout_action` test-module shape.
     use super::*;
     use crate::commands::vpn::VpnStatus;
+
+    // F15 (14-UAT round 2): the FE-measured plate height is clamped to a safe band before it resizes
+    // the window, so a bogus measurement can never create an off-screen / zero / giant plate.
+    #[test]
+    fn clamp_plate_height_coerces_to_the_safe_band() {
+        // A normal measured height passes through.
+        assert_eq!(clamp_plate_height(132.0), 132.0);
+        assert_eq!(clamp_plate_height(MIN_PLATE_HEIGHT), MIN_PLATE_HEIGHT);
+        assert_eq!(clamp_plate_height(MAX_PLATE_HEIGHT), MAX_PLATE_HEIGHT);
+        // Below-min / zero / negative → MIN (never a zero or off-screen window).
+        assert_eq!(clamp_plate_height(10.0), MIN_PLATE_HEIGHT);
+        assert_eq!(clamp_plate_height(0.0), MIN_PLATE_HEIGHT);
+        assert_eq!(clamp_plate_height(-50.0), MIN_PLATE_HEIGHT);
+        // Absurd finite → MAX (never a giant window). Non-finite (NaN / ±∞) is a garbage measurement
+        // → MIN (conservative: a small plate is safer than a giant/off-screen one).
+        assert_eq!(clamp_plate_height(5000.0), MAX_PLATE_HEIGHT);
+        assert_eq!(clamp_plate_height(f64::NAN), MIN_PLATE_HEIGHT);
+        assert_eq!(clamp_plate_height(f64::INFINITY), MIN_PLATE_HEIGHT);
+    }
 
     #[test]
     fn fires_on_seven_outcome_states() {
@@ -1237,6 +1328,28 @@ mod tests {
             ),
             Some(NotifyKind::Connected),
             "after the auto origin is consumed, the next manual connect reads Manual → Connected",
+        );
+    }
+
+    #[test]
+    fn disconnecting_is_transient_and_settled_disconnect_fires() {
+        // 3.4 R-DCT: a transition INTO the new Disconnecting wire-state fires NOTHING (transient, like
+        // Connecting). The genuine «Отключено» fires on the SETTLED Disconnecting → Disconnected edge
+        // for a real user disconnect, and stays suppressed for a switch/reconnect teardown.
+        assert_eq!(
+            decide_notification(VpnStatus::Connected, VpnStatus::Disconnecting, ConnectOrigin::Manual, true, false),
+            None,
+            "a transition INTO Disconnecting is transient — fires nothing",
+        );
+        assert_eq!(
+            decide_notification(VpnStatus::Disconnecting, VpnStatus::Disconnected, ConnectOrigin::Manual, true, false),
+            Some(NotifyKind::Disconnected),
+            "a real user disconnect fires «Отключено» on the settled Disconnecting → Disconnected edge",
+        );
+        assert_eq!(
+            decide_notification(VpnStatus::Disconnecting, VpnStatus::Disconnected, ConnectOrigin::Manual, true, true),
+            None,
+            "the teardown half of a switch/reconnect must not flash «Отключено»",
         );
     }
 

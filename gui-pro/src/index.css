@@ -191,3 +191,17 @@ input[type="number"] {
   overflow-y: auto;
   max-height: 100%;
 }
+
+/* ── View Transitions layering ── */
+/* F1 (14-UAT): keep the bottom tab navigation ABOVE the config cards during a config-switch View
+   Transition. The promoted card's ::view-transition-group animates in the browser's TOP LAYER, which
+   would otherwise paint OVER the bottom nav for the whole switch. The nav wrapper carries
+   view-transition-name: bottom-nav (App.tsx); forcing its group's z-index above the card groups keeps it
+   on top through the transition (the sticky hero has z-10, so without this it could legally paint above).
+   F25 (round 3): this z-index is only HALF the fix — it puts the nav group on TOP, but the nav snapshot
+   was TRANSPARENT (a vt-named element is snapshotted without its ancestors' bg), so cards gliding UNDER it
+   showed THROUGH. The other half is an opaque --color-bg-primary painted ON the bottom-nav wrapper in
+   App.tsx so the snapshot actually occludes. Keep BOTH. */
+::view-transition-group(bottom-nav) {
+  z-index: 1000;
+}

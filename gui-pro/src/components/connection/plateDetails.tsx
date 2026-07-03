@@ -30,13 +30,16 @@ const DETAIL_ICON = "h-3 w-3";
 const PING_UNIT: Record<PlateLang, string> = { ru: "мс", en: "ms" };
 
 /**
- * Colour the connect-time ping by quality: green under 100 ms, amber under 200, red beyond. Returns
- * a `var(--…)` status token. Used only for a numeric ping — a missing ping («—») renders muted, no
- * colour (see `buildConnectDetails`).
+ * Colour the connect-time ping by quality, using the EXACT SAME thresholds as the Connection-tab card
+ * pill (`usePerConfigPing.bandForMs`, IN-22): green ≤150 ms, amber ≤300, red beyond. One threshold set
+ * everywhere so the same ms never reads a different colour on the notification vs the card (owner:
+ * "везде одинаково" — was green<100/amber<200 here, which disagreed with the card's ≤150/≤300).
+ * Returns a `var(--…)` status token. Used only for a numeric ping — a missing ping («—») renders
+ * muted, no colour (see `buildConnectDetails`).
  */
 export function pingColor(ms: number): string {
-  if (ms < 100) return TOK.connected;
-  if (ms < 200) return TOK.warning;
+  if (ms <= 150) return TOK.connected;
+  if (ms <= 300) return TOK.warning;
   return TOK.error;
 }
 

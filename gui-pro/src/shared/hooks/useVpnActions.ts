@@ -203,6 +203,23 @@ export function useVpnActions({
     config.configPath,
   ]);
 
+  // Phase 14 (FAB-02): mark a config last-used by PATH (resolves the manifest id from the path).
+  // Extracted so BOTH switchTo's accept path (direct callers / revert) AND the App's terminal
+  // `connected` edge (the switch's real success — a spawned B may still die never-connected) can
+  // stamp it. Best-effort: a missing entry / failed marker never throws (the tunnel is already up
+  // — the marker is a UI nicety the list reload reconciles). No config content crosses (D-29).
+  const markLastUsed = useCallback(async (path: string): Promise<void> => {
+    try {
+      const list = await invoke<Array<{ id: string; path: string }>>("list_configs");
+      const match = list?.find((c) => c.path === path);
+      if (match) {
+        await invoke("set_last_used", { id: match.id });
+      }
+    } catch {
+      // Best-effort: a last-used-marker failure is not worth surfacing.
+    }
+  }, []);
+
   // Phase 11 (P11-04 / D-20): MANUAL config switch — «Переключиться» on an inactive
   // ConfigCard. This is intentionally a PLAIN disconnect→connect of the selected
   // config through the EXISTING vpn_disconnect/vpn_connect commands; it touches NO
@@ -217,12 +234,32 @@ export function useVpnActions({
   // is moved to the newly-active config via set_last_used (the Wave-1 manifest command).
   // set_last_used takes the manifest ID, not the path, so we resolve the ID from the
   // path via list_configs (the manifest is the source of truth for id↔path).
+  // Phase 14 (14-04, Open Q1): switchTo now RESOLVES to `{ ok: boolean }` so the App revert
+  // orchestration (D-05/D-05-impl) has an explicit, testable signal that B failed to connect —
+  // ok:true when the connect succeeds (the path that reaches set_last_used), ok:false on the
+  // connect catch that sets status=error (or a teardown reject / missing path). The explicit
+  // return is more testable than observing the terminal vpn-status edge from App. EVERYTHING else
+  // about switchTo's contract is UNCHANGED (teardown only when connected/connecting, the
+  // reconnectResolve + 5s safety + WR-02 reject-abort, set_switch_or_reconnect_pending(true,
+  // isSwitch:true) + clears, set_last_used after success). switchTo STILL never rejects — callers
+  // that fire-and-forget keep working; callers that await it now get a result to branch on.
+  //
+  // Phase 14 (FAB-07): `skipTeardown` lets the App REVERT leg reconnect A WITHOUT running a
+  // spurious second teardown. When a switch to B fails, the connection is already settled
+  // error/disconnected — there is no live tunnel to tear down, so a `vpn_disconnect` there is
+  // pure overhead (and if that spurious disconnect REJECTS — e.g. a transient «Lock error» — the
+  // old code aborted the revert entirely without ever trying A). The revert passes
+  // skipTeardown:true so it goes STRAIGHT to `vpn_connect(A)`. The forward switch keeps its
+  // status-gated teardown; skipTeardown does NOT change that path (default false).
   const switchTo = useCallback(
-    async (path: string) => {
+    async (
+      path: string,
+      opts?: { skipTeardown?: boolean; stampLastUsed?: boolean },
+    ): Promise<{ ok: boolean; superseded?: boolean }> => {
       if (!path) {
         setError(i18n.t("messages.config_required"));
         setStatus("error");
-        return;
+        return { ok: false };
       }
 
       // Tear the existing tunnel down first ONLY if one is up/coming up. From a
@@ -231,7 +268,9 @@ export function useVpnActions({
       // status on "reconnecting" to drive its no-dwell guard), a manual switch is a
       // plain disconnect→connect, so we use the honest "disconnecting" status during
       // the teardown — there is no no-dwell requirement for switching this phase.
-      if (status === "connected" || status === "connecting") {
+      // Phase 14 (FAB-07): the revert leg passes skipTeardown — A is being reconnected from an
+      // already-settled error/disconnected state, so there is no live tunnel to tear down.
+      if (!opts?.skipTeardown && (status === "connected" || status === "connecting")) {
         // Phase 13 (BL-01): a manual switch's teardown leg writes a genuine
         // Connected → Disconnected transition; raise the Rust-side suppression intent BEFORE
         // vpn_disconnect so notify::maybe_fire does not flash a spurious «Отключено» before
@@ -246,26 +285,15 @@ export function useVpnActions({
         // switch shares origin=Manual with save-and-reconnect, so the Rust seam cannot tell them
         // apart from the origin alone.
         void invoke("set_switch_or_reconnect_pending", { pending: true, isSwitch: true });
-        setStatus("disconnecting");
-        try {
-          await invoke("vpn_disconnect");
-        } catch (e) {
-          // WR-02 abort path (same as handleReconnect lines 108-123): a teardown
-          // REJECT means no "disconnected" event will ever fire — do NOT fall through
-          // to the wait (it would hang on the spinner for the full 5s safety window).
-          // Surface the error now and stop; do not proceed to connect.
-          // Phase 13 (BL-01): drop the suppression intent — no Disconnected will fire, so a
-          // stale true must not swallow a later genuine user «Отключено».
-          void invoke("set_switch_or_reconnect_pending", { pending: false });
-          setError(formatError(e));
-          setStatus("error");
-          return;
-        }
-
-        // Wait for the real "disconnected" event (sidecar fully torn down) before we
-        // connect the new config — the safety timeout resolves after 5s if it never
-        // comes. This is the EXACT reconnectResolve pattern from handleReconnect.
-        await new Promise<void>((resolve) => {
+        // F-8 (Fable-5): arm the teardown-settled resolver BEFORE the vpn_disconnect invoke. Rust
+        // emits the final Disconnected event BEFORE vpn_disconnect's promise resolves; arming the
+        // resolver AFTER the await (as before) left a window where the settled edge was processed
+        // with reconnectResolve still null → the teardown half of every switch flashed the
+        // intermediate «VPN отключён» snackbar before the destination «VPN подключён». Arming first
+        // makes useVpnEvents' snackbar-suppression cover the whole teardown regardless of
+        // event/continuation ordering. This is the SAME reconnectResolve pattern as handleReconnect,
+        // just armed one step earlier.
+        const teardownSettled = new Promise<void>((resolve) => {
           reconnectResolve.current = resolve;
           setTimeout(() => {
             if (reconnectResolve.current === resolve) {
@@ -274,6 +302,33 @@ export function useVpnActions({
             }
           }, 5000);
         });
+        setStatus("disconnecting");
+        try {
+          await invoke("vpn_disconnect");
+        } catch (e) {
+          // WR-02 abort path (same as handleReconnect lines 108-123): a teardown
+          // REJECT means no "disconnected" event will ever fire — do NOT fall through
+          // to the wait (it would hang on the spinner for the full 5s safety window).
+          // Surface the error now and stop; do not proceed to connect.
+          // F-8: the resolver armed above (for the teardown-settled wait) is now orphaned — no
+          // Disconnected will fire for this rejected teardown. It self-cleans: the 5s safety timer
+          // nulls it (`reconnectResolve.current === resolve`), or the next switch overwrites it. A
+          // stray Disconnected in that window resolves only the abandoned (un-awaited) promise —
+          // harmless. (Left as-is to keep the shared ref immutable per react-hooks/immutability.)
+          // Phase 13 (BL-01): drop the suppression intent — no Disconnected will fire, so a
+          // stale true must not swallow a later genuine user «Отключено».
+          void invoke("set_switch_or_reconnect_pending", { pending: false });
+          setError(formatError(e));
+          setStatus("error");
+          // Phase 14 (14-04): the teardown rejected — the switch never reached B, so report
+          // failure. The App revert re-points to the previous config A (which is still the
+          // connected server here), so the user stays put with a calm info notice.
+          return { ok: false };
+        }
+
+        // Wait for the real "disconnected" event (sidecar fully torn down) before we connect the new
+        // config — the safety timeout (armed above) resolves after 5s if it never comes.
+        await teardownSettled;
 
         // Phase 13 (BL-01): the intermediate teardown Disconnected has passed (suppressed) —
         // drop the intent so the destination connect's own outcome plate fires and a later
@@ -287,14 +342,29 @@ export function useVpnActions({
       // identical to handleConnect otherwise.
       try {
         setStatus("connecting");
-        await invoke("vpn_connect", {
+        // 3.5 F-VERDICT (F11): vpn_connect now returns a ConnectOutcome { spawned, reason }. A
+        // NO-SPAWN supersede (a genuine tray/manual disconnect landed during the connect — Rust's
+        // FAB-R4 / cancel bails) RESOLVES (not rejects) with spawned:false. That is NEITHER a live
+        // session NOR a failure: report it distinctly so performSwitch releases the switch lock
+        // immediately (no 15s park on a terminal edge that never comes, no revert re-fighting the
+        // user's disconnect, no phantom «остались на A» notice — the stuck-amber + phantom-banner bug).
+        const outcome = (await invoke("vpn_connect", {
           configPath: path,
           logLevel: config.logLevel,
-        });
+        })) as { spawned?: boolean; reason?: string } | null | undefined;
+        if (outcome && outcome.spawned === false) {
+          // The Rust bail already wrote Disconnected through the single mutator, so the status is
+          // driven by that event — do NOT setStatus here (keep the Rust event as the source of truth).
+          return { ok: false, superseded: true };
+        }
       } catch (e) {
         setError(formatError(e));
         setStatus("error");
-        return;
+        // Phase 14 (14-04): B failed to connect — report failure so the App reverts to the
+        // previous config A (D-05). The status is already `error`; the App's revert re-points
+        // config.configPath back to A, reconnects A via this SAME vpn_connect path, and shows a
+        // calm `ErrorBanner variant="info"` (never red for a switch-failed-reverted).
+        return { ok: false };
       }
 
       // The connect was accepted — mark this config last-used so the lead card sorts to
@@ -302,19 +372,23 @@ export function useVpnActions({
       // the manifest id from the path; a missing entry / failed marker must NOT undo the
       // successful connect (the tunnel is up — the marker is a best-effort UI nicety), so
       // we swallow any error from this step.
-      try {
-        const list = await invoke<Array<{ id: string; path: string }>>("list_configs");
-        const match = list?.find((c) => c.path === path);
-        if (match) {
-          await invoke("set_last_used", { id: match.id });
-        }
-      } catch {
-        // Best-effort: the connect already succeeded; a last-used-marker failure is not
-        // worth flipping the user into an error state. The list reload will reconcile.
+      //
+      // Phase 14 (FAB-02): `stampLastUsed` gates this. A vpn_connect ACCEPT only means B's
+      // process SPAWNED — B can still die never-connected (broken auth / connect-timeout). If we
+      // stamped last-used here, a failed B would become the next-boot auto-connect target even
+      // though it never connected. So `performSwitch` passes stampLastUsed:false and stamps only
+      // AFTER the terminal `connected` edge (via markLastUsed below). Direct callers and the revert
+      // leg keep the default (stamp on accept) — the revert's A is the server we WANT remembered.
+      if (opts?.stampLastUsed !== false) {
+        await markLastUsed(path);
       }
+
+      // Phase 14 (14-04): the connect was accepted (a last-used-marker hiccup does NOT downgrade
+      // this to a failure — the tunnel is up). Report success so the App does NOT trigger a revert.
+      return { ok: true };
     },
-    [status, config, i18n, setStatus, setError, reconnectResolve],
+    [status, config, i18n, setStatus, setError, reconnectResolve, markLastUsed],
   );
 
-  return { handleConnect, handleDisconnect, handleReconnect, switchTo };
+  return { handleConnect, handleDisconnect, handleReconnect, switchTo, markLastUsed };
 }
