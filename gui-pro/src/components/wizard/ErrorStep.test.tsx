@@ -53,6 +53,26 @@ describe("ErrorStep", () => {
     expect(setWizardStep).not.toHaveBeenCalled();
   });
 
+  it("SSH_CONFIG_DIVERGES renders «Переустановить» and calls handleApplyConfig (was missing → dead-end)", () => {
+    // Owner report: the lead + hint tell the user to press «Переустановить», but the
+    // button did not exist → no way to overwrite a diverged/leftover config. It must now
+    // exist and drive handleApplyConfig (deploy_server overwrite_config=true, credentials
+    // preserved). «Попробовать снова» remains as the secondary (edit settings first).
+    const handleApplyConfig = vi.fn();
+    const handleRetryToEndpoint = vi.fn();
+    const w = makeWizardState({
+      step: "error",
+      errorMessage: "SSH_CONFIG_DIVERGES|vpn.toml|existing server config differs",
+      handleApplyConfig,
+      handleRetryToEndpoint,
+    });
+    render(<ErrorStep {...w} />);
+    fireEvent.click(screen.getByText(i18n.t("wizard.error.reinstall")));
+    expect(handleApplyConfig).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByText(i18n.t("buttons.retry")));
+    expect(handleRetryToEndpoint).toHaveBeenCalledOnce();
+  });
+
   // UAT (06-uat fix 12): there is now ONE primary action — the old duplicate «Назад к
   // настройкам» ghost button (which also went to endpoint) is gone.
   it("does NOT render a duplicate 'back to settings' button", () => {

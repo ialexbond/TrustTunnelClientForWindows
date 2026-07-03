@@ -737,6 +737,8 @@ pub fn run() {
             commands::deeplink::decode_deeplink,
             commands::deeplink::import_config_from_string,
             commands::deeplink::read_config_file_for_import,
+            // Phase 15 — local (non-SSH) QR deeplink export from a stored config (D-01/D-03)
+            commands::deeplink_local::export_config_deeplink_local,
             commands::protocol::register_url_protocols,
             commands::protocol::check_url_protocols,
             commands::protocol::poll_pending_deeplink,

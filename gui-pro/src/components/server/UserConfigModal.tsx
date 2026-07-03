@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -26,9 +26,8 @@ import { readCachedCountryCode } from "./useServerGeoIp";
  *
  * Flow:
  *   - On open: invoke("server_export_config_deeplink") to fetch the tt:// URL.
- *   - QR is clickable (D-09): rasterizes SVG to PNG via canvas, writes the
- *     image to the clipboard with ClipboardItem. Falls back gracefully to
- *     copy-text when ClipboardItem is unavailable.
+ *   - QR is displayed for scanning; clicking it copies the tt:// link as TEXT (D-09).
+ *     The image-clipboard path was removed — it did not work in the WebView2.
  *   - Read-only deeplink input + inline Copy icon writes text via
  *     navigator.clipboard.writeText.
  *   - Download button: fetch_server_config → save() dialog → copy_file.
@@ -89,7 +88,6 @@ export function UserConfigModal({
   const [deeplinkError, setDeeplinkError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const qrContainerRef = useRef<HTMLDivElement>(null);
 
   // ── Shared deeplink fetch (used by effect + Retry) — WR-04 deduplication. ──
   // WR-05: depend on primitives (host/port/user) rather than the sshParams object
@@ -239,84 +237,19 @@ export function UserConfigModal({
     }
   };
 
-  // ── Copy QR as PNG image to clipboard (D-09) ──
+  // ── Click the QR → copy the deeplink as TEXT (D-09). The QR image-clipboard path was
+  //    removed: neither the web ClipboardItem nor the native writeImage worked reliably in
+  //    the Tauri WebView2 (owner UAT: it kept copying the link anyway), so clicking the QR
+  //    copies the link — the QR stays on screen for scanning. D-29: the activity log never
+  //    carries the link payload. ──
   const handleCopyQr = async () => {
     if (!deeplink || !username) return;
-
-    // Feature-detect: fallback to text-copy when ClipboardItem is unavailable.
-    if (typeof ClipboardItem === "undefined") {
-      try {
-        await navigator.clipboard.writeText(deeplink);
-        activityLog(
-          "USER",
-          `user.config.link_copied user=${username} fallback=no-clipboarditem`,
-        );
-        pushSuccess(t("server.users.link_copied"));
-      } catch (e) {
-        activityLog(
-          "ERROR",
-          `user.config.qr_copy_failed err=${formatError(e)}`,
-        );
-      }
-      return;
-    }
-
-    const svg = qrContainerRef.current?.querySelector("svg");
-    if (!svg) return;
-
     try {
-      const svgData = new XMLSerializer().serializeToString(svg);
-      const svgBlob = new Blob([svgData], {
-        type: "image/svg+xml;charset=utf-8",
-      });
-      const svgUrl = URL.createObjectURL(svgBlob);
-
-      // WR-01: try/finally guarantees revokeObjectURL on every path
-      // (including img.onerror reject and canvas.toBlob reject).
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = 240;
-        canvas.height = 240;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        // Paint white background — без fillRect PNG может выглядеть чёрным
-        // при paste в некоторых target-приложениях (alpha handling в Paint).
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, 240, 240);
-
-        const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error("QR image load failed"));
-          img.src = svgUrl;
-        });
-        ctx.drawImage(img, 0, 0, 240, 240);
-
-        const blob: Blob = await new Promise((resolve, reject) => {
-          canvas.toBlob((b) => {
-            if (b) resolve(b);
-            else reject(new Error("Canvas toBlob returned null"));
-          }, "image/png");
-        });
-
-        await navigator.clipboard.write([
-          new ClipboardItem({ "image/png": blob }),
-        ]);
-        activityLog("USER", `user.config.qr_copied user=${username}`);
-        pushSuccess(t("server.users.qr_copied"));
-      } finally {
-        URL.revokeObjectURL(svgUrl);
-      }
+      await navigator.clipboard.writeText(deeplink);
+      activityLog("USER", `user.config.link_copied user=${username}`);
+      pushSuccess(t("server.users.link_copied"));
     } catch (e) {
       activityLog("ERROR", `user.config.qr_copy_failed err=${formatError(e)}`);
-      // Graceful fallback: copy text so the user at least gets something.
-      try {
-        await navigator.clipboard.writeText(deeplink);
-        pushSuccess(t("server.users.link_copied"));
-      } catch {
-        // Silent — nothing else we can do.
-      }
     }
   };
 
@@ -439,7 +372,7 @@ export function UserConfigModal({
                 "focus-visible:shadow-[var(--focus-ring)] outline-none",
               )}
             >
-              <div ref={qrContainerRef}>
+              <div>
                 <QRCodeSVG
                   value={effectiveDeeplink}
                   size={240}

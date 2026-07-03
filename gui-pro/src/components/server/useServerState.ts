@@ -166,18 +166,37 @@ export function useServerState(props: ServerPanelProps) {
       // host key (deterministic + security-sensitive — it has its own reset flow in the outer
       // catch and must never be silently retried). A genuine auth failure simply fails the
       // retry too and surfaces normally (~400ms later), so broadening costs nothing real.
-      let info: ServerInfo;
-      try {
-        info = await invoke<ServerInfo>("check_server_installation", sshParams);
-      } catch (firstErr) {
-        const firstStr = formatError(firstErr);
-        const hostKeyChanged =
-          firstStr.includes("HOST_KEY_CHANGED") || firstStr.includes("Unknown server key");
-        if (hostKeyChanged) {
-          throw firstErr;
+      // R-6: retry the probe up to RETRY_ATTEMPTS times with RETRY_DELAY_MS between
+      // attempts BEFORE surfacing the «Сервер недоступен» stub. On launch the panel
+      // auto-connects and races the sidecar-version probe (two fresh SSH handshakes at
+      // once); the first attempts frequently fail transiently while the server's sshd is
+      // still warming, and a single 400ms retry wasn't enough — the stub flashed
+      // prematurely (owner report). `loading` stays true across the attempts, so the panel
+      // shows the connecting skeleton, not the stub, until ALL attempts fail. A changed
+      // host key is deterministic + security-sensitive → thrown immediately to the outer
+      // catch's reset flow, NEVER retried.
+      const RETRY_ATTEMPTS = 3;
+      const RETRY_DELAY_MS = 1500;
+      let info: ServerInfo | undefined;
+      let lastProbeErr: unknown;
+      for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+        try {
+          info = await invoke<ServerInfo>("check_server_installation", sshParams);
+          break;
+        } catch (probeErr) {
+          lastProbeErr = probeErr;
+          const probeStr = formatError(probeErr);
+          if (probeStr.includes("HOST_KEY_CHANGED") || probeStr.includes("Unknown server key")) {
+            throw probeErr;
+          }
+          if (attempt < RETRY_ATTEMPTS) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          }
         }
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        info = await invoke<ServerInfo>("check_server_installation", sshParams);
+      }
+      if (info === undefined) {
+        // All attempts failed (non-host-key) → surface as the normal unreachable error.
+        throw lastProbeErr;
       }
       setServerInfo(info);
       // R2-F08 (Plan 09-37, REVISED): authoritative-read producer for usersKnown.
@@ -304,7 +323,13 @@ export function useServerState(props: ServerPanelProps) {
         await loadServerInfo(true);
         pushSuccess(successMessage || t("server.actions.success_generic"));
       } catch (e) {
-        setActionResult({ type: "error", message: translateSshError(formatError(e), t) });
+        // R-11: actionResult is NOT rendered anywhere, so a failed Start/Stop was
+        // invisible («нажимаю сервис — ничего не происходит»). Surface the translated
+        // error in the shared snackbar (same channel as the success message) so a failed
+        // action is never silent. actionResult is kept for stories/back-compat.
+        const message = translateSshError(formatError(e), t);
+        setActionResult({ type: "error", message });
+        pushSuccess(message, "error");
       } finally {
         setActionLoading(null);
       }

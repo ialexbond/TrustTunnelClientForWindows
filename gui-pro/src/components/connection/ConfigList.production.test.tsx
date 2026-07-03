@@ -230,6 +230,37 @@ describe("ConfigList", () => {
     ).not.toBeInTheDocument();
   });
 
+  // Regression (Phase 15, 15-VERIFICATION gap): the «…» → «QR-код» action must reach EVERY card,
+  // including those in the NOT-CONNECTED uniform list (activeConfigPath="" — the COMMON state right
+  // after launch). That third render branch in ConfigList had `onQr` omitted, so «QR-код» was a silent
+  // no-op in the app's default state even though the plan required threading it to all three sites
+  // (D-09: available for any config). Existing card-level tests passed because they render the card in
+  // isolation with onQr wired — only a LIST-level prop-threading test catches the missed branch. This
+  // opens a not-connected card's overflow → «QR-код» → asserts onQr fires with that card's config.
+  it("threads onQr to «QR-код» on cards in the NOT-CONNECTED list (D-09 regression)", async () => {
+    const onQr = vi.fn();
+    renderWithProviders(
+      <ConfigList
+        configs={[cfgDe, cfgNl]}
+        loading={false}
+        onImport={vi.fn()}
+        status="disconnected"
+        activeConfigPath="" // nothing connected → the uniform not-connected branch (the one that dropped onQr)
+        onQr={onQr}
+      />,
+    );
+    const cards = screen.getAllByTestId("config-card");
+    // Open the FIRST card's overflow menu (scope the trigger to that card — two cards → two triggers).
+    await userEvent.click(
+      within(cards[0]).getByRole("button", { name: i18n.t("connection.card.actions_label") }),
+    );
+    const menu = screen.getByRole("menu");
+    await userEvent.click(within(menu).getByText(i18n.t("connection.card.qr")));
+    // cfgDe is last-used → the top card of the not-connected list; onQr must fire once with it.
+    expect(onQr).toHaveBeenCalledTimes(1);
+    expect(onQr).toHaveBeenCalledWith(cfgDe);
+  });
+
   // ─── Phase 14 (14-02): the hero survives a transient disconnected while switching ───
   //
   // GREEN as of 14-02 (D-12) — the `isSwitching` prop is threaded App→ConnectionPanel→ConfigList and

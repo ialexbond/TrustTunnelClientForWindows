@@ -409,7 +409,11 @@
     "qr": {
       "title": "Configuration QR code",
       "link": "Link",
-      "hint": "Scan the QR with another TrustTunnel app, or copy the link, to move the config to another device."
+      "hint": "Scan the QR with another TrustTunnel app, or copy the link, to move the config to another device.",
+      "qr_aria": "QR code — click to copy the link",
+      "link_aria": "Configuration link",
+      "copy_link": "Copy link",
+      "retry": "Retry"
     }
   },
   "wizard": {
@@ -533,6 +537,7 @@
       "config_file_label": "Configuration file:",
       "go_to_panel": "Go to Control Panel",
       "go_to_connection": "Go to Connection",
+      "add_config": "Add config",
       "reachability_warning": "Could not reach port 443 from outside. The server may still be starting up — wait a minute and try connecting. If that doesn't help, check whether port 443/tcp is open in your VPS firewall / Security Group."
     },
     "error": {
@@ -546,6 +551,7 @@
       "hint_port_80": "Port 80 must be open and not occupied by another service (nginx, apache) to obtain a certificate.",
       "hint_port_80_busy": "Port 80 is occupied by another web server, so Let's Encrypt could not issue a certificate. The fastest fix is to switch to a self-signed certificate: the install completes immediately, with no dependency on port 80.",
       "switch_to_selfsigned": "Switch to self-signed",
+      "reinstall": "Reinstall",
       "hint_port_80_refused": "Your VPS replied «Connection refused» on port 80 — the packet got through, but nothing is listening. Likely nginx/apache holds 443 with no forward on 80. Before certbot: sudo systemctl stop nginx (or apache2), then retry. After certbot succeeds you can bring nginx back up.",
       "hint_port_80_timeout": "Let's Encrypt's external probe to your VPS on port 80 timed out — a firewall is dropping inbound packets. Check: (1) sudo ufw allow 80/tcp on the server, (2) iptables -L INPUT, (3) Inbound rules in your VPS provider panel (AWS Security Group / DigitalOcean / Selectel — port 80/tcp must be open for 0.0.0.0/0). This is NOT a Let's Encrypt rate limit — it's the server being unreachable from the internet.",
       "hint_unreachable": "Server unreachable. Verify the IP address is correct, the server is running and not blocking connections from your network.",
@@ -827,7 +833,7 @@
       "empty_body": "Add your first VPN user",
       "show_config_tooltip": "Show config",
       "qr_copied": "QR code copied",
-      "qr_click_to_copy": "QR code — click to copy image",
+      "qr_click_to_copy": "QR code — click to copy the link",
       "deeplink_aria": "Connection deeplink",
       "copy_deeplink_tooltip": "Copy link",
       "download_config": "Download config",
@@ -1410,6 +1416,7 @@
         "rule_proto": "Proto",
         "rule_comment": "Comment",
         "delete": "Delete",
+        "delete_ssh_protected": "Can't delete — this is the active SSH connection port",
         "add_rule": "Add rule",
         "add_rule_title": "New firewall rule",
         "port_label": "Port",
@@ -1535,6 +1542,7 @@
         "comment_bad_chars": "Comment cannot contain \" ` $ \\ or newlines",
         "ip_invalid": "Invalid IP address",
         "generic_rule_rejected": "Rule rejected — check port, source and comment",
+        "refuse_delete_ssh": "Can't delete the active SSH connection port rule — it would lock you out of the server",
         "backend_generic": "Operation failed: {{msg}}",
         "port_change_failed": "Failed to change SSH port: {{msg}}",
         "port_validation_failed": "sshd config validation error: {{msg}}",
@@ -1846,13 +1854,17 @@
     "exportFailedUsers": "Failed to export config (code {{code}}). Available users: {{users}}",
     "deeplinkExportFailed": "Failed to export deeplink (code {{code}}). Check username '{{user}}'.",
     "uninstallFailed": "Could not fully uninstall TrustTunnel (code {{code}}). Check logs.",
+    "packageDownloadFailed": "The server couldn't download the TrustTunnel package from github.com. Check that the server has internet access and working DNS (e.g. /etc/resolv.conf or systemd-resolved), then retry.",
+    "installFailed": "Couldn't install TrustTunnel (code {{code}}). Click «Show» and copy the logs for diagnosis.",
     "certRenewFailed": "Failed to renew certificate (code {{code}}). Check logs.",
     "mkdirFailed": "Could not create a folder on the server. Check access rights.\n\nDetails: {{detail}}",
     "killProcessFailed": "Could not stop a process on the server. Try again.\n\nDetails: {{detail}}",
     "dnsFailed": "Could not resolve address for {{host}}. Check DNS or use direct IP.",
     "networkUnreachable": "Network unreachable for {{host}}. Check your internet connection.",
     "connectionRefused": "Server {{host}}:{{port}} refused the connection. Service not running or port closed.",
-    "tlsHandshakeFailed": "Could not establish secure connection with {{host}}. Check server SSH keys."
+    "tlsHandshakeFailed": "Could not establish secure connection with {{host}}. Check server SSH keys.",
+    "deployInProgress": "An installation is already running. Wait for it to finish or cancel it before starting a new one.",
+    "deployCancelled": "Installation cancelled."
   },
   "geoipErrors": {
     "timeout": "Country lookup timed out",

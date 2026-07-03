@@ -170,6 +170,30 @@ describe("translateSshError", () => {
     );
   });
 
+  it("translates SSH_PACKAGE_DOWNLOAD_FAILED (server DNS/network)", () => {
+    expect(translateSshError("SSH_PACKAGE_DOWNLOAD_FAILED", mockT)).toBe(
+      "sshErrors.packageDownloadFailed",
+    );
+  });
+
+  it("translates SSH_INSTALL_FAILED with code (was raw «Installation failed (code N)»)", () => {
+    expect(translateSshError("SSH_INSTALL_FAILED|1", mockT)).toBe(
+      'sshErrors.installFailed:{"code":"1"}',
+    );
+  });
+
+  it("translates SSH_DEPLOY_IN_PROGRESS (previously shown as raw English)", () => {
+    expect(
+      translateSshError("SSH_DEPLOY_IN_PROGRESS|another install is already running", mockT),
+    ).toBe("sshErrors.deployInProgress");
+  });
+
+  it("translates SSH_DEPLOY_CANCELLED", () => {
+    expect(translateSshError("SSH_DEPLOY_CANCELLED|superseded", mockT)).toBe(
+      "sshErrors.deployCancelled",
+    );
+  });
+
   it("translates SSH_CERT_RENEW_FAILED with code", () => {
     expect(translateSshError("SSH_CERT_RENEW_FAILED|1", mockT)).toBe(
       'sshErrors.certRenewFailed:{"code":"1"}',

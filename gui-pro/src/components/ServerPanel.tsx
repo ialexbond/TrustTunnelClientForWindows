@@ -155,29 +155,19 @@ export function ServerPanel(props: ServerPanelProps) {
   if (state.error || !state.serverInfo) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-md w-full space-y-4">
+        <div className="max-w-md w-full">
+          {/* R-5: «Отключиться от сервера» + «Повторить» now render in ONE equal-width row
+              INSIDE the plate (was: «Повторить» in the plate + a separate small ghost
+              «Отключиться» below, at different sizes/places). «Повторить» re-arms the H-05
+              skeleton then reloads and NEVER clears creds; Disconnect returns to the login
+              form and is the ONLY path that clears creds (D-05/D-06). */}
           <ServerUnavailablePlate
             onRetry={() => {
-              // H-05: re-show the first-connect skeleton on retry (parent resets
-              // isFirstConnect) BEFORE kicking off the reload, so the skeleton
-              // reappears instead of the latch staying off. Retry NEVER clears
-              // creds — only handleDisconnect does (D-05/D-06).
               props.onPanelRetry?.();
               void state.loadServerInfo();
             }}
+            onDisconnect={state.onDisconnect}
           />
-          {/* Phase 13.UAT G-04: Disconnect → возврат на SshConnectForm login.
-              Kept as a secondary exit alongside the plate's «Повторить». */}
-          <div className="flex justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<LogOut className="w-3.5 h-3.5" />}
-              onClick={state.onDisconnect}
-            >
-              {t("control.disconnect")}
-            </Button>
-          </div>
         </div>
       </div>
     );

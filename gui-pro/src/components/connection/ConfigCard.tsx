@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Check, Clock, ClipboardList, Copy, Globe, Loader2, Pencil, Settings, Trash2, X } from "lucide-react";
+import { Activity, Check, Clock, ClipboardList, Copy, Globe, Loader2, Pencil, QrCode, Settings, Trash2, X } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { Button } from "../../shared/ui/Button";
@@ -149,6 +149,9 @@ export interface ConfigCardProps {
   reconnectProgress?: ReconnectProgress | null;
   onConnect?: () => void;
   onEdit?: () => void;
+  /** Open the ConfigQr transfer modal for this config (D-09). Available for ANY config
+   *  (active or inactive) — the «QR-код» overflow item is never state-gated. */
+  onQr?: () => void;
   onDelete?: () => void;
   onDuplicate?: () => void;
   /**
@@ -179,6 +182,7 @@ export function ConfigCard({
   reconnectProgress,
   onConnect,
   onEdit,
+  onQr,
   onDelete,
   onDuplicate,
   onRename,
@@ -358,9 +362,11 @@ export function ConfigCard({
       ? t("connection.card.switch")
       : t("connection.card.connect");
 
-  // D-19 / D-26: the three secondary actions live in the OverflowMenu BY DEFAULT, each with
-  // its one canonical glyph. QR is DEFERRED this phase (not shown). D-21: locked while
-  // another card is connecting.
+  // D-19 / D-26: the secondary actions live in the OverflowMenu BY DEFAULT, each with its one
+  // canonical glyph. Phase 15 (D-09): «QR-код» (the QrCode glyph) is now the 4th item, opening
+  // the ConfigQr transfer modal — available for ANY config (active or inactive), NOT state-gated;
+  // only the existing D-21 `locked` (another card connecting) disables it, matching the others.
+  // D-21: locked while another card is connecting.
   const overflowItems: OverflowMenuItem[] = [
     {
       label: t("connection.card.edit"),
@@ -372,6 +378,12 @@ export function ConfigCard({
       label: t("connection.card.duplicate"),
       onSelect: runAction(onDuplicate),
       icon: <Copy className="w-3.5 h-3.5" />,
+      disabled: locked,
+    },
+    {
+      label: t("connection.card.qr"),
+      onSelect: runAction(onQr),
+      icon: <QrCode className="w-3.5 h-3.5" />,
       disabled: locked,
     },
     {

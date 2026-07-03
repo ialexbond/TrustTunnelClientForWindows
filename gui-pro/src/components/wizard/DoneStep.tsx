@@ -64,58 +64,65 @@ export function DoneStep(w: WizardState) {
         )}
 
         <div className="space-y-2 w-full">
-          <Button
-            variant="primary"
-            size="sm"
-            fullWidth
-            icon={<ChevronRight className="w-4 h-4" />}
-            onClick={() => w.onSetupComplete(w.configPath)}
-          >
-            {/* D-01 / A3: onSetupComplete already closes the overlay (App's
-                setWizardActive(false)); the dead setWizardStep("welcome") preamble
-                is dropped — there is no welcome menu to land on. */}
-            {t('wizard.done.go_to_panel')}
-          </Button>
-          {w.configPath && (
-            // UI-SPEC "one primary action per screen" (06-UI-REVIEW Experience finding):
-            // «Перейти к панели управления» (go_to_panel) is THE single primary CTA; this
-            // alternate post-install nav is demoted to secondary so there is one obvious
-            // next step, not two competing accent buttons.
+          {w.configPath ? (
+            <>
+              {/* R-7: «Добавить конфиг» is the PRIMARY next step after a successful install
+                  (owner). The freshly-installed config is ALREADY saved to the app config
+                  folder (deploy_export_config, same filename scheme as Save-As) AND already
+                  registered in the «Подключение» list (App.onSetupComplete → add_config);
+                  this button just navigates there so the user sees the new config card.
+                  «Перейти к панели управления» is demoted to secondary below. */}
+              <Button
+                variant="primary"
+                size="sm"
+                fullWidth
+                icon={<Plug className="w-4 h-4" />}
+                onClick={() => {
+                  // App.tsx reads this key in onSetupComplete and switches activeTab to
+                  // «connection» (a valid AppTab member). onSetupComplete also registers
+                  // the config (add_config) + closes the overlay.
+                  localStorage.setItem("tt_navigate_after_setup", "connection");
+                  w.onSetupComplete(w.configPath);
+                }}
+              >
+                {t('wizard.done.add_config')}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                fullWidth
+                icon={<ChevronRight className="w-4 h-4" />}
+                onClick={() => w.onSetupComplete(w.configPath)}
+              >
+                {t('wizard.done.go_to_panel')}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                fullWidth
+                icon={<Download className="w-4 h-4" />}
+                onClick={w.handleSaveAs}
+              >
+                {t('buttons.save_as')}
+              </Button>
+            </>
+          ) : (
+            // No exported config (edge) → «Перейти к панели управления» stays the primary
+            // (and only) action. onSetupComplete closes the overlay (App setWizardActive).
             <Button
-              variant="secondary"
+              variant="primary"
               size="sm"
               fullWidth
-              icon={<Plug className="w-4 h-4" />}
-              onClick={() => {
-                // UAT 2026-05-21 — was "settings" (wrong target). Button label
-                // is «Перейти к подключению», AppTab union has a "connection"
-                // member. App.tsx reads this key in onSetupComplete and
-                // switches activeTab accordingly.
-                localStorage.setItem("tt_navigate_after_setup", "connection");
-                // D-01 / A3: dropped the dead setWizardStep("welcome") preamble —
-                // onSetupComplete already closes the overlay in App.
-                w.onSetupComplete(w.configPath);
-              }}
+              icon={<ChevronRight className="w-4 h-4" />}
+              onClick={() => w.onSetupComplete(w.configPath)}
             >
-              {t('wizard.done.go_to_connection')}
-            </Button>
-          )}
-          {w.configPath && (
-            <Button
-              variant="secondary"
-              size="sm"
-              fullWidth
-              icon={<Download className="w-4 h-4" />}
-              onClick={w.handleSaveAs}
-            >
-              {t('buttons.save_as')}
+              {t('wizard.done.go_to_panel')}
             </Button>
           )}
           {/* UAT (06-uat fix 2): the first-user QR/deeplink button was removed here — the
               deeplink/QR stays reachable from the Users tab. «На главную» (to_home) was
-              already removed (UAT 2026-06-19): it duplicated the overlay × close and its
-              label promised a "home"/welcome menu D-01 deleted. The × is the single close
-              affordance; «Перейти к панели управления» is the primary action. */}
+              already removed (UAT 2026-06-19): it duplicated the overlay × close. The × is
+              the single close affordance. */}
         </div>
       </div>
     </div>
