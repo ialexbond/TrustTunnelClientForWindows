@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Activity, Check, Clock, ClipboardList, Copy, Globe, Loader2, Pencil, Settings, Trash2, X } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
+import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { Button } from "../../shared/ui/Button";
 import { IconButton } from "../../shared/ui/IconButton";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
@@ -11,7 +12,7 @@ import { OverflowMenu, type OverflowMenuItem } from "../../shared/ui/OverflowMen
 import { statusBadgeVariant } from "../../shared/lib/statusBadgeVariant";
 import { ConfigPingPill, type ConfigPing } from "./ConfigPingPill";
 import { InlineNameEdit } from "./InlineNameEdit";
-import type { VpnStatus } from "../../shared/types";
+import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
 
 /**
@@ -113,6 +114,39 @@ export interface ConfigCardProps {
   activeElsewhere?: boolean;
   /** Another card is connecting → this card's primary + overflow are locked (D-21). */
   locked?: boolean;
+  /**
+   * F28 (14-UAT round 3): THIS card's connect was just clicked and is in the window BEFORE the live
+   * status becomes `connecting` (the awaited pre-connect ping probe). Shows an INSTANT spinner on the
+   * primary so the click is never a silent no-op; the real status spinner takes over once it lands.
+   */
+  connectPending?: boolean;
+  /**
+   * Phase 14 (D-12): a seamless A→B switch is in flight for THIS (lead) card. During the
+   * switch the underlying `status` is the GREY `disconnecting`→`connecting` teardown/spawn
+   * leg, so the amber «Переключение» band + label must be FORCED, not derived from `status`
+   * (Pitfall 4: `statusBadgeVariant("disconnecting")` is grey «Отключение», which would flash
+   * the wrong colour/word mid-switch). We reuse the EXISTING `connecting` amber variant — no
+   * 5th badge variant (D-07 regression surface). The spinner + hidden-ping already fall out of
+   * `isInFlight`/`isConnected` for the in-flight legs; the only forced pieces are the band +
+   * the label. Mirrors the story-tier `leadBadgeVariant` switching→connecting mapping
+   * (connectionDemos.tsx). Owned by App.isSwitching, threaded ConnectionPanel→ConfigList→here.
+   */
+  switching?: boolean;
+  /**
+   * Phase 14 (F6, 14-UAT): the seamless-switch REVERT notice, rendered EMBEDDED inside the lead card
+   * (NOT a floating window-level banner). Set by App on a switch that failed and silently reverted to
+   * the previous server — a calm `ErrorBanner variant="info"` (never red — D-05). Only the lead card
+   * renders it; `null`/undefined shows nothing. Mirrors the story-tier «switch-failed-reverted».
+   */
+  revertNotice?: string | null;
+  /** Dismiss the embedded revert notice (clears App's revertNotice state). */
+  onRevertDismiss?: () => void;
+  /**
+   * F20 (14-UAT round 2): the live reconnect attempt progress {attempt, max}. Rendered ONLY on the
+   * lead card in the `reconnecting` status as «Попытка N из M» under the badge, so an auto-reconnect
+   * shows the user it is actively retrying (not silently waiting). `null`/undefined shows nothing.
+   */
+  reconnectProgress?: ReconnectProgress | null;
   onConnect?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -138,6 +172,11 @@ export function ConfigCard({
   busy = false,
   activeElsewhere = false,
   locked = false,
+  connectPending = false,
+  switching = false,
+  revertNotice,
+  onRevertDismiss,
+  reconnectProgress,
   onConnect,
   onEdit,
   onDelete,
@@ -265,20 +304,38 @@ export function ConfigCard({
   const highlightActive = leadCard && isConnected;
   // The lead card ALWAYS sits inside ConfigList's frosted-glass wrapper (leadCard ⟺ a live hero:
   // connecting / connected / disconnecting / reconnecting / recovering). For that frost to show
-  // through, the lead-card body must stay TRANSPARENT in EVERY live state — an opaque Card surface
-  // hides the glass (owner: «отключение»/«подключение» read as solid grey). Connected additionally
-  // gets the 8% green tint + ring (the active marker); the other live states show the neutral frost
-  // alone. Resting (inactive) rows keep Card's opaque surface (no wrapper behind them).
-  const activeHighlightClass = highlightActive
-    ? "bg-[var(--color-status-connected-bg)] ring-1 ring-[var(--color-success-tint-25)]"
-    : leadCard
-      ? "bg-transparent"
-      : "";
+  // through, the lead-card body stays TRANSPARENT for the neutral/grey legs.
+  //
+  // F2 (14-UAT): the lead card's SURFACE TINT now FOLLOWS the status badge. The owner reported the
+  // card reading grey while the badge was amber mid-switch — the colours disagreed. It now derives
+  // from the SAME effective variant the badge uses (`statusBadgeVariant(status)`, or the forced
+  // `connecting` amber while `switching`), so the card colour and the badge colour can never
+  // disagree: connected → green tint + ring (the active marker), connecting/switching → amber tint +
+  // ring, error → red tint + ring, disconnecting/disconnected → transparent (the neutral grey frost).
+  // Reuses the existing status-*-bg/-border tokens (no hardcoded hex). Resting (inactive) rows keep
+  // Card's opaque surface (no wrapper behind them) → no tint.
+  const tintVariant = switching ? "connecting" : statusBadgeVariant(status);
+  const activeHighlightClass = !leadCard
+    ? ""
+    : tintVariant === "connected"
+      ? "bg-[var(--color-status-connected-bg)] ring-1 ring-[var(--color-success-tint-25)]"
+      : tintVariant === "connecting"
+        ? "bg-[var(--color-status-connecting-bg)] ring-1 ring-[var(--color-status-connecting-border)]"
+        : tintVariant === "error"
+          ? "bg-[var(--color-status-error-bg)] ring-1 ring-[var(--color-status-error-border)]"
+          : "bg-transparent";
 
   // Lead-card status label — short state word (no trailing «…» in the badge). Uses the
   // existing status.* i18n keys (the _short variants for in-flight states).
-  const leadStatusLabel =
-    status === "connected"
+  //
+  // Phase 14 (D-12): while `switching`, the label is FORCED to «Переключение» regardless of the
+  // underlying in-flight `status` (the teardown leg is grey `disconnecting` «Отключение», the
+  // spawn leg is `connecting` «Подключение» — neither is the word the user should read during a
+  // seamless switch). This label feeds BOTH the badge AND the spinner primary's aria-label/title,
+  // so the whole face reads «Переключение» in one shot.
+  const leadStatusLabel = switching
+    ? t("status.switching_short")
+    : status === "connected"
       ? t("status.connected")
       : status === "connecting"
         ? t("status.connecting_short")
@@ -338,18 +395,37 @@ export function ConfigCard({
       // marker semantically (not via CSS hex), and confirm NO left-accent-rail element.
       data-active-highlight={highlightActive ? "true" : undefined}
       // IN-38: the live lead card keeps the normal --radius-lg (ROUNDED corners) — the owner
-      // explicitly reverted the IN-28 square. Corner "bleed" (sharp scrolled-under content peeking
-      // past the rounded corner) is handled NOT by squaring the card but by the sticky wrapper's
-      // SQUARE frost in ConfigList: an un-rounded frost is not clipped to a radius, so it fills the
-      // corner triangles with a soft blur instead of leaving them transparent.
+      // explicitly reverted the IN-28 square. F9 (14-UAT): the sticky frost wrapper in ConfigList is
+      // now ROUNDED + clipped to the SAME --radius-lg (was a square frost that filled the corner
+      // triangles), because its sharp square corners were peeking out below the rounded card. The
+      // frost now matches the card's rounded box exactly — no sharp corners, no separate corner fill.
       className={`transition-all ${activeHighlightClass}`}
     >
       {leadCard ? (
-        /* ── Lead card: one vertically-centred 3-column strip ── */
+        <>
+        {/* ── Lead card: one vertically-centred 3-column strip ── */}
         <div className="grid min-h-[3.75rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[var(--space-3)]">
-          {/* Left: status badge */}
-          <div className="flex min-w-0 items-center">
-            <StatusBadge variant={statusBadgeVariant(status)} label={leadStatusLabel} />
+          {/* Left: status badge. Phase 14 (D-12): while switching the band is FORCED to the
+              amber `connecting` variant (reusing the existing variant — no 5th) rather than
+              derived from the grey `disconnecting` teardown status (Pitfall 4). F20: during an
+              auto-reconnect a second row shows «Попытка N из M» under the badge. */}
+          <div className="flex min-w-0 flex-col items-start gap-[var(--space-1)]">
+            <StatusBadge
+              variant={switching ? "connecting" : statusBadgeVariant(status)}
+              label={leadStatusLabel}
+            />
+            {/* F20 (14-UAT round 2): show the reconnect attempt progress so the user sees it is
+                actively retrying, not silently waiting (the backend already emits attempt/max). Only
+                for the genuine `reconnecting` status (never during a manual switch); the reserved grid
+                min-height (3.75rem) keeps the card from growing/jumping between connected and reconnecting. */}
+            {status === "reconnecting" && !switching && reconnectProgress && (
+              <span className="min-w-0 select-none truncate text-xs tabular-nums text-[var(--color-text-muted)]">
+                {t("status.reconnect_attempt", {
+                  attempt: reconnectProgress.attempt,
+                  max: reconnectProgress.max,
+                })}
+              </span>
+            )}
           </div>
 
           {/* Centre: config identity — name (hero, READ-ONLY here) + «host · ping · uptime»
@@ -365,13 +441,18 @@ export function ConfigCard({
                 <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <TruncatedText text={config.host} className="min-w-0 font-mono" />
               </span>
-              {isConnected && shouldShowPing(status) && (
+              {/* Phase 14: explicitly hide the connected-only details (ping + uptime) while
+                  `switching`. A transient `connected` in the switch/revert window (A briefly up, or A
+                  reconnected on revert while `isSwitching` is not yet cleared) must NOT flash a stale
+                  ping/uptime — the amber «Переключение» owns the row. Direct `!switching` guard, not the
+                  `isConnected` side-effect (verifier WARNING: the side-effect left a 1-render flash window). */}
+              {isConnected && !switching && shouldShowPing(status) && (
                 <span className="flex shrink-0 items-center gap-[var(--space-1)]">
                   <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <ConfigPingPill ping={effectivePing} />
                 </span>
               )}
-              {isConnected && uptime && (
+              {isConnected && !switching && uptime && (
                 <span className="flex shrink-0 items-center gap-[var(--space-1)] font-mono tabular-nums">
                   <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   {uptime}
@@ -382,7 +463,12 @@ export function ConfigCard({
 
           {/* Right: primary + overflow. min-w-[9rem] fits the longest label «Переключиться». */}
           <div className="flex items-center justify-end gap-[var(--space-1)]">
-            {isInFlight(status) ? (
+            {/* Phase 14 (D-12): `switching` forces the icon-only spinner primary so a switch is
+                NEVER a live «Отключить» text button — the switch is self-terminating and its
+                controls are locked. During the teardown/spawn legs `isInFlight(status)` is
+                already true; OR-ing `switching` keeps the spinner up across any transient
+                settled-status blip mid-switch. */}
+            {isInFlight(status) || switching || connectPending ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -411,6 +497,20 @@ export function ConfigCard({
             />
           </div>
         </div>
+        {/* F6 (14-UAT): the switch-failed-reverted notice EMBEDDED in the lead card — a calm,
+            dismissible ErrorBanner variant="info" (never the red banner — D-05). Mirrors the
+            story-tier connectionDemos «switch-failed-reverted». The aria-label names the
+            role="status" live region (name only — D-29). */}
+        {revertNotice && (
+          <ErrorBanner
+            variant="info"
+            message={revertNotice}
+            onDismiss={onRevertDismiss}
+            aria-label={revertNotice}
+            className="mt-[var(--space-2)]"
+          />
+        )}
+        </>
       ) : (
         /* ── Resting (inactive) row ── */
         <div className="flex items-center gap-[var(--space-3)] min-w-0">
@@ -474,6 +574,9 @@ export function ConfigCard({
               size="sm"
               onClick={runAction(onConnect)}
               disabled={busy || locked}
+              // F28: instant spinner the moment this card's «Подключить»/«Переключиться» is clicked, for
+              // the window before the live status flips to connecting (Button.loading also disables it).
+              loading={connectPending}
               aria-label={primaryLabel}
               className="min-w-[9rem] justify-center"
             >

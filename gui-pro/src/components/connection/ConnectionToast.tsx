@@ -115,8 +115,13 @@ export function ConnectionToast({
   //            to that content height in lib.rs so there is no «подложка»). The design has NO drop
   //            shadow (its shadow-lg token resolves to none on this surface), so the plate omits it too.
   const isPlate = variant === "plate";
+  // F15 (14-UAT round 2): the plate FILLS the window (the DWM-rounded opaque window is the single plate
+  // surface — no «подложка») but must GROW with wrapped content. `min-h-full` (not `h-full`) keeps the
+  // fill for short content AND lets the toast's border-box grow when a long config name wraps the body,
+  // so #notification-root.scrollHeight includes the toast's FULL height (content + top/bottom padding +
+  // border) and the F15 resize preserves the design's bottom inset instead of clipping it.
   const containerClass = isPlate
-    ? "flex h-full w-full cursor-pointer items-start gap-[var(--space-3)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-[var(--space-3)]"
+    ? "flex min-h-full w-full cursor-pointer items-start gap-[var(--space-3)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-[var(--space-3)]"
     : "flex w-full max-w-[360px] cursor-pointer items-start gap-[var(--space-3)] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-[var(--space-3)] shadow-[var(--shadow-lg)]";
 
   return (

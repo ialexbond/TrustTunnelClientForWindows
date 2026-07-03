@@ -40,10 +40,17 @@ pub const RECONNECT_MAX_ATTEMPTS: u32 = 10;
 /// at any point (D-02 / D-05, RESEARCH A3).
 pub const RECONNECT_INTERVAL: Duration = Duration::from_secs(3);
 
-/// Per-attempt budget for a single reconnect try. Kept short (sub-minute) so a
-/// hung try does not stall the whole bounded sequence — a try that has not
-/// connected within this window is treated as a failed attempt and we move on.
-pub const RECONNECT_ATTEMPT_WINDOW: Duration = Duration::from_secs(15);
+/// Per-attempt CEILING for a single reconnect try (3.8 F-2 — was a flat 15s window).
+///
+/// The respawned child's `Connected` edge is now traffic-readiness-gated (up to
+/// `sidecar::TRAFFIC_READINESS_CAP` = 45s on http3 — the 3.8 delay-green). A flat 15s window
+/// counted every still-warming respawn as a FAILED attempt, and the NEXT attempt killed the
+/// warming child — so auto-reconnect became STRUCTURALLY unable to succeed on a slow-warmup
+/// protocol (Fable-5 F-2). `respawn_and_wait` now polls until the child CONNECTS, the child DIES,
+/// or the status goes terminal, and only falls back to this ceiling for a WEDGED-but-alive child.
+/// It must EXCEED the traffic-readiness cap (so a slow warmup can finish) yet stay sub-minute (so
+/// one hung try can't stall the bounded sequence). The early-exit keeps the real common case short.
+pub const RECONNECT_ATTEMPT_WINDOW: Duration = Duration::from_secs(55);
 
 /// Hard ceiling for the *initial* connect before the watchdog declares the
 /// "Connecting…" hung and forces an Error (D-05). 60 s is the agreed snappy-but-
@@ -179,6 +186,149 @@ pub fn is_fast_fail(elapsed: Duration) -> bool {
     elapsed < FAST_FAIL_GRACE
 }
 
+/// FAB-R1 (Fable-5 review of Phase 14) — may a supervisor respawn STORE its
+/// freshly-spawned child and write `Reconnecting`?
+///
+/// The window-independent reconnect supervisor captures `connection_generation`
+/// at the drop and passes it down to `respawn_sidecar`. But `respawn_sidecar`
+/// spawns the sidecar asynchronously, and during that `.await` a config switch's
+/// `vpn_connect(B)` can run: it BUMPS `connection_generation` and — because the
+/// child slot is momentarily empty mid-attempt — sails past the R8
+/// "already running" guard and spawns its OWN B sidecar. If the supervisor then
+/// blindly stores its A-retry child, TWO live sidecars coexist: the orphaned one
+/// still owns the WinTUN adapter + the fail-closed killswitch and is invisible to
+/// `kill_stale_sidecar` (different PID), or both bounce off R8 into a red error
+/// over the live session. The generation guard the loop runs BEFORE each attempt
+/// cannot catch this because the bump lands mid-attempt.
+///
+/// So `respawn_sidecar` RE-CHECKS this predicate immediately before it stores the
+/// child into `sidecar_child` AND before `set_vpn_status(Reconnecting)`: the store
+/// is allowed ONLY when the supervisor still owns the session — i.e. the captured
+/// generation still equals the live one (`is_current_generation`) AND no durable
+/// user-disconnect intent is set. Any mismatch means a `vpn_connect(B)` (or a
+/// manual reconnect / a user disconnect) took over → the retry is STALE, so the
+/// caller must kill the freshly-spawned child (drop its handle → KILL_ON_JOB_CLOSE
+/// fires) and return WITHOUT overwriting the slot or the PID file.
+///
+/// Pure (mirrors `is_current_generation` / `respawn`-guard shape) so the
+/// exhaustive gen-equal / gen-bumped / user-disconnect-set matrix is unit-tested
+/// without a real sidecar.
+pub fn respawn_may_store(
+    captured_generation: u64,
+    live_generation: u64,
+    user_disconnect_requested: bool,
+) -> bool {
+    is_current_generation(captured_generation, live_generation) && !user_disconnect_requested
+}
+
+/// 3.1 R-GEN (Fable-5 Phase-14 investigation, F12) — may the sidecar reader task's `Terminated`
+/// arm perform SESSION-STATUS side effects (write `vpn_status`, hand off to the reconnect
+/// supervisor) for the child that just exited?
+///
+/// The arm already gates the pid-file cleanup + the `sidecar_child` slot clear on process IDENTITY
+/// (`terminated_arm_owns_state` — a superseded child never strips a newer session's slot). But under
+/// a rapid disconnect→connect churn the OLD child's `Terminated` is delivered while the slot is
+/// TRANSIENTLY EMPTY (the disconnect took the child out; the new `vpn_connect` has already bumped the
+/// generation and emitted `Connecting`, but not yet stored its own child). An empty slot reads as
+/// "owns", so without a generation check the old child's non-zero exit writes `Error("sidecar-exit")`
+/// onto the fresh `Connecting` — exactly the F12 window in the churn log (the error lands between
+/// "Spawning..." and the new PID line). So the status side effects require BOTH: this child still owns
+/// the shared-state slot AND its captured generation is still the live one. The pid-gated cleanup runs
+/// regardless (this child's own housekeeping); only the session-scoped status/supervisor writes are
+/// suppressed for a superseded exit.
+///
+/// Pure (mirrors `respawn_may_store` / `is_current_generation`) so the owns × generation matrix is
+/// unit-tested without a real sidecar.
+pub fn terminated_arm_may_write_status(
+    owns_shared_state: bool,
+    captured_generation: u64,
+    live_generation: u64,
+) -> bool {
+    owns_shared_state && is_current_generation(captured_generation, live_generation)
+}
+
+/// FAB-R4 (Fable-5 review of Phase 14) — should `vpn_connect` BAIL to a clean
+/// `Disconnected` instead of spawning the destination sidecar, because a genuine
+/// user disconnect landed DURING a config switch (or a save-and-reconnect)?
+///
+/// A config switch A→B is a plain `vpn_disconnect(A)` → `vpn_connect(B)` on the
+/// frontend. `switchTo` (and `handleReconnect` for a save-and-reconnect) raises
+/// `set_switch_or_reconnect_pending(pending:true, …)` BEFORE its teardown; that
+/// teardown's `vpn_disconnect` legitimately sets the durable
+/// `user_disconnect_requested`; then `vpn_connect(B)` clears it. That clear is
+/// CORRECT for the switch's OWN teardown intent — but it also erases a GENUINE
+/// tray/manual «Отключить» that the user pressed in the teardown→connect gap, so
+/// the app ends CONNECTED against an explicit Disconnect (inverting the
+/// status-lifecycle «ручной Отключить побеждает» invariant).
+///
+/// **DECOUPLE-STAMP-FROM-BOOL (FAB-R4 re-fix, Fable option b):** the ORIGINAL
+/// wiring keyed this decision on the `switch_or_reconnect_pending` BOOL — but that
+/// bool is DEAD by the time `vpn_connect(B)` reads it: the FE sends
+/// `set_switch_or_reconnect_pending(pending:false)` (the BL-01 plate-suppression
+/// clear) BEFORE `vpn_connect(B)`, and that clear-edge also RESET the stamp to the
+/// sentinel — so the guard saw `switch_pending=false, stamp=None` and NEVER fired
+/// (the dead-guard defect Fable verified). The re-fix (a) leaves the stamp ALIVE
+/// across the FE's `pending:false` clear (the clear only drops the BL-01 bool now),
+/// and (b) keys this decision PURELY on the STAMP presence + the generation delta,
+/// NOT on the transient bool. The stamp is CONSUMED (reset to the sentinel) by the
+/// connect entry point that reads it, so it can influence at most the ONE
+/// immediately-following connect and can never leak into a later unrelated one.
+///
+/// The fix distinguishes the two disconnect classes by a monotonic sequence
+/// stamped from `connection_generation` at the moment the switch/save-and-reconnect
+/// is authorized (the `set_switch_or_reconnect_pending(pending:true)` raise): we
+/// record the LIVE generation THEN. The switch's OWN teardown-disconnect bumps the
+/// generation exactly ONCE past the stamp (`stamped → stamped + 1`); a genuine tray
+/// disconnect in the teardown→connect gap adds an EXTRA bump on top. So
+/// `vpn_connect` bails iff a stamp exists AND the durable disconnect intent is set
+/// AND the live generation has advanced PAST `stamped + 1` (an extra disconnect
+/// landed after authorization). If no stamp exists, or the only generation advance
+/// is the switch's own expected teardown (`live == stamped + 1` with intent from
+/// that teardown), the normal switch/save-and-reconnect completes untouched.
+///
+/// `durable_disconnect_requested` — the T-31 durable intent flag.
+/// `switch_authorized_generation` — the generation stamped when the switch /
+///   save-and-reconnect was authorized (`None` = sentinel = "no switch stamped",
+///   e.g. a plain manual connect or the supervisor-reconnect path). This is the
+///   SOLE gate now (the transient `switch_pending` bool is no longer consulted here
+///   — it is dead by connect time, which was the whole defect).
+/// `live_generation` — the current `connection_generation` at the `vpn_connect`
+///   decision point, read BEFORE this connect's own `fetch_add` bump (i.e. it
+///   reflects every teardown/disconnect that has landed so far, but not yet this
+///   connect's own increment).
+///
+/// The switch's OWN teardown-disconnect advances the generation exactly ONCE past
+/// the stamp (`stamped → stamped + 1`), so `live == stamped + 1` is the expected,
+/// normal switch — do NOT bail. A GENUINE tray/manual disconnect in the
+/// teardown→connect gap adds an EXTRA bump, so `live > stamped + 1` → the user's
+/// Disconnect landed after the switch was authorized and must win → bail.
+///
+/// Pure so the switch-completes / genuine-disconnect-wins / manual-connect /
+/// supervisor-reconnect / stale-stamp matrix is unit-tested without a real sidecar.
+pub fn switch_disconnect_wins(
+    durable_disconnect_requested: bool,
+    switch_authorized_generation: Option<u64>,
+    live_generation: u64,
+) -> bool {
+    match switch_authorized_generation {
+        // A switch/save-and-reconnect is authorized (a live stamp exists) AND the
+        // durable intent is still set: bail ONLY if an EXTRA disconnect landed after
+        // authorization. The switch's own single teardown advances the live
+        // generation to exactly `stamped + 1`, so a live generation PAST that means a
+        // genuine extra tray/manual disconnect bumped in between → the user's
+        // Disconnect must win. Keyed on the STAMP (not the transient bool), because
+        // the FE clears that bool BEFORE this connect runs (the dead-guard defect).
+        Some(stamped) => {
+            durable_disconnect_requested && live_generation > stamped.saturating_add(1)
+        }
+        // No stamp (sentinel → None): a plain manual connect, or the supervisor
+        // reconnect which never stamps → NEVER bail here; the existing
+        // connect_cancelled / generation guards own those paths. A normal manual
+        // connect after a manual disconnect is the user RE-connecting on purpose.
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,12 +370,20 @@ mod tests {
         // stall the whole sequence, and the total stays hard-BOUNDED (never infinite).
         assert_eq!(RECONNECT_MAX_ATTEMPTS, 10);
         assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(60));
+        // 3.8 F-2: the per-attempt ceiling grew from 15s to 55s so a traffic-readiness-gated
+        // (http3, ~45s warmup) respawn is not killed before it can green — but it stays sub-minute.
         assert!(RECONNECT_ATTEMPT_WINDOW < Duration::from_secs(60));
+        assert!(
+            RECONNECT_ATTEMPT_WINDOW >= Duration::from_secs(50),
+            "must exceed the ~45s http3 traffic-readiness warmup (3.8 F-2)"
+        );
         assert!(RECONNECT_INTERVAL < Duration::from_secs(60));
-        // Worst case (every attempt burns its full window + interval) stays bounded;
-        // fast-fail skips the interval for instant deaths, so the real worst case is lower.
+        // Worst case = every attempt burns the FULL ceiling + interval (a wedged-but-alive child
+        // every time). respawn_and_wait's early-exit on connect / child-death / terminal status
+        // makes the REAL common case far shorter; this only bounds the pathological ceiling. Still
+        // finite and user-cancellable (D-02/D-05 «Отмена»).
         let worst_case = (RECONNECT_ATTEMPT_WINDOW + RECONNECT_INTERVAL) * RECONNECT_MAX_ATTEMPTS;
-        assert!(worst_case <= Duration::from_secs(180));
+        assert!(worst_case <= Duration::from_secs(600));
     }
 
     #[test]
@@ -270,6 +428,156 @@ mod tests {
         // on something we do not recognize).
         assert!(!is_terminal_reason(""));
         assert!(!is_terminal_reason("some unrecognized failure"));
+    }
+
+    // ── FAB-R1 (Fable-5 review of Phase 14): respawn store guard ────────────
+
+    #[test]
+    fn respawn_may_store_only_when_generation_current_and_no_disconnect() {
+        // The supervisor captured generation 5 at the drop. Its respawn may STORE its
+        // fresh child ONLY while it still owns the session: generation unchanged AND no
+        // durable user-disconnect.
+        assert!(respawn_may_store(5, 5, false)); // still ours → store
+
+        // A config switch's vpn_connect(B) bumped the live generation past the captured
+        // one during the respawn's spawn await → this A-retry is STALE, must NOT store
+        // (else two live sidecars / orphaned killswitch-owning core — FAB-R1).
+        assert!(!respawn_may_store(5, 6, false)); // gen bumped by a switch → stale
+        assert!(!respawn_may_store(5, 99, false)); // any advance → stale
+
+        // A durable user-disconnect landed during the respawn → the user wins; do NOT
+        // store a sidecar they no longer want, even if the generation still matches.
+        assert!(!respawn_may_store(5, 5, true)); // user disconnect set → do not store
+
+        // Both a bump AND a disconnect → still must not store.
+        assert!(!respawn_may_store(5, 6, true));
+    }
+
+    #[test]
+    fn respawn_may_store_matches_generation_guard_semantics() {
+        // The store guard's generation dimension is exactly `is_current_generation`,
+        // so the two can never drift: current gen ⇒ may store (no disconnect); any
+        // mismatch ⇒ must not store, regardless of direction.
+        for (captured, live) in [(0u64, 0u64), (7, 7), (3, 4), (10, 2)] {
+            assert_eq!(
+                respawn_may_store(captured, live, false),
+                is_current_generation(captured, live),
+                "respawn store guard must track is_current_generation for captured={captured} live={live}",
+            );
+        }
+    }
+
+    // ── 3.1 R-GEN (Fable-5 Phase-14 investigation, F12): superseded-exit status gate ──
+
+    #[test]
+    fn terminated_arm_may_write_status_requires_owns_and_current_generation() {
+        // The reader task's Terminated arm may write session status / hand off to the supervisor
+        // ONLY when it still owns the slot AND its captured generation is live.
+        assert!(terminated_arm_may_write_status(true, 7, 7)); // owns + current → may write
+
+        // F12: this child owns the (transiently empty) slot, but a disconnect+connect churn bumped
+        // the generation past its captured one → its late non-zero exit must NOT write
+        // Error("sidecar-exit") onto the fresh Connecting.
+        assert!(!terminated_arm_may_write_status(true, 7, 8)); // owns but superseded → drop
+        assert!(!terminated_arm_may_write_status(true, 7, 99)); // any advance → drop
+
+        // A newer child is stored (does not own the slot) → already dropped by the identity gate;
+        // the combined predicate agrees regardless of generation.
+        assert!(!terminated_arm_may_write_status(false, 7, 7));
+        assert!(!terminated_arm_may_write_status(false, 7, 8));
+    }
+
+    #[test]
+    fn terminated_arm_status_gate_tracks_generation_guard() {
+        // When it owns the slot, the status gate's generation dimension is exactly
+        // is_current_generation — the two can never drift.
+        for (captured, live) in [(0u64, 0u64), (7, 7), (3, 4), (10, 2)] {
+            assert_eq!(
+                terminated_arm_may_write_status(true, captured, live),
+                is_current_generation(captured, live),
+                "status gate must track is_current_generation when owns for captured={captured} live={live}",
+            );
+        }
+    }
+
+    // ── FAB-R4 (Fable-5 review of Phase 14): switch-vs-tray-disconnect ──────
+
+    #[test]
+    fn switch_disconnect_wins_lets_a_normal_switch_complete() {
+        // Normal A→B switch: stamped at authorization = G (say 4). The switch's OWN
+        // teardown-disconnect advances the live generation to exactly G+1 (=5) and sets
+        // the durable intent — that is EXPECTED, not a genuine user disconnect. So
+        // vpn_connect must NOT bail: the switch completes and B connects.
+        //
+        // DECOUPLE-STAMP-FROM-BOOL (FAB-R4 re-fix): the decision is keyed on the STAMP
+        // presence, NOT on the transient switch_pending bool — the FE clears that bool
+        // (BL-01) BEFORE vpn_connect(B) runs, so a bool-keyed guard was DEAD. Here the
+        // stamp is alive at connect time; live == stamped + 1 → complete.
+        assert!(!switch_disconnect_wins(true, Some(4), 5)); // live == stamped + 1 → complete
+        // Even with intent set but the live gen exactly at the switch's own single
+        // teardown advance, we complete.
+        assert!(!switch_disconnect_wins(true, Some(0), 1));
+    }
+
+    #[test]
+    fn switch_disconnect_wins_lets_a_save_and_reconnect_complete() {
+        // Save-and-reconnect (handleReconnect, isSwitch:false) has the SAME teardown
+        // arithmetic as a switch: stamp = G at authorization, its own teardown bumps to
+        // G+1, then vpn_connect reads live = G+1 → complete. It ALSO stamps now (Fable
+        // Defect 2 — the same intent-inversion class), so this path must complete on the
+        // own-teardown delta exactly like a switch.
+        assert!(!switch_disconnect_wins(true, Some(7), 8)); // own teardown = +1 → complete
+    }
+
+    #[test]
+    fn switch_disconnect_wins_when_a_genuine_disconnect_lands_after_authorization() {
+        // A genuine tray/manual «Отключить» in the teardown→connect gap adds an EXTRA
+        // generation bump: stamped = 4, switch teardown → 5, tray disconnect → 6. The
+        // live generation (6) is now PAST stamped+1 (5) with the durable intent still
+        // set → the user's Disconnect must WIN: bail to a clean Disconnected, no B.
+        assert!(switch_disconnect_wins(true, Some(4), 6)); // live > stamped + 1 → bail
+        assert!(switch_disconnect_wins(true, Some(4), 9)); // further advance → still bail
+
+        // If the durable intent is somehow NOT set (e.g. the extra disconnect's intent
+        // was already consumed), there is no user disconnect to honor → do not bail.
+        assert!(!switch_disconnect_wins(false, Some(4), 6));
+    }
+
+    #[test]
+    fn switch_disconnect_wins_never_bails_a_plain_manual_connect() {
+        // No switch authorized (sentinel → None): a plain manual connect after a manual
+        // disconnect is the user RE-connecting on purpose. The connect_cancelled /
+        // generation guards own those paths — this predicate must never bail here, even
+        // with the durable intent still set and the generation advanced.
+        assert!(!switch_disconnect_wins(true, None, 100));
+        assert!(!switch_disconnect_wins(false, None, 0));
+    }
+
+    #[test]
+    fn switch_disconnect_wins_stale_stamp_after_aborted_switch_is_harmless() {
+        // Stale-stamp harmlessness (FAB-R4 re-fix point 3): an ABORTED switch (teardown
+        // vpn_disconnect REJECTED) leaves the stamp alive (the FE abort sends only
+        // pending:false, which no longer resets the stamp) but never runs vpn_connect(B),
+        // so the stamp survives to the NEXT connect. The realistic follow-up — a plain
+        // manual connect right after the aborted switch — must NOT be falsely bailed:
+        //   stamp = G (say 3), the aborted teardown's own bump → live = G+1 (=4).
+        // A connect reading (durable set by that teardown, stamp 3, live 4) sees
+        // live == stamped + 1 → COMPLETE, not bail. The stamp is then consumed by that
+        // connect (reset to sentinel) so it can never leak further.
+        assert!(!switch_disconnect_wins(true, Some(3), 4)); // own teardown only → complete
+        // With NO durable intent (the abort's intent was already consumed elsewhere),
+        // there is nothing to honor regardless of the delta → do not bail.
+        assert!(!switch_disconnect_wins(false, Some(3), 9));
+    }
+
+    #[test]
+    fn switch_disconnect_wins_leaves_the_supervisor_reconnect_path_untouched() {
+        // The reconnect supervisor's respawn NEVER calls set_switch_or_reconnect_pending,
+        // so no stamp exists → this predicate is a no-op for the auto-reconnect path (its
+        // ownership is the generation guard in the loop), regardless of the durable intent
+        // / live generation.
+        assert!(!switch_disconnect_wins(true, None, 42));
+        assert!(!switch_disconnect_wins(false, None, 42));
     }
 
     #[test]

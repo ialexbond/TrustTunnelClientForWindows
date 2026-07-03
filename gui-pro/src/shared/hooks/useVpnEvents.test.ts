@@ -44,12 +44,14 @@ function makeParams() {
   const setError = vi.fn();
   const setConnectedSince = vi.fn();
   const setVpnLogs = vi.fn();
+  const pushSuccess = vi.fn();
   const reconnectResolve = { current: null as null | (() => void) };
   return {
     setStatus,
     setError,
     setConnectedSince,
     setVpnLogs,
+    pushSuccess,
     reconnectResolve,
     params: {
       i18n,
@@ -57,6 +59,7 @@ function makeParams() {
       setError,
       setConnectedSince,
       setVpnLogs,
+      pushSuccess,
       reconnectResolve,
     },
   };
@@ -157,7 +160,8 @@ describe("useVpnEvents", () => {
     const updater = calls[calls.length - 1]?.[0];
     const resolved = typeof updater === "function" ? updater("connecting") : updater;
     expect(resolved).toBe("error");
-    expect(setError).toHaveBeenCalledWith("Authorization failed");
+    // F16: the core's fixed «Authorization failed» phrase is now localized, not raw.
+    expect(setError).toHaveBeenCalledWith(i18n.t("errors.auth_required"));
   });
 
   it("clears the stale error on a 'connected' vpn-status after a prior error (WR-01)", async () => {
@@ -218,6 +222,23 @@ describe("useVpnEvents", () => {
 
     expect(setStatus).toHaveBeenCalledWith("recovering");
     // recovering means the session is NOT up — connectedSince is cleared.
+    expect(setConnectedSince).toHaveBeenCalledWith(null);
+  });
+
+  it("F-9: a check_vpn_status_full snapshot of 'disconnecting' sets status disconnecting (not disconnected)", async () => {
+    // F-9 (Fable-5): a window mounting mid-teardown (the 3.4 Disconnecting transient can be in flight
+    // up to ~7s under 3.2) must render «Отключение» from the snapshot, NOT collapse to the
+    // disconnected else-branch (which briefly lied "disconnected" until the real Disconnected landed).
+    const { setStatus, setConnectedSince, params } = makeParams();
+    vi.mocked(invoke).mockResolvedValueOnce({ status: "disconnecting", error: null });
+
+    await act(async () => {
+      renderHook(() => useVpnEvents(params));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(setStatus).toHaveBeenCalledWith("disconnecting");
     expect(setConnectedSince).toHaveBeenCalledWith(null);
   });
 
@@ -424,6 +445,38 @@ describe("useVpnEvents", () => {
     expect(resolved).toBe("disconnected");
   });
 
+  it("3.4 R-DCT: 'disconnecting' stops uptime; a prev='disconnecting' disconnected fires «VPN отключён»", async () => {
+    // With the real Disconnecting wire status, a genuine user disconnect arrives as
+    // Connected → Disconnecting → Disconnected. The teardown status must stop the uptime clock, and
+    // the SETTLED edge (prev="disconnecting") must still fire the «VPN отключён» snackbar (the old
+    // prev==="connected"-only check would have lost it). The snackbar/uptime logic lives inside the
+    // setStatus updater, so drive it with the chosen prev like the AUDIT-#8 tests above.
+    const { setStatus, setConnectedSince, pushSuccess, params } = makeParams();
+    await act(async () => {
+      renderHook(() => useVpnEvents(params));
+    });
+    setStatus.mockClear();
+    setConnectedSince.mockClear();
+    pushSuccess.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnecting" as VpnStatus });
+    });
+    const discCalls = setStatus.mock.calls;
+    const discUpdater = discCalls[discCalls.length - 1]?.[0];
+    if (typeof discUpdater === "function") discUpdater("connected");
+    expect(setConnectedSince).toHaveBeenCalledWith(null); // teardown stops the uptime clock
+
+    setStatus.mockClear();
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+    });
+    const doneCalls = setStatus.mock.calls;
+    const doneUpdater = doneCalls[doneCalls.length - 1]?.[0];
+    if (typeof doneUpdater === "function") doneUpdater("disconnecting");
+    expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+  });
+
   it("AUDIT #8: with no manualReconnectActiveRef wired at all, 'disconnected' is never suppressed", async () => {
     // The ref param is optional (older call sites / tests). Absent ref must behave like
     // "no manual reconnect in flight" — the safe direction (never suppress).
@@ -583,7 +636,7 @@ describe("useVpnEvents", () => {
     expect(setConnectedSince).toHaveBeenCalledWith(null);
   });
 
-  it("passes a non-reason-code error through unchanged", async () => {
+  it("passes an unmapped error string through unchanged", async () => {
     const { setError, params } = makeParams();
 
     await act(async () => {
@@ -592,11 +645,12 @@ describe("useVpnEvents", () => {
     setError.mockClear();
 
     await act(async () => {
-      emitEvent("vpn-status", { status: "error" as VpnStatus, error: "Authorization failed" });
+      // A string that is neither a reason code nor one of the fixed core phrases (F16) —
+      // it must still render verbatim (defensive passthrough for anything we don't map).
+      emitEvent("vpn-status", { status: "error" as VpnStatus, error: "Some unmapped backend text" });
     });
 
-    // Older sanitized backend messages still render verbatim (only known codes map).
-    expect(setError).toHaveBeenCalledWith("Authorization failed");
+    expect(setError).toHaveBeenCalledWith("Some unmapped backend text");
   });
 
   // ──────────────────────────────────────────────────────────
@@ -751,5 +805,269 @@ describe("useVpnEvents", () => {
 
     // Hardened cleanup must immediately unlisten the late-resolved registration.
     expect(countLive("vpn-status")).toBe(0);
+  });
+
+  // ──────────────────────────────────────────────────────────
+  // Phase 14 (Wave 0, plan 14-01): the no-dwell guard MUST STAY NARROW
+  //
+  // GREEN INVARIANT (not RED) — a config switch's transient `disconnected` (the teardown leg, prev
+  // `disconnecting`) must NOT be eaten by the no-dwell guard. The guard keys ONLY on
+  // `prev === "reconnecting" && manualReconnectActiveRef.current`; a switch uses `disconnecting`, so
+  // it is NOT caught here — and Phase 14 must NOT broaden it. Broadening risks eating a REAL terminal
+  // disconnect (the AUDIT #8 "stuck on yellow" bug). Phase-14 visual continuity comes from the FE-only
+  // `isSwitching` flag keeping the hero live (ConfigList gate), NOT from suppressing this event. This
+  // test PASSES today and must KEEP passing across every later slice.
+  // ──────────────────────────────────────────────────────────
+
+  it("Phase 14: a switch's transient 'disconnected' (prev 'disconnecting') is NOT suppressed by the no-dwell guard", async () => {
+    // A manual reconnect ref set true would only matter for a prev="reconnecting" edge — here the
+    // switch teardown drives prev="disconnecting", which the guard never covers. Set the ref true to
+    // prove even THEN the disconnecting→disconnected edge is not suppressed (the guard is prev-scoped).
+    const { setStatus, params } = makeParams();
+    const manualReconnectActiveRef = { current: true };
+
+    await act(async () => {
+      renderHook(() => useVpnEvents({ ...params, manualReconnectActiveRef }));
+    });
+    setStatus.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+    });
+
+    // The teardown leg's transient disconnected surfaces — prev is "disconnecting", not the
+    // "reconnecting" the guard keys on, so the listener commits it (isSwitching keeps the hero live,
+    // it does NOT rely on suppressing this event).
+    const calls = setStatus.mock.calls;
+    const updater = calls[calls.length - 1]?.[0];
+    const resolved = typeof updater === "function" ? updater("disconnecting") : updater;
+    expect(resolved).toBe("disconnected");
+  });
+
+  // ─── F-7 (Fable-5): a user-superseded switch shows the NEUTRAL disconnect snack, not red ───
+  // The snackbar logic lives INSIDE the setStatus updater, so — like the no-dwell guard test above —
+  // we drive the updater with prev = "connecting" (the switch's destination connect) to exercise the
+  // connecting→disconnected branch (a mocked setStatus does not run the updater itself).
+  describe("F-7 — superseded switch snackbar (neutral, not red «Connection failed»)", () => {
+    it("connecting → disconnected with switchSupersededRef set shows «VPN отключён», not the red error", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      const switchSupersededRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, switchSupersededRef }));
+      });
+      pushSuccess.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      // Neutral «VPN отключён», never the red («error») «Connection failed». And the flag is consumed.
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+      expect(pushSuccess).not.toHaveBeenCalledWith(expect.anything(), "error");
+      expect(switchSupersededRef.current).toBe(false);
+    });
+
+    it("connecting → disconnected WITHOUT the supersede flag still shows the red «Connection failed»", async () => {
+      // Contrast: a genuine connect failure (no user disconnect superseded it) must still be red.
+      const { setStatus, pushSuccess, params } = makeParams();
+      const switchSupersededRef = { current: false };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, switchSupersededRef }));
+      });
+      pushSuccess.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus, error: "boom" });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      expect(pushSuccess).toHaveBeenCalledWith("boom", "error");
+    });
+  });
+
+  // ─── F16 (14-UAT round 2): the snackbar localizes the core's fixed English error phrases ───
+  // The C++ sidecar emits fixed English strings on the error payload (sidecar.rs fatal_marker_error /
+  // config_parse_error). They must be shown in the active locale, never leaked raw into the Russian
+  // UI. localizeError maps them to existing i18n keys; an empty payload falls back to the localized
+  // errors.connection_failed, NOT the old English default value.
+  describe("F16 — snackbar localizes core error strings", () => {
+    const failCases: Array<[string, string]> = [
+      ["Server refused the connection", "errors.connection_refused"],
+      ["Authorization failed", "errors.auth_required"],
+      ["Failed to start VPN tunnel", "errors.listener_failed"],
+      ["VPN adapter creation failed", "errors.wintun_missing"],
+      ["Configuration parse error. Check your config file.", "errors.config_parse_error"],
+    ];
+    it.each(failCases)(
+      "connecting → disconnected with core error «%s» shows the localized message, not the raw English",
+      async (coreError, key) => {
+        const { setStatus, pushSuccess, params } = makeParams();
+        const switchSupersededRef = { current: false };
+        await act(async () => {
+          renderHook(() => useVpnEvents({ ...params, switchSupersededRef }));
+        });
+        pushSuccess.mockClear();
+        await act(async () => {
+          emitEvent("vpn-status", { status: "disconnected" as VpnStatus, error: coreError });
+        });
+        const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+        if (typeof updater === "function") updater("connecting");
+
+        expect(pushSuccess).toHaveBeenCalledWith(i18n.t(key), "error");
+        expect(pushSuccess).not.toHaveBeenCalledWith(coreError, "error");
+      },
+    );
+
+    it("connecting → disconnected with NO error shows the localized generic, not English «Connection failed»", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      const switchSupersededRef = { current: false };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, switchSupersededRef }));
+      });
+      pushSuccess.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("errors.connection_failed"), "error");
+      expect(pushSuccess).not.toHaveBeenCalledWith("Connection failed", "error");
+    });
+  });
+
+  // ─── F17 (14-UAT round 2): a seamless switch+revert stays calm — no disconnect snackbar ───
+  // While isSwitching is mirrored into seamlessSwitchActiveRef, neither the red «Connection failed»
+  // (failed B) nor the neutral «VPN отключён» (revert/teardown leg) fires — the amber card + the
+  // embedded «…восстановлено» banner are the only signals. With the ref false the snackbars fire as
+  // before (no over-suppression of a genuine, non-switch disconnect).
+  describe("F17 — seamless switch/revert suppresses the disconnect snackbars", () => {
+    it("connecting → disconnected with the ref true fires NO red «Connection failed»", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      const seamlessSwitchActiveRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, seamlessSwitchActiveRef }));
+      });
+      pushSuccess.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", {
+          status: "disconnected" as VpnStatus,
+          error: "Server refused the connection",
+        });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      expect(pushSuccess).not.toHaveBeenCalled();
+    });
+
+    it("connected/disconnecting → disconnected with the ref true fires NO «VPN отключён»", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      const seamlessSwitchActiveRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, seamlessSwitchActiveRef }));
+      });
+      pushSuccess.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("disconnecting");
+
+      expect(pushSuccess).not.toHaveBeenCalled();
+    });
+
+    it("contrast: with the ref false the same edges still fire their snackbars", async () => {
+      // red on connecting → disconnected
+      {
+        const { setStatus, pushSuccess, params } = makeParams();
+        const seamlessSwitchActiveRef = { current: false };
+        await act(async () => {
+          renderHook(() => useVpnEvents({ ...params, seamlessSwitchActiveRef }));
+        });
+        pushSuccess.mockClear();
+        await act(async () => {
+          emitEvent("vpn-status", {
+            status: "disconnected" as VpnStatus,
+            error: "Server refused the connection",
+          });
+        });
+        const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+        if (typeof updater === "function") updater("connecting");
+        expect(pushSuccess).toHaveBeenCalledWith(i18n.t("errors.connection_refused"), "error");
+      }
+      // neutral on disconnecting → disconnected
+      {
+        const { setStatus, pushSuccess, params } = makeParams();
+        const seamlessSwitchActiveRef = { current: false };
+        await act(async () => {
+          renderHook(() => useVpnEvents({ ...params, seamlessSwitchActiveRef }));
+        });
+        pushSuccess.mockClear();
+        await act(async () => {
+          emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+        });
+        const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+        if (typeof updater === "function") updater("disconnecting");
+        expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+      }
+    });
+  });
+
+  // ─── Phase 14 (14-04): defensive onSettled backstop on the terminal edge ───
+  //
+  // Pitfall 2: even if a switch promise is abandoned (a dropped/never-resolving chain), a
+  // terminal `vpn-status` edge (connected OR error) must still clear the App's isSwitching lock —
+  // so the UI can never wedge locked. useVpnEvents fires an optional onSettled() callback exactly
+  // on the terminal connected/error edge. It MUST land on the terminal-edge branch, NOT inside the
+  // no-dwell guard (broadening the guard risks the AUDIT #8 stuck-on-yellow regression).
+  describe("Phase 14 — onSettled terminal-edge defensive clear (Pitfall 2)", () => {
+    it("fires onSettled on the terminal 'connected' edge", async () => {
+      const { params } = makeParams();
+      const onSettled = vi.fn();
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, onSettled }));
+      });
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" as VpnStatus });
+      });
+
+      expect(onSettled).toHaveBeenCalledTimes(1);
+    });
+
+    it("fires onSettled on the terminal 'error' edge", async () => {
+      const { params } = makeParams();
+      const onSettled = vi.fn();
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, onSettled }));
+      });
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus, error: "sidecar-exit" });
+      });
+
+      expect(onSettled).toHaveBeenCalledTimes(1);
+    });
+
+    it("does NOT fire onSettled on a NON-terminal edge (connecting / reconnecting / recovering / disconnected)", async () => {
+      const { params } = makeParams();
+      const onSettled = vi.fn();
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, onSettled }));
+      });
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connecting" as VpnStatus });
+        emitEvent("vpn-status", { status: "reconnecting" as VpnStatus });
+        emitEvent("vpn-status", { status: "recovering" as VpnStatus });
+        // A bare `disconnected` is the switch teardown's TRANSIENT — NOT a settle. Only
+        // connected/error are terminal for the switch lifecycle (a failed switch lands on error).
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+      });
+
+      expect(onSettled).not.toHaveBeenCalled();
+    });
   });
 });

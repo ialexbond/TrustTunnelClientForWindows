@@ -179,12 +179,13 @@ function TrayMenu() {
     isConnected || isBusy
       ? {
           id: "disconnect",
-          label: isBusy ? t("Отмена", "Cancel") : t("Отключиться", "Disconnect"),
+          // F22: match the Connection-tab buttons («Отключить»/«Подключить»), not the reflexive form.
+          label: isBusy ? t("Отмена", "Cancel") : t("Отключить", "Disconnect"),
           action: () => void tray("disconnect"),
         }
       : {
           id: "connect",
-          label: t("Подключиться", "Connect"),
+          label: t("Подключить", "Connect"),
           action: () => void tray("connect"),
           // Disable если нет config — нечего подключать. Показываем
           // пункт (не скрываем), чтобы пользователю было понятно что

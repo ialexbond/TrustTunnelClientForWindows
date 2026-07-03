@@ -12,6 +12,12 @@ interface Props {
   language: string;
   onLanguageChange: (lang: string) => void;
   statusPanel?: ReactNode;
+  /**
+   * Phase 14 (D-13): a seamless A→B switch is in flight (App-owned isSwitching). Passed straight to
+   * AutoModeSettings as `locked` so its master toggle + priority reorder are inert while switching —
+   * a mid-switch master-on / reorder could arm a competing switch (Pitfall 5). Pure pass-through.
+   */
+  isSwitching?: boolean;
 }
 
 export default function AppSettingsPanel({
@@ -20,6 +26,7 @@ export default function AppSettingsPanel({
   language,
   onLanguageChange,
   statusPanel,
+  isSwitching = false,
 }: Props) {
   const { t } = useTranslation();
   const pushSnack = useSnackBar();
@@ -37,7 +44,7 @@ export default function AppSettingsPanel({
             §Pattern 3). It groups all connection-automation prefs (auto-switch master + params +
             priority list, the MOVED startup auto-connect toggle, notifications). It owns its own
             useAppSettings/useConfigList — AppSettingsPanel only feeds onSaved, like the siblings. */}
-        <AutoModeSettings onSaved={showSaved} />
+        <AutoModeSettings onSaved={showSaved} locked={isSwitching} />
         <AppearanceSection
           theme={theme}
           onThemeChange={(t) => { onThemeChange(t); showSaved(); }}

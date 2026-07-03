@@ -466,7 +466,7 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
 
     const { hook } = renderReconnectHarness("connected");
 
-    let switchPromise: Promise<void>;
+    let switchPromise: Promise<{ ok: boolean }>;
     await act(async () => {
       switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
       // Let the synchronous setStatus("disconnecting") + the vpn_disconnect microtask
@@ -577,7 +577,7 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
     });
     const { hook } = renderReconnectHarness("connected");
 
-    let switchPromise: Promise<void>;
+    let switchPromise: Promise<{ ok: boolean }>;
     await act(async () => {
       switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
       await Promise.resolve();
@@ -649,7 +649,7 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
     });
     const { hook } = renderReconnectHarness("connected");
 
-    let switchPromise: Promise<void>;
+    let switchPromise: Promise<{ ok: boolean }>;
     await act(async () => {
       switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
       await Promise.resolve();
@@ -664,5 +664,181 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
       emitEvent("vpn-status", { status: "disconnected" });
       await switchPromise;
     });
+  });
+
+  // ─── Phase 14 (14-04): switchTo surfaces an explicit { ok } result ───
+  //
+  // D-05/D-05-impl: the App revert orchestration needs a TESTABLE signal that B failed to
+  // connect so it can re-point to A. switchTo now RESOLVES to { ok: boolean } — ok:true on a
+  // successful vpn_connect (the path that reaches set_last_used), ok:false on the connect catch
+  // that sets status=error. Everything else about its contract (teardown-only-when-live, the
+  // reject-abort, the pending signal, set_last_used) is UNCHANGED — the { ok } is purely additive.
+  it("14-04: resolves { ok: true } when the connect succeeds (from DISCONNECTED)", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("disconnected");
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(hook.result.current.status).not.toBe("error");
+  });
+
+  it("3.5 F-VERDICT: a NO-SPAWN supersede resolves { ok:false, superseded:true } and does NOT stamp last-used", async () => {
+    // vpn_connect bailed (a genuine disconnect landed mid-connect) → ConnectOutcome { spawned:false }.
+    // switchTo reports the supersede distinctly (so performSwitch skips the 15s park + the revert), and
+    // it must NOT mark the path last-used (no live session was created).
+    const calls: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      calls.push(cmd);
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      if (cmd === "vpn_connect") return { spawned: false, reason: "superseded-by-disconnect" };
+      return null;
+    });
+    const { hook } = renderReconnectHarness("disconnected");
+
+    let result: { ok: boolean; superseded?: boolean } | undefined;
+    await act(async () => {
+      result = await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(result).toEqual({ ok: false, superseded: true });
+    expect(calls).not.toContain("set_last_used"); // no last-used stamp for a superseded connect
+    expect(hook.result.current.status).not.toBe("error"); // a supersede is NOT a failure
+  });
+
+  it("14-04: resolves { ok: false } when the connect leg rejects (status → error)", async () => {
+    // vpn_connect rejects → switchTo's connect catch sets status=error; the result carries ok:false
+    // so the App can trigger the revert-to-previous. switchTo STILL never rejects (the caller awaits
+    // a resolved result, not a thrown error).
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_connect") throw new Error("B connect failed");
+      return null;
+    });
+    const { hook } = renderReconnectHarness("disconnected");
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      // Must NOT throw — it resolves to a result the caller reads.
+      result = await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(hook.result.current.status).toBe("error");
+  });
+
+  it("14-04: resolves { ok: false } on a teardown REJECT (from CONNECTED, no connect attempted)", async () => {
+    // A teardown reject aborts before the connect — the switch did NOT reach B, so the result is
+    // ok:false (the App's revert re-points to A, which is still the connected server anyway).
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "vpn_disconnect") throw new Error("Lock error");
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(hook.result.current.status).toBe("error");
+  });
+
+  it("14-04: resolves { ok: false } when no path is given (guard path)", async () => {
+    const { hook } = renderReconnectHarness("disconnected");
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await hook.result.current.actions.switchTo("");
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(hook.result.current.status).toBe("error");
+  });
+
+  // ─── Phase 14 (FAB-07): the revert leg's skipTeardown ───
+  // The App revert reconnects A from an ALREADY-settled error/disconnected state — there is no live
+  // tunnel to tear down. switchTo(path, { skipTeardown: true }) must go STRAIGHT to vpn_connect
+  // WITHOUT a vpn_disconnect, even if the status happens to read connected/connecting. This avoids a
+  // spurious second teardown that (if it rejected) would abort the revert without ever reconnecting A.
+  it("FAB-07: skipTeardown goes straight to vpn_connect (no vpn_disconnect) even from CONNECTED", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    // Status reads "connected" — normally that would trigger a teardown; skipTeardown must bypass it.
+    const { hook } = renderReconnectHarness("connected");
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await hook.result.current.actions.switchTo(OTHER_PATH, { skipTeardown: true });
+    });
+
+    // No teardown was performed — the revert connects A directly.
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: OTHER_PATH,
+      logLevel: "info",
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  // ─── Phase 14 (FAB-02): stampLastUsed:false defers the last-used marker ───
+  // A vpn_connect ACCEPT only means the process spawned — a spawned config can still die
+  // never-connected. So the forward switch passes stampLastUsed:false and the App stamps last-used
+  // only after the terminal `connected` edge (via the exported markLastUsed). switchTo must NOT call
+  // set_last_used when stampLastUsed:false, even on a successful spawn-accept.
+  it("FAB-02: stampLastUsed:false does NOT call set_last_used on a spawn-accept", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("disconnected");
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await hook.result.current.actions.switchTo(OTHER_PATH, { stampLastUsed: false });
+    });
+
+    // The connect was accepted (ok:true) but last-used was NOT stamped — the App does that after the
+    // terminal connected edge.
+    expect(result).toEqual({ ok: true });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("set_last_used", expect.anything());
+  });
+
+  // The DEFAULT (no opts) still stamps last-used on accept — direct callers / the revert's A keep it.
+  it("FAB-02: the default (stampLastUsed omitted) still stamps last-used on accept", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("disconnected");
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH);
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_last_used", { id: "other-id" });
+  });
+
+  // markLastUsed is exported so the App can stamp last-used after the terminal connected edge.
+  it("FAB-02: markLastUsed(path) resolves the id from the manifest and stamps set_last_used", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const { hook } = renderReconnectHarness("connected");
+
+    await act(async () => {
+      await hook.result.current.actions.markLastUsed(OTHER_PATH);
+    });
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_last_used", { id: "other-id" });
   });
 });

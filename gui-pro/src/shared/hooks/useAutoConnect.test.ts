@@ -24,6 +24,8 @@ const LAST_USED_LIST = [
 
 const setStatus = vi.fn();
 const setError = vi.fn();
+// F29: the freeze-cache seed callback the hook calls with the honest launch ping (path, ms).
+const seedConfigPing = vi.fn();
 
 // AUDIT-2026-06-11 #15/#23: the harness now supports rerendering with a changed
 // `status` (the live value App passes every render — feeds the hook's statusRef)
@@ -41,6 +43,7 @@ const renderAutoConnect = (
         status,
         setStatus,
         setError,
+        seedConfigPing,
       }),
     { initialProps },
   );
@@ -163,6 +166,39 @@ describe("useAutoConnect — T-22 B3 boot guard", () => {
     });
     expect(mockInvoke).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 42 });
     expect(pingPushedBeforeConnect).toBe(true);
+  });
+
+  it("F29: seeds the freeze cache with the launch ping (path, ms) when the probe is ok", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "ping_config_endpoint") return { status: "ok", ms: 58 };
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    // The honest launch ping is delivered to the card freeze cache (not just the notification plate).
+    expect(seedConfigPing).toHaveBeenCalledWith("/config.json", 58);
+  });
+
+  it("F29: does NOT seed the freeze cache when the launch probe is not ok (never a fabricated number)", async () => {
+    localStorage.setItem("tt_auto_connect", "true");
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "network_ready") return true;
+      if (cmd === "list_configs") return LAST_USED_LIST;
+      if (cmd === "ping_config_endpoint") return { status: "unreachable" };
+      if (cmd === "vpn_connect") return null;
+      return null;
+    });
+
+    renderAutoConnect();
+    await flush();
+
+    expect(seedConfigPing).not.toHaveBeenCalled();
   });
 
   it("pushes null when the launch reachability probe is unreachable (Phase 13, 13-09 Fix 1)", async () => {

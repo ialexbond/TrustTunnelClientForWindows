@@ -265,4 +265,39 @@ describe("ConfigEditView (production)", () => {
     await user.click(saveBtn);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
+
+  // ─── Phase 14 (14-03): lock the ACTIVE-config save while a switch is in flight (D-13) ───
+  //
+  // RED until 14-03 — the `isSwitching` prop is not yet on ConfigEditView. D-13: re-saving the
+  // ACTIVE config mid-switch reruns «Сохранить и переподключить» → a competing reconnect that races
+  // the in-flight swap. So while isSwitching the active-config save must be disabled (OR'd into the
+  // existing saveDisabled). An INACTIVE-config save does NOT race the tunnel, so it stays enabled.
+  describe("Phase 14 — lock active save while switching (RED until 14-03)", () => {
+    // D-13: active config + switch in flight → save disabled even when the form is dirty.
+    it("disables the active-config save while isSwitching", async () => {
+      const { default: userEvent } = await import("@testing-library/user-event");
+      const user = userEvent.setup();
+      // isActiveConfig + connected + isSwitching. Make the form dirty so the ONLY thing that could
+      // keep save disabled is the switch lock.
+      setup({ isActiveConfig: true, status: "connected", isSwitching: true });
+      await screen.findByLabelText(L.passwordAria);
+      await user.click(screen.getByRole("switch", { name: i18n.t("connection.editView.ipv6") }));
+
+      const saveBtn = screen.getByRole("button", { name: L.saveReconnect });
+      await waitFor(() => expect(saveBtn).toBeDisabled());
+    });
+
+    // D-13 must-keep: an INACTIVE-config save does not touch the live tunnel, so a switch on the
+    // active config must NOT lock an unrelated inactive-config edit's save.
+    it("leaves an inactive-config save enabled while isSwitching", async () => {
+      const { default: userEvent } = await import("@testing-library/user-event");
+      const user = userEvent.setup();
+      setup({ isActiveConfig: false, status: "disconnected", isSwitching: true });
+      await screen.findByLabelText(L.passwordAria);
+      await user.click(screen.getByRole("switch", { name: i18n.t("connection.editView.ipv6") }));
+
+      const saveBtn = screen.getByRole("button", { name: L.save });
+      await waitFor(() => expect(saveBtn).not.toBeDisabled());
+    });
+  });
 });

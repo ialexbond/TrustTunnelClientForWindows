@@ -23,6 +23,35 @@ interface UseVpnEventsParams {
   // Optional so existing call sites / tests that don't wire it still type-check
   // (absent ref = guard never suppresses, which is the safe direction).
   manualReconnectActiveRef?: React.MutableRefObject<boolean>;
+  // Phase 14 (14-04 / Pitfall 2): a DEFENSIVE backstop the App uses to clear its FE-only
+  // `isSwitching` lock. Fired EXACTLY on the terminal `vpn-status` edge — `connected` OR `error`
+  // (the two settle outcomes of a switch; a bare `disconnected` is the transient teardown, NOT a
+  // settle). This is belt-to-the-finally's-suspenders: even if a switch promise is abandoned (a
+  // dropped/never-resolving chain), the terminal edge still releases the lock so the UI can never
+  // wedge locked. It MUST land on the terminal-edge branch below — NOT inside/broadening the
+  // no-dwell guard (broadening risks eating a REAL terminal disconnect — AUDIT #8 stuck-on-yellow).
+  // Optional so call sites / tests that don't wire it keep type-checking (they simply get no clear).
+  //
+  // Phase 14 (FAB-02): the terminal STATUS (`connected` | `error`) is passed so the App can settle
+  // its switch on the REAL terminal edge — `switchTo` resolves at spawn-accept, but a spawned B can
+  // still die never-connected. performSwitch awaits this edge: `connected` → success (stamp
+  // last-used), `error` → silent revert. The App resolves an internal settle-promise from here.
+  onSettled?: (terminalStatus: "connected" | "error") => void;
+  // F-7 (Fable-5): set by App when a switch is SUPERSEDED by a genuine user disconnect (a tray
+  // «Отключить» mid-switch, or vpn_connect bailing spawned:false). Rust then writes a
+  // connecting → disconnected edge which the snackbar below would otherwise map to the RED
+  // «Connection failed» — but this was a user-intended disconnect, not a connect failure. The
+  // connecting→disconnected arm consults + CONSUMES this ref to show the neutral «VPN отключён»
+  // instead. Optional so call sites / tests that don't wire it keep type-checking.
+  switchSupersededRef?: React.MutableRefObject<boolean>;
+  // F17 (14-UAT round 2): set by App (mirrors isSwitching) across the WHOLE seamless switch+revert
+  // window. While true, the disconnected-edge snackbars — the red «Connection failed» (connecting→
+  // disconnected) AND the neutral «VPN отключён» (connected/disconnecting→disconnected) — are
+  // SUPPRESSED: a seamless switch/revert stays calm (amber card + embedded «…восстановлено» banner),
+  // it must not flash a disconnect snackbar for a failed B or the revert leg. Distinct from
+  // switchSupersededRef (a one-shot tray-supersede flag); this spans the whole switch. Optional so
+  // call sites / tests that don't wire it keep type-checking.
+  seamlessSwitchActiveRef?: React.MutableRefObject<boolean>;
 }
 
 export function useVpnEvents({
@@ -35,6 +64,9 @@ export function useVpnEvents({
   pushSuccess,
   setReconnectProgress,
   manualReconnectActiveRef,
+  onSettled,
+  switchSupersededRef,
+  seamlessSwitchActiveRef,
 }: UseVpnEventsParams) {
   // AUDIT-2026-06-11 #14: the mount snapshot (check_vpn_status_full) and the live
   // vpn-status listener are independent async channels — the IPC reply can land
@@ -81,9 +113,24 @@ export function useVpnEvents({
     // tell the user honestly instead of leaking the raw token.
     "disconnect-failed": "errors.disconnect_failed",
   };
+  // F16 (14-UAT round 2): the C++ sidecar emits a handful of FIXED English phrases on the
+  // vpn-status error payload (fatal_marker_error / config_parse_error in
+  // src-tauri/src/sidecar.rs:121-127,161). They are stable DERIVED phrases (D-29-safe, never
+  // raw log text) but are NOT ASCII reason codes, so localizeError used to pass them straight
+  // through — leaking English «Server refused the connection»/«Authorization failed» into the
+  // Russian UI (both the snackbar and the StatusPanel banner). Map each to its existing
+  // localized key. Keep this byte-for-byte in sync with sidecar.rs; if a phrase drifts it
+  // silently degrades to passthrough (today's behavior), never a crash.
+  const CORE_MESSAGE_I18N: Record<string, string> = {
+    "Authorization failed": "errors.auth_required",
+    "VPN adapter creation failed": "errors.wintun_missing",
+    "Failed to start VPN tunnel": "errors.listener_failed",
+    "Server refused the connection": "errors.connection_refused",
+    "Configuration parse error. Check your config file.": "errors.config_parse_error",
+  };
   const localizeError = (error: string | null | undefined): string | null => {
     if (!error) return error ?? null;
-    const key = REASON_CODE_I18N[error];
+    const key = REASON_CODE_I18N[error] ?? CORE_MESSAGE_I18N[error];
     return key ? i18n.t(key) : error;
   };
   // ─── Helper: write trace log visible in Log Panel ───
@@ -131,6 +178,12 @@ export function useVpnEvents({
           // (reconnecting, re-establish) are now distinct snapshot states; both mean
           // the session is NOT up, so connectedSince is cleared for either.
           setStatus(status);
+          setConnectedSince(null);
+        } else if (status === "disconnecting") {
+          // F-9 (Fable-5): a window mounting mid-teardown (the 3.4 Disconnecting transient can be
+          // in flight up to ~7s under 3.2) must render «Отключение», not collapse to «Отключено».
+          // The backend snapshot returns the canonical wire string, matching the live event.
+          setStatus("disconnecting");
           setConnectedSince(null);
         } else {
           setStatus("disconnected");
@@ -231,17 +284,51 @@ export function useVpnEvents({
             pushSuccess?.(i18n.t("messages.vpn_connected", "VPN connected"));
           } else if (event.payload.status === "disconnected") {
             setConnectedSince(null);
+            // F17 (14-UAT round 2): during a seamless switch+revert the app stays calm — the amber
+            // card + the embedded «…восстановлено» info banner are the ONLY failure signals. Suppress
+            // BOTH disconnect snackbars (the red «Connection failed» for a failed B, and the neutral
+            // «VPN отключён» for the revert/teardown leg) while isSwitching is mirrored here. Control
+            // flow — incl. the one-shot switchSupersededRef consume — is UNCHANGED; only the snackbar
+            // emission is gated, so a genuine (non-switch) disconnect still shows its snackbar.
+            const suppressDisconnectSnack = seamlessSwitchActiveRef?.current ?? false;
             if (prev === "connecting") {
-              // Was trying to connect → connection failed
-              pushSuccess?.(
-                event.payload.error || i18n.t("errors.connection_failed", "Connection failed"),
-                "error"
-              );
-            } else if (prev === "connected" && !reconnectResolve.current) {
-              // Was connected → normal disconnect (not part of reconnect)
+              if (switchSupersededRef?.current) {
+                // F-7 (Fable-5): a genuine user disconnect SUPERSEDED an in-flight switch (tray
+                // «Отключить» mid-switch, or vpn_connect bailing spawned:false). The
+                // connecting→disconnected edge here is the user's intended disconnect, NOT a connect
+                // failure — show the neutral «VPN отключён», never the red «Connection failed».
+                // Consume the flag so a later real connect failure still shows red.
+                switchSupersededRef.current = false;
+                if (!suppressDisconnectSnack)
+                  pushSuccess?.(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+              } else if (!suppressDisconnectSnack) {
+                // Was trying to connect → connection failed. F16: localize the core's error
+                // phrase (e.g. «Server refused the connection») via localizeError instead of
+                // leaking it raw; when the payload has no error, fall back to the localized
+                // generic errors.connection_failed (ru source + en mirror), NOT an English default.
+                pushSuccess?.(
+                  localizeError(event.payload.error) || i18n.t("errors.connection_failed"),
+                  "error"
+                );
+              }
+            } else if (
+              (prev === "connected" || prev === "disconnecting") &&
+              !reconnectResolve.current &&
+              !suppressDisconnectSnack
+            ) {
+              // Was connected (or in the new 3.4 Disconnecting teardown) → normal disconnect, not part
+              // of a reconnect. With the real Disconnecting wire status a genuine user disconnect now
+              // arrives as Connected → Disconnecting → Disconnected, so the settled edge's `prev` is
+              // "disconnecting" — recognise it too, else the «VPN отключён» snackbar would be lost.
               pushSuccess?.(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
             }
-          } else if (event.payload.status === "recovering" || event.payload.status === "reconnecting") {
+          } else if (
+            event.payload.status === "recovering" ||
+            event.payload.status === "reconnecting" ||
+            // 3.4 R-DCT: stop the uptime clock the moment the teardown starts (the real Disconnecting
+            // wire status), not only once it settles Disconnected.
+            event.payload.status === "disconnecting"
+          ) {
             // F1: a drop is NOT "up" — stop the uptime clock. Without this the timer kept
             // ticking under the «Восстановление»/«Переподключение» label (a visible
             // symptom of the stuck-green bug — the badge said «Подключено» and the timer
@@ -251,6 +338,18 @@ export function useVpnEvents({
 
           return event.payload.status;
         });
+        // Phase 14 (14-04 / Pitfall 2): DEFENSIVE isSwitching clear on the TERMINAL edge. A switch
+        // settles on exactly two outcomes — `connected` (B is up) or `error` (B failed → the App
+        // reverts to A). Fire onSettled here so the App's isSwitching lock is released even if a
+        // switch promise was abandoned (a dropped/never-resolving chain that never hit its finally).
+        // This is placed on the terminal-edge branch OUTSIDE the no-dwell guard on purpose — it must
+        // NOT be inside/broaden that guard (broadening risks swallowing a real terminal disconnect —
+        // AUDIT #8 stuck-on-yellow). A bare `disconnected` is the switch's TRANSIENT teardown, not a
+        // settle, so it deliberately does NOT fire onSettled (visual continuity comes from isSwitching
+        // keeping the hero live, not from this callback).
+        if (event.payload.status === "connected" || event.payload.status === "error") {
+          onSettled?.(event.payload.status);
+        }
         if (event.payload.error) {
           // Localize a stable reason code (e.g. `connect-timeout`) to a friendly
           // message; non-code errors pass through unchanged (SAFETY-03).

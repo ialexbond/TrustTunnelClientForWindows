@@ -39,6 +39,20 @@ export type Reading =
 export interface EngineState {
   consecutiveBad: number;
   cooldownUntil: number;
+  /**
+   * F24 / Fable R4 (MAJOR-1) loop-break: the path of the MOST RECENT switch target + when it was
+   * attempted. The 12-05 hook EXCLUDES this target from the candidate list for a short window
+   * (`SKIP_WINDOW_MS`) so a switch that FAILED and silently REVERTED (target unreachable → back to the
+   * previous server A) is not re-selected on the very next cycle. Without it, a candidate frozen at a
+   * stale-good pre-connect band (F24 freezes inactive cards while connected, and the cache only ever
+   * stores GOOD bands) looks perpetually healthy, so the engine would pick the same DEAD target every
+   * ~60–90 s forever (switch → fail → revert → switch…), churning the tunnel with real drops.
+   * Optional: the initial/legacy state omits them; absent means "no recent switch". The pure fn only
+   * CARRIES these through (`...state`); the hook sets them (on an ACCEPTED switch) and reads them (to
+   * filter candidates) — a swallowed/failed verdict must not record a target that never switched.
+   */
+  lastSwitchPath?: string;
+  lastSwitchAt?: number;
 }
 
 /** The two numeric prefs the decision needs (clamped upstream by useAppSettings). */

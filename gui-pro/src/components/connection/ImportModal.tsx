@@ -43,6 +43,13 @@ interface ImportModalProps {
   initialUrl?: string;
   /** Whether a file is currently dragged over the window (parent owns useFileDrop). */
   isDragging?: boolean;
+  /**
+   * Phase 14 (D-13): a seamless A→B switch is in flight (App-owned FE-only flag). While it is true
+   * the import is LOCKED — importing mid-switch adds a config and may auto-promote/open a competing
+   * flow that races the in-flight swap. OR'd into the existing importDisabled + the entry tiles'
+   * disabled; the existing in-flight (loading) lock is unchanged. Re-enables atomically on settle.
+   */
+  isSwitching?: boolean;
 }
 
 /** A compact entry tile (icon + label + caption) — the modal's primary affordance. */
@@ -80,7 +87,7 @@ function EntryTile({
   );
 }
 
-export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDragging = false }: ImportModalProps) {
+export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDragging = false, isSwitching = false }: ImportModalProps) {
   const { t, i18n } = useTranslation();
   const pushSnack = useSnackBar();
 
@@ -131,7 +138,9 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
   const trimmedLink = link.trim();
   const isValidLink = /^(tt|trusttunnel):\/\/.+/i.test(trimmedLink);
   const showLinkError = trimmedLink !== "" && !isValidLink;
-  const importDisabled = loading || !isValidLink;
+  // Phase 14 (D-13): lock the import while a switch is in flight (in addition to the in-flight
+  // `loading` lock + the link-validity gate) so a mid-switch import cannot race the swap.
+  const importDisabled = loading || !isValidLink || isSwitching;
 
   /** Run the backend import for already-decoded TOML content. A host+user duplicate is
    *  AUTO-added as a copy «(копия N)» Rust-side (IN-36) — no prompt; on success: snackbar +
@@ -310,14 +319,16 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
                 label={t("connection.import.tile_file")}
                 caption={t("connection.import.tile_file_hint")}
                 onClick={handlePickFile}
-                disabled={loading}
+                // D-13: «Из файла» imports directly on pick → lock it while switching too.
+                disabled={loading || isSwitching}
               />
               <EntryTile
                 icon={<Link2 className="h-6 w-6" />}
                 label={t("connection.import.tile_link")}
                 caption={t("connection.import.tile_link_hint")}
                 onClick={() => setLinkExpanded(true)}
-                disabled={loading}
+                // D-13: keep the door consistent — no entry into an import flow while switching.
+                disabled={loading || isSwitching}
               />
             </div>
             <p className="text-center text-xs text-[var(--color-text-muted)]">

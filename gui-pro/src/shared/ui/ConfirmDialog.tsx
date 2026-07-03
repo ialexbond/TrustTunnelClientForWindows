@@ -16,6 +16,12 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
+  /**
+   * Phase 14 (FAB-05): disable the confirm button WITHOUT the loading spinner. Used when the
+   * confirmed action becomes unsafe while the dialog is open (e.g. a config-switch started, so a
+   * delete would race the swap). Cancel stays enabled so the user can still dismiss the dialog.
+   */
+  confirmDisabled?: boolean;
   /** Modal size (default: "md"). Use "sm" for very short confirmations. */
   size?: "sm" | "md" | "lg";
 }
@@ -33,6 +39,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   loading,
+  confirmDisabled,
   size = "md",
 }: ConfirmDialogProps) {
   const { t } = useTranslation();
@@ -77,7 +84,7 @@ export function ConfirmDialog({
             variant={variant === "danger" ? "danger" : "primary"}
             onClick={onConfirm}
             loading={loading}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             size="sm"
           >
             {resolvedConfirmText}

@@ -276,6 +276,52 @@ pub async fn ping_config_endpoint(
     Ok(probe_tcp(&host, port, timeout_ms).await)
 }
 
+// ─── Tunnel-latency probe for the auto-switch engine (F23) ───────────────────
+
+/// F23 (14-UAT round 2): neutral reference hosts probed THROUGH the tunnel to measure the ACTIVE
+/// tunnel's REAL current latency for the auto-switch engine. While connected the endpoint itself can't
+/// be honestly probed — a direct connect to the endpoint (which IS the VPN server) rides the tunnel to
+/// the-server-and-back = the ~2× / «Недоступен» noise that caused the false switches. A NEUTRAL host
+/// reached via the tunnel (client → VPN server → reference) reflects the honest tunnel latency with no
+/// x2. Several hosts for robustness (one down/blocked → another answers); the probe rides the tunnel
+/// from the VPN server's egress, so a client-side geo-block (e.g. RU vs 1.1.1.1) does not apply.
+const TUNNEL_REFERENCE_HOSTS: &[(&str, u16)] = &[
+    ("8.8.8.8", 443),   // Google (Anycast, global)
+    ("1.1.1.1", 443),   // Cloudflare (Anycast, global)
+    ("77.88.8.8", 443), // Yandex (RU-friendly backup)
+];
+
+/// Pure: pick the FASTEST successful RTT from a set of probe results (the best-case tunnel latency,
+/// robust to one slow/blocked reference). All failed → `Unreachable` (the tunnel is dead or fully
+/// blocked → the engine treats it as a breach). Unit-tested without the network.
+fn best_reference_rtt(results: &[PingResult]) -> PingResult {
+    match results
+        .iter()
+        .filter_map(|r| match r {
+            PingResult::Ok { ms } => Some(*ms),
+            _ => None,
+        })
+        .min()
+    {
+        Some(ms) => PingResult::Ok { ms },
+        None => PingResult::Unreachable,
+    }
+}
+
+/// F23: probe the tunnel's real latency by TCP-connecting to the neutral reference hosts THROUGH the
+/// tunnel (in parallel) and returning the fastest successful RTT. This is the honest in-session health
+/// signal the auto-switch engine evaluates: a slow tunnel reads a high RTT (breach → switch), a dead
+/// tunnel reads `Unreachable` (breach → switch), and a healthy one reads a normal RTT (no switch off a
+/// good server). D-29: touches NO config content — only the fixed reference hosts above.
+#[tauri::command]
+pub async fn probe_tunnel_latency(timeout_ms: u64) -> Result<PingResult, String> {
+    let probes = TUNNEL_REFERENCE_HOSTS
+        .iter()
+        .map(|(host, port)| probe_tcp(host, *port, timeout_ms));
+    let results = futures_util::future::join_all(probes).await;
+    Ok(best_reference_rtt(&results))
+}
+
 // ═══════════════════════════════════════════════════════════════
 //   Tests
 // ═══════════════════════════════════════════════════════════════
@@ -535,5 +581,26 @@ mod tests {
         // the raw TCP connect) is likewise secret-free.
         assert!(validate_ping_host(&host).is_ok());
         assert!(!host.contains(SECRET));
+    }
+
+    /// F23 (14-UAT round 2): the tunnel-latency probe picks the FASTEST successful reference RTT
+    /// (robust to one slow/blocked host); if EVERY reference fails, the tunnel is dead/blocked →
+    /// Unreachable (which the engine treats as a breach → switch).
+    #[test]
+    fn best_reference_rtt_picks_fastest_ok_else_unreachable() {
+        use PingResult::*;
+        assert_eq!(
+            best_reference_rtt(&[Ok { ms: 120 }, Ok { ms: 45 }, Unreachable]),
+            Ok { ms: 45 }
+        );
+        assert_eq!(
+            best_reference_rtt(&[Unreachable, Ok { ms: 200 }, NoData]),
+            Ok { ms: 200 }
+        );
+        assert_eq!(
+            best_reference_rtt(&[Unreachable, Unreachable, Unreachable]),
+            Unreachable
+        );
+        assert_eq!(best_reference_rtt(&[]), Unreachable);
     }
 }

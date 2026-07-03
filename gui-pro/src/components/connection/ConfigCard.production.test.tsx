@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import i18n from "../../shared/i18n";
 import { renderWithProviders } from "../../test/test-utils";
 import { ConfigCard } from "./ConfigCard";
+import { statusBadgeVariant } from "../../shared/lib/statusBadgeVariant";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
+import type { VpnStatus } from "../../shared/types";
 
 // Resolve labels through i18n so the test is language-agnostic (jsdom defaults to en-US).
 const L = {
@@ -12,6 +14,10 @@ const L = {
   connect: i18n.t("connection.card.connect"),
   disconnect: i18n.t("connection.card.disconnect"),
   connecting: i18n.t("status.connecting_short"),
+  // Phase 14 (14-02): the switching-face badge label. Until the ru/en key lands, i18n.t returns
+  // the key string itself ("status.switching_short") — the switching-face test asserts THIS resolved
+  // value renders, so it flips GREEN automatically once 14-02 adds «Переключение» and forces it.
+  switching: i18n.t("status.switching_short"),
   no_data: i18n.t("connection.ping.no_data"),
   unreachable: i18n.t("connection.ping.unreachable"),
 };
@@ -56,6 +62,13 @@ describe("ConfigCard", () => {
   it("inactive card primary reads «Подключить» when nothing is active", () => {
     renderWithProviders(<ConfigCard config={cfg} status="disconnected" />);
     expect(screen.getByRole("button", { name: L.connect })).toBeInTheDocument();
+  });
+
+  // F28: connectPending gives INSTANT click feedback — the primary is disabled (Button.loading) so the
+  // click is never a silent no-op while the pre-connect probe runs before status becomes «connecting».
+  it("F28: connectPending disables the primary for instant click feedback", () => {
+    renderWithProviders(<ConfigCard config={cfg} status="disconnected" connectPending />);
+    expect(screen.getByRole("button", { name: L.connect })).toBeDisabled();
   });
 
   // Truth: the connected lead card primary reads «Отключить» (danger).
@@ -211,5 +224,159 @@ describe("ConfigCard", () => {
     expect(within(menu).getByText(i18n.t("connection.card.delete"))).toBeInTheDocument();
     // QR is DEFERRED this phase — not in the menu.
     expect(within(menu).queryByText(i18n.t("connection.card.qr"))).not.toBeInTheDocument();
+  });
+
+  // ─── Phase 14 (Wave 0, plan 14-01): the switching face ───
+  //
+  // RED SCAFFOLD (D-12) — the lead card gets a new `switching?: boolean` prop that FORCES the amber
+  // «Переключение» face regardless of the underlying in-flight VpnStatus (during the teardown leg the
+  // real status is the GREY `disconnecting`, so the card must force the amber band + «Переключение»
+  // label rather than derive it — Pitfall 4). These tests MUST FAIL until 14-02 adds the prop + the
+  // `status.switching_short` key. Assert by the RESOLVED label (not CSS class, per the plan), the
+  // in-flight spinner (never a live «Отключить»), and the hidden ping.
+  describe("Phase 14 — switching face (RED until 14-02)", () => {
+    // D-12: the switching lead card shows the «Переключение» state word — even though the underlying
+    // status is the grey `disconnecting` teardown leg. `switching` forces the amber label.
+    it("shows the «Переключение» label when switching (forced over the disconnecting status)", () => {
+      renderWithProviders(<ConfigCard config={cfg} leadCard status="disconnecting" switching />);
+      // The resolved switching label renders on the card (once 14-02 wires it + adds the i18n key).
+      expect(screen.getByText(L.switching)).toBeInTheDocument();
+    });
+
+    // D-12: the switching card renders an in-flight icon-only SPINNER primary and NEVER a live
+    // «Отключить» text button (a switch is not a settled connected state).
+    it("renders an in-flight spinner primary and NEVER a live «Отключить» while switching", () => {
+      renderWithProviders(<ConfigCard config={cfg} leadCard status="disconnecting" switching />);
+      // The primary is an icon-only spinner: its accessible name is the switching state word and it
+      // has NO visible text content.
+      const btn = screen.getByRole("button", { name: L.switching });
+      expect(btn.textContent?.trim()).toBe("");
+      // There is NEVER a live «Отключить» button while switching.
+      expect(
+        screen.queryByRole("button", { name: L.disconnect }),
+      ).not.toBeInTheDocument();
+    });
+
+    // D-12 / F03: the ping pill is HIDDEN while switching (a stale ping must not paint mid-transition).
+    it("hides the ping pill while switching", () => {
+      renderWithProviders(
+        <ConfigCard config={cfg} leadCard status="disconnecting" switching ping={{ band: "green", valueMs: 42 }} />,
+      );
+      // No ping number and no no-data «—» paint while switching.
+      expect(screen.queryByText(/42/)).not.toBeInTheDocument();
+      expect(screen.queryByText(L.no_data)).not.toBeInTheDocument();
+    });
+
+    // Verifier WARNING (14-VERIFICATION): the earlier `isConnected`-side-effect guard left a 1-render
+    // flash window — a TRANSIENT `connected` during the switch/revert (A briefly up, or A reconnected on
+    // revert before `isSwitching` clears) painted a stale ping/uptime. The direct `!switching` guard must
+    // suppress BOTH connected-only details even when the underlying status is `connected`.
+    it("hides ping AND uptime while switching even when the status is transiently connected", () => {
+      renderWithProviders(
+        <ConfigCard
+          config={cfg}
+          leadCard
+          status="connected"
+          switching
+          ping={{ band: "green", valueMs: 42 }}
+          uptime="0:05"
+        />,
+      );
+      expect(screen.queryByText(/42/)).not.toBeInTheDocument();
+      expect(screen.queryByText(L.no_data)).not.toBeInTheDocument();
+      expect(screen.queryByText("0:05")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Phase 14 regression guard (plan 14-01): statusBadgeVariant stays at EXACTLY 4 variants ───
+  //
+  // GREEN GUARD (not RED) — D-07 keeps the amber switching band on the EXISTING `connecting` variant;
+  // no 5th badge variant / no new color token is added (the owner is regression-sensitive). This
+  // asserts that across EVERY VpnStatus input, statusBadgeVariant only ever yields its 4 known
+  // variants. It PASSES today and must KEEP passing — a 5th variant would trip it.
+  it("statusBadgeVariant yields exactly its 4 existing variants across all VpnStatus inputs (no 5th)", () => {
+    const allStatuses: VpnStatus[] = [
+      "connected",
+      "connecting",
+      "reconnecting",
+      "recovering",
+      "disconnecting",
+      "disconnected",
+      "error",
+    ];
+    const allowed = new Set(["connected", "connecting", "error", "disconnected"]);
+    const produced = new Set(allStatuses.map((s) => statusBadgeVariant(s)));
+    // Every produced variant is one of the 4 allowed …
+    for (const v of produced) {
+      expect(allowed.has(v)).toBe(true);
+    }
+    // … and there are at most 4 distinct variants (amber reuses `connecting` — no 5th).
+    expect(produced.size).toBeLessThanOrEqual(4);
+  });
+});
+
+// F6 (14-UAT): the switch-failed-reverted notice renders EMBEDDED inside the lead card (a calm,
+// dismissible ErrorBanner variant="info"), NOT as a floating window-level banner.
+describe("ConfigCard — F6 embedded revert notice", () => {
+  const REVERT = "Переключение не удалось. Соединение с «Германия — Frankfurt» восстановлено.";
+
+  it("lead card renders the revert notice as a calm info (role=status), never a red alert", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="connected" revertNotice={REVERT} />);
+    // ErrorBanner variant=info announces politely (role="status"), named by its aria-label.
+    expect(screen.getByRole("status", { name: /восстановлено/i })).toBeInTheDocument();
+    // It is NOT the assertive red error alert.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing when no revert notice is set", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="connected" />);
+    expect(screen.queryByRole("status", { name: /восстановлено/i })).not.toBeInTheDocument();
+  });
+
+  it("a resting (non-lead) card never renders the revert notice", () => {
+    renderWithProviders(<ConfigCard config={cfg} status="disconnected" revertNotice={REVERT} />);
+    expect(screen.queryByRole("status", { name: /восстановлено/i })).not.toBeInTheDocument();
+  });
+
+  it("dismissing the embedded notice calls onRevertDismiss", async () => {
+    const onRevertDismiss = vi.fn();
+    renderWithProviders(
+      <ConfigCard config={cfg} leadCard status="connected" revertNotice={REVERT} onRevertDismiss={onRevertDismiss} />,
+    );
+    const dismiss = within(screen.getByRole("status", { name: /восстановлено/i })).getByRole("button");
+    await userEvent.click(dismiss);
+    expect(onRevertDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+// F20 (14-UAT round 2): during an auto-reconnect the lead card shows «Попытка N из M» so the user
+// sees it is actively retrying, not silently waiting.
+describe("ConfigCard — F20 reconnect attempt counter", () => {
+  // Language-agnostic (jsdom defaults to en-US) — resolve the counter text through i18n.
+  const ATTEMPT_2_OF_3 = i18n.t("status.reconnect_attempt", { attempt: 2, max: 3 });
+  const anyAttempt = /Attempt|Попытка/;
+
+  it("lead card in reconnecting shows the attempt counter «Попытка N из M»", () => {
+    renderWithProviders(
+      <ConfigCard config={cfg} leadCard status="reconnecting" reconnectProgress={{ attempt: 2, max: 3 }} />,
+    );
+    expect(screen.getByText(ATTEMPT_2_OF_3)).toBeInTheDocument();
+  });
+
+  it("a lead card that is NOT reconnecting shows no attempt counter", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="connected" />);
+    expect(screen.queryByText(anyAttempt)).not.toBeInTheDocument();
+  });
+
+  it("a reconnecting lead card WITHOUT progress shows no attempt counter", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="reconnecting" />);
+    expect(screen.queryByText(anyAttempt)).not.toBeInTheDocument();
+  });
+
+  it("a resting (non-lead) card never shows the attempt counter", () => {
+    renderWithProviders(
+      <ConfigCard config={cfg} status="reconnecting" reconnectProgress={{ attempt: 2, max: 3 }} />,
+    );
+    expect(screen.queryByText(anyAttempt)).not.toBeInTheDocument();
   });
 });

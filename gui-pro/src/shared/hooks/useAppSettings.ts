@@ -52,7 +52,14 @@ export const APP_SETTINGS_DEFAULTS: AppSettings = {
 
 /** LOCKED clamp bounds (V5). Exported so the engine/UI use the SAME ranges (no drift). */
 export const AUTO_SWITCH_BOUNDS = {
-  thresholdMs: { min: 50, max: 5000 },
+  // F24 / Fable R4 (MAJOR-2): the threshold now measures the ACTIVE TUNNEL latency (F23 — a reference
+  // host probed THROUGH the tunnel), NOT the old direct endpoint reachability it was originally tuned
+  // for. A healthy tunnel reads ~50–130 ms, so the previous 50 ms floor let a threshold be set BELOW
+  // healthy-tunnel norms → the active would perpetually "breach" while candidates' frozen DIRECT
+  // reachability (lower) stayed "healthy" → a deterministic ping-pong between two perfectly-fine servers.
+  // Raised to 150 ms — the card's green/yellow boundary (bandForMs): a threshold below the green band
+  // would mean "switch away from a GREEN server", which is nonsensical. Default stays 300 (yellow/red).
+  thresholdMs: { min: 150, max: 5000 },
   intervalSec: { min: 5, max: 300 },
   checksN: { min: 1, max: 10 },
 } as const;

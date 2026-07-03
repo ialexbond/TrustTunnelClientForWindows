@@ -25,6 +25,17 @@ pub enum VpnStatus {
     Disconnected,
     Connecting,
     Connected,
+    /// 3.4 R-DCT (Fable-5 Phase-14 investigation, F13/F10) — TEARDOWN IN PROGRESS. The user (or the
+    /// tray) asked to disconnect; the sidecar is being killed (up to the confirm-exit window — 3.2)
+    /// and the WinTUN adapter released. Wire string `"disconnecting"` — the SAME token the FE
+    /// (`VpnStatus` type, `statusBadgeVariant` → grey) and the tray already spoke as an FE-local /
+    /// icon-hack label; promoting it to a REAL backend status makes BOTH the window and the tray show
+    /// teardown truthfully with ONE mechanism (was: `vpn_disconnect` emitted nothing until the final
+    /// `Disconnected`, and the tray flipped its icon via an out-of-band `update_tray_icon` hack). An
+    /// argued, owner-approved deviation from Phase-14's D-07 «no new wire states» (D-07 was about the
+    /// compound `switching` concept; the whole stack already speaks this string). Transitions INTO it
+    /// fire no notification (transient); the genuine «Отключено» fires on `Disconnecting → Disconnected`.
+    Disconnecting,
     /// LOCAL-NETWORK loss (02-20 status-UX split). «Восстановление» — there is no
     /// physical adapter at all (Ethernet unplugged / Wi-Fi off), so there is nothing
     /// to (re)connect to yet; the connectivity monitor WAITS for the adapter to
@@ -51,6 +62,36 @@ pub enum VpnStatus {
     /// test alongside `Recovering` (T-08-01).
     Reconnecting,
     Error,
+}
+
+/// 3.5 F-VERDICT (Fable-5 Phase-14 investigation, F11) — the result of `vpn_connect`, so the FE can
+/// tell a real spawn from a NO-SPAWN bail. Before this, all three bail paths (FAB-R4 genuine-disconnect,
+/// pre-spawn cancel, post-spawn cancel) returned a bare `Ok(())` indistinguishable from "B spawned" —
+/// so `switchTo` believed B spawned and `performSwitch` parked 15s on a terminal edge that never came
+/// (the stuck amber «Переключение»), then reverted, re-fighting the tray disconnect Rust had honored,
+/// and flashed the phantom «остались на A» notice on a disconnected app. Additive JSON (camelCase):
+/// existing consumers that ignore the return are unaffected; `switchTo` reads `spawned`/`reason`.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectOutcome {
+    /// true when a sidecar was actually spawned + stored for THIS connect; false when the connect
+    /// bailed to a clean Disconnected without a live session (a genuine disconnect/cancel superseded it).
+    pub spawned: bool,
+    /// A STABLE ASCII token when `spawned` is false (currently only `"superseded-by-disconnect"`) so
+    /// the FE distinguishes a clean supersede from a real spawn without parsing prose (D-29: no secret).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl ConnectOutcome {
+    /// A sidecar was spawned + stored for this connect.
+    fn spawned() -> Self {
+        Self { spawned: true, reason: None }
+    }
+    /// The connect bailed without spawning because a genuine disconnect/cancel superseded it (F11).
+    fn superseded() -> Self {
+        Self { spawned: false, reason: Some("superseded-by-disconnect".to_string()) }
+    }
 }
 
 /// Shared application state for VPN lifecycle management.
@@ -88,6 +129,18 @@ pub struct AppState {
     /// `"BENCHMARK_ALREADY_RUNNING"` when this field is `Some`. Cleared to `None` on
     /// ALL exit paths (success / cancel / error / watchdog-forced) in `server_run_benchmark`.
     pub benchmark_cancel_tx: Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    /// 3.3 R-SERIAL (Fable-5 Phase-14 investigation, F13/F14) — serializes the FOUR user-facing
+    /// lifecycle COMMANDS (`vpn_connect`, `vpn_disconnect`, and the spawned bodies of
+    /// `tray_vpn_connect` / `tray_vpn_disconnect`) so a connect issued mid-teardown WAITS for the
+    /// confirmed teardown instead of interleaving (and can no longer reset the disconnect's own
+    /// intent flags mid-flight — the F12/F14 corruption source). `tokio::sync::Mutex` so the guard is
+    /// held ACROSS awaits. Background actors (the reconnect supervisor / `respawn_sidecar`, the
+    /// connect-timeout watchdog, `teardown_session_sidecar`, the sidecar `Terminated` arm)
+    /// DELIBERATELY do NOT take this lock — they are generation-guarded instead; a supervisor blocked
+    /// behind a user disconnect holding the lock would deadlock. Boundary: commands = serialized,
+    /// background = generation-guarded. The four commands never call one another (verified), so there
+    /// is no lock nesting.
+    pub lifecycle_flow: Arc<tokio::sync::Mutex<()>>,
     /// Phase 17 UAT 2026-05-20 — cooperative MTProto install cancel flag.
     ///
     /// Set to `true` by `mtproto_cancel_install` Tauri command; checked between
@@ -212,6 +265,37 @@ pub struct AppState {
     /// recovery does NOT set it (that path's Reconnecting/Recovering plates are intended — D-01), so
     /// it never blocks recovery notifications. Starts at `false`.
     pub switch_or_reconnect_pending: Arc<AtomicBool>,
+    /// F17 (14-UAT round 2) — the FE mirrors its whole-switch-window `isSwitching` here (raised on a
+    /// real switch start, cleared in performSwitch's finally after the WHOLE switch+revert). Unlike
+    /// `switch_or_reconnect_pending` (dropped before `vpn_connect(B)` so the tab controls re-enable),
+    /// this stays raised across a failed B + the revert-to-A leg, whose transient `→ Disconnected`
+    /// edges would otherwise fire a phantom «Отключено» plate mid-seamless-switch. `notify::maybe_fire`
+    /// ORs it into the intermediate-«Отключено» suppression. NEVER cleared Rust-side — the FE owns its
+    /// lifecycle; a stale-`true` would only mute disconnect NOTIFICATIONS, never the status/tunnel.
+    /// Starts at `false`.
+    pub seamless_switch_active: Arc<AtomicBool>,
+    /// FAB-R4 (Fable-5 review of Phase 14) — the `connection_generation` value
+    /// STAMPED at the moment a config switch is AUTHORIZED (the FE's
+    /// `set_switch_or_reconnect_pending(isSwitch:true)` raise, BEFORE the switch's
+    /// teardown-disconnect).
+    ///
+    /// A config switch A→B is a plain `vpn_disconnect(A)` → `vpn_connect(B)`, and
+    /// that teardown legitimately sets the durable `user_disconnect_requested`. If
+    /// `vpn_connect(B)` blindly cleared that intent it would ALSO erase a genuine
+    /// tray/manual «Отключить» pressed in the teardown→connect gap — the app then
+    /// ends CONNECTED against an explicit Disconnect (inverting «ручной Отключить
+    /// побеждает»). Stamping the live generation at switch-authorization lets
+    /// `vpn_connect` tell the switch's OWN single teardown advance (expected) from
+    /// an EXTRA disconnect that bumped the generation AFTER the switch was
+    /// authorized (a genuine tray disconnect → the user's intent must win, bail to
+    /// a clean `Disconnected`). The pure decision is
+    /// `lifecycle::switch_disconnect_wins`. `u64::MAX` sentinel means "no switch
+    /// authorized" (mapped to `None` at the read site). Written on the `isSwitch:true`
+    /// edge of `set_switch_or_reconnect_pending` and reset to the sentinel on the
+    /// clear edge. Starts at `u64::MAX` (no switch pending). `AtomicU64` mirrors
+    /// `connection_generation`'s lock-free shape — a single monotonic counter with
+    /// no compound invariant.
+    pub switch_authorized_generation: Arc<AtomicU64>,
     /// Phase 13 (13-05) — the LATEST notify-plate payload staged by `maybe_fire` before its emit.
     ///
     /// This closes the emit-before-listener race behind the UAT test-1 blocker (the empty black
@@ -255,6 +339,55 @@ pub struct AppState {
     /// one of the two whitelisted values ("ru"/"en") — `set_plate_language` coerces any other input to
     /// "ru". D-29: a 2-value language enum-like string, no secret.
     pub plate_language: Arc<Mutex<String>>,
+}
+
+impl AppState {
+    /// FAB-R4 (Fable-5 re-fix) — STAMP `switch_authorized_generation` with the live
+    /// `connection_generation` when a switch / save-and-reconnect is authorized (the
+    /// `set_switch_or_reconnect_pending(pending:true)` raise).
+    ///
+    /// Factored out of `set_switch_or_reconnect_pending` so the STAMP write and the
+    /// consume-and-decide read (`consume_switch_stamp_and_should_bail`) are exercised by
+    /// the SAME code the commands run — the integration test drives the real AppState
+    /// atomics through these seams, proving the stamp is ALIVE and CONSULTED at
+    /// `vpn_connect` check time (the missing test that would have caught the dead guard).
+    ///
+    /// Stamps on ANY `pending:true` (switch `is_switch==Some(true)` OR save-and-reconnect
+    /// `is_switch==Some(false)`/`None`) — both share the teardown→connect-gap intent-
+    /// inversion class (Fable Defect 2). On the clear edge (`!pending`) it does NOTHING to
+    /// the stamp: the stamp must survive the FE's BL-01 `pending:false` clear so the next
+    /// `vpn_connect` can still read it; it is consumed at the connect entry instead.
+    pub fn stamp_switch_authorized_if_pending(&self, pending: bool) {
+        if pending {
+            let live_gen = self.connection_generation.load(Ordering::SeqCst);
+            self.switch_authorized_generation
+                .store(live_gen, Ordering::SeqCst);
+        }
+    }
+
+    /// FAB-R4 (Fable-5 re-fix) — CONSUME the switch stamp (read + reset to the sentinel in
+    /// one atomic swap) and decide whether `vpn_connect` must BAIL to a clean Disconnected
+    /// because a genuine user disconnect landed during the switch.
+    ///
+    /// The consume-once swap is the seam that makes a stamp single-use: it can influence at
+    /// most THIS connect and never leaks into a later unrelated one. Delegates the pure
+    /// decision to `lifecycle::switch_disconnect_wins`, keyed on the STAMP presence (NOT the
+    /// transient `switch_or_reconnect_pending` bool the FE has already cleared by now — the
+    /// dead-guard defect). Returns `true` when the caller must bail without spawning and
+    /// WITHOUT clearing `user_disconnect_requested` (the explicit Disconnect wins).
+    pub fn consume_switch_stamp_and_should_bail(&self) -> bool {
+        // Read-and-reset in one shot: swap the sentinel in, take whatever was there.
+        let raw = self
+            .switch_authorized_generation
+            .swap(u64::MAX, Ordering::SeqCst);
+        // u64::MAX sentinel = "no switch/save-and-reconnect authorized".
+        let switch_stamp = if raw == u64::MAX { None } else { Some(raw) };
+        crate::lifecycle::switch_disconnect_wins(
+            self.user_disconnect_requested.load(Ordering::SeqCst),
+            switch_stamp,
+            self.connection_generation.load(Ordering::SeqCst),
+        )
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -452,7 +585,7 @@ fn stale_kill_args(pid: u32) -> Vec<String> {
 /// `KILL_ON_JOB_CLOSE`) still terminates the sidecar on parent death, so no
 /// orphan survives. Surfacing the failure makes that degraded mode VISIBLE in the
 /// log instead of silently swallowed.
-fn save_sidecar_pid(pid: u32) {
+pub(crate) fn save_sidecar_pid(pid: u32) {
     if let Err(e) = std::fs::write(sidecar_pid_path(), pid.to_string()) {
         // FIXED phrase + the std::io::Error kind only (no path / no PID beyond the
         // generic kind — D-29). Degraded mode: crash cleanup now leans entirely on
@@ -970,8 +1103,38 @@ pub fn spawn_connect_timeout_watchdog(app: &tauri::AppHandle, captured_gen: u64)
 ///
 /// Factored out so the OR of both flags is locked by tests — dropping the durable
 /// leg would silently reintroduce the "Cancel during spawn is overridden" bug.
-fn connect_cancelled(transient_disconnecting: bool, durable_disconnect_requested: bool) -> bool {
+///
+/// F-6 (Fable-5): pub(crate) so `tray_vpn_connect` can run the same post-spawn cancel re-check
+/// (#19) the window `vpn_connect` does — the tray path lacked it and could store a zombie sidecar.
+pub(crate) fn connect_cancelled(transient_disconnecting: bool, durable_disconnect_requested: bool) -> bool {
     transient_disconnecting || durable_disconnect_requested
+}
+
+/// F-4 (Fable-5 review): does this `vpn_disconnect` represent a REAL teardown that should emit the
+/// Disconnecting/Disconnected wire statuses?
+///
+/// A real teardown had a live child OR the session was in an active/in-flight state. A NO-OP
+/// disconnect — the wizard uninstall/start-over invoking `vpn_disconnect` with the VPN already off —
+/// has neither, and emitting Disconnecting → Disconnected there would (a) flash a phantom «Отключено»
+/// plate + «VPN отключён» snackbar on an already-disconnected app, and (b) let the interposed
+/// Disconnecting rewrite `prev`, bypassing the notify decider's `prev == Error` acknowledge-
+/// suppression. Pure so the gate is unit-tested; mirrors the tray twin's inline `had_child || active`.
+///
+/// R2-1 (Fable-5 re-review): `Disconnecting` IS in the active set. A `status_before == Disconnecting`
+/// means a REAL teardown is already in flight (only a real teardown ever writes Disconnecting — the
+/// no-op wizard case starts from Disconnected/Error, never Disconnecting), so this disconnect must be
+/// allowed to write the settling Disconnected — else a superseded tray/window disconnect (whose own
+/// tail was generation-skipped) strands the wire on «Отключение» forever until the next connect.
+fn disconnect_emits_wire_status(had_child: bool, status_before: VpnStatus) -> bool {
+    had_child
+        || matches!(
+            status_before,
+            VpnStatus::Connecting
+                | VpnStatus::Connected
+                | VpnStatus::Reconnecting
+                | VpnStatus::Recovering
+                | VpnStatus::Disconnecting
+        )
 }
 
 #[tauri::command]
@@ -981,9 +1144,19 @@ pub async fn vpn_connect(
     geodata_state: tauri::State<'_, Arc<GeoDataState>>,
     config_path: String,
     log_level: String,
-) -> Result<(), String> {
+) -> Result<ConnectOutcome, String> {
     eprintln!("[vpn_connect] Called with config_path={config_path}, log_level={log_level}");
     crate::logging::log_app("INFO", &format!("VPN connect: config={config_path}, log_level={log_level}"));
+
+    // 3.3 R-SERIAL (F13/F14): serialize the whole vpn_connect body against vpn_disconnect + the tray
+    // twins. A connect issued while a teardown is still in flight now WAITS for the confirmed teardown
+    // instead of interleaving — so it can no longer reset the disconnect's own intent flags mid-kill
+    // (the F12/F14 corruption source at the flag-reset below) and never races a still-terminating .exe
+    // / still-releasing WinTUN adapter (F13). Held across the whole body; dropped on return (the
+    // sidecar's own reader task + watchdog outlive this and are NOT gated — they are generation-
+    // guarded). Clone so the guard borrows a local Arc for the fn scope.
+    let flow = Arc::clone(&state.lifecycle_flow);
+    let _flow_guard = flow.lock().await;
 
     // Write system diagnostics snapshot (if logging enabled) — in a BACKGROUND thread so
     // it never blocks the connect path. It shells out to PowerShell (~1s startup), which
@@ -1023,6 +1196,11 @@ pub async fn vpn_connect(
                 | VpnStatus::Connected
                 | VpnStatus::Reconnecting
                 | VpnStatus::Recovering
+                // 3.4 R-DCT: a teardown-in-progress session is still "active" — refuse a rival connect
+                // (defense-in-depth; 3.3 serialization already makes a connect WAIT for the confirmed
+                // teardown, so status is Disconnected by the time this runs — this can't wrongly refuse
+                // a legitimate connect).
+                | VpnStatus::Disconnecting
         );
         let mut guard = state
             .sidecar_child
@@ -1099,12 +1277,54 @@ pub async fn vpn_connect(
         }).ok();
     }
 
+    // FAB-R4 (Fable-5 review of Phase 14) — DECOUPLE-STAMP-FROM-BOOL re-fix: a genuine
+    // tray/manual «Отключить» that lands DURING a config switch / save-and-reconnect (in
+    // the teardown→connect gap) must WIN over the blind intent-clear — otherwise
+    // `vpn_connect(B)` spawns B and the app ends CONNECTED against an explicit Disconnect
+    // (inverting «ручной Отключить побеждает»). We tell the teardown's OWN single
+    // disconnect (expected — it legitimately set the durable intent) from an EXTRA
+    // disconnect by comparing the LIVE generation (read BEFORE this connect's own bump
+    // below, so it reflects every teardown/disconnect that has landed) against the
+    // generation STAMPED when the switch/save-and-reconnect was authorized (any
+    // `set_switch_or_reconnect_pending(pending:true)`). The teardown's own bump advances
+    // the live generation to exactly `stamped + 1`; a live generation PAST that means a
+    // genuine tray disconnect bumped in between → bail to a clean Disconnected WITHOUT
+    // clearing the durable intent or spawning B.
+    //
+    // CONSUME-ONCE: `consume_switch_stamp_and_should_bail` reads the stamp and IMMEDIATELY
+    // resets it to the sentinel (single atomic swap), so the stamp can influence at most
+    // THIS single connect and can never leak into a later unrelated connect (which would
+    // false-bail it). This is the seam the ORIGINAL wiring missed — it keyed the guard on
+    // the transient `switch_or_reconnect_pending` bool, which the FE clears (BL-01) BEFORE
+    // this connect runs, so the guard was DEAD (Fable-verified). The decision is now keyed
+    // purely on the STAMP presence via `lifecycle::switch_disconnect_wins`. A plain manual
+    // connect (no stamp, sentinel `u64::MAX` → `None`) and the reconnect supervisor path
+    // (never stamps) NEVER bail here. The seam is shared with the integration test so the
+    // stamp-alive-and-consulted behaviour is pinned against the real AppState atomics.
+    if state.consume_switch_stamp_and_should_bail() {
+        crate::logging::log_app(
+            "INFO",
+            "[vpn] genuine user-disconnect landed during a config switch — bailing to Disconnected, NOT spawning B (FAB-R4)",
+        );
+        // The stamp was already consumed (swapped to sentinel) above, so it can never
+        // leak into the next connect's decision (the switch is over — the user
+        // disconnected instead).
+        // Do NOT clear `user_disconnect_requested`: the user's Disconnect stands.
+        // Write a clean Disconnected through the single mutator (D-01).
+        set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+        // 3.5 F-VERDICT (F11): report the NO-SPAWN supersede so the FE releases the switch lock
+        // immediately (no 15s park, no revert, no phantom «остались на A» notice).
+        return Ok(ConnectOutcome::superseded());
+    }
+
     // Reset flags for new connection
     if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
     // T-31: a fresh connect clears the durable user-disconnect intent so a prior
     // Disconnect can never suppress THIS new session's reconnects. Pairs with the
     // store(true) in vpn_disconnect — the only two writers of this flag.
     state.user_disconnect_requested.store(false, Ordering::SeqCst);
+    // FAB-R4: the stamp was already consumed (swapped to the sentinel) at the read above,
+    // so nothing further to reset here — a later plain manual connect always reads None.
 
     // ── Non-blocking pre-flight connectivity check (02-09, UAT Gap #2) ──────
     //
@@ -1142,7 +1362,8 @@ pub async fn vpn_connect(
     ) {
         eprintln!("[vpn_connect] Cancelled before sidecar spawn");
         set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
-        return Ok(());
+        // 3.5 F-VERDICT (F11): a cancel landed before spawn — report the supersede, do not spawn.
+        return Ok(ConnectOutcome::superseded());
     }
 
     // Pass Arc clones so sidecar can clear itself on termination. The sidecar
@@ -1165,7 +1386,7 @@ pub async fn vpn_connect(
     crate::dns_guard::snapshot_system_dns();
     crate::dns_guard::flush_dns_cache();
 
-    let child = sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc)
+    let child = sidecar::spawn_trusttunnel(&app, &config_path, sidecar_log_level, child_arc, disc_arc, connect_generation)
         .await
         .map_err(|e| {
             let msg = format!("Failed to start sidecar: {e}");
@@ -1217,7 +1438,9 @@ pub async fn vpn_connect(
         // kill_sidecar await above, so clearing now cannot race it into a spurious
         // reconnect — and a stale `true` at rest is the known landmine.
         if let Ok(mut d) = state.disconnecting.lock() { *d = false; }
-        return Ok(());
+        // 3.5 F-VERDICT (F11): B spawned then was killed by the cancel — no live session resulted, so
+        // report the supersede (spawned:false) so the FE does not treat this as a live connect.
+        return Ok(ConnectOutcome::superseded());
     }
 
     // Save PID for stale-process cleanup after crashes
@@ -1253,7 +1476,8 @@ pub async fn vpn_connect(
     // it no longer owns (Codex HIGH).
     spawn_connect_timeout_watchdog(&app, connect_generation);
 
-    Ok(())
+    // 3.5 F-VERDICT (F11): a real sidecar was spawned + stored for this connect.
+    Ok(ConnectOutcome::spawned())
 }
 
 /// Reconnect-safe respawn of the sidecar for the Plan 04 supervisor (STATUS-05).
@@ -1280,10 +1504,29 @@ pub async fn vpn_connect(
 /// `vpn_connect` (which bumps) and that is exactly what neutralizes a stale
 /// supervisor (Codex HIGH).
 ///
+/// FAB-R1 (Fable-5 review of Phase 14): `captured_generation` is the generation the
+/// supervisor captured at the drop. `spawn_trusttunnel` is async, and during that
+/// `.await` a config switch's `vpn_connect(B)` can BUMP the generation and — because
+/// the child slot is momentarily empty mid-attempt — sail past R8 and spawn its OWN
+/// B sidecar. So immediately BEFORE storing the fresh child into `sidecar_child` AND
+/// before `set_vpn_status(Reconnecting)`, we RE-CHECK ownership via
+/// `lifecycle::respawn_may_store` (generation still current AND no durable
+/// user-disconnect): if it was taken over, this retry is STALE — kill the freshly
+/// spawned child (drop its handle → KILL_ON_JOB_CLOSE) and return WITHOUT
+/// overwriting the slot / PID file / status, so two live sidecars can never coexist
+/// (an orphaned killswitch-owning core). The pre-existing `disconnecting` / durable
+/// re-checks below are KEPT — this only ADDS the generation dimension the switch
+/// race needs.
+///
 /// All failures are logged + tolerated (the supervisor counts the attempt as failed
 /// when `wait_for_connected` times out); this fn never returns an error to keep the
 /// bounded loop simple.
-pub async fn respawn_sidecar(app: &tauri::AppHandle, config_path: &str, log_level: &str) {
+pub async fn respawn_sidecar(
+    app: &tauri::AppHandle,
+    config_path: &str,
+    log_level: &str,
+    captured_generation: u64,
+) {
     let state = match app.try_state::<AppState>() {
         Some(s) => s,
         None => {
@@ -1381,6 +1624,7 @@ pub async fn respawn_sidecar(app: &tauri::AppHandle, config_path: &str, log_leve
         sidecar_log_level,
         child_arc,
         disc_arc,
+        captured_generation,
     )
     .await
     {
@@ -1402,6 +1646,32 @@ pub async fn respawn_sidecar(app: &tauri::AppHandle, config_path: &str, log_leve
         crate::logging::log_app(
             "INFO",
             "[reconnect] disconnect observed after spawn — killing fresh child, not storing (T-10-05)",
+        );
+        child.child.kill().ok();
+        return;
+    }
+
+    // FAB-R1 (Fable-5 review of Phase 14): the T-10-05 re-check above only reads the
+    // TRANSIENT `disconnecting` flag — it does NOT catch a config switch's
+    // `vpn_connect(B)` that BUMPED `connection_generation` and spawned its own B
+    // sidecar during THIS respawn's `spawn_trusttunnel` await (a switch is not a
+    // "disconnect"; it never raises `disconnecting`). Without a generation re-check
+    // here, storing this A-retry child leaves TWO live sidecars: the B core just
+    // spawned by vpn_connect AND this one, one of them an orphan holding the WinTUN
+    // adapter + fail-closed killswitch, invisible to `kill_stale_sidecar`. Re-check
+    // ownership through the pure `respawn_may_store` (generation still current AND no
+    // durable user-disconnect): if the switch took over, this retry is STALE — kill
+    // the fresh child (drop its handle → KILL_ON_JOB_CLOSE) and RETURN without
+    // storing the slot / PID file / status, so the switch's B sidecar is the ONLY
+    // live core.
+    if !crate::lifecycle::respawn_may_store(
+        captured_generation,
+        state.connection_generation.load(Ordering::SeqCst),
+        state.user_disconnect_requested.load(Ordering::SeqCst),
+    ) {
+        crate::logging::log_app(
+            "INFO",
+            "[reconnect] generation advanced during respawn (a switch/manual connect took over) — killing stale A-retry child, not storing (FAB-R1)",
         );
         child.child.kill().ok();
         return;
@@ -1449,7 +1719,23 @@ pub async fn vpn_disconnect(
     // the watchdog must never kill the next session a fast reconnect may start.
     state.connection_generation.fetch_add(1, Ordering::SeqCst);
 
-    // Take child out and drop guard before async call
+    // 3.3 R-SERIAL (F13/F14): the intent preamble above (disconnecting + durable intent + generation
+    // bump) runs FIRST as a fast SYNC cancel signal — an in-flight vpn_connect sees it and bails.
+    // NOW serialize the actual TEARDOWN against vpn_connect + the tray twins so a connect cannot
+    // interleave with the kill (and its still-terminating .exe / still-releasing adapter — F13). Held
+    // across the confirm-exit kill (3.2); dropped on return. Background actors are NOT gated (they are
+    // generation-guarded; the preamble already bumped the generation so any of them will bail).
+    let flow = Arc::clone(&state.lifecycle_flow);
+    let _flow_guard = flow.lock().await;
+
+    // 3.4 R-DCT + F-4 (Fable-5 review): take the child and snapshot the pre-teardown status FIRST,
+    // so the Disconnecting/Disconnected wire writes fire ONLY for a REAL teardown. A NO-OP disconnect
+    // — e.g. the wizard uninstall/start-over invoking vpn_disconnect with the VPN already off — must
+    // not flash a phantom «Отключение»/«Отключено» plate + snackbar, and must not let an interposed
+    // Disconnecting bypass the notify decider's `prev == Error` acknowledge-suppression. This mirrors
+    // the tray twin's own gate (had_child || status ∈ active). Snapshot BEFORE any status write (the
+    // Disconnecting write below would itself move the status out from under this read).
+    let status_before = *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner());
     let child = {
         let mut guard = state
             .sidecar_child
@@ -1457,6 +1743,21 @@ pub async fn vpn_disconnect(
             .map_err(|e| format!("Lock error: {e}"))?;
         guard.take()
     };
+    let had_child = child.is_some();
+    // A REAL teardown = there was a live child OR the session was in an active/in-flight state. A
+    // settled Disconnected/Error with no child is a no-op: emit no wire status, just run the
+    // idempotent cleanup + intent-flag reset below (the preamble already raised `disconnecting`).
+    let is_real_teardown = disconnect_emits_wire_status(had_child, status_before);
+
+    // 3.4 R-DCT: emit the REAL Disconnecting wire status at the top of a REAL teardown so BOTH the
+    // window and the tray show «Отключение» truthfully (was: nothing emitted until the final
+    // Disconnected — the FE only had an optimistic local flag, and the tray flipped its icon via an
+    // out-of-band hack). The notify decider treats a transition INTO Disconnecting as transient
+    // (fires nothing); the genuine «Отключено» fires on the settled Disconnecting → Disconnected
+    // edge below. F-4: gated so a no-op disconnect stays silent.
+    if is_real_teardown {
+        set_vpn_status(&app, &state, VpnStatus::Disconnecting, None);
+    }
 
     // AUDIT-2026-06-11 #20/#22: capture the kill result instead of `?`-returning on it.
     // The old `?` bailed out BEFORE the hosts cleanup, the DNS restore, the Disconnected
@@ -1528,7 +1829,12 @@ pub async fn vpn_disconnect(
         return Err(err);
     }
 
-    set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+    // F-4 (Fable-5): gate the final settled Disconnected the same way — a no-op disconnect writes no
+    // wire status at all (a kill failure is only reachable when had_child, so the Error path above is
+    // always a real teardown and stays unconditional).
+    if is_real_teardown {
+        set_vpn_status(&app, &state, VpnStatus::Disconnected, None);
+    }
 
     // WR-01: clear the process-wide `disconnecting` intent flag now that the
     // disconnect is fully complete. The flag was set `true` at the top of this fn
@@ -1597,6 +1903,8 @@ pub fn check_vpn_status(state: tauri::State<'_, AppState>) -> String {
     match status {
         VpnStatus::Connected => "connected",
         VpnStatus::Connecting => "connecting",
+        // 3.4 R-DCT: teardown-in-progress is now a real wire status.
+        VpnStatus::Disconnecting => "disconnecting",
         VpnStatus::Error => "error",
         // 02-20: the two distinct states map to their OWN wire strings — no collapse.
         VpnStatus::Recovering => "recovering",
@@ -1779,9 +2087,51 @@ pub fn set_switch_or_reconnect_pending(
         crate::notify::fire_start_plate(&app, wire_key);
     }
 
+    // FAB-R4 (Fable-5 review of Phase 14) — DECOUPLE-STAMP-FROM-BOOL re-fix:
+    //
+    // STAMP the live connection generation at the moment a switch / save-and-reconnect
+    // is authorized (the `pending:true` raise, BEFORE the teardown-disconnect).
+    // `vpn_connect` later compares the live generation against this stamp (via
+    // `lifecycle::switch_disconnect_wins`) to tell the teardown's OWN single bump from a
+    // GENUINE tray/manual disconnect that bumped the generation AFTER authorization — the
+    // latter must win over the blind intent-clear so an explicit «Отключить» is not erased.
+    //
+    // The ORIGINAL wiring had two bugs the re-fix corrects:
+    //   1. It stamped ONLY on `is_switch == Some(true)`. But `handleReconnect`
+    //      (save-and-reconnect, `is_switch == Some(false)`) has the SAME
+    //      teardown→connect-gap intent-inversion class (Fable Defect 2): its teardown sets
+    //      the durable intent and its `vpn_connect` blindly cleared it. So we now stamp on
+    //      ANY `pending:true` (switch OR save-and-reconnect). The reconnect SUPERVISOR path
+    //      never calls this command, so it never stamps — its ownership is the generation
+    //      guard in the loop.
+    //   2. The clear-edge (`!pending`) RESET the stamp to the sentinel. That clear is the
+    //      BL-01 plate-suppression clear the FE sends BEFORE `vpn_connect(B)` — so it wiped
+    //      the stamp before the guard could ever read it (the dead-guard defect Fable
+    //      verified). We now leave the stamp ALIVE across the clear (only the BL-01 bool is
+    //      dropped below); the stamp is instead CONSUMED (reset to the sentinel) by the
+    //      connect entry point that reads it (`vpn_connect` / `tray_vpn_connect`), so it can
+    //      influence at most the ONE immediately-following connect and never leaks into a
+    //      later unrelated one.
+    // Shared seam (also driven by the integration test against the real AppState atomics).
+    // On the clear edge (`!pending`) it deliberately does NOT touch
+    // `switch_authorized_generation` — the stamp must survive the FE's BL-01 `pending:false`
+    // clear so `vpn_connect(B)` can still read it. The stamp is consumed at the connect
+    // entry points instead (see `vpn_connect` / `tray_vpn_connect`).
+    state.stamp_switch_authorized_if_pending(pending);
+
     state
         .switch_or_reconnect_pending
         .store(pending, Ordering::Relaxed);
+}
+
+/// F17 (14-UAT round 2) — mirror the FE's whole-switch-window `isSwitching` into AppState so
+/// `notify::maybe_fire` can suppress the phantom «Отключено» plate (and, via the FE ref, the
+/// disconnect snackbars) across a seamless switch+revert. See the `seamless_switch_active` field doc
+/// and `maybe_fire`. Carries ONLY a bool — no config content / password (D-29). Notification-side
+/// command: `vpn_connect`/`vpn_disconnect` signatures are untouched.
+#[tauri::command]
+pub fn set_seamless_switch_active(active: bool, state: tauri::State<'_, AppState>) {
+    state.seamless_switch_active.store(active, Ordering::Relaxed);
 }
 
 /// Phase 13 (13-06) — coerce a raw FE theme string to one of the two whitelisted plate themes.
@@ -1856,6 +2206,9 @@ mod tests {
         // already expects (D-03 — preserve the current visible vocabulary).
         assert_eq!(serde_json::to_string(&VpnStatus::Connecting).unwrap(), "\"connecting\"");
         assert_eq!(serde_json::to_string(&VpnStatus::Connected).unwrap(), "\"connected\"");
+        // 3.4 R-DCT: the teardown-in-progress wire string the FE/tray already speak — locked here so
+        // a future rename can never drift the cross-process «disconnecting» token.
+        assert_eq!(serde_json::to_string(&VpnStatus::Disconnecting).unwrap(), "\"disconnecting\"");
         assert_eq!(serde_json::to_string(&VpnStatus::Disconnected).unwrap(), "\"disconnected\"");
         assert_eq!(serde_json::to_string(&VpnStatus::Error).unwrap(), "\"error\"");
         // 02-20 status-UX split: the former single "recovering" string is now TWO
@@ -1866,6 +2219,18 @@ mod tests {
         // cross-process consumers or re-collapse the two states onto one token (T-08-01).
         assert_eq!(serde_json::to_string(&VpnStatus::Recovering).unwrap(), "\"recovering\"");
         assert_eq!(serde_json::to_string(&VpnStatus::Reconnecting).unwrap(), "\"reconnecting\"");
+    }
+
+    #[test]
+    fn connect_outcome_serializes_to_the_additive_shape_the_fe_reads() {
+        // 3.5 F-VERDICT: the FE reads `spawned` (+ the optional `reason` token) to tell a real spawn
+        // from a NO-SPAWN supersede. Lock the wire shape — a spawn omits `reason`
+        // (skip_serializing_if), a supersede carries the stable token.
+        assert_eq!(serde_json::to_string(&ConnectOutcome::spawned()).unwrap(), "{\"spawned\":true}");
+        assert_eq!(
+            serde_json::to_string(&ConnectOutcome::superseded()).unwrap(),
+            "{\"spawned\":false,\"reason\":\"superseded-by-disconnect\"}"
+        );
     }
 
     #[test]
@@ -2180,6 +2545,28 @@ mod tests {
     }
 
     #[test]
+    fn disconnect_emits_wire_status_only_for_a_real_teardown() {
+        // A live child ⇒ real teardown regardless of the (possibly stale) status snapshot.
+        assert!(disconnect_emits_wire_status(true, VpnStatus::Disconnected));
+        assert!(disconnect_emits_wire_status(true, VpnStatus::Connected));
+        // No child but an active/in-flight status ⇒ still a real teardown (a tray «Отмена»
+        // mid-connect / mid-reconnect, or a recovery in progress).
+        assert!(disconnect_emits_wire_status(false, VpnStatus::Connecting));
+        assert!(disconnect_emits_wire_status(false, VpnStatus::Connected));
+        assert!(disconnect_emits_wire_status(false, VpnStatus::Reconnecting));
+        assert!(disconnect_emits_wire_status(false, VpnStatus::Recovering));
+        // R2-1: `Disconnecting` is ACTIVE — a teardown already in flight (a superseded tray/window
+        // disconnect) must be allowed to write the settling Disconnected, else the wire strands on
+        // «Отключение». Only a REAL teardown ever writes Disconnecting, so this never fires on a no-op.
+        assert!(disconnect_emits_wire_status(false, VpnStatus::Disconnecting));
+        // F-4: the NO-OP disconnect — no child AND already SETTLED (Disconnected/Error) — emits
+        // NOTHING, so the wizard uninstall/start-over (vpn_disconnect with the VPN off) does not flash
+        // a phantom «Отключено», and an Error-acknowledge is not rewritten into a fired plate.
+        assert!(!disconnect_emits_wire_status(false, VpnStatus::Disconnected));
+        assert!(!disconnect_emits_wire_status(false, VpnStatus::Error));
+    }
+
+    #[test]
     fn disconnect_failed_error_uses_reason_code_not_cyrillic() {
         // AUDIT-2026-06-11 #20: the value vpn_disconnect passes to the single mutator
         // when BOTH kill paths failed is the STABLE ASCII reason code
@@ -2281,5 +2668,285 @@ mod tests {
         assert_eq!(normalize_plate_language(""), "ru");
         assert_eq!(normalize_plate_language("<script>"), "ru");
         assert_eq!(normalize_plate_language("EN"), "ru", "case-sensitive: only exact 'en' passes");
+    }
+
+    // ── FAB-R4 (Fable-5 review of Phase 14): switch-authorized-generation stamp ──
+    // vpn_connect reads `switch_authorized_generation` and maps the u64::MAX sentinel
+    // to `None` before feeding `lifecycle::switch_disconnect_wins`. Lock that exact
+    // sentinel→Option mapping + the end-to-end decision matrix the way vpn_connect
+    // wires it, so the "no switch authorized" sentinel can never be misread as a real
+    // stamp (which would bail a plain manual connect) and a genuine mid-switch tray
+    // disconnect is never swallowed.
+
+    /// Mirror of the sentinel→Option mapping vpn_connect performs on the raw
+    /// `switch_authorized_generation` load.
+    fn switch_stamp_from_raw(raw: u64) -> Option<u64> {
+        if raw == u64::MAX { None } else { Some(raw) }
+    }
+
+    #[test]
+    fn switch_stamp_sentinel_maps_to_no_switch() {
+        // The at-rest / cleared value is the u64::MAX sentinel → "no switch authorized".
+        assert_eq!(switch_stamp_from_raw(u64::MAX), None);
+        // Any real generation stamp maps through unchanged.
+        assert_eq!(switch_stamp_from_raw(0), Some(0));
+        assert_eq!(switch_stamp_from_raw(7), Some(7));
+    }
+
+    #[test]
+    fn fab_r4_end_to_end_decision_matches_vpn_connect_wiring() {
+        use crate::lifecycle::switch_disconnect_wins;
+
+        // No switch stamped (sentinel) — a plain manual connect. Even with the durable
+        // intent set and the generation advanced, vpn_connect must NOT bail (the
+        // connect_cancelled / generation guards own that path — this is the user
+        // deliberately reconnecting).
+        assert!(!switch_disconnect_wins(
+            /*durable=*/ true,
+            switch_stamp_from_raw(u64::MAX),
+            /*live=*/ 50,
+        ));
+
+        // Normal switch: stamp = 3, the switch's own teardown advanced live to 4
+        // (stamp+1). The durable intent is the switch's OWN teardown intent → complete,
+        // do NOT bail, so B connects.
+        assert!(!switch_disconnect_wins(
+            /*durable=*/ true,
+            switch_stamp_from_raw(3),
+            /*live=*/ 4,
+        ));
+
+        // Genuine tray «Отключить» in the teardown→connect gap: stamp = 3, switch
+        // teardown → 4, tray disconnect → 5. live (5) > stamp+1 (4) with intent set →
+        // the user's Disconnect WINS: bail to a clean Disconnected, B never spawns.
+        assert!(switch_disconnect_wins(
+            /*durable=*/ true,
+            switch_stamp_from_raw(3),
+            /*live=*/ 5,
+        ));
+    }
+
+    // ── FAB-R4 re-fix: AppState-level integration tests (the MISSING test) ──────
+    //
+    // These drive the REAL AppState atomics through the SAME seams the commands run
+    // (`stamp_switch_authorized_if_pending` = the `set_switch_or_reconnect_pending`
+    // stamp write; `consume_switch_stamp_and_should_bail` = the `vpn_connect` guard
+    // read). They prove the stamp is ALIVE and CONSULTED at `vpn_connect` check time on
+    // the real switch path — the class of test that would have caught the DEAD guard
+    // (the landed FAB-R4 reset the stamp on the FE's `pending:false` clear before the
+    // guard ever ran). Vacuum-only predicate tests could not have caught that, because
+    // the predicate itself was always arithmetically correct — the wiring was dead.
+
+    /// Build an AppState wired exactly like `lib.rs` `.manage(AppState { … })`, but with
+    /// no live Tauri handle — enough to exercise the FAB-R4 stamp/consume seams against
+    /// the real atomics. Only the fields the seams touch matter; the rest mirror the
+    /// production defaults so the struct is a faithful stand-in.
+    fn test_app_state() -> AppState {
+        AppState {
+            sidecar_child: Arc::new(Mutex::new(None)),
+            disconnecting: Arc::new(Mutex::new(false)),
+            vpn_status: Arc::new(Mutex::new(VpnStatus::Disconnected)),
+            last_error: Arc::new(Mutex::new(None)),
+            tray_notified: Arc::new(Mutex::new(false)),
+            config_path: Arc::new(Mutex::new(None)),
+            log_level: Arc::new(Mutex::new("info".to_string())),
+            locale: Arc::new(Mutex::new("ru".to_string())),
+            benchmark_cancel_tx: Arc::new(tokio::sync::Mutex::new(None)),
+            lifecycle_flow: Arc::new(tokio::sync::Mutex::new(())),
+            mtproto_install_cancel: Arc::new(AtomicBool::new(false)),
+            update_sidecar_cancel: Arc::new(AtomicBool::new(false)),
+            connection_generation: Arc::new(AtomicU64::new(0)),
+            reconnect_in_progress: Arc::new(AtomicBool::new(false)),
+            last_preflight_offline: Arc::new(AtomicBool::new(false)),
+            user_disconnect_requested: Arc::new(AtomicBool::new(false)),
+            notifications_enabled: Arc::new(AtomicBool::new(true)),
+            pending_connect_origin: Arc::new(Mutex::new(crate::notify::ConnectOrigin::Manual)),
+            pending_connect_ping: Arc::new(Mutex::new(None)),
+            switch_or_reconnect_pending: Arc::new(AtomicBool::new(false)),
+            seamless_switch_active: Arc::new(AtomicBool::new(false)),
+            // Production default: the "no switch authorized" sentinel.
+            switch_authorized_generation: Arc::new(AtomicU64::new(u64::MAX)),
+            pending_plate: Arc::new(Mutex::new(None)),
+            plate_theme: Arc::new(Mutex::new("dark".to_string())),
+            plate_language: Arc::new(Mutex::new("ru".to_string())),
+        }
+    }
+
+    #[tokio::test]
+    async fn lifecycle_flow_serializes_lifecycle_commands() {
+        // 3.3 R-SERIAL (F13/F14): the lifecycle_flow mutex serializes the four lifecycle commands —
+        // while one holds it, a concurrent command must WAIT. Prove mutual exclusion via try_lock: it
+        // fails while the guard is held and succeeds once it is dropped.
+        let state = test_app_state();
+        let guard = Arc::clone(&state.lifecycle_flow).lock_owned().await;
+        assert!(
+            state.lifecycle_flow.try_lock().is_err(),
+            "a held lifecycle_flow lock must block a concurrent connect/disconnect",
+        );
+        drop(guard);
+        assert!(
+            state.lifecycle_flow.try_lock().is_ok(),
+            "a released lifecycle_flow lock must let the next command proceed",
+        );
+    }
+
+    /// Drive the full FE→Rust sequence of a config switch on the real AppState atomics,
+    /// stopping at the point `vpn_connect(B)` reads the guard. Returns whether
+    /// `vpn_connect` WOULD bail (consuming the stamp as it does). `extra_disconnect`
+    /// models a genuine tray «Отключить» landing in the teardown→connect gap.
+    fn drive_switch_up_to_connect_guard(
+        state: &AppState,
+        is_switch: bool,
+        extra_disconnect: bool,
+    ) -> bool {
+        // 1. FE `switchTo`/`handleReconnect` raises pending:true → Rust STAMPS the live
+        //    generation. (`is_switch` only picks the start-plate kind; the stamp fires on
+        //    ANY pending:true now — switch OR save-and-reconnect.)
+        let _ = is_switch; // both paths stamp identically; kept for call-site clarity.
+        state.stamp_switch_authorized_if_pending(true);
+
+        // 2. The teardown `vpn_disconnect(A)` sets the durable intent + bumps generation.
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+        state.connection_generation.fetch_add(1, Ordering::SeqCst);
+
+        // 3. A GENUINE tray «Отключить» in the teardown→connect gap: another
+        //    vpn_disconnect → durable intent (already set) + an EXTRA generation bump.
+        if extra_disconnect {
+            state.user_disconnect_requested.store(true, Ordering::SeqCst);
+            state.connection_generation.fetch_add(1, Ordering::SeqCst);
+        }
+
+        // 4. FE sends set_switch_or_reconnect_pending(pending:false) BEFORE vpn_connect(B)
+        //    (the BL-01 plate-suppression clear). Post-fix: this drops ONLY the bool and
+        //    must LEAVE THE STAMP ALIVE (the whole point — the old code reset it here and
+        //    the guard went dead).
+        state.stamp_switch_authorized_if_pending(false);
+        state.switch_or_reconnect_pending.store(false, Ordering::Relaxed);
+
+        // 5. `vpn_connect(B)` reaches its guard: consume-and-decide against the real atomics.
+        state.consume_switch_stamp_and_should_bail()
+    }
+
+    #[test]
+    fn fab_r4_integration_genuine_tray_disconnect_mid_switch_bails_at_connect() {
+        // THE missing test: on the real switch path, with a genuine tray «Отключить» in
+        // the teardown→connect gap, vpn_connect's guard must BE ALIVE and fire — bail to
+        // Disconnected, NOT spawn B. The stamp survives the FE's pending:false clear
+        // (step 4) and is consulted at the connect guard (step 5). Before the re-fix this
+        // returned false (dead guard) because pending:false reset the stamp.
+        let state = test_app_state();
+        let would_bail = drive_switch_up_to_connect_guard(&state, /*is_switch=*/ true, /*extra=*/ true);
+        assert!(
+            would_bail,
+            "genuine tray disconnect mid-switch MUST bail at vpn_connect (the live-guard behaviour)",
+        );
+        // The durable intent is NOT cleared by the guard — the user's Disconnect stands.
+        assert!(state.user_disconnect_requested.load(Ordering::SeqCst));
+        // The stamp was consumed (swapped to the sentinel) so it cannot leak forward.
+        assert_eq!(state.switch_authorized_generation.load(Ordering::SeqCst), u64::MAX);
+    }
+
+    #[test]
+    fn fab_r4_integration_stamp_is_alive_at_connect_after_the_fe_clear() {
+        // Directly pin the dead-guard fix: after the FE's pending:false clear the stamp
+        // must STILL be present (not the sentinel) at the moment vpn_connect reads it.
+        let state = test_app_state();
+        state.stamp_switch_authorized_if_pending(true); // switch authorized at gen 0 → stamp 0
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // teardown bump → 1
+        // FE clear (BL-01). Post-fix this must NOT wipe the stamp.
+        state.stamp_switch_authorized_if_pending(false);
+        assert_eq!(
+            state.switch_authorized_generation.load(Ordering::SeqCst),
+            0,
+            "stamp must survive the FE pending:false clear (dead-guard fix)",
+        );
+    }
+
+    #[test]
+    fn fab_r4_integration_normal_switch_completes_no_false_bail() {
+        // A NORMAL switch (no intervening disconnect): own teardown = +1, so
+        // live == stamped + 1 → vpn_connect must NOT bail (B connects).
+        let state = test_app_state();
+        let would_bail = drive_switch_up_to_connect_guard(&state, /*is_switch=*/ true, /*extra=*/ false);
+        assert!(!would_bail, "a normal switch must complete — no false bail");
+    }
+
+    #[test]
+    fn fab_r4_integration_normal_save_and_reconnect_completes_no_false_bail() {
+        // Save-and-reconnect (handleReconnect, is_switch:false) has the SAME own-teardown
+        // arithmetic and now ALSO stamps (Fable Defect 2) → own teardown = +1 → complete.
+        let state = test_app_state();
+        let would_bail = drive_switch_up_to_connect_guard(&state, /*is_switch=*/ false, /*extra=*/ false);
+        assert!(!would_bail, "a normal save-and-reconnect must complete — no false bail");
+    }
+
+    #[test]
+    fn fab_r4_integration_genuine_disconnect_mid_save_and_reconnect_bails() {
+        // The intent-inversion class also covers save-and-reconnect: a genuine tray
+        // «Отключить» in its teardown→connect gap must win too.
+        let state = test_app_state();
+        let would_bail = drive_switch_up_to_connect_guard(&state, /*is_switch=*/ false, /*extra=*/ true);
+        assert!(would_bail, "genuine disconnect mid-save-and-reconnect MUST bail (Fable Defect 2)");
+    }
+
+    #[test]
+    fn fab_r4_integration_plain_manual_connect_after_aborted_switch_is_not_bailed() {
+        // Stale-stamp harmlessness: an ABORTED switch (teardown vpn_disconnect rejected)
+        // leaves the stamp alive (the FE abort sends only pending:false, which no longer
+        // resets the stamp) and never runs vpn_connect(B) — so the stamp survives to the
+        // NEXT connect. A plain manual connect right after must NOT be falsely bailed:
+        // the aborted teardown's own single bump gives live == stamped + 1.
+        let state = test_app_state();
+        state.stamp_switch_authorized_if_pending(true); // switch authorized at gen 0 → stamp 0
+        // Aborted teardown: vpn_disconnect set the durable intent + bumped once, THEN
+        // rejected (kill failed) — so no vpn_connect(B) ran to consume the stamp.
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+        state.connection_generation.fetch_add(1, Ordering::SeqCst); // → 1
+        state.switch_or_reconnect_pending.store(false, Ordering::Relaxed); // FE abort clear
+        // Now a plain manual connect reaches the guard: live (1) == stamped (0) + 1 →
+        // must NOT bail. The connect then consumes the (now-harmless) stamp.
+        assert!(
+            !state.consume_switch_stamp_and_should_bail(),
+            "a plain manual connect after an aborted switch must NOT be falsely bailed",
+        );
+        // Stamp consumed → a subsequent connect sees the sentinel and never bails.
+        assert_eq!(state.switch_authorized_generation.load(Ordering::SeqCst), u64::MAX);
+        assert!(!state.consume_switch_stamp_and_should_bail());
+    }
+
+    #[test]
+    fn fab_r4_integration_plain_manual_connect_no_stamp_never_bails() {
+        // No switch ever authorized (stamp at rest = sentinel): a plain manual connect —
+        // even after a manual disconnect that set the durable intent + advanced the
+        // generation — must NEVER bail here (the user is deliberately reconnecting).
+        let state = test_app_state();
+        state.user_disconnect_requested.store(true, Ordering::SeqCst);
+        state.connection_generation.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            !state.consume_switch_stamp_and_should_bail(),
+            "a plain manual connect with no stamp must never bail",
+        );
+    }
+
+    #[test]
+    fn fab_r4_integration_tray_connect_consumes_a_leftover_stamp() {
+        // tray_vpn_connect must CONSUME/reset the stamp (it does a `swap(u64::MAX)` on the
+        // same field). Model a leftover stamp from an aborted switch, then the tray-connect
+        // reset, and assert the stamp is cleared so it can never leak into a later
+        // vpn_connect and false-bail it. (tray_vpn_connect never bails on the stamp — it is
+        // a fresh user connect — it only clears it, exactly like the code does.)
+        let state = test_app_state();
+        state.stamp_switch_authorized_if_pending(true); // leftover stamp from an aborted switch
+        // The tray connect's reset (mirrors tray.rs `swap(u64::MAX, SeqCst)`).
+        let prior = state.switch_authorized_generation.swap(u64::MAX, Ordering::SeqCst);
+        assert_ne!(prior, u64::MAX, "there was a live leftover stamp to clear");
+        assert_eq!(
+            state.switch_authorized_generation.load(Ordering::SeqCst),
+            u64::MAX,
+            "tray connect must reset the stamp so it cannot leak into a later vpn_connect",
+        );
+        // A subsequent vpn_connect now reads the sentinel → never bails.
+        assert!(!state.consume_switch_stamp_and_should_bail());
     }
 }

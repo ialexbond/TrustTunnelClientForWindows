@@ -1,6 +1,7 @@
-import { useState, useRef, useMemo, useCallback, useEffect } from "react";
+import { useState, useRef, useMemo, useCallback, useEffect, type CSSProperties } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { TitleBar } from "./components/layout/TitleBar";
 import { TabNavigation } from "./components/layout/TabNavigation";
 import { WindowControls } from "./components/layout/WindowControls";
@@ -64,6 +65,22 @@ type PingResult =
 // null («—») is pushed. (usePerConfigPing's background sweep uses 3s; this path is
 // latency-sensitive, so it mirrors the launch path's tighter bound.)
 const MANUAL_PING_TIMEOUT_MS = 1500;
+
+// Phase 14 (FAB-02 / D-14): the SWITCH SETTLE BACKSTOP. After B's process spawns (switchTo resolves
+// ok:true) performSwitch waits for the REAL terminal `vpn-status` edge — `connected` (success) or
+// `error` (silent revert). But a spawned B can wedge without emitting EITHER (a stuck connect that
+// never terminates). This timer bounds each wait tick.
+const SWITCH_SETTLE_TIMEOUT_MS = 15_000;
+// F-1 (Fable-5 review): with 3.8 delay-green a HEALTHY B on http3 honestly stays «Подключение» for
+// ~30-55s (real traffic-readiness — the delayed `connected` edge), far past the old flat 15s. So the
+// backstop is now status-AWARE and RE-ARMS: a 15s tick with the Rust status STILL "connecting" means
+// B is alive + warming (connected/error both flip the status AND resolve the park), so we keep the
+// amber park instead of a phantom revert. This ceiling caps the total re-arms so a truly wedged B
+// (no terminal edge ever) still reverts eventually. 5 × 15s = 75s sits ABOVE the 60s connect-timeout
+// watchdog, so in practice the watchdog's `error` edge resolves the park first — this is a last
+// resort. Before F-1 the flat 15s timed out every slow-warmup switch → phantom revert into an
+// R8-active session (red «уже запущено») → green landing on the WRONG active card.
+const SWITCH_SETTLE_MAX_TICKS = 5;
 
 function App() {
   // ─── Theme & Language ───
@@ -307,7 +324,152 @@ function App() {
   // is exactly the window being closed). Set true before the first await of every manual initiator,
   // released in a `finally` so a failed/rejected connect never wedges the button.
   const connectInFlightRef = useRef(false);
+  // Phase 14 (D-07/D-12): FE-only «a seamless A→B switch is in flight» flag. It is REACT STATE
+  // (not a ref like connectInFlightRef) precisely because it DRIVES RENDER — it is OR'd into
+  // ConfigList's leadIsLive gate so the frosted hero stays mounted + hoisted through the transient
+  // `disconnected` the teardown emits (a ref would flip without re-rendering, and the hero would
+  // still demote for that frame). Owning it here (not in the Rust VpnStatus enum) keeps the blast
+  // radius entirely off the regression-sensitive status surface (D-07): the Rust core, serde
+  // round-trip, notify decider, and tray buckets stay UNTOUCHED. Set synchronously in the switch
+  // handlers BEFORE runViewTransition (Pitfall 1) and cleared in their `finally`.
+  const [isSwitching, setIsSwitching] = useState(false);
+  // F28 (14-UAT round 3): the path of the config whose connect was just INITIATED by a click, held only
+  // for the window BEFORE the live status becomes `connecting`. On a fresh connect that window is filled
+  // by the awaited pre-connect ping probe (up to ~1.5s on a slow/unreachable server), during which the
+  // card still showed the idle «Подключить» with nothing locked — the owner felt it as a hang. The target
+  // card reads this to show an INSTANT spinner + disabled primary on click, and the whole list locks
+  // (ConfigList OR's it into listLocked); it is set synchronously at the connect initiators (BELOW the
+  // in-flight guards, ABOVE runViewTransition — Pitfall 1) and cleared in their `finally`, so the spinner
+  // can never hang past a settled/failed connect. Does NOT fight the honest-delay-green — it only covers
+  // the pre-`connecting` gap; the existing status spinner takes over once `connecting` lands.
+  const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
+  // Phase 14 (14-04, D-05): the calm NON-ALARMING revert notice shown when a switch to B fails and
+  // the app silently returns to the previous server A. It renders as `ErrorBanner variant="info"`
+  // (NEVER the red error banner — reverting to a working A is not a failure state), carries only A's
+  // DISPLAY NAME (D-29 — never the .toml path/password), and is dismissible + transient (Open Q3 —
+  // `switch-failed-reverted` is a transient outcome, not a persistent new state). Cleared on dismiss
+  // and whenever a fresh switch/connect starts (so a stale «остались на A» never lingers over a later
+  // successful switch).
+  const [revertNotice, setRevertNotice] = useState<string | null>(null);
+  // F30 (14-UAT round 3): the calm «…восстановлено» revert notice must appear at the MOMENT A is
+  // ACTUALLY reconnected («Подключено») — NOT when `switchTo(A)` merely spawns A. `switchTo` resolves on
+  // the vpn_connect SPAWN-ACCEPT (FAB-02), while A is still «Подключение», so the old code set the notice
+  // during the amber connecting phase → the owner saw «Соединение восстановлено» pop OVER an amber
+  // «Подключение» badge, i.e. "restored before it was restored". Fix: `revertToPrevious` STAGES the
+  // message in this ref and the effect below commits it only on A's real `connected` edge; an
+  // `error`/`disconnected` edge (A also failed, or the user left) DROPS the staged notice so a calm
+  // reassurance never shows over a red error. Tightens WR-02 (the notice now tracks the true connected
+  // edge, not the spawn-accept). New connect/switch initiators clear the ref so a stale A-notice never
+  // lands on a DIFFERENT server's connect.
+  const pendingRevertNoticeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status === "connected") {
+      // A actually reconnected → commit the staged calm notice (once).
+      if (pendingRevertNoticeRef.current) {
+        setRevertNotice(pendingRevertNoticeRef.current);
+        pendingRevertNoticeRef.current = null;
+      }
+    } else if (status === "error") {
+      // A ALSO failed to reconnect → drop the staged notice so a calm blue reassurance never shows over a
+      // red «Ошибка». NOTE: we deliberately do NOT clear on `disconnected` — the switch teardown passes
+      // through a (suppressed) `disconnected` BEFORE the revert stages the notice, so clearing there would
+      // race the stage away. A genuine user-disconnect between the stage and A's connect leaves the ref
+      // set but harmless: it can only commit on a `connected` edge, and every fresh connect/switch
+      // initiator (performSwitch / handleConnectActive) clears the ref first, so it never lands on a
+      // different server.
+      pendingRevertNoticeRef.current = null;
+    }
+  }, [status]);
+  // Phase 14 (WR-03): a LIVE ref mirroring the current active config path, updated EVERY render (the
+  // same pattern as useVpnEvents' statusRef). performSwitch reads `previousPath` from THIS ref, not
+  // from a memoized closure over config.configPath. A memoized switch handler captures config.configPath
+  // at the render it was created; if an auto-switch fires in the very tick a manual promote committed,
+  // that closure lags the just-committed active path by one render, so a failed revert could restore a
+  // one-step-stale server A. Reading the ref guarantees the revert always targets the truly-current
+  // active path regardless of handler staleness. Written unconditionally below on each render.
+  const activeConfigPathRef = useRef(config.configPath);
+  activeConfigPathRef.current = config.configPath;
+  // Phase 14 (FAB-01): a LIVE ref mirroring the current VPN status, updated every render (same
+  // pattern as activeConfigPathRef / useVpnEvents' statusRef). performSwitch reads status from THIS
+  // ref (not its memoized closure) so it can REFUSE a switch while the backend reconnect supervisor
+  // is running (`reconnecting`/`recovering`) — a manual «Переключиться» clicked during a backend
+  // auto-reconnect would race the Rust `respawn_sidecar` (worst case: UI says B while traffic still
+  // flows through A). The ref guarantees the refusal sees the truly-current status even if the
+  // handler's closure lagged a render.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  // F17 (14-UAT round 2): a LIVE ref mirroring isSwitching (same render-time pattern as statusRef) so
+  // the useVpnEvents listener closure can read the whole-switch-window flag SYNCHRONOUSLY, and a Rust
+  // mirror so notify::maybe_fire suppresses the phantom «Отключено» plate across the whole
+  // switch+revert. During a seamless switch the card holds amber «Переключение» and the only failure
+  // signal is the embedded «…восстановлено» info banner — the disconnect snackbar (this ref) and the
+  // «Отключено» plate (the Rust flag) must both stay silent for a failed B / the revert-to-A leg.
+  // Tracking isSwitching directly (not a manual set in performSwitch) also covers the defensive clear.
+  const seamlessSwitchActiveRef = useRef(isSwitching);
+  seamlessSwitchActiveRef.current = isSwitching;
+  useEffect(() => {
+    void invoke("set_seamless_switch_active", { active: isSwitching }).catch(() => {});
+  }, [isSwitching]);
   const pushSuccess = useSnackBar();
+
+  // Phase 14 (FAB-02): the switch's TERMINAL-EDGE settle resolver. `switchTo` resolves when B's
+  // process SPAWNS (vpn_connect accepted), NOT when B actually reaches `connected` — a spawned B
+  // can still die never-connected (broken auth / connect-timeout), the DOMINANT real "B не
+  // подключается" case. performSwitch parks on THIS promise after switchTo's spawn-accept and lets
+  // the vpn-status listener resolve it on the real terminal edge: `connected` → success,
+  // `error` → revert. Held in a ref (not state) so the listener resolves it without a re-render and
+  // performSwitch reads the live resolver. Cleared once resolved so a stale settle never fires.
+  const switchSettleRef = useRef<((terminalStatus: "connected" | "error" | "external") => void) | null>(null);
+
+  // Phase 14 (F-7, Fable-5): set when a switch is SUPERSEDED by a genuine user disconnect (a tray
+  // «Отключить» mid-switch, or vpn_connect bailing spawned:false). Rust then writes a
+  // connecting → disconnected edge that useVpnEvents would otherwise map to the RED «Connection
+  // failed» snackbar — but this was a user-intended disconnect. The connecting→disconnected snack arm
+  // consults + CONSUMES this ref to show the neutral «VPN отключён» instead. Cleared on consume and
+  // at the start of every fresh switch (so a stale supersede never mutes a later real failure).
+  const switchSupersededRef = useRef(false);
+
+  // Phase 14 (FAB-02/FAB-03): the terminal-edge callback the vpn-status listener fires on
+  // `connected`/`error`. Two jobs, in this order:
+  //   1. Resolve the switch's settle-promise so performSwitch can act on the REAL terminal edge
+  //      (this is what makes the silent revert fire for a POST-SPAWN B failure — FAB-02).
+  //   2. FAB-03: the DEFENSIVE isSwitching clear is now GUARDED — it only clears when the switch
+  //      guard is NOT held (connectInFlightRef.current === false). While a switch/revert is in
+  //      flight, performSwitch OWNS the isSwitching lifecycle (it clears it in its finally after the
+  //      whole switch+revert settles). The old unconditional clear here fired on B's error edge
+  //      BEFORE the revert leg ran → the frosted hero unmounted (red/gray flash) and the cards
+  //      re-enabled as dead buttons mid-revert. Clearing only when the guard is free preserves the
+  //      TRUE abandoned-promise case this backstop was built for (a dropped chain that never hit its
+  //      finally leaves connectInFlightRef false → this still releases the lock).
+  const onSwitchSettle = useCallback((terminalStatus: "connected" | "error") => {
+    const resolve = switchSettleRef.current;
+    if (resolve) {
+      switchSettleRef.current = null;
+      resolve(terminalStatus);
+    }
+    // FAB-03: only the abandoned-promise case (guard already released) clears here.
+    if (!connectInFlightRef.current) setIsSwitching(false);
+  }, []);
+
+  // 3.6 F-TRAY (F10/F11): a genuine tray «Отключить» that lands DURING a switch must ABORT the FE's
+  // settle-park WITHOUT a revert — the user's disconnect intent wins (Rust already honored it and
+  // bailed vpn_connect). The vpn-flow listener (below) calls this to resolve the park with "external";
+  // performSwitch then releases the lock and does NOT revert (a revert would re-fight the user's
+  // disconnect and flash the phantom «остались на A» notice). Also clears any pending revert notice.
+  const onExternalDisconnect = useCallback(() => {
+    const resolve = switchSettleRef.current;
+    // F-7 / R2-3 (Fable-5 re-review): only a switch actually IN FLIGHT (park armed) can be
+    // superseded — mark the flag ONLY then. A plain tray disconnect with no park must NOT set it,
+    // else the flag leaks and later mutes a genuine NON-switch (hero-button) connect failure's red
+    // «Connection failed» snack (there is no consumer on the plain connected→disconnecting→disconnected
+    // wire, and the only clear is at performSwitch entry).
+    if (resolve) {
+      switchSupersededRef.current = true;
+      switchSettleRef.current = null;
+      resolve("external");
+    }
+    setRevertNotice(null);
+  }, []);
 
   useVpnEvents({
     i18n,
@@ -319,6 +481,9 @@ function App() {
     pushSuccess,
     setReconnectProgress,
     manualReconnectActiveRef,
+    onSettled: onSwitchSettle,
+    switchSupersededRef,
+    seamlessSwitchActiveRef,
   });
 
   // ─── App-level config-list + inactive-ping source (Phase 12, 12-07) ───
@@ -327,7 +492,15 @@ function App() {
   // loop) AND it produces the priority-ordered candidate list the auto-switch engine (below)
   // consumes. Declared ABOVE useVpnActions because pushPendingConnectPing (next) reads it and is
   // now ALSO threaded INTO useVpnActions for the save-and-reconnect ping push (Fable-A review #3).
-  const configPingSource = useConfigPingSource(config.configPath);
+  // F23 (14-UAT round 2): `status` gates the active-config probe exclusion — the selected config is
+  // probed directly while DISCONNECTED (so its pre-connect RTT fills the cache + shows on the card),
+  // and excluded/substituted only while the tunnel is up.
+  const configPingSource = useConfigPingSource(config.configPath, status);
+  // F29: pull the STABLE seed callback out as a plain identifier — `useConfigPingSource` returns a fresh
+  // object each render, so referencing it as `configPingSource.seedRetainedPing(...)` (a method call) would
+  // make exhaustive-deps demand the whole object as a dep (recreating callbacks every render). The
+  // function itself is a `useCallback([])`, so this local is stable.
+  const seedRetainedPing = configPingSource.seedRetainedPing;
 
   // Phase 13 (13-08b, reworked 13-12): push the connect-time PING the notification plate shows,
   // RIGHT BEFORE a manual connect/switch. Two-tier source, mirroring the LAUNCH path's fresh probe
@@ -389,8 +562,20 @@ function App() {
       // Awaited (unlike the fast path): the probe already cost a round-trip, and the callers'
       // await must cover the push itself so the Rust Connected edge cannot outrun it.
       await invoke("set_pending_connect_ping", { ms }).catch(() => {});
+      // F29 (fix-all-paths): a MANUAL connect right after launch (before the background probe loop has a
+      // warm reading) hits THIS slow path too. Seed the freeze cache with this honest direct measurement
+      // so the connected card shows the real ping — same fix as the autostart path (useAutoConnect). The
+      // FAST PATH above needs no seed (the value is already in the cache). null → no seed (honest «—»).
+      // Fable R (MAJOR): but this callback ALSO runs on a manual «Переключиться» from a LIVE tunnel (A→B),
+      // where the tunnel A is still up when the probe runs — so `ping_config_endpoint(B)` rides tunnel A
+      // and returns THROUGH-TUNNEL garbage (586/207/2000 ms, the F24 noise). Seeding that would freeze B on
+      // a fake number for the whole session — exactly what F26 forbids. So gate the seed on a genuinely
+      // pre-connect status (disconnected/error): only then is the probe a real DIRECT measurement. The
+      // plate push above is unaffected (it is transient, consumed on one connect edge — 13-12).
+      const preConnect = statusRef.current === "disconnected" || statusRef.current === "error";
+      if (ms !== null && preConnect) seedRetainedPing(path, ms);
     },
-    [configPingSource.configs, configPingSource.pings],
+    [configPingSource.configs, configPingSource.pings, seedRetainedPing],
   );
 
   // ─── VPN Actions ───
@@ -400,7 +585,7 @@ function App() {
   // Fable-A review #3: pushPendingConnectPing is threaded in so handleReconnect («Сохранить и
   // переподключить») pushes the SAME ping+origin every other connect initiator pushes — it was the
   // only path reaching vpn_connect without it, so its «Подключено» plate deterministically read «—».
-  const { handleConnect, handleDisconnect, handleReconnect, switchTo } = useVpnActions({
+  const { handleConnect, handleDisconnect, handleReconnect, switchTo, markLastUsed } = useVpnActions({
     config,
     status,
     setStatus,
@@ -410,6 +595,21 @@ function App() {
     manualReconnectActiveRef,
     pushPendingConnectPing,
   });
+
+  // Phase 14 (CR-02, FAB-05): the SWITCH-GATED disconnect wrapper. A switch (or revert) legitimately
+  // passes through `connected`/`connecting` transiently while it tears A down / reconnects A — an
+  // unguarded disconnect landing in that window resolves the SHARED reconnectResolve early, so
+  // switchTo proceeds to vpn_connect before the sidecar it expected to tear down is actually gone
+  // (double spawn / R8 «VPN is already running»). Gating on isSwitching || connectInFlightRef makes
+  // the disconnect inert for the whole switch window; it re-enables atomically on settle. A normal
+  // disconnect (no switch in flight) passes straight through. DEFINED ABOVE useConfigLifecycle
+  // (FAB-05) so the fs-watcher external-delete path receives THIS guarded disconnect, not the raw one
+  // (the raw handleDisconnect was the last FE-reachable disconnect entry the CR-02 sweep missed —
+  // an external delete of the active config mid-switch fired an ungated teardown that raced the swap).
+  const handleDisconnectGuarded = useCallback(async (): Promise<void> => {
+    if (isSwitching || connectInFlightRef.current) return;
+    await handleDisconnect();
+  }, [isSwitching, handleDisconnect]);
 
   // ─── Shell hooks (Phase 12.5 decomposition) ───
   useConfigLifecycle({
@@ -424,9 +624,15 @@ function App() {
     i18n,
     // IN-32: disconnect the tunnel if the ACTIVE config file disappears on disk while live.
     status,
-    onDisconnect: handleDisconnect,
+    // FAB-05: pass the GUARDED disconnect — an external delete of the active config while a switch is
+    // in flight must NOT fire an ungated teardown that races the swap (the guard makes it inert).
+    onDisconnect: handleDisconnectGuarded,
+    // FAB-05: while a switch is in flight, the fs-watcher must NOT wipe config.configPath — the
+    // active pointer is mid-transition to B, and blanking it would strand the swap (and unmount the
+    // hero). The lifecycle hook skips the wipe (and defers the delete side-effects) while switching.
+    isSwitching,
   });
-  useAutoConnect({ config, status, setStatus, setError });
+  useAutoConnect({ config, status, setStatus, setError, seedConfigPing: seedRetainedPing });
 
   // ─── Phase 12 (12-07): smart auto-switch engine ───
   // (The config-list + inactive-ping source it consumes — configPingSource — now lives ABOVE
@@ -458,11 +664,17 @@ function App() {
   const handleConnectActive = useCallback(async (): Promise<void> => {
     if (connectInFlightRef.current) return;
     connectInFlightRef.current = true;
+    // F28: instant click feedback (same as performSwitch) — the status-panel connect / Ctrl-shortcut path
+    // also awaits the pre-connect probe before status flips to connecting. Cleared in finally.
+    setPendingConnectPath(config.configPath || null);
+    // F30: a fresh manual connect is not a revert — drop any staged revert notice.
+    pendingRevertNoticeRef.current = null;
     try {
       if (config.configPath) await pushPendingConnectPing(config.configPath);
       await handleConnect();
     } finally {
       connectInFlightRef.current = false;
+      setPendingConnectPath(null);
     }
   }, [config.configPath, pushPendingConnectPing, handleConnect]);
 
@@ -481,17 +693,286 @@ function App() {
     }
   }, [handleReconnect]);
 
-  const handleAutoSwitch = useCallback(
-    async (path: string) => {
-      if (path) {
-        runViewTransition(() => {
-          setConfig((prev) => ({ ...prev, configPath: path }));
-        });
-        localStorage.setItem("tt_config_path", path);
+  // Phase 14 (14-04, D-05/D-05-impl): the SHARED revert-to-previous — the silent return to the
+  // previous server A when a switch to B fails. Both the manual switch (handleConnectConfig) and the
+  // auto switch (handleAutoSwitch) call it with the pre-switch `previousPath` they captured BEFORE
+  // promoting the active pointer to B (the promote overwrote config.configPath to B, so A had to be
+  // captured first). It:
+  //   1. re-points config.configPath back to A INSIDE a view transition (the frosted hero glides
+  //      back to A instead of snapping) + restores the tt_config_path marker;
+  //   2. reconnects A through the EXISTING switchTo/vpn_connect path (NO new Rust command — D-07),
+  //      which also re-marks A as last-used on success (Pitfall 6 — so next-boot auto-connect targets
+  //      A, not the failed B);
+  //   3. shows a calm `ErrorBanner variant="info"` «Не удалось переключиться, остались на «A»» — the
+  //      banner interpolates ONLY A's DISPLAY NAME (D-29 — never the .toml path/password).
+  // If the A-reconnect ALSO fails, switchTo lands the status honestly on `error` (a red STATUS badge
+  // is legitimate — A genuinely can't connect); we do NOT recurse/loop (Pitfall 3), and the info
+  // notice still tells the user we tried to return them to A. The revert is naturally bounded by the
+  // switchTo result (well under the 60s connect-timeout watchdog — D-14).
+  const revertToPrevious = useCallback(
+    async (previousPath: string, bStillLive: boolean): Promise<void> => {
+      if (!previousPath) return;
+      // Resolve A's friendly display name for the notice (D-29 — name only, never the path). Fall
+      // back to a generic «предыдущий сервер» if the manifest entry can't be found.
+      const prevConfig = configPingSource.configs.find((c) => samePath(c.path, previousPath));
+      const prevName = prevConfig?.name || i18n.t("connection.revert.fallback_name");
+
+      // 1. Re-point the active pointer back to A (view-transitioned glide, like the forward promote).
+      runViewTransition(() => {
+        setConfig((prev) => ({ ...prev, configPath: previousPath }));
+      });
+      localStorage.setItem("tt_config_path", previousPath);
+
+      // 2. Reconnect A via the existing switchTo/vpn_connect path. If A also fails, switchTo sets
+      // status=error itself — we intentionally do NOT revert-again (no loop, Pitfall 3).
+      // Phase 14 (FAB-07): pass skipTeardown — the switch to B already settled the connection on
+      // error/disconnected, so there is NO live tunnel to tear down. Running switchTo's normal
+      // status-gated teardown here would be a spurious second `vpn_disconnect`; worse, if that
+      // disconnect REJECTED (transient lock error) the revert would abort without ever reconnecting
+      // A. skipTeardown goes straight to vpn_connect(A) — the revert always starts from a settled
+      // error/disconnected state, so this is safe.
+      // F-1 (Fable-5) — DEFENSIVE: the normal revert entry (an `error` terminal edge) has B already
+      // settled, so skipTeardown is right. But the last-resort re-park ceiling can fire while B is
+      // STILL «Подключение» (a wedged-but-alive B), and a skipTeardown vpn_connect(A) into that
+      // R8-active session returns "VPN is already running" (red flash) instead of reverting. So skip
+      // the teardown ONLY when B has genuinely settled; if B is still live, tear it down first.
+      // R2-2 (Fable-5 re-review): `bStillLive` is derived by the CALLER from the park OUTCOME — NOT a
+      // `statusRef` re-read here. On the common `error` edge this continuation runs as a microtask
+      // BEFORE React commits the error render, so a re-read would still see the pre-error "connecting"
+      // and force a spurious 5s F-4-silenced teardown on every failed switch. The outcome is
+      // authoritative: `error` ⇒ settled ⇒ skipTeardown; only a ceiling `timeout` that saw B still
+      // live (read fresh in the tick's own macrotask) tears B down first.
+      const revertResult = await switchTo(previousPath, { skipTeardown: !bStillLive });
+
+      // 3. WR-02 + F30: STAGE the calm blue «остались на A» info notice; the status effect commits it
+      // only on A's real `connected` edge (never during the amber «Подключение», and never at all if A
+      // ALSO fails — the effect drops the staged notice on `error`/`disconnected`, so a calm
+      // blue reassurance can never show on top of a red «Ошибка», nor before A is truly back). `ok` here
+      // means A's vpn_connect was ACCEPTED (spawn) — necessary but not sufficient; the effect waits for
+      // the terminal `connected`. variant=info is NEVER the red banner (D-05); name only (D-29).
+      if (revertResult.ok) {
+        pendingRevertNoticeRef.current = i18n.t("connection.revert.body", { name: prevName });
       }
-      await switchTo(path);
     },
-    [switchTo],
+    [switchTo, configPingSource.configs, i18n],
+  );
+
+  // Phase 14 (CR-01 / IN-03): the SINGLE shared switch-orchestration helper that BOTH the manual
+  // switch (handleConnectConfig) and the auto switch (handleAutoSwitch) call, so the in-flight guard
+  // and the whole switch lifecycle are identical BY CONSTRUCTION — the two handlers can no longer
+  // drift apart (the exact CR-01 divergence: handleAutoSwitch used to set only isSwitching and never
+  // raised connectInFlightRef, so a manual card tap / keyboard connect / status-panel button could run
+  // a SECOND switchTo concurrently with an in-flight auto-switch — two teardown chains over the single
+  // shared reconnectResolve, risking a double sidecar spawn / R8 error).
+  //
+  // The helper:
+  //   (a) raises the SAME synchronous connectInFlightRef guard the manual initiators use — so
+  //       auto-switch and every manual initiator are now MUTUALLY EXCLUSIVE (an in-flight auto-switch
+  //       blocks a manual connect and vice-versa). The ref MUST flip synchronously (not React state)
+  //       so the guard is closed within the same event-handler tick, before the first await.
+  //   (b) captures previousPath from the LIVE activeConfigPathRef (WR-03), never a memoized closure —
+  //       so a failed revert always restores the truly-current active server A even if this handler's
+  //       closure lagged the just-committed active path by one render.
+  //   (c) clears any stale revert notice + flips isSwitching TRUE synchronously BEFORE runViewTransition
+  //       (Pitfall 1: runViewTransition uses flushSync, so a flag set AFTER it misses the captured
+  //       frame and the frosted hero flickers one frame down to a resting row).
+  //   (d) promotes the active pointer to B inside a View Transition + writes tt_config_path.
+  //   (e) awaits pushPendingConnectPing ONLY for the manual path (pushPing:true) — the connect-time
+  //       plate ping; the auto-switch path (pushPing:false) keeps its prior behavior (AutoSwitch origin
+  //       is stamped inside switchTo's seam, not here).
+  //   (f) FAB-01: REFUSES the switch (early no-op) while status ∈ {reconnecting, recovering} — a
+  //       switch there would race the Rust reconnect supervisor's respawn_sidecar (silent
+  //       wrong-server / double-spawn). Read from the LIVE statusRef.
+  //   (g) FAB-02: awaits switchTo(path) for the SPAWN-ACCEPT, then parks on the REAL terminal
+  //       `vpn-status` edge (connected → success + stamp last-used; error/timeout → silent revert).
+  //       switchTo resolving ok:true only means B's PROCESS spawned — a spawned B can still die
+  //       never-connected, so the revert must fire on the terminal edge, not on switchTo's return.
+  //   (h) clears connectInFlightRef + isSwitching in `finally` — atomically AFTER the whole
+  //       switch+revert settles, so the amber lock + hero stay held through the entire revert leg
+  //       (FAB-03: the onSettled defensive clear no longer releases the lock while the guard is held).
+  //   Returns { accepted } so the auto-switch caller can keep its breach counter on a refused/no-op
+  //   tick (FAB-06) — a swallowed verdict must not reset the breach + arm the cooldown.
+  const performSwitch = useCallback(
+    async ({ path, pushPing }: { path: string; pushPing: boolean }): Promise<{ accepted: boolean }> => {
+      // (a) the synchronous in-flight guard — a second switch/connect (manual OR auto) while this one
+      // is in flight is a NO-OP. Flipped BEFORE the first await; released in `finally`.
+      if (connectInFlightRef.current) return { accepted: false };
+      // (f) FAB-01: refuse a switch while the backend reconnect supervisor is running. A manual
+      // «Переключиться» (or an auto-switch tick) landing during `reconnecting`/`recovering` races the
+      // Rust respawn_sidecar — worst case the UI reads B while traffic still flows through A. Read the
+      // LIVE status ref so the refusal is never one render stale. The cards are ALSO visibly locked in
+      // these states (ConfigList `locked` extended to reconnecting/recovering), so this is the logic
+      // half of the FE closure for FAB-01 (the full Rust generation re-check FAB-R1 is BACKLOGGED).
+      if (statusRef.current === "reconnecting" || statusRef.current === "recovering") {
+        return { accepted: false };
+      }
+      connectInFlightRef.current = true;
+      // F28: INSTANT click feedback. Flag the target card so it shows a spinner + disabled primary and the
+      // whole list locks, RIGHT NOW — before the awaited pre-connect ping probe (below) that otherwise
+      // leaves the card looking idle for up to ~1.5s. Set below the refusal guards (a refused call must not
+      // touch it) and above runViewTransition (Pitfall 1 — a set after flushSync skips a frame). Cleared in
+      // `finally` for every exit (success / error / supersede / throw), so the spinner can never hang.
+      setPendingConnectPath(path || null);
+      // (b) capture A from the LIVE ref, not a memoized closure (WR-03).
+      const previousPath = activeConfigPathRef.current;
+      // (c) clear any stale revert notice + flip the amber flag synchronously (Pitfall 1).
+      setRevertNotice(null);
+      // F30: also drop any STAGED (pending) revert notice — a fresh switch/connect abandons a prior
+      // revert-to-A, so its «…восстановлено» must never land on THIS (possibly different) server's
+      // connected edge.
+      pendingRevertNoticeRef.current = null;
+      // F-7: a fresh switch starts clean — never carry a stale supersede flag into it (which would
+      // wrongly mute a real connect-failure snackbar on THIS switch).
+      switchSupersededRef.current = false;
+      // 3.7 F-SWITCHDEF (F3): a SWITCH (amber «Переключение» + park-and-revert) requires a LIVE tunnel
+      // to switch FROM — a previous active path AND a live/in-flight status. A plain connect from a
+      // settled disconnected/error state is NOT a switch: it must read the normal «Подключение»
+      // (connecting, driven by status), NEVER the amber face, and it has no revert target. Read the
+      // LIVE statusRef (the same predicate switchTo uses to decide whether a teardown leg is needed).
+      const isRealSwitch =
+        Boolean(previousPath) && (statusRef.current === "connected" || statusRef.current === "connecting");
+      if (isRealSwitch) setIsSwitching(true);
+      try {
+        if (path) {
+          // (d) promote the active pointer to B inside a View Transition (glide, not snap). Must stay
+          // ABOVE the first await so runViewTransition's flushSync captures the before frame.
+          runViewTransition(() => {
+            setConfig((prev) => ({ ...prev, configPath: path }));
+          });
+          localStorage.setItem("tt_config_path", path);
+        }
+        // (e) manual path only: push the selected config's connect-time ping BEFORE switchTo. AWAITED
+        // (13-12) so a slow-path probe's push lands before the Rust Connected edge peeks the cell.
+        // pushPendingConnectPing never rejects. The auto path skips it (AutoSwitch stamps its own
+        // origin inside switchTo's seam).
+        if (pushPing && path) {
+          await pushPendingConnectPing(path);
+        }
+        // (g) FAB-02: run the switch for the SPAWN-ACCEPT. stampLastUsed:false — a vpn_connect accept
+        // only means B's PROCESS spawned; we must NOT stamp a not-yet-connected (possibly-failing) B
+        // as last-used, or the next-boot auto-connect would target a dead server. We stamp only after
+        // the terminal `connected` edge below.
+        // A real switch stamps last-used only AFTER the terminal `connected` edge (FAB-02, via the
+        // markLastUsed in the park below); a fresh connect stamps on accept like the pre-Phase-14
+        // plain connect (it has no terminal-edge park).
+        const result = await switchTo(path, { stampLastUsed: !isRealSwitch });
+        // F28 (Fable NIT): clear the instant-feedback flag the moment switchTo returns — by now the live
+        // status has flipped to `connecting`, so the card's status face (or the amber `switching` face on
+        // a real switch) drives it. This stops a FAILED target from spinning `connectPending` through the
+        // whole revert/reconnect leg (it becomes a resting card again on revert). The `finally` still
+        // clears too (belt — covers a throw before this point).
+        setPendingConnectPath(null);
+        if (result.superseded) {
+          // F-7: a no-spawn supersede (Rust bailed vpn_connect → connecting→disconnected). Mark it
+          // so the snack shows the neutral «VPN отключён», not red «Connection failed».
+          switchSupersededRef.current = true;
+          // 3.5 F-VERDICT (F11): a genuine tray/manual «Отключить» superseded this switch mid-flight —
+          // Rust bailed vpn_connect to a clean Disconnected WITHOUT spawning B. Do NOT park on a
+          // terminal edge that will never come (the 15s stuck amber «Переключение»), and do NOT revert
+          // (reverting would re-fight the user's disconnect and flash a phantom «остались на A» notice
+          // on a disconnected app). Just release the lock (finally) and leave the app disconnected.
+          return { accepted: true };
+        }
+        if (!result.ok) {
+          // switchTo already failed at spawn-accept (teardown reject / connect throw). A real switch
+          // reverts to A; a fresh connect has NO A to revert to — switchTo already set status=error.
+          // R2-2: B settled to error at spawn-accept ⇒ skipTeardown (bStillLive=false).
+          if (isRealSwitch) await revertToPrevious(previousPath, false);
+          return { accepted: true };
+        }
+        if (!isRealSwitch) {
+          // 3.7 F-SWITCHDEF (F3): a fresh connect is NOT a switch — no terminal-edge park, no revert.
+          // switchTo already marked last-used on accept; the status is driven by vpn-status events
+          // (Подключение → Подключено/Ошибка), exactly like the pre-Phase-14 plain connect.
+          return { accepted: true };
+        }
+        // B's process spawned. Now park on the REAL terminal edge: the vpn-status listener resolves
+        // switchSettleRef with `connected` (B is up) or `error` (B died never-connected). A stuck B
+        // that emits NEITHER is bounded by the status-aware SWITCH_SETTLE backstop below.
+        let settleTimer: ReturnType<typeof setTimeout> | undefined;
+        let settleTicks = 0;
+        // R2-2: B's liveness at the deciding TIMEOUT tick, captured with a fresh macrotask statusRef
+        // read (not a stale microtask read in the settle continuation). Only consulted for a `timeout`.
+        let timeoutBStillLive = false;
+        const terminal = await new Promise<"connected" | "error" | "timeout" | "external">((resolve) => {
+          // Wrap the resolver so the D-14 timer is CLEARED the moment the terminal edge (or the
+          // timeout itself) settles — a dangling setTimeout would otherwise fire long after the
+          // switch is done (and, under fake timers in tests, pollute a later test's timeline).
+          // 3.6 F-TRAY: "external" is resolved by the vpn-flow tray-disconnect listener (not by the
+          // vpn-status terminal edge) → abort the switch without a revert.
+          const settle = (outcome: "connected" | "error" | "timeout" | "external") => {
+            if (settleTimer !== undefined) clearTimeout(settleTimer);
+            settleTimer = undefined;
+            switchSettleRef.current = null;
+            resolve(outcome);
+          };
+          switchSettleRef.current = settle;
+          // F-1: the backstop RE-ARMS while B is still «Подключение» (3.8 delay-green — a healthy
+          // http3 B can take ~30-55s to become traffic-ready). Each 15s tick: if the LIVE status is
+          // still "connecting", B is alive + warming (a terminal edge would have flipped the status
+          // AND resolved this park via the listener), so re-arm — up to SWITCH_SETTLE_MAX_TICKS. Only
+          // a tick where the status has LEFT "connecting" (a genuinely wedged B — the watchdog /
+          // Terminated will emit `error`), or the ceiling, resolves "timeout" → revert. This never
+          // phantom-reverts a warming B onto the wrong card.
+          const armTick = () => {
+            settleTimer = setTimeout(() => {
+              settleTicks += 1;
+              if (statusRef.current === "connecting" && settleTicks < SWITCH_SETTLE_MAX_TICKS) {
+                armTick();
+              } else {
+                // R2-2: capture B's liveness HERE (fresh macrotask read) so the revert's skipTeardown
+                // is decided by this tick, not a stale statusRef re-read in the settle microtask. A
+                // ceiling timeout with B still "connecting" ⇒ B is live ⇒ tear it down first.
+                timeoutBStillLive =
+                  statusRef.current === "connecting" || statusRef.current === "connected";
+                settle("timeout");
+              }
+            }, SWITCH_SETTLE_TIMEOUT_MS);
+          };
+          armTick();
+        });
+        if (terminal === "connected") {
+          // B actually connected — NOW stamp it last-used (FAB-02: never on a failed B).
+          await markLastUsed(path);
+        } else if (terminal === "external") {
+          // 3.6 F-TRAY (F10/F11): a genuine tray «Отключить» superseded the switch mid-park — the
+          // user's disconnect wins (Rust already bailed vpn_connect + wrote Disconnected). Do NOT
+          // revert (reverting would re-fight the disconnect and flash a phantom «остались на A»
+          // notice). Just release the lock (finally); the app stays disconnected.
+        } else {
+          // error OR timeout: B failed to reach connected while the switch guard was held — silently
+          // revert to A (D-05). The revert re-points config.configPath back to A and reconnects A.
+          // R2-2: `error` ⇒ B already settled ⇒ skipTeardown (instant A-reconnect, no false 5s
+          // «Отключение»); only a ceiling `timeout` that saw B still live tears B down first.
+          const bStillLive = terminal === "timeout" ? timeoutBStillLive : false;
+          await revertToPrevious(previousPath, bStillLive);
+        }
+        return { accepted: true };
+      } finally {
+        // (h) release the guard + amber flag atomically when the switch (and any revert) has fully
+        // settled — held through the ENTIRE revert leg so the hero stays frosted-amber the whole time.
+        switchSettleRef.current = null;
+        connectInFlightRef.current = false;
+        setIsSwitching(false);
+        // F28: clear the instant-feedback flag once the connect/switch (and any revert) has fully settled.
+        // By now the live status has taken over (connecting/connected/error), so the card's own status
+        // face drives it — the pending flag has done its job of covering the pre-`connecting` gap.
+        setPendingConnectPath(null);
+      }
+    },
+    [switchTo, pushPendingConnectPing, revertToPrevious, markLastUsed],
+  );
+
+  // Phase 14 (D-10): the AUTO-switch shares the identical seamless amber experience + in-flight guard
+  // as the manual switch — it is a thin wrapper over the shared performSwitch (pushPing:false: the
+  // AutoSwitch origin is stamped inside switchTo's seam, not the manual pushPendingConnectPing). The
+  // engine already gates itself while status≠"connected" + the ~60s cooldown (D-09); performSwitch's
+  // connectInFlightRef additionally makes it mutually exclusive with every manual initiator (CR-01).
+  // FAB-06: it returns performSwitch's `{ accepted }` so useAutoSwitch only consumes the breach +
+  // arms the cooldown when the switch was ACTUALLY accepted (a refused/no-op tick keeps the count).
+  const handleAutoSwitch = useCallback(
+    (path: string): Promise<{ accepted: boolean }> => performSwitch({ path, pushPing: false }),
+    [performSwitch],
   );
 
   useAutoSwitch({
@@ -503,6 +984,9 @@ function App() {
     activeConfigPath: config.configPath || undefined,
     candidates: configPingSource.candidates,
     switchTo: handleAutoSwitch,
+    // Phase 14 (D-13 / Pitfall 5): belt-and-suspenders — the engine short-circuits before doSwitch
+    // while the App-owned switch is in flight, so a second auto-switch cannot race the swap.
+    isSwitching,
   });
 
   useTabPersistence({ activeTab, config, status, connectedSince });
@@ -530,6 +1014,34 @@ function App() {
     }, []),
   );
 
+  // 3.6 F-TRAY (F10/F11): the tray executes connect/disconnect in Rust (so it works even if the
+  // webview is wedged); the window MIRRORS what the tray did via a `vpn-flow` event emitted at the
+  // START of tray_vpn_connect / tray_vpn_disconnect. This closes the tray↔app desync the owner hit:
+  //   - disconnect@tray DURING a switch → abort the FE's settle-park WITHOUT a revert (the user's
+  //     disconnect wins; onExternalDisconnect resolves the park "external" + clears any notice).
+  //   - connect@tray → ADOPT the pointer (setConfig + tt_config_path + refresh the list) so the hero
+  //     follows the config the tray actually connected, instead of a stale/reverted FE pointer (the
+  //     owner's "tray icon green while the tab shows all «Подключить» / no active card" split).
+  useEffect(() => {
+    const unlistenPromise = listen<{ action?: string; origin?: string; configPath?: string }>(
+      "vpn-flow",
+      (event) => {
+        const { action, origin, configPath } = event.payload || {};
+        if (origin !== "tray") return;
+        if (action === "disconnect") {
+          onExternalDisconnect();
+        } else if (action === "connect" && configPath) {
+          setConfig((prev) => ({ ...prev, configPath }));
+          localStorage.setItem("tt_config_path", configPath);
+          connectionPanelRef.current?.refresh();
+        }
+      },
+    );
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [onExternalDisconnect]);
+
   // ─── Log viewing ───
   // Logs are surfaced exclusively through the in-window LogPanel overlay
   // (toggled by the title-bar Terminal button, see showLogs above). An earlier
@@ -547,50 +1059,16 @@ function App() {
   // promote happens up front; if the connect ultimately errors, the status reflects it but
   // the active-config pointer still points at the user's intended config (matching the old
   // connect path, which also set the path before awaiting).
+  // Phase 14 (CR-01 / IN-03): the MANUAL switch/connect (a card's «Переключиться» / «Подключить» on
+  // the «Подключение» tab) is now a thin wrapper over the shared performSwitch (pushPing:true — the
+  // manual path pushes the connect-time plate ping BEFORE the connect). All of the guard + lifecycle
+  // (synchronous connectInFlightRef, isSwitching set-before-runViewTransition + finally-clear, the
+  // View Transition promote, and the D-05 revert-on-failure) now lives in performSwitch, so the manual
+  // and auto paths cannot drift. A manual «Подключить» with no live tunnel also passes here; the amber
+  // face only shows on the LIVE lead card, so a cold connect (no prior hero) reads as a normal connect.
   const handleConnectConfig = useCallback(
-    async (path: string) => {
-      // Fable-A review #1/#2: the in-flight guard — a second activation (another card's
-      // «Переключиться» / «Подключить», or the status-panel button racing this one) while the
-      // awaited probe or the switch itself is in flight is a NO-OP. This also kills the
-      // stale-closure hazard: a second switchTo captured against pre-teardown state can no longer
-      // interleave/reorder with the first, and a stale slow-probe push can no longer overwrite a
-      // newer target's ping (only one manual initiator runs at a time). Flipped synchronously
-      // BEFORE the first await; released in `finally`.
-      if (connectInFlightRef.current) return;
-      connectInFlightRef.current = true;
-      try {
-        if (path) {
-          // 11-UAT gap D: commit the active-path change INSIDE a View Transition so the
-          // «Подключение» list animates the chosen config gliding to the lead (and the previous
-          // lead settling down), instead of snapping. ConfigList tags each card with a stable
-          // view-transition-name; flushSync (inside runViewTransition) makes this re-render
-          // synchronous so the browser captures the before/after frames. Reduced-motion / no-API
-          // (jsdom) fall back to an instant promote. NOTE (13-12): this promote must stay ABOVE the
-          // first await — runViewTransition needs to run synchronously inside the event handler so
-          // the transition captures the before frame.
-          runViewTransition(() => {
-            setConfig((prev) => ({ ...prev, configPath: path }));
-          });
-          localStorage.setItem("tt_config_path", path);
-        }
-        // Phase 13 (13-08b / 13-12): push the selected config's connect-time ping BEFORE switchTo —
-        // AWAITED (13-12): when nothing is live, switchTo skips the teardown and goes straight to
-        // vpn_connect, so an un-awaited slow-path probe would land its push after the Rust Connected
-        // edge already read the cell (→ «—»). (On a live switch the ~5s teardown window would mask
-        // that race, but awaiting makes BOTH entry points correct.) pushPendingConnectPing never
-        // rejects, so this async handler never rejects either — the ConnectionPanel call sites
-        // (typed `(path) => void`) can keep fire-and-forgetting it safely.
-        await pushPendingConnectPing(path);
-        // AWAITED (was `void` pre-Fable-A): the guard must stay raised through the whole
-        // disconnect→connect so a second manual initiator cannot slip in mid-switch. switchTo
-        // never rejects (every failure path inside resolves after setting status/error), so the
-        // `finally` below always releases the guard.
-        await switchTo(path);
-      } finally {
-        connectInFlightRef.current = false;
-      }
-    },
-    [switchTo, pushPendingConnectPing],
+    (path: string) => performSwitch({ path, pushPing: true }),
+    [performSwitch],
   );
 
   // ─── Shell action callbacks ───
@@ -650,9 +1128,20 @@ function App() {
   // Keyboard shortcuts (Ctrl+Shift+C = connect, Ctrl+1..5 = navigate, etc.)
   useKeyboardShortcuts({
     onToggleConnect: useCallback(() => {
+      // Phase 14 (CR-02): do NOT let a keyboard toggle issue a disconnect (or a connect) while a
+      // switch is in flight. During a switch the status legitimately passes through `connected`
+      // transiently (A is still up during B's teardown; on a revert A reconnects back to
+      // `connected`), so a Ctrl+Shift+C in that window would fire handleDisconnect() mid-switch —
+      // the extra `disconnected` event would resolve the SHARED reconnectResolve early, so switchTo
+      // proceeds to vpn_connect before the sidecar it expected to tear down is actually gone (double
+      // spawn / R8 «VPN is already running»). Gating on isSwitching || connectInFlightRef makes the
+      // toggle inert for the whole switch — the lock re-enables atomically when the switch settles.
+      // (The StatusPanel/Connection disconnect buttons are already locked via ConfigList's
+      // `locked={isSwitching}`; the tray/backend disconnect is Rust-owned and out of FE scope.)
+      if (isSwitching || connectInFlightRef.current) return;
       if (status === "connected") handleDisconnect();
       else if (status === "disconnected" && config.configPath) handleConnectActive();
-    }, [status, config.configPath, handleConnectActive, handleDisconnect]),
+    }, [status, config.configPath, handleConnectActive, handleDisconnect, isSwitching]),
     onNavigate: setActiveTab as (page: string) => void,
     onToggleTheme: toggleTheme,
     onToggleLanguage: toggleLanguage,
@@ -680,10 +1169,12 @@ function App() {
       configPath: config.configPath,
       vpnMode,
       onConnect: handleConnectActive,
-      onDisconnect: handleDisconnect,
+      // Phase 14 (CR-02): the switch-gated disconnect so a Routing/Connection-panel disconnect cannot
+      // interleave mid-switch and race the shared reconnectResolve teardown.
+      onDisconnect: handleDisconnectGuarded,
       onReconnect: handleReconnectGuarded,
     }),
-    [status, connectedSince, config.configPath, vpnMode, handleConnectActive, handleDisconnect, handleReconnectGuarded],
+    [status, connectedSince, config.configPath, vpnMode, handleConnectActive, handleDisconnectGuarded, handleReconnectGuarded],
   );
 
   // IN-11 (06-review): the tabpanels stay MOUNTED (hidden via opacity/visibility, not
@@ -699,8 +1190,14 @@ function App() {
       error={error}
       connectedSince={connectedSince}
       onConnect={handleConnectActive}
-      onDisconnect={handleDisconnect}
+      // Phase 14 (CR-02): the StatusPanel «Отключить»/«Отмена» button is live in `connected`/
+      // `connecting` — states a switch transiently passes through — so gate its disconnect on the
+      // in-flight switch (handleDisconnectGuarded) to keep it from racing the shared teardown.
+      onDisconnect={handleDisconnectGuarded}
       reconnectProgress={reconnectProgress}
+      // F28 (fix-all-paths): the StatusPanel «Подключить» (Settings/About tabs) also awaits the
+      // pre-connect probe via handleConnectActive — show the instant spinner here too.
+      connectPending={pendingConnectPath != null}
     />
   ) : null;
   const statusPanelFor = (tab: AppTab) => (activeTab === tab ? statusPanelNode : null);
@@ -753,6 +1250,12 @@ function App() {
         </button>
         <WindowControls />
       </TitleBar>
+
+      {/* Phase 14 (F6, 14-UAT): the calm switch-failed-reverted notice USED to render here as a
+          floating window-level banner. It now renders EMBEDDED inside the lead ConfigCard (threaded
+          `revertNotice` → ConnectionPanel → ConfigList → ConfigCard), matching the Storybook
+          «switch-failed-reverted» design. The `revertNotice` state + `setRevertNotice(null)` dismiss
+          still live here in App; only the render LOCATION moved into the active card. */}
 
       {/* Content area */}
       <div
@@ -835,12 +1338,28 @@ function App() {
               status={status}
               activeConfigPath={config.configPath}
               onConnect={handleConnectConfig}
-              onDisconnect={handleDisconnect}
+              // Phase 14 (CR-02): switch-gated disconnect (the lead card's «Отключить»). ConfigList
+              // already locks the card via `locked={isSwitching}`; this is defense-in-depth so the
+              // disconnect action itself is inert mid-switch and cannot race the shared teardown.
+              onDisconnect={handleDisconnectGuarded}
               onSwitchTo={handleConnectConfig}
               onReconnect={handleReconnectGuarded}
+              // Phase 14 (D-12): thread the FE-only switching flag so ConfigList can OR it into the
+              // leadIsLive gate — the frosted hero survives the transient teardown `disconnected`.
+              isSwitching={isSwitching}
+              // F28: the just-clicked connect target — instant spinner/lock feedback before status lands.
+              pendingConnectPath={pendingConnectPath}
+              // F6 (14-UAT): the switch-failed-reverted notice renders EMBEDDED inside the lead card
+              // (via ConfigList→ConfigCard), not as a floating window-level banner.
+              revertNotice={revertNotice}
+              onRevertDismiss={() => setRevertNotice(null)}
               // 12-07: reuse the App-level single config-list + ping source (one inactive-ping loop
               // shared with the auto-switch engine — no rival loop, T-12-14).
               source={configPingSource}
+              // F20 (14-UAT round 2): thread the reconnect attempt progress so the lead card shows
+              // «Переподключение · Попытка N из M» (the backend already emits attempt/max; StatusPanel
+              // rendered it but the redesigned Connection tab surface is the ConfigList lead card).
+              reconnectProgress={reconnectProgress}
             />
             {/* Production ImportModal (Phase 11, Plan 04) — the SINGLE point through which a
                 config is added (two tiles / link / drag, errors-in-modal, host+user
@@ -854,6 +1373,9 @@ function App() {
               // the import never fires automatically). undefined for a manual open.
               initialUrl={deepLinkUrl ?? undefined}
               isDragging={isDragging}
+              // Phase 14 (D-13): lock the import while a switch is in flight — a mid-switch import
+              // could add + auto-promote a competing flow that races the swap.
+              isSwitching={isSwitching}
               onClose={() => {
                 setImportOpen(false);
                 // Clear the stale deep-link URL so a later manual open is not pre-filled.
@@ -897,7 +1419,9 @@ function App() {
               connectedSince={connectedSince}
               vpnError={error}
               onConnect={handleConnectActive}
-              onDisconnect={handleDisconnect}
+              // Phase 14 (CR-02): switch-gated disconnect — the Routing tab's status controls must
+              // not issue a disconnect that races the shared teardown mid-switch.
+              onDisconnect={handleDisconnectGuarded}
               onReconnect={handleReconnectGuarded}
               onVpnModeChange={setVpnMode}
             />
@@ -926,6 +1450,9 @@ function App() {
             language={i18n.language}
             onLanguageChange={handleLanguageChange}
             statusPanel={statusPanelFor("settings")}
+            // Phase 14 (D-13): lock «Авто-режим» master toggle + priority reorder while a switch is
+            // in flight — a mid-switch master-on / reorder could arm a competing switch (Pitfall 5).
+            isSwitching={isSwitching}
           />
         </div>
 
@@ -956,8 +1483,20 @@ function App() {
         </div>
       </div>
 
-      {/* Bottom tab navigation — wrapped in same maxWidth as content area so it aligns with the rest of the UI */}
-      <div style={{ maxWidth: 1000, width: "100%", margin: "0 auto", flexShrink: 0 }}>
+      {/* Bottom tab navigation — wrapped in same maxWidth as content area so it aligns with the rest of the UI.
+          F1 (14-UAT): `view-transition-name: bottom-nav` gives the nav its own snapshot group during a
+          config-switch View Transition; index.css forces that group's z-index above the card groups so a
+          promoted card gliding up never paints OVER the bottom nav mid-switch.
+          F25 (14-UAT round 3, Fable-confirmed): z-index alone was NOT enough — a `view-transition-name`
+          element is snapshotted WITHOUT its ancestors' paint, and neither this wrapper nor TabNavigation
+          nor its buttons paint an opaque background (the dark bar behind the nav comes from the ROOT div's
+          --color-bg-primary, which goes into the ROOT snapshot BELOW the cards). So the `bottom-nav`
+          snapshot was TRANSPARENT: cards gliding UNDER it (correct z-order) were visible THROUGH its
+          alpha-0 pixels → read as "cards on top of / through the menu, flicker". Fix: paint an opaque
+          --color-bg-primary ON this vt-named element (a visual no-op live — the nav already sits on that
+          colour — but it makes the snapshot opaque so "on top" actually occludes). Needs BOTH halves:
+          the z-index rule (the sticky hero has z-10 → could legally paint above) AND this opaque bg. */}
+      <div style={{ maxWidth: 1000, width: "100%", margin: "0 auto", flexShrink: 0, backgroundColor: "var(--color-bg-primary)", viewTransitionName: "bottom-nav" } as CSSProperties}>
         <TabNavigation
           activeTab={activeTab}
           onTabChange={(tab) => setActiveTab(tab)}
