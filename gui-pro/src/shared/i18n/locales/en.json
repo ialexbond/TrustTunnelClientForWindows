@@ -306,6 +306,7 @@
     "list": {
       "add": "Add config"
     },
+    "refresh_pings": "Refresh ping",
     "card": {
       "connect": "Connect",
       "disconnect": "Disconnect",

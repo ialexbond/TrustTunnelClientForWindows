@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  usePerConfigPing,
-  PING_INTERVAL_MS,
-  type PingTarget,
-} from "../usePerConfigPing";
+import { usePerConfigPing, type PingTarget } from "../usePerConfigPing";
 
 // `@tauri-apps/api/core` invoke is globally mocked in src/test/tauri-mock.ts. We set the
 // resolved value per-test to drive the `ping_config_endpoint` command.
@@ -15,7 +11,7 @@ const targets: PingTarget[] = [
   { id: "cfg-nl", path: "C:/app/TrustTunnel_bold-eagle.toml" },
 ];
 
-describe("usePerConfigPing", () => {
+describe("usePerConfigPing (manual refresh — no auto ping)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -28,16 +24,44 @@ describe("usePerConfigPing", () => {
     vi.useRealTimers();
   });
 
-  // Truth: the hook pings every inactive config on mount and resolves its band.
-  it("pings each config on mount and maps the result to a band", async () => {
+  // Truth (owner's decision): the ping loop is MANUAL. Nothing fires on mount and there is no
+  // interval — the map stays empty and NO `ping_config_endpoint` is invoked until refreshPings runs.
+  it("does NOT ping on mount — the map is empty and invoke is never called", async () => {
     const { result } = renderHook(() => usePerConfigPing(targets));
 
-    // Flush the initial pingAll round (microtasks).
+    // Flush any microtasks a mount might have scheduled.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
 
-    // ping_config_endpoint invoked once per target with its path + a timeout.
+    expect(vi.mocked(invoke)).not.toHaveBeenCalled();
+    expect(result.current.pings).toEqual({});
+    expect(result.current.pinging).toBe(false);
+  });
+
+  // Truth: NO interval — advancing time (well past the former 15 s cadence) fires zero pings while
+  // no manual round was requested.
+  it("does NOT ping on any interval — advancing time fires nothing", async () => {
+    renderHook(() => usePerConfigPing(targets));
+
+    await act(async () => {
+      // Advance far beyond the old 15 s cadence — still zero pings without a manual trigger.
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalled();
+  });
+
+  // Truth: refreshPings runs EXACTLY ONE round — one invoke per target — and maps each result to a band.
+  it("refreshPings pings each config once and maps the result to a band", async () => {
+    const { result } = renderHook(() => usePerConfigPing(targets));
+
+    await act(async () => {
+      await result.current.refreshPings();
+    });
+
+    // ping_config_endpoint invoked exactly once per target with its path + a timeout — one round only.
+    expect(vi.mocked(invoke).mock.calls.length).toBe(2);
     expect(invoke).toHaveBeenCalledWith(
       "ping_config_endpoint",
       expect.objectContaining({ configPath: targets[0].path }),
@@ -47,8 +71,31 @@ describe("usePerConfigPing", () => {
       expect.objectContaining({ configPath: targets[1].path }),
     );
     // 42 ms → green band with the numeric value.
-    expect(result.current["cfg-de"]).toMatchObject({ band: "green", valueMs: 42 });
-    expect(result.current["cfg-nl"]).toMatchObject({ band: "green", valueMs: 42 });
+    expect(result.current.pings["cfg-de"]).toMatchObject({ band: "green", valueMs: 42 });
+    expect(result.current.pings["cfg-nl"]).toMatchObject({ band: "green", valueMs: 42 });
+  });
+
+  // Truth: each refreshPings is ONE round — two clicks fire two rounds (2 invokes each), never a
+  // self-scheduling loop that keeps firing on its own.
+  it("each refreshPings call is exactly one round (no self-rescheduling)", async () => {
+    const { result } = renderHook(() => usePerConfigPing(targets));
+
+    await act(async () => {
+      await result.current.refreshPings();
+    });
+    expect(vi.mocked(invoke).mock.calls.length).toBe(2);
+
+    // Advancing time between rounds fires nothing on its own.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(vi.mocked(invoke).mock.calls.length).toBe(2);
+
+    // A second manual round adds exactly one more round (2 more invokes).
+    await act(async () => {
+      await result.current.refreshPings();
+    });
+    expect(vi.mocked(invoke).mock.calls.length).toBe(4);
   });
 
   // Truth (IN-22): owner-set colour bands — ≤150 green, 151–300 yellow, >300 red. Lock the
@@ -65,28 +112,11 @@ describe("usePerConfigPing", () => {
       vi.mocked(invoke).mockResolvedValue({ status: "ok", ms });
       const { result, unmount } = renderHook(() => usePerConfigPing(one));
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
+        await result.current.refreshPings();
       });
-      expect(result.current["cfg"]).toMatchObject({ band, valueMs: ms });
+      expect(result.current.pings["cfg"]).toMatchObject({ band, valueMs: ms });
       unmount();
     }
-  });
-
-  // Truth: the hook re-pings on the 15 s interval (D-23).
-  it("re-pings on the interval", async () => {
-    renderHook(() => usePerConfigPing(targets));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    const afterFirst = vi.mocked(invoke).mock.calls.length;
-    expect(afterFirst).toBe(2); // one per target
-
-    // Advance one full interval → a second round fires.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS);
-    });
-    expect(vi.mocked(invoke).mock.calls.length).toBe(afterFirst + 2);
   });
 
   // Truth: an unreachable result maps to the timeout band («Недоступен»), no-data to «—».
@@ -97,11 +127,11 @@ describe("usePerConfigPing", () => {
     const { result } = renderHook(() => usePerConfigPing(targets));
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      await result.current.refreshPings();
     });
 
-    expect(result.current["cfg-de"]).toMatchObject({ band: "timeout" });
-    expect(result.current["cfg-nl"]).toMatchObject({ band: "no-data" });
+    expect(result.current.pings["cfg-de"]).toMatchObject({ band: "timeout" });
+    expect(result.current.pings["cfg-nl"]).toMatchObject({ band: "no-data" });
   });
 
   // Truth: a failed invoke degrades to no-data «—» (never red), not a crash.
@@ -110,53 +140,20 @@ describe("usePerConfigPing", () => {
     const { result } = renderHook(() => usePerConfigPing(targets));
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      await result.current.refreshPings();
     });
 
-    expect(result.current["cfg-de"]).toMatchObject({ band: "no-data" });
-    expect(result.current["cfg-nl"]).toMatchObject({ band: "no-data" });
+    expect(result.current.pings["cfg-de"]).toMatchObject({ band: "no-data" });
+    expect(result.current.pings["cfg-nl"]).toMatchObject({ band: "no-data" });
   });
 
-  // Truth: on unmount the loop is cancelled — no further pings fire after the next interval.
-  it("stops pinging on unmount", async () => {
-    const { unmount } = renderHook(() => usePerConfigPing(targets));
-
+  // Truth: an EMPTY target set is a no-op — refreshPings pings nothing and does not flip `pinging`.
+  it("refreshPings on an empty target set is a no-op", async () => {
+    const { result } = renderHook(() => usePerConfigPing([]));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      await result.current.refreshPings();
     });
-    const afterFirst = vi.mocked(invoke).mock.calls.length;
-
-    unmount();
-
-    // Advance several intervals — no new pings after unmount.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS * 3);
-    });
-    expect(vi.mocked(invoke).mock.calls.length).toBe(afterFirst);
-  });
-
-  // Truth: a simulated StrictMode double-mount does not double-fire the interval. Two
-  // hook instances with the SAME target set must not start two interleaved loops that
-  // double the per-tick probe count.
-  it("does not double-fire under a simulated double-mount", async () => {
-    // Render twice with the same target identity to emulate StrictMode's mount/remount.
-    const first = renderHook(() => usePerConfigPing(targets));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    first.unmount();
-    const second = renderHook(() => usePerConfigPing(targets));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-
-    // After the second mount's first round, the total is the first mount's 2 + the second
-    // mount's 2 — never 4 in a single tick from one mount (the once-guard prevents a
-    // single instance from launching two interleaved loops).
-    const total = vi.mocked(invoke).mock.calls.length;
-    // One round per mount = 2 targets each = 4 total; the key assertion is that a single
-    // advance(0) after the second mount produced exactly 2 NEW calls, not 4.
-    expect(total).toBe(4);
-    second.unmount();
+    expect(vi.mocked(invoke)).not.toHaveBeenCalled();
+    expect(result.current.pings).toEqual({});
   });
 });

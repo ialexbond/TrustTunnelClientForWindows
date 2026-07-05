@@ -89,6 +89,30 @@ describe("CertSection summary card", () => {
     });
   });
 
+  it("cert-type-aware address (CP-1d): LE → cert DOMAIN even when host is a bare IP; self-signed → the server IP", async () => {
+    // Let's Encrypt: the SSH host is a bare IP, but an LE cert is for a DOMAIN → show the domain.
+    const le = stateWith(sampleLetsEncryptCert, {
+      sshParams: { host: "203.0.113.9", port: 22, user: "root", password: "" },
+    } as Partial<ServerState>);
+    const { unmount } = render(<CertSection state={le} security={mockSecurity} />);
+    await waitFor(() => {
+      const card = screen.getByTestId("cert-summary-card");
+      expect(card).toHaveTextContent(/vpn\.example\.com/); // domain from the cert
+      expect(card).not.toHaveTextContent(/203\.0\.113\.9/); // NOT the bare IP
+    });
+    unmount();
+    // Self-signed: the cert CN is the internal «internal.local» placeholder → show the server IP.
+    const ss = stateWith(sampleSelfSignedCert, {
+      sshParams: { host: "203.0.113.141", port: 22, user: "root", password: "" },
+    } as Partial<ServerState>);
+    render(<CertSection state={ss} security={mockSecurity} />);
+    await waitFor(() => {
+      const card = screen.getByTestId("cert-summary-card");
+      expect(card).toHaveTextContent(/13\.143\.139\.141/); // the server IP
+      expect(card).not.toHaveTextContent(/internal\.local/); // NOT the fake CN
+    });
+  });
+
   it("status pill aria-label says «Действителен N дней» for valid cert", async () => {
     render(<CertSection state={stateWith(sampleLetsEncryptCert)} security={mockSecurity} />);
     // StatusIndicator renders label as aria-label (not visible text), so query

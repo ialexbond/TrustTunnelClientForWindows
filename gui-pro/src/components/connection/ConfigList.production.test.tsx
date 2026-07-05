@@ -263,6 +263,101 @@ describe("ConfigList", () => {
     expect(onQr).toHaveBeenCalledWith(cfgDe);
   });
 
+  // ─── Manual ping refresh button (next to «Добавить конфиг») ───
+  //
+  // The automatic 15 s card-ping interval is REMOVED; pinging is now MANUAL via a square icon-only
+  // «Обновить пинг» button placed next to «Добавить конфиг». One click pings ALL config cards once.
+  // Assert BEHAVIOR + aria (not CSS): the button renders next to add-config, is accessible by its
+  // aria-label, click triggers the refresh, and it is disabled while a round is in flight / no configs.
+  describe("manual ping refresh button", () => {
+    const refreshLabel = i18n.t("connection.refresh_pings");
+    const addLabel = i18n.t("connection.list.add");
+
+    it("renders the refresh button next to «Добавить конфиг», accessible by aria-label", () => {
+      renderWithProviders(
+        <ConfigList
+          configs={[cfgDe, cfgNl]}
+          loading={false}
+          onImport={vi.fn()}
+          onRefreshPings={vi.fn()}
+        />,
+      );
+      const refreshBtn = screen.getByRole("button", { name: refreshLabel });
+      const addBtn = screen.getByRole("button", { name: addLabel });
+      expect(refreshBtn).toBeInTheDocument();
+      expect(addBtn).toBeInTheDocument();
+      // Adjacency: both live in the SAME footer row. The add button sits directly in the footer; the
+      // refresh button is wrapped by its Tooltip, so climb to the nearest common footer ancestor and
+      // assert it contains BOTH buttons (the refresh button is placed immediately next to add-config).
+      const footer = addBtn.parentElement;
+      expect(footer).toContainElement(refreshBtn);
+    });
+
+    it("clicking the refresh button triggers onRefreshPings", async () => {
+      const onRefreshPings = vi.fn();
+      renderWithProviders(
+        <ConfigList
+          configs={[cfgDe, cfgNl]}
+          loading={false}
+          onImport={vi.fn()}
+          onRefreshPings={onRefreshPings}
+        />,
+      );
+      await userEvent.click(screen.getByRole("button", { name: refreshLabel }));
+      expect(onRefreshPings).toHaveBeenCalledTimes(1);
+    });
+
+    it("disables the refresh button (shows the in-flight spinner) while pinging", () => {
+      renderWithProviders(
+        <ConfigList
+          configs={[cfgDe, cfgNl]}
+          loading={false}
+          onImport={vi.fn()}
+          onRefreshPings={vi.fn()}
+          pinging
+        />,
+      );
+      // `loading` renders the spinner AND disables the button — assert the observable disabled state.
+      expect(screen.getByRole("button", { name: refreshLabel })).toBeDisabled();
+    });
+
+    it("does not fire onRefreshPings while pinging (button is inert)", async () => {
+      const onRefreshPings = vi.fn();
+      renderWithProviders(
+        <ConfigList
+          configs={[cfgDe, cfgNl]}
+          loading={false}
+          onImport={vi.fn()}
+          onRefreshPings={onRefreshPings}
+          pinging
+        />,
+      );
+      await userEvent.click(screen.getByRole("button", { name: refreshLabel }));
+      expect(onRefreshPings).not.toHaveBeenCalled();
+    });
+
+    it("disables the refresh button when there are no configs to ping", () => {
+      // A populated-but-not-empty check is impossible with zero configs (the empty state renders
+      // instead), so render the empty state and assert the refresh button is not present there — the
+      // footer (add + refresh) only exists in the populated list. The disabled-when-empty guard is
+      // additionally covered by the button's `disabled={pinging || configs.length === 0}`.
+      renderWithProviders(
+        <ConfigList configs={[]} loading={false} onImport={vi.fn()} onRefreshPings={vi.fn()} />,
+      );
+      // Empty state → no populated footer → no refresh button.
+      expect(screen.queryByRole("button", { name: refreshLabel })).not.toBeInTheDocument();
+    });
+
+    it("omits the refresh button when onRefreshPings is not supplied", () => {
+      renderWithProviders(
+        <ConfigList configs={[cfgDe, cfgNl]} loading={false} onImport={vi.fn()} />,
+      );
+      expect(screen.queryByRole("button", { name: refreshLabel })).not.toBeInTheDocument();
+      // The add-config button is still there.
+      expect(screen.getByRole("button", { name: addLabel })).toBeInTheDocument();
+    });
+  });
+
   // ─── Phase 16 (TA-3): the T-22 «IP» glyph is threaded through the LIST render ───
   //
   // The ConfigCard-level tests prove ONE card shows the «IP» glyph for a bare-IP display_host.

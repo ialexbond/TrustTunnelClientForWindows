@@ -341,4 +341,44 @@ describe("ConnectionPanel scroll behavior (IN-45/IN-49)", () => {
     await screen.findByText("Швеция"); // the new card rendered…
     expect(el.scrollTop).toBe(100); // …but the view did not move
   });
+
+  // ─── Manual ping refresh (standalone path: the panel's OWN usePerConfigPing) ───
+  //
+  // With no App `source` injected the panel runs its internal ping loop, which is now MANUAL. Assert
+  // the wiring end-to-end: no ping fires on mount (auto interval removed), and clicking the «Обновить
+  // пинг» button runs one round — ping_config_endpoint invoked once per config.
+  it("does NOT ping on mount, and the refresh button pings every config once on click", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_configs") return Promise.resolve(TWO);
+      if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "ok", ms: 42 });
+      return Promise.resolve(null);
+    });
+    setup();
+
+    // Both cards render…
+    await screen.findByText("Нидерланды");
+    // …and NO ping fired automatically (the auto interval / on-mount ping is gone).
+    expect(
+      invokeMock.mock.calls.filter((c) => c[0] === "ping_config_endpoint").length,
+    ).toBe(0);
+
+    // Click «Обновить пинг» → exactly one round: one probe per config (TWO configs → 2 probes).
+    await user.click(
+      screen.getByRole("button", { name: i18n.t("connection.refresh_pings") }),
+    );
+    await waitFor(() =>
+      expect(
+        invokeMock.mock.calls.filter((c) => c[0] === "ping_config_endpoint").length,
+      ).toBe(2),
+    );
+    expect(invokeMock).toHaveBeenCalledWith(
+      "ping_config_endpoint",
+      expect.objectContaining({ configPath: "C:/app/a.toml" }),
+    );
+    expect(invokeMock).toHaveBeenCalledWith(
+      "ping_config_endpoint",
+      expect.objectContaining({ configPath: "C:/app/b.toml" }),
+    );
+  });
 });

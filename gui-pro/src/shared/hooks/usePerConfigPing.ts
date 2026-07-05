@@ -1,27 +1,33 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ConfigPing, PingBand } from "../../components/connection/ConfigPingPill";
 
 /**
- * `usePerConfigPing` — periodically pings the INACTIVE configs' endpoints (D-16 / D-23)
- * so the Connection-tab cards show live reachability bands. It mirrors the interval +
- * cancel-guard pattern of `useAutoConnect`:
- *   - a `cancelled` flag + `clearTimeout` in the effect cleanup (cancel on unmount), which
- *     is what actually makes StrictMode's mount→unmount→remount correct: the first loop's
- *     `cancelled` flag short-circuits all its in-flight + scheduled work, so the remount's
- *     fresh loop is the only one that survives (WR-06 — no separate once-guard needed),
- *   - `invoke<PingResult>("ping_config_endpoint", { configPath, timeoutMs })` per config
- *     (the Rust side reads host:port from the config's own .toml — SSRF-safe).
+ * `usePerConfigPing` — pings the INACTIVE configs' endpoints ON DEMAND (D-16 / manual-refresh)
+ * so the Connection-tab cards show reachability bands. The former automatic 15 s interval loop is
+ * GONE (owner's decision): there is NO on-mount ping and NO recurring re-measure. Instead the hook
+ * exposes a `refreshPings()` that runs exactly ONE ping round over the CURRENT targets, triggered by
+ * the manual «Обновить пинг» button next to «Добавить конфиг».
  *
- * It returns a map of config id → resolved `ConfigPing` band the `ConfigPingPill` renders.
+ * What stays from the interval era:
+ *   - the cancel-on-re-seed / unmount safety: a `cancelled` flag (flipped in the effect cleanup)
+ *     short-circuits any in-flight round so a target-set change or unmount cannot let a stale probe
+ *     write back after the fact (WR-06 — no separate once-guard needed);
+ *   - WR-05 prune: on each target-set change, `pings` entries whose config id is no longer a target
+ *     are dropped so the map stays bounded and a reused (migration-derived) id starts clean;
+ *   - `invoke<PingResult>("ping_config_endpoint", { configPath, timeoutMs })` per config (the Rust side
+ *     reads host:port from the config's own .toml — SSRF-safe).
+ *
+ * It returns `{ pings, refreshPings, pinging }`:
+ *   - `pings` — a map of config id → resolved `ConfigPing` band the `ConfigPingPill` renders;
+ *   - `refreshPings()` — run one manual ping round over the current targets (resolves when done);
+ *   - `pinging` — true while a round is in flight (drives the button's spinner + disabled state).
+ *
  * F23 (14-UAT round 2): the active/connected config is genuinely NOT pinged here — the caller
- * (`useConfigPingSource`) now EXCLUDES it from `targets`, because a direct probe of the active
- * endpoint travels through the tunnel (~2× the real RTT / Unreachable) and is meaningless while
- * connected. The active lead card instead shows the config's retained DIRECT pre-connect band
- * (`useConfigPingSource.lastGoodByPath`); this loop only probes the INACTIVE configs' reachability.
- *
- * The interval default is 15 s (D-23). The value is a local constant THIS phase; the
- * configurable «Авто-режим» setting that drives it is a later phase.
+ * (`useConfigPingSource`) EXCLUDES it from `targets`, because a direct probe of the active endpoint
+ * travels through the tunnel (~2× the real RTT / Unreachable) and is meaningless while connected. The
+ * active lead card instead shows the config's retained DIRECT pre-connect band
+ * (`useConfigPingSource.lastGoodByPath`); this hook only probes the INACTIVE configs' reachability.
  */
 
 /** The Rust `PingResult` discriminated union (serde tag = "status", kebab-case). Exported so the
@@ -32,17 +38,9 @@ export type PingResult =
   | { status: "unreachable" }
   | { status: "no-data" };
 
-/** D-23 default re-measure cadence. Local constant this phase. */
-export const PING_INTERVAL_MS = 15000;
-
 /** Default per-probe TCP-connect timeout. A reachable endpoint answers well within this;
  *  a filtered/closed one reads Unreachable at the bound. */
 export const PING_TIMEOUT_MS = 3000;
-
-/** IN-37: only show the «measuring» skeleton if a re-measure takes LONGER than this. A fast probe
- *  (the common case) updates the value in place — so the pill no longer flickers a skeleton on
- *  every interval (the owner found the flicker distracting). */
-export const SKELETON_DELAY_MS = 1000;
 
 /** Map a numeric round-trip (ms) to a colour band. Owner-set thresholds (IN-22): ≤150 green
  *  / 151–300 yellow / >300 red. (Supersedes the D-16 100/300 proposal.) NOTE (T-30): the
@@ -75,49 +73,65 @@ export interface PingTarget {
   path: string;
 }
 
-/**
- * Ping the given inactive configs on an interval. Returns `{ id → ConfigPing }`.
- *
- * @param targets the inactive configs to probe (id + path). The caller passes a STABLE
- *   array reference (or memoizes it) — the loop re-derives from the latest targets each
- *   tick via a ref, so changing the list does not restart the interval, but the effect
- *   keys on the joined ids so adding/removing a config does re-seed the loop cleanly.
- */
-export function usePerConfigPing(targets: PingTarget[]): Record<string, ConfigPing> {
-  const [pings, setPings] = useState<Record<string, ConfigPing>>({});
+/** What the hook returns — the band map plus the manual-refresh trigger and its in-flight flag. */
+export interface PerConfigPing {
+  /** id → latest ConfigPing band the cards render. */
+  pings: Record<string, ConfigPing>;
+  /** Run ONE ping round over the current targets on demand. Resolves when the round settles. */
+  refreshPings: () => Promise<void>;
+  /** True while a manual round is in flight (drives the refresh button's spinner + disabled state). */
+  pinging: boolean;
+}
 
-  // Latest targets, read inside the loop without restarting the interval on every render.
-  // Written in an effect (not during render) so the ref stays lint-clean; the loop only
-  // reads it on the next tick, so the one-render lag is irrelevant.
+/**
+ * Ping the given inactive configs ON DEMAND. Returns `{ pings, refreshPings, pinging }`.
+ *
+ * There is NO automatic ping — nothing fires on mount and there is no interval. The caller triggers a
+ * round by calling `refreshPings()` (wired to the «Обновить пинг» button). Changing the target set
+ * still prunes dead ids from `pings` (WR-05) and cancels any in-flight round, but does NOT itself
+ * start a new one.
+ *
+ * @param targets the inactive configs to probe (id + path). The caller passes a STABLE array reference
+ *   (or memoizes it) — a manual round re-derives from the latest targets via a ref, and the prune keys
+ *   on the joined ids so adding/removing a config prunes cleanly without a stale-band flash.
+ */
+export function usePerConfigPing(targets: PingTarget[]): PerConfigPing {
+  const [pings, setPings] = useState<Record<string, ConfigPing>>({});
+  const [pinging, setPinging] = useState(false);
+
+  // Latest targets, read inside a manual round without re-subscribing on every render. Written in an
+  // effect (not during render) so the ref stays lint-clean; a round only reads it when invoked, so the
+  // one-render lag is irrelevant.
   const targetsRef = useRef(targets);
   useEffect(() => {
     targetsRef.current = targets;
   });
 
-  // A stable key for the current target set — adding/removing a config changes it, so the
-  // effect re-runs and re-seeds the loop; a pure re-render with the same ids does not.
+  // A generation counter that a target-set change / unmount bumps. A manual round captures the
+  // generation it started under; if the generation moves (re-seed or unmount) while a probe is in
+  // flight, the round is `cancelled` and stops writing back. This replaces the interval era's
+  // per-effect `cancelled` closure — there is no long-lived effect loop anymore, so the guard lives in
+  // a ref shared by every round. (WR-06: same cancel-on-re-seed / unmount semantics, no once-guard.)
+  const generationRef = useRef(0);
+
+  // A stable key for the current target set — adding/removing a config changes it, so the prune effect
+  // re-runs and drops dead ids; a pure re-render with the same ids does not.
   const targetsKey = targets
     .map((tg) => tg.id)
     .sort()
     .join("|");
 
   useEffect(() => {
-    // WR-06: the previous `startedKeyRef` once-guard was DEAD — the cleanup reset it to
-    // null on EVERY unmount, so on StrictMode's mount→unmount→remount the remount saw
-    // `null !== targetsKey` and started a second loop anyway. Only the first loop's
-    // `cancelled` flag (set in its cleanup) made that correct. So the guard added surface
-    // without doing its stated job; it is removed. The `cancelled` flag below + the
-    // `[targetsKey]` dep already give the right semantics: a remount/genuine target change
-    // cancels the prior loop and starts exactly one fresh loop.
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Each target-set change starts a new generation, cancelling any in-flight round from the previous
+    // set so a stale probe cannot write a band for an id that just left the list.
+    generationRef.current += 1;
 
-    // WR-05: prune `pings` entries whose config id is no longer a target. `pings` only ever
-    // GREW (keyed by id, written with `{ ...prev, [id]: … }`), so a deleted config's last-known
-    // band lingered in state until unmount — unbounded growth across add/delete churn, and a
-    // latent trap: migration ids are path-derived and CAN recur, so a reclaimed id could briefly
-    // paint a stale band before its first fresh probe. Dropping dead ids on each re-seed keeps
-    // the map bounded to the live target set and guarantees a reused id starts clean.
+    // WR-05: prune `pings` entries whose config id is no longer a target. The map is keyed by id and
+    // written with `{ ...prev, [id]: … }`, so without this a deleted config's last-known band would
+    // linger until unmount — unbounded growth across add/delete churn, and a latent trap: migration ids
+    // are path-derived and CAN recur, so a reclaimed id could briefly paint a stale band before its
+    // first fresh probe. Dropping dead ids here keeps the map bounded to the live target set and
+    // guarantees a reused id starts clean.
     const liveIds = new Set(targets.map((tg) => tg.id));
     setPings((prev) => {
       const next: Record<string, ConfigPing> = {};
@@ -133,84 +147,58 @@ export function usePerConfigPing(targets: PingTarget[]): Record<string, ConfigPi
       return changed ? next : prev;
     });
 
-    const pingAll = async () => {
-      const current = targetsRef.current;
-      // Probe each target; resolve all before scheduling the next tick so a slow probe
-      // does not pile up overlapping rounds.
-      await Promise.all(
-        current.map(async (tg) => {
-          // IN-37: do NOT flash the «measuring» skeleton immediately — only if the probe takes
-          // LONGER than SKELETON_DELAY_MS. A fast re-measure (the common case) just updates the
-          // value in place, so the pill no longer flickers a skeleton on every interval. The
-          // timer keeps the prior band's tint via the pill while it shows.
-          const skeletonTimer = setTimeout(() => {
-            if (cancelled) return;
-            setPings((prev) => ({
-              ...prev,
-              [tg.id]: { ...(prev[tg.id] ?? { band: "no-data" }), measuring: true },
-            }));
-          }, SKELETON_DELAY_MS);
+    return () => {
+      // Unmount / next re-seed: bump the generation so any round still in flight stops writing back.
+      generationRef.current += 1;
+    };
+    // `targets` is intentionally consumed via the serialized `targetsKey` dep (re-run only on a genuine
+    // target-set change, not on every render that rebuilds an equal array).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetsKey]);
+
+  // Run ONE ping round over the current targets. PP-7 (perf audit): coalesce the whole round into as
+  // FEW setPings as possible — the interval era wrote per-target on every resolution (2N+ renders per
+  // round); here each target resolves into a local `results` object and the round commits ONE merged
+  // setPings at the end. An empty target set is a no-op (no state churn). Cancel-safe: a round captures
+  // its generation and drops its result write if the generation moved (re-seed / unmount) meanwhile.
+  const refreshPings = useCallback(async (): Promise<void> => {
+    const current = targetsRef.current;
+    if (current.length === 0) return;
+    const myGeneration = generationRef.current;
+    setPinging(true);
+    try {
+      const results = await Promise.all(
+        current.map(async (tg): Promise<[string, ConfigPing]> => {
           try {
             const result = await invoke<PingResult>("ping_config_endpoint", {
               configPath: tg.path,
               timeoutMs: PING_TIMEOUT_MS,
             });
-            clearTimeout(skeletonTimer);
-            // WR-06 (gap 1): if cancelled mid-probe, do NOT leave the card stuck showing
-            // the «measuring» skeleton — clear the measuring flag (keeping the prior band)
-            // so the card settles instead of spinning until the next genuine re-seed.
-            if (cancelled) {
-              setPings((prev) =>
-                prev[tg.id]?.measuring
-                  ? { ...prev, [tg.id]: { ...prev[tg.id], measuring: false } }
-                  : prev,
-              );
-              return;
-            }
-            // toConfigPing carries no `measuring`, so this also clears the skeleton if it showed.
-            setPings((prev) => ({ ...prev, [tg.id]: toConfigPing(result) }));
+            return [tg.id, toConfigPing(result)];
           } catch {
-            clearTimeout(skeletonTimer);
-            // A failed invoke (backend unavailable / bad path) reads honest no-data «—»
-            // (never red) rather than surfacing a hard error on the card.
-            if (cancelled) {
-              // Same as the success path: clear the measuring flag on cancel so the card
-              // does not stick on the spinner (WR-06 gap 1).
-              setPings((prev) =>
-                prev[tg.id]?.measuring
-                  ? { ...prev, [tg.id]: { ...prev[tg.id], measuring: false } }
-                  : prev,
-              );
-              return;
-            }
-            setPings((prev) => ({ ...prev, [tg.id]: { band: "no-data" } }));
+            // A failed invoke (backend unavailable / bad path) reads honest no-data «—» (never red)
+            // rather than surfacing a hard error on the card.
+            return [tg.id, { band: "no-data" }];
           }
         }),
       );
-    };
+      // Cancel guard: if the target set changed (or the hook unmounted) while this round was in flight,
+      // discard the result entirely — writing it could paint a band for an id that just left the list.
+      if (generationRef.current !== myGeneration) return;
+      // PP-7: single merged commit for the whole round. Merge over `prev` (not a bare object) so a
+      // target absent from `results` — impossible here since results covers `current`, but defensive —
+      // keeps its prior band, and the prune effect owns removing dead ids.
+      setPings((prev) => {
+        const next = { ...prev };
+        for (const [id, ping] of results) next[id] = ping;
+        return next;
+      });
+    } finally {
+      // Only the round that is still current owns clearing the flag — a superseded round leaves it to
+      // whichever round is now live, so the button's spinner tracks the ACTIVE round, not a stale one.
+      if (generationRef.current === myGeneration) setPinging(false);
+    }
+  }, []);
 
-    const loop = async () => {
-      if (cancelled) return;
-      await pingAll();
-      if (cancelled) return;
-      // NIT (Fable R4): with NO targets (e.g. while connected — useConfigPingSource freezes the cards
-      // and probes nothing), do not schedule empty 15 s rounds forever. A genuine target-set change
-      // re-seeds this effect with a fresh loop (the `[targetsKey]` dep), so stopping here when idle
-      // loses nothing and drops a pointless recurring timer.
-      if (targetsRef.current.length === 0) return;
-      timer = setTimeout(() => void loop(), PING_INTERVAL_MS);
-    };
-
-    void loop();
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-    // `targets` is intentionally consumed via the serialized `targetsKey` dep (re-run only on a
-    // genuine target-set change, not on every render that rebuilds an equal array).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetsKey]);
-
-  return pings;
+  return { pings, refreshPings, pinging };
 }

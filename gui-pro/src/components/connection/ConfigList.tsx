@@ -1,8 +1,9 @@
 import { useMemo, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { Inbox, Plus } from "lucide-react";
+import { Inbox, Plus, RotateCw } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { Button } from "../../shared/ui/Button";
+import { Tooltip } from "../../shared/ui/Tooltip";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { samePath } from "../../shared/utils/samePath";
@@ -18,6 +19,14 @@ interface ConfigListProps {
   onImport: () => void;
   /** Resolved ping bands per config id (from usePerConfigPing). Absent → no-data «—». */
   pings?: Record<string, ConfigPing>;
+  /**
+   * Manually ping every config's endpoint ONCE (the «Обновить пинг» button next to «Добавить конфиг»).
+   * The ping loop is manual — there is no automatic interval — so this is the only way a fresh reading
+   * lands. Absent → the refresh button is not rendered (e.g. isolated card tests that omit it).
+   */
+  onRefreshPings?: () => void | Promise<void>;
+  /** True while a manual ping round is in flight — spins + disables the refresh button. */
+  pinging?: boolean;
   /** Per-card action callbacks (wired by ConnectionPanel). */
   onConnect?: (config: ConfigSummary) => void;
   onEdit?: (config: ConfigSummary) => void;
@@ -99,6 +108,8 @@ export function ConfigList({
   loading,
   onImport,
   pings = {},
+  onRefreshPings,
+  pinging = false,
   onConnect,
   onEdit,
   onQr,
@@ -366,10 +377,32 @@ export function ConfigList({
           ))
         )}
       </div>
-      <div>
+      {/* «Добавить конфиг» + the manual «Обновить пинг» refresh button beside it. The refresh button
+          mirrors the add-config button's shell (same Button component, secondary variant, sm height =
+          h-8) but is a SQUARE icon-only control (w-8, no horizontal padding). The ping loop is manual
+          (no auto interval), so this is the ONLY way to re-measure reachability — one click pings ALL
+          config cards once. It spins + disables while a round is in flight, and is disabled when there
+          are no configs to ping. onRefreshPings absent (isolated renders) → the button is omitted. */}
+      <div className="flex items-center gap-[var(--space-2)]">
         <Button variant="secondary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={onImport}>
           {t("connection.list.add")}
         </Button>
+        {onRefreshPings && (
+          <Tooltip text={t("connection.refresh_pings")}>
+            <Button
+              variant="secondary"
+              size="sm"
+              // Square icon-only: drop the horizontal padding and fix the width to the h-8 height so
+              // the button reads as a 32×32 square matching the add-config button's height.
+              className="w-8 px-0"
+              aria-label={t("connection.refresh_pings")}
+              loading={pinging}
+              disabled={pinging || configs.length === 0}
+              icon={<RotateCw className="w-4 h-4" />}
+              onClick={() => void onRefreshPings()}
+            />
+          </Tooltip>
+        )}
       </div>
     </div>
   );
