@@ -700,7 +700,7 @@ const HARD_KILL_CONFIRM_TIMEOUT_MS: u64 = 5000;
 const HARD_KILL_CONFIRM_POLL_MS: u64 = 100;
 
 /// 3.8 delay-green (owner decision): how long to HOLD «Подключение» while waiting for real
-/// traffic-readiness (a DNS query THROUGH the tunnel) after the C++ core's "Successfully connected"
+/// traffic-readiness (a DNS-INDEPENDENT raw-IP HTTPS round-trip through the tunnel) after the C++ core's "Successfully connected"
 /// handshake edge, before emitting Connected anyway as an honest fallback. The handshake edge is
 /// tunnel-UP, not traffic-READY — on http3/QUIC the tunnel can be up while real traffic does not flow
 /// for ~30-40s. `dns_probe` polls every 500ms and returns the moment traffic works, so http2 (already
@@ -981,7 +981,7 @@ pub async fn spawn_with_args(
 }
 
 /// Check sidecar log lines for connection milestones. Emits "connected" only after the handshake AND
-/// a real traffic-readiness probe succeeds (3.8 delay-green) — a DNS query THROUGH the tunnel — capped
+/// a real traffic-readiness probe succeeds (3.8 delay-green) — a DNS-independent raw-IP HTTPS round-trip through the tunnel — capped
 /// at TRAFFIC_READINESS_CAP, then emitted anyway as an honest fallback so http2 stays fast while http3
 /// holds «Подключение» until traffic actually flows.
 // Internal reader-task helper: the args are the line + the app handle + the three mutable
@@ -1043,7 +1043,7 @@ async fn check_sidecar_markers(
         // "Successfully connected" handshake edge is TUNNEL-UP, not TRAFFIC-READY. On http3/QUIC the
         // tunnel can be up while real traffic does not flow for ~30-40s (the «зелёная карточка
         // ≠ рабочий интернет»). So instead of flipping to Connected on the handshake edge, ALWAYS run a
-        // traffic-readiness probe first (a DNS query THROUGH the tunnel — with killswitch ON it fails
+        // traffic-readiness probe first (a DNS-independent raw-IP HTTPS round-trip through the tunnel — with killswitch ON it fails
         // exactly as long as real traffic fails, so it is honest by construction), capped at
         // TRAFFIC_READINESS_CAP, and emit Connected on success OR at the cap (honest fallback — we
         // cannot hold «Подключение» forever). For http2 the probe succeeds ~instantly, so it stays
@@ -1104,7 +1104,7 @@ async fn check_sidecar_markers(
                 if !may_emit {
                     crate::logging::log_app(
                         "INFO",
-                        &format!("[vpn] T+{elapsed}ms: DNS probe finished but the session is stale/cancelled — suppressing Connected (AUDIT #1)"),
+                        &format!("[vpn] T+{elapsed}ms: readiness probe finished but the session is stale/cancelled — suppressing Connected (AUDIT #1)"),
                     );
                     return;
                 }
@@ -1191,14 +1191,45 @@ fn emit_connected(app: &tauri::AppHandle, spawn_time: &Instant) {
     }
 }
 
-/// Probe DNS by resolving a lightweight domain. Returns true as soon as DNS works.
+/// 16-08 (gap 5c): the delay-green readiness gate. Returns true the moment a real
+/// DNS-INDEPENDENT traffic round-trip succeeds through the tunnel, or false when
+/// `max_wait` elapses first.
+///
+/// Historically this resolved a hostname via `tokio::net::lookup_host` — a DNS-ONLY
+/// signal. But the connectivity monitor itself already rejects DNS as unreliable
+/// (FIX-E, connectivity.rs): the sidecar DNS proxy (a DoH/DoT AdGuard upstream on
+/// the IP/self-hosted config) warms and ANSWERS DNS while the data path is still
+/// settling → «Подключено» flipped green before real traffic flowed (owner UAT:
+/// «зелёная карточка ≠ рабочий интернет» on the IP variant). Now this loops the
+/// shared `connectivity::probe_traffic_once` (raw-IP HTTPS to 1.1.1.1 / 1.0.0.1,
+/// 2xx/204 = ready) on the SAME 500ms cadence, so green fires only after a genuine
+/// round-trip — the same DNS-independent primitive the monitor's liveness probe uses.
+///
+/// The name is kept so the single caller (delay-green probe task) and the
+/// `traffic_readiness_budget` cap + `probe_task_may_emit` staleness gate around it
+/// stay byte-for-byte. `max_wait` (the budget) still caps total time, so the honest
+/// fallback emit always precedes the 60s connect-timeout watchdog (proven by
+/// `traffic_readiness_budget_stays_under_watchdog`). Each attempt is bounded by a
+/// short per-attempt timeout so a black-holing path cannot overrun `max_wait`.
 async fn dns_probe(max_wait: std::time::Duration) -> bool {
+    // Per-attempt round-trip budget: deliberately MIRRORS the monitor's tight liveness
+    // timeout `connectivity::TUNNEL_PROBE_TIMEOUT_SECS` (= 3s). The literal is kept local
+    // (rather than importing the constant) only to avoid widening that constant's private
+    // visibility for a single mirror; if the monitor's timeout ever changes, update this to
+    // match. It is additionally clamped to what remains of `max_wait` on the final attempt,
+    // so total time never exceeds the budget cap.
+    const PER_ATTEMPT: std::time::Duration = std::time::Duration::from_secs(3);
     let start = Instant::now();
     while start.elapsed() < max_wait {
-        if let Ok(mut addrs) = tokio::net::lookup_host("clients3.google.com:443").await {
-            if addrs.next().is_some() {
-                return true;
-            }
+        let remaining = max_wait.saturating_sub(start.elapsed());
+        let attempt_timeout = std::cmp::min(PER_ATTEMPT, remaining);
+        if crate::connectivity::probe_traffic_once(attempt_timeout).await {
+            return true;
+        }
+        // Same 500ms inter-attempt cadence as the historical DNS loop — but only
+        // sleep if the budget still has room, so we never overshoot max_wait waiting.
+        if start.elapsed() + std::time::Duration::from_millis(500) >= max_wait {
+            break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
@@ -1334,7 +1365,10 @@ mod tests {
         // Sanitizing a fixed ASCII phrase is a no-op (idempotent) — proves it
         // carries nothing the sanitizer would have to redact.
         assert_eq!(crate::logging::sanitize(marker), marker);
-        assert!(!marker.is_empty());
+        // NIT-5 (16-12): strengthen the trivial `!is_empty()` into a meaningful
+        // assertion on the actual marker content — the [vpn] prefix + the fixed
+        // phrase — so a future edit that empties or mangles the marker is caught.
+        assert_eq!(marker, "[vpn] connect start");
     }
 
     #[test]
@@ -1358,7 +1392,8 @@ mod tests {
         let marker = handshake_marker();
         assert_no_secret(marker, SAMPLE_SECRET);
         assert_eq!(crate::logging::sanitize(marker), marker);
-        assert!(!marker.is_empty());
+        // NIT-5 (16-12): assert the actual phrase, not just non-empty.
+        assert_eq!(marker, "[vpn] handshake complete - connection up");
     }
 
     #[test]
@@ -1366,7 +1401,8 @@ mod tests {
         let marker = drop_detected_marker();
         assert_no_secret(marker, SAMPLE_SECRET);
         assert_eq!(crate::logging::sanitize(marker), marker);
-        assert!(!marker.is_empty());
+        // NIT-5 (16-12): assert the actual phrase, not just non-empty.
+        assert_eq!(marker, "[vpn] connection drop detected");
     }
 
     #[test]
@@ -1375,7 +1411,8 @@ mod tests {
         let marker = killed_on_exit_marker();
         assert_no_secret(marker, SAMPLE_SECRET);
         assert_eq!(crate::logging::sanitize(marker), marker);
-        assert!(!marker.is_empty());
+        // NIT-5 (16-12): assert the actual phrase, not just non-empty.
+        assert_eq!(marker, "[vpn] sidecar killed on exit");
     }
 
     #[test]

@@ -119,15 +119,16 @@ describe("CertModal (P1-9 + P1-10)", () => {
     });
   });
 
-  it("issuer block shows Let's Encrypt + subject CN", async () => {
-    // FIX false-green CertModal:93 — replaces the second tautological negative
-    // (`copy-fingerprint-button` testid that never existed) with a real
-    // assertion on the issuer block content that actually renders.
+  it("issuer block shows Let's Encrypt + the real server address", async () => {
+    // CP-1c (16-12): the «Выдан» line shows the cert type + the real server host
+    // (sshParams.host), which for a domain server equals the domain.
     render(
       <CertModal
         isOpen={true}
         onClose={vi.fn()}
-        state={makeState()}
+        state={makeState({
+          sshParams: { host: "vpn.example.com", port: 22, user: "root", password: "" },
+        } as Partial<ServerState>)}
         security={mockSecurityFactory()}
       />,
     );
@@ -281,6 +282,40 @@ describe("CertModal (P1-9 + P1-10)", () => {
     expect(security.enableCertbotTimer).toHaveBeenCalled();
   });
 
+  // ── CP-1b (16-09): auto-renewal gated to Let's Encrypt ────────────────────
+
+  it("CP-1b: a self-signed cert renders NO auto-renewal section / enable button", async () => {
+    // Auto-renewal is certbot/ACME-only — meaningless on a self-signed cert.
+    // The whole block (and its misplaced «Включить автообновление» button) must
+    // not render for a non-LE cert.
+    render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState({ certRaw: sampleSelfSignedCert })}
+        security={mockSecurityFactory()}
+      />,
+    );
+    // The issued-by block renders (so the modal is mounted), but the whole
+    // auto-renewal section is gone for a self-signed cert.
+    await screen.findByText(i18n.t("server.cert.block_issued_by"));
+    expect(screen.queryByTestId("cert-auto-renewal-section")).toBeNull();
+    expect(screen.queryByTestId("enable-auto-renewal-button")).toBeNull();
+  });
+
+  it("CP-1b: a Let's Encrypt cert (auto_renewal inactive) DOES render the enable button", async () => {
+    render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState()}
+        security={mockSecurityFactory()}
+      />,
+    );
+    expect(await screen.findByTestId("cert-auto-renewal-section")).toBeInTheDocument();
+    expect(await screen.findByTestId("enable-auto-renewal-button")).toBeInTheDocument();
+  });
+
   // ── Renew action footer ───────────────────────────────────────────────────
 
   it("renew button visible for Let's Encrypt cert", async () => {
@@ -343,10 +378,100 @@ describe("CertModal (P1-9 + P1-10)", () => {
       />,
     );
     await waitFor(() => {
-      // Self-signed badge present, renew button absent.
-      expect(screen.getByText(i18n.t("server.cert.self_signed"))).toBeInTheDocument();
+      // Self-signed label present (CP-1c: the type label now also appears in the
+      // «Выдан» lead, so there can be >1 — use getAllByText), renew button absent.
+      expect(screen.getAllByText(i18n.t("server.cert.self_signed")).length).toBeGreaterThan(0);
     });
     expect(screen.queryByTestId("cert-renew-button")).toBeNull();
+  });
+
+  // ── CP-1c (16-12): «Выдан» = cert type + the REAL server address (IP) ──────
+
+  it("CP-1c: self-signed «Выдан» shows the type + the REAL server IP, never trusttunnel.local", async () => {
+    // A self-signed cert's subject CN is «trusttunnel.local». The «Выдан» line
+    // must now show the type + the REAL server host (sshParams.host = the IP),
+    // and NEVER the internal .local placeholder.
+    const selfSigned = {
+      hostname: "trusttunnel.local",
+      notAfter: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      notBefore: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      subject: "CN = trusttunnel.local",
+      issuer: "CN = trusttunnel.local",
+    };
+    render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState({
+          certRaw: selfSigned,
+          sshParams: { host: "203.0.113.141", port: 22, user: "root", password: "" },
+        } as Partial<ServerState>)}
+        security={mockSecurityFactory()}
+      />,
+    );
+    const issuedByLabel = await screen.findByText(i18n.t("server.cert.block_issued_by"));
+    const section = issuedByLabel.closest("section") as HTMLElement;
+    await waitFor(() => {
+      // The real server IP is shown as the address.
+      expect(section.textContent ?? "").toContain("203.0.113.141");
+    });
+    // The internal .local placeholder is NEVER rendered in the issued-by block.
+    expect(section.textContent ?? "").not.toContain("trusttunnel.local");
+    // The SELF-SIGNED type label stays visible (lead label + badge).
+    expect(screen.getAllByText(i18n.t("server.cert.self_signed")).length).toBeGreaterThan(0);
+  });
+
+  it("NIT-8b (16-12): a self-signed cert shows the valid-until + reinstall-to-renew note; LE does NOT", async () => {
+    // Self-signed: the owner asked how to renew — show a muted valid-until +
+    // reinstall note (self-signed never auto-renews).
+    const selfSigned = {
+      hostname: "trusttunnel.local",
+      notAfter: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      notBefore: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      subject: "CN = trusttunnel.local",
+      issuer: "CN = trusttunnel.local",
+    };
+    const { unmount } = render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState({ certRaw: selfSigned })}
+        security={mockSecurityFactory()}
+      />,
+    );
+    expect(await screen.findByTestId("cert-self-signed-renew-note")).toBeInTheDocument();
+    unmount();
+
+    // Let's Encrypt: no self-signed renew note (LE has its own auto-renewal block).
+    render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState()}
+        security={mockSecurityFactory()}
+      />,
+    );
+    await screen.findByText(i18n.t("server.cert.block_issued_by"));
+    expect(screen.queryByTestId("cert-self-signed-renew-note")).toBeNull();
+  });
+
+  it("CP-1c: Let's Encrypt «Выдан» shows «Let's Encrypt • real address (= domain)»", async () => {
+    render(
+      <CertModal
+        isOpen={true}
+        onClose={vi.fn()}
+        state={makeState({
+          sshParams: { host: "vpn.example.com", port: 22, user: "root", password: "" },
+        } as Partial<ServerState>)}
+        security={mockSecurityFactory()}
+      />,
+    );
+    const issuedByLabel = await screen.findByText(i18n.t("server.cert.block_issued_by"));
+    const section = issuedByLabel.closest("section") as HTMLElement;
+    await waitFor(() => {
+      expect(within(section).getByText(/Let's Encrypt/i)).toBeInTheDocument();
+      expect(within(section).getByText(/vpn\.example\.com/)).toBeInTheDocument();
+    });
   });
 
   it("renew confirm → server_renew_cert success path", async () => {

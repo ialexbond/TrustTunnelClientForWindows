@@ -17,6 +17,7 @@ const cfgDe: ConfigSummary = {
   id: "cfg-de-abc12345",
   name: "Германия — Frankfurt",
   host: "de1.example.com",
+  display_host: "de1.example.com",
   user: "swift-fox",
   path: "C:/app/TrustTunnel_swift-fox.toml",
   order: 0,
@@ -26,6 +27,7 @@ const cfgNl: ConfigSummary = {
   id: "cfg-nl-def67890",
   name: "Нидерланды",
   host: "nl.example.com",
+  display_host: "nl.example.com",
   user: "bold-eagle",
   path: "C:/app/TrustTunnel_bold-eagle.toml",
   order: 1,
@@ -259,6 +261,51 @@ describe("ConfigList", () => {
     // cfgDe is last-used → the top card of the not-connected list; onQr must fire once with it.
     expect(onQr).toHaveBeenCalledTimes(1);
     expect(onQr).toHaveBeenCalledWith(cfgDe);
+  });
+
+  // ─── Phase 16 (TA-3): the T-22 «IP» glyph is threaded through the LIST render ───
+  //
+  // The ConfigCard-level tests prove ONE card shows the «IP» glyph for a bare-IP display_host.
+  // This LIST-level case renders a bare-IP card (fake .local SNI host + IP in display_host — the
+  // exact gap-5a shape) TOGETHER with a domain card, so a regression that drops display_host on the
+  // list's map/hoist path (twin-collapse in ConnectionPanel keys off display_host) would surface
+  // here even while the isolated card test stays green. The IP config is the LIVE lead (the glyph is
+  // lead-card only), the domain config rests — so exactly one «IP» glyph must exist and belong to it.
+  it("TA-3: renders exactly one «IP» glyph for a bare-IP card in a mixed IP+domain list", () => {
+    // cfgIp: a bare-IP server carrying a fake TLS-SNI hostname (.local) — the real endpoint is the IP.
+    const cfgIp: ConfigSummary = {
+      id: "cfg-ip-fedc0987",
+      name: "Self-hosted (IP)",
+      host: "trusttunnel.local", // fake SNI hostname (raw dedup key)
+      display_host: "203.0.113.141", // the IP-preferring card value the glyph keys off
+      user: "lone-wolf",
+      path: "C:/app/TrustTunnel_lone-wolf.toml",
+      order: 0,
+      last_used: false,
+    };
+    renderWithProviders(
+      <ConfigList
+        configs={[cfgIp, cfgDe]}
+        loading={false}
+        onImport={vi.fn()}
+        // The IP config is connected → hoisted to the lead (the only place the glyph renders);
+        // cfgDe (domain) rests below.
+        status="connected"
+        activeConfigPath={cfgIp.path}
+        onConnect={vi.fn()}
+      />,
+    );
+    // Exactly one «IP» glyph in the whole list, and it belongs to the IP (lead) card.
+    const markers = screen.getAllByTestId("config-card-ip-marker");
+    expect(markers).toHaveLength(1);
+    const cards = screen.getAllByTestId("config-card");
+    const ipCard = cards.find((c) => c.contains(markers[0]));
+    expect(ipCard).toBe(cards[0]); // the lead card is the IP config
+    expect(ipCard).toHaveTextContent("203.0.113.141"); // shows the IP, not the fake .local name
+    expect(ipCard).not.toHaveTextContent("trusttunnel.local");
+    // The domain card (cfgDe) shows its domain host and NO «IP» glyph.
+    expect(cards[1]).toHaveTextContent("de1.example.com");
+    expect(within(cards[1]).queryByText("IP")).not.toBeInTheDocument();
   });
 
   // ─── Phase 14 (14-02): the hero survives a transient disconnected while switching ───

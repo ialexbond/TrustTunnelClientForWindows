@@ -89,12 +89,18 @@ use crate::commands::paths::validate_app_path;
 
 /// Read the endpoint host + port from a config `.toml`'s `[endpoint]` section Rust-side.
 ///
-/// The endpoint section carries `hostname` (the domain) and `addresses` (an array of
+/// The endpoint section carries `hostname` (the TLS-SNI name) and `addresses` (an array of
 /// `"ip:port"` strings — see `ssh/deploy.rs` export + `ssh/mod.rs::build_client_config`).
-/// We prefer the `hostname` for the connect target (so a named endpoint is probed by
-/// name) and fall back to the IP from the first `addresses` entry. The PORT always comes
-/// from the first `addresses` entry's `:port` suffix (the host carries no port), defaulting
-/// to 443 when absent. NEVER reads `endpoint.password` (D-29).
+///
+/// 16-12 gap PING-IP: prefer the DIAL TARGET — the host of the first `addresses` entry
+/// (the real IP) — over `hostname`. For a self-hosted server `hostname` is a FAKE TLS-SNI
+/// name (`trusttunnel.local`) that does not resolve in DNS, so probing it read
+/// «Недоступен» even when the IP server was reachable. The endpoint actually DIALS
+/// `addresses[0]`, so that is what the reachability probe must hit. `hostname` is used only
+/// as the fallback when there is no address (a pure-domain config where `hostname` == the
+/// dial target anyway, so behavior is unchanged). The PORT always comes from the first
+/// `addresses` entry's `:port` suffix, defaulting to 443 when absent. NEVER reads
+/// `endpoint.password` (D-29).
 fn read_endpoint_host_port(content: &str) -> Result<(String, u16), String> {
     let v: toml::Value =
         toml::from_str(content).map_err(|e| format!("Failed to parse config: {e}"))?;
@@ -124,18 +130,22 @@ fn read_endpoint_host_port(content: &str) -> Result<(String, u16), String> {
         Some(PortParse::Absent) | None => DEFAULT_ENDPOINT_PORT,
     };
 
-    // Host: prefer the named hostname, else the bare IP from the first address.
+    // Host: 16-12 gap PING-IP — prefer the DIAL IP from addresses[0] (the real target the
+    // endpoint connects to), else fall back to the named hostname. A self-hosted server
+    // carries a fake, unresolvable `trusttunnel.local` hostname over a real bare-IP
+    // addresses[0]; probing the .local name read a false «Недоступен». For a pure-domain
+    // config there is no addresses entry (or it equals the domain), so this falls back to
+    // hostname and behavior is unchanged.
+    let addr_host = first_addr.and_then(host_from_addr);
     let hostname = ep
         .get("hostname")
         .and_then(|h| h.as_str())
         .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let host = match hostname {
-        Some(h) => h.to_string(),
-        None => first_addr
-            .and_then(host_from_addr)
-            .ok_or("Config endpoint has no hostname or address")?,
-    };
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let host = addr_host
+        .or(hostname)
+        .ok_or("Config endpoint has no hostname or address")?;
 
     Ok((host, port))
 }
@@ -180,9 +190,29 @@ fn parse_port_from_addr(addr: &str) -> PortParse {
     PortParse::Absent
 }
 
+/// Extract the port of an `"ip:port"` / `"[ipv6]:port"` address as an `Option<u16>`
+/// (the simpler sibling of `parse_port_from_addr`'s tri-state, for callers that only
+/// want "the port, or the 443 default").
+///
+/// `pub(crate)` so the fetch-path cert probe (`server_config::parse_probe_target_from_endpoint`,
+/// 16-12 gap 5b-2) can SHARE this exact port derivation instead of copying it — the probe
+/// must target the SAME `addresses[0]` port the ping reader uses. Returns `None` for an
+/// absent OR unparseable port so the caller applies its own default (443).
+pub(crate) fn port_from_addr(addr: &str) -> Option<u16> {
+    match parse_port_from_addr(addr) {
+        PortParse::Port(p) => Some(p),
+        PortParse::Absent | PortParse::Invalid => None,
+    }
+}
+
 /// Extract the host part of an `"ip:port"` / `"[ipv6]:port"` address (the value used when
 /// the config has no named `hostname`).
-fn host_from_addr(addr: &str) -> Option<String> {
+///
+/// `pub(crate)` so the card summary path (`manifest.rs::derive_display_host`, 16-07) can SHARE
+/// this exact host-derivation instead of copying it. Both the ping reader
+/// (`read_endpoint_host_port`) and the card display value must extract the address host the same
+/// way — a second copy would drift (the 16-UAT round-3 5a root_cause explicitly requires reuse).
+pub(crate) fn host_from_addr(addr: &str) -> Option<String> {
     // Bracketed IPv6 literal: keep the brackets — `TcpStream::connect` accepts `[::1]`.
     if let Some(close) = addr.rfind(']') {
         return Some(addr[..=close].to_string());
@@ -425,8 +455,11 @@ mod tests {
     #[test]
     fn ping_rejects_bad_host() {
         // Validate the host extracted from a config — a metachar host must be rejected.
-        let content = sample_config("evil;rm -rf /", "203.0.113.10:443");
-        let (host, _port) = read_endpoint_host_port(&content).unwrap();
+        // 16-12 PING-IP: the dial host now comes from addresses[0], so put the metachar
+        // there (no valid address) to exercise the verbatim-read + reject path.
+        let content =
+            "[endpoint]\nhostname = \"evil;rm -rf /\"\nusername = \"u\"\npassword = \"p\"\n";
+        let (host, _port) = read_endpoint_host_port(content).unwrap();
         assert_eq!(host, "evil;rm -rf /", "host is read verbatim from the config");
         assert!(
             validate_ping_host(&host).is_err(),
@@ -437,13 +470,32 @@ mod tests {
         assert!(validate_ping_host("203.0.113.10").is_ok());
     }
 
-    /// The host:port extraction reads the named hostname + the port from the first
-    /// address entry, falling back to 443; the password is never touched.
+    /// 16-12 gap PING-IP: the ping target is the DIAL IP from addresses[0], NOT the fake
+    /// .local SNI hostname. A self-hosted server carries hostname="trusttunnel.local" (which
+    /// does not resolve) over addresses[0]="203.0.113.141:443"; probing the .local name read
+    /// a false «Недоступен». The reader must now return the real reachable IP + port.
     #[test]
-    fn read_endpoint_host_port_prefers_hostname_and_address_port() {
+    fn read_endpoint_host_port_prefers_address_ip_over_fake_sni() {
+        let content = sample_config("trusttunnel.local", "203.0.113.141:443");
+        let (host, port) = read_endpoint_host_port(&content).unwrap();
+        assert_eq!(host, "203.0.113.141", "ping must target the real dial IP, not the .local SNI");
+        assert_eq!(port, 443);
+
+        // A domain config: hostname == addresses host, so the target is unchanged.
+        let domain = sample_config("de1.example.com", "de1.example.com:8443");
+        let (dhost, dport) = read_endpoint_host_port(&domain).unwrap();
+        assert_eq!(dhost, "de1.example.com");
+        assert_eq!(dport, 8443);
+    }
+
+    /// The host:port extraction reads the dial IP from the first address entry + its port
+    /// (16-12 PING-IP: addresses[0] host wins over the SNI hostname); the password is never
+    /// touched.
+    #[test]
+    fn read_endpoint_host_port_prefers_address_ip_and_address_port() {
         let content = sample_config("de1.example.com", "203.0.113.10:8443");
         let (host, port) = read_endpoint_host_port(&content).unwrap();
-        assert_eq!(host, "de1.example.com");
+        assert_eq!(host, "203.0.113.10", "the dial IP from addresses[0] is the probe target");
         assert_eq!(port, 8443);
     }
 
@@ -498,7 +550,8 @@ mod tests {
         );
         let content = std::fs::read_to_string(&cfg).unwrap();
         let (host, port) = read_endpoint_host_port(&content).unwrap();
-        assert_eq!(host, "de1.example.com");
+        // 16-12 PING-IP: the dial IP from addresses[0] is the probe target.
+        assert_eq!(host, "203.0.113.10");
         assert_eq!(port, 443);
         // D-29: the parsed host/port never carry the password.
         assert!(!host.contains("SECRET"));
@@ -511,10 +564,11 @@ mod tests {
     /// its address row.
     #[test]
     fn endpoint_address_from_content_formats_host_port_and_never_the_password() {
-        // Named hostname + an address port → "hostname:port".
+        // 16-12 PING-IP: the plate address mirrors the ping target = the dial IP from
+        // addresses[0] + its port (the plate shows the same host:port that is probed).
         let content = sample_config("de-fra.trusttunnel.net", "203.0.113.42:8443");
         let addr = endpoint_address_from_content(&content).expect("a usable endpoint → an address");
-        assert_eq!(addr, "de-fra.trusttunnel.net:8443");
+        assert_eq!(addr, "203.0.113.42:8443");
         // D-29: the address must never carry the fixture password.
         assert!(
             !addr.contains("SUPER-SECRET-XYZ"),
@@ -529,9 +583,12 @@ mod tests {
             Some("203.0.113.42:443"),
         );
 
-        // A metachar host fails closed (None) rather than surfacing on the plate.
-        let content_bad = sample_config("evil;rm -rf /", "203.0.113.10:443");
-        assert!(endpoint_address_from_content(&content_bad).is_none());
+        // A metachar host fails closed (None) rather than surfacing on the plate. 16-12
+        // PING-IP: the dial host is addresses[0], so a metachar in the address (no valid
+        // dial host) is what must fail closed.
+        let content_bad =
+            "[endpoint]\nhostname = \"evil;rm -rf /\"\nusername = \"u\"\npassword = \"p\"\n";
+        assert!(endpoint_address_from_content(content_bad).is_none());
 
         // A config with no [endpoint] at all → None (the plate omits the address row).
         assert!(endpoint_address_from_content("loglevel = \"info\"\n").is_none());
@@ -563,8 +620,9 @@ mod tests {
         // Exercise the ONE config-consuming step of the ping path.
         let (host, port) = read_endpoint_host_port(&content).unwrap();
 
-        // The derived connect target is exactly the endpoint — and carries NO credential.
-        assert_eq!(host, "de1.example.com");
+        // The derived connect target is the endpoint dial IP (16-12 PING-IP) — and carries
+        // NO credential.
+        assert_eq!(host, "203.0.113.10");
         assert_eq!(port, 8443);
         assert!(
             !host.contains(SECRET) && !host.to_lowercase().contains("password"),

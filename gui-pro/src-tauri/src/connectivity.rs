@@ -375,6 +375,7 @@ unsafe extern "system" fn interface_change_callback(
     notify.notify_one();
 }
 
+
 /// Periodically check TUNNEL liveness while VPN is connected.
 /// Emits "internet-status" events with { online: bool, action?, reason? } payload.
 /// When the tunnel drops, hands off to the window-independent reconnect supervisor
@@ -599,6 +600,34 @@ pub fn start_monitor(
                         "[connectivity] adapter-change wake but the FIX-B reset is rate-limited — keeping the failure streak (AUDIT #13)",
                     );
                 }
+            }
+
+            // 16-08 (gap 6): mid-session second-VPN banner. detect_conflicting_adapters
+            // is a ONE-SHOT at connect (commands::vpn), so a second VPN that starts AFTER
+            // our connect used to drop the tunnel into «Восстановление» with NO banner
+            // (owner UAT). On an HONORED adapter-change wake (a new interface appeared)
+            // while this session is Connected — we are past the vpn_up==Connected gate
+            // (:500), the resume re-baseline (:549) and the just-connected grace skip
+            // (:561) — re-run the conflict scan and emit the same named banner if a real
+            // FOREIGN adapter is present (filter_out_own_adapter still drops our WinTUN,
+            // T-21). Gated on the honored wake, NOT the FIX-B reset outcome, so a foreign
+            // adapter is scanned even when the physical uplink is present; the existing
+            // WR-01 wake debounce + the FE per-adapter dedup keying keep routine churn
+            // from spamming. detect_conflicting_adapters shells out to PowerShell, so it
+            // runs OFF-THREAD (spawn_blocking) and MUST NOT delay the liveness check
+            // below — this is READ-AND-EMIT ONLY: no status/killswitch/routing/reconnect
+            // change (T-16-08-01 / T-16-08-04).
+            if woke_via_event {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || {
+                    // MINOR-2 (16-10): use the MONITORED variant, which re-reads the live
+                    // vpn_status AFTER this off-thread PowerShell scan resolves and skips the
+                    // emit unless still Connected. The scan can finish 1.5–3s later — after the
+                    // user disconnected — so the ungated connect-thread emit would paint a stale
+                    // "second VPN" banner on a disconnected app. The connect thread keeps the
+                    // ungated `emit_adapter_conflict_if_any` (it runs during an active connect).
+                    crate::commands::vpn::emit_adapter_conflict_if_any_monitored(&app);
+                });
             }
 
             // 02-18 (STATUS-05 gap): FAST LOCAL-uplink-loss short-circuit. Runs AFTER
@@ -1931,8 +1960,180 @@ fn find_physical_adapter() -> Option<AdapterInfo> {
 /// failed probe does NOT declare offline — the caller requires `MAX_FAILURES`
 /// consecutive misses, so one transient timeout under heavy load is tolerated
 /// (T-07-01: never false-kill a busy-but-healthy tunnel).
-async fn check_tunnel_alive() -> bool {
+/// Pure LIVENESS classifier for a traffic probe HTTP response, factored out so the
+/// strict 2xx/204 "traffic reached a live upstream" rule is a single testable decision.
+/// Used by the ongoing liveness probe `check_tunnel_alive` (and `check_adapter_online`).
+///
+/// NOTE (16-11): the READINESS gate (`probe_traffic_once`) no longer routes through this
+/// classifier — readiness uses the more-lenient `probe_reachable` (ANY completed round-trip
+/// = ready). Liveness stays STRICT on purpose: a middlebox block page can return 200/404,
+/// which must NOT read as a live upstream mid-session.
+///
+/// A 204 (the classic captive-portal / generate_204 answer) is explicitly accepted
+/// alongside any 2xx — everything else (3xx redirect, 4xx, 5xx) means we did NOT
+/// reach a healthy upstream through the path. Exhaustively tested (2xx/204 → true,
+/// 3xx/4xx/5xx → false) so the liveness rule can never silently widen.
+fn traffic_status_ok(status: u16) -> bool {
+    status == 204 || (200..300).contains(&status)
+}
+
+/// 16-11 (MINOR-4): the multi-operator, DNS-free endpoint set the readiness probe
+/// (`probe_traffic_once`) round-trips through the tunnel.
+///
+/// The set stays DNS-free two ways, both keeping TLS validation FULL (no
+/// `danger_accept_invalid_certs`):
+///   - Cloudflare  `1.1.1.1` / `1.0.0.1`  — IP literals whose cert SAN carries the IP
+///     (FIX-E rationale), so the URL host IS the IP and no DNS is needed.
+///   - Google      `8.8.8.8` / `8.8.4.4`  — IP literals; `dns.google` cert SANs include
+///     both IPs, so TLS validates against the IP directly.
+///   - Yandex      `common.dot.dns.yandex.net`  — a HOSTNAME whose DoH cert is issued for
+///     the hostname (NOT the IP), so a bare `https://77.88.8.8/` would FAIL TLS. Instead
+///     the client PINS this host to `77.88.8.8` / `77.88.8.1` via
+///     `reqwest::ClientBuilder::resolve_to_addrs` (see `probe_traffic_once`): the correct
+///     SNI/cert is used AND no system DNS lookup happens — DNS-free, TLS-valid. Russia-
+///     stable fallback if Cloudflare AND Google are throttled/blocked from the exit.
+///
+/// MINOR-4 direction: relying on a single operator (Cloudflare only) meant that on an
+/// exit server where Cloudflare is blocked/rate-limited THROUGH the tunnel — but the
+/// tunnel is otherwise healthy — the readiness probe never succeeded, so the card waited
+/// to the ~45s budget cap before greening on EVERY connect to that server (honest, not a
+/// hang, but per-server UX degradation). With three operators one blocked operator no
+/// longer delays green: whichever operator answers first paints green.
+///
+/// The Yandex host is pinned in `YANDEX_DOH_HOST` / `YANDEX_DOH_ADDRS` so the endpoint
+/// list and the resolve override cannot drift apart.
+pub(crate) const READINESS_PROBE_ENDPOINTS: [&str; 5] = [
+    "https://1.1.1.1/",
+    "https://1.0.0.1/",
+    "https://8.8.8.8/",
+    "https://8.8.4.4/",
+    "https://common.dot.dns.yandex.net/",
+];
+
+/// Yandex DoH host — its TLS cert is issued for this HOSTNAME (not the IP), so it must be
+/// reached by name with a resolve-override pin, never as a bare IP literal (that would
+/// fail TLS SAN validation). Single source of truth shared by the endpoint list, the
+/// `.resolve_to_addrs` pin, and the DNS-free test.
+pub(crate) const YANDEX_DOH_HOST: &str = "common.dot.dns.yandex.net";
+
+/// The two Yandex Common-DNS anycast IPs the DoH host is pinned to. Pinning here means the
+/// probe performs NO system DNS lookup for the Yandex endpoint (DNS-free) while still
+/// presenting the correct SNI so the hostname cert validates.
+pub(crate) const YANDEX_DOH_ADDRS: [&str; 2] = ["77.88.8.8:443", "77.88.8.1:443"];
+
+/// Pure acceptance predicate for the READINESS gate.
+///
+/// `completed` = the HTTPS attempt resolved to `Ok(_response)` (a full round-trip
+/// finished), regardless of HTTP status. `Err(_)` (transport error / timeout) ⇒ the
+/// attempt did NOT complete.
+///
+/// This is intentionally MORE LENIENT than `traffic_status_ok` (the liveness rule used
+/// by `check_tunnel_alive`, which stays strict 2xx/204). Rationale: a *completed* HTTPS
+/// exchange to a public anycast host proves the tunnel carried traffic end-to-end (the
+/// TLS handshake + request + response all flowed over the tunnel), which is exactly what
+/// "ready to paint green" means — even a 404/403 answer proves reachability. Google's
+/// `https://8.8.8.8/` answers 404 at `/`, so a strict 2xx/204 rule would reject a
+/// perfectly reachable operator. Liveness stays strict on purpose (a middlebox block
+/// page can return 200, which must NOT read as a live upstream), but readiness only needs
+/// proof that bytes crossed the tunnel.
+fn probe_reachable(completed: bool) -> bool {
+    completed
+}
+
+/// 16-11 (MINOR-4): a SINGLE DNS-independent readiness round-trip against a MULTI-OPERATOR
+/// IP-literal set (`READINESS_PROBE_ENDPOINTS`). Returns true the moment ANY endpoint
+/// COMPLETES an HTTPS round-trip within `timeout` (`Ok(_response)`, ANY HTTP status);
+/// false when every endpoint errors/times out.
+///
+/// This is the readiness primitive the sidecar delay-green gate (`sidecar::dns_probe`)
+/// waits on. It does NOT back the monitor's liveness probe (`check_tunnel_alive` runs its
+/// own strict 2xx/204 rule via `traffic_status_ok`); readiness uses the more-lenient
+/// `probe_reachable` (a completed exchange of ANY status = ready — see that predicate for
+/// why). It needs NO DNS: the Cloudflare + Google endpoints are IP literals in the operator
+/// cert SAN, and the Yandex endpoint is a hostname PINNED to its anycast IPs via
+/// `resolve_to_addrs` (so no system DNS lookup happens while the correct SNI/cert is still
+/// used). A stalled sidecar DNS proxy can therefore never false-fail it — that is exactly
+/// why the delay-green gate waits on THIS instead of a DNS-only `lookup_host` (a warm
+/// DoH/DoT upstream answered DNS while the data path was still settling → premature green
+/// on the IP/AdGuard config).
+///
+/// All attempts run concurrently on THIS task via `FuturesUnordered` (no detached spawns
+/// to leak) and we return on the FIRST completed round-trip, so a live path greens as fast
+/// as the fastest operator answers; a fully dead path costs ~ONE `timeout` (the shared
+/// reqwest client `.timeout`), not five.
+pub(crate) async fn probe_traffic_once(timeout: Duration) -> bool {
+    // `StreamExt` (`.next()`) now lives in the extracted `first_ready` helper (TA-6); this scope
+    // only builds the `FuturesUnordered` set, so it no longer imports `StreamExt`.
+    use futures_util::stream::FuturesUnordered;
+
+    // MINOR-1 (16-10, Fable review): bypass any WinINET-registry or env (HTTPS_PROXY)
+    // system proxy. This probe is a *tunnel* readiness signal — it must reflect the
+    // tunnel data-path, not a system proxy. Without `.no_proxy()` a live system proxy
+    // could answer while the tunnel is still settling (reintroducing premature-green),
+    // or a dead proxy entry could hang every attempt to the timeout cap. `.no_proxy()`
+    // makes the raw-IP round-trip go straight through default routing (⇒ through the
+    // tunnel while VPN is up).
+    //
+    // 16-11 amend (Yandex): pin the Yandex DoH HOSTNAME to its anycast IPs so the probe
+    // does NO system DNS lookup for it (stays DNS-free) while still presenting the correct
+    // SNI so the hostname-issued cert validates with FULL TLS verification — a bare
+    // `https://77.88.8.8/` would fail because the cert SAN has no IP. This override applies
+    // ONLY to `common.dot.dns.yandex.net`; the IP-literal endpoints are unaffected.
+    let yandex_addrs: Vec<std::net::SocketAddr> = YANDEX_DOH_ADDRS
+        .iter()
+        .filter_map(|a| a.parse().ok())
+        .collect();
     let client = match reqwest::Client::builder()
+        .no_proxy()
+        .resolve_to_addrs(YANDEX_DOH_HOST, &yandex_addrs)
+        .timeout(timeout)
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // Per-attempt IP round-trip: ANY completed response (`Ok(_)`, any status) = the
+    // tunnel carried bytes end-to-end = ready. See `probe_reachable` for why this is
+    // deliberately more lenient than the liveness rule.
+    let attempt = |url: &'static str| {
+        let client = client.clone();
+        async move { probe_reachable(client.get(url).send().await.is_ok()) }
+    };
+    let attempts: FuturesUnordered<_> =
+        READINESS_PROBE_ENDPOINTS.iter().map(|&url| attempt(url)).collect();
+    // Return on the FIRST endpoint that reports ready; if all resolve without a ready,
+    // fall through to false. The short-circuit fold lives in the pure `first_ready` helper
+    // (TA-6) so it can be unit-tested with a deterministic stream of bools.
+    first_ready(attempts).await
+}
+
+/// TA-6: the pure short-circuit fold at the heart of `probe_traffic_once` — drain a stream of
+/// bool-yielding futures and return `true` the moment ANY yields `true` (dropping the rest, so a
+/// live path greens as fast as the fastest answer), `false` only when the whole stream is
+/// exhausted without a `true` (and `false` for an empty stream). Extracted from the inline
+/// `while let Some(..) = stream.next().await` so the racing semantics are exercised by a unit test
+/// with a synthetic `[false, true, false]` / `[false, false, false]` / `[]` stream — no network,
+/// byte-identical behaviour to the previous inline loop.
+pub(crate) async fn first_ready<S>(mut stream: S) -> bool
+where
+    S: futures_util::stream::Stream<Item = bool> + Unpin,
+{
+    use futures_util::stream::StreamExt;
+    while let Some(ready) = stream.next().await {
+        if ready {
+            return true;
+        }
+    }
+    false
+}
+
+async fn check_tunnel_alive() -> bool {
+    // MINOR-1 (16-10, Fable review): parity with `probe_traffic_once` — the liveness
+    // verdict must equally ignore any WinINET/env system proxy so its "tunnel alive?"
+    // answer reflects the tunnel data-path only, never a system proxy answering on its
+    // behalf. See `probe_traffic_once` for the full rationale.
+    let client = match reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(TUNNEL_PROBE_TIMEOUT_SECS))
         .build()
     {
@@ -1975,7 +2176,10 @@ async fn check_tunnel_alive() -> bool {
         async move {
             match client.get(url).send().await {
                 Ok(resp) => {
-                    let ok = resp.status().is_success() || resp.status().as_u16() == 204;
+                    // 16-08: route the 2xx/204 rule through the shared classifier so the
+                    // hot liveness path and the delay-green gate can never diverge. Same
+                    // predicate as before (`is_success() || == 204`), now single-sourced.
+                    let ok = traffic_status_ok(resp.status().as_u16());
                     if ok {
                         log_app(
                             "DEBUG",
@@ -2080,6 +2284,142 @@ pub(crate) async fn check_adapter_online() -> bool {
 #[cfg(test)]
 mod detection_cadence_tests {
     use super::*;
+
+    // ── 16-08 (gap 5c): the honest-green traffic probe ─────────────────────────
+
+    #[test]
+    fn traffic_status_ok_accepts_only_2xx_and_204() {
+        // The delay-green readiness rule: a live upstream answered through the path.
+        // 2xx (incl. the 200 root) and the captive-portal 204 mean READY.
+        assert!(traffic_status_ok(200), "200 = reached a live upstream");
+        assert!(traffic_status_ok(204), "204 = generate_204 / captive-portal OK");
+        assert!(traffic_status_ok(299), "any 2xx counts");
+        // Everything else means we did NOT reach a healthy upstream — the gate must
+        // NOT green on a redirect, a 4xx block page, or a 5xx.
+        assert!(!traffic_status_ok(301), "3xx redirect ≠ traffic-ready");
+        assert!(!traffic_status_ok(403), "4xx ≠ traffic-ready");
+        assert!(!traffic_status_ok(500), "5xx ≠ traffic-ready");
+        assert!(!traffic_status_ok(199), "sub-200 informational ≠ ready");
+        assert!(!traffic_status_ok(300), "300 is the 3xx boundary, not 2xx");
+    }
+
+    #[test]
+    fn readiness_acceptance_is_lenient_completed_any_status() {
+        // 16-11 (MINOR-4): the READINESS gate greens on ANY completed HTTPS round-trip,
+        // regardless of HTTP status. `probe_reachable` maps the per-attempt outcome:
+        //   Ok(_response) of ANY status → reachable (bytes crossed the tunnel = ready)
+        //   Err(_) transport error / timeout → NOT reachable
+        // The reqwest attempt collapses to a bool (`.send().await.is_ok()`) before this
+        // predicate, so a completed 200/204/404/403 all arrive here as `true` and only a
+        // transport error / timeout arrives as `false`. This is intentionally MORE lenient
+        // than the strict 2xx/204 liveness rule (`traffic_status_ok`) — a completed
+        // exchange to a public anycast host (incl. Google's 404 at `/`) proves the tunnel
+        // carries traffic; liveness must stay strict to avoid a middlebox block-page 200
+        // reading as a live upstream.
+        assert!(probe_reachable(true), "a completed round-trip (any status) ⇒ ready");
+        assert!(!probe_reachable(false), "a transport error / timeout ⇒ not ready");
+
+        // TA-12: the old `for status in [200,204,404,403] { assert!(probe_reachable(true)) }` loop
+        // called the status-IGNORING predicate four times with the loop var unused — four copies of
+        // the same always-true assert masquerading as status-dependent. Dropped. The meaningful
+        // divergence is the cross-check against the STRICT liveness rule at the 4xx statuses where
+        // the two rules deliberately disagree: readiness=ready, liveness=not-alive.
+        assert!(probe_reachable(true) && !traffic_status_ok(404));
+        assert!(probe_reachable(true) && !traffic_status_ok(403));
+    }
+
+    // TA-6: the racing short-circuit fold at the core of `probe_traffic_once` — «first ready wins /
+    // all-fail → false» — is exercised directly on `first_ready` with a synthetic stream of bools
+    // (no network). This is the MINOR-4 fix's core the audit flagged as untested: the previous
+    // inline `while let Some(..) = stream.next().await` had no unit coverage.
+    #[tokio::test]
+    async fn first_ready_returns_true_on_the_first_ready_and_short_circuits() {
+        use futures_util::stream;
+        // [false, true, false] → true; the fold must return as soon as it sees the `true`.
+        assert!(
+            first_ready(stream::iter([false, true, false])).await,
+            "a stream containing a ready ⇒ true",
+        );
+    }
+
+    #[tokio::test]
+    async fn first_ready_returns_false_when_every_attempt_fails() {
+        use futures_util::stream;
+        // [false, false, false] → false; the whole stream drains with no ready.
+        assert!(
+            !first_ready(stream::iter([false, false, false])).await,
+            "all attempts failing ⇒ false",
+        );
+    }
+
+    #[tokio::test]
+    async fn first_ready_returns_false_on_an_empty_stream() {
+        use futures_util::stream;
+        // [] → false; nothing to be ready.
+        assert!(
+            !first_ready(stream::iter(Vec::<bool>::new())).await,
+            "an empty stream ⇒ false",
+        );
+    }
+
+    #[test]
+    fn readiness_probe_endpoints_are_dns_free() {
+        // 16-11 (MINOR-4 + Yandex amend): guard the DNS-independence invariant by PARSING
+        // each endpoint's host. Every endpoint must be EITHER an IP literal (host parses as
+        // IpAddr — no DNS needed) OR the ONE hostname that is pinned via a hardcoded
+        // resolve() entry (YANDEX_DOH_HOST → YANDEX_DOH_ADDRS, so the probe still does no
+        // system DNS lookup). If someone adds a NON-pinned hostname, it is neither an IP nor
+        // the pinned host → this test fails. Not a source-text grep — it checks the actual
+        // parsed hosts + the pin constants.
+        let mut cloudflare_or_google_ips: Vec<IpAddr> = Vec::new();
+        let mut saw_pinned_yandex = false;
+
+        for url in READINESS_PROBE_ENDPOINTS {
+            // Strip the scheme + trailing path; what remains is the bare host.
+            let host = url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))
+                .expect("readiness endpoint must be an https/http URL")
+                .trim_end_matches('/');
+
+            if let Ok(ip) = host.parse::<IpAddr>() {
+                cloudflare_or_google_ips.push(ip);
+            } else {
+                // The only permitted hostname is the one pinned to fixed IPs (DNS-free).
+                assert_eq!(
+                    host, YANDEX_DOH_HOST,
+                    "readiness endpoint host {host:?} is neither an IP literal nor the pinned \
+                     Yandex host — it would need a system DNS lookup",
+                );
+                saw_pinned_yandex = true;
+            }
+        }
+
+        // Multi-operator: both Cloudflare literals AND both Google literals are present, so a
+        // single blocked operator no longer delays green (the MINOR-4 fix).
+        for ip in ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(
+                cloudflare_or_google_ips.contains(&ip),
+                "readiness probe must include the multi-operator IP literal {ip}",
+            );
+        }
+
+        // Yandex is present AND its pin resolves to valid socket addrs on port 443, so the
+        // resolve_to_addrs override is real (not an empty pin that would fall back to DNS).
+        assert!(saw_pinned_yandex, "readiness probe must include the pinned Yandex DoH host");
+        let pinned: Vec<std::net::SocketAddr> =
+            YANDEX_DOH_ADDRS.iter().filter_map(|a| a.parse().ok()).collect();
+        assert_eq!(
+            pinned.len(),
+            YANDEX_DOH_ADDRS.len(),
+            "every Yandex pin addr must parse as host:port (real DNS-free pin)",
+        );
+        assert!(
+            pinned.iter().all(|s| s.port() == 443),
+            "Yandex pin must target the HTTPS port so the pinned round-trip is TLS",
+        );
+    }
 
     #[test]
     fn offline_floor_is_snappy() {

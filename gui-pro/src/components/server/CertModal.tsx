@@ -320,17 +320,38 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
               {t("server.cert.block_issued_by")}
             </div>
             <div className="text-body">
-              {certInfo.issuerSummary ?? (certInfo.certType === "lets_encrypt" ? "Let's Encrypt" : t("server.cert.unknown"))}
-              {/* R2-F07 (Plan 09-36): do NOT glue the always-known domain onto the
-                  «Неизвестно» issuer when the cert is MISSING — a known address
-                  beside an unknown cert reads as contradictory. The address is
-                  shown as its own neutral fact below instead. */}
-              {!certMissing && (certInfo.subjectCn || certInfo.domain) ? (
-                <span style={{ color: "var(--color-text-muted)" }}>
-                  {" • "}
-                  <span className="font-mono text-mono-sm">{certInfo.subjectCn || certInfo.domain}</span>
-                </span>
-              ) : null}
+              {/* CP-1c (16-12): show the cert TYPE + the REAL server address (the
+                  IP the app connects to), NEVER the internal «trusttunnel.local»
+                  SNI placeholder. Before, a self-signed cert's subject CN
+                  («trusttunnel.local») was shown as the address (and duplicated
+                  the issuer). The owner wants the actual server host —
+                  state.sshParams.host (e.g. 203.0.113.141) — shown ONCE next to
+                  the type. For a real domain server sshParams.host IS the domain,
+                  so it still reads correctly. See 16-UAT-ROUND3 gap CP-1c. */}
+              {(() => {
+                // The leading segment is the human cert-type name.
+                const leadLabel =
+                  certInfo.certType === "lets_encrypt"
+                    ? t("server.cert.lets_encrypt")
+                    : certInfo.certType === "self_signed"
+                      ? t("server.cert.self_signed")
+                      : t("server.cert.unknown");
+                // The address = the real server host (sshParams.host), never the
+                // cert subject CN / .local SNI. R2-F07: omit for a MISSING cert.
+                const host = certMissing ? "" : sshParams.host || "";
+                const showHost = host !== "" && host.toLowerCase() !== leadLabel.toLowerCase();
+                return (
+                  <>
+                    {leadLabel}
+                    {showHost ? (
+                      <span style={{ color: "var(--color-text-muted)" }}>
+                        {" • "}
+                        <span className="font-mono text-mono-sm">{host}</span>
+                      </span>
+                    ) : null}
+                  </>
+                );
+              })()}
             </div>
             {/* R2-F07: the configured server address as a standalone neutral
                 element when the cert is missing (domain comes from hosts.toml,
@@ -386,13 +407,37 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                 </span>
               )}
             </div>
+            {/* NIT-8b (16-12): the owner asked «how do I renew in 10 years?» for a
+                self-signed cert. Auto-renewal (certbot) is LE-only, so a self-signed
+                cert never renews itself. Render ONE muted line stating the valid-until
+                date + that renewal = reinstalling the protocol. Self-signed only; LE
+                keeps the certbot auto-renewal block below. */}
+            {certInfo.certType === "self_signed" && certInfo.notAfter ? (
+              <p
+                className="text-caption mt-2"
+                style={{ color: "var(--color-text-muted)" }}
+                data-testid="cert-self-signed-renew-note"
+              >
+                {t("server.cert.self_signed_renew_note", {
+                  date: formatDateHuman(certInfo.notAfter, i18n.language),
+                })}
+              </p>
+            ) : null}
           </section>
 
           {/* P UAT 2026-05-04: SHA-256 fingerprint block убран — для end-user
               он бесполезен (домен и issuer уже в Block 1). Если admin'у нужен
               для верификации — может через ssh посмотреть `openssl x509 ...`. */}
 
-          {/* Block 3 (was 4) — Auto-renewal toggle (D-5.3) */}
+          {/* Block 3 (was 4) — Auto-renewal toggle (D-5.3).
+              CP-1b (16-09): auto-renewal is a certbot/ACME mechanism — it only
+              applies to Let's Encrypt certs. It is meaningless on self-signed /
+              unknown certs (there is nothing certbot can renew), yet the block
+              used to render for ALL cert types with a misplaced «Включить
+              автообновление» control. Gate the WHOLE block to lets_encrypt
+              (mirrors the renew footer at the LE gate below). See 16-UAT-ROUND3
+              gap CP-1b. */}
+          {certInfo.certType === "lets_encrypt" && (
           <section
             className="border-t pt-3"
             style={{ borderColor: "var(--color-border)" }}
@@ -414,13 +459,21 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                     просто дублирует уже видимый success state. */}
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-2">
+              /* CP-1b (16-09): the not-setup row used `justify-between` with a
+                 long label AND a long button competing for the md-modal width →
+                 the button got compressed and «Включить автообновление» wrapped
+                 / squished. Stack the label above the button on narrow width
+                 (flex-col) and only sit them side-by-side on sm+; give the
+                 button shrink-0 + whitespace-nowrap so its label can never be
+                 squeezed. */
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-body-sm" style={{ color: "var(--color-text-muted)" }}>
                   {t("server.cert.auto_renewal_not_setup")}
                 </span>
                 <Button
                   variant="secondary"
                   size="sm"
+                  className="shrink-0 whitespace-nowrap"
                   icon={<RotateCw className="w-3 h-3" />}
                   onClick={() => void security.enableCertbotTimer()}
                   loading={security.isBusy("enable-certbot-timer")}
@@ -432,6 +485,7 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
               </div>
             )}
           </section>
+          )}
 
           {/* Action footer — Renew (Let's Encrypt only) */}
           {certInfo.certType === "lets_encrypt" && (

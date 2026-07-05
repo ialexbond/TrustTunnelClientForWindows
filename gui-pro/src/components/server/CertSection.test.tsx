@@ -76,8 +76,13 @@ describe("CertSection summary card", () => {
     expect(screen.getByText(/TLS Сертификат/i)).toBeVisible();
   });
 
-  it("subtitle shows issuer + subject (compact)", async () => {
-    render(<CertSection state={stateWith(sampleLetsEncryptCert)} security={mockSecurity} />);
+  it("subtitle shows the cert type + the real server address", async () => {
+    // CP-1c (16-12): the address is state.sshParams.host (the real server host);
+    // for a domain server that equals the domain.
+    const state = stateWith(sampleLetsEncryptCert, {
+      sshParams: { host: "vpn.example.com", port: 22, user: "root", password: "" },
+    } as Partial<ServerState>);
+    render(<CertSection state={state} security={mockSecurity} />);
     await waitFor(() => {
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/Let's Encrypt/i);
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/vpn\.example\.com/);
@@ -214,10 +219,63 @@ describe("CertSection summary card", () => {
     });
   });
 
-  it("self-signed cert shown in subtitle", async () => {
-    render(<CertSection state={stateWith(sampleSelfSignedCert)} security={mockSecurity} />);
+  it("self-signed cert subtitle shows the type + the real server address (not the .local subject CN)", async () => {
+    // CP-1c (16-12): a self-signed cert's subject CN is the internal .local SNI;
+    // the subtitle now shows the real server host (sshParams.host), not that CN.
+    const state = stateWith(sampleSelfSignedCert, {
+      sshParams: { host: "203.0.113.55", port: 22, user: "root", password: "" },
+    } as Partial<ServerState>);
+    render(<CertSection state={state} security={mockSecurity} />);
     await waitFor(() => {
-      expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/internal\.local/);
+      const card = screen.getByTestId("cert-summary-card");
+      expect(card).toHaveTextContent(new RegExp(i18n.t("server.cert.self_signed"), "i"));
+      expect(card).toHaveTextContent("203.0.113.55");
+    });
+    // The internal .local subject CN is not surfaced as the address.
+    expect(screen.getByTestId("cert-summary-card").textContent ?? "").not.toContain("internal.local");
+  });
+
+  // ── CP-1c (16-12): cert TYPE + the REAL server address (IP), not .local ────
+
+  it("CP-1c: self-signed subtitle shows the «Self-signed» type label + the REAL server IP, and NEVER trusttunnel.local", async () => {
+    // A self-signed cert's subject CN is the internal SNI placeholder
+    // «trusttunnel.local». The owner wants the REAL server address — the IP the
+    // app connects to (state.sshParams.host = "203.0.113.141") — plus the type,
+    // and NEVER the .local placeholder.
+    const selfSigned = {
+      present: true,
+      hostname: "trusttunnel.local",
+      notAfter: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      subject: "CN = trusttunnel.local",
+      issuer: "CN = trusttunnel.local",
+    };
+    const state = stateWith(selfSigned, {
+      sshParams: { host: "203.0.113.141", port: 22, user: "root", password: "" },
+    } as Partial<ServerState>);
+    render(<CertSection state={state} security={mockSecurity} />);
+    const card = await screen.findByTestId("cert-summary-card");
+    await waitFor(() => {
+      // The certificate TYPE label is present.
+      expect(card).toHaveTextContent(new RegExp(i18n.t("server.cert.self_signed"), "i"));
+    });
+    // The REAL server IP is shown as the address.
+    expect(card).toHaveTextContent("203.0.113.141");
+    // The internal .local SNI placeholder is NEVER rendered.
+    expect(card.textContent ?? "").not.toContain("trusttunnel.local");
+  });
+
+  it("CP-1c: Let's Encrypt subtitle shows the «Let's Encrypt» type label + the real server address (= the domain)", async () => {
+    // For a real domain server sshParams.host IS the domain, so showing
+    // sshParams.host still reads as the domain. CP-1c: the address is always the
+    // real server host, which for LE equals the domain the user entered.
+    const state = stateWith(sampleLetsEncryptCert, {
+      sshParams: { host: "vpn.example.com", port: 22, user: "root", password: "" },
+    } as Partial<ServerState>);
+    render(<CertSection state={state} security={mockSecurity} />);
+    const card = await screen.findByTestId("cert-summary-card");
+    await waitFor(() => {
+      expect(card).toHaveTextContent(new RegExp(i18n.t("server.cert.lets_encrypt"), "i"));
+      expect(card).toHaveTextContent(/vpn\.example\.com/);
     });
   });
 

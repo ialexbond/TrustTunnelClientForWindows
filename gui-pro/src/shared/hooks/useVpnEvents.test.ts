@@ -1015,6 +1015,202 @@ describe("useVpnEvents", () => {
     });
   });
 
+  // ─── B1 (16-UAT round 2): an in-app snackbar ALSO fires on a connect FAILURE («error» edge) ───
+  //
+  // Root cause: the connect-failure snackbar lived ONLY inside the `disconnected` arm (gated
+  // prev==="connecting"). An auth/connect failure arrives as status:"error" (sidecar
+  // «Authorization Required» → fatal_marker_error → set_vpn_status(Error)), which today ONLY set the
+  // persistent StatusPanel banner (setError) — no pushSuccess. The desktop plate fires on the →error
+  // edge (notify.rs), so the two surfaces disagreed. We now ALSO toast on the error edge, guarded the
+  // same way the disconnect snackbar is: fire only from an in-flight connect (prev connecting/
+  // reconnecting), suppress during a seamless switch, and NEVER re-toast a late-mount/re-emit error.
+  // The persistent banner (setError) is kept — the owner wants BOTH surfaces.
+  describe("B1 — snackbar on the connect-failure «error» edge", () => {
+    it("connecting → error fires the red error snackbar (localized), keeping the persistent banner", async () => {
+      const { setStatus, setError, pushSuccess, params } = makeParams();
+      await act(async () => {
+        renderHook(() => useVpnEvents(params));
+      });
+      pushSuccess.mockClear();
+      setError.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus, error: "Authorization failed" });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      // The snackbar fires with the localized message and the "error" (red) type …
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("errors.auth_required"), "error");
+      // … and the persistent StatusPanel banner is STILL set (both surfaces, per owner).
+      expect(setError).toHaveBeenCalledWith(i18n.t("errors.auth_required"));
+    });
+
+    it("reconnecting → error also fires the red error snackbar (an in-flight reconnect that failed)", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      await act(async () => {
+        renderHook(() => useVpnEvents(params));
+      });
+      pushSuccess.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus, error: "sidecar-exit" });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("reconnecting");
+
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("errors.sidecar_exit"), "error");
+    });
+
+    it("error with NO payload falls back to the localized generic errors.connection_failed", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      await act(async () => {
+        renderHook(() => useVpnEvents(params));
+      });
+      pushSuccess.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("errors.connection_failed"), "error");
+    });
+
+    it("a seamless-switch-active error does NOT toast (the calm «…восстановлено» banner covers it)", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      const seamlessSwitchActiveRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, seamlessSwitchActiveRef }));
+      });
+      pushSuccess.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus, error: "Authorization failed" });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("connecting");
+
+      // A failed B during a switch already surfaces via the amber card + «…восстановлено» info
+      // banner — it must NOT also red-toast.
+      expect(pushSuccess).not.toHaveBeenCalled();
+    });
+
+    it("an error NOT from an in-flight connect (prev 'disconnected') does NOT toast", async () => {
+      // A late-mount snapshot landing on error, or a re-emit of an already-error status, must not
+      // re-toast — only an in-flight connect (connecting/reconnecting) that just failed does.
+      const { setStatus, pushSuccess, params } = makeParams();
+      await act(async () => {
+        renderHook(() => useVpnEvents(params));
+      });
+      pushSuccess.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus, error: "Authorization failed" });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("disconnected");
+
+      expect(pushSuccess).not.toHaveBeenCalled();
+    });
+
+    it("a re-emit of an already-'error' status (prev 'error') does NOT re-toast", async () => {
+      const { setStatus, pushSuccess, params } = makeParams();
+      await act(async () => {
+        renderHook(() => useVpnEvents(params));
+      });
+      pushSuccess.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error" as VpnStatus, error: "sidecar-exit" });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("error");
+
+      expect(pushSuccess).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── B5 (16-UAT round 2): «Сохранить и переподключить» stays seamless (no «Отключение» flash) ───
+  //
+  // Root cause: the no-dwell guard suppressed only `status === "disconnected"` while
+  // manualReconnectActiveRef was set. The backend now emits `Disconnecting` FIRST at every real
+  // teardown (vpn.rs), which the guard did NOT match → it leaked to status → «Отключение»; then
+  // `disconnected` arrives with prev==="disconnecting" (not "reconnecting") → guard missed it too →
+  // «Отключён». We widen the guard to also hold on the `disconnecting` transient during a manual
+  // reconnect, so the amber «Переподключение» holds continuously. NOT broadened to recovering/no-mark
+  // (keeps the AUDIT #8 stuck-on-yellow fix — that path has manualReconnectActiveRef.current false).
+  describe("B5 — manual reconnect holds amber «Переподключение» through the disconnecting transient", () => {
+    it("reconnecting → disconnecting → disconnected stays 'reconnecting' for BOTH events (manual reconnect in flight)", async () => {
+      const { setStatus, params } = makeParams();
+      const manualReconnectActiveRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, manualReconnectActiveRef }));
+      });
+
+      // 1) The teardown's leading `disconnecting` transient must be held (prev "reconnecting").
+      setStatus.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnecting" as VpnStatus });
+      });
+      {
+        const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+        const resolved = typeof updater === "function" ? updater("reconnecting") : updater;
+        expect(resolved).toBe("reconnecting");
+      }
+
+      // 2) The settled `disconnected` must ALSO be held — even though prev is now "reconnecting"
+      //    (the guard suppressed the intermediate disconnecting, so status never left reconnecting).
+      setStatus.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+      });
+      {
+        const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+        const resolved = typeof updater === "function" ? updater("reconnecting") : updater;
+        expect(resolved).toBe("reconnecting");
+      }
+    });
+
+    it("does NOT broaden: a plain switch teardown 'disconnecting' (no manual reconnect) still commits", async () => {
+      // manualReconnectActiveRef false → the widened guard must NOT suppress a disconnecting edge.
+      const { setStatus, params } = makeParams();
+      const manualReconnectActiveRef = { current: false };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, manualReconnectActiveRef }));
+      });
+      setStatus.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnecting" as VpnStatus });
+      });
+
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      const resolved = typeof updater === "function" ? updater("reconnecting") : updater;
+      expect(resolved).toBe("disconnecting");
+    });
+
+    it("does NOT broaden to 'recovering': a disconnecting from recovering commits (AUDIT #8 intact)", async () => {
+      // Even with a manual reconnect ref set, the guard keys on prev==="reconnecting"; a
+      // recovering→disconnecting edge is not covered, so it commits (never stuck-on-yellow).
+      const { setStatus, params } = makeParams();
+      const manualReconnectActiveRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, manualReconnectActiveRef }));
+      });
+      setStatus.mockClear();
+
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnecting" as VpnStatus });
+      });
+
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      const resolved = typeof updater === "function" ? updater("recovering") : updater;
+      expect(resolved).toBe("disconnecting");
+    });
+  });
+
   // ─── Phase 14 (14-04): defensive onSettled backstop on the terminal edge ───
   //
   // Pitfall 2: even if a switch promise is abandoned (a dropped/never-resolving chain), a

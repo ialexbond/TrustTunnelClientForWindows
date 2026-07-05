@@ -803,6 +803,88 @@ fn detect_conflicting_adapters() -> Vec<String> {
 #[cfg(not(windows))]
 fn detect_conflicting_adapters() -> Vec<String> { vec![] }
 
+/// 16-08 (gap 6): pure "should we raise the second-VPN banner?" decision. We emit
+/// ONLY when the post-`filter_out_own_adapter` conflict list is non-empty — so our
+/// OWN WinTUN re-appearing (a routine provider reconnect) NEVER nags (T-21). Pure so
+/// the empty→silent / non-empty→emit rule is unit-testable without OS enumeration.
+fn conflict_emit_warranted(conflicts: &[String]) -> bool {
+    !conflicts.is_empty()
+}
+
+/// MINOR-2 (16-10, Fable review): pure MONITOR-path emit decision — a conflict banner
+/// is warranted mid-session ONLY when a real foreign adapter is present AND the session
+/// is still Connected. `detect_conflicting_adapters` shells out to PowerShell, so a scan
+/// spawned while Connected can resolve 1.5–3s LATER, by which time the user may have
+/// disconnected; emitting then paints a stale "second VPN" banner on a disconnected app.
+/// Gating on a FRESH `Connected` read right before the emit closes that window. Pure so
+/// the (present, Connected)→emit / (present, Disconnected)→silent rule is unit-testable
+/// without OS enumeration or AppState. NOTE: this is the MONITOR gate only — the
+/// connect-thread one-shot runs during an active connect and is intentionally NOT gated.
+fn monitor_conflict_emit_warranted(conflicts: &[String], status: VpnStatus) -> bool {
+    conflict_emit_warranted(conflicts) && status == VpnStatus::Connected
+}
+
+/// 16-08 (gap 6): single source of truth for the second-VPN conflict banner. Runs
+/// `detect_conflicting_adapters` (which already applies `filter_out_own_adapter`
+/// internally) and, ONLY when a real FOREIGN adapter is present, emits the SAME two
+/// events the connect thread has always emitted: `vpn-log` (warn) + the structured
+/// `vpn-adapter-conflict` { adapters, message } that drives the FE banner.
+///
+/// Used by BOTH the connect thread (one-shot at connect) and the connectivity
+/// monitor's honored adapter-change wake (mid-session re-scan) — so a second VPN
+/// that starts AFTER our connect raises the same named banner instead of a silent
+/// drop into «Восстановление» (owner UAT gap 6). This is READ-AND-EMIT ONLY: it
+/// never touches status / killswitch / routing / reconnect. `detect_conflicting_adapters`
+/// shells out to PowerShell, so callers on an async path MUST run this off-thread
+/// (see the monitor's `spawn_blocking`).
+pub(crate) fn emit_adapter_conflict_if_any(app: &tauri::AppHandle) {
+    let conflicts = detect_conflicting_adapters();
+    if !conflict_emit_warranted(&conflicts) {
+        return;
+    }
+    emit_conflict_events(app, &conflicts);
+}
+
+/// MINOR-2 (16-10, Fable review): the MONITOR-path variant. Same detect-and-emit as
+/// `emit_adapter_conflict_if_any`, but re-reads the LIVE `vpn_status` (the D-01 single
+/// owner) immediately before emitting and SKIPS the emit unless the session is still
+/// `Connected`. The connect-thread one-shot must NOT use this (it runs during an active
+/// connect, before the status has settled to Connected); it keeps calling the ungated
+/// `emit_adapter_conflict_if_any`. See `monitor_conflict_emit_warranted` for why: the
+/// PowerShell scan can resolve 1.5–3s after the user disconnected → a fresh status read
+/// here prevents a stale post-disconnect banner. Reads the SAME AppState/vpn_status the
+/// monitor already owns; adds NO new lock and does not change timing.
+pub(crate) fn emit_adapter_conflict_if_any_monitored(app: &tauri::AppHandle) {
+    let conflicts = detect_conflicting_adapters();
+    // Fresh status read AFTER the (slow) scan resolved, using the canonical D-01 owner.
+    let status = app
+        .try_state::<AppState>()
+        .map(|state| *state.vpn_status.lock().unwrap_or_else(|e| e.into_inner()))
+        .unwrap_or(VpnStatus::Disconnected);
+    if !monitor_conflict_emit_warranted(&conflicts, status) {
+        return;
+    }
+    emit_conflict_events(app, &conflicts);
+}
+
+/// 16-10: the shared emit body factored out of the connect-thread and monitor helpers so
+/// the `vpn-log` (warn) + `vpn-adapter-conflict` { adapters, message } event shape stays
+/// single-sourced. Callers decide WHETHER to emit; this decides only HOW.
+fn emit_conflict_events(app: &tauri::AppHandle, conflicts: &[String]) {
+    let names = conflicts.join(", ");
+    let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
+    eprintln!("[vpn] {warn_msg}");
+    crate::logging::log_app("WARN", &warn_msg);
+    app.emit("vpn-log", VpnLogPayload {
+        message: warn_msg.clone(),
+        level: "warn".into(),
+    }).ok();
+    app.emit("vpn-adapter-conflict", serde_json::json!({
+        "adapters": conflicts,
+        "message": warn_msg,
+    })).ok();
+}
+
 /// Kill the sidecar stored in AppState, if any.
 ///
 /// IN-02: this intentionally does NOT route through `set_vpn_status`, so it leaves
@@ -1231,24 +1313,14 @@ pub async fn vpn_connect(
     // Kill any stale sidecar processes that might hold the WinTUN adapter
     kill_stale_sidecar();
 
-    // Warn about conflicting VPN adapters (non-blocking — runs in background)
+    // Warn about conflicting VPN adapters (non-blocking — runs in background).
+    // 16-08 (gap 6): the emit is now the shared emit_adapter_conflict_if_any, used
+    // by BOTH this connect-thread one-shot and the monitor's mid-session re-scan, so
+    // the event shape is single-sourced. Detached thread + app.clone() shape kept so
+    // detection (a PowerShell shell-out) stays off the hot connect path.
     let app_bg = app.clone();
     std::thread::spawn(move || {
-        let conflicts = detect_conflicting_adapters();
-        if !conflicts.is_empty() {
-            let names = conflicts.join(", ");
-            let warn_msg = format!("Warning: detected active VPN adapters from other software: {names}. This may cause connection issues. Consider disabling them before connecting.");
-            eprintln!("[vpn_connect] {warn_msg}");
-            crate::logging::log_app("WARN", &warn_msg);
-            app_bg.emit("vpn-log", VpnLogPayload {
-                message: warn_msg.clone(),
-                level: "warn".into(),
-            }).ok();
-            app_bg.emit("vpn-adapter-conflict", serde_json::json!({
-                "adapters": conflicts,
-                "message": warn_msg,
-            })).ok();
-        }
+        emit_adapter_conflict_if_any(&app_bg);
     });
 
     app.emit("vpn-log", VpnLogPayload {
@@ -2627,6 +2699,98 @@ mod tests {
         ];
         let filtered = filter_out_own_adapter(raw.clone());
         assert_eq!(filtered, raw, "no genuine third-party adapter must be over-filtered");
+    }
+
+    // ── 16-08 (gap 6): mid-session re-scan emit decision ──────────────────────
+    #[test]
+    fn conflict_emit_warranted_only_on_non_empty_list() {
+        // The banner (vpn-adapter-conflict) fires ONLY when a real foreign adapter
+        // remains after filter_out_own_adapter. An empty list = nothing to warn about,
+        // so a routine provider reconnect (our own WinTUN re-appearing, already dropped
+        // by the filter) never nags mid-session.
+        assert!(!conflict_emit_warranted(&[]), "empty list => no banner");
+        assert!(
+            !conflict_emit_warranted(&Vec::<String>::new()),
+            "explicitly-empty vec => no banner",
+        );
+        assert!(
+            conflict_emit_warranted(&["WireGuard Tunnel".to_string()]),
+            "a foreign adapter => banner",
+        );
+        assert!(
+            conflict_emit_warranted(&[
+                "AmneziaWG".to_string(),
+                "OpenVPN TAP-Windows Adapter V9".to_string(),
+            ]),
+            "multiple foreign adapters => banner",
+        );
+    }
+
+    #[test]
+    fn mid_session_rescan_drops_own_but_keeps_foreign() {
+        // The mid-session re-scan reuses filter_out_own_adapter (T-21): a raw enumeration
+        // that carries our own "TrustTunnel (host)" WinTUN alongside a genuine second VPN
+        // must warrant a banner naming ONLY the foreign adapter — never our own tunnel.
+        let raw = vec![
+            "TrustTunnel (vpn.example.com)".to_string(),
+            "WireGuard".to_string(),
+            "Amnezia".to_string(),
+        ];
+        let filtered = filter_out_own_adapter(raw);
+        assert_eq!(
+            filtered,
+            vec!["WireGuard".to_string(), "Amnezia".to_string()],
+            "own WinTUN dropped; both foreign adapters kept",
+        );
+        assert!(
+            conflict_emit_warranted(&filtered),
+            "a foreign adapter remains => the mid-session banner fires",
+        );
+    }
+
+    #[test]
+    fn mid_session_rescan_stays_silent_when_only_own_adapter() {
+        // If the ONLY adapter enumerated is our own WinTUN (the routine "provider
+        // reconnect" case — our tunnel re-appearing), the filtered list is empty, so no
+        // banner fires: routine churn must never nag.
+        let raw = vec!["TrustTunnel (vpn.example.com)".to_string()];
+        let filtered = filter_out_own_adapter(raw);
+        assert!(filtered.is_empty(), "own-only => empty after filter");
+        assert!(
+            !conflict_emit_warranted(&filtered),
+            "own adapter re-appearing must NOT raise the banner",
+        );
+    }
+
+    // ── MINOR-2 (16-10, Fable review): monitor-path emit is status-gated ───────
+    #[test]
+    fn monitor_conflict_emit_gated_on_fresh_connected_status() {
+        let foreign = vec!["WireGuard Tunnel".to_string()];
+        // A foreign adapter is present, but the off-thread scan resolved AFTER the user
+        // disconnected: a fresh Disconnected read must suppress the stale banner.
+        assert!(
+            !monitor_conflict_emit_warranted(&foreign, VpnStatus::Disconnected),
+            "present + Disconnected => no stale post-disconnect banner",
+        );
+        // Foreign adapter present and the session is still Connected => the banner fires.
+        assert!(
+            monitor_conflict_emit_warranted(&foreign, VpnStatus::Connected),
+            "present + Connected => banner fires",
+        );
+        // No foreign adapter => silent even while Connected (routine churn never nags).
+        assert!(
+            !monitor_conflict_emit_warranted(&[], VpnStatus::Connected),
+            "empty + Connected => no banner",
+        );
+        // Any non-Connected transient status equally suppresses the mid-session emit.
+        assert!(
+            !monitor_conflict_emit_warranted(&foreign, VpnStatus::Reconnecting),
+            "present + Reconnecting => no banner (not a settled Connected session)",
+        );
+        assert!(
+            !monitor_conflict_emit_warranted(&foreign, VpnStatus::Connecting),
+            "present + Connecting => no banner",
+        );
     }
 
     #[test]

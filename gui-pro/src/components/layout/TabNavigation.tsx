@@ -25,6 +25,15 @@ interface TabNavigationProps {
    */
   hasAppUpdate?: boolean;
   hasSidecarUpdate?: boolean;
+  /**
+   * INSTALL-LOCK (16-12): when `true`, tab switching is DISABLED — a protocol
+   * install (or a delete/reset) is in progress and navigating away would corrupt
+   * it («установка не завершена»). The active tab stays selectable/visible; the
+   * OTHER tab pills are non-interactive (aria-disabled + pointer-events none +
+   * dimmed) and keyboard arrow-navigation is suppressed. Re-enabled the instant
+   * the install finishes (done/error/cancel). Default `false`.
+   */
+  locked?: boolean;
 }
 
 interface TabDef {
@@ -52,6 +61,7 @@ export function TabNavigation({
   onTabChange,
   hasAppUpdate = false,
   hasSidecarUpdate = false,
+  locked = false,
 }: TabNavigationProps) {
   const { t } = useTranslation();
   const navRef = useRef<HTMLElement>(null);
@@ -86,6 +96,10 @@ export function TabNavigation({
   // This prevents accidental activation of heavy tabs (Control/Connection) while
   // users just navigate the tablist.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    // INSTALL-LOCK (16-12): while an install/reset is running, arrow/Home/End
+    // navigation is suppressed too, so the keyboard cannot move focus onto (and
+    // then activate) another tab mid-install.
+    if (locked) return;
     // Find which tab currently has keyboard focus — roving focus means activeTab
     // may lag behind focus as the user arrows around.
     const tabEls = Array.from(
@@ -150,6 +164,10 @@ export function TabNavigation({
         />
         {TABS.map((tab, index) => {
           const active = activeTab === tab.id;
+          // INSTALL-LOCK (16-12): during an install/reset, only the ACTIVE tab
+          // stays interactive; the others are non-interactive (can't switch away
+          // and disrupt the install). The active pill itself is never disabled.
+          const tabLocked = locked && !active;
 
           return (
             <button
@@ -159,12 +177,23 @@ export function TabNavigation({
               id={getTabButtonId(tab.id)}
               aria-selected={active}
               aria-controls={getTabPanelId(tab.id)}
+              aria-disabled={tabLocked || undefined}
+              disabled={tabLocked}
               tabIndex={active ? 0 : -1}
-              onClick={() => onTabChange(tab.id)}
-              className="flex-1 flex items-center justify-center outline-none cursor-pointer bg-transparent border-none p-0 focus-visible:shadow-[var(--focus-ring)]"
+              onClick={() => {
+                // Guard the click too — a locked non-active tab must not switch.
+                if (tabLocked) return;
+                onTabChange(tab.id);
+              }}
+              className={[
+                "flex-1 flex items-center justify-center outline-none bg-transparent border-none p-0 focus-visible:shadow-[var(--focus-ring)]",
+                tabLocked ? "cursor-not-allowed" : "cursor-pointer",
+              ].join(" ")}
               style={{
                 color: active ? "var(--color-accent-interactive)" : "var(--color-text-secondary)",
                 position: "relative",
+                // Dim the locked (non-active) pills so the lock is visible.
+                opacity: tabLocked ? "var(--opacity-disabled)" : undefined,
               }}
             >
               <span

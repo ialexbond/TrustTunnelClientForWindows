@@ -13,7 +13,7 @@ import { Tooltip } from "../../shared/ui/Tooltip";
 import { NumberInput } from "../../shared/ui/NumberInput";
 import { DnsUpstreamsInput } from "../server/DnsUpstreamsInput";
 import { useSettingsState } from "../settings/useSettingsState";
-import { validateListenAddress } from "../../shared/utils/validators";
+// (validateListenAddress import removed with the SOCKS5 address field — TUN-only now)
 import type { VpnStatus, VpnConfig } from "../../shared/types";
 
 /**
@@ -32,7 +32,7 @@ import type { VpnStatus, VpnConfig } from "../../shared/types";
  *   - header: «Настройки конфигурации» h2 + config name + active/inactive flag + corner ×
  *   - read-only credentials (server address / login / MASKED password — never the secret, D-29)
  *   - Protocol segment (HTTP/2 | HTTP/3)
- *   - Mode segment (TUN → MTU · SOCKS5 → address/login/password)
+ *   - MTU (TUN listener parameter)
  *   - Kill Switch / Anti-DPI / Post-Quantum / IPv6 toggles (flat, one benefit line + «?» each)
  *   - DnsUpstreamsInput
  *   - read-only config file path + «Открыть папку»
@@ -173,6 +173,11 @@ export function ConfigEditView({
     onConfigChange: onConfigChange ?? (() => {}),
     onSwitchToSetup: () => {},
     onClearConfig: () => {},
+    // B3 (16-UAT round 2): NO auto-save in the config editor. Edits must persist ONLY when the
+    // user presses «Сохранить»/«Сохранить и переподключить» (handleSave), in BOTH the connected
+    // and disconnected states. Opting out disables the 1200ms debounce AND the tt-peer-save
+    // flush so a field edit never touches disk before the button.
+    autoSave: false,
   });
 
   const { config, saving, dirty, handleSave, loadError } = state;
@@ -183,18 +188,7 @@ export function ConfigEditView({
   // Derived per-config field values (read straight off the hook's `config`, the parsed
   // .toml). The updateField path mutates the same nested shape the settings sections use.
   const protocol = config?.endpoint?.upstream_protocol || "http2";
-  const listenerMode = config?.listener?.socks ? "socks" : "tun";
   const mtu = String(config?.listener?.tun?.mtu_size ?? 1280);
-  // WR-07: read the RAW stored SOCKS address (may be "") so the user can clear the field to
-  // re-type it — the old `|| "127.0.0.1:1080"` snapped an emptied field back to the default
-  // mid-edit, which made it impossible to clear. The default is only used as a placeholder now.
-  const socksAddrRaw =
-    typeof config?.listener?.socks?.address === "string"
-      ? (config.listener.socks.address as string)
-      : "";
-  const socksAddr = socksAddrRaw;
-  const socksUser = config?.listener?.socks?.username || "";
-  const socksPass = config?.listener?.socks?.password || "";
   const killSwitch = Boolean(config?.killswitch_enabled);
   const antiDpi = Boolean(config?.endpoint?.anti_dpi);
   const postQuantum = Boolean(config?.post_quantum_group_enabled);
@@ -221,15 +215,6 @@ export function ConfigEditView({
       ? t("connection.editView.name_bad_chars")
       : null;
 
-  // WR-07: validate the SOCKS address (host + port range) so an invalid value participates in
-  // saveDisabled instead of being saved verbatim and failing opaquely at the sidecar. Only the
-  // SOCKS listener mode has this field — in TUN mode there is no SOCKS address to validate.
-  // validateListenAddress returns an i18n KEY ("" = valid); we surface the localized message
-  // inline (same pattern as MTU/DNS/name errors).
-  const socksErrorKey = listenerMode === "socks" ? validateListenAddress(socksAddrRaw) : "";
-  const socksError = socksErrorKey !== "";
-  const socksErrorMsg = socksError ? t(socksErrorKey) : null;
-
   // F26: the save LABEL comes from isActiveConfig, NOT the live save mode.
   const saveLabel = isActiveConfig
     ? t("connection.editView.save_and_reconnect")
@@ -245,11 +230,10 @@ export function ConfigEditView({
   // stays editable). Reuses the existing disabled idiom — OR'd into saveDisabled, no parallel lock.
   const switchLocked = isActiveConfig && isSwitching;
 
-  // Save is disabled when: nothing changed, a field is invalid (MTU/DNS/name/SOCKS address —
-  // WR-07), the first-connect lock is on, a save is already in flight, or a switch is in flight on
-  // the active config (D-13).
+  // Save is disabled when: nothing changed, a field is invalid (MTU/DNS/name), the first-connect
+  // lock is on, a save is already in flight, or a switch is in flight on the active config (D-13).
   const saveDisabled =
-    !dirty || mtuError || dnsError || nameInvalid || socksError || firstConnectLocked || saving || switchLocked;
+    !dirty || mtuError || dnsError || nameInvalid || firstConnectLocked || saving || switchLocked;
 
   const handleSaveClick = async () => {
     // Save the file WITHOUT awaiting a reconnect inside, so on success we can close the modal
@@ -406,78 +390,18 @@ export function ConfigEditView({
             />
           </Field>
 
-          {/* Listener mode + its dependent field(s) */}
-          <Field label={t("connection.editView.mode")} help={t("connection.editView.help_mode")}>
-            <Segmented
-              ariaLabel={t("connection.editView.mode")}
-              options={[
-                { id: "tun", label: "TUN" },
-                { id: "socks", label: "SOCKS5" },
-              ]}
-              value={listenerMode}
-              onChange={(id) => {
-                // IN-54: one atomic switch. Preserves the other mode's data for a round-trip
-                // (TUN routes are no longer destroyed) and flips on the FIRST click. A fresh TUN
-                // defaults to a full tunnel (0.0.0.0/0) so it always routes traffic.
-                if (id !== listenerMode) state.setListenerMode(id as "tun" | "socks");
-              }}
+          {/* MTU — the only TUN listener parameter surfaced here (SOCKS5 mode removed). */}
+          <Field label={t("connection.editView.mtu")} help={t("tooltips.mtu")}>
+            <NumberInput
+              value={mtu}
+              onChange={(v) => state.updateField("listener.tun.mtu_size", Number(v) || 0)}
+              min={MTU_MIN}
+              max={MTU_MAX}
+              maxLength={4}
+              onErrorChange={setMtuError}
+              aria-label={t("connection.editView.mtu")}
             />
           </Field>
-          {listenerMode === "tun" ? (
-            <Field label={t("connection.editView.mtu")} help={t("tooltips.mtu")}>
-              <NumberInput
-                value={mtu}
-                onChange={(v) => state.updateField("listener.tun.mtu_size", Number(v) || 0)}
-                min={MTU_MIN}
-                max={MTU_MAX}
-                maxLength={4}
-                onErrorChange={setMtuError}
-                aria-label={t("connection.editView.mtu")}
-              />
-            </Field>
-          ) : (
-            <>
-              <Field label={t("connection.editView.socks_address")} help={t("connection.editView.help_socks_address")}>
-                <Input
-                  value={socksAddr}
-                  onChange={(e) =>
-                    // WR-07: keep the keystroke-level whitelist (digits / dots / colons /
-                    // brackets for IPv6) but do NOT snap an emptied field back to the default —
-                    // store the raw value so the user can clear and re-type. Shape validation
-                    // (host + port range) is surfaced via `error` and gates `saveDisabled`.
-                    state.updateField(
-                      "listener.socks.address",
-                      e.target.value.replace(/[^0-9.:[\]]/g, ""),
-                    )
-                  }
-                  error={socksErrorMsg ?? undefined}
-                  placeholder="127.0.0.1:1080"
-                  aria-label={t("connection.editView.socks_address")}
-                />
-              </Field>
-              <Field label={t("connection.editView.socks_login")} help={t("connection.editView.help_socks_login")}>
-                <Input
-                  value={socksUser}
-                  onChange={(e) =>
-                    state.updateField("listener.socks.username", e.target.value || undefined)
-                  }
-                  placeholder={t("connection.editView.socks_login_placeholder")}
-                  aria-label={t("connection.editView.socks_login")}
-                />
-              </Field>
-              <Field label={t("connection.editView.socks_password")} help={t("connection.editView.help_socks_password")}>
-                <PasswordInput
-                  value={socksPass}
-                  onChange={(e) =>
-                    state.updateField("listener.socks.password", e.target.value || undefined)
-                  }
-                  showIcon
-                  placeholder={t("connection.editView.socks_password_placeholder")}
-                  aria-label={t("connection.editView.socks_password")}
-                />
-              </Field>
-            </>
-          )}
 
           {/* Security + network toggles — flat list, no section headings, no per-row icons.
               Kill Switch is per-config here (part of the .toml), not the global switch. */}

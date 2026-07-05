@@ -141,11 +141,21 @@ describe("SecuritySection Phase 16 Plan 05 layout", () => {
       sha256Fingerprint:
         "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
     };
-    render(<SecuritySection state={makeServerState({ certRaw })} />);
+    // CP-1c (16-12): the subtitle shows the REAL server host (sshParams.host),
+    // which for a real domain server IS the domain. Set the SSH host to the domain
+    // so the summary card reads the domain address.
+    render(
+      <SecuritySection
+        state={makeServerState({
+          certRaw,
+          sshParams: { ...mockSshParams, host: "vpn.example.com", keyPath: undefined },
+        })}
+      />,
+    );
     expect(await screen.findByTestId("firewall-summary-card")).toBeVisible();
     // P1-9 + P1-10 #R+#3 — CertSection теперь summary card; detail (fingerprint,
-    // subject CN) перенесены в CertModal. Здесь проверяем что summary card
-    // рендерит и subtitle несёт subject CN.
+    // subject CN) перенесены в CertModal. CP-1c: subtitle несёт РЕАЛЬНЫЙ адрес
+    // сервера (sshParams.host), который для домена = домен.
     expect(await screen.findByTestId("cert-summary-card")).toBeVisible();
     await waitFor(() => {
       expect(screen.getByTestId("cert-summary-card")).toHaveTextContent(/vpn\.example\.com/);

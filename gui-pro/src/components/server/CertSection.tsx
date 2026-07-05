@@ -139,18 +139,38 @@ export function CertSection({ state, security }: Props) {
     // glued onto an unknown cert via «issuer • domain • …»). Returning null here
     // lets the render swap in the dedicated address element instead.
     if (certMissing) return null;
-    const issuer = certInfo.issuerSummary
-      ?? (certInfo.certType === "lets_encrypt" ? "Let's Encrypt" : t("server.cert.unknown"));
-    const sub = certInfo.subjectCn || certInfo.domain || "—";
-    // Show absolute expiration date alongside issuer + domain так чтобы
+    // CP-1 (16-09): show the certificate TYPE + the domain-or-IP ONCE — never the
+    // host name twice. For a self-signed cert the issuer CN == subject CN (both
+    // «trusttunnel.local»), so the old `${issuer} • ${sub}` rendered the host
+    // twice and NEVER surfaced the type. certInfo.certType is already parsed —
+    // surface it as the leading segment instead of issuerSummary. This is a
+    // long-standing, repeatedly-requested fix (16-UAT-ROUND3 gap CP-1).
+    const certTypeLabel =
+      certInfo.certType === "self_signed"
+        ? t("server.cert.self_signed")
+        : certInfo.certType === "lets_encrypt"
+          ? t("server.cert.lets_encrypt")
+          : t("server.cert.unknown");
+    // CP-1c (16-12): show the REAL server address — the IP the app connects to —
+    // not the cert subject CN. For a self-hosted server the subject CN is the
+    // internal SNI placeholder «trusttunnel.local» (the owner «воевал тысячу
+    // раз» to stop seeing it); the address he wants is state.sshParams.host (the
+    // actual server host = the IP, e.g. 203.0.113.141). Prefer sshParams.host —
+    // it IS the server — falling back to the subject CN / domain only when the
+    // host is somehow empty. For a real domain server sshParams.host IS the
+    // domain, so it still reads correctly.
+    const domainOrIp = sshParams.host || certInfo.subjectCn || certInfo.domain || "—";
+    // Show absolute expiration date alongside type + domain так чтобы
     // пользователь видел КОГДА истекает (не только относительное «67 дней»).
     const expires = certInfo.notAfter
       ? t("server.security.summary.cert_subtitle_expires", {
           date: formatExpiryDate(certInfo.notAfter, i18n.language),
         })
       : null;
-    return expires ? `${issuer} • ${sub} • ${expires}` : `${issuer} • ${sub}`;
-  }, [certInfo, certMissing, i18n.language, t]);
+    return expires
+      ? `${certTypeLabel} • ${domainOrIp} • ${expires}`
+      : `${certTypeLabel} • ${domainOrIp}`;
+  }, [certInfo, certMissing, sshParams.host, i18n.language, t]);
 
   // R2-F07 (Plan 09-36): the configured server address as a standalone neutral
   // fact, shown when the cert is missing (the domain comes from hosts.toml and

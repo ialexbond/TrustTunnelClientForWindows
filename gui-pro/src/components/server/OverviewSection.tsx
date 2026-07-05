@@ -70,6 +70,15 @@ const accent: React.CSSProperties = { color: "var(--color-accent-interactive)" }
 // hardcoded `2rem`/`600`; now --font-size-card-value (32px) + --font-weight-semibold
 // so a card-value retune lives in tokens.css, not scattered inline styles.
 const bigNum: React.CSSProperties = { fontSize: "var(--font-size-card-value)", fontWeight: "var(--font-weight-semibold)", lineHeight: 1, color: "var(--color-text-primary)" };
+// CP-2b (16-12, REVERT of 16-09): the owner rejected the shrunk country font —
+// he wants the country value at the SAME size as the other metric cards
+// (Uptime/Version/IP = bigNum, --font-size-card-value 32px), just kept on ONE
+// line. The 16-09 fix mistakenly reduced it to --font-size-title-sm (20px). We
+// revert to the bigNum size (lineHeight nudged to 1.1 for the flag row) and
+// achieve one-line via whitespace-nowrap + overflow-hidden/text-ellipsis + a
+// title (applied at the JSX span) so a pathologically long name is ellipsized at
+// FULL size rather than shrunk or wrapped. See 16-UAT-ROUND3 gap CP-2b.
+const countryValue: React.CSSProperties = { fontSize: "var(--font-size-card-value)", fontWeight: "var(--font-weight-semibold)", lineHeight: 1.1, color: "var(--color-text-primary)" };
 const danger: React.CSSProperties = { color: "var(--color-danger-500)" };
 
 // D-10 (Plan 07-06, post-UAT scope): perceptible press-state — a native-app
@@ -430,7 +439,13 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
   const securityKeyPath = sshParams.keyPath;
   const serviceActive = serverInfo?.serviceActive;
   const refetchSecurity = useCallback(() => {
-    if (!serviceActive || rebooting) return;
+    // Round-3 re-UAT fix: firewall (ufw) + fail2ban are SERVER-side services whose
+    // status is INDEPENDENT of whether the VPN protocol is running. Gating this
+    // fetch on `serviceActive` left the Overview «Безопасность» card showing «—»
+    // for both while the protocol was stopped (and after a re-auth) even though
+    // the Security tab loaded them fine. Only skip while `rebooting` (SSH unstable).
+    // `serviceActive` stays in the deps/sig below so the card refreshes on start↔stop.
+    if (rebooting) return;
     setSecurityLoading(true);
     invoke<{ firewall: { installed: boolean; active: boolean }; fail2ban: { installed: boolean; active: boolean } }>(
       "security_get_status",
@@ -449,7 +464,10 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         activityLog("ERROR", `overview.security.failed err=${String(e)}`, "security_get_status");
       })
       .finally(() => { setSecurityLoading(false); setSecurityHasSettled(true); });
-  }, [securityHost, securityPort, securityUser, securityPassword, securityKeyPath, serviceActive, rebooting, activityLog]);
+    // serviceActive intentionally NOT a dep: the fetch no longer branches on it
+    // (firewall/fail2ban are protocol-independent). The sig-effect below keeps
+    // serviceActive so the card still refreshes on a start↔stop transition.
+  }, [securityHost, securityPort, securityUser, securityPassword, securityKeyPath, rebooting, activityLog]);
 
   // C-01: StrictMode-safe single-fire. The dev double-mount would otherwise fire
   // security_get_status twice on the same SSH channel. A signature ref ensures
@@ -765,8 +783,8 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
         <div className="flex flex-col items-center justify-center gap-0.5" style={{ minHeight: 48 }}>
           {ping !== null && ping > 0 ? (
             <div className="flex items-baseline justify-center gap-1">
-              <span className="font-mono" style={{ ...bigNum, color: pingColor }}>{ping}</span>
-              <span className="text-sm font-mono" style={muted}>ms</span>
+              <span className="font-mono whitespace-nowrap" style={{ ...bigNum, color: pingColor }}>{ping}</span>
+              <span className="text-sm font-mono whitespace-nowrap" style={muted}>ms</span>
             </div>
           ) : (
             <>
@@ -869,7 +887,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
               the D-07 all-cards gate has already opened — it does NOT feed
               allReady/gateOpenedRef. See 09-UAT-2-DIAGNOSIS.md (R2-F08). */}
           {usersKnown ? (
-            <span className="font-mono" style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
+            <span className="font-mono whitespace-nowrap" style={userCount > 0 ? bigNum : { ...bigNum, ...muted }}>{userCount}</span>
           ) : (
             <Skeleton variant="line" width={100} height={32} data-testid="users-count-skeleton" />
           )}
@@ -904,9 +922,9 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
               inline-block wrapper sized to the value, with the dust as its absolute inset-0 child.
               Replaced the old blur(6px) (readable silhouette + hard halo edge). The value reserves
               its width in both states → no layout shift on toggle. */}
-          <span className="relative inline-block" style={bigNum}>
+          <span className="relative inline-block whitespace-nowrap" style={bigNum}>
             <span
-              className="font-mono"
+              className="font-mono whitespace-nowrap"
               style={{
                 opacity: ipRevealed ? 1 : 0,
                 transition: "opacity 400ms var(--ease-out)",
@@ -937,7 +955,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
           {geoLoading ? (
             <Skeleton variant="line" width={120} height={28} />
           ) : geo ? (
-            <span style={bigNum} className="flex items-center gap-2" data-testid="country-card-value">
+            <span style={countryValue} className="flex items-center gap-2 min-w-0" data-testid="country-card-value">
               {/* M-06: ipwho.is возвращает готовый emoji флаг (U+1F1XX regional
                   indicators). Показываем его слева от страны — проще, чем
                   тянуть SVG-флаги из flag-icons или подобного пакета. Emoji
@@ -945,7 +963,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
               {geo.flag_emoji && (
                 <span
                   aria-hidden="true"
-                  className="text-xl leading-none"
+                  className="text-xl leading-none shrink-0"
                   // M-06 follow-up: force Twemoji Country Flags as the primary
                   // family for this span. Windows native Segoe UI Emoji does
                   // NOT render regional indicator pairs as flags — it shows
@@ -958,7 +976,17 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
                   {geo.flag_emoji}
                 </span>
               )}
-              <span>{getLocalizedCountry(geo.country_code, geo.country, i18n.language)}</span>
+              {/* CP-2 (16-09): whitespace-nowrap keeps the localized name on ONE
+                  line; truncate + title degrades a pathologically long name to a
+                  «…» ellipsis with the full name on hover instead of wrapping. */}
+              {(() => {
+                const localized = getLocalizedCountry(geo.country_code, geo.country, i18n.language);
+                return (
+                  <span className="whitespace-nowrap truncate leading-tight" title={localized}>
+                    {localized}
+                  </span>
+                );
+              })()}
             </span>
           ) : (
             <span className="text-xl font-semibold" style={muted}>—</span>
@@ -1004,7 +1032,7 @@ export function OverviewSection({ state, activeServerTab, onNavigate, sidecarAva
       >
         <Title icon={<Package className="w-5 h-5" />} text={t("server.overview.cards.protocolVersion")} clickable refreshAriaLabel={refreshAriaLabel} />
         <div className="flex items-center justify-center gap-3 py-2">
-          <span className="font-mono" style={bigNum}>{version}</span>
+          <span className="font-mono whitespace-nowrap" style={bigNum}>{version}</span>
           {sidecarAvailable && (
             // Phase 19: дизайн-спека (Storybook «8b. Версия — обновление»)
             // предписывает `ArrowUpCircle` w-6 h-6 warning-500 — стрелка в

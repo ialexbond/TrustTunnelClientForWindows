@@ -40,7 +40,6 @@ function makeState(overrides: Partial<SettingsState> = {}): SettingsState {
     setLocalPath: vi.fn(),
     setError: vi.fn(),
     updateField: vi.fn(),
-    setListenerMode: vi.fn(),
     handleSave: vi.fn().mockResolvedValue(undefined),
     browseConfig: vi.fn().mockResolvedValue(undefined),
     clearConfig: vi.fn(),

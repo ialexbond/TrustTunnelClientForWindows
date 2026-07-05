@@ -47,8 +47,10 @@ export const SKELETON_DELAY_MS = 1000;
 /** Map a numeric round-trip (ms) to a colour band. Owner-set thresholds (IN-22): ≤150 green
  *  / 151–300 yellow / >300 red. (Supersedes the D-16 100/300 proposal.) NOTE (T-30): the
  *  probe is endpoint reachability (DNS+TCP connect to the server), NOT real tunnel latency,
- *  so the value can read higher than the in-tunnel RTT until real latency lands. */
-function bandForMs(ms: number): PingBand {
+ *  so the value can read higher than the in-tunnel RTT until real latency lands.
+ *  Exported (TA-1) so a boundary test can lock the exact owner-set 150/300 cutoffs — the
+ *  green-only sample inputs elsewhere would let a `<=`→`<` or threshold-swap regression pass. */
+export function bandForMs(ms: number): PingBand {
   if (ms <= 150) return "green";
   if (ms <= 300) return "yellow";
   return "red";

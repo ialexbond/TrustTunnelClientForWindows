@@ -184,7 +184,7 @@ describe("useSettingsState", () => {
     expect(result.current.saving).toBe(false);
   });
 
-  // ─── Auto-save when VPN not active ───
+  // ─── Auto-save when VPN not active (DEFAULT behavior: autoSave omitted/true) ───
   it("auto-saves after 1200ms when dirty and VPN not active", async () => {
     mockedInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "read_client_config") return fakeConfig as never;
@@ -250,6 +250,142 @@ describe("useSettingsState", () => {
     expect(saveCalls.length).toBe(0);
     // Still dirty
     expect(result.current.dirty).toBe(true);
+  });
+
+  // ─── B3 (16-UAT round 2): autoSave: false disables BOTH silent auto-write paths ───
+  // ConfigEditView opts out so a config edit never touches disk before «Сохранить». The
+  // debounce must never fire and a sibling panel's tt-peer-save must not flush — but the
+  // explicit handleSave button must still write.
+
+  it("with autoSave:false, dirty + 1200ms does NOT auto-save (debounce disarmed)", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return fakeConfig as never;
+      if (cmd === "save_client_config") return null as never;
+      return null as never;
+    });
+
+    const props = makeProps({ status: "disconnected", autoSave: false });
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.updateField("loglevel", "debug");
+    });
+    expect(result.current.dirty).toBe(true);
+
+    // Advance well past the 1200ms auto-save delay.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      await vi.runAllTimersAsync();
+    });
+
+    // No disk write — the debounce never armed.
+    const saveCalls = mockedInvoke.mock.calls.filter(
+      (call) => call[0] === "save_client_config",
+    );
+    expect(saveCalls.length).toBe(0);
+    // Still dirty (nothing persisted).
+    expect(result.current.dirty).toBe(true);
+  });
+
+  it("with autoSave:false, a tt-peer-save event while dirty does NOT auto-save", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return fakeConfig as never;
+      if (cmd === "save_client_config") return null as never;
+      return null as never;
+    });
+
+    const props = makeProps({ status: "disconnected", autoSave: false });
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.updateField("loglevel", "debug");
+    });
+    expect(result.current.dirty).toBe(true);
+
+    // A sibling panel dispatches the peer-save signal — must be ignored when opted out.
+    await act(async () => {
+      window.dispatchEvent(new Event("tt-peer-save"));
+      await vi.runAllTimersAsync();
+    });
+
+    const saveCalls = mockedInvoke.mock.calls.filter(
+      (call) => call[0] === "save_client_config",
+    );
+    expect(saveCalls.length).toBe(0);
+    expect(result.current.dirty).toBe(true);
+  });
+
+  it("with autoSave:false, the explicit handleSave button STILL writes to disk", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return fakeConfig as never;
+      if (cmd === "save_client_config") return null as never;
+      return null as never;
+    });
+
+    const props = makeProps({ status: "disconnected", autoSave: false });
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.updateField("loglevel", "debug");
+    });
+    expect(result.current.dirty).toBe(true);
+
+    // The explicit save path is untouched by the opt-out — it still persists.
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "save_client_config",
+      expect.objectContaining({ configPath: "/path/to/config.toml" }),
+    );
+  });
+
+  // Sanity: the peer-save flush STILL works for the DEFAULT (autoSave omitted/true) callers —
+  // the inline Settings/Routing panels keep live-apply.
+  it("with autoSave default (true), a tt-peer-save event while dirty DOES auto-save", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_client_config") return fakeConfig as never;
+      if (cmd === "save_client_config") return null as never;
+      return null as never;
+    });
+
+    const props = makeProps({ status: "disconnected" });
+    const { result } = renderHook(() => useSettingsState(props), { wrapper });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    act(() => {
+      result.current.updateField("loglevel", "debug");
+    });
+    expect(result.current.dirty).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("tt-peer-save"));
+      await vi.runAllTimersAsync();
+    });
+
+    const saveCalls = mockedInvoke.mock.calls.filter(
+      (call) => call[0] === "save_client_config",
+    );
+    expect(saveCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   // ─── browseConfig ───
@@ -585,95 +721,4 @@ describe("useSettingsState", () => {
     expect(okResult.current.loadError).toBe(false);
   });
 
-  // ─── setListenerMode (IN-54): mode switch must not destroy routing data ───
-
-  // The original bug: switching a TUN config to SOCKS5 deleted [listener.tun] (routes), and
-  // switching back recreated a bare tun with NO routes → "connects but no traffic". A round-trip
-  // must restore the exact routes.
-  it("switching TUN→SOCKS→TUN restores the original tun routes (no data loss)", async () => {
-    const tunCfg: ClientConfig = {
-      ...fakeConfig,
-      listener: {
-        tun: {
-          mtu_size: 1400,
-          change_system_dns: true,
-          included_routes: ["0.0.0.0/0"],
-          excluded_routes: ["10.0.0.0/8"],
-        },
-      },
-    };
-    mockedInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "read_client_config") return tunCfg as never;
-      return null as never;
-    });
-
-    const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props), { wrapper });
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    act(() => {
-      result.current.setListenerMode("socks");
-    });
-    expect(result.current.config!.listener.socks).toBeDefined();
-    expect(result.current.config!.listener.tun).toBeUndefined();
-
-    act(() => {
-      result.current.setListenerMode("tun");
-    });
-    expect(result.current.config!.listener.socks).toBeUndefined();
-    expect(result.current.config!.listener.tun).toEqual({
-      mtu_size: 1400,
-      change_system_dns: true,
-      included_routes: ["0.0.0.0/0"],
-      excluded_routes: ["10.0.0.0/8"],
-    });
-  });
-
-  // A genuinely fresh TUN (no routes to restore) must default to a FULL tunnel so it routes.
-  it("a SOCKS-only config switched to TUN defaults to a full tunnel (0.0.0.0/0)", async () => {
-    const socksCfg: ClientConfig = {
-      ...fakeConfig,
-      listener: { socks: { address: "127.0.0.1:1080" } },
-    };
-    mockedInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "read_client_config") return socksCfg as never;
-      return null as never;
-    });
-
-    const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props), { wrapper });
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    act(() => {
-      result.current.setListenerMode("tun");
-    });
-    expect(result.current.config!.listener.socks).toBeUndefined();
-    expect(result.current.config!.listener.tun?.included_routes).toEqual(["0.0.0.0/0"]);
-    expect(result.current.config!.listener.tun?.change_system_dns).toBe(true);
-  });
-
-  // Regression: the mode toggle flips on a SINGLE call (the old chained updateField calls
-  // collided on a stale closure and needed two clicks).
-  it("setListenerMode flips on a single call (no two-click)", async () => {
-    mockedInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "read_client_config") return fakeConfig as never; // TUN
-      return null as never;
-    });
-
-    const props = makeProps();
-    const { result } = renderHook(() => useSettingsState(props), { wrapper });
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    act(() => {
-      result.current.setListenerMode("socks");
-    });
-    expect(result.current.config!.listener.socks).toBeDefined();
-    expect(result.current.config!.listener.tun).toBeUndefined();
-  });
 });

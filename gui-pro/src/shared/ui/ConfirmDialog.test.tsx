@@ -31,6 +31,23 @@ describe("ConfirmDialog", () => {
     expect(screen.getByText("This action cannot be undone.")).toBeInTheDocument();
   });
 
+  it("DELMODAL (16-12): title + body are LEFT-aligned and the buttons are RIGHT-aligned (not centered)", () => {
+    render(<ConfirmDialog {...defaults} />);
+    const title = screen.getByText("Delete item?");
+    const body = screen.getByText("This action cannot be undone.");
+    // Title + body are left-aligned (no text-center).
+    expect(title.className).toContain("text-left");
+    expect(title.className).not.toContain("text-center");
+    expect(body.className).toContain("text-left");
+    expect(body.className).not.toContain("text-center");
+    // The buttons live in a right-aligned footer row (Отмена + confirm), not centered.
+    const footer = screen.getByText("Подтвердить").closest("div") as HTMLElement;
+    expect(footer.className).toContain("justify-end");
+    expect(footer.className).not.toContain("justify-center");
+    // Cancel comes before confirm (Отмена left of the danger action within the right group).
+    expect(footer.textContent).toBe("ОтменаПодтвердить");
+  });
+
   it("renders default confirm text 'Подтвердить'", () => {
     render(<ConfirmDialog {...defaults} />);
     expect(screen.getByText("Подтвердить")).toBeInTheDocument();

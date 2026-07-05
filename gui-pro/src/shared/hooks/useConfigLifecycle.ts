@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { i18n as I18nType } from "i18next";
 import type { AppTab, VpnConfig, VpnStatus } from "../types";
+import { isSelfDeleting } from "../utils/selfDeleteGuard";
 
 interface UseConfigLifecycleParams {
   config: VpnConfig;
@@ -127,25 +128,51 @@ export function useConfigLifecycle({
     const unlisten = listen<{ exists: boolean; path: string }>("config-file-changed", (event) => {
       const { exists, path } = event.payload;
       if (!exists && path === config.configPath) {
-        // Config file was deleted externally.
+        // Config file was deleted.
+        // B2 (16-UAT round 2): an IN-APP delete (ConnectionPanel «Удалить») removes the `.toml`
+        // via delete_config → fs remove, which the ACTIVE-config watcher sees as this same
+        // Remove event. Treating it as an EXTERNAL delete would raise a RED «Конфиг удалён»
+        // snackbar on top of the GREEN success the panel already showed (the double-snackbar
+        // bug — only on the active/last-used file, the only one watched). The initiator marks
+        // the path in the self-delete guard around invoke("delete_config").
+        //
+        // #8 (Fable re-review): the guard must suppress ONLY the parts the panel already owns —
+        // the RED snackbar and the disconnect (the panel disconnected itself via D-03). It must
+        // NOT skip the ACTIVE-POINTER cleanup: pre-B2 this watcher reaction was the ONLY code
+        // clearing the active pointer on an active-config delete (localStorage tt_config_path,
+        // config.configPath, wizardKey bump). Blanket-returning here left the pointer dangling at
+        // the deleted .toml → StatusPanel kept rendering a gone config and its «Подключить»
+        // invoked vpn_connect on a deleted file; and after deleting the LAST config the next
+        // imported/installed config was not auto-activated (shouldActivateConfig saw a stale
+        // hasActiveConfig). So we branch: run the state reconciliation always, gate only the
+        // snackbar + disconnect on the self-delete mark.
+        const selfDelete = isSelfDeleting(path);
         // Phase 14 (FAB-05): DEFER the whole delete-handling while a seamless A→B switch is in flight.
         // During a switch config.configPath is mid-transition to B; an fs-watcher event here (e.g. the
         // teardown briefly touches the file, or a real delete lands in the swap window) must NOT wipe
         // the path (blanking it strands the swap + unmounts the frosted hero) nor fire an ungated
         // disconnect that races the swap. The switch is self-terminating; a genuinely-gone file
-        // resurfaces on the next watcher event / focus refresh once the swap has settled.
+        // resurfaces on the next watcher event / focus refresh once the swap has settled. This wins
+        // over a self-delete too (a mid-switch self-delete is blocked at the panel anyway, FAB-05).
         if (isSwitchingRef.current) return;
         // IN-32: if the deleted file is the ACTIVE config and a tunnel is live, tear it down
         // FIRST — the sidecar is still running on a now-gone file. Reuse the switch-GUARDED disconnect
         // (FAB-05 — App passes handleDisconnectGuarded; never touch the killswitch/sidecar internals).
-        // Read the live values from refs.
-        if (statusRef.current !== "disconnected" && statusRef.current !== "error") {
+        // Read the live values from refs. SKIP on a self-delete: the panel already ran D-03's
+        // disconnect-then-delete, so a second disconnect here would be a redundant (ungated) teardown.
+        if (!selfDelete && statusRef.current !== "disconnected" && statusRef.current !== "error") {
           void onDisconnectRef.current();
         }
+        // Active-pointer reconciliation — runs for BOTH a genuine external delete AND a self-delete
+        // (#8): nothing else clears the active pointer, so it must happen either way.
         localStorage.removeItem("tt_config_path");
         setConfig({ configPath: "", logLevel: "info" });
         setWizardKey((k) => k + 1);
-        pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
+        // Only a GENUINE external delete surprises the user with the RED «Конфиг удалён» snackbar;
+        // a self-delete already showed the panel's own GREEN success, so it stays silent here.
+        if (!selfDelete) {
+          pushSuccess(i18n.t("messages.config_file_deleted", "Config file was deleted"), "error");
+        }
       } else if (exists && !config.configPath) {
         // Config file appeared — reload it. 06-uat: do NOT auto-navigate to the
         // Connection tab here. An externally-restored config file should not yank the
