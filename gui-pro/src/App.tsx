@@ -152,6 +152,12 @@ function App() {
   // so the deploy-step listener stays alive and a running install keeps going in the
   // background while the user browses other tabs. The × still fully closes.
   const [wizardLaunchTab, setWizardLaunchTab] = useState<AppTab>("control");
+  // INSTALL-LOCK (16-12): true while the wizard is in a must-not-interrupt step
+  // (deploying / uninstalling). Fed by SetupWizard's onBusyChange and OR-ed into
+  // the bottom TabNavigation `locked` prop so the user cannot switch tabs and
+  // corrupt a running install/reset («установка не завершена»). Reset to false
+  // when the wizard leaves those steps or the overlay closes.
+  const [wizardBusy, setWizardBusy] = useState(false);
 
   // ─── Connection import (D-06) ───
   // The import entry lives on the «Подключение» tab — the empty-state CTA and the «Добавить
@@ -1502,6 +1508,9 @@ function App() {
           onTabChange={(tab) => setActiveTab(tab)}
           hasAppUpdate={hasAppUpdate}
           hasSidecarUpdate={hasSidecarUpdate}
+          // INSTALL-LOCK (16-12): lock tab switching while the wizard is deploying
+          // /uninstalling so unrelated nav can't disrupt a running install.
+          locked={wizardActive && wizardBusy}
         />
       </div>
     </div>
@@ -1566,9 +1575,16 @@ function App() {
         <div className="flex-1 flex flex-col w-full max-w-[600px] mx-auto">
           <SetupWizard
             key={wizardKey}
+            // INSTALL-LOCK (16-12): report the must-not-interrupt steps so App can
+            // lock the bottom tab nav while an install/reset runs.
+            onBusyChange={setWizardBusy}
             // D-01 / Pitfall 3: first-screen "Назад" and Done/Found post-install nav
             // close the overlay (no welcome menu to navigate back to).
-            onClose={() => setWizardActive(false)}
+            onClose={() => {
+              // Belt-and-braces: closing the overlay always clears the nav lock.
+              setWizardBusy(false);
+              setWizardActive(false);
+            }}
             onSetupComplete={(configPath) => {
               // UAT 2026-06-19 (R2/R3) — finishing the wizard used to
               // UNCONDITIONALLY promote the freshly-created config to the active

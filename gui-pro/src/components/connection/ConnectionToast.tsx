@@ -131,7 +131,16 @@ export function ConnectionToast({
     // Capped at a toast width (card) so the body wraps (never truncates) for long config names. The
     // whole plate is the D-04 body-click target; the × below stops propagation so a close does not
     // also restore.
-    <div role="status" onClick={onBodyClick} className={containerClass}>
+    <div
+      role="status"
+      onClick={onBodyClick}
+      className={containerClass}
+      // TA-10: stable semantic marker for the surface variant. The plate/card distinction
+      // (rounding + shadow dropped on the DWM-rounded window) is driven by the `variant` prop;
+      // tests assert on this attribute rather than Tailwind class substrings, per «test behaviour,
+      // not CSS». The precise visual chrome is a Storybook concern.
+      data-variant={variant}
+    >
       {/* State icon — the only saturated element, so a glance at the colour reads the state.
           aria-hidden: the title carries the meaning for screen readers. BOTH variants top-align the
           row (items-start), so the icon gets the same tiny top nudge to align with the title's cap

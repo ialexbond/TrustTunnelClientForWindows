@@ -472,6 +472,93 @@ fn merge_json_into_table(
     }
 }
 
+/// The standard full-tunnel TUN listener block, byte-for-byte matching what the setup
+/// wizard writes (`ssh::build_client_config`). Used to synthesize `[listener.tun]` when a
+/// config has none — e.g. a legacy SOCKS-only config being converted to TUN.
+fn default_tun_table() -> toml_edit::Table {
+    let mut tun = toml_edit::Table::new();
+    tun.insert("mtu_size", toml_edit::value(1280));
+    tun.insert("change_system_dns", toml_edit::value(true));
+    let mut inc = toml_edit::Array::new();
+    inc.push("0.0.0.0/0");
+    tun.insert("included_routes", toml_edit::value(inc));
+    tun.insert("excluded_routes", toml_edit::value(toml_edit::Array::new()));
+    tun
+}
+
+/// TUN-only enforcement (the client SOCKS5 listener mode was removed — the app is TUN-only).
+/// Strips any `[listener.socks]` and guarantees a `[listener.tun]` exists. A legacy/imported
+/// config that declared only SOCKS is converted to a full-tunnel TUN listener so the C++
+/// sidecar always brings up the WinTUN adapter — never a local proxy. Fields inside an
+/// existing `[listener.tun]` are left untouched. Operates on a toml_edit document so all
+/// other sections (endpoint, credentials, routing, comments) are preserved verbatim.
+fn ensure_tun_listener(doc: &mut toml_edit::DocumentMut) {
+    if doc.get("listener").and_then(|l| l.as_table_like()).is_none() {
+        doc["listener"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    if let Some(listener) = doc.get_mut("listener").and_then(|l| l.as_table_mut()) {
+        // Implicit so the sub-tables render as `[listener.tun]` with no bare `[listener]` header.
+        listener.set_implicit(true);
+        listener.remove("socks");
+        if !listener.contains_key("tun") {
+            listener.insert("tun", toml_edit::Item::Table(default_tun_table()));
+        }
+    }
+}
+
+/// One-shot normalization for a raw config TOML: if it declares the removed
+/// `[listener.socks]` mode, convert it to TUN and return the rewritten text; otherwise
+/// return `None` so the caller can skip the disk write (TUN-only configs are never
+/// rewritten). Unparseable input returns `None` — never rewrite a file we cannot read.
+pub fn normalize_config_socks_to_tun(toml_text: &str) -> Option<String> {
+    let mut doc: toml_edit::DocumentMut = toml_text.parse().ok()?;
+    let has_socks = doc
+        .get("listener")
+        .and_then(|l| l.as_table_like())
+        .map(|t| t.contains_key("socks"))
+        .unwrap_or(false);
+    if !has_socks {
+        return None;
+    }
+    ensure_tun_listener(&mut doc);
+    Some(doc.to_string())
+}
+
+/// One-shot sweep at startup: convert any on-disk client config that still declares the
+/// removed `[listener.socks]` mode to a full-tunnel `[listener.tun]`. Runs BEFORE the config
+/// fs-watcher starts (so the «Подключение» list loads already-normalized) and while no VPN
+/// session is live (so it never races the connectivity monitor / FAB-05 switch logic — a
+/// mid-connect rewrite of the active config would fight the watcher). Idempotent: TUN-only
+/// configs are read but never rewritten (no mtime change, no watcher churn). Best-effort — an
+/// unreadable/unwritable file is skipped. D-29: config contents are NEVER logged (they carry
+/// credentials); only a fixed phrase is emitted.
+pub fn normalize_all_configs_to_tun() {
+    let dir = portable_data_dir();
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+            continue;
+        }
+        if path.file_name().and_then(|s| s.to_str()) == Some("Cargo.toml") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(normalized) = normalize_config_socks_to_tun(&content) {
+            if std::fs::write(&path, normalized).is_ok() {
+                crate::logging::log_app(
+                    "INFO",
+                    "[config] normalized a legacy SOCKS listener to TUN (SOCKS client mode removed)",
+                );
+            }
+        }
+    }
+}
+
 /// Apply an editor's config payload onto the existing on-disk TOML *without* losing anything the
 /// payload omits.
 ///
@@ -501,26 +588,11 @@ fn apply_config_edit(existing: &str, config: &serde_json::Value) -> Result<Strin
         merge_json_into_table(doc.as_table_mut(), obj, &routing_managed);
     }
 
-    // Mode switch: if the editor declares exactly one listener type, drop the other known type so
-    // a stale [listener.tun]/[listener.socks] block doesn't linger (the sidecar crashes with both
-    // present). Fields WITHIN the kept type are preserved by the merge above.
-    if let Some(incoming) = config.get("listener").and_then(|l| l.as_object()) {
-        let has_tun = incoming.contains_key("tun");
-        let has_socks = incoming.contains_key("socks");
-        if let Some(listener) = doc.get_mut("listener").and_then(|l| l.as_table_mut()) {
-            if has_socks && !has_tun {
-                listener.remove("tun");
-            } else if has_tun && !has_socks {
-                listener.remove("socks");
-            }
-        }
-    }
-    // Final safety: never leave both listener types present.
-    if let Some(listener) = doc.get_mut("listener").and_then(|l| l.as_table_mut()) {
-        if listener.contains_key("socks") && listener.contains_key("tun") {
-            listener.remove("tun"); // socks takes priority
-        }
-    }
+    // TUN-only enforcement (SOCKS5 client listener mode removed): strip any `[listener.socks]`
+    // the merge may have carried in and guarantee a `[listener.tun]` remains, so a saved config
+    // can never spawn the sidecar in local-proxy mode. Fields inside an existing tun block are
+    // preserved by the merge above.
+    ensure_tun_listener(&mut doc);
 
     // DHCP ports (67, 68) must stay in killswitch_allow_ports so the Kill Switch never blocks a
     // DHCP lease renewal. ENSURE rather than replace — keep any other configured ports (the old
@@ -837,10 +909,10 @@ excluded_routes = []
         assert!(out.contains("password = \"secret\""), "password lost:\n{out}");
     }
 
-    /// Switching tun → socks must drop the stale [listener.tun] block (sidecar crashes with both)
-    /// while round-tripping the SOCKS credentials.
+    /// SOCKS5 client mode was removed — an incoming `[listener.socks]` payload is stripped on save
+    /// and the `[listener.tun]` listener is preserved. No socks block can ever be written.
     #[test]
-    fn apply_edit_mode_switch_tun_to_socks_drops_tun() {
+    fn apply_edit_forces_tun_strips_incoming_socks() {
         let existing = r#"
 [endpoint]
 hostname = "h.win"
@@ -855,9 +927,65 @@ included_routes = ["0.0.0.0/0"]
             "listener": { "socks": { "address": "127.0.0.1:1080", "username": "u", "password": "p" } }
         });
         let out = apply_config_edit(existing, &config).unwrap();
-        assert!(!out.contains("[listener.tun]"), "stale tun left:\n{out}");
-        assert!(out.contains("username = \"u\""), "socks user lost:\n{out}");
-        assert!(out.contains("password = \"p\""), "socks pass lost:\n{out}");
+        assert!(!out.contains("[listener.socks]"), "socks block written:\n{out}");
+        assert!(!out.contains("127.0.0.1:1080"), "socks address leaked:\n{out}");
+        assert!(out.contains("[listener.tun]"), "tun listener missing:\n{out}");
+    }
+
+    /// A legacy SOCKS-only config normalizes to a full-tunnel TUN listener, preserving every other
+    /// section (endpoint + credentials) verbatim.
+    #[test]
+    fn normalize_socks_only_config_becomes_full_tunnel() {
+        let socks = r#"
+[endpoint]
+hostname = "h.win"
+username = "alice"
+password = "secret"
+
+[listener.socks]
+address = "127.0.0.1:1080"
+"#;
+        let out = normalize_config_socks_to_tun(socks).expect("socks config should be rewritten");
+        assert!(!out.contains("[listener.socks]"), "socks block survived:\n{out}");
+        assert!(out.contains("[listener.tun]"), "tun listener missing:\n{out}");
+        assert!(out.contains("0.0.0.0/0"), "full-tunnel route missing:\n{out}");
+        assert!(out.contains("hostname = \"h.win\""), "endpoint lost:\n{out}");
+        assert!(out.contains("username = \"alice\""), "credentials lost:\n{out}");
+        assert!(out.contains("password = \"secret\""), "credentials lost:\n{out}");
+    }
+
+    /// A TUN-only config is already normalized — normalize returns None (no rewrite / no churn).
+    #[test]
+    fn normalize_tun_only_config_is_noop() {
+        let tun = r#"
+[endpoint]
+hostname = "h.win"
+[listener.tun]
+mtu_size = 1280
+"#;
+        assert!(normalize_config_socks_to_tun(tun).is_none());
+    }
+
+    /// Unparseable input is never rewritten (returns None — never touch a file we cannot read).
+    #[test]
+    fn normalize_unparseable_is_noop() {
+        assert!(normalize_config_socks_to_tun("this is = not valid ][").is_none());
+    }
+
+    /// A config with BOTH listener blocks (a torn/legacy state) collapses to TUN only, keeping the
+    /// existing tun fields.
+    #[test]
+    fn normalize_both_listeners_collapses_to_tun() {
+        let both = r#"
+[listener.tun]
+mtu_size = 1400
+[listener.socks]
+address = "127.0.0.1:1080"
+"#;
+        let out = normalize_config_socks_to_tun(both).expect("has socks → rewritten");
+        assert!(!out.contains("[listener.socks]"), "socks survived:\n{out}");
+        assert!(out.contains("[listener.tun]"), "tun listener missing:\n{out}");
+        assert!(out.contains("mtu_size = 1400"), "existing tun fields must be kept:\n{out}");
     }
 
     /// DHCP ports are ensured, not reset — a user's extra allow-ports survive a save.

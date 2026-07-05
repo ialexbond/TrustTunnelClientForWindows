@@ -56,6 +56,15 @@ export interface SetupWizardProps {
   // wizard (D-01): the first screen's "Назад" and the Done/Found post-install nav
   // exit the overlay instead of navigating to the deleted welcome menu (Pitfall 3).
   onClose?: () => void;
+  /**
+   * INSTALL-LOCK (16-12): reports whether the wizard is in an IN-PROGRESS,
+   * must-not-interrupt step — `deploying` (installing the protocol) or
+   * `uninstalling` (delete/reset). App.tsx OR-s this into the tab-nav `locked`
+   * flag so the user cannot switch tabs and disrupt a running install
+   * («установка не завершена»). Fires `false` on every other step
+   * (endpoint/found/done/error/recovery) and on unmount.
+   */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 // STEPS_ORDER is the RENDER-ONLY deploy progress map (consumed by DeployingStep), NOT a

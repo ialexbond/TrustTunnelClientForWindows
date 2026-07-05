@@ -349,6 +349,31 @@ describe("OverviewSection", () => {
       });
     });
 
+    it("CP-2b: the country name renders on ONE line at the FULL bigNum size (revert of the 16-09 shrink) with the flag still shown", async () => {
+      // CP-2b (16-12): the owner rejected the 16-09 font shrink — he wants the
+      // country value at the SAME (bigNum, --font-size-card-value) size as the
+      // other metric cards, just on ONE line. Assert: (a) the value element uses
+      // the card-value size, NOT the smaller title-sm; (b) the name renders in a
+      // single whitespace-nowrap element with a title fallback; (c) the flag stays.
+      const state = makeState();
+      render(<OverviewSection state={state} />);
+      const value = await screen.findByTestId("country-card-value");
+      // (a) FULL size — the value wrapper uses --font-size-card-value (bigNum),
+      // never the shrunk --font-size-title-sm the 16-09 fix wrongly applied.
+      expect(value.style.fontSize).toBe("var(--font-size-card-value)");
+      expect(value.style.fontSize).not.toContain("title-sm");
+      await waitFor(() => {
+        // (b) The localized name renders in a single nowrap element (one line).
+        const nameEl = within(value).getByText("United States");
+        expect(nameEl).toBeInTheDocument();
+        expect(nameEl.className).toMatch(/whitespace-nowrap/);
+        // The full name is exposed via title for the ellipsis fallback.
+        expect(nameEl).toHaveAttribute("title", "United States");
+      });
+      // (c) The flag emoji is still rendered alongside the name.
+      expect(within(value).getByText("🇺🇸")).toBeInTheDocument();
+    });
+
     it("shows '—' when geo is null (error)", async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
         if (cmd === "ping_endpoint") return 42;

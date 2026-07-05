@@ -400,6 +400,13 @@ pub fn run() {
             let geodata_state = app.state::<Arc<geodata_v2ray::GeoDataState>>().inner().clone();
             geodata_v2ray::start_geodata_watcher(app.handle().clone(), geodata_state);
 
+            // SOCKS5 client mode was removed — the app is TUN-only. Convert any legacy on-disk
+            // config that still declares `[listener.socks]` to a full-tunnel `[listener.tun]`
+            // now, at startup: BEFORE the fs-watcher below (so the list loads normalized) and
+            // while no VPN session is live (so it never races the connectivity monitor / FAB-05
+            // switch logic). Idempotent — TUN-only configs are not rewritten.
+            commands::config::normalize_all_configs_to_tun();
+
             // IN-31: watch the config data dir so the «Подключение» list refreshes the instant a
             // config .toml is added/removed on disk (e.g. deleted in the file manager).
             commands::manifest::start_configs_watcher(app.handle().clone());

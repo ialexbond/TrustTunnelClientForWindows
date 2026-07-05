@@ -189,7 +189,8 @@ export function ConfigQr({ isOpen, config, onClose }: ConfigQrProps) {
         </div>
       ) : deeplink ? (
         <>
-          {/* QR — clickable: copies the image to the clipboard, with a small press animation. */}
+          {/* QR — clickable: copies the deeplink as TEXT (writeText), with a small press animation.
+              The image-clipboard path was removed — it did not work in WebView2 (see handleCopyQr). */}
           <div className="mt-[var(--space-4)] flex justify-center">
             <button
               type="button"

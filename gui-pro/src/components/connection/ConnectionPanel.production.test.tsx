@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRef } from "react";
 import { screen, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +6,11 @@ import i18n from "../../shared/i18n";
 import { renderWithProviders } from "../../test/test-utils";
 import { ConnectionPanel, type ConnectionPanelHandle } from "./ConnectionPanel";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
+import {
+  isSelfDeleting,
+  clearSelfDelete,
+  resetSelfDeleteGuard,
+} from "../../shared/utils/selfDeleteGuard";
 
 // IN-40: jsdom gives every element a 0 layout, so install a fake geometry on the scroll
 // container to simulate "at bottom" vs "scrolled up". scrollTop is a real, settable jsdom
@@ -25,14 +30,14 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const TWO: ConfigSummary[] = [
-  { id: "cfg-a", name: "Германия — Frankfurt", host: "de1.example.com", user: "swift-fox", path: "C:/app/a.toml", order: 0, last_used: true },
-  { id: "cfg-b", name: "Нидерланды", host: "nl1.example.com", user: "calm-owl", path: "C:/app/b.toml", order: 1, last_used: false },
+  { id: "cfg-a", name: "Германия — Frankfurt", host: "de1.example.com", display_host: "de1.example.com", user: "swift-fox", path: "C:/app/a.toml", order: 0, last_used: true },
+  { id: "cfg-b", name: "Нидерланды", host: "nl1.example.com", display_host: "nl1.example.com", user: "calm-owl", path: "C:/app/b.toml", order: 1, last_used: false },
 ];
 const ONE: ConfigSummary[] = [TWO[0]];
 const EMPTY: ConfigSummary[] = [];
 const THREE: ConfigSummary[] = [
   ...TWO,
-  { id: "cfg-c", name: "Швеция", host: "se1.example.com", user: "brave-elk", path: "C:/app/c.toml", order: 2, last_used: false },
+  { id: "cfg-c", name: "Швеция", host: "se1.example.com", display_host: "se1.example.com", user: "brave-elk", path: "C:/app/c.toml", order: 2, last_used: false },
 ];
 
 const L = {
@@ -65,6 +70,15 @@ function setup(props?: Partial<Parameters<typeof ConnectionPanel>[0]>) {
 describe("ConnectionPanel (production integration)", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    // TA-8: the selfDeleteGuard is a module-level singleton shared across ALL tests. Reset it (and
+    // cancel any live 8000 ms TTL timer) before AND after each test so a mark leaked by one test's
+    // real delete flow cannot bleed a stale mark / a pending timer into a sibling (order-dependent
+    // flake, and a live timer leaking into the neighbouring secondVpn suite).
+    resetSelfDeleteGuard();
+  });
+
+  afterEach(() => {
+    resetSelfDeleteGuard();
   });
 
   // Truth: «Переключиться» on an inactive card calls onSwitchTo (the switchTo VPN action) —
@@ -174,14 +188,67 @@ describe("ConnectionPanel (production integration)", () => {
     await waitFor(() => expect(callOrder).toEqual(["disconnect", "delete_config"]));
   });
 
+  // #7 (Fable re-review): the self-delete mark must be armed AFTER the disconnect leg completes,
+  // immediately before delete_config — NOT before the disconnect. If it were armed first, a SLOW
+  // teardown (up to ~7s: graceful + hard-kill + DNS restore) could outlast the guard's TTL,
+  // so the mark would already be gone by the time the fs Remove landed → the watcher would fire a
+  // second red snackbar on top of the green success (the B2 double-snackbar bug resurfacing on its
+  // flagship case: deleting the ACTIVE config while CONNECTED). Assert: at the instant delete_config
+  // is invoked (which only happens AFTER onDisconnect resolves), the active path IS marked — so a
+  // long disconnect cannot expire the mark before the file is even removed.
+  it("#7: an active-config delete arms the self-delete mark AFTER a slow disconnect, right before delete_config", async () => {
+    const user = userEvent.setup();
+    // The beforeEach resetSelfDeleteGuard() already cleared any residual mark (guard is a singleton).
+    let markedWhenDeleteInvoked: boolean | null = null;
+    let markedDuringDisconnect: boolean | null = null;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_configs") return Promise.resolve(ONE);
+      if (cmd === "delete_config") {
+        // Capture the guard state at the exact moment the file is about to be removed.
+        markedWhenDeleteInvoked = isSelfDeleting("C:/app/a.toml");
+        return Promise.resolve(EMPTY);
+      }
+      if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+      return Promise.resolve(null);
+    });
+    // A SLOW disconnect that resolves after a real delay; during it, the path must NOT yet be
+    // marked (the mark is deferred to after the disconnect) so the TTL clock has not started early.
+    const onDisconnect = vi.fn().mockImplementation(async () => {
+      markedDuringDisconnect = isSelfDeleting("C:/app/a.toml");
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    setup({ status: "connected", activeConfigPath: "C:/app/a.toml", onDisconnect });
+
+    await screen.findByText("Германия — Frankfurt");
+    const actions = screen.getByRole("button", { name: i18n.t("connection.card.actions_label") });
+    await user.click(actions);
+    const menu = screen.getByRole("menu");
+    await user.click(within(menu).getByText(i18n.t("connection.card.delete")));
+
+    const confirmBtn = await screen.findByRole("button", { name: i18n.t("connection.delete.confirm_active") });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(invokeMock.mock.calls.some((c) => c[0] === "delete_config")).toBe(true));
+    try {
+      // The mark was NOT armed during the disconnect leg (so a long teardown cannot expire it early)…
+      expect(markedDuringDisconnect).toBe(false);
+      // …but IS armed by the time delete_config removes the file (covering the fs Remove event).
+      expect(markedWhenDeleteInvoked).toBe(true);
+    } finally {
+      // TA-8: clear in a finally so an assertion failure above can't leak the mark + its live TTL
+      // timer into a sibling test. (afterEach's resetSelfDeleteGuard is the backstop.)
+      clearSelfDelete("C:/app/a.toml");
+    }
+  });
+
   // Truth (11-UAT gap A): a machine upgraded from the old single-config build can hold ONE
   // server as TWO physical .toml files (legacy trusttunnel_client.toml + wizard
   // TrustTunnel_<user>.toml), which migration keeps as two manifest entries. The panel collapses
   // same-server (host+user) twins into a single card, keeping the connected file as the survivor.
   it("collapses two same-server files (host+user) into a single card", async () => {
     const DUP: ConfigSummary[] = [
-      { id: "legacy", name: "Германия — Frankfurt", host: "de1.example.com", user: "swift-fox", path: "C:/app/trusttunnel_client.toml", order: 1, last_used: false },
-      { id: "wizard", name: "Германия — Frankfurt", host: "de1.example.com", user: "swift-fox", path: "C:/app/TrustTunnel_swift-fox.toml", order: 0, last_used: true },
+      { id: "legacy", name: "Германия — Frankfurt", host: "de1.example.com", display_host: "de1.example.com", user: "swift-fox", path: "C:/app/trusttunnel_client.toml", order: 1, last_used: false },
+      { id: "wizard", name: "Германия — Frankfurt", host: "de1.example.com", display_host: "de1.example.com", user: "swift-fox", path: "C:/app/TrustTunnel_swift-fox.toml", order: 0, last_used: true },
     ];
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "list_configs") return Promise.resolve(DUP);
@@ -204,6 +271,11 @@ describe("ConnectionPanel (production integration)", () => {
 describe("ConnectionPanel scroll behavior (IN-45/IN-49)", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    resetSelfDeleteGuard(); // TA-8: keep the singleton clean between suites too.
+  });
+
+  afterEach(() => {
+    resetSelfDeleteGuard();
   });
 
   function renderPanel() {

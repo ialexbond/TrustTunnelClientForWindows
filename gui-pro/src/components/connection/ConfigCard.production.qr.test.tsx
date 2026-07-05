@@ -19,6 +19,7 @@ const cfg: ConfigSummary = {
   id: "cfg-de-abc12345",
   name: "Германия — Frankfurt",
   host: "de1.example.com",
+  display_host: "de1.example.com",
   user: "swift-fox",
   path: "C:/app/TrustTunnel_swift-fox.toml",
   order: 0,

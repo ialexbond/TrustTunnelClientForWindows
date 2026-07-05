@@ -32,16 +32,14 @@ export interface ClientConfig {
     [key: string]: unknown;
   };
   listener: {
+    // TUN is the only listener mode — the SOCKS5 client mode was removed (it could not
+    // deliver a working system-wide SOCKS5 proxy on Windows). Legacy `[listener.socks]`
+    // configs are normalized to TUN on load (Rust: normalize_all_configs_to_tun).
     tun?: {
       mtu_size: number;
       change_system_dns: boolean;
       included_routes: string[];
       excluded_routes: string[];
-    };
-    socks?: {
-      address: string;
-      username?: string;
-      password?: string;
     };
   };
   // NOTE: dns_upstreams is NOT a top-level key — it belongs under endpoint (see above).
@@ -58,6 +56,15 @@ export interface SettingsProps {
   onSwitchToSetup: () => void;
   onClearConfig: () => void;
   onVpnModeChange?: (mode: string) => void;
+  /**
+   * B3 (16-UAT round 2): when `false`, disable BOTH silent auto-write-to-disk paths — the
+   * 1200ms debounce (useAutoSave, fires while VPN is disconnected) AND the `tt-peer-save`
+   * window listener (fires when a sibling panel saves). Persistence then happens ONLY on the
+   * explicit `handleSave` button. DEFAULT `true` so the inline Settings/Routing/live-apply
+   * panels are unchanged; the per-config editor (ConfigEditView, the surface with a real
+   * «Сохранить» button) passes `false` so edits never touch disk before the button.
+   */
+  autoSave?: boolean;
 }
 
 export interface SettingsState {
@@ -81,9 +88,6 @@ export interface SettingsState {
   setLocalPath: (path: string) => void;
   setError: (msg: string) => void;
   updateField: (path: string, value: unknown) => void;
-  /** Switch the listener mode (TUN ↔ SOCKS5) in one atomic write, preserving the other block's
-   *  data for a round-trip and defaulting a fresh TUN to a full tunnel (0.0.0.0/0). */
-  setListenerMode: (mode: "tun" | "socks") => void;
   /** Save the per-config .toml. Resolves to `true` on success, `false` on failure — lets a
    *  caller (ConfigEditView) close the modal only when the save actually succeeded. */
   handleSave: (reconnect?: boolean) => Promise<boolean>;
@@ -175,6 +179,9 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     // props object through and other surfaces (ServerPanel install) still rely on it.
     onClearConfig,
     onVpnModeChange,
+    // B3: default true — omitting the flag keeps every existing caller (Settings/Routing/inline
+    // live-apply panels) on the original auto-save behavior. Only ConfigEditView opts out.
+    autoSave = true,
   } = props;
 
   const [config, setConfig] = useState<ClientConfig | null>(null);
@@ -193,16 +200,10 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   const savedConfig = useRef<ClientConfig | null>(null);
   const dirty = config !== null && savedConfig.current !== null && !deepEqual(config, savedConfig.current);
 
-  // IN-54: stash for the listener block we are leaving on a mode switch, so a TUN→SOCKS→TUN
-  // round-trip restores the original routes. Reset when the edited config changes (below) so one
-  // config's routes can never leak into another.
-  const stashedListenerRef = useRef<{ tun?: unknown; socks?: unknown }>({});
-
   // ─── Sync path from parent ───
   useEffect(() => {
     setLocalPath(configPath);
     setReloadKey(k => k + 1);
-    stashedListenerRef.current = {}; // IN-54: drop a prior config's stashed listener block
     if (!configPath) {
       setConfig(null);
       setError("");
@@ -244,9 +245,8 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   // Phase 11 (IN-54): use a FUNCTIONAL setState updater (read `prev`, not the closed-over
   // `config`). The old form cloned the render-time `config` and was memoized with [config], so
   // two updateField calls fired in ONE handler both saw the SAME stale config → last-write-wins
-  // dropped the first change. That is exactly why the TUN/SOCKS mode toggle needed two clicks
-  // (three chained writes collided). A functional updater makes each chained call see the prior
-  // result, so the deps can be [] and the callback identity is stable.
+  // dropped the first change. A functional updater makes each chained call see the prior result,
+  // so the deps can be [] and the callback identity is stable.
   const updateField = useCallback(
     (path: string, value: unknown) => {
       setConfig((prev) => {
@@ -271,61 +271,16 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     []
   );
 
-  // ─── Switch the listener mode (TUN ↔ SOCKS5) atomically ───
-  // Phase 11 (IN-54): the sidecar config can hold ONLY ONE listener type, so switching modes
-  // must drop the other block. The old toggle did this with several chained updateField calls
-  // AND it DESTROYED the routing data: TUN→SOCKS deleted the whole [listener.tun] (the
-  // `included_routes`/`excluded_routes` that actually carry traffic), and SOCKS→TUN recreated a
-  // bare tun with NO routes → the config "connects but passes no traffic". We instead:
-  //   1) stash whichever block we are leaving, so a round-trip (TUN→SOCKS→TUN) RESTORES the
-  //      original routes instead of losing them, and
-  //   2) when creating a fresh TUN with nothing to restore, default to a FULL tunnel
-  //      (`included_routes = ["0.0.0.0/0"]`) so a TUN config always routes — the server
-  //      configs are full-tunnel and that is the expected default.
-  // One setConfig write = no stale-closure collision, so the toggle also flips on the FIRST click.
-  const setListenerMode = useCallback((mode: "tun" | "socks") => {
-    setConfig((prev) => {
-      if (!prev) return prev;
-      const clone: ClientConfig = JSON.parse(JSON.stringify(prev));
-      const cur = clone.listener ?? {};
-      // Remember what we are leaving so switching back can restore it (esp. TUN routes).
-      if (cur.tun) stashedListenerRef.current.tun = cur.tun;
-      if (cur.socks) stashedListenerRef.current.socks = cur.socks;
-      if (mode === "tun") {
-        const restored = (cur.tun ?? stashedListenerRef.current.tun) as
-          | ClientConfig["listener"]["tun"]
-          | undefined;
-        clone.listener = {
-          tun: restored ?? {
-            mtu_size: 1280,
-            change_system_dns: true,
-            included_routes: ["0.0.0.0/0"],
-            excluded_routes: [],
-          },
-        };
-      } else {
-        const restored = (cur.socks ?? stashedListenerRef.current.socks) as
-          | ClientConfig["listener"]["socks"]
-          | undefined;
-        clone.listener = { socks: restored ?? { address: "127.0.0.1:1080" } };
-      }
-      return clone;
-    });
-  }, []);
-
-  // ─── Build config for saving (preserve only active listener) ───
+  // ─── Build config for saving (TUN-only) ───
+  // SOCKS5 client mode was removed — the sidecar always runs a TUN listener. Ensure
+  // `change_system_dns` stays true so a full tunnel always sets the system DNS; fields inside
+  // listener.tun (mtu_size / routes) are preserved from the edited config.
   const buildConfigToSave = useCallback(() => {
     if (!config) return config;
     const clone = { ...config };
-    if (config.listener?.socks) {
-      // SOCKS5 mode — only socks, no tun
-      clone.listener = { socks: config.listener.socks };
-    } else {
-      // TUN mode — ensure change_system_dns is true
-      clone.listener = {
-        tun: { ...config.listener?.tun, change_system_dns: true } as { mtu_size: number; change_system_dns: boolean; included_routes: string[]; excluded_routes: string[] },
-      };
-    }
+    clone.listener = {
+      tun: { ...config.listener?.tun, change_system_dns: true } as NonNullable<ClientConfig["listener"]["tun"]>,
+    };
     return clone;
   }, [config]);
 
@@ -376,15 +331,21 @@ export function useSettingsState(props: SettingsProps): SettingsState {
   }, [config, localPath, buildConfigToSave, onConfigChange, status, onReconnect, pushSuccess, t]);
 
   // ─── Peer-save: when Routing panel saves, save our config too ───
+  // B3: gated on `autoSave`. When a caller opts out (ConfigEditView), a sibling panel's Save
+  // must NOT silently flush this config to disk — persistence is button-only there.
   useEffect(() => {
+    if (!autoSave) return;
     const handler = () => { if (dirty) silentSave(); };
     window.addEventListener("tt-peer-save", handler);
     return () => window.removeEventListener("tt-peer-save", handler);
-  }, [dirty, silentSave]);
+  }, [autoSave, dirty, silentSave]);
 
   // ─── Auto-save when VPN not active (silent, no UI) ───
+  // B3: gate the debounce on `autoSave` by passing `dirty: autoSave && dirty`. When a caller
+  // opts out, the timer never arms (dirty is forced false into the hook), so an edit is never
+  // written to disk 1200ms after typing — it persists ONLY on the explicit handleSave button.
   useAutoSave({
-    dirty,
+    dirty: autoSave && dirty,
     canSave: !!config && !!localPath,
     isActive: status === "connected" || status === "connecting",
     onSave: silentSave,
@@ -437,7 +398,6 @@ export function useSettingsState(props: SettingsProps): SettingsState {
     setLocalPath,
     setError,
     updateField,
-    setListenerMode,
     handleSave,
     browseConfig,
     clearConfig,

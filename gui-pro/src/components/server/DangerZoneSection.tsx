@@ -56,28 +56,37 @@ export function DangerZoneSection({ state }: Props) {
   };
 
   const handleUninstall = async () => {
-    const ok = await confirm({
+    // INSTALL-LOCK (16-12): run the destructive uninstall through the confirm
+    // dialog's `action` hook so the CONFIRM BUTTON itself shows a loader and the
+    // modal stays open (Cancel + backdrop disabled) for the whole operation —
+    // the destructive op can no longer be interrupted mid-flight by a stray click
+    // or navigation. The section button also keeps its own loader (setUninstallLoading)
+    // so the danger-zone row reflects the in-progress state.
+    await confirm({
       title: t("server.danger.confirm_uninstall_title"),
       message: t("server.danger.confirm_uninstall_message"),
       variant: "danger",
       confirmText: t("server.danger.confirm_delete_btn"),
       cancelText: t("buttons.cancel"),
+      action: async () => {
+        setUninstallLoading(true);
+        try {
+          await invoke("uninstall_server", sshParams);
+          state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
+          state.pushSuccess(t("server.danger.uninstalled", "VPN удалён с сервера"));
+        } catch (e) {
+          // R-11 (fix-all-paths): surface the failure in the snackbar, not the unrendered
+          // actionResult, so a failed uninstall is never silent. Re-throw so the confirm
+          // dialog closes with `false` (its action contract) after we surface the error.
+          const message = translateSshError(formatError(e), t);
+          setActionResult({ type: "error", message });
+          state.pushSuccess(message, "error");
+          throw e;
+        } finally {
+          setUninstallLoading(false);
+        }
+      },
     });
-    if (!ok) return;
-    setUninstallLoading(true);
-    try {
-      await invoke("uninstall_server", sshParams);
-      state.setServerInfo({ installed: false, version: "", serviceActive: false, users: [] });
-      state.pushSuccess(t("server.danger.uninstalled", "VPN удалён с сервера"));
-    } catch (e) {
-      // R-11 (fix-all-paths): surface the failure in the snackbar, not the unrendered
-      // actionResult, so a failed uninstall is never silent.
-      const message = translateSshError(formatError(e), t);
-      setActionResult({ type: "error", message });
-      state.pushSuccess(message, "error");
-    } finally {
-      setUninstallLoading(false);
-    }
   };
 
   return (

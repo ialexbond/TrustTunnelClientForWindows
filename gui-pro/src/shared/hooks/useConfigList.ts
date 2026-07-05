@@ -3,13 +3,22 @@ import { invoke } from "@tauri-apps/api/core";
 
 /**
  * One config entry as the Rust `list_configs` command returns it (a non-secret
- * `ConfigSummary`). Mirrors `commands/manifest.rs::ConfigSummary` — id/name/host/user +
- * the manifest order/last_used flags. The password is NEVER part of this shape (D-29).
+ * `ConfigSummary`). Mirrors `commands/manifest.rs::ConfigSummary` — id/name/host/display_host/user
+ * + the manifest order/last_used flags. The password is NEVER part of this shape (D-29).
  */
 export interface ConfigSummary {
   id: string;
   name: string;
+  /** The RAW endpoint hostname — the DEDUP / same-server-identity key (FE `identityKey` in
+   *  dedupeConfigsByIdentity.ts, Rust find_duplicate_by_host_user + identity_key_of). Never used
+   *  for the card display: it may be a fake TLS-SNI name (e.g. trusttunnel.local) for a bare-IP
+   *  server. Keep dedup readers on this field. */
   host: string;
+  /** 16-07 (gap 5a): the value the Connection-tab card SHOWS — IP-preferring. For a bare-IP
+   *  endpoint carrying a fake SNI hostname this is the real IP (from addresses[0]), so the
+   *  `isIpAddress` branch renders the «IP» glyph; a real domain keeps the domain + globe. Display
+   *  ONLY — NEVER a dedup key. Mirrors the Rust `display_host` field 1:1. */
+  display_host: string;
   user: string;
   path: string;
   order: number;

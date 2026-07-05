@@ -20,12 +20,18 @@ const L = {
   switching: i18n.t("status.switching_short"),
   no_data: i18n.t("connection.ping.no_data"),
   unreachable: i18n.t("connection.ping.unreachable"),
+  // Phase 16 (T-22 / 16-03): the IP-only glyph tooltip. The key ALREADY exists
+  // (connection.card.ip_only_tooltip); the glyph that consumes it does not yet — so the
+  // two IP cases below are RED until 16-03 renders the «IP» glyph in the host-meta row.
+  ipTooltip: i18n.t("connection.card.ip_only_tooltip"),
 };
 
 const cfg: ConfigSummary = {
   id: "cfg-de-abc12345",
   name: "Германия — Frankfurt",
   host: "de1.example.com",
+  // 16-07: a real domain → display_host mirrors host (globe preserved).
+  display_host: "de1.example.com",
   user: "swift-fox",
   path: "C:/app/TrustTunnel_swift-fox.toml",
   order: 0,
@@ -286,6 +292,108 @@ describe("ConfigCard", () => {
       expect(screen.queryByText(/42/)).not.toBeInTheDocument();
       expect(screen.queryByText(L.no_data)).not.toBeInTheDocument();
       expect(screen.queryByText("0:05")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Phase 16 (Wave 0, plan 16-01): the T-22 IP-only glyph ───
+  //
+  // RED SCAFFOLD (T-22) — the lead card's host-meta row currently shows only a `Globe` icon +
+  // the host text. For a BARE-IP endpoint (no domain) 16-03 will add a small leading «IP»
+  // letter-glyph carrying the `connection.card.ip_only_tooltip` label, so the user can tell an
+  // IP-only server apart from a domain one at a glance. These cases MUST FAIL until 16-03 renders
+  // the glyph — same file, same assertions turn GREEN there (mirrors the 14-02 switching-face
+  // RED→GREEN handoff documented above). Assert semantically by the rendered «IP» text within the
+  // config-card testid + the tooltip label reachable, NEVER by a CSS class.
+  // 16-07 (gap 5a): the glyph + host text now key off config.display_host, so these cases set
+  // display_host (the IP-preferring card value), NOT config.host (the raw dedup key).
+  describe("T-22 ip-only glyph (keys off display_host)", () => {
+    // Test A: an IPv4 display_host renders the «IP» glyph + its tooltip label.
+    it("renders the «IP» glyph with its tooltip for a bare IPv4 display_host", () => {
+      renderWithProviders(
+        <ConfigCard
+          config={{ ...cfg, host: "203.0.113.7", display_host: "203.0.113.7" }}
+          leadCard
+          status="connected"
+        />,
+      );
+      const card = screen.getByTestId("config-card");
+      // The «IP» letter-glyph text is present in the host-meta area.
+      expect(within(card).getByText("IP")).toBeInTheDocument();
+      // Its accessible/tooltip label resolves the existing ip_only_tooltip key (reachable text).
+      expect(within(card).getByText(L.ipTooltip)).toBeInTheDocument();
+    });
+
+    // 5a-2 (16-12): the «IP» marker must be CONSISTENT with the domain globe — a plain
+    // inline monochrome marker, NOT the mismatched boxed pill/badge (owner: «не по
+    // дизайну»). TA-9: assert this via the stable `data-variant="plain"` semantic marker
+    // (a cosmetic restyle/token-rename must NOT break this test) instead of matching Tailwind
+    // class substrings, per the «test behaviour + aria, not CSS» rule. The glyph text and the
+    // accessible tooltip/sr-only label are the observable contract and are asserted alongside.
+    it("5a-2: the «IP» marker is a plain inline marker (data-variant=plain), not a boxed pill/badge", () => {
+      renderWithProviders(
+        <ConfigCard
+          config={{ ...cfg, host: "203.0.113.7", display_host: "203.0.113.7" }}
+          leadCard
+          status="connected"
+        />,
+      );
+      const marker = screen.getByTestId("config-card-ip-marker");
+      // Semantic variant marker — the "plain inline glyph, not a boxed pill" contract.
+      expect(marker).toHaveAttribute("data-variant", "plain");
+      expect(marker).toHaveTextContent("IP");
+      // The glyph itself is decorative (aria-hidden); the label is carried by the always-rendered
+      // sr-only span so a screen reader parked on the glyph still reads it (reachable text).
+      expect(marker).toHaveAttribute("aria-hidden", "true");
+      const card = screen.getByTestId("config-card");
+      expect(within(card).getByText(L.ipTooltip)).toBeInTheDocument();
+    });
+
+    // Test B: an IPv6 display_host also renders the «IP» glyph.
+    it("renders the «IP» glyph for a bracketed IPv6 display_host", () => {
+      renderWithProviders(
+        <ConfigCard
+          config={{ ...cfg, host: "[2001:db8::1]:443", display_host: "[2001:db8::1]:443" }}
+          leadCard
+          status="connected"
+        />,
+      );
+      const card = screen.getByTestId("config-card");
+      expect(within(card).getByText("IP")).toBeInTheDocument();
+    });
+
+    // Test C (green guard): a DOMAIN display_host renders NO «IP» glyph, only the Globe host meta.
+    it("renders NO «IP» glyph for a domain display_host", () => {
+      renderWithProviders(
+        <ConfigCard
+          config={{ ...cfg, host: "de1.example.com", display_host: "de1.example.com" }}
+          leadCard
+          status="connected"
+        />,
+      );
+      const card = screen.getByTestId("config-card");
+      expect(within(card).queryByText("IP")).not.toBeInTheDocument();
+    });
+
+    // ── 16-07 (gap 5a): the headline fix — a fake SNI hostname over a bare IP ──
+    //
+    // The UAT bug: a bare-IP server carries a fake TLS-SNI hostname (host="trusttunnel.local") but
+    // the real endpoint is the IP (display_host="203.0.113.141"). The card must show the IP + the
+    // «IP» glyph, NOT the fake .local name + globe. The glyph keys off display_host, so this passes.
+    it("gap 5a: a fake-SNI host + IP display_host renders «IP» and SHOWS the IP", () => {
+      renderWithProviders(
+        <ConfigCard
+          config={{ ...cfg, host: "trusttunnel.local", display_host: "203.0.113.141" }}
+          leadCard
+          status="connected"
+        />,
+      );
+      const card = screen.getByTestId("config-card");
+      // «IP» glyph + its tooltip label render (keyed off display_host).
+      expect(within(card).getByText("IP")).toBeInTheDocument();
+      expect(within(card).getByText(L.ipTooltip)).toBeInTheDocument();
+      // The card shows the real IP, NOT the fake SNI name.
+      expect(within(card).getByText("203.0.113.141")).toBeInTheDocument();
+      expect(within(card).queryByText("trusttunnel.local")).not.toBeInTheDocument();
     });
   });
 

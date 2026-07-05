@@ -795,3 +795,104 @@ mod warmup_grace_tests {
         assert!(tunnel_loss_armed(WARMUP_GRACE_SECS + 10, false));
     }
 }
+
+// ─── Phase 16 (plan 16-04): T-32 transient-miss debounce decision ───
+//
+// T-32 — a SINGLE tunnel-probe miss that lands right after an adapter settle (the FIX-B/E RC-1
+// case: Docker/WSL/Wi-Fi NIC churn briefly starves the probe) may be treated as TRANSIENT and NOT
+// escalate, while a miss that brings the streak to MAX_FAILURES is a genuine drop that MUST
+// escalate — the debounce may NEVER delay a real drop. This is the pure decision the 16-01 RED
+// module (`probe_miss_tests`) pinned; 16-04 lands it here so that module compiles + goes GREEN.
+//
+// WHY it exists: reduce residual false «tunnel-lost» churn on a transient DNS-proxy/adapter blip
+// while preserving the praised ~10× faster real-drop detection. The transient case is defined as
+// «inside the adapter-settle window AND below max_failures» — the SAME two facts the FIX-B reset
+// already keys on, expressed as one testable predicate. Two invariants make it real-drop-safe by
+// construction:
+//   1. `consecutive_failures >= max_failures` ⇒ ALWAYS false — a streak that reaches the escalation
+//      threshold is a genuine sustained drop and is NEVER masked, even inside the settle window.
+//   2. `within_settle_window == false` ⇒ ALWAYS false — outside the window there is NO debounce;
+//      the steady-state MAX_FAILURES cadence owns the decision exactly as today (defaults to
+//      current behavior). This is why the helper cannot regress the aggressive real-drop timing.
+//
+// Clock/IO-free, mirroring `fixb_reset_allowed`'s pure shape (`max_failures` is a PARAMETER, not
+// the cross-module private `connectivity::MAX_FAILURES`). VPN-core-adjacent → Fable deep-review
+// post-execution. Rationale: .planning/debug/claude-code-403-on-vpn-reconnect.md (FIX-B / FIX-E).
+//
+// NOTE (16-04 boundary): this helper is deliberately NOT wired into the live `connectivity.rs`
+// escalation loop — see 16-04-SUMMARY.md. At the only candidate seam (the MAX_FAILURES escalation
+// gate) the FIX-B reset already zeros the counter + sleeps ADAPTER_EVENT_SETTLE_MS (1500 ms), so by
+// the time a streak could reach MAX_FAILURES (~12-15 s of cadence) the settle window is long
+// expired — the predicate would be `false` there anyway (invariants 1 AND 2 both bite). Wiring
+// would be a provable no-op, and the residual false-drop it targets cannot be demonstrated without
+// the live `app.log` (unavailable). The helper ships tested + ready for a future
+// demonstrable-log fix; the globals are NOT loosened.
+pub fn probe_miss_is_transient(
+    consecutive_failures: u32,
+    max_failures: u32,
+    within_settle_window: bool,
+) -> bool {
+    within_settle_window && consecutive_failures < max_failures
+}
+
+#[cfg(test)]
+mod probe_miss_tests {
+    use super::*;
+
+    // Small self-contained MAX (mirrors connectivity::MAX_FAILURES = 3) passed as a parameter — do
+    // NOT reach across modules for the private const; the pure fn takes it as an argument.
+    const MAX: u32 = 3;
+
+    #[test]
+    fn probe_miss_transient_within_settle_window_is_transient() {
+        // A single miss (failures below MAX) that lands inside a recent adapter-settle window is
+        // transient — absorb it, do not escalate.
+        assert!(probe_miss_is_transient(1, MAX, true));
+    }
+
+    #[test]
+    fn probe_miss_at_max_failures_is_not_transient() {
+        // A miss that brings the streak to MAX is a real, sustained drop — it must escalate even
+        // inside a settle window. The debounce NEVER delays a genuine drop (defaults to current
+        // behavior once the streak is real).
+        assert!(!probe_miss_is_transient(MAX, MAX, true));
+    }
+
+    #[test]
+    fn probe_miss_outside_settle_window_is_not_transient() {
+        // Outside the settle window there is NO debounce — the steady-state MAX_FAILURES cadence
+        // owns the decision (current behavior). Even a below-max streak is NOT masked here.
+        assert!(!probe_miss_is_transient(2, MAX, false));
+    }
+
+    #[test]
+    fn probe_miss_zero_failures_in_window_is_transient() {
+        // Below max, inside the window → transient (the very first miss after a settle).
+        assert!(probe_miss_is_transient(0, MAX, true));
+    }
+
+    #[test]
+    fn probe_miss_max_max_is_never_transient_for_any_max() {
+        // Boundary invariant: (max, max, _) is ALWAYS false for any max >= 1, regardless of the
+        // window flag — a streak that reaches the escalation threshold is a genuine drop that a
+        // real-drop-safe debounce may NEVER delay. This is the core anti-mask guarantee.
+        for max in 1u32..=10 {
+            assert!(
+                !probe_miss_is_transient(max, max, true),
+                "(max={max}, max, true) must never be transient",
+            );
+            assert!(
+                !probe_miss_is_transient(max, max, false),
+                "(max={max}, max, false) must never be transient",
+            );
+        }
+    }
+
+    #[test]
+    fn probe_miss_above_max_is_never_transient() {
+        // A streak that has already overshot MAX is likewise never transient — the `<` comparison
+        // holds for any over-threshold count, so a real drop can never be re-classified transient.
+        assert!(!probe_miss_is_transient(MAX + 1, MAX, true));
+        assert!(!probe_miss_is_transient(u32::MAX, MAX, true));
+    }
+}

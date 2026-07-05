@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { useWizardState } from "./wizard/useWizardState";
@@ -20,12 +21,22 @@ import type { SetupWizardProps } from "./wizard/types";
 // unreachable from this router. Reachable screens: endpoint → deploying → done/error,
 // plus `found` (server already installed → reinstall/manage) and the out-of-flow
 // `recovery` fork (interrupted-install safety net) — neither shows an SSH login form.
-function SetupWizard({ onSetupComplete, onClose }: SetupWizardProps) {
+function SetupWizard({ onSetupComplete, onClose, onBusyChange }: SetupWizardProps) {
   const { t } = useTranslation();
   // onClose threaded into the hook so screens (Done/Found post-install nav, an
   // auth-secret-miss fallback) can close the overlay instead of routing to a deleted
   // server screen (D-01 / Pitfall 3 / 06-uat SSH-removal).
   const wizard = useWizardState({ onSetupComplete, onClose });
+
+  // INSTALL-LOCK (16-12): report the must-not-interrupt steps up to App so it can
+  // lock the bottom tab nav. `deploying` = protocol install running; `uninstalling`
+  // = delete/reset running. Any other step is safe to navigate away from. Also
+  // fire `false` on unmount so a torn-down wizard never leaves the nav stuck locked.
+  const busy = wizard.step === "deploying" || wizard.step === "uninstalling";
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
 
   switch (wizard.step) {
     case "found":

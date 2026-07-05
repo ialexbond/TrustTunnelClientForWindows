@@ -11,6 +11,7 @@ import { FieldError } from "../../shared/ui/FieldError";
 import { OverflowMenu, type OverflowMenuItem } from "../../shared/ui/OverflowMenu";
 import { statusBadgeVariant } from "../../shared/lib/statusBadgeVariant";
 import { ConfigPingPill, type ConfigPing } from "./ConfigPingPill";
+import { isIpAddress } from "./plateDetails";
 import { InlineNameEdit } from "./InlineNameEdit";
 import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 import type { ConfigSummary } from "../../shared/hooks/useConfigList";
@@ -450,8 +451,49 @@ export function ConfigCard({
             />
             <div className="flex min-w-0 max-w-full items-center justify-center gap-[var(--space-3)] text-xs text-[var(--color-text-muted)]">
               <span className="flex min-w-0 items-center gap-[var(--space-1)]">
-                <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <TruncatedText text={config.host} className="min-w-0 font-mono" />
+                {/* Phase 16 (T-22): a bare-IP endpoint (no domain) shows a leading LETTER-glyph
+                    «IP» instead of the `Globe`, so the user can tell a raw-IP server (self-signed /
+                    no-domain) apart from a domain one at a glance. Locked visual (connection.md):
+                    a TEXT glyph, NOT a lucide icon — do NOT reuse buildConnectDetails' `Server` swap.
+                    IP-only AND lead-card only: resting rows never show it (they drop the host icon
+                    entirely). Derived from the EXISTING `isIpAddress` helper (no new regex) and the
+                    EXISTING `connection.card.ip_only_tooltip` key (no new key). The `Tooltip` gives
+                    the hover affordance; the visually-hidden `sr-only` span carries the same label as
+                    the accessible name in the always-rendered DOM (a hover-portal tooltip alone is not
+                    reachable for a screen reader parked on the glyph, and is not in the card subtree). */}
+                {/* 16-07 (gap 5a): the glyph branch + host text key off config.display_host (the
+                    IP-preferring card value), NOT config.host (the raw dedup key). A bare-IP server
+                    carrying a fake SNI hostname (trusttunnel.local) thus shows the real IP + «IP»
+                    glyph; a real domain keeps the domain + globe. Dedup still keys off config.host. */}
+                {/* 5a-2 (16-12): the «IP» marker must be CONSISTENT with the domain
+                    `Globe` treatment (owner: «не по дизайну») — the boxed pill
+                    (border + bg + rounded box) read as a mismatched badge next to
+                    the clean inline globe. Render «IP» as a plain inline monochrome
+                    marker at the SAME size (h-3.5 = 14px) and the SAME muted token
+                    color as the globe, no pill/border/background. It sits inline in
+                    the meta row exactly where the globe would, so a bare-IP server
+                    and a domain server read as the same kind of host glyph. */}
+                {isIpAddress(config.display_host) ? (
+                  <Tooltip text={t("connection.card.ip_only_tooltip")} position="top">
+                    <span
+                      className="inline-flex h-3.5 shrink-0 items-center text-[11px] font-semibold leading-none tracking-wide text-[var(--color-text-muted)]"
+                      aria-hidden="true"
+                      data-testid="config-card-ip-marker"
+                      // TA-9: stable semantic marker for the "plain inline glyph (not a boxed
+                      // pill/badge)" contract (5a-2). Tests assert on this, not on Tailwind class
+                      // substrings, so a cosmetic restyle/token-rename can't break the test.
+                      data-variant="plain"
+                    >
+                      IP
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                )}
+                {isIpAddress(config.display_host) && (
+                  <span className="sr-only">{t("connection.card.ip_only_tooltip")}</span>
+                )}
+                <TruncatedText text={config.display_host} className="min-w-0 font-mono" />
               </span>
               {/* Phase 14: explicitly hide the connected-only details (ping + uptime) while
                   `switching`. A transient `connected` in the switch/revert window (A briefly up, or A
@@ -562,7 +604,8 @@ export function ConfigCard({
             )}
 
             <div className="flex items-center gap-[var(--space-1)] min-w-0 text-xs text-[var(--color-text-muted)]">
-              <TruncatedText text={config.host} className="min-w-0 font-mono" />
+              {/* 16-07: resting-row host text shows the IP-preferring display_host too (dedup keys off host). */}
+              <TruncatedText text={config.display_host} className="min-w-0 font-mono" />
               {config.user && (
                 <>
                   <span aria-hidden="true" className="shrink-0 select-none">·</span>

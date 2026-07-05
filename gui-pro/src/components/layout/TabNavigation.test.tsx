@@ -46,6 +46,34 @@ describe("TabNavigation", () => {
     expect(onTabChange).toHaveBeenCalledWith("connection");
   });
 
+  // ── INSTALL-LOCK (16-12): tab switching disabled during install/reset ──────
+
+  it("locked: a NON-active tab is disabled and does NOT switch (install can't be disrupted)", () => {
+    render(<TabNavigation {...defaultProps} activeTab="control" locked />);
+    const connectionTab = screen.getByRole("tab", { name: new RegExp(i18n.t("tabs.connection")) });
+    // The non-active tab is disabled + aria-disabled while locked.
+    expect(connectionTab).toBeDisabled();
+    expect(connectionTab).toHaveAttribute("aria-disabled", "true");
+    // Clicking it does NOT trigger a tab change.
+    fireEvent.click(connectionTab);
+    expect(onTabChange).not.toHaveBeenCalled();
+  });
+
+  it("locked: the ACTIVE tab stays enabled (never disables the current section)", () => {
+    render(<TabNavigation {...defaultProps} activeTab="control" locked />);
+    const controlTab = screen.getByRole("tab", { name: new RegExp(i18n.t("tabs.controlPanel")) });
+    expect(controlTab).not.toBeDisabled();
+    expect(controlTab).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("NOT locked: non-active tabs switch normally (lock is off by default)", () => {
+    render(<TabNavigation {...defaultProps} activeTab="control" />);
+    const connectionTab = screen.getByRole("tab", { name: new RegExp(i18n.t("tabs.connection")) });
+    expect(connectionTab).not.toBeDisabled();
+    fireEvent.click(connectionTab);
+    expect(onTabChange).toHaveBeenCalledWith("connection");
+  });
+
   it("calls onTabChange with 'control' for Control Panel tab", () => {
     render(<TabNavigation {...defaultProps} activeTab="connection" />);
     fireEvent.click(screen.getByText(i18n.t("tabs.controlPanel")));

@@ -54,9 +54,14 @@ export function ConfirmDialog({
       closeOnBackdrop={!loading}
       size={size}
     >
+      {/* DELMODAL (16-12): the reset/uninstall confirm rendered its title, body AND
+          buttons CENTERED, which read as off-pattern vs the app's other confirms.
+          Use the standard modal layout: title + body LEFT-aligned, action buttons
+          in a RIGHT-aligned footer row (Отмена secondary + danger action on the
+          right). Same copy/behavior, just the alignment. */}
       <div className="space-y-[var(--space-4)]">
         <h3
-          className="text-base font-semibold text-center"
+          className="text-base font-semibold text-left"
           style={{
             color:
               variant === "danger"
@@ -67,11 +72,11 @@ export function ConfirmDialog({
           {title}
         </h3>
         <p
-          className="text-sm text-center leading-relaxed text-[var(--color-text-secondary)] whitespace-pre-line"
+          className="text-sm text-left leading-relaxed text-[var(--color-text-secondary)] whitespace-pre-line"
         >
           {message}
         </p>
-        <div className="flex gap-[var(--space-3)] items-center justify-center">
+        <div className="flex gap-[var(--space-3)] items-center justify-end">
           <Button
             variant="ghost"
             onClick={onCancel}

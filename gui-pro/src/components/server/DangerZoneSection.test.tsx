@@ -65,6 +65,53 @@ describe("DangerZoneSection", () => {
     ).toBeInTheDocument();
   });
 
+  it("INSTALL-LOCK (16-12): confirming delete shows a loader on the confirm button while the uninstall runs, then invokes uninstall_server", async () => {
+    // Gate the uninstall invoke on a manual resolve so we can observe the
+    // in-flight loading state on the CONFIRM button (the destructive op runs
+    // through the confirm dialog's `action` hook — the modal stays open with a
+    // spinner and can't be interrupted mid-flight).
+    let resolveUninstall: (() => void) | undefined;
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "uninstall_server") {
+        return new Promise<void>((res) => {
+          resolveUninstall = () => res();
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const state = makeState();
+    render(<DangerZoneSection state={state} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(i18n.t("server.danger.uninstall")) }),
+    );
+    // Click the danger confirm button in the dialog.
+    const confirmBtn = await screen.findByRole("button", {
+      name: new RegExp(i18n.t("server.danger.confirm_delete_btn")),
+    });
+    fireEvent.click(confirmBtn);
+
+    // While the uninstall is pending: the confirm button is disabled (loading) and
+    // the invoke was fired.
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("uninstall_server", state.sshParams);
+    });
+    const dialogConfirm = screen.getByRole("button", {
+      name: new RegExp(i18n.t("server.danger.confirm_delete_btn")),
+    });
+    expect(dialogConfirm).toBeDisabled();
+
+    // Complete the uninstall → dialog resolves, serverInfo cleared.
+    resolveUninstall?.();
+    await waitFor(() => {
+      expect(state.setServerInfo).toHaveBeenCalledWith({
+        installed: false,
+        version: "",
+        serviceActive: false,
+        users: [],
+      });
+    });
+  });
+
   // ── Phase 17 Plan 06: Stop/Start conditional toggle (D-3.3) ──
 
   it("renders_stop_button_when_service_active — Stop visible, Start absent", () => {

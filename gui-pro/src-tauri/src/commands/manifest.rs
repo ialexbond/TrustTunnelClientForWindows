@@ -70,6 +70,15 @@ pub struct ConfigEntry {
     pub order: u32,
     /// Whether this is the last-used config (D-05 — no "favourite"/star concept).
     pub last_used: bool,
+    /// B6 fix #5 (DATA-LOSS): a DURABLE flag marking this entry as a deliberately-created copy
+    /// (card «Дублировать» or import same-server «Добавить копию»). Set true at every app
+    /// copy-creation site; `is_deliberate_copy` checks it FIRST so a copy is ALWAYS spared by the
+    /// delete identity-sweep — even when its name/filename heuristic would miss it (a numbered
+    /// «(копия 2)» label, an import copy that kept the original filename, or a copy the user then
+    /// RENAMED, stripping the name marker). `#[serde(default)]` so existing manifests written
+    /// before this field parse as `false` (legacy copies fall back to the name/filename heuristic).
+    #[serde(default)]
+    pub copy: bool,
 }
 
 /// The on-disk `configs.json` manifest. The single source of truth for the config
@@ -97,7 +106,18 @@ impl Default for Manifest {
 pub struct ConfigSummary {
     pub id: String,
     pub name: String,
+    /// The RAW `[endpoint].hostname` — the dedup / same-server IDENTITY key. Read by
+    /// `find_duplicate_by_host_user` (D-13), `identity_key_of` (B6 copy-sweep), and the FE
+    /// `identityKey` (dedupeConfigsByIdentity.ts). MUST stay the raw hostname: re-keying it to the
+    /// IP would silently alter dedup/same-server-copy behavior (the round-2 DATA-LOSS surface).
     pub host: String,
+    /// 16-07 (gap 5a): the value the Connection-tab card SHOWS. IP-preferring — for a bare-IP
+    /// endpoint that carries a fake TLS-SNI hostname (e.g. `trusttunnel.local` +
+    /// `addresses=["203.0.113.141:443"]`) this is the real IP, so the FE `isIpAddress` branch
+    /// renders the «IP» glyph instead of the globe. Display ONLY — never a dedup/identity key.
+    /// Computed by `derive_display_host` (which reuses `ping::host_from_addr`). Plain snake_case so
+    /// the FE `display_host` mirrors it 1:1.
+    pub display_host: String,
     pub user: String,
     pub path: String,
     pub order: u32,
@@ -214,6 +234,64 @@ fn looks_like_config(content: &str) -> bool {
     content.contains("[endpoint]") || content.contains("[listener")
 }
 
+/// Is `s` a bare IP literal? Accepts an unbracketed IPv4/IPv6, and a bracketed IPv6 literal
+/// (`[2001:db8::1]`) by stripping the surrounding brackets first. Used ONLY to decide whether a
+/// candidate host string is an address (→ drives the «IP» glyph); it is not a validator.
+fn is_bare_ip(s: &str) -> bool {
+    let unbracketed = s.strip_prefix('[').and_then(|r| r.strip_suffix(']')).unwrap_or(s);
+    unbracketed.parse::<std::net::IpAddr>().is_ok()
+}
+
+/// The app's self-hosted "no real domain" SNI placeholder. When a self-hosted (non-Let's-Encrypt)
+/// install has no user domain, the generated config carries `hostname = "trusttunnel.local"` as a
+/// FAKE TLS-SNI name (mirroring `server_config.rs::validated_server_host`, which treats empty OR
+/// `trusttunnel.local` as "no real host"). It is NOT a routable domain — the real endpoint is the
+/// IP in `addresses[0]` — so for the card we surface that IP instead of this placeholder.
+const NO_DOMAIN_SNI_PLACEHOLDER: &str = "trusttunnel.local";
+
+/// 16-07 (gap 5a): the IP-preferring value the card SHOWS (`ConfigSummary.display_host`), kept
+/// SEPARATE from `host` (the raw dedup/identity key) so fixing the card glyph can never alter
+/// dedup/same-server-copy behavior.
+///
+/// Rule — a bare-IP `addresses[0]` wins over a FAKE SNI hostname; a REAL domain keeps the domain
+/// (so its globe glyph is preserved):
+///   * hostname is a REAL domain (non-empty, not a bare IP, not the `trusttunnel.local`
+///     no-domain placeholder) → the hostname wins (globe).
+///   * else (hostname empty, itself an IP, or the `trusttunnel.local` placeholder) AND
+///     `addresses[0]` yields a bare IP → that IP (so a `trusttunnel.local`-SNI-over-IP config
+///     surfaces the real IP + the «IP» glyph — the gap-5a fix).
+///   * else fall back to the trimmed hostname, else the address host, else "".
+///
+/// The `trusttunnel.local` test mirrors `server_config.rs::validated_server_host` (empty OR
+/// `trusttunnel.local` ⇒ no real host) so the two agree on what counts as a real domain. Reuses
+/// `ping::host_from_addr` for the address host — the SAME derivation the ping reader uses, so the
+/// two host derivations cannot drift (the 5a root_cause requires reuse, not a copy).
+fn derive_display_host(hostname: &str, first_addr: Option<&str>) -> String {
+    let hostname = hostname.trim();
+    let addr_host = first_addr.and_then(crate::commands::ping::host_from_addr);
+    let addr_is_ip = addr_host.as_deref().map(is_bare_ip).unwrap_or(false);
+    // A REAL domain wins → globe preserved. "Real" excludes empty, a bare IP, and the
+    // no-domain `trusttunnel.local` placeholder (a fake SNI, not a routable name).
+    let hostname_is_real_domain = !hostname.is_empty()
+        && !is_bare_ip(hostname)
+        && !hostname.eq_ignore_ascii_case(NO_DOMAIN_SNI_PLACEHOLDER);
+    if hostname_is_real_domain {
+        return hostname.to_string();
+    }
+    // Fake-SNI / empty / IP hostname: prefer a bare-IP addresses[0] so the «IP» glyph fires.
+    if addr_is_ip {
+        if let Some(ip) = addr_host {
+            return ip;
+        }
+    }
+    // No usable address IP: keep the hostname (may itself be an IP or the placeholder), else the
+    // address host, else "".
+    if !hostname.is_empty() {
+        return hostname.to_string();
+    }
+    addr_host.unwrap_or_default()
+}
+
 /// Read name/host/user out of a config `.toml`. Name = TOML `name` → else `username`
 /// (D-14). NEVER reads or logs `endpoint.password` (D-29). Validates the path first (V12).
 ///
@@ -241,6 +319,15 @@ fn summarize_unchecked(path: &str) -> Result<ConfigSummary, String> {
         .and_then(|h| h.as_str())
         .unwrap_or_default()
         .to_string();
+    // 16-07 (gap 5a): the card DISPLAY value — IP-preferring, separate from `host` (the raw
+    // dedup/identity key, left untouched above). `addresses[0]` feeds derive_display_host so a
+    // bare-IP endpoint carrying a fake SNI hostname surfaces the real IP + the «IP» glyph.
+    let first_addr = ep
+        .and_then(|e| e.get("addresses"))
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.first())
+        .and_then(|s| s.as_str());
+    let display_host = derive_display_host(&host, first_addr);
     let user = ep
         .and_then(|e| e.get("username"))
         .and_then(|u| u.as_str())
@@ -266,6 +353,7 @@ fn summarize_unchecked(path: &str) -> Result<ConfigSummary, String> {
         id: id_from_path(p),
         name,
         host,
+        display_host,
         user,
         path: path.to_string(),
         order: 0,
@@ -299,6 +387,14 @@ pub fn migrate_to_manifest(
 
     let mut entries: Vec<ConfigEntry> = Vec::new();
     let mut seen_paths: Vec<std::path::PathBuf> = Vec::new();
+    // B6 fix #6: migration is DEDUP-BY-PATH ONLY (the pre-B6 behavior — the identity-aware skip is
+    // REVERTED). Rationale: the skip left the losing same-identity twin as an UNTRACKED
+    // password-bearing `.toml` on disk (migration never deletes — P11-02 — and never re-runs), and
+    // the delete-sweep iterates only `manifest.configs`, so that untracked twin could NEVER be
+    // deleted in-app → a residual-secret file forever. Tracking BOTH twins instead is coherent: the
+    // display already collapses same-identity twins to one card (`dedupeConfigsByIdentity`), and the
+    // delete identity-sweep removes BOTH files on delete. So the twin is invisible (collapsed) yet
+    // fully deletable — no untracked orphan. NEVER reads the password (D-29).
 
     // (a) The legacy active config is config #1 + last_used, IF it exists on disk and is
     //     a real config. This is the file the user is connected through — it must never
@@ -310,12 +406,14 @@ pub fn migrate_to_manifest(
                 if looks_like_config(&content) {
                     let canon = canonical_or_self(active_path);
                     let name = derive_name(&content, active_path);
+                    let path_str = active_path.to_string_lossy().to_string();
                     entries.push(ConfigEntry {
                         id: id_from_path(active_path),
                         name,
-                        path: active_path.to_string_lossy().to_string(),
+                        path: path_str,
                         order: 0,
                         last_used: true,
+                        copy: false, // migrated files are never copies (fix #5 durable flag)
                     });
                     seen_paths.push(canon);
                 }
@@ -355,12 +453,17 @@ pub fn migrate_to_manifest(
             continue; // dedup — already the active config (or a duplicate path)
         }
         let name = derive_name(&content, &p);
+        let path_str = p.to_string_lossy().to_string();
+        // B6 fix #6: track EVERY distinct-path config (path-dedup only — no identity skip). A
+        // same-identity twin is kept as its own tracked entry so it is deletable in-app; the
+        // display-collapse hides it and the delete identity-sweep removes both files together.
         entries.push(ConfigEntry {
             id: id_from_path(&p),
             name,
-            path: p.to_string_lossy().to_string(),
+            path: path_str,
             order: next_order,
             last_used: false,
+            copy: false, // migrated files are never copies (fix #5 durable flag)
         });
         seen_paths.push(canon);
         next_order += 1;
@@ -616,6 +719,8 @@ fn list_configs_in_dir(dir: &Path) -> Result<Vec<ConfigSummary>, String> {
             id: entry.id.clone(),
             name: entry.name.clone(),
             host: String::new(),
+            // Unreadable file: no host context → the card display value is empty too.
+            display_host: String::new(),
             user: String::new(),
             path: entry.path.clone(),
             order: entry.order,
@@ -629,6 +734,8 @@ fn list_configs_in_dir(dir: &Path) -> Result<Vec<ConfigSummary>, String> {
                 summary.name
             },
             host: summary.host,
+            // Carry the summary's IP-preferring display value through to the card (16-07).
+            display_host: summary.display_host,
             user: summary.user,
             path: entry.path.clone(),
             order: entry.order,
@@ -662,17 +769,21 @@ pub fn add_config(path: String) -> Result<Vec<ConfigSummary>, String> {
 
 /// Internal: append a config entry (deduped by canonical path). Shared by add_config +
 /// duplicate_config so the dedup rule lives in one place. Name derived from content (D-14).
+/// A plain add is never a copy (`copy = false`).
 fn add_entry(manifest: &mut Manifest, path: &str) -> Result<(), String> {
-    add_entry_named(manifest, path, None)
+    add_entry_named(manifest, path, None, false)
 }
 
-/// Like `add_entry` but with an OPTIONAL explicit display name. The import/duplicate COPY paths
-/// pass `Some("<base> (копия N)")` (IN-26) so the copy is labelled distinctly; a plain
-/// add/import passes `None` and derives the name from content (D-14).
+/// Like `add_entry` but with an OPTIONAL explicit display name and a durable `copy` flag. The
+/// import/duplicate COPY paths pass `Some("<base> (копия N)")` (IN-26) so the copy is labelled
+/// distinctly AND `copy = true` (B6 fix #5) so the delete identity-sweep spares it regardless of
+/// how its name/filename later drifts; a plain add/import passes `None`/`false` and derives the
+/// name from content (D-14).
 fn add_entry_named(
     manifest: &mut Manifest,
     path: &str,
     name_override: Option<&str>,
+    copy: bool,
 ) -> Result<(), String> {
     let p = Path::new(path);
     let canon = canonical_or_self(p);
@@ -698,6 +809,7 @@ fn add_entry_named(
         path: path.to_string(),
         order: next_order,
         last_used: false,
+        copy, // B6 fix #5: durable copy marker (import same-server «Добавить копию» passes true)
     });
     Ok(())
 }
@@ -961,34 +1073,95 @@ fn delete_config_in_dir(dir: &Path, id: &str) -> Result<(), String> {
         .iter()
         .position(|c| c.id == id)
         .ok_or("Config not found in manifest")?;
-    let entry = manifest.configs.remove(idx);
-    // WR-03: delete the on-disk file FIRST and only DROP the manifest entry if that
-    // succeeds. The old code removed the entry unconditionally and best-effort-deleted the
-    // file (`let _ = remove_file`). If the `.toml` was locked / in use / permission-denied
-    // the delete silently failed yet the entry was gone — leaving an ORPHAN file on disk
-    // that no manifest entry tracks and that startup migration (guarded by manifest-exists)
-    // never re-discovers. Since each config file holds a password, an untracked orphan is
-    // also a residual-secret concern. Now, on a delete failure, we re-insert the entry at
-    // its original position so the manifest still tracks the file we could not remove, and
-    // surface the error to the caller. V12: only delete a file that validates inside the
-    // data dir; a path that somehow points outside is dropped from the list (the file is
-    // not ours to remove) without attempting a delete. Scoped to `dir` (the manifest's own
-    // dir) so the WR-03 test can drive this with a tempdir; in production `dir` IS
-    // `portable_data_dir()`, so the behaviour is unchanged.
-    if validate_path_in_dir(&entry.path, dir).is_ok() {
-        if let Err(e) = std::fs::remove_file(&entry.path) {
-            // The file may have been deleted out from under us already — NotFound is
-            // success-equivalent (the file is gone, which is the goal). Any other error
-            // means the file still exists, so keep tracking it: re-insert and fail.
-            if e.kind() != std::io::ErrorKind::NotFound {
-                manifest.configs.insert(idx, entry);
-                return Err(format!("Failed to delete config file: {e}"));
+    let target = manifest.configs[idx].clone();
+
+    // B6 (16-UAT round 2): the card the user deleted may be the DISPLAY winner of a same-server
+    // migration twin (two `.toml` files, same host+user — legacy `trusttunnel_client.toml` +
+    // `TrustTunnel_<user>.toml`). The card carries only the winner id, so deleting exactly that one
+    // entry+file leaves the loser twin orphaned → it collapses back into a card → "reappears". So
+    // delete SWEEPS every manifest entry sharing the target's (host,user) identity — EXCEPT a
+    // deliberate «(копия)» / `-copy` / `-<n>` sibling (it is its own card the user chose to keep,
+    // per the DECIDED rule). The target itself is always swept even if the file is unreadable now
+    // (its identity is unknown then, but it is still the explicit delete). NEVER reads the password
+    // (D-29).
+    let target_is_copy = is_deliberate_copy(target.copy, &target.name, &target.path);
+    let target_identity = if target_is_copy { None } else { identity_key_of(&target.path) };
+
+    // Collect the ids to delete: the target, plus non-copy siblings sharing its identity.
+    let mut ids_to_delete: Vec<String> = vec![target.id.clone()];
+    if let Some((ref host, ref user)) = target_identity {
+        for c in &manifest.configs {
+            if c.id == target.id {
+                continue;
+            }
+            if is_deliberate_copy(c.copy, &c.name, &c.path) {
+                continue; // a deliberate copy keeps its own card — never swept (fix #5: flag-first)
+            }
+            if let Some((h, u)) = identity_key_of(&c.path) {
+                if &h == host && &u == user {
+                    ids_to_delete.push(c.id.clone());
+                }
             }
         }
     }
+
+    // Remove the matched entries from the manifest (record originals + positions for WR-03
+    // re-insertion on a file-delete failure). Remove from the highest index down so earlier
+    // indices stay valid.
+    let mut removed: Vec<(usize, ConfigEntry)> = Vec::new();
+    let mut positions: Vec<usize> = manifest
+        .configs
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| ids_to_delete.iter().any(|d| d == &c.id))
+        .map(|(i, _)| i)
+        .collect();
+    positions.sort_unstable_by(|a, b| b.cmp(a));
+    for pos in positions {
+        removed.push((pos, manifest.configs.remove(pos)));
+    }
+    // Restore ascending order so re-insertion (on failure) lands entries at their original slots.
+    removed.sort_by_key(|(pos, _)| *pos);
+
+    let removed_last_used = removed.iter().any(|(_, e)| e.last_used);
+
+    // WR-03: delete each on-disk file, and if ANY file cannot be removed, RE-INSERT its entry so
+    // the manifest still tracks the file we could not remove (never orphan a password-bearing
+    // `.toml`) and surface the error. V12: only delete a file that validates inside the data dir; a
+    // path pointing outside is dropped from the list without attempting a delete. A NotFound error
+    // is success-equivalent (the file is already gone). Files that DID delete stay removed; only the
+    // failed one is re-tracked, then we fail — matching the single-delete WR-03 contract.
+    let mut first_err: Option<String> = None;
+    let mut reinsert: Vec<(usize, ConfigEntry)> = Vec::new();
+    for (pos, entry) in &removed {
+        if validate_path_in_dir(&entry.path, dir).is_ok() {
+            if let Err(e) = std::fs::remove_file(&entry.path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    reinsert.push((*pos, entry.clone()));
+                    if first_err.is_none() {
+                        first_err = Some(format!("Failed to delete config file: {e}"));
+                    }
+                }
+            }
+        }
+    }
+    // Re-insert the entries whose files could not be removed, at their original positions (ascending
+    // so earlier indices are filled first and later ones still land correctly).
+    reinsert.sort_by_key(|(pos, _)| *pos);
+    for (pos, entry) in reinsert {
+        let at = pos.min(manifest.configs.len());
+        manifest.configs.insert(at, entry);
+    }
+    if let Some(err) = first_err {
+        // Persist the partial state (files that DID delete stay gone; the re-inserted entry keeps
+        // its file tracked), then surface the error.
+        write_manifest_atomic(dir, &manifest)?;
+        return Err(err);
+    }
+
     // If we removed the last-used config, promote the new top entry (lowest order) so the
     // list always has a sensible lead when non-empty.
-    if entry.last_used {
+    if removed_last_used {
         if let Some(top) = manifest.configs.iter_mut().min_by_key(|c| c.order) {
             top.last_used = true;
         }
@@ -1042,6 +1215,7 @@ pub fn duplicate_config(id: String) -> Result<Vec<ConfigSummary>, String> {
         path: dest.to_string_lossy().to_string(),
         order: next_order,
         last_used: false,
+        copy: true, // B6 fix #5: card «Дублировать» is a deliberate copy — durably spare it from the sweep
     });
     write_manifest_atomic(&dir, &manifest)?;
     list_configs()
@@ -1138,6 +1312,71 @@ pub fn find_duplicate_by_host_user(dir: &Path, host: &str, user: &str) -> Option
             .map(|s| s.host == host && s.user == user)
             .unwrap_or(false)
     })
+}
+
+/// B6 (16-UAT round 2 + fix #5): true when this entry is a DELIBERATELY-created copy of another
+/// config, mirroring the frontend `isDeliberateCopy` rule (dedupeConfigsByIdentity.ts). A copy has
+/// the same (host,user) identity as its original but must keep its own card and must NEVER be
+/// swept by the delete identity-sweep — permanent data loss otherwise (fix #5).
+///
+/// Detection order (fix #5 hardening):
+///   1. The DURABLE `copy` flag (primary) — set true at every app copy-creation site
+///      (`duplicate_config`, import same-server «Добавить копию»). A flagged entry is a copy no
+///      matter what its name/filename later becomes (a numbered «(копия 2)» label, an import copy
+///      that kept the original filename, or a copy the user RENAMED to strip the marker).
+///   2. Name heuristic (legacy fallback, for pre-flag manifests): the display name carries a
+///      trailing « (копия)» OR « (копия N)» — detected via `copy_base_name` (which parses BOTH),
+///      not a literal `.contains("(копия)")` that missed the numbered form «(копия 2)».
+///   3. Filename heuristic (legacy fallback): a `-copy` / `-copy-<n>` / trailing `-<n>` suffix.
+///
+/// A migration twin (`trusttunnel_client.toml` + `TrustTunnel_<user>.toml`) carries no copy flag,
+/// no «(копия)» label, and no copy suffix — so it is never mis-flagged; generated usernames glue
+/// digits to the noun («free-lion58»), never as a trailing «-<n>».
+fn is_deliberate_copy(copy: bool, name: &str, path: &str) -> bool {
+    // (1) Durable flag wins — a flagged copy is always spared, regardless of name/filename drift.
+    if copy {
+        return true;
+    }
+    let base = Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let stem = base.strip_suffix(".toml").unwrap_or(&base);
+    // (2) Name heuristic (legacy fallback): a trailing « (копия)» OR « (копия N)». `copy_base_name`
+    // strips both forms, so a real strip (base != name) means the name carries a copy marker — this
+    // catches the numbered «(копия 2)» that the old literal `.contains("(копия)")` missed.
+    if copy_base_name(name).trim_end() != name.trim_end() {
+        return true;
+    }
+    // (3) `-copy` or `-copy-<n>` suffix (card «Дублировать», legacy fallback).
+    if stem.ends_with("-copy") {
+        return true;
+    }
+    if let Some((_, n)) = stem.rsplit_once("-copy-") {
+        if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    // `-<n>` trailing-number suffix (import «Добавить копию» → `<stem>-2.toml`).
+    if let Some((_, tail)) = stem.rsplit_once('-') {
+        if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// B6: the same-server identity key for a manifest entry read off its `.toml` — normalized
+/// (host, user), matching the FE `identityKey`. `None` when the file is unreadable or has no host
+/// (an un-keyable entry is never collapsed/swept). NEVER reads the password (D-29).
+fn identity_key_of(path: &str) -> Option<(String, String)> {
+    let s = summarize_unchecked(path).ok()?;
+    let host = s.host.trim().to_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+    Some((host, s.user.trim().to_lowercase()))
 }
 
 /// Read the (host, user) pair out of a config's TOML CONTENT (not a path) — the D-13 dup
@@ -1248,11 +1487,15 @@ pub fn append_config_to_manifest(dir: &Path, path: &str) -> Result<(), String> {
 }
 
 /// Like `append_config_to_manifest` but with an explicit display name — the import AddCopy path
-/// (deeplink.rs) labels the new entry «<base> (копия N)» (IN-26).
+/// (deeplink.rs) labels the new entry «<base> (копия N)» (IN-26). This is a same-server
+/// «Добавить копию», so it is a DELIBERATE copy: mark it durably (`copy = true`, B6 fix #5) so the
+/// delete identity-sweep spares it even though its imported filename may carry no `-copy`/`-<n>`
+/// suffix (the import keeps the original filename) and its «(копия N)» label could later be
+/// renamed away.
 pub fn append_config_to_manifest_named(dir: &Path, path: &str, name: &str) -> Result<(), String> {
     let _guard = lock_manifest();
     let mut manifest = read_manifest(dir)?;
-    add_entry_named(&mut manifest, path, Some(name))?;
+    add_entry_named(&mut manifest, path, Some(name), true)?;
     write_manifest_atomic(dir, &manifest)
 }
 
@@ -1781,6 +2024,7 @@ included_routes = ["0.0.0.0/0"]
                 path: tmp.join("c.toml").to_string_lossy().to_string(),
                 order: 0,
                 last_used: true,
+                copy: false,
             }],
         };
         // A stray leftover .tmp from a hypothetical crashed write must not be read as the
@@ -1813,6 +2057,7 @@ included_routes = ["0.0.0.0/0"]
                     path: a.to_string_lossy().to_string(),
                     order: 0,
                     last_used: true,
+                    copy: false,
                 },
                 ConfigEntry {
                     id: id_from_path(&b),
@@ -1820,6 +2065,7 @@ included_routes = ["0.0.0.0/0"]
                     path: b.to_string_lossy().to_string(),
                     order: 1,
                     last_used: false,
+                    copy: false,
                 },
             ],
         };
@@ -1876,6 +2122,7 @@ included_routes = ["0.0.0.0/0"]
                 path: a.to_string_lossy().to_string(),
                 order: 0,
                 last_used: true,
+                copy: false,
             }],
         };
         write_manifest_atomic(&tmp, &m).unwrap();
@@ -1910,6 +2157,7 @@ included_routes = ["0.0.0.0/0"]
                 path: p.to_string_lossy().to_string(),
                 order: 0,
                 last_used: true,
+                copy: false,
             }],
         };
         write_manifest_atomic(&tmp, &m).unwrap();
@@ -2037,6 +2285,7 @@ included_routes = ["0.0.0.0/0"]
                     path: tmp.join("a.toml").to_string_lossy().to_string(),
                     order: 0,
                     last_used: true,
+                    copy: false,
                 },
                 ConfigEntry {
                     id: "b".into(),
@@ -2044,6 +2293,7 @@ included_routes = ["0.0.0.0/0"]
                     path: tmp.join("b.toml").to_string_lossy().to_string(),
                     order: 1,
                     last_used: false,
+                    copy: false,
                 },
             ],
         };
@@ -2094,6 +2344,7 @@ included_routes = ["0.0.0.0/0"]
             path: format!("C:/app/{id}.toml"),
             order,
             last_used: false,
+            copy: false,
         }
     }
 
@@ -2136,6 +2387,7 @@ included_routes = ["0.0.0.0/0"]
                 path: p.to_string_lossy().to_string(),
                 order: 0,
                 last_used: true,
+                copy: false,
             }],
         };
         apply_reorder(&mut manifest.configs, &["x"]);
@@ -2171,6 +2423,7 @@ included_routes = ["0.0.0.0/0"]
                     path: dir.join(format!("c{i}.toml")).to_string_lossy().to_string(),
                     order: i,
                     last_used: false,
+                    copy: false,
                 });
                 write_manifest_atomic(&dir, &manifest).unwrap();
             }));
@@ -2220,6 +2473,7 @@ included_routes = ["0.0.0.0/0"]
             path: dir_as_path.to_string_lossy().to_string(),
             order: 0,
             last_used: true,
+            copy: false,
         };
         write_manifest_atomic(
             &tmp,
@@ -2267,6 +2521,7 @@ included_routes = ["0.0.0.0/0"]
                     path: ghost.to_string_lossy().to_string(),
                     order: 0,
                     last_used: false,
+                    copy: false,
                 },
                 ConfigEntry {
                     id: "present".into(),
@@ -2274,6 +2529,7 @@ included_routes = ["0.0.0.0/0"]
                     path: present.to_string_lossy().to_string(),
                     order: 5,
                     last_used: true,
+                    copy: false,
                 },
             ],
         };
@@ -2303,6 +2559,7 @@ included_routes = ["0.0.0.0/0"]
                 path: a.to_string_lossy().to_string(),
                 order: 3,
                 last_used: false,
+                copy: false,
             }],
         };
         assert!(!prune_missing(&mut manifest), "no missing files → no change");
@@ -2330,6 +2587,7 @@ included_routes = ["0.0.0.0/0"]
                     path: cfg.to_string_lossy().to_string(),
                     order: 0,
                     last_used: true,
+                    copy: false,
                 }],
             },
         )
@@ -2342,15 +2600,418 @@ included_routes = ["0.0.0.0/0"]
         cleanup(&tmp);
     }
 
+    // ─── B6 (16-UAT round 2): migration twin dedup + delete identity-sweep ───
+
+    /// B6 fix #6: a FRESH migration of two same-identity twin files (legacy
+    /// `trusttunnel_client.toml` + branded `TrustTunnel_<user>.toml`, same host+user) tracks BOTH
+    /// as manifest entries (path-dedup only — the identity-skip is REVERTED). Rationale: the old
+    /// skip left the losing twin UNTRACKED on disk (a residual password-bearing `.toml` that could
+    /// never be deleted in-app). Tracking both is coherent: the display collapses the pair to one
+    /// card (`dedupeConfigsByIdentity`) and the delete identity-sweep removes both files. Migration
+    /// still NEVER deletes a file (P11-02).
+    #[test]
+    fn migrate_tracks_both_same_identity_twins_deletes_nothing() {
+        let tmp = tempdir();
+        // Two files, same host+user (a migration twin). Different names/content otherwise.
+        let legacy = write_toml(
+            &tmp,
+            "trusttunnel_client.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let branded = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+
+        let manifest = migrate_to_manifest(&tmp, None).expect("migration ok");
+
+        // BOTH twin files are tracked (path-dedup only — no identity collapse at migration).
+        assert_eq!(
+            manifest.configs.len(),
+            2,
+            "both same-identity twins must be TRACKED (fix #6 — no untracked orphan)"
+        );
+        // NEVER delete a file during migration (P11-02) — both twin files still on disk.
+        assert!(legacy.is_file(), "migration must not delete the legacy twin file");
+        assert!(branded.is_file(), "migration must not delete the branded twin file");
+        // Both tracked entries point at the two twin paths.
+        let paths: Vec<&str> = manifest.configs.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.contains(&legacy.to_string_lossy().as_ref()));
+        assert!(paths.contains(&branded.to_string_lossy().as_ref()));
+        cleanup(&tmp);
+    }
+
+    /// B6 fix #6 (the untracked-orphan scenario end-to-end): a fresh migration of the twin pair
+    /// tracks both, and DELETING the (display-winner) card then removes BOTH files via the identity
+    /// sweep — because both are tracked, the sweep reaches the twin. No residual `.toml` is left.
+    #[test]
+    fn migrate_then_delete_removes_both_twin_files_no_orphan() {
+        let tmp = tempdir();
+        let legacy = write_toml(
+            &tmp,
+            "trusttunnel_client.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let branded = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let manifest = migrate_to_manifest(&tmp, None).expect("migration ok");
+        assert_eq!(manifest.configs.len(), 2, "both twins tracked");
+
+        // Delete via the first entry's id — the identity-sweep must take the sibling twin too.
+        let target_id = manifest.configs[0].id.clone();
+        delete_config_in_dir(&tmp, &target_id).expect("delete sweeps the identity");
+        assert!(!legacy.exists(), "legacy twin file must be removed by the sweep");
+        assert!(!branded.exists(), "branded twin file must be removed by the sweep");
+        let after = read_manifest(&tmp).unwrap();
+        assert!(
+            after.configs.is_empty(),
+            "no orphan entry (and no untracked residual file) remains after delete"
+        );
+        cleanup(&tmp);
+    }
+
+    /// B6 SOURCE: a DELIBERATE copy (a `copy: true` entry, or a legacy «(копия)» / `-copy` /
+    /// `-<n>` suffixed one) has the same (host,user) as its original but is never collapsed by the
+    /// delete sweep — it is its own card. Fix #6: migration itself no longer collapses, so both the
+    /// original and the copy are tracked after migration (the display collapses the non-copy twin
+    /// only).
+    #[test]
+    fn migrate_keeps_deliberate_copy_as_its_own_entry() {
+        let tmp = tempdir();
+        write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        // A deliberate duplicate: same identity, copy-suffixed filename.
+        write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox-copy.toml",
+            &sample_config(Some("Россия (копия)"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+
+        let manifest = migrate_to_manifest(&tmp, None).expect("migration ok");
+        assert_eq!(
+            manifest.configs.len(),
+            2,
+            "both files are tracked after migration (fix #6 — no identity collapse at migration)"
+        );
+        cleanup(&tmp);
+    }
+
+    /// B6 DELETE: deleting a card whose server has a migration twin (same host+user) must remove
+    /// BOTH twin files + BOTH manifest entries — not just the one the card's id points at (else the
+    /// orphan twin reappears on reload).
+    #[test]
+    fn delete_sweeps_all_same_identity_twins() {
+        let tmp = tempdir();
+        let a = write_toml(
+            &tmp,
+            "trusttunnel_client.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let b = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "twin-a".into(), name: "Россия".into(), path: a.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    ConfigEntry { id: "twin-b".into(), name: "Россия".into(), path: b.to_string_lossy().to_string(), order: 1, last_used: false, copy: false },
+                ],
+            },
+        )
+        .unwrap();
+
+        // Delete via the card's winner id (twin-a). The sweep must take twin-b too.
+        delete_config_in_dir(&tmp, "twin-a").expect("delete sweeps the identity");
+        assert!(!a.exists(), "twin A file must be removed");
+        assert!(!b.exists(), "twin B file must be removed (the sweep)");
+        let after = read_manifest(&tmp).unwrap();
+        assert!(after.configs.is_empty(), "both twin entries must be gone (no orphan reappears)");
+        cleanup(&tmp);
+    }
+
+    /// B6 DELETE: the sweep must PRESERVE a deliberate «(копия)» sibling (same host+user but a
+    /// copy-suffixed name). Deleting the server card removes its migration twin pair but leaves the
+    /// copy the user chose to keep (its own card).
+    #[test]
+    fn delete_sweep_preserves_deliberate_copy_sibling() {
+        let tmp = tempdir();
+        let original = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let twin = write_toml(
+            &tmp,
+            "trusttunnel_client.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let copy = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox-copy.toml",
+            &sample_config(Some("Россия (копия)"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "orig".into(), name: "Россия".into(), path: original.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    ConfigEntry { id: "twin".into(), name: "Россия".into(), path: twin.to_string_lossy().to_string(), order: 1, last_used: false, copy: false },
+                    ConfigEntry { id: "copy".into(), name: "Россия (копия)".into(), path: copy.to_string_lossy().to_string(), order: 2, last_used: false, copy: true },
+                ],
+            },
+        )
+        .unwrap();
+
+        delete_config_in_dir(&tmp, "orig").expect("delete sweeps twins, keeps the copy");
+        assert!(!original.exists(), "the original must be removed");
+        assert!(!twin.exists(), "the migration twin must be swept");
+        assert!(copy.exists(), "the deliberate copy must be PRESERVED (its own card)");
+        let after = read_manifest(&tmp).unwrap();
+        assert_eq!(after.configs.len(), 1, "only the copy entry remains");
+        assert_eq!(after.configs[0].id, "copy");
+        cleanup(&tmp);
+    }
+
+    // ─── B6 fix #5 (DATA-LOSS): the identity-sweep must spare a deliberately-kept copy ───
+
+    /// fix #5(a): a NUMBERED copy label «<base> (копия 2)» (from `next_copy_name`) does NOT contain
+    /// the literal "(копия)", so the OLD name check missed it → the sweep deleted it. The
+    /// `copy_base_name`-based heuristic now recognises the numbered form; the durable flag covers it
+    /// regardless. Deleting the sibling server card must PRESERVE the «(копия 2)» copy.
+    #[test]
+    fn delete_sweep_preserves_numbered_kopiya_copy() {
+        let tmp = tempdir();
+        let original = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        // A second numbered copy «(копия 2)» — no literal "(копия)" substring in that exact form.
+        let copy2 = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox-copy-2.toml",
+            &sample_config(Some("Россия (копия 2)"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "orig".into(), name: "Россия".into(), path: original.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    // No durable flag on this entry (legacy manifest) — the NAME heuristic must catch «(копия 2)».
+                    ConfigEntry { id: "copy2".into(), name: "Россия (копия 2)".into(), path: copy2.to_string_lossy().to_string(), order: 1, last_used: false, copy: false },
+                ],
+            },
+        )
+        .unwrap();
+
+        delete_config_in_dir(&tmp, "orig").expect("delete sweeps the server, keeps the copy");
+        assert!(!original.exists(), "the original server must be removed");
+        assert!(copy2.exists(), "the «(копия 2)» copy must be PRESERVED (data-loss fix #5)");
+        let after = read_manifest(&tmp).unwrap();
+        assert_eq!(after.configs.len(), 1, "only the copy remains");
+        assert_eq!(after.configs[0].id, "copy2");
+        cleanup(&tmp);
+    }
+
+    /// fix #5(b): a copy created via `duplicate_config` (durable `copy: true`) that the user then
+    /// RENAMED — stripping the «(копия)» name marker AND with no copy filename suffix — must STILL
+    /// be spared by the sweep. Only the durable flag can save it here (name + filename heuristics
+    /// both miss). This is the pure data-loss hole the flag closes.
+    #[test]
+    fn delete_sweep_preserves_renamed_flagged_copy() {
+        let tmp = tempdir();
+        let original = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        // A copy the user RENAMED to a plain name, stored under a filename with NO copy suffix
+        // (worst case: neither the name nor the filename heuristic can flag it).
+        let renamed_copy = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox-backup.toml",
+            &sample_config(Some("Мой запасной"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "orig".into(), name: "Россия".into(), path: original.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    // Durable flag set at creation; name/filename markers are gone → only the flag saves it.
+                    ConfigEntry { id: "renamed".into(), name: "Мой запасной".into(), path: renamed_copy.to_string_lossy().to_string(), order: 1, last_used: false, copy: true },
+                ],
+            },
+        )
+        .unwrap();
+
+        delete_config_in_dir(&tmp, "orig").expect("delete sweeps the server, keeps the flagged copy");
+        assert!(!original.exists(), "the original server must be removed");
+        assert!(
+            renamed_copy.exists(),
+            "a renamed, no-suffix copy with the durable flag must be PRESERVED (data-loss fix #5)"
+        );
+        let after = read_manifest(&tmp).unwrap();
+        assert_eq!(after.configs.len(), 1, "only the flagged copy remains");
+        assert_eq!(after.configs[0].id, "renamed");
+        cleanup(&tmp);
+    }
+
+    /// fix #5(c): an import same-server auto-copy (`append_config_to_manifest_named`, durable
+    /// `copy: true`) that kept the ORIGINAL filename (no `-copy`/`-<n>` suffix) must be spared by
+    /// the sweep — the durable flag covers the filename-heuristic hole.
+    #[test]
+    fn delete_sweep_preserves_import_autocopy_with_original_filename() {
+        let tmp = tempdir();
+        let original = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        // The import auto-copy landed under a branded filename that carries NO copy suffix.
+        let import_copy = write_toml(
+            &tmp,
+            "RU_TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия (копия)"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "orig".into(), name: "Россия".into(), path: original.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    ConfigEntry { id: "imported".into(), name: "Россия (копия)".into(), path: import_copy.to_string_lossy().to_string(), order: 1, last_used: false, copy: true },
+                ],
+            },
+        )
+        .unwrap();
+
+        delete_config_in_dir(&tmp, "orig").expect("delete sweeps the server, keeps the import copy");
+        assert!(!original.exists(), "the original server must be removed");
+        assert!(import_copy.exists(), "the import auto-copy must be PRESERVED (data-loss fix #5)");
+        cleanup(&tmp);
+    }
+
+    /// fix #5(d): the counter-case — a genuine migration twin (same host+user, NO durable flag, NO
+    /// «(копия)» marker, NO copy filename suffix) IS still swept. The fix must not over-protect.
+    #[test]
+    fn delete_sweep_still_removes_a_genuine_twin() {
+        let tmp = tempdir();
+        let original = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        let twin = write_toml(
+            &tmp,
+            "trusttunnel_client.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "orig".into(), name: "Россия".into(), path: original.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    ConfigEntry { id: "twin".into(), name: "Россия".into(), path: twin.to_string_lossy().to_string(), order: 1, last_used: false, copy: false },
+                ],
+            },
+        )
+        .unwrap();
+
+        delete_config_in_dir(&tmp, "orig").expect("delete sweeps the genuine twin");
+        assert!(!original.exists(), "the original must be removed");
+        assert!(!twin.exists(), "a genuine non-copy twin MUST still be swept (no over-protection)");
+        let after = read_manifest(&tmp).unwrap();
+        assert!(after.configs.is_empty(), "both non-copy twin entries are gone");
+        cleanup(&tmp);
+    }
+
+    /// fix #5 unit: `is_deliberate_copy` recognises the numbered «(копия 2)» label and honours the
+    /// durable flag first, while a bare non-copy name/path is not flagged.
+    #[test]
+    fn is_deliberate_copy_covers_numbered_label_and_flag() {
+        // Durable flag wins regardless of name/path.
+        assert!(is_deliberate_copy(true, "Мой запасной", "C:/app/TrustTunnel_swift-fox-backup.toml"));
+        // Numbered «(копия 2)» label (the old .contains("(копия)") missed this).
+        assert!(is_deliberate_copy(false, "Россия (копия 2)", "C:/app/whatever.toml"));
+        // Plain «(копия)» label still flagged.
+        assert!(is_deliberate_copy(false, "Россия (копия)", "C:/app/whatever.toml"));
+        // Filename `-copy` suffix still flagged.
+        assert!(is_deliberate_copy(false, "Россия", "C:/app/TrustTunnel_swift-fox-copy.toml"));
+        // A genuine twin: no flag, no label marker, no suffix → NOT a copy.
+        assert!(!is_deliberate_copy(false, "Россия", "C:/app/trusttunnel_client.toml"));
+    }
+
+    /// B6 DELETE + WR-03: the orphan-on-failure safety survives inside the identity-sweep path — if
+    /// the DELETED card's file cannot be removed, its entry is RE-INSERTED (never orphaned) and the
+    /// delete surfaces an error. (Cross-platform, the only way to force a deterministic remove_file
+    /// failure is to point the path at a directory — which cannot be identity-read, so we target it
+    /// directly: the target is always in the delete set regardless of identity. This exercises the
+    /// re-insertion branch of the new sweep code, the WR-03 contract.)
+    #[test]
+    fn delete_sweep_keeps_entry_when_the_target_file_delete_fails() {
+        let tmp = tempdir();
+        // A directory standing in for an unremovable config file (remove_file on a dir errors
+        // non-NotFound on every platform — the same trick the WR-03 single-delete test uses).
+        let dir_as_path = tmp.join("trusttunnel_client.toml");
+        std::fs::create_dir(&dir_as_path).unwrap();
+        // A readable same-name-server sibling that would be swept — but must NOT be touched because
+        // the target's file failed to delete (we re-insert + fail before any sibling is affected...
+        // and the target here has no readable identity, so the sibling is not in the set at all).
+        let sibling = write_toml(
+            &tmp,
+            "TrustTunnel_swift-fox.toml",
+            &sample_config(Some("Россия"), "ru1.example.com", "swift-fox", "SECRET-A"),
+        );
+        write_manifest_atomic(
+            &tmp,
+            &Manifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                configs: vec![
+                    ConfigEntry { id: "locked".into(), name: "Россия".into(), path: dir_as_path.to_string_lossy().to_string(), order: 0, last_used: true, copy: false },
+                    ConfigEntry { id: "sibling".into(), name: "Россия".into(), path: sibling.to_string_lossy().to_string(), order: 1, last_used: false, copy: false },
+                ],
+            },
+        )
+        .unwrap();
+
+        let result = delete_config_in_dir(&tmp, "locked");
+        assert!(result.is_err(), "delete must surface the error when the target file cannot be removed");
+        // The unremovable file must STILL be tracked (no orphaned password-bearing file).
+        assert!(dir_as_path.is_dir(), "the unremovable path must still exist");
+        let after = read_manifest(&tmp).unwrap();
+        assert!(
+            after.configs.iter().any(|c| c.id == "locked"),
+            "the entry for the file we could not remove must be re-inserted (no orphan)"
+        );
+        // The readable sibling was untouched (the failed target has no identity, so no sweep).
+        assert!(sibling.exists(), "an unrelated sibling must not be swept when the target fails");
+        cleanup(&tmp);
+    }
+
     /// Truth (IN-01): repeated last-used switches keep orders dense (0..n), never climbing
     /// monotonically. Replicates the NEW set_last_used transform and asserts the order set
     /// is exactly {0,1,...,n-1} after each switch, with the selected config at 0.
     #[test]
     fn set_last_used_keeps_orders_dense() {
         let mut configs = vec![
-            ConfigEntry { id: "a".into(), name: "A".into(), path: "a".into(), order: 0, last_used: true },
-            ConfigEntry { id: "b".into(), name: "B".into(), path: "b".into(), order: 1, last_used: false },
-            ConfigEntry { id: "c".into(), name: "C".into(), path: "c".into(), order: 2, last_used: false },
+            ConfigEntry { id: "a".into(), name: "A".into(), path: "a".into(), order: 0, last_used: true, copy: false },
+            ConfigEntry { id: "b".into(), name: "B".into(), path: "b".into(), order: 1, last_used: false, copy: false },
+            ConfigEntry { id: "c".into(), name: "C".into(), path: "c".into(), order: 2, last_used: false, copy: false },
         ];
 
         // The NEW dense re-normalize transform (mirrors set_last_used).
@@ -2402,5 +3063,238 @@ included_routes = ["0.0.0.0/0"]
 
     fn cleanup(dir: &Path) {
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // ─── 16-07 (gap 5a): display_host derivation + dedup/identity regression ──────────
+
+    /// A config `.toml` carrying an explicit `[endpoint].addresses` list — the round-3 gap-5a
+    /// shape (a bare-IP endpoint with a fake TLS-SNI `hostname`). Carries a password so D-29
+    /// (never read the password) still holds through the new display path.
+    fn config_with_addresses(hostname: &str, user: &str, addresses: &[&str]) -> String {
+        let addr_list = addresses
+            .iter()
+            .map(|a| format!("\"{a}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "# TrustTunnel Client Configuration\n\
+             loglevel = \"info\"\n\n\
+             [endpoint]\n\
+             hostname = \"{hostname}\"\n\
+             username = \"{user}\"\n\
+             password = \"s3cret-never-displayed\"\n\
+             addresses = [{addr_list}]\n\n\
+             [listener.tun]\n\
+             mtu_size = 1280\n"
+        )
+    }
+
+    /// Truth (gap 5a): a fake SNI hostname over a bare-IP addresses[0] → host stays the raw
+    /// hostname (dedup key), display_host is the real IP (drives the FE «IP» glyph).
+    #[test]
+    fn derive_display_host_prefers_ip_over_fake_sni() {
+        assert_eq!(
+            derive_display_host("trusttunnel.local", Some("203.0.113.141:443")),
+            "203.0.113.141"
+        );
+    }
+
+    /// Truth: an EMPTY hostname + a bare-IP addresses[0] → the IP.
+    #[test]
+    fn derive_display_host_empty_hostname_uses_ip() {
+        assert_eq!(derive_display_host("", Some("203.0.113.7:443")), "203.0.113.7");
+    }
+
+    /// Truth: a REAL domain hostname wins over the address (globe preserved) — the domain is
+    /// never replaced by its resolved IP.
+    #[test]
+    fn derive_display_host_real_domain_wins() {
+        assert_eq!(
+            derive_display_host("vpn.example.com", Some("1.2.3.4:443")),
+            "vpn.example.com"
+        );
+    }
+
+    // ─── TA-7: legacy SOCKS → TUN migration (was a manual-only UAT step, now automated) ──
+    //
+    // UAT Test 2 («старый SOCKS-конфиг авто-конвертируется в рабочий TUN при загрузке») was skipped
+    // for lack of a legacy artifact — but it is a pure deterministic load-time transform needing no
+    // live server. This drives a REAL legacy `[listener.socks]` `.toml` through the actual normalize
+    // path (`config::normalize_config_socks_to_tun`, the fn wired into the startup sweep
+    // `normalize_all_configs_to_tun`), writes the result, and summarizes it — asserting the outcome
+    // is a full-tunnel TUN config with the endpoint + credentials preserved verbatim.
+
+    /// A realistic LEGACY client config that declares ONLY the removed `[listener.socks]` mode.
+    /// Carries endpoint host/user/password so the test can assert they survive the conversion.
+    fn legacy_socks_config() -> String {
+        "# TrustTunnel Client Configuration (legacy SOCKS build)\n\
+         loglevel = \"info\"\n\
+         vpn_mode = \"general\"\n\
+         killswitch_enabled = true\n\n\
+         [endpoint]\n\
+         hostname = \"de1.example.com\"\n\
+         username = \"swift-fox\"\n\
+         password = \"legacy-SOCKS-secret\"\n\n\
+         [listener.socks]\n\
+         bind_address = \"127.0.0.1\"\n\
+         bind_port = 1080\n"
+            .to_string()
+    }
+
+    #[test]
+    fn legacy_socks_config_normalizes_to_full_tunnel_tun_preserving_endpoint_and_creds() {
+        let tmp = tempdir();
+
+        // 1. A real legacy SOCKS `.toml` on disk.
+        let original = legacy_socks_config();
+        let path = write_toml(&tmp, "TrustTunnel_swift-fox.toml", &original);
+
+        // 2. The manifest-load normalize step (the same fn the startup sweep runs) rewrites it.
+        let raw = std::fs::read_to_string(&path).expect("read legacy config");
+        let normalized = crate::commands::config::normalize_config_socks_to_tun(&raw)
+            .expect("a config with [listener.socks] MUST be normalized (Some)");
+        std::fs::write(&path, &normalized).expect("write normalized config");
+
+        // 3a. The rewritten TOML is a FULL-TUNNEL TUN config — no SOCKS listener remains, and the
+        //     synthesized tun block routes everything (0.0.0.0/0).
+        let doc: toml::Value = toml::from_str(&normalized).expect("normalized config is valid TOML");
+        let listener = doc.get("listener").and_then(|l| l.as_table()).expect("[listener] present");
+        assert!(listener.get("socks").is_none(), "the SOCKS listener must be gone:\n{normalized}");
+        let tun = listener.get("tun").and_then(|t| t.as_table()).expect("[listener.tun] synthesized");
+        let routes: Vec<&str> = tun
+            .get("included_routes")
+            .and_then(|r| r.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert!(
+            routes.contains(&"0.0.0.0/0"),
+            "the TUN listener must be a FULL tunnel (0.0.0.0/0):\n{normalized}"
+        );
+
+        // 3b. The endpoint + credentials are preserved verbatim through the conversion.
+        let ep = doc.get("endpoint").and_then(|e| e.as_table()).expect("[endpoint] preserved");
+        assert_eq!(ep.get("hostname").and_then(|v| v.as_str()), Some("de1.example.com"));
+        assert_eq!(ep.get("username").and_then(|v| v.as_str()), Some("swift-fox"));
+        assert_eq!(
+            ep.get("password").and_then(|v| v.as_str()),
+            Some("legacy-SOCKS-secret"),
+            "the endpoint password must survive the SOCKS→TUN conversion:\n{normalized}"
+        );
+
+        // 4. The SUMMARIZE path reads the now-TUN config as a normal card (host/user survive; the
+        //    password is never surfaced in the summary — D-29).
+        let summary = summarize_unchecked(&path.to_string_lossy()).expect("summarize normalized config");
+        assert_eq!(summary.host, "de1.example.com");
+        assert_eq!(summary.display_host, "de1.example.com"); // real domain → globe (no IP glyph)
+        assert_eq!(summary.user, "swift-fox");
+
+        // 5. Idempotence: a re-run over the already-TUN config is a no-op (None → no disk churn).
+        assert!(
+            crate::commands::config::normalize_config_socks_to_tun(&normalized).is_none(),
+            "a TUN-only config must NOT be rewritten again (idempotent sweep)"
+        );
+
+        cleanup(&tmp);
+    }
+
+    /// Truth: a hostname that is ALREADY a bare IP → host == display_host == that IP.
+    #[test]
+    fn derive_display_host_ip_hostname_unchanged() {
+        assert_eq!(
+            derive_display_host("203.0.113.141", Some("203.0.113.141:443")),
+            "203.0.113.141"
+        );
+    }
+
+    /// Truth: no addresses at all → the hostname is the display value (domain → globe).
+    #[test]
+    fn derive_display_host_no_addresses_keeps_hostname() {
+        assert_eq!(derive_display_host("foo.com", None), "foo.com");
+    }
+
+    /// Truth: a bracketed IPv6 addresses[0] with a non-IP hostname → display_host is the
+    /// bracketed IPv6 literal (kept bracketed, matching host_from_addr).
+    #[test]
+    fn derive_display_host_bracketed_ipv6() {
+        assert_eq!(
+            derive_display_host("trusttunnel.local", Some("[2001:db8::1]:443")),
+            "[2001:db8::1]"
+        );
+    }
+
+    /// Truth: summarize_unchecked fills host with the RAW hostname (unchanged) AND display_host
+    /// with the IP for the gap-5a shape.
+    #[test]
+    fn summarize_sets_display_host_ip_for_fake_sni_over_ip() {
+        let tmp = tempdir();
+        let p = write_toml(
+            &tmp,
+            "cfg.toml",
+            &config_with_addresses("trusttunnel.local", "u", &["203.0.113.141:443"]),
+        );
+        let s = summarize_unchecked(&p.to_string_lossy()).expect("summary");
+        assert_eq!(s.host, "trusttunnel.local", "host stays the RAW dedup key");
+        assert_eq!(s.display_host, "203.0.113.141", "display_host is the real IP");
+        cleanup(&tmp);
+    }
+
+    /// Truth: a real-domain config keeps host == display_host == the domain (globe preserved).
+    #[test]
+    fn summarize_sets_display_host_domain_for_real_domain() {
+        let tmp = tempdir();
+        let p = write_toml(
+            &tmp,
+            "cfg.toml",
+            &config_with_addresses("vpn.example.com", "u", &["1.2.3.4:443"]),
+        );
+        let s = summarize_unchecked(&p.to_string_lossy()).expect("summary");
+        assert_eq!(s.host, "vpn.example.com");
+        assert_eq!(s.display_host, "vpn.example.com");
+        cleanup(&tmp);
+    }
+
+    /// REGRESSION (gap 5a, threat T-16-07-01): adding display_host must NOT re-key dedup/identity.
+    /// Two entries with the SAME fake SNI (hostname="trusttunnel.local") + SAME user + SAME IP still
+    /// key IDENTICALLY on ("trusttunnel.local","u") — proving identity_key_of and
+    /// find_duplicate_by_host_user still read the RAW host, not the IP (no DATA-LOSS re-keying).
+    #[test]
+    fn dedup_identity_unchanged_after_display_host() {
+        let tmp = tempdir();
+        let content = config_with_addresses("trusttunnel.local", "u", &["203.0.113.141:443"]);
+        let a = write_toml(&tmp, "a.toml", &content);
+        let b = write_toml(&tmp, "b.toml", &content);
+
+        // identity_key_of keys off the RAW host + user — NOT the IP display_host.
+        let ka = identity_key_of(&a.to_string_lossy()).expect("key a");
+        let kb = identity_key_of(&b.to_string_lossy()).expect("key b");
+        assert_eq!(ka, kb, "same-SNI+user copies still key identically");
+        assert_eq!(
+            ka,
+            ("trusttunnel.local".to_string(), "u".to_string()),
+            "the identity key is the RAW host+user, never the IP"
+        );
+
+        // find_duplicate_by_host_user still matches on the RAW host, not the IP display value.
+        let manifest = Manifest {
+            configs: vec![ConfigEntry {
+                id: "id-a".to_string(),
+                name: "A".to_string(),
+                path: a.to_string_lossy().to_string(),
+                order: 0,
+                last_used: false,
+                copy: false,
+            }],
+            ..Default::default()
+        };
+        write_manifest_atomic(&tmp, &manifest).unwrap();
+        assert!(
+            find_duplicate_by_host_user(&tmp, "trusttunnel.local", "u").is_some(),
+            "dup match still keys on the RAW host (trusttunnel.local), not the IP"
+        );
+        assert!(
+            find_duplicate_by_host_user(&tmp, "203.0.113.141", "u").is_none(),
+            "the IP is NOT the dedup key — it must not match"
+        );
+        cleanup(&tmp);
     }
 }

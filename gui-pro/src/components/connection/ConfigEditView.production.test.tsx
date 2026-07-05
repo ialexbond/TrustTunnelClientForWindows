@@ -199,6 +199,45 @@ describe("ConfigEditView (production)", () => {
     });
   });
 
+  // TA-5 / B3: the no-auto-save invariant (ConfigEditView autoSave:false). A dirty form must NOT
+  // write anything until the user clicks Save — a regression that re-enabled auto-save would leave
+  // every other test green (they all save via an explicit click), so lock it directly: make the
+  // form dirty two ways (toggle IPv6 + type in the name), let timers/microtasks flush, and assert
+  // ZERO save_client_config calls until the Save button is clicked (then exactly the click writes).
+  it("B3: no auto-save — a dirty form never writes until Save is clicked", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    setup({ isActiveConfig: false, status: "disconnected" });
+    await screen.findByLabelText(L.passwordAria);
+
+    // Dirty the form via a toggle AND a text field (the two dirty paths the audit calls out).
+    await user.click(screen.getByRole("switch", { name: i18n.t("connection.editView.ipv6") }));
+    await user.type(
+      screen.getByLabelText(i18n.t("connection.editView.display_name")),
+      "Изменённое имя",
+    );
+
+    // Give any hypothetical debounced auto-save every chance to fire: wait PAST the 1200 ms
+    // auto-save debounce the hook would use IF autoSave were on (ConfigEditView.tsx:180 sets it
+    // false, disabling that debounce + the peer-save flush), then flush microtasks. If a
+    // regression re-enabled auto-save the debounced write would have landed inside this window.
+    await new Promise((r) => setTimeout(r, 1300));
+    await Promise.resolve();
+
+    // The invariant: nothing was saved WITHOUT a click.
+    expect(invokeMock.mock.calls.filter((c) => c[0] === "save_client_config")).toHaveLength(0);
+
+    // Now click Save → exactly the explicit action writes (proving the form WAS dirty/saveable).
+    const saveBtn = screen.getByRole("button", { name: L.save });
+    await waitFor(() => expect(saveBtn).not.toBeDisabled());
+    await user.click(saveBtn);
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.filter((c) => c[0] === "save_client_config").length,
+      ).toBeGreaterThan(0);
+    });
+  });
+
   // 11-UAT IN-09/IN-12: the «Имя конфига» field is where the config TITLE is edited (incl. for
   // the active config — the lead card itself is read-only). The name lives in endpoint.name; the
   // fixture has none, so the field starts empty; editing it makes the form dirty and the saved

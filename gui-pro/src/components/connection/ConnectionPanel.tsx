@@ -10,9 +10,11 @@ import { useSnackBar } from "../../shared/ui/SnackBarContext";
 import { formatError } from "../../shared/utils/formatError";
 import { samePath } from "../../shared/utils/samePath";
 import { dedupeConfigsByIdentity } from "../../shared/utils/dedupeConfigsByIdentity";
+import { markSelfDelete, clearSelfDelete } from "../../shared/utils/selfDeleteGuard";
 import { ConfigList } from "./ConfigList";
 import { ConfigEditView } from "./ConfigEditView";
 import { ConfigQr } from "./ConfigQr";
+import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import type { VpnStatus, ReconnectProgress } from "../../shared/types";
 
 export interface ConnectionPanelHandle {
@@ -136,6 +138,41 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
         unlisten.then((f) => f());
       };
     }, [refresh]);
+
+    // ─── T-34: second-VPN conflict banner (Phase 16) ───
+    // A running SECOND VPN client (Amnezia / WireGuard) contends for routes/adapter and can break the
+    // tunnel. The Rust backend emits `vpn-adapter-conflict` { adapters, message } (own-adapter already
+    // filtered T-21). useVpnEvents (App-level) still logs it; here we ALSO subscribe at the panel and
+    // lift the payload into local state so we can render the reused ErrorBanner variant="warning" atop
+    // the tab body (LOCKED contract — NO SecondVpnBanner component). Mirrors the configs-changed
+    // listener above (async-unlisten cleanup, mount-once). Dismiss is keyed per-adapter-name and
+    // session-scoped: dismissing stores the current adapter key; the SAME conflicting adapter re-firing
+    // recomputes the same key → stays hidden (no re-nag on every connect), while a NEW/DIFFERENT adapter
+    // set yields a different key → re-shows the banner.
+    const [conflict, setConflict] = useState<{ adapters: string[]; message: string } | null>(null);
+    const [dismissedAdapterKey, setDismissedAdapterKey] = useState<string | null>(null);
+    useEffect(() => {
+      const unlisten = listen<{ adapters: string[]; message: string }>("vpn-adapter-conflict", (event) => {
+        setConflict({ adapters: event.payload.adapters, message: event.payload.message });
+      });
+      return () => {
+        unlisten.then((f) => f());
+      };
+    }, []);
+    // Fable review #151: clear a stale conflict at the START of each connect attempt. The Rust
+    // detection thread re-emits `vpn-adapter-conflict` ~1s after every vpn_connect, so a conflict
+    // that is STILL present re-shows on its own; one the user already resolved (disabled the other
+    // VPN — the banner's own advice) produces no event, so the banner correctly disappears instead
+    // of asserting a resolved conflict for the rest of the session. The event fires only on a
+    // non-empty conflict set (vpn.rs), so there is no all-clear signal to rely on — the connect
+    // edge is the reset point. `dismissedAdapterKey` is left intact so a within-session dismiss
+    // still holds; a fresh connect that re-detects the SAME adapter re-emits and (if not dismissed
+    // this session) re-shows.
+    useEffect(() => {
+      if (status === "connecting") setConflict(null);
+    }, [status]);
+    const adapterKey = conflict?.adapters.join("|") ?? null;
+    const showBanner = !!conflict && adapterKey !== dismissedAdapterKey;
 
     // Collapse same-server twins (host+user) into one card before anything renders or pings —
     // a machine upgraded from the old single-config build can hold one server as two physical
@@ -308,14 +345,39 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           // the .toml out from under a live tunnel. Re-evaluate active at CONFIRM time (the active
           // config may have changed while the dialog was open).
           if (isLiveActive(config.path)) await onDisconnect();
+          // B2 (16-UAT round 2): mark the paths this in-app delete will remove so the fs-watcher on
+          // the ACTIVE config does not raise a SECOND (red) «Конфиг удалён» snackbar on top of the
+          // green success below (the double-snackbar bug). We mark both the card's own path AND the
+          // current activeConfigPath (the file the watcher actually watches — usually the same, but a
+          // delete of the active card while its path form differs is covered). B6: delete_config now
+          // sweeps same-server twins, but only the ACTIVE `.toml` is watched, so marking the active
+          // path is sufficient to suppress the one watcher event a sweep can trigger.
+          //
+          // #7 (Fable re-review): the mark is set HERE — AFTER `await onDisconnect()`, immediately
+          // before invoke("delete_config") — NOT before the disconnect. The disconnect teardown can
+          // take up to ~7s (graceful 1.5s + hard-kill confirm + DNS restore); marking before it
+          // meant the guard's TTL could expire DURING the disconnect, so the mark was already gone by
+          // the time the fs Remove landed → the watcher saw an UNMARKED delete and fired the red
+          // snackbar on top of the green success (the B2 bug resurfacing on its flagship case:
+          // deleting the ACTIVE config while CONNECTED). The file cannot be removed during the
+          // disconnect leg — delete_config has not run yet — so nothing is lost by marking later, and
+          // the TTL now covers only the short delete → reload round-trip.
+          markSelfDelete(config.path);
+          if (activeConfigPath) markSelfDelete(activeConfigPath);
           await invoke("delete_config", { id: config.id });
           await reload();
           pushSnack(t("connection.snackbar.config_deleted"));
         } catch (e) {
           pushSnack(formatError(e), "error");
+        } finally {
+          // Clear the guard once the reload has settled (a TTL backstop in the guard clears it
+          // anyway if this is skipped). After this point a GENUINE external delete of the same
+          // path warns normally again.
+          clearSelfDelete(config.path);
+          if (activeConfigPath) clearSelfDelete(activeConfigPath);
         }
       },
-      [isLiveActive, isSwitching, confirm, onDisconnect, reload, pushSnack, t],
+      [isLiveActive, isSwitching, activeConfigPath, confirm, onDisconnect, reload, pushSnack, t],
     );
 
     // ─── Rename (Enter/✓ commits via rename_config; returns an error string on failure) ───
@@ -341,6 +403,18 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
 
     return (
       <div ref={scrollerRef} className="h-full overflow-y-auto p-[var(--space-4)]">
+        {/* T-34: yellow second-VPN warning — reused ErrorBanner variant="warning" (NO SecondVpnBanner
+            component, LOCKED). Names the conflicting adapter(s) only (D-29 — never an endpoint/secret).
+            Dismiss is per-adapter (see showBanner/dismissedAdapterKey above). */}
+        {showBanner && conflict && (
+          <ErrorBanner
+            variant="warning"
+            message={t("connection.secondVpn.warning", { adapter: conflict.adapters.join(", ") })}
+            aria-label={t("connection.secondVpn.warning", { adapter: conflict.adapters.join(", ") })}
+            onDismiss={() => setDismissedAdapterKey(adapterKey)}
+            className="mb-[var(--space-3)]"
+          />
+        )}
         <ConfigList
           configs={visibleConfigs}
           loading={loading}

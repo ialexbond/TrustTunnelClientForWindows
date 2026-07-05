@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useConfigLifecycle } from "./useConfigLifecycle";
 import { captureListeners } from "../../test/fixtures/events";
+import { markSelfDelete, clearSelfDelete } from "../utils/selfDeleteGuard";
 import type { AppTab, VpnConfig, VpnStatus } from "../types";
 import type { i18n as I18nType } from "i18next";
 
@@ -192,6 +193,57 @@ describe("useConfigLifecycle (H-2 characterization)", () => {
     expect(setters.setWizardKey).toHaveBeenCalled();
     // Deletion surfaces an error-variant snackbar.
     expect(setters.pushSuccess).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  // ── B2 (16-UAT round 2) + #8 (Fable re-review): an APP-initiated delete of the active config
+  //    must NOT fire the RED external-delete warning (the panel already showed the green success)
+  //    NOR issue a redundant disconnect (the panel disconnected via D-03) — but it MUST STILL run
+  //    the active-pointer cleanup. Pre-#8 the guard blanket-returned, leaving config.configPath +
+  //    tt_config_path dangling at the deleted .toml (StatusPanel rendered a gone config; the next
+  //    import was not auto-activated). Now the pointer is reconciled on a self-delete too. ──
+  it("B2/#8: an app-initiated delete of the active config CLEARS the active pointer but fires NO red snackbar and NO disconnect", async () => {
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    // status connected so we can assert the disconnect is NOT re-fired here (the panel owns D-03).
+    const { params, setters } = makeParams({ configPath: "C:/cfg/client.toml", status: "connected" });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+
+    // The in-app delete marks the path around invoke("delete_config"); the fs-watcher Remove then
+    // arrives as config-file-changed{exists:false} for the SAME (active) file.
+    markSelfDelete("C:/cfg/client.toml");
+    try {
+      await act(async () => {
+        events.emitEvent("config-file-changed", { exists: false, path: "C:/cfg/client.toml" });
+      });
+
+      // Suppressed: no red snackbar (the panel's green success stands), no redundant disconnect.
+      expect(setters.pushSuccess).not.toHaveBeenCalled();
+      expect(setters.onDisconnect).not.toHaveBeenCalled();
+      // #8: the active pointer IS reconciled — otherwise it would strand at the deleted .toml.
+      expect(localStorage.getItem("tt_config_path")).toBeNull();
+      expect(setters.setConfig).toHaveBeenCalledWith({ configPath: "", logLevel: "info" });
+      expect(setters.setWizardKey).toHaveBeenCalled();
+    } finally {
+      clearSelfDelete("C:/cfg/client.toml");
+    }
+  });
+
+  it("B2: a GENUINE external delete (path NOT marked) STILL fires the red warning", async () => {
+    localStorage.setItem("tt_config_path", "C:/cfg/client.toml");
+    const { params, setters } = makeParams({ configPath: "C:/cfg/client.toml", status: "disconnected" });
+    const events = captureListeners();
+
+    renderHook(() => useConfigLifecycle(params));
+
+    // No markSelfDelete — the user deleted the .toml in Explorer.
+    await act(async () => {
+      events.emitEvent("config-file-changed", { exists: false, path: "C:/cfg/client.toml" });
+    });
+
+    // The external-delete warning must still fire (regression guard for the B2 fix).
+    expect(setters.pushSuccess).toHaveBeenCalledWith(expect.any(String), "error");
+    expect(setters.setConfig).toHaveBeenCalledWith({ configPath: "", logLevel: "info" });
   });
 
   // ── IN-32: external delete of the ACTIVE config while CONNECTED tears down the tunnel ──

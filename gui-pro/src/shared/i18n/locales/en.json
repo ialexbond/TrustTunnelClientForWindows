@@ -151,14 +151,7 @@
   },
   "settings": {
     "tunnel": {
-      "title": "Tunnel",
-      "listenerMode": "Listener Mode",
-      "socksAddress": "SOCKS5 Address",
-      "socks_username": "Username",
-      "socks_password": "Password",
-      "socks_username_placeholder": "Optional",
-      "socks_password_placeholder": "Optional",
-      "socks_auth_hint": "SOCKS5 proxy authentication. Leave empty if the proxy is only for you."
+      "title": "Tunnel"
     },
     "security": {
       "title": "Security",
@@ -286,6 +279,9 @@
       "body": "Switch failed. Connection to «{{name}}» restored.",
       "fallback_name": "the previous server"
     },
+    "secondVpn": {
+      "warning": "Another VPN client ({{adapter}}) is running — this may cause connection problems."
+    },
     "empty": {
       "heading": "No configs",
       "body": "Import a ready config from a file or a link.",
@@ -344,11 +340,7 @@
       "login": "Login",
       "password": "Password",
       "protocol": "Protocol",
-      "mode": "Mode",
       "mtu": "MTU",
-      "socks_address": "SOCKS5 address",
-      "socks_login": "SOCKS5 login",
-      "socks_password": "SOCKS5 password",
       "kill_switch": "Kill Switch",
       "anti_dpi": "Anti-DPI",
       "post_quantum": "Post-Quantum",
@@ -365,12 +357,6 @@
       "credentials_login_aria": "Login (read-only)",
       "credentials_password_aria": "Configuration password (read-only)",
       "help_protocol": "How the connection is disguised. HTTP/2 is more stable and compatible; HTTP/3 (QUIC) is faster on unstable networks but is sometimes blocked. If unsure, keep HTTP/2.",
-      "help_mode": "TUN — system tunnel: all device traffic goes through the VPN. SOCKS5 — local proxy: only apps configured to use it go through the VPN.",
-      "help_socks_address": "Local address and port where the app runs the SOCKS5 proxy.",
-      "help_socks_login": "Username for the local SOCKS5 proxy (optional).",
-      "help_socks_password": "Password for the local SOCKS5 proxy (optional).",
-      "socks_login_placeholder": "Optional",
-      "socks_password_placeholder": "Optional",
       "help_dns": "Which DNS to use inside the tunnel. Plain (8.8.8.8), DoT (tls://1.1.1.1:853) and DoH (https://dns.example/dns-query) are supported. One per line.",
       "kill_switch_desc": "Cuts the internet if the VPN drops suddenly — so traffic never leaks around the tunnel.",
       "anti_dpi_desc": "Disguises traffic to bypass deep packet inspection (DPI) systems.",
@@ -764,13 +750,13 @@
     },
     "actions": {
       "restart": "Restart Service",
-      "stop": "Stop Service",
-      "start": "Start Service",
+      "stop": "Stop Protocol",
+      "start": "Start Protocol",
       "reboot_server": "Reboot Server",
       "refresh_status": "Refresh Status",
       "success_restart": "Service restarted",
-      "success_stop": "Service stopped",
-      "success_start": "Service started",
+      "success_stop": "Protocol stopped",
+      "success_start": "Protocol started",
       "success_reboot": "Server rebooting",
       "success_reboot_done": "Server rebooted and available",
       "success_generic": "Completed successfully",
@@ -1242,6 +1228,7 @@
       "self_signed": "Self-signed",
       "lets_encrypt": "Let's Encrypt",
       "unknown": "Unknown",
+      "self_signed_renew_note": "Valid until {{date}}. A self-signed certificate does not renew automatically — when it expires, reinstall the protocol to issue a new one.",
       "days_left": "{{days}} days left",
       "expired": "Expired",
       "years": "{{count}}y",
@@ -1741,8 +1728,8 @@
       "confirm_uninstall_title": "Uninstall TrustTunnel?",
       "confirm_uninstall_message": "The service will be stopped, all TrustTunnel files will be deleted from the server. The current VPN connection will be interrupted.",
       "confirm_delete_btn": "Yes, delete",
-      "stop_title": "Stop service?",
-      "stop_message": "The service will stop, VPN connections will be interrupted.",
+      "stop_title": "Stop protocol?",
+      "stop_message": "The protocol will stop, VPN connections will be interrupted.",
       "stop_confirm_btn": "Stop",
       "reboot_title": "Reboot server?",
       "reboot_message": "Server will reboot. This will take 1-2 minutes.",

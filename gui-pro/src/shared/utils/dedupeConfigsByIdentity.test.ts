@@ -7,6 +7,7 @@ function cfg(over: Partial<ConfigSummary>): ConfigSummary {
     id: "id",
     name: "name",
     host: "de1.example.com",
+    display_host: "de1.example.com",
     user: "swift-fox",
     path: "C:/app/x.toml",
     order: 0,
@@ -101,5 +102,17 @@ describe("dedupeConfigsByIdentity", () => {
     const out = dedupeConfigsByIdentity([branded, copy, legacy], "C:/app/TrustTunnel_swift-fox.toml");
     // The legacy+branded twin collapses to the active branded; the copy stays as its own card.
     expect(out.map((c) => c.id)).toEqual(["branded", "copy"]);
+  });
+
+  // B6 fix #5: a NUMBERED copy label «<base> (копия 2)» must be recognised as a copy (kept as its
+  // own card), same as «(копия)». The old `.includes("(копия)")` missed the numbered form — which
+  // both hid the copy here AND let the Rust delete identity-sweep permanently delete it. The FE and
+  // Rust `is_deliberate_copy` rules must agree on «(копия N)».
+  it("keeps a numbered «(копия 2)» copy as its own card (fix #5)", () => {
+    const original = cfg({ id: "orig", name: "Россия", path: "C:/app/TrustTunnel_swift-fox.toml", order: 0, last_used: true });
+    // Numbered copy label, and a filename with no copy suffix so ONLY the name rule can flag it.
+    const copy2 = cfg({ id: "copy2", name: "Россия (копия 2)", path: "C:/app/TrustTunnel_swift-fox-backup.toml", order: 1 });
+    const out = dedupeConfigsByIdentity([original, copy2]);
+    expect(out.map((c) => c.id)).toEqual(["orig", "copy2"]);
   });
 });

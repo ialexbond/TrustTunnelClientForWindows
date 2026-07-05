@@ -52,6 +52,13 @@ interface UseVpnEventsParams {
   // switchSupersededRef (a one-shot tray-supersede flag); this spans the whole switch. Optional so
   // call sites / tests that don't wire it keep type-checking.
   seamlessSwitchActiveRef?: React.MutableRefObject<boolean>;
+  // T-34 (Phase 16): lift the log-only `vpn-adapter-conflict` payload into React state so the UI can
+  // render the second-VPN warning banner (ErrorBanner variant="warning"). The listener below keeps
+  // its existing traceLog line AND calls this when supplied — a second VPN client (its adapter name
+  // already own-filtered by T-21 Rust-side) can contend for routes/adapter and destabilize the
+  // tunnel, so we warn the user without blocking. Optional so existing call sites / tests that don't
+  // surface the banner still type-check (absent = today's log-only behavior, unchanged).
+  setConflict?: (conflict: { adapters: string[]; message: string } | null) => void;
 }
 
 export function useVpnEvents({
@@ -67,6 +74,7 @@ export function useVpnEvents({
   onSettled,
   switchSupersededRef,
   seamlessSwitchActiveRef,
+  setConflict,
 }: UseVpnEventsParams) {
   // AUDIT-2026-06-11 #14: the mount snapshot (check_vpn_status_full) and the live
   // vpn-status listener are independent async channels — the IPC reply can land
@@ -262,9 +270,18 @@ export function useVpnEvents({
           // before its optimistic setStatus("reconnecting") and clears it before
           // reconnecting (plus a 5s safety timeout), so the teardown's transient
           // "disconnected" is hidden exactly for that window and nothing else.
+          // B5 (16-UAT round 2): «Сохранить и переподключить» must stay seamless — a continuous
+          // amber «Переподключение», never a «Отключение»/«Отключён» flash. The backend now emits
+          // `Disconnecting` FIRST at every real teardown (vpn.rs 3.4 R-DCT), so the guard must hold
+          // on BOTH the leading `disconnecting` transient AND the settled `disconnected`. Before this,
+          // the guard matched only `disconnected`: the `disconnecting` leaked → «Отключение», then
+          // `disconnected` arrived with prev==="disconnecting" (guard missed it) → «Отключён».
+          // Still keyed on prev==="reconnecting" && manualReconnectActiveRef — NOT broadened to
+          // recovering/no-mark, so a REAL terminal disconnect during an AUTO-reconnect still commits
+          // (AUDIT #8 stuck-on-yellow fix intact: that path has manualReconnectActiveRef.current false).
           if (
             prev === "reconnecting" &&
-            event.payload.status === "disconnected" &&
+            (event.payload.status === "disconnected" || event.payload.status === "disconnecting") &&
             manualReconnectActiveRef?.current
           ) {
             return prev;
@@ -321,6 +338,27 @@ export function useVpnEvents({
               // arrives as Connected → Disconnecting → Disconnected, so the settled edge's `prev` is
               // "disconnecting" — recognise it too, else the «VPN отключён» snackbar would be lost.
               pushSuccess?.(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+            }
+          } else if (event.payload.status === "error") {
+            // B1 (16-UAT round 2): an in-app snackbar must ALSO fire on a connect FAILURE, not only
+            // the desktop plate (notify.rs maps Error → ConnectionError on the →error edge). An
+            // auth/connect failure arrives here as status:"error" (sidecar «Authorization Required» →
+            // fatal_marker_error → set_vpn_status(Error)); previously this only set the persistent
+            // banner (setError, below) — no snackbar, so the two surfaces disagreed. We now ALSO toast,
+            // guarded exactly like the disconnect snackbar:
+            //   • fire ONLY from an in-flight connect that failed (prev connecting/reconnecting) — so a
+            //     late-mount snapshot landing on error, or a re-emit of an already-error status, does
+            //     NOT re-toast;
+            //   • SUPPRESS during a seamless switch/revert (a failed B already surfaces via the calm
+            //     amber card + «…восстановлено» info banner — it must not also red-toast).
+            // The persistent banner (setError, at the bottom of this listener) is UNCHANGED — the owner
+            // wants BOTH the snackbar and the plate/banner.
+            const suppressErrorSnack = seamlessSwitchActiveRef?.current ?? false;
+            if ((prev === "connecting" || prev === "reconnecting") && !suppressErrorSnack) {
+              pushSuccess?.(
+                localizeError(event.payload.error) || i18n.t("errors.connection_failed"),
+                "error",
+              );
             }
           } else if (
             event.payload.status === "recovering" ||
@@ -471,13 +509,18 @@ export function useVpnEvents({
     };
   }, [reconnectResolve]);
 
-  // ─── Conflicting VPN adapter warning (log only, non-blocking) ───
+  // ─── Conflicting VPN adapter warning (non-blocking) ───
+  // T-34 (Phase 16): this listener used to be LOG-ONLY. It still writes the same trace line to the
+  // Log Panel, but now ALSO lifts the payload into React state (setConflict, when wired) so the
+  // «Подключение» tab can render the yellow second-VPN ErrorBanner. The payload's `adapters` are
+  // already own-adapter-filtered Rust-side (T-21), so anything here is a genuinely foreign VPN.
   useEffect(() => {
     const unlisten = listen<{ adapters: string[]; message: string }>(
       "vpn-adapter-conflict",
       (event) => {
-        const { adapters } = event.payload;
+        const { adapters, message } = event.payload;
         traceLog(`WARNING: Conflicting adapters detected: ${adapters.join(", ")}. If connection fails, disable them.`);
+        setConflict?.({ adapters, message });
       },
     );
     return () => { unlisten.then((f) => f()); };

@@ -131,27 +131,19 @@ describe("ConnectionToast", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
-  it("variant=plate fills the window, keeps the border, drops rounding+shadow; card keeps all (13-07)", () => {
-    // variant="plate" (production desktop plate): the DWM-rounded opaque WINDOW provides the rounding,
-    // so the toast must NOT draw its OWN rounding or shadow — but it KEEPS the 1px border and top-aligns
-    // (items-start) to match the Storybook design 1:1, and it FILLS the window (min-h-full w-full) so the
-    // window (sized to the content height) has no «подложка». F15: `min-h-full` (not `h-full`) lets the
-    // toast GROW with wrapped content so the F15 resize measures the full height incl. the bottom inset.
+  it("exposes the selected surface variant via data-variant (plate vs card) — 13-07 / TA-10", () => {
+    // TA-10: assert the variant SEMANTICALLY (the `variant` prop drives the surface). The exact
+    // visual chrome difference (plate drops rounding+shadow because the DWM-rounded opaque window
+    // supplies them, card keeps its own) is a Storybook/visual concern — this test locks the
+    // behaviour that the plate is announced as a live region AND carries the chosen variant, not
+    // the Tailwind class strings (a restyle must not break it).
     const { unmount } = renderKind("connected", "Sweden", { variant: "plate" });
     const plate = screen.getByRole("status");
-    expect(plate.className).toContain("min-h-full");
-    expect(plate.className).toContain("w-full");
-    expect(plate.className).toContain("items-start");
-    expect(plate.className).toMatch(/\bborder\b/); // border KEPT (matches the design edge)
-    expect(plate.className).not.toMatch(/\brounded-/); // rounding comes from the DWM window, not the card
-    expect(plate.className).not.toMatch(/\bshadow-/); // the design has no drop shadow
+    expect(plate).toHaveAttribute("data-variant", "plate");
     unmount();
 
-    // variant="card" (default, Storybook/preview): unchanged — keeps rounding + border + shadow.
-    renderKind("connected", "Sweden", { variant: "card" });
-    const card = screen.getByRole("status");
-    expect(card.className).toMatch(/\brounded-/);
-    expect(card.className).toMatch(/\bborder\b/);
-    expect(card.className).toMatch(/\bshadow-/);
+    // Default variant is "card" (Storybook/preview) when none is passed.
+    renderKind("connected", "Sweden");
+    expect(screen.getByRole("status")).toHaveAttribute("data-variant", "card");
   });
 });

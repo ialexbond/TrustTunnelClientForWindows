@@ -13,8 +13,8 @@ import type { PingTarget } from "./usePerConfigPing";
 // reachability. These tests pin that.
 
 const CONFIGS: ConfigSummary[] = [
-  { id: "a", name: "A", host: "a.win", user: "ua", path: "/cfg/a.toml", order: 0, last_used: true },
-  { id: "b", name: "B", host: "b.win", user: "ub", path: "/cfg/b.toml", order: 1, last_used: false },
+  { id: "a", name: "A", host: "a.win", display_host: "a.win", user: "ua", path: "/cfg/a.toml", order: 0, last_used: true },
+  { id: "b", name: "B", host: "b.win", display_host: "b.win", user: "ub", path: "/cfg/b.toml", order: 1, last_used: false },
 ];
 
 vi.mock("./useConfigList", () => ({
