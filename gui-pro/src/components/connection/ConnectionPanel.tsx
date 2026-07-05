@@ -226,8 +226,13 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
       // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the set changes
       [usingSource, internalVisibleConfigs.map((c) => `${c.id}:${c.path}`).join("|")],
     );
-    const internalPings = usePerConfigPing(internalTargets);
-    const pings = source?.pings ?? internalPings;
+    // The ping loop is now MANUAL (no auto interval). When an App-level `source` is injected the round
+    // is triggered via source.refreshPings; standalone (the panel's own unit tests) uses the internal
+    // hook's refreshPings. Either way `pinging` drives the «Обновить пинг» button's spinner + disabled.
+    const internalPing = usePerConfigPing(internalTargets);
+    const pings = source?.pings ?? internalPing.pings;
+    const refreshPings = source?.refreshPings ?? internalPing.refreshPings;
+    const pinging = source?.pinging ?? internalPing.pinging;
 
     // ─── ConfigEditView (per-config settings modal) ───
     // Two pieces of state so the modal plays its EXIT animation: `editOpen` drives the Modal's
@@ -420,6 +425,10 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           loading={loading}
           onImport={onImport}
           pings={pings}
+          // Manual ping refresh (the «Обновить пинг» button next to «Добавить конфиг»): one round over
+          // the current targets on click; `pinging` spins + disables it while a round is in flight.
+          onRefreshPings={refreshPings}
+          pinging={pinging}
           status={status}
           activeConfigPath={activeConfigPath}
           onConnect={handleCardConnect}

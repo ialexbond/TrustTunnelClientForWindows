@@ -151,15 +151,18 @@ export function CertSection({ state, security }: Props) {
         : certInfo.certType === "lets_encrypt"
           ? t("server.cert.lets_encrypt")
           : t("server.cert.unknown");
-    // CP-1c (16-12): show the REAL server address — the IP the app connects to —
-    // not the cert subject CN. For a self-hosted server the subject CN is the
-    // internal SNI placeholder «trusttunnel.local» (the owner «воевал тысячу
-    // раз» to stop seeing it); the address he wants is state.sshParams.host (the
-    // actual server host = the IP, e.g. 203.0.113.141). Prefer sshParams.host —
-    // it IS the server — falling back to the subject CN / domain only when the
-    // host is somehow empty. For a real domain server sshParams.host IS the
-    // domain, so it still reads correctly.
-    const domainOrIp = sshParams.host || certInfo.subjectCn || certInfo.domain || "—";
+    // CP-1d (owner 2026-07-05): the displayed address is CERT-TYPE-AWARE.
+    // - self_signed → the server IP (sshParams.host). The cert CN is the internal
+    //   SNI placeholder «trusttunnel.local», so show the real connect address.
+    // - lets_encrypt → the DOMAIN the cert was issued for (subjectCn / domain);
+    //   the SSH host may be a bare IP, but an LE cert is always for a domain.
+    // - custom / unknown → whatever the cert was actually issued to — read from the
+    //   cert subject (subjectCn), which may be an IP OR a domain. The app surfaces
+    //   the cert's own subject rather than guessing.
+    const domainOrIp =
+      certInfo.certType === "self_signed"
+        ? (sshParams.host || certInfo.subjectCn || certInfo.domain || "—")
+        : (certInfo.subjectCn || certInfo.domain || sshParams.host || "—");
     // Show absolute expiration date alongside type + domain так чтобы
     // пользователь видел КОГДА истекает (не только относительное «67 дней»).
     const expires = certInfo.notAfter

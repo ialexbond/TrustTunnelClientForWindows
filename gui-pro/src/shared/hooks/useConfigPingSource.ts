@@ -41,6 +41,14 @@ export interface ConfigPingSource {
   reload: () => Promise<void>;
   /** Re-fetch the manifest list SILENTLY (no skeleton). */
   refresh: () => Promise<void>;
+  /**
+   * Manually ping every visible config's endpoint ONCE (the «Обновить пинг» button next to «Добавить
+   * конфиг»). There is no automatic ping — this is the ONLY way a fresh reachability reading lands.
+   * While a tunnel is up the target set is empty (F24), so a round is a harmless no-op then.
+   */
+  refreshPings: () => Promise<void>;
+  /** True while a manual ping round is in flight (drives the refresh button's spinner + disabled state). */
+  pinging: boolean;
   /** First-load skeleton flag. */
   loading: boolean;
   /** Priority-ordered (manifest order) INACTIVE configs + their latest reading — for the engine. */
@@ -103,13 +111,22 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // there is no honest live tunnel number to show instead). While DISCONNECTED all configs ARE probed
   // directly (honest pre-connect RTT — fills the cache + shows live). `tunnelUp` in the dep re-seeds the
   // loop on connect/disconnect.
+  // Owner (2026-07-05): ping is now MANUAL-only (the «Обновить пинг» button), so the old F24/F26
+  // reason for targets=[] while connected (an AUTO loop pinging through the tunnel and flapping the
+  // inactive cards) no longer applies — nothing pings unless the user explicitly clicks. So targets
+  // ALWAYS include every card, even while connected: a manual click measures all of them. The number
+  // is tunnel-routed when connected (still not an honest RTT — F26), but the owner asked to see a live
+  // measurement on demand. The engine still consumes the FROZEN pre-connect band (candidates below), so
+  // this manual live number never drives an auto-switch decision.
   const targets: PingTarget[] = useMemo(
-    () =>
-      tunnelUp ? [] : visibleConfigs.map((c) => ({ id: c.id, path: c.path })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the set / tunnel state changes
-    [visibleConfigs.map((c) => `${c.id}:${c.path}`).join("|"), tunnelUp],
+    () => visibleConfigs.map((c) => ({ id: c.id, path: c.path })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the set changes
+    [visibleConfigs.map((c) => `${c.id}:${c.path}`).join("|")],
   );
-  const pings = usePerConfigPing(targets);
+  // Manual ping: `usePerConfigPing` no longer pings automatically (no on-mount, no interval — owner's
+  // decision). `refreshPings` runs ONE round over the current targets on demand (the «Обновить пинг»
+  // button); `pinging` drives the button spinner. The band map still feeds the cards + the engine.
+  const { pings, refreshPings, pinging } = usePerConfigPing(targets);
 
   // F23/F24: cache each config's LAST-KNOWN good DIRECT reading (a numeric band measured while probed —
   // i.e. while disconnected), keyed by path. While the tunnel is up NOTHING is probed, so this retained
@@ -118,12 +135,17 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // side-effect); the one-render lag is harmless because these values only serve while connected/bridging.
   const lastGoodByPath = useRef<Record<string, ConfigPing>>({});
   useEffect(() => {
-    // Record each config's latest numeric direct band (measured while it was probed — i.e. inactive,
-    // or the selected config while disconnected).
-    for (const c of visibleConfigs) {
-      const p = pings[c.id];
-      if (p && typeof p.valueMs === "number") {
-        lastGoodByPath.current[c.path] = { band: p.band, valueMs: p.valueMs };
+    // Record each config's latest numeric DIRECT band — but ONLY while DISCONNECTED. A manual ping
+    // while connected (now possible — targets always include every card) travels through the tunnel
+    // (F26), so it is NOT an honest pre-connect RTT; caching it would poison the frozen band the engine
+    // and the post-disconnect bridge rely on. So skip the cache write while tunnelUp — the tunnel-routed
+    // number is shown live on the card (patchedPings below) but never becomes the retained "good" value.
+    if (!tunnelUp) {
+      for (const c of visibleConfigs) {
+        const p = pings[c.id];
+        if (p && typeof p.valueMs === "number") {
+          lastGoodByPath.current[c.path] = { band: p.band, valueMs: p.valueMs };
+        }
       }
     }
     // F23: invalidate entries whose path left the config list (deleted config), so a REUSED path
@@ -141,7 +163,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
         if (!live.has(path)) delete lastGoodByPath.current[path];
       }
     }
-  }, [pings, visibleConfigs]);
+  }, [pings, visibleConfigs, tunnelUp]);
 
   // F29 (14-UAT round 3): seed a config's retained band directly. On AUTO-CONNECT-ON-LAUNCH the VPN
   // connects FASTER than the background probe loop gets a warm reading, so at the connecting→connected
@@ -187,12 +209,17 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
       }
       return bridged ?? pings;
     }
-    // CONNECTED (tunnel up). Freeze EVERY card — active and inactive alike — at its retained pre-connect
-    // band. No live probe, no fake tunnel number.
+    // CONNECTED (tunnel up). Show a LIVE manual measurement when the user pressed «Обновить пинг»
+    // (targets now include every card even connected, so a manual round populates `pings`) — the owner
+    // wants to see a fresh number on demand. Otherwise (no manual refresh since connect) freeze the card
+    // at its retained pre-connect band, as before. The live connected number is tunnel-routed (F26) and
+    // is display-only — the engine still reads the frozen band (candidates below).
     const next: Record<string, ConfigPing> = {};
     for (const c of visibleConfigs) {
+      const live = pings[c.id];
       const retained = lastGoodByPath.current[c.path];
-      if (retained) next[c.id] = retained;
+      if (live) next[c.id] = live;
+      else if (retained) next[c.id] = retained;
     }
     return next;
     // F29: `seedVersion` forces THIS memo to recompute after a post-freeze `seedRetainedPing` ref write —
@@ -231,6 +258,8 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     pings: patchedPings,
     reload,
     refresh,
+    refreshPings,
+    pinging,
     loading,
     candidates,
     seedRetainedPing,

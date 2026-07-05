@@ -4,7 +4,6 @@ import {
   usePerConfigPing,
   bandForMs,
   toConfigPing,
-  SKELETON_DELAY_MS,
   type PingTarget,
 } from "./usePerConfigPing";
 
@@ -60,8 +59,8 @@ describe("bandForMs — owner-set ping thresholds (IN-22 / TA-1 boundary lock)",
   });
 });
 
-describe("usePerConfigPing — WR-06 (cancel clears measuring; no double loop)", () => {
-  it("resolves a band for each target on the first tick", async () => {
+describe("usePerConfigPing — manual round + pinging flag", () => {
+  it("resolves a band for each target on a manual refreshPings round", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "ping_config_endpoint") return { status: "ok", ms: 42 };
       return null;
@@ -69,21 +68,20 @@ describe("usePerConfigPing — WR-06 (cancel clears measuring; no double loop)",
 
     const { result } = renderHook(() => usePerConfigPing(TARGETS));
 
-    await waitFor(() => {
-      expect(result.current.a?.band).toBe("green");
-      expect(result.current.b?.band).toBe("green");
+    // No auto ping — the map starts empty.
+    expect(result.current.pings).toEqual({});
+
+    await act(async () => {
+      await result.current.refreshPings();
     });
-    // Settled cards are NOT left measuring.
-    expect(result.current.a?.measuring).toBeFalsy();
-    expect(result.current.b?.measuring).toBeFalsy();
+
+    expect(result.current.pings.a?.band).toBe("green");
+    expect(result.current.pings.b?.band).toBe("green");
+    // The flag settles back to false once the round completes.
+    expect(result.current.pinging).toBe(false);
   });
 
-  it("clears the 'measuring' flag on the cancel path instead of leaving the card stuck (WR-06 gap 1)", async () => {
-    // A probe that hangs while the hook is mounted: 'a' is in flight (measuring=true) when
-    // the loop is cancelled. The cancel branch (both success and catch) must clear the
-    // measuring flag via setPings so the card never sticks on the skeleton. We resolve the
-    // pending probe AFTER cancel and assert the cancel path runs WITHOUT throwing / leaving
-    // an unhandled rejection — the clear-on-cancel setter is exercised on the in-flight id.
+  it("sets `pinging` true while a round is in flight and false when it settles", async () => {
     let resolveProbe: ((v: { status: string; ms: number }) => void) | undefined;
     mockInvoke.mockImplementation(
       (cmd: string) =>
@@ -96,56 +94,33 @@ describe("usePerConfigPing — WR-06 (cancel clears measuring; no double loop)",
         }),
     );
 
-    // TA-11: replace the terminal `expect(true).toBe(true)` tautology with a real assertion —
-    // spy on `unhandledrejection` so resolving the probe AFTER unmount (the cancel branch)
-    // is proven not to leak a rejected promise. An empty spy list is the meaningful signal.
-    const unhandled: PromiseRejectionEvent[] = [];
-    const onUnhandled = (e: PromiseRejectionEvent) => unhandled.push(e);
-    globalThis.addEventListener?.("unhandledrejection", onUnhandled);
+    const { result } = renderHook(() => usePerConfigPing([{ id: "a", path: "/a.toml" }]));
 
-    vi.useFakeTimers();
-    const { result, unmount } = renderHook(() =>
-      usePerConfigPing([{ id: "a", path: "/a.toml" }]),
-    );
-
-    // IN-37: the «measuring» skeleton only shows AFTER SKELETON_DELAY_MS. Advance past it so the
-    // still-in-flight probe marks the card measuring (the bug's precondition).
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SKELETON_DELAY_MS + 10);
+    // Kick off a round WITHOUT awaiting it — the probe is still hanging, so `pinging` must be true.
+    let round: Promise<void>;
+    act(() => {
+      round = result.current.refreshPings();
     });
-    expect(result.current.a?.measuring).toBe(true);
+    await waitFor(() => expect(result.current.pinging).toBe(true));
 
-    // Cancel mid-probe (unmount sets cancelled=true), then let the hung probe resolve so
-    // the cancel branch executes its measuring-clear setter. This must not throw.
-    unmount();
+    // Resolve the probe → the round settles and the flag clears.
     await act(async () => {
-      resolveProbe?.({ status: "ok", ms: 10 });
-      await Promise.resolve();
-      await Promise.resolve();
+      resolveProbe?.({ status: "ok", ms: 20 });
+      await round;
     });
-
-    // The cancel-clear branch ran cleanly: resolving the probe after unmount produced ZERO
-    // unhandled rejections. (Post-unmount React no longer re-renders the hook, so the clear
-    // is a no-op visually — but the in-FLIGHT-then-re-seed case, where the component stays
-    // mounted, relies on this exact setter to settle the card; test :below covers that.)
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(unhandled).toHaveLength(0);
-    globalThis.removeEventListener?.("unhandledrejection", onUnhandled);
+    expect(result.current.pinging).toBe(false);
+    expect(result.current.pings.a?.band).toBe("green");
   });
+});
 
-  it("settles a card that was measuring after a re-seed keeps it in the set", async () => {
-    // Stronger gap-1 guard with the component STAYING mounted: 'a' is measuring, the target
-    // set changes (re-seed) but 'a' is still present. The fresh loop re-probes 'a' and it
-    // must end up settled (band set, measuring cleared) — never stuck on the spinner.
-    vi.useFakeTimers();
-    let resolvers: Array<(v: { status: string; ms: number }) => void> = [];
+describe("usePerConfigPing — cancel-on-re-seed + WR-05 prune", () => {
+  it("discards a round's result if the target set changes mid-flight (cancel-on-re-seed)", async () => {
+    let resolveProbe: ((v: { status: string; ms: number }) => void) | undefined;
     mockInvoke.mockImplementation(
       (cmd: string) =>
         new Promise((resolve) => {
           if (cmd === "ping_config_endpoint") {
-            resolvers.push(resolve as (v: { status: string; ms: number }) => void);
+            resolveProbe = resolve as (v: { status: string; ms: number }) => void;
           } else {
             resolve(null);
           }
@@ -157,41 +132,25 @@ describe("usePerConfigPing — WR-06 (cancel clears measuring; no double loop)",
       { initialProps: { targets: [{ id: "a", path: "/a.toml" }] } },
     );
 
-    // IN-37: advance past the skeleton delay so 'a' is marked measuring (the gap-1 precondition).
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SKELETON_DELAY_MS + 10);
-    });
-    expect(result.current.a?.measuring).toBe(true);
-
-    // Re-seed: add 'b' (a still present) → prior loop cancelled, fresh loop probes both.
-    rerender({
-      targets: [
-        { id: "a", path: "/a.toml" },
-        { id: "b", path: "/b.toml" },
-      ],
+    // Start a round over the {a} set; the probe hangs.
+    let round: Promise<void>;
+    act(() => {
+      round = result.current.refreshPings();
     });
 
-    // Resolve all outstanding probes (the old hung 'a' + the fresh loop's 'a'/'b').
-    await act(async () => {
-      const r = resolvers;
-      resolvers = [];
-      r.forEach((res) => res({ status: "ok", ms: 20 }));
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      const r = resolvers;
-      resolvers = [];
-      r.forEach((res) => res({ status: "ok", ms: 20 }));
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    // Re-seed the target set (a leaves, c arrives) WHILE the {a} round is in flight → generation bumps.
+    rerender({ targets: [{ id: "c", path: "/c.toml" }] });
 
-    // The fresh loop's fast probe settles 'a' (green) WITHOUT a skeleton (resolved before the
-    // delay), so measuring is cleared.
-    expect(result.current.a?.band).toBe("green");
-    expect(result.current.a?.measuring).toBeFalsy();
+    // Now resolve the hung {a} probe. Because the generation moved, the stale result must be DISCARDED
+    // — 'a' is no longer a target and must not be painted.
+    await act(async () => {
+      resolveProbe?.({ status: "ok", ms: 10 });
+      await round;
+    });
+    expect(result.current.pings.a).toBeUndefined();
   });
 
-  it("re-seeds (single fresh loop) when the target set changes — no interleaved duplicate", async () => {
+  it("WR-05: prunes a band for an id that leaves the target set", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "ping_config_endpoint") return { status: "ok", ms: 10 };
       return null;
@@ -199,24 +158,66 @@ describe("usePerConfigPing — WR-06 (cancel clears measuring; no double loop)",
 
     const { result, rerender } = renderHook(
       ({ targets }: { targets: PingTarget[] }) => usePerConfigPing(targets),
-      { initialProps: { targets: [{ id: "a", path: "/a.toml" }] } },
+      {
+        initialProps: {
+          targets: [
+            { id: "a", path: "/a.toml" },
+            { id: "b", path: "/b.toml" },
+          ] as PingTarget[],
+        },
+      },
     );
 
-    await waitFor(() => expect(result.current.a?.band).toBe("green"));
-
-    // Add a second target → effect re-runs (targetsKey changed) → prior loop cancelled,
-    // one fresh loop probes both. No assertion-friendly "double loop" leak: both ids
-    // resolve, and the hook does not throw / spin.
-    rerender({
-      targets: [
-        { id: "a", path: "/a.toml" },
-        { id: "b", path: "/b.toml" },
-      ],
+    // Populate both bands via a manual round.
+    await act(async () => {
+      await result.current.refreshPings();
     });
+    expect(result.current.pings.a?.band).toBe("green");
+    expect(result.current.pings.b?.band).toBe("green");
 
+    // Drop 'b' from the target set → the prune effect removes its stale band, 'a' stays.
+    rerender({ targets: [{ id: "a", path: "/a.toml" }] });
     await waitFor(() => {
-      expect(result.current.a?.band).toBe("green");
-      expect(result.current.b?.band).toBe("green");
+      expect(result.current.pings.b).toBeUndefined();
+      expect(result.current.pings.a?.band).toBe("green");
     });
+  });
+
+  it("does not throw when a hung probe resolves after unmount (cancel-safe)", async () => {
+    let resolveProbe: ((v: { status: string; ms: number }) => void) | undefined;
+    mockInvoke.mockImplementation(
+      (cmd: string) =>
+        new Promise((resolve) => {
+          if (cmd === "ping_config_endpoint") {
+            resolveProbe = resolve as (v: { status: string; ms: number }) => void;
+          } else {
+            resolve(null);
+          }
+        }),
+    );
+
+    const unhandled: PromiseRejectionEvent[] = [];
+    const onUnhandled = (e: PromiseRejectionEvent) => unhandled.push(e);
+    globalThis.addEventListener?.("unhandledrejection", onUnhandled);
+
+    const { result, unmount } = renderHook(() =>
+      usePerConfigPing([{ id: "a", path: "/a.toml" }]),
+    );
+
+    let round: Promise<void>;
+    act(() => {
+      round = result.current.refreshPings();
+    });
+
+    // Unmount mid-round (generation bumps), then let the hung probe resolve — the result is discarded
+    // and no unhandled rejection leaks.
+    unmount();
+    await act(async () => {
+      resolveProbe?.({ status: "ok", ms: 10 });
+      await round;
+      await Promise.resolve();
+    });
+    expect(unhandled).toHaveLength(0);
+    globalThis.removeEventListener?.("unhandledrejection", onUnhandled);
   });
 });

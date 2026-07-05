@@ -965,7 +965,7 @@ describe("App", () => {
           { id: "id-1", name: "C1", host: "h1.example.com", user: "u", path: "/config.json", order: 0, last_used: true },
           { id: "id-2", name: "C2", host: "h2.example.com", user: "u", path: "/other.toml", order: 1, last_used: false },
         ];
-      // The background per-config sweep lands a NUMERIC band for the target (ok → valueMs).
+      // A MANUAL ping round lands a NUMERIC band for the target (ok → valueMs) in the App-level map.
       if (cmd === "ping_config_endpoint") return { status: "ok", ms: 42 };
       if (cmd === "vpn_connect") return null;
       return null;
@@ -974,15 +974,16 @@ describe("App", () => {
     await act(async () => {
       render(<App />);
     });
-    // Let the background sweep land its numeric readings in the App-level ping map.
+    // The ping loop is MANUAL now (no auto sweep). Trigger one round through the App-level source so the
+    // target's numeric band lands in the ping map — the fast path of pushPendingConnectPing reads it.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(50);
+      await connectionPanelProps.source.refreshPings();
     });
 
-    // F23 (14-UAT round 2): count probes of the SWITCH TARGET only. Switching makes the FORMER active
-    // config a new INACTIVE ping target, so useConfigPingSource fires an unrelated probe of IT; the
-    // fast-path contract is only that the TARGET (/other.toml) is not freshly probed (its map value
-    // is used), so a total-count assertion would wrongly trip on that unrelated probe.
+    // F23 (14-UAT round 2): count probes of the SWITCH TARGET only. The manual round probed the
+    // inactive target already; the fast-path contract is only that the TARGET (/other.toml) is not
+    // freshly RE-probed at switch time (its map value is used), so we snapshot the count now and assert
+    // it does not grow across the switch.
     const targetProbesBefore = vi
       .mocked(invoke)
       .mock.calls.filter(
@@ -1005,8 +1006,8 @@ describe("App", () => {
 
     // The EXACT map number was pushed…
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_connect_ping", { ms: 42 });
-    // …with NO fresh probe (the fast path reads the map synchronously — the 15s background sweep
-    // did not tick during the switch, so any new probe here would be the — forbidden — fallback)…
+    // …with NO fresh probe (the fast path reads the map synchronously — no manual round ran during the
+    // switch, so any new probe of the target here would be the — forbidden — slow-path fallback)…
     const targetProbesAfter = vi
       .mocked(invoke)
       .mock.calls.filter(

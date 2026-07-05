@@ -336,9 +336,18 @@ export function CertModal({ isOpen, onClose, state, security }: CertModalProps) 
                     : certInfo.certType === "self_signed"
                       ? t("server.cert.self_signed")
                       : t("server.cert.unknown");
-                // The address = the real server host (sshParams.host), never the
-                // cert subject CN / .local SNI. R2-F07: omit for a MISSING cert.
-                const host = certMissing ? "" : sshParams.host || "";
+                // CP-1d (owner 2026-07-05): the address is CERT-TYPE-AWARE.
+                // - self_signed → the server IP (sshParams.host); the cert CN is
+                //   the internal «trusttunnel.local» SNI placeholder.
+                // - lets_encrypt → the DOMAIN the cert is for (subjectCn / domain).
+                // - custom / unknown → whatever the cert was issued to (subjectCn —
+                //   IP OR domain), read from the cert subject.
+                // R2-F07: omit for a MISSING cert.
+                const host = certMissing
+                  ? ""
+                  : certInfo.certType === "self_signed"
+                    ? (sshParams.host || certInfo.subjectCn || certInfo.domain || "")
+                    : (certInfo.subjectCn || certInfo.domain || sshParams.host || "");
                 const showHost = host !== "" && host.toLowerCase() !== leadLabel.toLowerCase();
                 return (
                   <>
