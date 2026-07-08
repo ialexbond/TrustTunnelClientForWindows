@@ -35,6 +35,14 @@ describe("i18n key parity", () => {
     const extra = [...ruKeys].filter((k) => !enKeys.has(k));
     expect(extra).toEqual([]);
   });
+
+  it("BUG-A2: messages.connect_cancelled exists in BOTH ru and en with its expected copy", () => {
+    // The cancel snackbar («Подключение отменено») must be present + localized in both bundles so the
+    // wiring layer (useVpnStatusListener snack:cancelled → i18n.t('messages.connect_cancelled')) never
+    // falls back to the raw key / English default in the RU-primary app.
+    expect(ru.messages.connect_cancelled).toBe("Подключение отменено");
+    expect(en.messages.connect_cancelled).toBe("Connection cancelled");
+  });
 });
 
 describe("Phase 19 — JSON structural integrity", () => {

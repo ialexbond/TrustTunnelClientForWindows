@@ -237,6 +237,7 @@
     "logs_appear_on_connect": "Logs will appear after connecting...",
     "vpn_connected": "VPN connected",
     "vpn_disconnected": "VPN disconnected",
+    "connect_cancelled": "Connection cancelled",
     "domain_already_exists": "Domain \"{{domain}}\" is already in the list",
     "domain_in_ru_list": "Domain \"{{domain}}\" is already included in RU domains"
   },
@@ -284,9 +285,7 @@
     },
     "empty": {
       "heading": "No configs",
-      "body": "Import a ready config from a file or a link.",
-      "wizard_pointer": "Create via the setup wizard",
-      "wizard_pointer_aria": "Create a config via the setup wizard"
+      "body": "Import a ready config from a file or a link."
     },
     "import": {
       "cta": "Import config",
@@ -300,8 +299,7 @@
       "link_supported_hint": "trusttunnel:// links are also supported",
       "error_invalid_file": "Could not read the file. Check that the config is valid.",
       "error_invalid_link": "The link is broken or is not a tt:// or trusttunnel:// link.",
-      "partial_summary": "Added {{ok}}, failed — {{failed}}",
-      "retry_failed": "Retry"
+      "partial_count": "Imported {{ok}} of {{total}}"
     },
     "list": {
       "add": "Add config"
@@ -322,8 +320,10 @@
     },
     "ping": {
       "unreachable": "Unreachable",
+      "unreachable_tooltip": "The server did not answer a direct connection. This is about server reachability, not whether the config works.",
       "no_data": "—",
       "no_data_tooltip": "not measured yet / no network",
+      "reachable_tooltip": "Server reachable (latency of a direct connection to it). This does NOT mean you can connect through it — only that the server responds.",
       "measuring": "Measuring…",
       "unit": "ms"
     },
@@ -353,7 +353,6 @@
       "save_and_reconnect": "Save and reconnect",
       "cancel": "Cancel",
       "close": "Close",
-      "subtitle": "{{name}} · {{state}}",
       "credentials_address_aria": "Server address (read-only)",
       "credentials_login_aria": "Login (read-only)",
       "credentials_password_aria": "Configuration password (read-only)",
@@ -363,8 +362,7 @@
       "anti_dpi_desc": "Disguises traffic to bypass deep packet inspection (DPI) systems.",
       "post_quantum_desc": "Extra encryption resistant to quantum-computer attacks.",
       "ipv6_desc": "IPv6 address support inside the tunnel.",
-      "load_error": "Could not read the config. The file is corrupt — close and import the config again.",
-      "mtu_invalid": "Invalid MTU value."
+      "load_error": "Could not read the config. The file is corrupt — close and import the config again."
     },
     "rename": {
       "aria": "Rename config",
@@ -384,13 +382,9 @@
     },
     "snackbar": {
       "config_added": "Config added",
-      "configs_added": "Added {{count}} configs",
-      "configs_added_many": "Added {{count}} configs",
-      "config_updated": "Settings saved",
       "config_renamed": "Config renamed",
       "config_duplicated": "Config copy created",
       "config_deleted": "Config deleted",
-      "qr_copied": "QR code copied",
       "link_copied": "Link copied to clipboard"
     },
     "qr": {

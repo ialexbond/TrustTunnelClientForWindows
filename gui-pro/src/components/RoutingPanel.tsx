@@ -25,9 +25,15 @@ interface RoutingPanelProps {
   onReconnect: () => Promise<void>;
   vpnMode?: string;
   onVpnModeChange?: (mode: string) => void;
+  // Fable F4 (BUG-A2 fix-all-paths): the Routing tab renders its OWN StatusPanel, so it must thread
+  // the SAME switching/connectPending props App gives the shell StatusPanel — otherwise the Routing
+  // status strip shows a DEAD live «Отмена» during a switch's `connecting` leg (handler inert) and can
+  // render two buttons during the switch's transient `disconnected` window (Fable F3). App owns both.
+  isSwitching?: boolean;
+  connectPending?: boolean;
 }
 
-function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect, onDisconnect, onReconnect, vpnMode = "general", onVpnModeChange }: RoutingPanelProps) {
+function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect, onDisconnect, onReconnect, vpnMode = "general", onVpnModeChange, isSwitching = false, connectPending = false }: RoutingPanelProps) {
   const { t } = useTranslation();
   const state = useRoutingState({ configPath, status, vpnMode, onReconnect });
   const { toggles } = useFeatureToggles();
@@ -88,6 +94,11 @@ function RoutingPanel({ configPath, status, connectedSince, vpnError, onConnect,
         connectedSince={connectedSince}
         onConnect={onConnect}
         onDisconnect={onDisconnect}
+        // Fable F4: thread the same switch/pending flags the shell StatusPanel gets so the Routing
+        // status strip's live «Отмена» is hidden during a switch's connecting leg (handler inert) and
+        // its control branches stay mutually exclusive during the switch's transient disconnected window.
+        switching={isSwitching}
+        connectPending={connectPending}
       />
 
       <div className="flex-1 scroll-overlay py-3 px-4 space-y-4">

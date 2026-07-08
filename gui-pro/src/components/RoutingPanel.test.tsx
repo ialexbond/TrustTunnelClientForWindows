@@ -366,4 +366,31 @@ describe("RoutingPanel", () => {
     // It won't show the VPN mode selector yet
     expect(screen.queryByText("Режим VPN")).not.toBeInTheDocument();
   });
+
+  // ── Fable F4 (BUG-A2 fix-all-paths): the Routing tab's OWN StatusPanel threads switching/connectPending ──
+  describe("Fable F4 — StatusPanel switch/pending threading", () => {
+    it("shows a LIVE, working «Отмена» during a plain connecting (isSwitching false)", async () => {
+      const onDisconnect = vi.fn();
+      render(<RoutingPanel {...defaultProps} status="connecting" onDisconnect={onDisconnect} />);
+      await waitFor(() => {
+        expect(screen.getByText("Режим VPN")).toBeInTheDocument();
+      });
+      const cancel = screen.getByRole("button", { name: /Отмена/ });
+      expect(cancel).toBeEnabled();
+      fireEvent.click(cancel);
+      expect(onDisconnect).toHaveBeenCalledOnce();
+    });
+
+    it("HIDES the dead live «Отмена» during a switch's connecting leg (isSwitching threaded through)", async () => {
+      // Without F4 threading, the Routing StatusPanel would show a DEAD live «Отмена» here (the App's
+      // handleUserCancel is inert while isSwitching). With the prop threaded, the strip shows the inert
+      // spinner instead — no dead button.
+      render(<RoutingPanel {...defaultProps} status="connecting" isSwitching />);
+      await waitFor(() => {
+        expect(screen.getByText("Режим VPN")).toBeInTheDocument();
+      });
+      // No live cancel; the status strip's only action button in this area is the inert spinner.
+      expect(screen.queryByRole("button", { name: /Отмена/ })).not.toBeInTheDocument();
+    });
+  });
 });

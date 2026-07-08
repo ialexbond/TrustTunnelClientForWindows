@@ -7,16 +7,19 @@
 //   - clean cancel on unmount (no leaked timers/loops),
 //   - it keeps monitoring after a manual pick (D-05 — no manual-mode freeze).
 //
-// `probe_tunnel_latency` (the tunnel-latency probe the engine invokes each tick) is mocked to return a
-// controllable `{status, ms}` union; `switchTo` is a spy passed as a prop. Fake timers +
-// `advanceTimersByTimeAsync` inside `act` drive the interval ticks deterministically.
+// PA-2 (17-02): the engine NO LONGER invokes `probe_tunnel_latency` each tick — it evaluates the ACTIVE
+// config's FROZEN pre-connect band, passed in as the `activeReading` prop (the honest signal
+// `useConfigPingSource.activeReading` derives from `lastGoodByPath`). `switchTo` is a spy passed as a
+// prop. `invoke` is still mocked for the switch-time side effects
+// ("set_pending_connect_origin"/"set_pending_connect_ping"). Fake timers + `advanceTimersByTimeAsync`
+// inside `act` drive the interval ticks deterministically.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useAutoSwitch, COOLDOWN_MS, type UseAutoSwitchParams } from "./useAutoSwitch";
 import type { Candidate, Reading } from "../lib/decideAutoSwitch";
 
-// Mock @tauri-apps/api/core — the engine invokes "probe_tunnel_latency" each tick (the F23
-// tunnel-latency signal) plus "set_pending_connect_origin"/"set_pending_connect_ping" on a switch.
+// Mock @tauri-apps/api/core — the engine invokes only "set_pending_connect_origin"/
+// "set_pending_connect_ping" on a switch now (PA-2 retired the per-tick probe_tunnel_latency invoke).
 const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
@@ -34,7 +37,11 @@ function makeCandidates(reading: Reading): Candidate[] {
   return [{ path: "/candidate.toml", order: 1, reading }];
 }
 
-/** Build the hook props with sensible defaults; override per test. */
+/**
+ * Build the hook props with sensible defaults; override per test. PA-2 (17-02): `activeReading` is the
+ * ACTIVE config's frozen band the engine evaluates for a breach. Default BAD so most tests (which want
+ * breaches) fire — mirrors the old default `probe_tunnel_latency` → BAD mock.
+ */
 function makeProps(overrides: Partial<UseAutoSwitchParams> = {}): UseAutoSwitchParams {
   return {
     masterOn: true,
@@ -43,6 +50,7 @@ function makeProps(overrides: Partial<UseAutoSwitchParams> = {}): UseAutoSwitchP
     checksN: 3,
     status: "connected",
     activeConfigPath: "/active.toml",
+    activeReading: BAD,
     candidates: makeCandidates(HEALTHY),
     switchTo: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -59,11 +67,10 @@ async function advanceOneTick() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
-  // Default: the tunnel-latency probe reads BAD (Unreachable) every tick (most tests want breaches).
-  mockInvoke.mockImplementation(async (cmd: string) => {
-    if (cmd === "probe_tunnel_latency") return BAD;
-    return null;
-  });
+  // PA-2 (17-02): no per-tick probe invoke anymore. `invoke` only serves the switch-time side effects
+  // (set_pending_connect_origin/ping) → default to a benign null. The breach signal is `activeReading`
+  // (default BAD in makeProps).
+  mockInvoke.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -77,8 +84,8 @@ describe("useAutoSwitch", () => {
       useAutoSwitch(makeProps({ status: "disconnected", switchTo })),
     );
 
-    // Advance several intervals — the loop must be inert: no switch, no switch-side effects (F23: the
-    // engine no longer probes at all, so a disconnected engine must make NO switch-origin mark either).
+    // Advance several intervals — the loop must be inert: no switch, no switch-side effects (PA-2: the
+    // engine makes no ping IPC at all, so a disconnected engine must make NO switch-origin mark either).
     await advanceOneTick();
     await advanceOneTick();
     await advanceOneTick();
@@ -300,7 +307,7 @@ describe("useAutoSwitch", () => {
   });
 
   it("cancels on unmount", async () => {
-    // F23: the engine no longer probes, so use the switch verdict itself as the "loop alive" proxy —
+    // PA-2: the engine makes no ping IPC, so use the switch verdict itself as the "loop alive" proxy —
     // checksN:1 + BAD active (default) + a HEALTHY candidate + a REFUSED switch (accepted:false, so the
     // cooldown is never armed) makes a switch fire on EVERY tick, so switchTo's call count tracks the
     // live loop.
@@ -395,22 +402,18 @@ describe("useAutoSwitch", () => {
     expect(switchTo).not.toHaveBeenCalled();
   });
 
-  // ─── F23 (14-UAT round 2): the engine reads the TUNNEL-LATENCY probe, never the endpoint ───
-  // The endpoint itself can't be honestly probed while connected (a direct connect goes through the
-  // tunnel to the-server-and-back = the ~2× / Unreachable noise that caused the false switches). The
-  // engine now probes neutral reference hosts THROUGH the tunnel (`probe_tunnel_latency`).
-  it("F23: probes probe_tunnel_latency (never ping_config_endpoint), and a HEALTHY tunnel never switches", async () => {
+  // ─── PA-2 (17-02): the engine decides on the FROZEN pre-connect band, never a per-tick probe ───
+  // The through-tunnel `probe_tunnel_latency` is RETIRED from the decision (F26 caught it dishonest — a
+  // through-tunnel RTT is unmeasurable from this process). The engine now evaluates the `activeReading`
+  // prop (the SAME frozen band the active card shows, D-02), and makes NO ping IPC in the tick.
+  it("PA-2: never invokes probe_tunnel_latency (or any ping) in the tick; a HEALTHY active reading never switches", async () => {
     const switchTo = vi.fn().mockResolvedValue(undefined);
-    // The tunnel latency reads healthy (below threshold) every tick.
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "probe_tunnel_latency") return HEALTHY;
-      return null;
-    });
     renderHook(() =>
       useAutoSwitch(
         makeProps({
-          checksN: 1, // would switch on the first breach — but a healthy tunnel is never a breach
+          checksN: 1, // would switch on the first breach — but a healthy active reading is never a breach
           switchTo,
+          activeReading: HEALTHY, // active config's frozen band reads healthy
           candidates: makeCandidates(HEALTHY),
         }),
       ),
@@ -419,17 +422,17 @@ describe("useAutoSwitch", () => {
     await advanceOneTick();
     await advanceOneTick();
 
-    // The engine measures the tunnel via the reference probe, NEVER the endpoint directly (the x2 source).
-    expect(mockInvoke.mock.calls.filter((c) => c[0] === "probe_tunnel_latency").length).toBeGreaterThan(0);
+    // The retired probe is NEVER invoked; the endpoint is never probed in the tick either.
+    expect(mockInvoke.mock.calls.filter((c) => c[0] === "probe_tunnel_latency")).toHaveLength(0);
     expect(mockInvoke.mock.calls.filter((c) => c[0] === "ping_config_endpoint")).toHaveLength(0);
-    // A healthy tunnel reading is never a breach → the engine never switches off a healthy server.
+    // A healthy frozen band is never a breach → the engine never switches off a healthy server.
     expect(switchTo).not.toHaveBeenCalled();
   });
 
-  // A dead tunnel reads Unreachable (all reference hosts failed) → that IS a breach → switch.
-  it("F23: a dead tunnel (Unreachable) IS a breach → switches to a healthy candidate", async () => {
+  // A frozen band that reads Unreachable (the active config was unreachable pre-connect) IS a breach → switch.
+  it("PA-2: an Unreachable active reading IS a breach → switches to a healthy candidate", async () => {
     const switchTo = vi.fn().mockResolvedValue(undefined);
-    // Default mock already returns BAD (Unreachable) for probe_tunnel_latency.
+    // Default activeReading is BAD (Unreachable) via makeProps.
     renderHook(() =>
       useAutoSwitch(makeProps({ checksN: 1, switchTo, candidates: makeCandidates(HEALTHY) })),
     );
@@ -438,16 +441,19 @@ describe("useAutoSwitch", () => {
     expect(switchTo).toHaveBeenCalledWith("/candidate.toml");
   });
 
-  // A no-data reading here means the IPC invoke itself failed (transient), NOT tunnel distress — it
-  // must be NEUTRAL, never accumulate breaches toward a false switch off a healthy server.
-  it("F23: a failed probe (no-data) is neutral — never switches", async () => {
+  // A no-data active reading means the active config has no retained pre-connect band yet (never
+  // measured / transient) — it must be NEUTRAL, never accumulate breaches toward a false switch.
+  it("PA-2: a no-data active reading is neutral — never switches", async () => {
     const switchTo = vi.fn().mockResolvedValue(undefined);
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "probe_tunnel_latency") throw new Error("ipc failed");
-      return null;
-    });
     renderHook(() =>
-      useAutoSwitch(makeProps({ checksN: 1, switchTo, candidates: makeCandidates(HEALTHY) })),
+      useAutoSwitch(
+        makeProps({
+          checksN: 1,
+          switchTo,
+          activeReading: { status: "no-data" },
+          candidates: makeCandidates(HEALTHY),
+        }),
+      ),
     );
 
     await advanceOneTick();

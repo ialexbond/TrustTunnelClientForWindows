@@ -12,7 +12,7 @@ import { DropOverlay } from "../../shared/ui/DropOverlay";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
 // IN-41: reuse the Russian one/few/many helper for the multi-file batch toast — same declined
 // «конфиг» copy as the drag-drop path (useFileDrop). English uses the i18next _one/_other key.
-import { pluralRu } from "../server/certUtils";
+import { pluralRu } from "../../shared/lib/pluralRu";
 
 /**
  * Production ImportModal — the SINGLE point through which a config is added to the
@@ -87,6 +87,25 @@ function EntryTile({
   );
 }
 
+/**
+ * CA-3: surface an import failure to a log sink instead of the old bare `catch {}`.
+ *
+ * D-29 (SACRED): the config content carries the user's host / username / PASSWORD. We log ONLY
+ * a SANITIZED trail — a short reason (the Error message, which is a backend status string, never
+ * the file body) plus the file BASENAME (not the full path, not the content). The config content
+ * / the decoded TOML is NEVER passed here. The literal password token is not written into any
+ * comment either (comment-text discipline, T-17-06). The mirror is DEV-BUILD-ONLY (same
+ * `import.meta.env.DEV` gate as the vpn-log F12 mirror, D-11) so a release build never streams it.
+ */
+function logImportFailure(reason: unknown, fileLabel?: string): void {
+  if (!import.meta.env.DEV) return;
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  const where = fileLabel ? ` [${fileLabel}]` : "";
+  // DEV-only import-failure mirror (CA-3); gated off in release. console.error is permitted by the
+  // no-console rule (only console.log is flagged), so no disable directive is needed here.
+  console.error(`[import] failed${where}: ${msg}`);
+}
+
 export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDragging = false, isSwitching = false }: ImportModalProps) {
   const { t, i18n } = useTranslation();
   const pushSnack = useSnackBar();
@@ -96,6 +115,9 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
   const [loading, setLoading] = useState(false);
   // An in-modal error banner (modal stays open). null = none.
   const [error, setError] = useState<string | null>(null);
+  // CA-3: a partial-batch outcome («импортировано N из M») shown IN-MODAL when SOME (not all)
+  // picked files failed — no longer silently closed behind okCount>0. null = no partial state.
+  const [partial, setPartial] = useState<{ ok: number; total: number } | null>(null);
 
   // Prefill from a deep-link click — show the expanded link row but DO NOT import
   // (deeplink-never-auto). Seeding controlled state from props on open is the intended
@@ -114,6 +136,7 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
     setLinkExpanded(false);
     setLoading(false);
     setError(null);
+    setPartial(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -126,6 +149,7 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
       setLinkExpanded(false);
       setLink("");
       setError(null);
+      setPartial(null);
       return;
     }
     resetState();
@@ -162,8 +186,11 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
         onImported(path);
         resetState();
         onClose();
-      } catch {
-        // Errors render IN-MODAL (the modal stays open) — never a flyaway toast.
+      } catch (err) {
+        // CA-3: mirror a SANITIZED trail (reason + source label — never `content`, D-29) before
+        // showing the in-modal banner. Errors render IN-MODAL (the modal stays open) — never a
+        // flyaway toast.
+        logImportFailure(err, source);
         setError(
           source === "deeplink" || source === "clipboard-deeplink"
             ? t("connection.import.error_invalid_link")
@@ -182,6 +209,7 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
    *  the error stays in the modal. */
   const handlePickFile = useCallback(async () => {
     setError(null);
+    setPartial(null);
     let paths: string[];
     try {
       const picked = await open({
@@ -191,19 +219,25 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
       // plugin-dialog returns string[] for multiple; normalize defensively (a shim may hand back
       // a bare string) and bail on cancel (null).
       paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
-    } catch {
+    } catch (dialogErr) {
+      // A failure to OPEN the picker (not a cancel — cancel resolves to null) is a real fault worth
+      // a DEV trail; treat as "no files picked" for the flow. D-29-safe (no content here).
+      logImportFailure(dialogErr, "picker");
       paths = [];
     }
     if (paths.length === 0) return;
     setLoading(true);
+    const total = paths.length;
     let okCount = 0;
+    let failCount = 0;
     let lastPath: string | undefined;
     for (const path of paths) {
+      // Preserve each file's original filename (basename) so the stored config keeps its branded
+      // «[<CC>_]TrustTunnel_<login>.toml» name instead of a content-derived one. The basename is
+      // ALSO the only per-file label we log (never the path body, never the config content — D-29).
+      const basename = path.split(/[\\/]/).pop() || undefined;
       try {
         const content = await invoke<string>("read_config_file_for_import", { path });
-        // Preserve each file's original filename (basename) so the stored config keeps its branded
-        // «[<CC>_]TrustTunnel_<login>.toml» name instead of a content-derived one.
-        const basename = path.split(/[\\/]/).pop() || undefined;
         const dest = await invoke<string>("import_config_from_string", {
           content,
           source: "file",
@@ -211,11 +245,16 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
         });
         okCount++;
         lastPath = dest;
-      } catch {
-        // Skip a bad file and keep importing the rest; reported below only if NONE succeeded.
+      } catch (fileErr) {
+        // CA-3: no longer a silent `catch {}` — bind the failure to a DEV-mirrored, SANITIZED log
+        // line (reason + basename only). Keep importing the rest; the partial/none outcome below
+        // decides the UI. The config content / password is NEVER passed to the logger (D-29).
+        failCount++;
+        logImportFailure(fileErr, basename);
       }
     }
     if (okCount === 0) {
+      // Total failure: the modal STAYS OPEN with the general error banner (unchanged behavior).
       setError(t("connection.import.error_invalid_file"));
       setLoading(false);
       return;
@@ -223,6 +262,15 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
     // onImported (promoteImportedConfig) is idempotent and reloads the whole manifest, so every new
     // card appears even though only the last path is passed.
     onImported(lastPath!);
+    if (failCount > 0) {
+      // CA-3: PARTIAL success — some files failed. Do NOT silently close behind okCount>0. Keep the
+      // modal open showing «импортировано N из M» so the incomplete batch is visible. The successful
+      // configs are already added (onImported above ran); the user closes when they've seen it.
+      setPartial({ ok: okCount, total });
+      setLoading(false);
+      return;
+    }
+    // Full success: one batch snackbar + close (unchanged behavior).
     pushSnack(
       okCount === 1
         ? t("connection.snackbar.config_added")
@@ -242,7 +290,10 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
     try {
       const content = await invoke<string>("decode_deeplink", { url: trimmedLink });
       await runImport(content, "deeplink");
-    } catch {
+    } catch (err) {
+      // CA-3: the decode failure was swallowed — mirror a sanitized trail (the tt:// link is opaque
+      // ASCII, but log only the reason label, never the decoded content). D-29-safe.
+      logImportFailure(err, "deeplink-decode");
       setError(t("connection.import.error_invalid_link"));
       setLoading(false);
     }
@@ -278,6 +329,23 @@ export function ImportModal({ isOpen, onClose, onImported, initialUrl, isDraggin
         {error && (
           <div className="mb-[var(--space-3)]">
             <ErrorBanner variant="error" message={error} onDismiss={() => setError(null)} />
+          </div>
+        )}
+
+        {/* CA-3: partial-batch outcome («импортировано N из M») — a WARNING (not an error): the
+            successful configs were added, but some files failed, so the batch is incomplete and the
+            modal stays open until dismissed. */}
+        {partial && (
+          <div className="mb-[var(--space-3)]">
+            <ErrorBanner
+              variant="warning"
+              message={t("connection.import.partial_count", { ok: partial.ok, total: partial.total })}
+              onDismiss={() => {
+                setPartial(null);
+                resetState();
+                onClose();
+              }}
+            />
           </div>
         )}
 

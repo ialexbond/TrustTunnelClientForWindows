@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { AppTab, VpnStatus } from "../types";
 // IN-41: reuse the established Russian one/few/many helper so the batch toast declines «конфиг»
 // («Добавлено 2 конфига» / «Добавлено 5 конфигов»). English uses i18next _one/_other keys instead.
-import { pluralRu } from "../../components/server/certUtils";
+import { pluralRu } from "../lib/pluralRu";
 
 interface FileDropResult {
   file_type: "config" | "routing";

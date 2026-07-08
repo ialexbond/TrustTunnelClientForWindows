@@ -182,50 +182,35 @@ pub async fn import_config_from_string(
 
     use crate::commands::manifest;
 
-    // IN-55: prune ghost manifest entries (configs deleted outside the app) BEFORE the duplicate
-    // check + copy-name allocation, so a stale ghost can't make a fresh config look like a
-    // duplicate («Россия» → «Россия (копия)») or inflate the copy number («(копия 4)» with no
-    // copy 2). Best-effort: a prune hiccup must not block the import.
-    let _ = manifest::prune_manifest_in_dir(&config_dir);
+    // PP-2 (16-PERF-AUDIT §m-2): run the ENTIRE import — ghost-prune → duplicate decision →
+    // unique-name allocation → atomic `.toml` write → manifest append — under ONE hold of
+    // MANIFEST_LOCK inside `import_config_under_lock`. The pre-PP-2 path made the duplicate DECISION
+    // outside any lock (find_duplicate released the lock before the write), so two near-simultaneous
+    // imports of the same (host, user) could both write an ORIGINAL — two non-copy twins. The single
+    // held lock closes that TOCTOU window: the second caller checks only after the first's write is
+    // committed, so it lands as a «(копия)». D-13 «add as copy» + atomic write (PP-1) preserved.
+    let (dest_str, was_copy) =
+        manifest::import_config_under_lock(&config_dir, &content, original_file_name.as_deref())?;
 
-    // D-13 duplicate key = (host, user) read from the incoming content (D-29: never the password).
-    let (host, user) = manifest::host_user_from_content(&content);
-    let existing = manifest::find_duplicate_by_host_user(&config_dir, &host, &user);
-
-    // Host+user duplicate (D-13) → AUTO-add as a copy «<base> (копия N)» (no prompt; IN-36).
-    // No duplicate → first import with the content-derived name. A re-import / drop NEVER
-    // overwrites an existing config (a copy is recoverable; an overwrite is not).
-    let stem = original_file_name
-        .as_deref()
-        .and_then(manifest::safe_import_stem_from_filename)
-        .unwrap_or_else(|| manifest::import_stem_from_content(&content));
-    let dest = manifest::unique_import_path(&config_dir, &stem);
-    let dest_str = dest.to_string_lossy().to_string();
-
-    match existing {
-        Some(dup) => {
-            // Base the copy name on the duplicate's CURRENT file-derived name — NOT the manifest
-            // label, which can drift if edited via ConfigEditView/save_client_config (IN-27). Bake
-            // it into endpoint.name so the card + edit view show «<base> (копия N)».
-            let dup_base = manifest::current_display_name(&dup.path).unwrap_or(dup.name);
-            let copy_name = manifest::next_copy_name_for(&config_dir, &dup_base);
-            let content_named = manifest::with_endpoint_name(&content, &copy_name);
-            std::fs::write(&dest, &content_named)
-                .map_err(|e| format!("Failed to write config: {e}"))?;
-            manifest::append_config_to_manifest_named(&config_dir, &dest_str, &copy_name)?;
-            // D-29: log ONLY the source label + destination path — NEVER `content` (it carries the
-            // user's host/username/secret).
-            eprintln!("[deeplink] Config copy imported from {source}: {dest_str}");
-        }
-        None => {
-            std::fs::write(&dest, &content).map_err(|e| format!("Failed to write config: {e}"))?;
-            manifest::append_config_to_manifest(&config_dir, &dest_str)?;
-            // D-29: log ONLY the source label + destination path — never `content`.
-            eprintln!("[deeplink] Config imported from {source}: {dest_str}");
-        }
+    // D-29: log ONLY the source label + destination path — NEVER `content` (it carries the user's
+    // host/username/secret). The copy-vs-original distinction is neutral metadata, safe to log.
+    if was_copy {
+        eprintln!("[deeplink] Config copy imported from {source}: {dest_str}");
+    } else {
+        eprintln!("[deeplink] Config imported from {source}: {dest_str}");
     }
 
     Ok(dest_str)
+}
+
+/// PP-2 test seam: the single-lock import helper the `wave0_pp2` RED test drives. Delegates to
+/// `manifest::import_config_under_lock` (the whole check→write→append under one MANIFEST_LOCK hold)
+/// with no source filename, so two racing imports of the same (host, user) yield one original + one
+/// copy — never two originals. Kept thin so production and the test exercise the SAME critical
+/// section.
+#[cfg(test)]
+fn import_under_lock(dir: &std::path::Path, content: &str) -> Result<(String, bool), String> {
+    crate::commands::manifest::import_config_under_lock(dir, content, None)
 }
 
 #[cfg(test)]
@@ -511,6 +496,55 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ─── Phase 17 (17-03) — PP-2 import TOCTOU single-lock (GREEN) ──────────────────────────
+    //
+    // Landed by 17-03: 17-01 wrote this as `wave0_red`-gated RED (the single-lock helper
+    // `import_under_lock` did not exist yet); 17-03 added it — the whole dup-check + write +
+    // manifest-append run under ONE MANIFEST_LOCK hold (`manifest::import_config_under_lock`) — and
+    // DELETED the gate so it runs under default `cargo test --lib` and passes.
+    //
+    // PP-2 defect (16-PERF-AUDIT §m-2): the pre-fix dup check (`find_duplicate_by_host_user`) and
+    // the write were separate lock-takes, so two near-simultaneous imports of the SAME (host, user)
+    // both read «no duplicate» and each wrote an ORIGINAL — two originals instead of one original +
+    // one «(копия)». The single-lock helper serializes check+write: the second import observes the
+    // first's committed write and lands as a copy.
+
+    /// GREEN (17-03): two sequential-but-racing imports of the same (host, user) under the
+    /// single-lock helper yield exactly ONE original + ONE copy — never two originals.
+    #[test]
+    fn wave0_pp2_concurrent_dup_import_yields_one_original_one_copy() {
+        let dir = tmpdir();
+        let host = "race.example.com";
+        let user = "same-user";
+        let first = sample("First", host, user, "SECRET-1");
+        let second = sample("Second", host, user, "SECRET-2");
+
+        // Both imports go through the SAME single-lock helper. The second, seeing the first's
+        // committed write, must land as a copy — not a second original.
+        import_under_lock(&dir, &first).unwrap();
+        import_under_lock(&dir, &second).unwrap();
+
+        let m = manifest::read_manifest(&dir).unwrap();
+        assert_eq!(
+            m.configs.len(),
+            2,
+            "a dup import must add a copy, not overwrite — two manifest entries total"
+        );
+        // Exactly one entry keeps the plain «First» base (the original); the other is a
+        // «(копия …)» — NOT two originals.
+        let copies = m
+            .configs
+            .iter()
+            .filter(|c| c.name.contains("копия"))
+            .count();
+        assert_eq!(
+            copies, 1,
+            "exactly one of the two must be a copy (one original + one copy, never two originals)"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

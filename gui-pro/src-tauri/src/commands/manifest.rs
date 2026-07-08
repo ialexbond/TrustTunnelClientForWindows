@@ -46,6 +46,108 @@ fn lock_manifest() -> std::sync::MutexGuard<'static, ()> {
     MANIFEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+// ─── PP-5: self-echo suppression window ──────────────────────────────────────
+//
+// Every in-app mutation (add/delete/duplicate/rename/reorder/import/save) writes through the atomic
+// writer. PA-4/17-07 made all six mutation commands return `Result<(), String>`/`Ok(())`; the FE
+// RE-INVOKES `list_configs` right after each mutation (reload/refresh) — it does NOT get a fresh
+// `Vec<ConfigSummary>` handed back from the command. The data-dir fs-watcher (`start_configs_watcher`)
+// ALSO sees that same write and would emit a `configs-changed` echo, driving a SECOND, redundant
+// `list_configs` for a change the FE already re-fetched. PP-5 records an "expected write" instant at
+// the end of `atomic_write`; the watcher suppresses `configs-changed` for a short window after it (a
+// genuine EXTERNAL change — file-manager delete/restore — lands outside any in-app write window and
+// still fires). The window is a coalescing debounce, not a correctness gate FOR THE MUTATORS THAT
+// SELF-REFETCH.
+//
+// F5 CAVEAT: two mutators — `set_last_used` and `reorder_configs` — have fire-and-forget FE callers
+// that do NOT re-fetch (`markLastUsed` resolves ids only; `persistOrder` is optimistic-local to the
+// Settings tab), and IN-49 removed the tab-SWITCH reload backstop (panels stay mounted). For those
+// two the suppressed echo WAS the only live refresh, so they now emit `configs-changed` THEMSELVES
+// after their write (see each command). Suppression must NOT be justified by a tab-switch/focus
+// backstop for tab switches — that backstop no longer exists.
+
+use std::time::{Duration, Instant};
+
+/// How long after an in-app atomic write the watcher suppresses its own `configs-changed` echo.
+/// Long enough to swallow the notify event for our own write (temp+rename lands within a few ms),
+/// short enough that a real external change moments later is not masked.
+const SELF_ECHO_SUPPRESS: Duration = Duration::from_millis(250);
+
+/// The instant of the last in-app atomic write. `None` until the first write. Poison-tolerant.
+static LAST_EXPECTED_WRITE: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Record that an in-app write just happened (called at the tail of `atomic_write`). Opens the
+/// PP-5 suppression window so the watcher skips the echo for our own write.
+fn note_expected_write() {
+    let mut guard = LAST_EXPECTED_WRITE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(Instant::now());
+}
+
+/// True if we are still inside the suppression window opened by the most recent in-app write —
+/// i.e. this fs event is (almost certainly) the echo of our own write and should NOT re-emit
+/// `configs-changed`. An external change arriving after the window returns false (emit as usual).
+fn within_self_echo_window() -> bool {
+    let guard = LAST_EXPECTED_WRITE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    matches!(*guard, Some(t) if t.elapsed() < SELF_ECHO_SUPPRESS)
+}
+
+/// Test-only: force the last-expected-write instant to a chosen time so the window-expiry branch is
+/// tested WITHOUT a real sleep (a sleep-based test is flaky under the shared static — a parallel
+/// write test could re-arm the window mid-sleep).
+#[cfg(test)]
+fn force_last_expected_write(instant: Option<Instant>) {
+    let mut guard = LAST_EXPECTED_WRITE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = instant;
+}
+
+// ─── PP-6: single data-dir watcher owns both FE signals ──────────────────────
+//
+// Before PP-6 there were TWO OS watchers on the SAME `portable_data_dir`: `start_configs_watcher`
+// (app-wide, emits `configs-changed` for the list) and `watch_config_file` (config.rs, emits
+// `config-file-changed {exists,path}` for the ACTIVE file's external-delete/restore lifecycle).
+// Two `notify` watchers on one directory is the redundant OS-watcher PP-6 flags. PP-6 collapses
+// them: `start_configs_watcher` is the SOLE watcher and ALSO emits `config-file-changed` for the
+// registered active path. `watch_config_file`/`unwatch_config_file` no longer spawn a watcher —
+// they just register/clear the active path here. Both FE signals keep firing with identical
+// payloads; only the duplicate OS watcher is gone.
+
+/// The currently-watched active config path (set by `watch_config_file`, cleared by
+/// `unwatch_config_file`). The single data-dir watcher reads this to decide whether an fs event
+/// touches the active file and thus warrants a `config-file-changed` emit. Poison-tolerant.
+static ACTIVE_CONFIG_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+/// Register the active config path so the single data-dir watcher emits `config-file-changed`
+/// for it (PP-6). Replaces the old second OS watcher's target.
+pub fn set_active_config_path(path: String) {
+    let mut guard = ACTIVE_CONFIG_PATH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(path);
+}
+
+/// Clear the active config path (PP-6) — after this no `config-file-changed` is emitted until a
+/// new path is registered.
+pub fn clear_active_config_path() {
+    let mut guard = ACTIVE_CONFIG_PATH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = None;
+}
+
+/// The registered active config path, if any (read by the single data-dir watcher).
+fn active_config_path() -> Option<String> {
+    ACTIVE_CONFIG_PATH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
 /// Current manifest schema version. Bumped only on a breaking layout change.
 /// Migration is idempotent and guards on the presence of a manifest at this version.
 pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -53,6 +155,9 @@ pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// The manifest file name in the portable data dir.
 const MANIFEST_FILENAME: &str = "configs.json";
 /// The temp file used by the atomic writer (written, fsync'd, then renamed over the real one).
+/// 17-03: the generic `atomic_write` now derives `<name>.tmp` itself, so production no longer
+/// references this constant — the crash-safety test still asserts against the exact temp name.
+#[cfg_attr(not(test), allow(dead_code))]
 const MANIFEST_TMP_FILENAME: &str = "configs.json.tmp";
 
 /// One config entry in the manifest. Holds ONLY non-secret metadata — the
@@ -190,27 +295,123 @@ fn slugify(s: &str) -> String {
 
 // ─── Atomic write + read ─────────────────────────────────────────────────────
 
-/// Atomically write the manifest: write to `configs.json.tmp`, fsync, then rename
-/// over `configs.json` (atomic swap on the same NTFS volume). The ONLY writer path.
-pub fn write_manifest_atomic(dir: &Path, manifest: &Manifest) -> Result<(), String> {
+/// PP-1 (17-03): the single generic atomic file writer. Writes `bytes` to `<name>.tmp` inside
+/// `dir`, fsyncs the data, renames it over `<name>` (atomic swap on the same NTFS volume), then
+/// PP-3 makes a BEST-EFFORT fsync of the PARENT DIR (F9: on Windows this requires opening the dir
+/// with FILE_FLAG_BACKUP_SEMANTICS — a plain open is denied — and can still fail without write
+/// access, so it is swallowed). The rename's durability does NOT rest on that fsync: NTFS journals
+/// the rename as a metadata transaction, so the directory-entry update survives a power loss even
+/// when the fsync is skipped or denied. The dir fsync is a belt to that journaling suspenders.
+///
+/// This is the ONE writer every password-bearing per-config `.toml` routes through (config
+/// save/normalize/recovery/DHCP-patch, the duplicate copy, the rename, the import writes, the
+/// deploy/server-config export). A crash / power-loss / ENOSPC mid-write can therefore never leave
+/// a truncated password file: the temp may be partial, but the real file is only ever swapped in
+/// whole. F14: on a RECOVERABLE mid-write error (write/fsync/rename returns `Err`, e.g. ENOSPC) the
+/// partial `<name>.tmp` is removed best-effort before returning — it holds partial password-bearing
+/// bytes (D-29) that must not linger until the next successful save; only a hard crash (no unwind)
+/// can leave a temp behind, and the next `atomic_write` overwrites it. Generalized from
+/// `write_manifest_atomic`'s proven temp→write_all→sync_all→rename body so there is no second
+/// hand-rolled copy to drift.
+///
+/// D-29: this function NEVER logs `bytes` (the config content carries the endpoint password) — it
+/// emits nothing at all; only the caller's neutral path/name may be logged. `name` must be a BARE
+/// filename (no separators) — callers join it onto a validated `dir`.
+pub fn atomic_write(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create data dir: {e}"))?;
-    let tmp = dir.join(MANIFEST_TMP_FILENAME);
-    let final_path = dir.join(MANIFEST_FILENAME);
+    let tmp = dir.join(format!("{name}.tmp"));
+    let final_path = dir.join(name);
+    // F14: every error path AFTER the temp is created must remove `<name>.tmp` before returning.
+    // The temp holds a PARTIAL, password-bearing config (D-29); an ENOSPC/IO failure mid-write must
+    // not strand it on disk until the next successful save. The rename below CONSUMES the temp on
+    // success (nothing to clean up), so this best-effort cleanup runs only on the failure legs.
+    {
+        let write_result = (|| {
+            let mut f = std::fs::File::create(&tmp)
+                .map_err(|e| format!("Failed to create temp file: {e}"))?;
+            std::io::Write::write_all(&mut f, bytes)
+                .map_err(|e| format!("Failed to write temp file: {e}"))?;
+            // fsync the data to disk BEFORE the rename so a crash can never leave a half-written
+            // final file (the temp may be partial, the real file is swapped in whole or not at all).
+            f.sync_all()
+                .map_err(|e| format!("Failed to fsync temp file: {e}"))
+        })();
+        if let Err(e) = write_result {
+            let _ = std::fs::remove_file(&tmp); // best-effort — the partial password file must not linger
+            return Err(e);
+        }
+    }
+    if let Err(e) = std::fs::rename(&tmp, &final_path) {
+        let _ = std::fs::remove_file(&tmp); // rename failed → the temp is still ours to clean up
+        return Err(format!("Failed to swap file into place: {e}"));
+    }
+    // PP-3 (16-PERF-AUDIT §m-3) + F9 (17-review): best-effort fsync of the PARENT DIR so the rename
+    // (a directory-entry mutation) is itself durable against an immediate power loss.
+    //
+    // F9: on Windows — the ONLY shipping platform — a plain `File::open(dir)` fails with
+    // ERROR_ACCESS_DENIED because std does NOT pass FILE_FLAG_BACKUP_SEMANTICS, which is required to
+    // obtain a HANDLE to a directory. The old `File::open(dir)` therefore NEVER opened, so this whole
+    // branch was dead here and durability rested entirely on the fallback below. We now open the dir
+    // WITH backup-semantics so `sync_all()` (→ FlushFileBuffers on the dir handle) can actually run.
+    // It is still BEST-EFFORT: the open (no write access) or the flush may fail, and either way we
+    // swallow it — a parent-dir fsync failure must not fail an otherwise-successful write. The real
+    // durability guarantee does NOT depend on it: NTFS journals the rename (a metadata transaction),
+    // so the directory entry survives a crash even when this flush is skipped or denied. This fsync
+    // is the belt to that journaling suspenders, no longer a load-bearing (and previously dead) step.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_BACKUP_SEMANTICS (0x0200_0000): lets CreateFile return a handle to a DIRECTORY
+        // (not just a file). Hard-coded literal to avoid pulling an extra windows-sys feature into
+        // the build (CI-drift risk); the value is stable Win32 ABI.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        if let Ok(dir_handle) = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir)
+        {
+            let _ = dir_handle.sync_all();
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        // On Unix a plain directory open + fsync is the standard, supported idiom.
+        if let Ok(dir_handle) = std::fs::File::open(dir) {
+            let _ = dir_handle.sync_all();
+        }
+    }
+    // PP-5: open the self-echo suppression window so the data-dir watcher skips the `configs-changed`
+    // echo for THIS write (the FE re-invokes `list_configs` right after the mutation — PA-4/17-07
+    // made the mutation commands return `Ok(())` rather than the fresh list). A genuine external
+    // change lands outside any write window and still fires. This is the single choke point every
+    // in-app `.toml`/manifest write flows through (17-03), so one call here covers all mutators.
+    note_expected_write();
+    Ok(())
+}
+
+/// PP-1 convenience over `atomic_write`: take a FULL destination path, split off its parent dir
+/// and bare filename, then route the write through `atomic_write`. Every `.toml` writer that
+/// already holds a full `PathBuf` (config save/normalize/recovery/DHCP-patch, the duplicate copy,
+/// the rename, the import writes, the deploy/server-config export) calls this so it stays a
+/// one-line swap of the old `std::fs::write(&path, bytes)`. A path with no parent (never, for our
+/// data-dir files) or no filename is an error rather than a silent plain write. D-29: logs nothing.
+pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| "atomic write: destination has no parent directory".to_string())?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "atomic write: destination has no filename".to_string())?;
+    atomic_write(dir, name, bytes)
+}
+
+/// Atomically write the manifest: serialize to bytes, then route through the generic
+/// `atomic_write` (temp → fsync → rename → parent-dir fsync). The ONLY manifest writer path.
+pub fn write_manifest_atomic(dir: &Path, manifest: &Manifest) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(manifest)
         .map_err(|e| format!("Failed to serialize manifest: {e}"))?;
-    {
-        let mut f =
-            std::fs::File::create(&tmp).map_err(|e| format!("Failed to create temp manifest: {e}"))?;
-        std::io::Write::write_all(&mut f, &json)
-            .map_err(|e| format!("Failed to write temp manifest: {e}"))?;
-        // fsync the data to disk before the rename so a crash can never leave a
-        // half-written configs.json (the temp may be partial, the real file is not).
-        f.sync_all()
-            .map_err(|e| format!("Failed to fsync temp manifest: {e}"))?;
-    }
-    std::fs::rename(&tmp, &final_path)
-        .map_err(|e| format!("Failed to swap manifest into place: {e}"))?;
-    Ok(())
+    atomic_write(dir, MANIFEST_FILENAME, &json)
 }
 
 /// Read and deserialize the manifest from `configs.json` in the given dir.
@@ -359,6 +560,81 @@ fn summarize_unchecked(path: &str) -> Result<ConfigSummary, String> {
         order: 0,
         last_used: false,
     })
+}
+
+// ─── PP-4: (mtime, len) summarize cache ──────────────────────────────────────
+//
+// `list_configs` runs on every refresh (import/delete/rename/reorder + the fs-watcher
+// `configs-changed` echo + tab-switch/focus backstop). Each call re-read + re-parsed EVERY
+// `.toml` even when nothing on disk changed. PP-4 keys a per-path cache on the file's
+// (mtime, len): if BOTH match the last parse, the stored name/host/display_host/user is
+// reused and the TOML parse is skipped. A write always bumps mtime (and usually len), so a
+// real edit invalidates the entry and is re-parsed — the cache can never serve stale data.
+// The password is NEVER cached (D-29: `summarize_unchecked` never reads it in the first place).
+//
+// Bounded: entries whose path is no longer in the manifest are never evicted actively, but the
+// cache only grows with distinct config paths the user has ever listed (a handful), so unbounded
+// growth is not a practical concern; a stale entry for a deleted path is simply never hit again.
+
+/// The cache key half we compare: last-modified time + byte length. A `.toml` write (atomic
+/// temp+rename, 17-03) lands a fresh mtime, so a stale key can never match a changed file.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    mtime_ns: i128,
+    len: u64,
+}
+
+fn file_stamp(path: &str) -> Option<FileStamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?;
+    // Represent mtime as signed nanoseconds from the UNIX epoch so pre-epoch times (rare, but
+    // possible on odd filesystems) still compare correctly instead of saturating.
+    let mtime_ns = match modified.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as i128,
+        Err(e) => -(e.duration().as_nanos() as i128),
+    };
+    Some(FileStamp { mtime_ns, len: meta.len() })
+}
+
+/// Process-wide cache: path → (stamp, parsed summary). Reuses the parsed name/host/display_host/
+/// user when the file's (mtime, len) is unchanged since the last parse (PP-4). Poison-tolerant for
+/// the same reason as the manifest lock — a stale/rebuildable cache must never wedge the list.
+static SUMMARIZE_CACHE: Mutex<Option<std::collections::HashMap<String, (FileStamp, ConfigSummary)>>> =
+    Mutex::new(None);
+
+/// `summarize_unchecked` with the PP-4 (mtime, len) cache in front. On a stamp hit the stored
+/// summary is cloned (no file read/parse); on a miss (or an unstat-able file) it falls through to
+/// a fresh parse and refreshes the cache. Behavior is identical to `summarize_unchecked` — only
+/// the redundant re-parse of unchanged files is elided.
+fn summarize_cached(path: &str) -> Result<ConfigSummary, String> {
+    let stamp = file_stamp(path);
+    if let Some(stamp) = stamp {
+        let mut guard = SUMMARIZE_CACHE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let map = guard.get_or_insert_with(std::collections::HashMap::new);
+        if let Some((cached_stamp, cached)) = map.get(path) {
+            if *cached_stamp == stamp {
+                return Ok(cached.clone());
+            }
+        }
+        // Miss (new file, changed stamp, or first sight): parse fresh, then cache under the stamp.
+        let summary = summarize_unchecked(path)?;
+        map.insert(path.to_string(), (stamp, summary.clone()));
+        return Ok(summary);
+    }
+    // Un-stat-able (locked/racing): skip the cache entirely and parse directly.
+    summarize_unchecked(path)
+}
+
+/// Clear the PP-4 summarize cache. Test-only hook so cache-behavior tests start from a known
+/// empty state without leaking entries across cases.
+#[cfg(test)]
+fn clear_summarize_cache() {
+    let mut guard = SUMMARIZE_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = None;
 }
 
 // ─── Path validation ─────────────────────────────────────────────────────────
@@ -714,8 +990,9 @@ fn list_configs_in_dir(dir: &Path) -> Result<Vec<ConfigSummary>, String> {
         // Re-summarize from the .toml so renames/edits to the file reflect; fall back to
         // the manifest name if the file is unreadable (do not drop the entry). The paths
         // here are manifest-tracked (added through the validated add/migrate funnel), so
-        // the unchecked reader is correct — no second path-validation needed.
-        let summary = summarize_unchecked(&entry.path).unwrap_or_else(|_| ConfigSummary {
+        // the unchecked reader is correct — no second path-validation needed. PP-4: the
+        // (mtime, len) cache skips the re-parse when the .toml is unchanged since last list.
+        let summary = summarize_cached(&entry.path).unwrap_or_else(|_| ConfigSummary {
             id: entry.id.clone(),
             name: entry.name.clone(),
             host: String::new(),
@@ -752,9 +1029,17 @@ fn list_configs_in_dir(dir: &Path) -> Result<Vec<ConfigSummary>, String> {
 }
 
 /// Append an already-on-disk config (inside the data dir) to the manifest. Deduped by
-/// canonical path — adding the same path twice is a no-op. Returns the updated list.
+/// canonical path — adding the same path twice is a no-op.
+///
+/// PA-4 (17-07, MINOR-2): returns `Result<(), String>`, NOT the updated list. Every caller
+/// already discarded the returned `Vec<ConfigSummary>` and re-invoked `list_configs`
+/// afterwards (consume-and-drop-reload), so returning `Ok(())` makes the discard explicit in
+/// the type and drops one redundant manifest read per mutation. The convention decision was
+/// recorded in plan 17-04 and applied consistently to all six manifest MUTATION commands
+/// (add/delete/duplicate/rename/set_last_used/reorder); the READ commands (`list_configs`,
+/// `migrate_configs`) keep their `Vec` return — their list IS consumed.
 #[tauri::command]
-pub fn add_config(path: String) -> Result<Vec<ConfigSummary>, String> {
+pub fn add_config(path: String) -> Result<(), String> {
     validate_app_path(&path)?;
     // WR-01: hold the funnel lock across read→mutate→write so a concurrent mutation
     // cannot overwrite this add with a stale manifest copy (lost update).
@@ -764,7 +1049,7 @@ pub fn add_config(path: String) -> Result<Vec<ConfigSummary>, String> {
     prune_missing(&mut manifest); // IN-55: drop ghosts so order/dedup are truthful
     add_entry(&mut manifest, &path)?;
     write_manifest_atomic(&dir, &manifest)?;
-    list_configs()
+    Ok(())
 }
 
 /// Internal: append a config entry (deduped by canonical path). Shared by add_config +
@@ -844,10 +1129,12 @@ fn prune_missing(manifest: &mut Manifest) -> bool {
     true
 }
 
-/// Lock + read + prune + write-if-changed. For callers that do NOT already hold the funnel lock
-/// (the import flow, which then runs find_duplicate / next_copy_name as separate locked reads, and
-/// the fs-watcher). Callers already holding the lock with a manifest in hand (add/duplicate) use
-/// `prune_missing` directly instead — re-locking here would deadlock.
+/// Lock + read + prune + write-if-changed. 17-03/PP-2: the import flow now prunes INLINE under its
+/// own single held lock (`import_config_under_lock` calls `prune_missing` directly — re-locking here
+/// would deadlock), so production no longer calls this wrapper; it is retained as the funnel's
+/// standalone prune entry point (and exercised by tests). Callers already holding the lock with a
+/// manifest in hand (add/duplicate) use `prune_missing` directly instead.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn prune_manifest_in_dir(dir: &Path) -> Result<bool, String> {
     let _guard = lock_manifest();
     let mut manifest = read_manifest(dir)?;
@@ -969,7 +1256,41 @@ pub fn start_configs_watcher(app: tauri::AppHandle) {
                     || p.file_name().and_then(|n| n.to_str()) == Some(MANIFEST_FILENAME)
             });
             if relevant {
-                app_handle.emit("configs-changed", ()).ok();
+                // PP-5: suppress the `configs-changed` echo of our OWN in-app write. After each
+                // mutation the FE re-invokes `list_configs` (PA-4/17-07 — the commands return
+                // `Ok(())`, not a list), so a watcher-driven second read would be redundant. A
+                // genuine EXTERNAL change lands outside the suppression window and still fires.
+                // F5: `set_last_used`/`reorder_configs` have fire-and-forget callers that do NOT
+                // re-fetch, so they self-emit `configs-changed` after their write — that explicit
+                // emit is what refreshes the list, NOT this suppressed echo.
+                if !within_self_echo_window() {
+                    app_handle.emit("configs-changed", ()).ok();
+                }
+            }
+            // PP-6: this SINGLE data-dir watcher also drives `config-file-changed` for the registered
+            // ACTIVE config path (retiring the second OS watcher that config.rs used to spawn). Emit
+            // it for a Create/Remove/Modify that touches the active file. NOT gated by the PP-5
+            // self-echo window: the active-file lifecycle (external delete/restore vs in-app delete)
+            // is disambiguated FE-side by the self-delete guard (useConfigLifecycle, B2/#8) exactly
+            // as before — collapsing the watcher must not change that timing. Payload shape is
+            // byte-identical to the old config.rs emit: `{ exists, path }`.
+            if let Some(active) = active_config_path() {
+                let active_path = std::path::Path::new(&active);
+                let active_name = active_path.file_name();
+                let touches_active = active_name.is_some()
+                    && event
+                        .paths
+                        .iter()
+                        .any(|p| p.file_name() == active_name);
+                if touches_active {
+                    let exists = active_path.is_file();
+                    app_handle
+                        .emit(
+                            "config-file-changed",
+                            serde_json::json!({ "exists": exists, "path": &active }),
+                        )
+                        .ok();
+                }
             }
         }) {
             Ok(w) => w,
@@ -1054,12 +1375,13 @@ fn sync_entry_name_in_dir(dir: &Path, path: &str) -> Result<(), String> {
 /// file is a manifest-tracked file inside the portable data dir (V12). Refuses to touch a
 /// path outside the data dir.
 #[tauri::command]
-pub fn delete_config(id: String) -> Result<Vec<ConfigSummary>, String> {
+pub fn delete_config(id: String) -> Result<(), String> {
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
     delete_config_in_dir(&dir, &id)?;
-    list_configs()
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    Ok(())
 }
 
 /// Testable core of `delete_config` against an explicit dir (the command wraps this with
@@ -1172,7 +1494,7 @@ fn delete_config_in_dir(dir: &Path, id: &str) -> Result<(), String> {
 /// Duplicate a config: copy its `.toml` to a unique filename in the data dir and append a
 /// «(копия)» entry. The active/last-used config is untouched.
 #[tauri::command]
-pub fn duplicate_config(id: String) -> Result<Vec<ConfigSummary>, String> {
+pub fn duplicate_config(id: String) -> Result<(), String> {
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
@@ -1206,7 +1528,9 @@ pub fn duplicate_config(id: String) -> Result<Vec<ConfigSummary>, String> {
     );
     let dest_content =
         std::fs::read_to_string(&dest).map_err(|e| format!("Failed to read copied config: {e}"))?;
-    std::fs::write(&dest, upsert_endpoint_name(&dest_content, &copy_name))
+    // PP-1: rewrite the copy's baked-in name atomically — a crash here must not leave the copy's
+    // password-bearing `.toml` truncated. dest lives inside `dir`, so split off its bare filename.
+    write_bytes_atomic(&dest, upsert_endpoint_name(&dest_content, &copy_name).as_bytes())
         .map_err(|e| format!("Failed to write copy name: {e}"))?;
     let next_order = manifest.configs.iter().map(|c| c.order).max().map_or(0, |m| m + 1);
     manifest.configs.push(ConfigEntry {
@@ -1218,7 +1542,8 @@ pub fn duplicate_config(id: String) -> Result<Vec<ConfigSummary>, String> {
         copy: true, // B6 fix #5: card «Дублировать» is a deliberate copy — durably spare it from the sweep
     });
     write_manifest_atomic(&dir, &manifest)?;
-    list_configs()
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    Ok(())
 }
 
 /// Build a unique `<stem>-copy[-N].toml` path inside `dir`, atomically CLAIMING it.
@@ -1476,6 +1801,11 @@ pub fn safe_import_stem_from_filename(file_name: &str) -> Option<String> {
 /// manifest at `dir` and writing it back atomically. Used by the import write path
 /// (deeplink.rs) so the imported file becomes a card. Deduped by canonical path. The path
 /// MUST already be validated by the caller (it just wrote the file there).
+/// 17-03/PP-2: production import now appends INLINE under `import_config_under_lock`'s single held
+/// lock (the whole check→write→append is one critical section), so this standalone wrapper is no
+/// longer called by production — it is retained as the funnel's append entry point and exercised by
+/// the import tests.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn append_config_to_manifest(dir: &Path, path: &str) -> Result<(), String> {
     // WR-01: the import write path (deeplink.rs) is part of the same mutation funnel —
     // serialize its read→mutate→write so an import cannot interleave with a card
@@ -1492,11 +1822,90 @@ pub fn append_config_to_manifest(dir: &Path, path: &str) -> Result<(), String> {
 /// delete identity-sweep spares it even though its imported filename may carry no `-copy`/`-<n>`
 /// suffix (the import keeps the original filename) and its «(копия N)» label could later be
 /// renamed away.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn append_config_to_manifest_named(dir: &Path, path: &str, name: &str) -> Result<(), String> {
     let _guard = lock_manifest();
     let mut manifest = read_manifest(dir)?;
     add_entry_named(&mut manifest, path, Some(name), true)?;
     write_manifest_atomic(dir, &manifest)
+}
+
+/// PP-2 (16-PERF-AUDIT §m-2): perform an entire config import — prune ghosts → decide
+/// duplicate-vs-original → allocate a unique filename → write the `.toml` atomically → append the
+/// manifest entry — under ONE continuous hold of `MANIFEST_LOCK`.
+///
+/// The pre-PP-2 import path took the lock THREE separate times (`prune_manifest_in_dir`,
+/// `find_duplicate_by_host_user`, then `append_config_to_manifest*`) with the duplicate DECISION
+/// made OUTSIDE any lock. Two near-simultaneous imports of the same (host, user) could therefore
+/// both observe «no duplicate» in the gap and each write an ORIGINAL — two non-copy twins instead
+/// of one original + one «(копия)». Holding the lock across the whole check→write→append closes
+/// that TOCTOU window: the second caller only runs its check AFTER the first's manifest write is
+/// committed, so it sees the duplicate and lands as a copy.
+///
+/// Returns `(destination path, is_copy)`. `is_copy` is true when a same-(host,user) config already
+/// existed (D-13 «add as copy»). D-29: never logs the content/password. All the sub-helpers used
+/// here (`prune_missing`, `find_duplicate_by_host_user`, `unique_import_path`, `next_copy_name_for`,
+/// `read_manifest`, `write_manifest_atomic`) are lock-FREE, so calling them under the held guard
+/// cannot re-enter the std `Mutex` and deadlock; the `append_config_to_manifest*` wrappers (which
+/// DO take the lock) are deliberately NOT used here.
+pub fn import_config_under_lock(
+    dir: &Path,
+    content: &str,
+    original_file_name: Option<&str>,
+) -> Result<(String, bool), String> {
+    // One continuous critical section — the whole point of PP-2.
+    let _guard = lock_manifest();
+
+    // IN-55: prune ghost manifest entries (configs deleted outside the app) in-memory FIRST — do
+    // NOT call prune_manifest_in_dir (it re-takes the lock → deadlock). We persist the pruned
+    // manifest as part of the final append write below, so a ghost can't inflate the copy number or
+    // make a fresh config look like a duplicate. (Persist the prune even on the no-op no-dup path so
+    // a stale ghost is cleaned regardless.)
+    let mut manifest = read_manifest(dir)?;
+    let pruned = prune_missing(&mut manifest);
+    if pruned {
+        write_manifest_atomic(dir, &manifest)?;
+    }
+
+    // D-13 duplicate key = (host, user), read from the incoming CONTENT (D-29: never the password).
+    // Reuse the same `find_duplicate_by_host_user` the pre-PP-2 path used — it is lock-free
+    // (read_manifest, no MANIFEST_LOCK), so calling it under the held guard cannot deadlock, and the
+    // just-persisted prune means it reads the truthful manifest.
+    let (host, user) = host_user_from_content(content);
+    let existing = find_duplicate_by_host_user(dir, &host, &user);
+
+    // Branded/derived unique destination filename (atomic create_new claim — never overwrites).
+    let stem = original_file_name
+        .and_then(safe_import_stem_from_filename)
+        .unwrap_or_else(|| import_stem_from_content(content));
+    let dest = unique_import_path(dir, &stem);
+    let dest_str = dest.to_string_lossy().to_string();
+
+    match existing {
+        Some(dup) => {
+            // Same-server duplicate → AUTO-add as a copy «<base> (копия N)» (D-13 / IN-36). Base the
+            // copy name on the duplicate's CURRENT file-derived name (not the maybe-stale manifest
+            // label); `next_copy_name_for` allocates the first free «(копия N)» against the dir's
+            // manifest (lock-free read — safe under the held guard).
+            let dup_base = current_display_name(&dup.path).unwrap_or(dup.name);
+            let copy_name = next_copy_name_for(dir, &dup_base);
+            let content_named = with_endpoint_name(content, &copy_name);
+            // PP-1: atomic write of the copy's password-bearing `.toml`.
+            write_bytes_atomic(&dest, content_named.as_bytes())?;
+            // Append the copy entry to the (pruned) in-hand manifest and persist atomically — all
+            // still under the single held lock, so no concurrent import can slip in a second twin.
+            add_entry_named(&mut manifest, &dest_str, Some(&copy_name), true)?;
+            write_manifest_atomic(dir, &manifest)?;
+            Ok((dest_str, true))
+        }
+        None => {
+            // First import for this identity → plain original (name derived from content).
+            write_bytes_atomic(&dest, content.as_bytes())?;
+            add_entry(&mut manifest, &dest_str)?;
+            write_manifest_atomic(dir, &manifest)?;
+            Ok((dest_str, false))
+        }
+    }
 }
 
 /// Rename a config's display name. The name is the user-facing TITLE of the config (D-14):
@@ -1510,7 +1919,7 @@ pub fn append_config_to_manifest_named(dir: &Path, path: &str, name: &str) -> Re
 /// the username on every reload (11-UAT: name edits did not stick). Persisting into the `.toml`
 /// makes the rename the real config name, survive reload, and "reflect on the config".
 #[tauri::command]
-pub fn rename_config(id: String, name: String) -> Result<Vec<ConfigSummary>, String> {
+pub fn rename_config(id: String, name: String) -> Result<(), String> {
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
@@ -1549,17 +1958,30 @@ pub fn rename_config(id: String, name: String) -> Result<Vec<ConfigSummary>, Str
     } else {
         upsert_endpoint_name(&content, &name)
     };
-    std::fs::write(&path, updated).map_err(|e| format!("Failed to write config: {e}"))?;
+    // PP-1: persist the renamed `endpoint.name` atomically — a crash mid-write must not truncate
+    // this password-bearing config `.toml`.
+    write_bytes_atomic(Path::new(&path), updated.as_bytes())
+        .map_err(|e| format!("Failed to write config: {e}"))?;
     // Keep the manifest label in sync as the fallback for an unreadable file.
     entry.name = name;
     write_manifest_atomic(&dir, &manifest)?;
-    list_configs()
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    Ok(())
 }
 
 /// Mark a config as last-used: clear every other marker, set this one, move it to order 0
 /// (the lead card). D-05 — exactly one last-used at a time, no favourite/star concept.
+///
+/// F5 (17-review): takes `app` so it can EXPLICITLY emit `configs-changed` after its write. The
+/// atomic writer arms the PP-5 self-echo window, which suppresses the fs-watcher's `configs-changed`
+/// echo — and this command's FE caller (`markLastUsed`) is fire-and-forget with NO list re-fetch,
+/// and IN-49 removed the tab-switch reload backstop, so that suppressed echo WAS the only live
+/// refresh. Without the explicit emit the «Подключение» list would show a stale order/lead-card
+/// after an A→B switch until some other event refreshed it. The self-notify replaces exactly the
+/// echo PP-5 swallows; PP-5 suppression is UNCHANGED for every other writer (which self-refetch).
 #[tauri::command]
-pub fn set_last_used(id: String) -> Result<Vec<ConfigSummary>, String> {
+pub fn set_last_used(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
@@ -1590,7 +2012,16 @@ pub fn set_last_used(id: String) -> Result<Vec<ConfigSummary>, String> {
         c.order = i as u32;
     }
     write_manifest_atomic(&dir, &manifest)?;
-    list_configs()
+    // F5: self-notify the FE. The write above armed the PP-5 window, so the watcher will SKIP its
+    // `configs-changed` echo for this write; this explicit emit is the refresh that echo would have
+    // driven. `markLastUsed` does not re-fetch, so without it the Connection list keeps a stale
+    // lead-card/order. Same event name/payload the watcher uses → useConfigMutations' listener runs
+    // its silent `refresh()`. Best-effort like every emit here; a dropped emit is a UI-freshness
+    // nicety, never a correctness gate (D-29: no config content crosses — the FE re-reads via
+    // list_configs which carries no password).
+    app.emit("configs-changed", ()).ok();
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    Ok(())
 }
 
 /// Persist the user-set priority order (D-02 / D-05). The «Авто-режим» priority list
@@ -1606,8 +2037,15 @@ pub fn set_last_used(id: String) -> Result<Vec<ConfigSummary>, String> {
 /// Inputs are manifest ids, never filesystem paths (there is no path parameter), so no
 /// path traversal is possible (V5/V12). The atomic writer guarantees no torn write.
 /// D-29: this command never reads `endpoint.password` and logs nothing.
+///
+/// F5 (17-review): takes `app` to EXPLICITLY emit `configs-changed` after the write — same reason as
+/// `set_last_used`. Its FE caller (`persistOrder` in AutoModeSettings) is optimistic-local to the
+/// Settings tab and does NOT re-fetch; with IN-49's tab-switch backstop gone, the PP-5-suppressed
+/// echo was the only path that refreshed the «Подключение» list, so a reorder on «Авто-режим» left
+/// «Подключение» showing the stale order indefinitely. The self-notify replaces that echo.
 #[tauri::command]
-pub fn reorder_configs(ids: Vec<String>) -> Result<Vec<ConfigSummary>, String> {
+pub fn reorder_configs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    use tauri::Emitter;
     // WR-01: serialize read→mutate→write against other manifest mutators.
     let _guard = lock_manifest();
     let dir = portable_data_dir();
@@ -1636,7 +2074,13 @@ pub fn reorder_configs(ids: Vec<String>) -> Result<Vec<ConfigSummary>, String> {
     }
 
     write_manifest_atomic(&dir, &manifest)?;
-    list_configs()
+    // F5: self-notify the FE (see the doc comment). The PP-5 window this write armed suppresses the
+    // watcher echo; `persistOrder` does not re-fetch, so this explicit emit is what refreshes the
+    // «Подключение» list to the new order. Same event/payload as the watcher → the FE listener runs
+    // its silent `refresh()`. Best-effort; D-29: no config content crosses.
+    app.emit("configs-changed", ()).ok();
+    // PA-4 (17-07): return Ok(()) — the FE discarded the list and re-invoked list_configs.
+    Ok(())
 }
 
 // ─── Tests (Wave-0 stubs turned GREEN) ───────────────────────────────────────
@@ -3044,6 +3488,50 @@ included_routes = ["0.0.0.0/0"]
         }
     }
 
+    /// F5 (17-review) — SELF-NOTIFY CONTRACT. `set_last_used` and `reorder_configs` MUST explicitly
+    /// emit `configs-changed` after their write, because the PP-5 window their atomic write arms
+    /// suppresses the fs-watcher echo AND their FE callers (`markLastUsed`, `persistOrder`) are
+    /// fire-and-forget with no list re-fetch, with IN-49's tab-switch reload backstop gone — so the
+    /// suppressed echo was the ONLY live refresh. A real emit needs a Tauri runtime + data dir (the
+    /// same reason the reorder tests use in-memory transforms — line ~2766), so we assert the
+    /// contract at the SOURCE level: each command takes `app: tauri::AppHandle` and, inside its body,
+    /// calls `app.emit("configs-changed", ())`. A future edit dropping either the param or the emit
+    /// (re-stranding the Connection list — the F5 regression) fails this test. Mirrors the existing
+    /// D-29 source-discipline spy shape (`..._never_logs_the_password_d29`).
+    #[test]
+    fn f5_set_last_used_and_reorder_self_emit_configs_changed() {
+        let src = include_str!("manifest.rs");
+
+        // Extract a function's body slice: from its `pub fn <name>(` to the start of the NEXT
+        // `#[tauri::command]` (both commands are the last two commands before the tests module, and
+        // each is immediately followed by another `#[tauri::command]` or the tests boundary).
+        fn body_after<'a>(src: &'a str, sig_needle: &str) -> &'a str {
+            let start = src.find(sig_needle).unwrap_or_else(|| {
+                panic!("expected to find `{sig_needle}` — did the signature change?")
+            });
+            let rest = &src[start..];
+            // Cut at the next command attribute (or the tests module) so we scan only THIS body.
+            let end = rest[sig_needle.len()..]
+                .find("#[tauri::command]")
+                .or_else(|| rest.find("mod tests"))
+                .map(|i| i + sig_needle.len())
+                .unwrap_or(rest.len());
+            &rest[..end]
+        }
+
+        for sig in [
+            "pub fn set_last_used(app: tauri::AppHandle, id: String)",
+            "pub fn reorder_configs(app: tauri::AppHandle, ids: Vec<String>)",
+        ] {
+            let body = body_after(src, sig);
+            assert!(
+                body.contains("app.emit(\"configs-changed\", ())"),
+                "F5: `{sig}` must self-emit `configs-changed` after its write (PP-5 swallows the \
+                 watcher echo and the FE caller does not re-fetch)"
+            );
+        }
+    }
+
     // ── tempdir helpers (no external crate — std-only, unique per test) ──
 
     fn tempdir() -> std::path::PathBuf {
@@ -3296,5 +3784,214 @@ included_routes = ["0.0.0.0/0"]
             "the IP is NOT the dedup key — it must not match"
         );
         cleanup(&tmp);
+    }
+
+    // ─── Phase 17 (17-03) — PP-1 `atomic_write` crash-safety + D-29 spy (GREEN) ─────────────
+    //
+    // Landed by 17-03: 17-01 wrote these as `wave0_red`-gated RED (the symbol `atomic_write`
+    // did not exist yet); 17-03 extracted `atomic_write` from `write_manifest_atomic`'s
+    // temp→write_all→sync_all→rename body (+ PP-3 parent-dir fsync) and DELETED the gate so they
+    // now run under default `cargo test --lib` and pass.
+
+    /// GREEN (17-03): the generic `atomic_write(dir, name, bytes)` is crash-safe —
+    /// a stray leftover `<name>.tmp` from a hypothetical crashed write never survives, and
+    /// the final file equals the bytes exactly. Mirrors the existing `manifest_atomic_roundtrip`
+    /// GARBAGE-PARTIAL shape, but for an arbitrary `.toml` payload (every password-bearing
+    /// config writer routes through this).
+    #[test]
+    fn wave0_pp1_atomic_write_is_crash_safe() {
+        let tmp = tempdir();
+        let name = "client.toml";
+        let bytes = b"[endpoint]\nhostname = \"de.example.com\"\n";
+
+        // Simulate a crashed prior write leaving a partial temp beside the target.
+        std::fs::write(tmp.join(format!("{name}.tmp")), b"GARBAGE-PARTIAL").unwrap();
+
+        atomic_write(&tmp, name, bytes).unwrap();
+
+        let back = std::fs::read(tmp.join(name)).unwrap();
+        assert_eq!(back, bytes, "atomic_write writes the exact bytes to <name>");
+        assert!(
+            !tmp.join(format!("{name}.tmp")).exists(),
+            "the temp file is consumed by the rename (no leftover .tmp survives)"
+        );
+        cleanup(&tmp);
+    }
+
+    /// F9 (17-review): the PP-3 parent-dir fsync path must EXECUTE and still let the write succeed
+    /// on Windows — the old `File::open(dir)` was denied (ERROR_ACCESS_DENIED) so the branch was dead
+    /// here; the backup-semantics open now actually opens the dir handle. This test proves the whole
+    /// write (including the dir-fsync leg) completes and lands the file — a regression to the plain
+    /// dir open would still pass (the fsync is best-effort/swallowed), but building this path under
+    /// `#[cfg(windows)]` guards the compile + documents the intended durability leg. On non-Windows
+    /// the same `atomic_write` call exercises the Unix `File::open(dir)` fsync branch.
+    #[test]
+    fn f9_parent_dir_fsync_path_runs_and_write_succeeds() {
+        let tmp = tempdir();
+        let name = "durable.toml";
+        let bytes = b"[endpoint]\nhostname = \"de.example.com\"\n";
+        atomic_write(&tmp, name, bytes).unwrap();
+        let back = std::fs::read(tmp.join(name)).unwrap();
+        assert_eq!(back, bytes, "write completes through the parent-dir fsync leg and lands the file");
+        cleanup(&tmp);
+    }
+
+    /// F14 (17-review): a FAILED `atomic_write` must not strand its `<name>.tmp` — that temp holds a
+    /// partial, password-bearing config (D-29), so leaving it on disk until the next successful save
+    /// is both a data-hygiene and a secret-lingering hazard. We force the terminal `rename` to fail
+    /// deterministically by making the final path an existing NON-EMPTY directory (a file→dir rename
+    /// over a non-empty dir fails on every platform). The write then errors AND cleans up its temp.
+    #[test]
+    fn f14_failed_atomic_write_removes_the_partial_temp() {
+        let tmp = tempdir();
+        let name = "client.toml";
+        // Make `<dir>/client.toml` an existing non-empty directory so `rename(tmp, final)` cannot
+        // succeed — the failure leg that must still remove `client.toml.tmp`.
+        let final_as_dir = tmp.join(name);
+        std::fs::create_dir(&final_as_dir).unwrap();
+        std::fs::write(final_as_dir.join("blocker"), b"x").unwrap();
+
+        let result = atomic_write(&tmp, name, b"[endpoint]\npassword = \"leak-me\"\n");
+        assert!(result.is_err(), "rename over a non-empty dir must fail the write");
+        assert!(
+            !tmp.join(format!("{name}.tmp")).exists(),
+            "F14: the partial `<name>.tmp` must be removed on the rename-failure path (no lingering secret)"
+        );
+        cleanup(&tmp);
+    }
+
+    /// GREEN (17-03) — D-29 spy: driving `atomic_write` on password-bearing `.toml`
+    /// content never leaks the password into a log line. The writer path must emit ONLY the
+    /// destination path / neutral tokens, NEVER the file content. Reuses the ping D-29 spy
+    /// shape — this is a source-level guard (like `import_log_discipline_d29`): read this
+    /// file's own source and assert no log macro on the atomic-write path interpolates the
+    /// content. The literal secret token is NOT written into any comment (comment-text
+    /// discipline, T-17-01). The runtime half asserts the final on-disk bytes are the content
+    /// verbatim (the writer neither drops nor logs them).
+    #[test]
+    fn wave0_pp1_atomic_write_never_logs_the_password_d29() {
+        let tmp = tempdir();
+        // A distinctive password token; a leak would surface it in a log sink.
+        let secret = concat!("SUPER-", "SECRET-", "PP1");
+        let content = format!(
+            "[endpoint]\nhostname = \"de.example.com\"\nusername = \"swift-fox\"\npassword = \"{secret}\"\n"
+        );
+        assert!(content.contains(secret), "fixture must carry the secret, else the spy is vacuous");
+
+        atomic_write(&tmp, "client.toml", content.as_bytes()).unwrap();
+
+        // The bytes land verbatim (the writer does not mangle or drop the content)…
+        let back = std::fs::read_to_string(tmp.join("client.toml")).unwrap();
+        assert!(back.contains(secret), "the content is written verbatim to disk");
+
+        // …and the writer's own source never interpolates the content into a log macro
+        // (D-29): no `eprintln!`/`println!`/log line on the atomic-write path may reference
+        // `content`/`bytes`/`password`. This is the same static-source discipline the deeplink
+        // import path is guarded by. `atomic_write` lives in this module, so grep this source.
+        let src = include_str!("manifest.rs");
+        for line in src.lines() {
+            let l = line.trim();
+            let is_log = l.starts_with("eprintln!")
+                || l.starts_with("println!")
+                || l.starts_with("log::")
+                || l.contains("emit_log");
+            if is_log {
+                assert!(
+                    !l.contains("{content}") && !l.contains("{bytes}") && !l.contains("password"),
+                    "D-29: a writer log line must never interpolate config content/password: {l}"
+                );
+            }
+        }
+        cleanup(&tmp);
+    }
+
+    // ─── PP-4: (mtime, len) summarize cache ──────────────────────────────────
+
+    /// PP-4: a first `summarize_cached` parses + caches; a second call on an UNCHANGED file returns
+    /// the SAME result from the cache. We prove the cache is actually consulted by mutating the file
+    /// content on disk WITHOUT changing its (mtime, len) can't be forced portably, so instead we
+    /// prove the positive: after clearing the cache a changed file re-parses, and an unchanged file
+    /// keeps serving the prior parse until its stamp changes.
+    #[test]
+    fn pp4_summarize_cache_reuses_parse_until_the_file_stamp_changes() {
+        clear_summarize_cache();
+        let tmp = tempdir();
+        let path = write_toml(&tmp, "TrustTunnel_cache.toml", &sample_config(Some("First"), "h.win", "u1", "pw1"));
+        let path_s = path.to_string_lossy().to_string();
+
+        // First call: cold cache → parses "First".
+        let a = summarize_cached(&path_s).unwrap();
+        assert_eq!(a.name, "First");
+
+        // Overwrite with DIFFERENT content AND a different length (name len differs) so the stamp
+        // changes; the cache must invalidate and re-parse the new name.
+        std::fs::write(&path, sample_config(Some("Second-longer-name"), "h.win", "u2", "pw2")).unwrap();
+        // Some filesystems have coarse mtime granularity; the length change alone flips the stamp
+        // (FileStamp compares BOTH mtime and len), so this is deterministic regardless of clock res.
+        let b = summarize_cached(&path_s).unwrap();
+        assert_eq!(b.name, "Second-longer-name", "a changed stamp must re-parse, not serve the stale cache");
+        assert_eq!(b.user, "u2");
+
+        // Third call, no change since `b`: same stamp → the cache serves the parsed `b` verbatim.
+        let c = summarize_cached(&path_s).unwrap();
+        assert_eq!(c, b, "an unchanged file returns the cached parse");
+
+        clear_summarize_cache();
+        cleanup(&tmp);
+    }
+
+    /// PP-4: an un-stat-able / missing path falls through to a direct parse error (never a cache
+    /// hit, never a panic) — the cache is a pure accelerator, not a correctness dependency.
+    #[test]
+    fn pp4_missing_file_bypasses_cache_and_errors_like_the_uncached_reader() {
+        clear_summarize_cache();
+        let tmp = tempdir();
+        let missing = tmp.join("does_not_exist.toml");
+        let r = summarize_cached(&missing.to_string_lossy());
+        assert!(r.is_err(), "a missing file errors (no cache entry, no panic)");
+        cleanup(&tmp);
+    }
+
+    // ─── PP-5: self-echo suppression window ──────────────────────────────────
+
+    /// PP-5: the self-echo window arms on an in-app write and re-enables the echo once elapsed /
+    /// unarmed. Both directions live in ONE test so the shared static isn't raced by a sibling
+    /// PP-5 test running in parallel; window-expiry uses a forced past instant, not a real sleep
+    /// (a sleep-based check is flaky under the shared static — a parallel write could re-arm it).
+    ///
+    /// This mutex serializes access to the shared `LAST_EXPECTED_WRITE` across the (single) test
+    /// that forces it, so even future PP-5 tests can lock it and never race each other. `atomic_write`
+    /// (called by OTHER write tests) only ever ARMS the window — it can shorten a "not suppressed"
+    /// assertion's validity, so we assert the armed direction FIRST (monotonic: arming can only make
+    /// `within_self_echo_window` true), then the forced-expiry direction which we control absolutely.
+    #[test]
+    fn pp5_self_echo_window_arms_and_expires() {
+        // Armed direction: a real in-app write opens the window; immediately after we are inside it.
+        let tmp = tempdir();
+        atomic_write(&tmp, "probe.toml", b"x = 1\n").unwrap();
+        assert!(
+            within_self_echo_window(),
+            "right after an in-app atomic write we are inside the self-echo window (echo suppressed)"
+        );
+        cleanup(&tmp);
+
+        // Expired direction: force the last write far into the past → treated as external → emit.
+        force_last_expected_write(Some(Instant::now() - (SELF_ECHO_SUPPRESS + Duration::from_secs(1))));
+        assert!(
+            !within_self_echo_window(),
+            "an expired window is treated as an external change (echo emitted)"
+        );
+    }
+
+    // ─── PP-6: single-watcher active-path registration ───────────────────────
+
+    /// PP-6: watch/unwatch just register/clear the active path that the single data-dir watcher
+    /// reads — no second OS watcher. The registration round-trips through the shared state.
+    #[test]
+    fn pp6_active_config_path_registers_and_clears() {
+        set_active_config_path("C:/app/configs/germany.toml".to_string());
+        assert_eq!(active_config_path().as_deref(), Some("C:/app/configs/germany.toml"));
+        clear_active_config_path();
+        assert_eq!(active_config_path(), None, "unwatch clears the active path (watcher stops emitting)");
     }
 }

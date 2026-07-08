@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ConfigPing, PingBand } from "../../components/connection/ConfigPingPill";
 
 /**
  * `usePerConfigPing` — pings the INACTIVE configs' endpoints ON DEMAND (D-16 / manual-refresh)
@@ -23,12 +22,38 @@ import type { ConfigPing, PingBand } from "../../components/connection/ConfigPin
  *   - `refreshPings()` — run one manual ping round over the current targets (resolves when done);
  *   - `pinging` — true while a round is in flight (drives the button's spinner + disabled state).
  *
- * F23 (14-UAT round 2): the active/connected config is genuinely NOT pinged here — the caller
- * (`useConfigPingSource`) EXCLUDES it from `targets`, because a direct probe of the active endpoint
- * travels through the tunnel (~2× the real RTT / Unreachable) and is meaningless while connected. The
- * active lead card instead shows the config's retained DIRECT pre-connect band
- * (`useConfigPingSource.lastGoodByPath`); this hook only probes the INACTIVE configs' reachability.
+ * F23 / BUG-B (17-uat B2): the caller (`useConfigPingSource`) now includes the ACTIVE config in
+ * `targets` too — the former F23/D-02 active-exclusion was REMOVED (owner wants the active card
+ * refreshable on demand). While connected a direct probe of the active endpoint rides the tunnel
+ * (~2× the real RTT / Unreachable — F26), so that live number is DISPLAY-ONLY; the auto-switch engine
+ * never reads it (it consumes the FROZEN pre-connect band `useConfigPingSource.lastGoodByPath`). This
+ * hook simply probes whatever `targets` it is given (active + inactive).
  */
+
+// ─── Ping band types (PA-3: relocated from the presentation component) ────────────────────
+//
+// PA-3 (17-02): `PingBand` + `ConfigPing` live HERE, in the STATE module that produces them, not in
+// `ConfigPingPill.tsx` (the presentation component that merely renders them). Before this move the
+// hooks imported the type UPWARD from the component — a layer inversion (16-PATTERN-AUDIT §MAJOR-1):
+// state should not depend on presentation. Now `ConfigPingPill` + every consumer imports these DOWNWARD
+// from the state module (mirrors `ConfigSummary` living in `useConfigList.ts`). Pure relocation — the
+// banding, `bandForMs`, and the five rendered states are byte-unchanged.
+
+/** Ping colour band — mirrors the Rust `PingResult` discriminant + the design's D-16
+ *  unmeasurable states. `green`/`yellow`/`red` carry a numeric value; `timeout`/`no-data`/
+ *  `measuring` deliberately do NOT (that distinction is the whole point of D-16). */
+export type PingBand = "green" | "yellow" | "red" | "timeout" | "no-data" | "measuring";
+
+/** The resolved ping state for one config, as `usePerConfigPing` produces it. */
+export interface ConfigPing {
+  band: PingBand;
+  /** Numeric round-trip in ms — present ONLY for green/yellow/red. */
+  valueMs?: number;
+  /** True while RE-measuring a config whose band is already known: the pill renders as a
+   *  coloured Skeleton tinted to `band` instead of the value, then resolves to the new
+   *  band. The standalone `measuring` band is the first-ever probe (grey skeleton). */
+  measuring?: boolean;
+}
 
 /** The Rust `PingResult` discriminated union (serde tag = "status", kebab-case). Exported so the
  *  App-level tunnel-latency probe (`useConfigPingSource`) reuses the SAME shape + mapper — the active

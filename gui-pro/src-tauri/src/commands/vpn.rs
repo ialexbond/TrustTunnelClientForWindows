@@ -274,6 +274,20 @@ pub struct AppState {
     /// lifecycle; a stale-`true` would only mute disconnect NOTIFICATIONS, never the status/tunnel.
     /// Starts at `false`.
     pub seamless_switch_active: Arc<AtomicBool>,
+    /// Part B (cancel notification) — the FE-raised user-CANCEL intent the next terminal
+    /// `Disconnected` consumes to fire «Подключение отменено» instead of «Отключено».
+    ///
+    /// A user CANCEL of an in-flight connect (pressing «Отмена» while Connecting/Recovering) and a
+    /// genuine disconnect of a live tunnel are DIFFERENT events (owner requirement), but both land on
+    /// `VpnStatus::Disconnected` — the sidecar exposes no "was this a cancel?" bit. So the FE raises
+    /// THIS durable flag via `set_pending_cancel(true)` at the SAME point `handleUserCancel` sets its
+    /// own `connectCancelledRef` (only when statusRef is connecting/recovering — a connected «Отключить»
+    /// does NOT set it), mirroring how `set_pending_connect_origin` is invoked alongside the FE's
+    /// connect-origin state. `notify::maybe_fire` reads it on the terminal `Disconnected` edge to map
+    /// that transition to `NotifyKind::Cancelled`, then CONSUMES it (resets to `false`) on the SAME
+    /// terminal edges the origin is consumed, so a cancel flag can never leak into a later disconnect.
+    /// AtomicBool because it is a single bool with no compound invariant. Starts at `false`.
+    pub pending_cancel: Arc<AtomicBool>,
     /// FAB-R4 (Fable-5 review of Phase 14) — the `connection_generation` value
     /// STAMPED at the moment a config switch is AUTHORIZED (the FE's
     /// `set_switch_or_reconnect_pending(isSwitch:true)` raise, BEFORE the switch's
@@ -396,6 +410,68 @@ struct VpnLogPayload {
     level: String,
 }
 
+/// PA-1 (Phase 17): the STABLE ASCII `action` code the `"internet-status"` event carries and
+/// the FE banner routing branches on. F10 (Fable-5 review): was a free `Option<String>` string
+/// literal on both ends, so a typo at an emit site (`Some("giveup")`) or a mistyped FE branch
+/// compiled clean, passed every test, then silently killed a banner at runtime (the value-drift
+/// half of Pitfall 2 the PA-1 spec — 16-PATTERN-AUDIT §MAJOR-3 — meant to close with `Option<enum>`).
+/// A closed enum makes each emit site name a variant the compiler checks. `rename_all = "snake_case"`
+/// keeps the wire strings BYTE-IDENTICAL to the former literals (`disconnect` / `give_up`) — this is a
+/// compile-time-safety change only, NOT a wire/behavior change. `reconnect` is intentionally ABSENT:
+/// PA-4 removed every Rust producer of it (the FE listener already ignores it).
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InternetStatusAction {
+    /// `"disconnect"` — a drop was declared; the UI shows the disconnecting/recovering state.
+    Disconnect,
+    /// `"give_up"` — the recovery wait gave up waiting for the adapter to return.
+    GiveUp,
+}
+
+/// PA-1 (Phase 17): the STABLE ASCII `reason` code that classifies a `disconnect` drop. F10: was a
+/// free `Option<String>` (see `InternetStatusAction`). `rename_all = "kebab-case"` keeps the wire
+/// strings BYTE-IDENTICAL to the former `connectivity::{TUNNEL_LOST_REASON, INTERNET_LOST_REASON}`
+/// literals (`tunnel-lost` / `internet-lost`). Stage-2 localizes these on the FE (never a Russian
+/// string; D-09/D-29: no secret). The `give_up` action carries no reason (`None`).
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum InternetStatusReason {
+    /// `"tunnel-lost"` — server-silent drop: the tunnel is dead but the local network is up.
+    TunnelLost,
+    /// `"internet-lost"` — the whole local network is unreachable (adapter/gateway down).
+    InternetLost,
+}
+
+/// PA-1 (Phase 17): the typed `"internet-status"` event payload. Was emitted as ad-hoc
+/// `serde_json::json!` at every connectivity.rs site, with the field names living ONLY in
+/// string literals on both ends — a rename compiled clean and silently killed banner routing
+/// (16-PATTERN-AUDIT §MAJOR-3, Pitfall 2). Now a serde struct mirrored by the FE
+/// `shared/ipc/events.ts` `InternetStatusEvent`; the byte-identity round-trip test
+/// (`wave0_pa1_internet_and_adapter_payloads_are_byte_identical`) fails on a field rename on
+/// either end. `action`/`reason` are STABLE ASCII codes the FE branches on (never a
+/// localized string — Stage-2 localizes `reason`; D-29: no secret field), now closed enums
+/// (F10) so a value typo is a compile error too — not just a field-name rename. Both are
+/// `skip_serializing_if = "Option::is_none"` so an online event is byte-identical to today's
+/// `{online:true}`.
+#[derive(Clone, Serialize)]
+pub(crate) struct InternetStatusPayload {
+    pub online: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<InternetStatusAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<InternetStatusReason>,
+}
+
+/// PA-1 (Phase 17): the typed `"vpn-adapter-conflict"` event payload (was raw
+/// `serde_json::json!({adapters, message})` at vpn.rs). Mirrored by the FE
+/// `AdapterConflictEvent`. `adapters` are already own-adapter-filtered Rust-side (T-21);
+/// `message` is the human warning the yellow banner shows (D-29: no secret).
+#[derive(Clone, Serialize)]
+struct AdapterConflictPayload {
+    adapters: Vec<String>,
+    message: String,
+}
+
 #[derive(Clone, Serialize)]
 pub struct VpnStatusPayload {
     // Typed status — serializes to the same lowercase wire strings as before.
@@ -474,7 +550,7 @@ fn write_vpn_status_and_emit(
 ) {
     // WR-01: recover the poisoned guard so the canonical write ALWAYS lands
     // before we emit. The previous `if let Ok` silently dropped the write on a
-    // poisoned mutex but still emitted, so every reader (check_vpn_status, tray,
+    // poisoned mutex but still emitted, so every reader (check_vpn_status_full, tray,
     // connectivity monitor) would disagree with what listeners were just told —
     // the exact status drift this phase exists to eliminate. Mirrors the
     // `unwrap_or_else(|e| e.into_inner())` pattern already used for tray_notified
@@ -879,10 +955,10 @@ fn emit_conflict_events(app: &tauri::AppHandle, conflicts: &[String]) {
         message: warn_msg.clone(),
         level: "warn".into(),
     }).ok();
-    app.emit("vpn-adapter-conflict", serde_json::json!({
-        "adapters": conflicts,
-        "message": warn_msg,
-    })).ok();
+    app.emit("vpn-adapter-conflict", AdapterConflictPayload {
+        adapters: conflicts.to_vec(),
+        message: warn_msg,
+    }).ok();
 }
 
 /// Kill the sidecar stored in AppState, if any.
@@ -1219,6 +1295,24 @@ fn disconnect_emits_wire_status(had_child: bool, status_before: VpnStatus) -> bo
         )
 }
 
+/// CA-2 (Phase 17): confine a connect config path to the portable data dir BEFORE spawning
+/// the sidecar (SAFETY-01 defense-in-depth / ASVS V12). `vpn_connect` and its reconnect twin
+/// (`respawn_sidecar`) canonicalize the path but did NOT confine WHERE it points — the last
+/// unguarded config-command, while ping.rs/manifest.rs already `validate_app_path`. Factored
+/// into this pure `&str -> Result<PathBuf, String>` so the guard is unit-testable without a
+/// live `AppHandle`/`AppState`: an outside/traversal path → Err (rejected before any spawn), an
+/// in-data-dir path → Ok(canonical).
+///
+/// F16 (Fable-5 review): returns the CANONICAL path the confinement was decided against, and the
+/// callers spawn THAT exact path — closing the check-then-use (TOCTOU) window where the guard
+/// canonicalized the string, discarded the result, and the spawn re-canonicalized the raw string
+/// (two resolutions of the same string that a race could point at different targets). Reuses the
+/// single shared `paths::validate_app_path_canonical` primitive so a future tightening (e.g.
+/// reparse-point rejection) lands here too.
+fn vpn_connect_path_guard(config_path: &str) -> Result<std::path::PathBuf, String> {
+    crate::commands::paths::validate_app_path_canonical(config_path)
+}
+
 #[tauri::command]
 pub async fn vpn_connect(
     app: tauri::AppHandle,
@@ -1328,14 +1422,22 @@ pub async fn vpn_connect(
         level: "info".into(),
     }).ok();
 
-    // Canonicalize config_path to prevent path traversal before passing to sidecar.
-    // R7: «Подключение» was emitted above, so a failure here must move the status off the
-    // yellow tray icon — to Error. The FE also surfaces the returned Err in its catch.
-    let config_path = match std::fs::canonicalize(&config_path) {
-        Ok(p) => p.to_string_lossy().to_string(),
+    // CA-2 (Phase 17): confine the path to the portable data dir BEFORE spawning
+    // (defense-in-depth, SAFETY-01 / ASVS V12). Canonicalization expands symlinks/`..` but
+    // does NOT confine WHERE the path points — an absolute path to any system file
+    // canonicalizes fine, so canonicalize ALONE never prevented traversal. Reject an
+    // out-of-dir path up front, mirroring ping.rs:349 / manifest.rs. R7: «Подключение» was
+    // emitted above, so a failure here must move the status off the yellow tray icon → Error.
+    //
+    // F16 (Fable-5 review): the guard now RETURNS the canonical path it validated, and we spawn
+    // THAT exact path — the old code validated the raw string, discarded the guard's canonical
+    // result, then re-canonicalized the raw string (a check-then-use / TOCTOU window). One
+    // resolution, used for both the confinement decision and the spawn.
+    let config_path = match vpn_connect_path_guard(&config_path) {
+        Ok(canonical) => canonical.to_string_lossy().to_string(),
         Err(e) => {
             set_vpn_status(&app, &state, VpnStatus::Error, None);
-            return Err(format!("Invalid config path: {e}"));
+            return Err(e);
         }
     };
 
@@ -1619,11 +1721,18 @@ pub async fn respawn_sidecar(
     // 2. Sweep any stale saved-PID sidecar (per-edition, never image-name — D-07).
     kill_stale_sidecar();
 
-    // 3. Canonicalize the config path (path-traversal guard — same as vpn_connect).
-    let config_path = match std::fs::canonicalize(config_path) {
-        Ok(p) => p.to_string_lossy().to_string(),
+    // 3. CA-2: confine the config path to the portable data dir BEFORE respawn (same guard
+    //    as vpn_connect — canonicalize alone does not confine WHERE the path points). This
+    //    path is the app's own saved config, but the guard is cheap defense-in-depth so both
+    //    spawn doors reject an out-of-dir path identically.
+    //
+    //    F16 (Fable-5 review): spawn the CANONICAL path the guard returned instead of
+    //    re-canonicalizing the raw string a second time (closes the check-then-use / TOCTOU
+    //    window — mirrors the vpn_connect fix so both spawn doors resolve the path exactly once).
+    let config_path = match vpn_connect_path_guard(config_path) {
+        Ok(canonical) => canonical.to_string_lossy().to_string(),
         Err(e) => {
-            crate::logging::log_app("WARN", &format!("[reconnect] invalid config path: {e}"));
+            crate::logging::log_app("WARN", &format!("[reconnect] config path outside data dir: {e}"));
             return;
         }
     };
@@ -1952,44 +2061,12 @@ pub async fn test_sidecar(
     Ok(result)
 }
 
-/// Snapshot command — returns the current status as the existing wire string so a
-/// late-mounting window can sync (D-08). Reads the single `vpn_status` owner (D-01)
-/// instead of deriving from `sidecar_child.is_some()` + the legacy bool. The command
-/// NAME and `String` return shape are kept identical so the frontend caller
-/// (`useVpnEvents.ts` invoke("check_vpn_status")) is untouched in this plan — the
-/// wire string is byte-identical (Pattern 3: rename only with the caller).
-///
-/// 02-20: `Recovering` → `"recovering"` (local-net wait) and `Reconnecting` →
-/// `"reconnecting"` (tunnel re-establish) map to their OWN wire strings — NEITHER is
-/// collapsed to "disconnected", and they are no longer collapsed onto each other. A
-/// window mounting mid-recovery or mid-reconnect must read the true state from the
-/// snapshot. Each string is byte-identical to its `VpnStatus` serde wire string, so
-/// the snapshot and the live `"vpn-status"` event agree.
-#[tauri::command]
-pub fn check_vpn_status(state: tauri::State<'_, AppState>) -> String {
-    let status = state
-        .vpn_status
-        .lock()
-        .map(|g| *g)
-        .unwrap_or(VpnStatus::Disconnected);
-    match status {
-        VpnStatus::Connected => "connected",
-        VpnStatus::Connecting => "connecting",
-        // 3.4 R-DCT: teardown-in-progress is now a real wire status.
-        VpnStatus::Disconnecting => "disconnecting",
-        VpnStatus::Error => "error",
-        // 02-20: the two distinct states map to their OWN wire strings — no collapse.
-        VpnStatus::Recovering => "recovering",
-        VpnStatus::Reconnecting => "reconnecting",
-        VpnStatus::Disconnected => "disconnected",
-    }
-    .to_string()
-}
-
 /// Snapshot command that returns BOTH the status AND its error detail (Codex
-/// MEDIUM — late-mount loses the error reason). `check_vpn_status` above is kept
-/// untouched (still returns a bare `String`) so existing callers don't break; this
-/// companion command is additive. The returned payload reuses the EXACT
+/// MEDIUM — late-mount loses the error reason). This is the SOLE status snapshot
+/// command: PA-4 (Phase 17) removed the parallel plain-`String` `check_vpn_status`
+/// (dead on this surface — the only FE caller reads this `{status, error}` snapshot
+/// via `check_vpn_status_full`), so there is no second status-mapping match to drift.
+/// The returned payload reuses the EXACT
 /// `{ status, error }` shape of the `"vpn-status"` event (D-05), so a window
 /// mounting after an `error` event can restore the reason the same way a live
 /// event would deliver it. `error` is the already-sanitized stored copy (D-29).
@@ -2204,6 +2281,24 @@ pub fn set_switch_or_reconnect_pending(
 #[tauri::command]
 pub fn set_seamless_switch_active(active: bool, state: tauri::State<'_, AppState>) {
     state.seamless_switch_active.store(active, Ordering::Relaxed);
+}
+
+/// Part B (cancel notification) — mirror the FE's user-CANCEL intent into AppState so
+/// `notify::maybe_fire` can fire «Подключение отменено» (a DIFFERENT event from «Отключено» — owner
+/// requirement) on the terminal `Disconnected` of an in-flight connect the user cancelled.
+///
+/// The FE (`handleUserCancel`) calls this with `true` at the SAME point it sets its own
+/// `connectCancelledRef` — only when the live status is connecting/recovering (an in-flight connect),
+/// never for a connected «Отключить» — mirroring how `set_pending_connect_origin` is invoked alongside
+/// the FE's connect-origin state. `maybe_fire` reads it on the next terminal `Disconnected` to map it
+/// to `NotifyKind::Cancelled`, then consumes it (resets to `false`) on the terminal edge, so a stale
+/// cancel flag never leaks into a later disconnect. This carries ONLY a `bool` — never config content
+/// or a password (D-29) — and writes no log line. `Relaxed`: no ordering dependency with the status
+/// write; a fire either sees the pre- or post-toggle value, both consistent. This is a SEPARATE
+/// notification-side command — `vpn_connect`/`vpn_disconnect` signatures stay untouched.
+#[tauri::command]
+pub fn set_pending_cancel(pending: bool, state: tauri::State<'_, AppState>) {
+    state.pending_cancel.store(pending, Ordering::Relaxed);
 }
 
 /// Phase 13 (13-06) — coerce a raw FE theme string to one of the two whitelisted plate themes.
@@ -2928,6 +3023,8 @@ mod tests {
             pending_connect_ping: Arc::new(Mutex::new(None)),
             switch_or_reconnect_pending: Arc::new(AtomicBool::new(false)),
             seamless_switch_active: Arc::new(AtomicBool::new(false)),
+            // Part B (cancel notification): the FE-raised user-cancel intent. Starts false.
+            pending_cancel: Arc::new(AtomicBool::new(false)),
             // Production default: the "no switch authorized" sentinel.
             switch_authorized_generation: Arc::new(AtomicU64::new(u64::MAX)),
             pending_plate: Arc::new(Mutex::new(None)),
@@ -3112,5 +3209,145 @@ mod tests {
         );
         // A subsequent vpn_connect now reads the sentinel → never bails.
         assert!(!state.consume_switch_stamp_and_should_bail());
+    }
+
+    // ─── Phase 17 Wave 0 (17-01) — GREEN by 17-04: PA-1 typed payloads + CA-2 guard ───────
+    //
+    // These were `wave0_red`-gated RED scaffolds (referencing the then-not-yet-existing
+    // `InternetStatusPayload` / `AdapterConflictPayload` structs and the `vpn_connect_path_guard`
+    // fn). 17-04 landed those symbols and un-gated the tests; being the LAST `wave0_red`
+    // consumer, 17-04 also removed the `wave0_red` feature from Cargo.toml. The tests now run
+    // under the default `cargo test --lib`.
+
+    /// RED (GREEN by 17-04) — PA-1 serde byte-identity for the two new IPC payloads. The
+    /// `internet-status` and `vpn-adapter-conflict` emits (raw `serde_json::json!` today)
+    /// become typed structs; this locks the exact wire shape the FE `shared/ipc/events.ts`
+    /// listener parses (`online`/`action`/`reason`; `adapters`/`message`). Mirrors the
+    /// existing `vpn_status_payload_is_byte_identical_to_today` round-trip.
+    ///
+    /// F10 (Fable-5 review): `action`/`reason` are now closed enums, so this test asserts the
+    /// exact wire string of EACH REAL variant (not made-up values) — the FE literal union in
+    /// `shared/ipc/events.ts` mirrors these same codes. A serde-rename typo on either enum
+    /// (breaking byte-identity with the FE) fails HERE.
+    #[test]
+    fn wave0_pa1_internet_and_adapter_payloads_are_byte_identical() {
+        // internet-status: an online event with no action/reason → the two optional fields
+        // are skipped on the wire (skip_serializing_if = Option::is_none), leaving {online}.
+        let online = InternetStatusPayload {
+            online: true,
+            action: None,
+            reason: None,
+        };
+        assert_eq!(serde_json::to_string(&online).unwrap(), "{\"online\":true}");
+
+        // Each REAL action variant must serialize to its exact wire code. These are the ONLY
+        // two `action` values any Rust producer emits (connectivity.rs, verified by grep) —
+        // `reconnect` was removed by PA-4 and is intentionally not representable.
+        assert_eq!(
+            serde_json::to_string(&InternetStatusAction::Disconnect).unwrap(),
+            "\"disconnect\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InternetStatusAction::GiveUp).unwrap(),
+            "\"give_up\""
+        );
+
+        // Each REAL reason variant must serialize to its exact wire code (kebab-case), matching
+        // the former connectivity::{TUNNEL_LOST_REASON, INTERNET_LOST_REASON} string literals.
+        assert_eq!(
+            serde_json::to_string(&InternetStatusReason::TunnelLost).unwrap(),
+            "\"tunnel-lost\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InternetStatusReason::InternetLost).unwrap(),
+            "\"internet-lost\""
+        );
+
+        // A whole offline `disconnect` event surfaces both fields so the FE banner routing can
+        // branch on them — the byte shape a `declare_offline_and_handoff(tunnel-lost)` emits.
+        let offline = InternetStatusPayload {
+            online: false,
+            action: Some(InternetStatusAction::Disconnect),
+            reason: Some(InternetStatusReason::TunnelLost),
+        };
+        assert_eq!(
+            serde_json::to_string(&offline).unwrap(),
+            "{\"online\":false,\"action\":\"disconnect\",\"reason\":\"tunnel-lost\"}"
+        );
+
+        // A `give_up` event carries no reason → the reason field is skipped on the wire.
+        let gave_up = InternetStatusPayload {
+            online: false,
+            action: Some(InternetStatusAction::GiveUp),
+            reason: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&gave_up).unwrap(),
+            "{\"online\":false,\"action\":\"give_up\"}"
+        );
+
+        // vpn-adapter-conflict: the list of conflicting adapters + a human message. Lock the
+        // field names/order the FE reads.
+        let conflict = AdapterConflictPayload {
+            adapters: vec!["Wintun".to_string(), "TAP-Windows".to_string()],
+            message: "Обнаружен конфликтующий VPN-адаптер".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_string(&conflict).unwrap(),
+            "{\"adapters\":[\"Wintun\",\"TAP-Windows\"],\"message\":\"Обнаружен конфликтующий VPN-адаптер\"}"
+        );
+    }
+
+    /// RED (GREEN by 17-04) — CA-2 path confinement. `vpn_connect` (and its reconnect twin)
+    /// must reject a config path OUTSIDE `portable_data_dir` BEFORE spawning the sidecar
+    /// (defense-in-depth, SAFETY-01 / ASVS V12), reusing the `validate_app_path` primitive
+    /// that already guards `ping.rs:285` and `manifest.rs`. The guard is factored into the
+    /// pure `vpn_connect_path_guard(config_path) -> Result<PathBuf, String>` so it is testable
+    /// without a live `AppHandle`/`AppState`. An outside path → Err; an in-data-dir path → Ok.
+    #[test]
+    fn wave0_ca2_vpn_connect_rejects_a_path_outside_the_data_dir() {
+        // A path clearly outside the portable data dir (a traversal / arbitrary system file)
+        // must be rejected before any spawn.
+        assert!(
+            vpn_connect_path_guard("C:/Windows/System32/evil.toml").is_err(),
+            "vpn_connect must reject a config path outside the data dir"
+        );
+        assert!(
+            vpn_connect_path_guard("../../etc/passwd").is_err(),
+            "a traversal path must be rejected"
+        );
+
+        // A real config inside the portable data dir passes the guard.
+        let inside = crate::ssh::portable_data_dir().join("TrustTunnel_swift-fox.toml");
+        assert!(
+            vpn_connect_path_guard(&inside.to_string_lossy()).is_ok(),
+            "an in-data-dir config path must pass the guard"
+        );
+    }
+
+    /// F16 (Fable-5 review) — the guard returns the CANONICAL path the caller then spawns, so
+    /// the confinement check and the spawn resolve the string exactly ONCE (no check-then-use /
+    /// TOCTOU window). Assert the Ok value is the canonical, confined path a spawn would use: it
+    /// is absolute, lives under the canonical data dir, and keeps the requested file name.
+    #[test]
+    fn ca2_guard_returns_the_canonical_path_used_for_spawn() {
+        let data_dir = crate::ssh::portable_data_dir();
+        // Canonical form of the data dir (the guard confines against this same canonical root).
+        let canonical_dir = std::fs::canonicalize(&data_dir).unwrap_or(data_dir.clone());
+
+        let requested = data_dir.join("TrustTunnel_swift-fox.toml");
+        let returned = vpn_connect_path_guard(&requested.to_string_lossy())
+            .expect("an in-data-dir config path must pass the guard and yield its canonical path");
+
+        assert!(returned.is_absolute(), "spawned path must be absolute");
+        assert!(
+            returned.starts_with(&canonical_dir),
+            "the returned canonical path {returned:?} must live under the data dir {canonical_dir:?}"
+        );
+        assert_eq!(
+            returned.file_name(),
+            requested.file_name(),
+            "the canonical path must preserve the requested config file name"
+        );
     }
 }

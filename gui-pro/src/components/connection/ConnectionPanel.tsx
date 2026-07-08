@@ -1,16 +1,13 @@
 import { useImperativeHandle, forwardRef, useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useConfigList, type ConfigSummary } from "../../shared/hooks/useConfigList";
 import { usePerConfigPing, type PingTarget } from "../../shared/hooks/usePerConfigPing";
 import type { ConfigPingSource } from "../../shared/hooks/useConfigPingSource";
+import { useConfigMutations } from "../../shared/hooks/useConfigMutations";
 import { useConfirm } from "../../shared/ui/useConfirm";
 import { useSnackBar } from "../../shared/ui/SnackBarContext";
-import { formatError } from "../../shared/utils/formatError";
 import { samePath } from "../../shared/utils/samePath";
 import { dedupeConfigsByIdentity } from "../../shared/utils/dedupeConfigsByIdentity";
-import { markSelfDelete, clearSelfDelete } from "../../shared/utils/selfDeleteGuard";
 import { ConfigList } from "./ConfigList";
 import { ConfigEditView } from "./ConfigEditView";
 import { ConfigQr } from "./ConfigQr";
@@ -126,54 +123,6 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
     // (silent fs-watcher / focus backstop) never moves the scroll.
     useImperativeHandle(ref, () => ({ reload: reloadAndReveal, refresh }), [reloadAndReveal, refresh]);
 
-    // IN-31: refresh the list the INSTANT the config data dir changes on disk (a config added or
-    // removed externally, e.g. deleted in the file manager). The Rust fs-watcher emits
-    // `configs-changed`; we silent-refresh (no skeleton, scroll preserved) so a deleted card
-    // disappears immediately. Mirrors useDeepLinkImport's listen pattern.
-    useEffect(() => {
-      const unlisten = listen("configs-changed", () => {
-        void refresh();
-      });
-      return () => {
-        unlisten.then((f) => f());
-      };
-    }, [refresh]);
-
-    // ─── T-34: second-VPN conflict banner (Phase 16) ───
-    // A running SECOND VPN client (Amnezia / WireGuard) contends for routes/adapter and can break the
-    // tunnel. The Rust backend emits `vpn-adapter-conflict` { adapters, message } (own-adapter already
-    // filtered T-21). useVpnEvents (App-level) still logs it; here we ALSO subscribe at the panel and
-    // lift the payload into local state so we can render the reused ErrorBanner variant="warning" atop
-    // the tab body (LOCKED contract — NO SecondVpnBanner component). Mirrors the configs-changed
-    // listener above (async-unlisten cleanup, mount-once). Dismiss is keyed per-adapter-name and
-    // session-scoped: dismissing stores the current adapter key; the SAME conflicting adapter re-firing
-    // recomputes the same key → stays hidden (no re-nag on every connect), while a NEW/DIFFERENT adapter
-    // set yields a different key → re-shows the banner.
-    const [conflict, setConflict] = useState<{ adapters: string[]; message: string } | null>(null);
-    const [dismissedAdapterKey, setDismissedAdapterKey] = useState<string | null>(null);
-    useEffect(() => {
-      const unlisten = listen<{ adapters: string[]; message: string }>("vpn-adapter-conflict", (event) => {
-        setConflict({ adapters: event.payload.adapters, message: event.payload.message });
-      });
-      return () => {
-        unlisten.then((f) => f());
-      };
-    }, []);
-    // Fable review #151: clear a stale conflict at the START of each connect attempt. The Rust
-    // detection thread re-emits `vpn-adapter-conflict` ~1s after every vpn_connect, so a conflict
-    // that is STILL present re-shows on its own; one the user already resolved (disabled the other
-    // VPN — the banner's own advice) produces no event, so the banner correctly disappears instead
-    // of asserting a resolved conflict for the rest of the session. The event fires only on a
-    // non-empty conflict set (vpn.rs), so there is no all-clear signal to rely on — the connect
-    // edge is the reset point. `dismissedAdapterKey` is left intact so a within-session dismiss
-    // still holds; a fresh connect that re-detects the SAME adapter re-emits and (if not dismissed
-    // this session) re-shows.
-    useEffect(() => {
-      if (status === "connecting") setConflict(null);
-    }, [status]);
-    const adapterKey = conflict?.adapters.join("|") ?? null;
-    const showBanner = !!conflict && adapterKey !== dismissedAdapterKey;
-
     // Collapse same-server twins (host+user) into one card before anything renders or pings —
     // a machine upgraded from the old single-config build can hold one server as two physical
     // .toml files, which migration (path-dedup only) keeps as two manifest entries (11-UAT gap
@@ -268,10 +217,14 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
       setQrOpen(false);
       qrCloseTimer.current = setTimeout(() => setQrConfig(null), 200);
     }, []);
-    // Clear the pending cleanup timer on unmount (like the edit timer) so a late setState never
-    // fires on an unmounted panel.
+    // PP-9 (17-07, n-9): clear BOTH modal close timers on unmount so a late setState (the deferred
+    // setEditConfig(null) / setQrConfig(null) 200ms after a close) never fires on an unmounted panel.
+    // The comment used to claim it cleared "like the edit timer", but the edit timer was in fact NOT
+    // cleared — only the QR one was — so unmounting the panel within 200ms of closing the edit modal
+    // left editCloseTimer's setState-on-unmounted warning live. Clearing both closes n-9.
     useEffect(() => {
       return () => {
+        if (editCloseTimer.current) clearTimeout(editCloseTimer.current);
         if (qrCloseTimer.current) clearTimeout(qrCloseTimer.current);
       };
     }, []);
@@ -305,100 +258,26 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
       [tunnelLive, isLiveActive, onConnect, onDisconnect, onSwitchTo],
     );
 
-    // ─── Duplicate ───
-    const handleDuplicate = useCallback(
-      async (config: ConfigSummary) => {
-        try {
-          await invoke("duplicate_config", { id: config.id });
-          await reloadAndReveal(); // IN-45: a duplicate is a user add → reveal the new copy
-          pushSnack(t("connection.snackbar.config_duplicated"));
-        } catch (e) {
-          pushSnack(formatError(e), "error");
-        }
-      },
-      [reloadAndReveal, pushSnack, t],
-    );
-
-    // ─── Delete (LIVE active = disconnect-then-delete, D-03; last → empty) ───
-    const handleDelete = useCallback(
-      async (config: ConfigSummary) => {
-        // Phase 14 (FAB-05): the delete confirm is ASYNC — the user may sit on the dialog while a
-        // switch starts (or the active config changes underneath). The copy is chosen at OPEN time
-        // (active-vs-inactive wording), but the DESTRUCTIVE decision — whether to disconnect first —
-        // is RE-EVALUATED at CONFIRM time below against live `isLiveActive`/`isSwitching`. And the
-        // confirm button is DISABLED while a switch is in flight so the user cannot delete a config
-        // (least of all the active one) out from under a mid-flight swap.
-        const activeAtOpen = isLiveActive(config.path);
-        const ok = await confirm({
-          title: activeAtOpen ? t("connection.delete.title_active") : t("connection.delete.title"),
-          message: activeAtOpen
-            ? t("connection.delete.body_active", { name: config.name })
-            : t("connection.delete.body", { name: config.name }),
-          variant: "danger",
-          confirmText: activeAtOpen ? t("connection.delete.confirm_active") : t("connection.delete.confirm"),
-          cancelText: t("connection.delete.cancel"),
-          // FAB-05: block the confirm while a switch is in flight — a delete landing mid-swap would
-          // race the teardown/reconnect (and delete the .toml the swap is connecting).
-          confirmDisabled: isSwitching,
-        });
-        if (!ok) return;
-        // FAB-05: re-check at CONFIRM time. If a switch is in flight now (started while the dialog was
-        // open), abort the delete entirely — the swap owns the connection lifecycle right now.
-        if (isSwitching) return;
-        try {
-          // D-03: an ACTIVE config must disconnect BEFORE the file is removed — never delete
-          // the .toml out from under a live tunnel. Re-evaluate active at CONFIRM time (the active
-          // config may have changed while the dialog was open).
-          if (isLiveActive(config.path)) await onDisconnect();
-          // B2 (16-UAT round 2): mark the paths this in-app delete will remove so the fs-watcher on
-          // the ACTIVE config does not raise a SECOND (red) «Конфиг удалён» snackbar on top of the
-          // green success below (the double-snackbar bug). We mark both the card's own path AND the
-          // current activeConfigPath (the file the watcher actually watches — usually the same, but a
-          // delete of the active card while its path form differs is covered). B6: delete_config now
-          // sweeps same-server twins, but only the ACTIVE `.toml` is watched, so marking the active
-          // path is sufficient to suppress the one watcher event a sweep can trigger.
-          //
-          // #7 (Fable re-review): the mark is set HERE — AFTER `await onDisconnect()`, immediately
-          // before invoke("delete_config") — NOT before the disconnect. The disconnect teardown can
-          // take up to ~7s (graceful 1.5s + hard-kill confirm + DNS restore); marking before it
-          // meant the guard's TTL could expire DURING the disconnect, so the mark was already gone by
-          // the time the fs Remove landed → the watcher saw an UNMARKED delete and fired the red
-          // snackbar on top of the green success (the B2 bug resurfacing on its flagship case:
-          // deleting the ACTIVE config while CONNECTED). The file cannot be removed during the
-          // disconnect leg — delete_config has not run yet — so nothing is lost by marking later, and
-          // the TTL now covers only the short delete → reload round-trip.
-          markSelfDelete(config.path);
-          if (activeConfigPath) markSelfDelete(activeConfigPath);
-          await invoke("delete_config", { id: config.id });
-          await reload();
-          pushSnack(t("connection.snackbar.config_deleted"));
-        } catch (e) {
-          pushSnack(formatError(e), "error");
-        } finally {
-          // Clear the guard once the reload has settled (a TTL backstop in the guard clears it
-          // anyway if this is skipped). After this point a GENUINE external delete of the same
-          // path warns normally again.
-          clearSelfDelete(config.path);
-          if (activeConfigPath) clearSelfDelete(activeConfigPath);
-        }
-      },
-      [isLiveActive, isSwitching, activeConfigPath, confirm, onDisconnect, reload, pushSnack, t],
-    );
-
-    // ─── Rename (Enter/✓ commits via rename_config; returns an error string on failure) ───
-    const handleRename = useCallback(
-      async (config: ConfigSummary, newName: string): Promise<string | void> => {
-        try {
-          await invoke("rename_config", { id: config.id, name: newName });
-          await reload();
-          pushSnack(t("connection.snackbar.config_renamed"));
-        } catch (e) {
-          // Surface the failure inline in the card's FieldError (the rename stays open).
-          return formatError(e);
-        }
-      },
-      [reload, pushSnack, t],
-    );
+    // ─── PA-5 (17-07): the config-list IPC lives in useConfigMutations ───
+    // The mutation `invoke` calls (duplicate/delete/rename) + the two `listen` subscriptions
+    // (`configs-changed` silent refresh, `vpn-adapter-conflict` warning banner) were extracted here
+    // so this component only RENDERS (mirrors the useConfigLifecycle extraction that moved
+    // `config-file-changed` out of App). The delete-path domain logic (D-03 disconnect-then-delete,
+    // the B2/#7 self-delete guard + TTL timing, the FAB-05 mid-switch abort) moved VERBATIM. The
+    // second-VPN `banner` state is returned for the panel to render as the reused ErrorBanner.
+    const { handleDuplicate, handleDelete, handleRename, banner } = useConfigMutations({
+      status,
+      activeConfigPath,
+      isSwitching: isSwitching ?? false,
+      isLiveActive,
+      onDisconnect,
+      reload,
+      refresh,
+      reloadAndReveal,
+      confirm,
+      pushSnack,
+      t,
+    });
 
     // After a per-config save the card may need a fresh summary (name/host unchanged here,
     // but a re-read keeps the manifest authoritative).
@@ -410,13 +289,14 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
       <div ref={scrollerRef} className="h-full overflow-y-auto p-[var(--space-4)]">
         {/* T-34: yellow second-VPN warning — reused ErrorBanner variant="warning" (NO SecondVpnBanner
             component, LOCKED). Names the conflicting adapter(s) only (D-29 — never an endpoint/secret).
-            Dismiss is per-adapter (see showBanner/dismissedAdapterKey above). */}
-        {showBanner && conflict && (
+            PA-5 (17-07): the conflict state + per-adapter dismiss now live in useConfigMutations; the
+            panel only renders `banner`. */}
+        {banner.show && (
           <ErrorBanner
             variant="warning"
-            message={t("connection.secondVpn.warning", { adapter: conflict.adapters.join(", ") })}
-            aria-label={t("connection.secondVpn.warning", { adapter: conflict.adapters.join(", ") })}
-            onDismiss={() => setDismissedAdapterKey(adapterKey)}
+            message={t("connection.secondVpn.warning", { adapter: banner.adapters.join(", ") })}
+            aria-label={t("connection.secondVpn.warning", { adapter: banner.adapters.join(", ") })}
+            onDismiss={banner.dismiss}
             className="mb-[var(--space-3)]"
           />
         )}
@@ -432,6 +312,9 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           status={status}
           activeConfigPath={activeConfigPath}
           onConnect={handleCardConnect}
+          // D-05 (17-07): the lead card's connecting-loader «Отмена» button reuses the SAME
+          // onDisconnect App threads in (handleDisconnect → vpn_disconnect) — no new backend command.
+          onDisconnect={onDisconnect}
           onEdit={openEdit}
           onQr={openQr}
           onDelete={handleDelete}

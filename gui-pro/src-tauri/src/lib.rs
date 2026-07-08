@@ -186,6 +186,11 @@ pub fn run() {
             // maybe_fire (and, via the FE ref, the disconnect snackbars) stay silent across a
             // seamless switch+revert. Starts false; the FE owns its lifecycle (never cleared Rust-side).
             seamless_switch_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Part B (cancel notification) — the FE-raised user-cancel intent the next terminal
+            // Disconnected consumes to fire «Подключение отменено» instead of «Отключено». Starts
+            // false; the FE raises it via set_pending_cancel(true) when handleUserCancel aborts an
+            // in-flight connect, and notify::maybe_fire reads + consumes it on the Disconnected edge.
+            pending_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             // FAB-R4 (Fable-5 review of Phase 14) — the connection_generation stamped when a
             // config switch is authorized (the isSwitch:true edge of
             // set_switch_or_reconnect_pending). u64::MAX = "no switch authorized"; lets
@@ -564,6 +569,9 @@ pub fn run() {
             commands::vpn::set_pending_connect_ping,
             commands::vpn::set_switch_or_reconnect_pending,
             commands::vpn::set_seamless_switch_active,
+            // Part B (cancel notification) — the FE mirrors its user-cancel intent so maybe_fire fires
+            // «Подключение отменено» instead of «Отключено» on a cancelled in-flight connect (D-29: bool only).
+            commands::vpn::set_pending_cancel,
             commands::vpn::set_plate_theme,
             // Phase 13 (13-07) — mirror the app UI language ("ru"/"en") so the plate copy follows it.
             commands::vpn::set_plate_language,
@@ -579,7 +587,6 @@ pub fn run() {
             logging::open_logs_folder,
             commands::vpn::vpn_connect,
             commands::vpn::vpn_disconnect,
-            commands::vpn::check_vpn_status,
             commands::vpn::check_vpn_status_full,
             commands::vpn::clear_vpn_error,
             commands::vpn::test_sidecar,
@@ -626,10 +633,10 @@ pub fn run() {
             // Named ping_config_endpoint to avoid colliding with the existing
             // network::ping_endpoint(host, port) used by the Control Panel.
             commands::ping::ping_config_endpoint,
-            // F23 (14-UAT round 2): measure the ACTIVE tunnel's real latency for the auto-switch
-            // engine by probing neutral reference hosts THROUGH the tunnel (the endpoint itself can't
-            // be honestly probed while connected — that was the x2 noise). Fixed reference hosts only.
-            commands::ping::probe_tunnel_latency,
+            // F11 (17-review): `probe_tunnel_latency` (F23) was DELETED — PA-2 retired the
+            // through-tunnel probe from the auto-switch decision, leaving 0 frontend callers, so
+            // its registration is removed here (any lingering webview invoke would otherwise still
+            // fire outbound TCP probes). Mirrors the earlier check_vpn_status removal.
             commands::ssh_commands::check_server_installation,
             commands::ssh_commands::uninstall_server,
             commands::ssh_commands::fetch_server_config,

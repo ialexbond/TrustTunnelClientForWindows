@@ -530,7 +530,9 @@ pub async fn fetch_server_config(
         &name,
         country_code.as_deref(),
     ));
-    std::fs::write(&client_config_path, &client_toml)
+    // PP-1: the re-exported client config carries the endpoint password — write it atomically so
+    // a crash / power-loss mid-write can never leave it truncated (same guarantee as deploy.rs).
+    crate::commands::manifest::write_bytes_atomic(&client_config_path, client_toml.as_bytes())
         .map_err(|e| format!("SSH_WRITE_CONFIG_FAILED|{e}"))?;
 
     let config_path_str = client_config_path.to_string_lossy().to_string();

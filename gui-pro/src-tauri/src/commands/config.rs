@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
-use tauri::Emitter;
 
 use crate::routing_rules::RoutingRules;
 use crate::ssh::portable_data_dir;
@@ -12,8 +10,11 @@ use crate::ssh::portable_data_dir;
 use crate::commands::paths::validate_app_path;
 
 // ─── Config file watcher state ───────────────────────────────
-
-static CONFIG_WATCHER_STOP: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
+//
+// PP-6: the active-config watcher no longer owns a `notify` thread — the app-wide
+// `manifest::start_configs_watcher` drives `config-file-changed`. The active path is registered in
+// `manifest::ACTIVE_CONFIG_PATH` via watch_config_file/unwatch_config_file, so no per-file watcher
+// state lives here anymore.
 
 // ─── Typed config for validation and defaults ──────────────────
 
@@ -223,87 +224,27 @@ pub fn config_file_exists(config_path: String) -> bool {
     std::path::Path::new(&config_path).is_file()
 }
 
-/// Start watching the config file's parent directory.
-/// Emits "config-file-changed" with `{ exists: bool, path: String }` on create/remove/modify.
+/// Register the active config file so the SINGLE app-wide data-dir watcher
+/// (`manifest::start_configs_watcher`) emits `config-file-changed { exists, path }` for it on
+/// create/remove/modify.
+///
+/// PP-6: this NO LONGER spawns its own `notify` watcher. Before PP-6 there were two OS watchers on
+/// the same `portable_data_dir` (this one for the active file + the app-wide list watcher). They
+/// are collapsed into ONE: `start_configs_watcher` reads the active path registered here and emits
+/// the byte-identical `{ exists, path }` payload. The FE contract (useConfigLifecycle) is unchanged
+/// — same event name, same payload, same external-delete/restore semantics (the self-delete guard
+/// still disambiguates in-app vs external). `app` is accepted for signature compatibility with the
+/// FE `invoke("watch_config_file", { configPath })` call (the watcher is app-wide now).
 #[tauri::command]
-pub fn watch_config_file(app: tauri::AppHandle, config_path: String) {
-    use notify::{Watcher, RecursiveMode, Event, EventKind};
-
-    // Stop any existing watcher
-    if let Ok(mut guard) = CONFIG_WATCHER_STOP.lock() {
-        if let Some(tx) = guard.take() {
-            tx.send(()).ok();
-        }
-    }
-
-    let path = std::path::PathBuf::from(&config_path);
-    let dir = match path.parent() {
-        Some(d) => d.to_path_buf(),
-        None => return,
-    };
-    let file_name = match path.file_name() {
-        Some(n) => n.to_os_string(),
-        None => return,
-    };
-
-    let (tx_stop, rx_stop) = std::sync::mpsc::channel::<()>();
-    if let Ok(mut guard) = CONFIG_WATCHER_STOP.lock() {
-        *guard = Some(tx_stop);
-    }
-
-    std::thread::spawn(move || {
-        let app_handle = app.clone();
-        let watched_name = file_name.clone();
-        let watched_path = config_path.clone();
-
-        let mut watcher = match notify::recommended_watcher(
-            move |res: Result<Event, notify::Error>| {
-                if let Ok(event) = res {
-                    match event.kind {
-                        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
-                            // Only react to our specific file
-                            let relevant = event.paths.iter().any(|p| {
-                                p.file_name().is_some_and(|n| n == watched_name)
-                            });
-                            if relevant {
-                                let exists = std::path::Path::new(&watched_path).is_file();
-                                app_handle.emit("config-file-changed", serde_json::json!({
-                                    "exists": exists,
-                                    "path": &watched_path,
-                                })).ok();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            },
-        ) {
-            Ok(w) => w,
-            Err(_) => return,
-        };
-
-        if watcher.watch(&dir, RecursiveMode::NonRecursive).is_err() {
-            return;
-        }
-
-        // Keep alive until stop signal
-        loop {
-            match rx_stop.recv_timeout(std::time::Duration::from_secs(60)) {
-                Ok(()) => break,         // Stop requested
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            }
-        }
-    });
+pub fn watch_config_file(_app: tauri::AppHandle, config_path: String) {
+    crate::commands::manifest::set_active_config_path(config_path);
 }
 
+/// Clear the registered active config path (PP-6). After this the app-wide watcher stops emitting
+/// `config-file-changed` until a new path is registered. No thread to tear down anymore.
 #[tauri::command]
 pub fn unwatch_config_file() {
-    if let Ok(mut guard) = CONFIG_WATCHER_STOP.lock() {
-        if let Some(tx) = guard.take() {
-            tx.send(()).ok();
-        }
-    }
+    crate::commands::manifest::clear_active_config_path();
 }
 
 #[tauri::command]
@@ -343,7 +284,13 @@ pub fn read_client_config(config_path: String) -> Result<serde_json::Value, Stri
                     // the original is preserved for inspection; the in-memory `c` is what this
                     // read returns, so the app still works with the recovered view this session.
                     let recovered_path = format!("{config_path}.recovered");
-                    let _ = std::fs::write(&recovered_path, &fixed);
+                    // PP-1: the recovered copy is a password-bearing config — write it atomically
+                    // so a crash can't leave a truncated `.recovered` file. Best-effort (a failure
+                    // just means no side copy; the in-memory recovered `c` still drives this read).
+                    let _ = crate::commands::manifest::write_bytes_atomic(
+                        std::path::Path::new(&recovered_path),
+                        fixed.as_bytes(),
+                    );
                     eprintln!(
                         "[config] Recovery successful; recovered copy written to {recovered_path} (original left intact)"
                     );
@@ -369,7 +316,12 @@ pub fn read_client_config(config_path: String) -> Result<serde_json::Value, Stri
                 ports.push(*p as i64);
             }
             doc["killswitch_allow_ports"] = toml_edit::value(ports);
-            let _ = std::fs::write(&config_path, doc.to_string());
+            // PP-1: atomic rewrite — a crash mid-patch must not truncate this password-bearing
+            // config. Best-effort (a failure just skips the auto-patch; the in-memory cfg is used).
+            let _ = crate::commands::manifest::write_bytes_atomic(
+                std::path::Path::new(&config_path),
+                doc.to_string().as_bytes(),
+            );
             eprintln!("[config] Auto-patched: killswitch_allow_ports with DHCP ports");
         }
     }
@@ -549,7 +501,9 @@ pub fn normalize_all_configs_to_tun() {
             continue;
         };
         if let Some(normalized) = normalize_config_socks_to_tun(&content) {
-            if std::fs::write(&path, normalized).is_ok() {
+            // PP-1: atomic normalize — a crash while rewriting a legacy config must not truncate
+            // this password-bearing `.toml`. Best-effort (an unwritable file is simply skipped).
+            if crate::commands::manifest::write_bytes_atomic(&path, normalized.as_bytes()).is_ok() {
                 crate::logging::log_app(
                     "INFO",
                     "[config] normalized a legacy SOCKS listener to TUN (SOCKS client mode removed)",
@@ -678,8 +632,14 @@ pub fn save_client_config(config_path: String, config: serde_json::Value) -> Res
     // routing block — included_routes / mtu_size / excluded_routes). See apply_config_edit.
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     let content = apply_config_edit(&existing, &config)?;
-    std::fs::write(&config_path, &content)
-        .map_err(|e| format!("Failed to write config: {e}"))?;
+    // PP-1: atomic save — a crash / power-loss / ENOSPC mid-write must never leave this
+    // password-bearing config truncated (losing the endpoint host/login/password). temp → fsync →
+    // rename → parent-dir fsync guarantees the file is swapped in whole or not at all.
+    crate::commands::manifest::write_bytes_atomic(
+        std::path::Path::new(&config_path),
+        content.as_bytes(),
+    )
+    .map_err(|e| format!("Failed to write config: {e}"))?;
 
     // IN-26 follow-up: keep the manifest display name in sync with the freshly-saved
     // endpoint.name. ConfigEditView's «Имя конфига» edit goes through THIS save (it rewrites the

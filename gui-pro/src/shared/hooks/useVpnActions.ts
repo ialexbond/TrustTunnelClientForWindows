@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../utils/formatError";
 import type { VpnStatus, VpnConfig } from "../types";
+import type { ConnectOutcome } from "../ipc/events";
 import type { i18n as I18nType } from "i18next";
 
 interface UseVpnActionsParams {
@@ -26,6 +27,14 @@ interface UseVpnActionsParams {
   // so call sites / tests that don't wire it keep type-checking (they simply get no push —
   // the plate then honestly shows «—», the pre-fix behaviour).
   pushPendingConnectPing?: (path: string) => Promise<void>;
+  // BUG-B (17-uat) B1: App.tsx's POST-TEARDOWN variant — pushes the notification ping AND seeds the
+  // destination's freeze cache from the SAME single probe. Called by the teardown paths
+  // (handleReconnect + a real switchTo) at the post-teardown/pre-connect point, where the destination
+  // is genuinely INACTIVE so the probe is honest. It replaces the plain pushPendingConnectPing on the
+  // teardown paths so the ACTIVE card shows the same honest number the notification shows on every path
+  // (previously the switch/save-and-reconnect active card fell to «● —»). Optional (test call sites that
+  // don't wire it simply get no push/seed — the pre-fix behaviour).
+  pushPendingConnectPingSeeded?: (path: string) => Promise<void>;
 }
 
 // AUDIT-2026-06-11 #8: upper bound on how long the manual-reconnect mark may stay
@@ -43,6 +52,7 @@ export function useVpnActions({
   reconnectResolve,
   manualReconnectActiveRef,
   pushPendingConnectPing,
+  pushPendingConnectPingSeeded,
 }: UseVpnActionsParams) {
   const handleConnect = useCallback(async () => {
     if (!config.configPath) {
@@ -53,10 +63,16 @@ export function useVpnActions({
     try {
       setError(null);
       setStatus("connecting");
-      await invoke("vpn_connect", {
+      // NIT-1 (Phase 17): vpn_connect resolves a typed ConnectOutcome { spawned, reason }.
+      // The direct-connect path intentionally does NOT react to `spawned:false` (unlike
+      // switchTo, which must release the switch lock): a supersede here means a genuine
+      // disconnect already landed, and the Rust `vpn-status` event is the single status
+      // owner (D-01) that drives the UI — reacting here would double-write the status. The
+      // typed cast documents the shape so a future consumer reads the same contract.
+      (await invoke("vpn_connect", {
         configPath: config.configPath,
         logLevel: config.logLevel,
-      });
+      })) as ConnectOutcome | null | undefined;
     } catch (e) {
       setError(formatError(e));
       setStatus("error");
@@ -176,16 +192,28 @@ export function useVpnActions({
     // also clears it on the Connected/Error terminal outcome as a backstop.)
     clearSwitchPending();
 
-    // Fable-A review #3: push the connect-time PING (+ the origin=Manual stamp inside the
-    // callback) for the reconnect's terminal «Подключено» plate — the same belt every other
-    // connect initiator wears. Timing is deliberate: AFTER the teardown wait above (the endpoint
-    // is inactive again, so the fresh probe reads a real number — probing while the tunnel was
-    // still up reads Unreachable BY DESIGN) and BEFORE handleConnect below (so the Rust Connected
-    // edge finds the cell filled instead of None → «—»). AWAITED for the same reason the other
-    // initiators await it (13-12): the slow-path push must land before the Connected edge peeks.
-    // The callback never rejects (every invoke inside is caught), so this cannot abort the flow.
-    if (pushPendingConnectPing && config.configPath) {
-      await pushPendingConnectPing(config.configPath);
+    // Fable-A review #3 + BUG-B (17-uat) B1: push the connect-time PING (+ origin=Manual) for the
+    // reconnect's terminal «Подключено» plate AND seed the active card's freeze cache from the SAME
+    // probe — the SEEDED variant. Timing is deliberate: AFTER the teardown wait above (the endpoint is
+    // inactive again, so the fresh probe reads a real DIRECT number — probing while the tunnel was still
+    // up reads Unreachable BY DESIGN) and BEFORE handleConnect below (so the Rust Connected edge finds
+    // the cell filled instead of None → «—», and the freeze cache is seeded before the connected freeze).
+    // The seeded variant seeds UNCONDITIONALLY on an ok reading (the plain pushPendingConnectPing gates
+    // the seed on a disconnected/error status, which is FALSE here — the save-and-reconnect keeps the
+    // status optimistically on «reconnecting» through the teardown — so the active card fell to «● —»
+    // before this fix). AWAITED for the same reason (13-12): the slow-path push must land before the
+    // Connected edge peeks. The App-provided callback catches every invoke internally, but BUG-B B1
+    // requires the probe to NEVER block/fail the reconnect — so it is also wrapped defensively here: a
+    // rejected push/seed is swallowed and the reconnect proceeds regardless (the seed is a UI nicety, not
+    // a gate on the connect). Fallback to the plain push when the seeded variant is not wired.
+    try {
+      if (pushPendingConnectPingSeeded && config.configPath) {
+        await pushPendingConnectPingSeeded(config.configPath);
+      } else if (pushPendingConnectPing && config.configPath) {
+        await pushPendingConnectPing(config.configPath);
+      }
+    } catch {
+      // BUG-B B1: a probe/push/seed failure must not abort the reconnect — proceed to handleConnect.
     }
 
     // Reconnect immediately — sidecar is already terminated when disconnect event
@@ -200,6 +228,7 @@ export function useVpnActions({
     setError,
     manualReconnectActiveRef,
     pushPendingConnectPing,
+    pushPendingConnectPingSeeded,
     config.configPath,
   ]);
 
@@ -254,7 +283,7 @@ export function useVpnActions({
   const switchTo = useCallback(
     async (
       path: string,
-      opts?: { skipTeardown?: boolean; stampLastUsed?: boolean },
+      opts?: { skipTeardown?: boolean; stampLastUsed?: boolean; seedAfterTeardown?: boolean },
     ): Promise<{ ok: boolean; superseded?: boolean }> => {
       if (!path) {
         setError(i18n.t("messages.config_required"));
@@ -290,9 +319,11 @@ export function useVpnActions({
         // resolver AFTER the await (as before) left a window where the settled edge was processed
         // with reconnectResolve still null → the teardown half of every switch flashed the
         // intermediate «VPN отключён» snackbar before the destination «VPN подключён». Arming first
-        // makes useVpnEvents' snackbar-suppression cover the whole teardown regardless of
-        // event/continuation ordering. This is the SAME reconnectResolve pattern as handleReconnect,
-        // just armed one step earlier.
+        // makes the status listener's snackbar-suppression cover the whole teardown regardless of
+        // event/continuation ordering: reduceVpnStatus reads this armed `reconnectResolve` as its
+        // `reconnectPending` guard (F7 — the restored pre-CA-1 `!reconnectResolve.current` gate) and
+        // drops the neutral «VPN отключён» on the connected/disconnecting→disconnected teardown leg.
+        // This is the SAME reconnectResolve pattern as handleReconnect, just armed one step earlier.
         const teardownSettled = new Promise<void>((resolve) => {
           reconnectResolve.current = resolve;
           setTimeout(() => {
@@ -334,6 +365,26 @@ export function useVpnActions({
         // drop the intent so the destination connect's own outcome plate fires and a later
         // genuine user disconnect still shows «Отключено». (Rust also clears on Connected/Error.)
         void invoke("set_switch_or_reconnect_pending", { pending: false });
+
+        // BUG-B (17-uat) B1: NOW — the old tunnel is torn down (teardownSettled resolved) and the
+        // destination is genuinely INACTIVE — is the ONE honest moment to probe the destination and seed
+        // its freeze cache. A manual «Переключиться» used to push the notification ping BEFORE the
+        // teardown (in performSwitch), riding tunnel A → through-tunnel garbage, and never seeded the
+        // active card → the switched-to card fell to «● —». The SEEDED variant pushes the notification
+        // AND seeds lastGoodByPath[dest] from the SAME single probe. `seedAfterTeardown` is passed only by
+        // the MANUAL performSwitch path (the auto-switch stamps its own AutoSwitch origin/plate inside
+        // this seam and must NOT be re-stamped Manual). It never rejects (every invoke inside is caught),
+        // so it cannot abort the switch, and it is AWAITED so the push lands before the Rust Connected
+        // edge peeks the cell (13-12) and the seed lands before the connected freeze. Wrapped
+        // defensively (BUG-B B1): a probe/push/seed failure must NEVER abort the switch — the connect
+        // proceeds regardless (the callback also catches internally, this is belt-and-suspenders).
+        if (opts?.seedAfterTeardown && pushPendingConnectPingSeeded) {
+          try {
+            await pushPendingConnectPingSeeded(path);
+          } catch {
+            // A probe/push/seed failure must not block the switch — fall through to vpn_connect.
+          }
+        }
       }
 
       // Connect the selected config. handleConnect is NOT reused here because it always
@@ -351,7 +402,7 @@ export function useVpnActions({
         const outcome = (await invoke("vpn_connect", {
           configPath: path,
           logLevel: config.logLevel,
-        })) as { spawned?: boolean; reason?: string } | null | undefined;
+        })) as ConnectOutcome | null | undefined;
         if (outcome && outcome.spawned === false) {
           // The Rust bail already wrote Disconnected through the single mutator, so the status is
           // driven by that event — do NOT setStatus here (keep the Rust event as the source of truth).
@@ -387,7 +438,7 @@ export function useVpnActions({
       // this to a failure — the tunnel is up). Report success so the App does NOT trigger a revert.
       return { ok: true };
     },
-    [status, config, i18n, setStatus, setError, reconnectResolve, markLastUsed],
+    [status, config, i18n, setStatus, setError, reconnectResolve, markLastUsed, pushPendingConnectPingSeeded],
   );
 
   return { handleConnect, handleDisconnect, handleReconnect, switchTo, markLastUsed };

@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Power,
+  Ban,
 } from "lucide-react";
 import {
   notificationCopy,
@@ -31,6 +32,10 @@ const EXPECTED_KINDS = [
   // moment a deliberate auto-switch begins, so the owner SEES «Переключение…» before the terminal
   // «Переключено автоматически» replaces it.
   "switching",
+  // Part B (cancel notification): a USER CANCEL of an in-flight connect — «Подключение отменено». A
+  // DIFFERENT event from `disconnected` (owner requirement); fired by the pure Rust decider
+  // (NotifyKind::Cancelled) when the FE-raised `pending_cancel` intent is set on a terminal Disconnected.
+  "cancelled",
 ] as const;
 
 describe("notificationCopy", () => {
@@ -76,6 +81,16 @@ describe("notificationCopy", () => {
     // never speaks as a person, so «Переключаю сервер…» → «Переход на другой сервер».
     expect(buildBody("switching", "любой сервер", "ru")).toBe("Переход на другой сервер");
     expect(buildBody("switching", "any server", "en")).toBe("Moving to another server");
+
+    // Part B (cancel notification): the `cancelled` kind — «Подключение отменено» / "Connection
+    // cancelled", NEUTRAL (Ban icon + muted colour, like `disconnected`), name-independent body.
+    expect(notificationCopy.cancelled.icon).toBe(Ban);
+    expect(notificationCopy.cancelled.iconColor).toBe("var(--color-text-muted)");
+    expect(notificationCopy.cancelled.title.ru).toBe("Подключение отменено");
+    expect(notificationCopy.cancelled.title.en).toBe("Connection cancelled");
+    // Body is name-independent (the connect was aborted); passing a name changes nothing.
+    expect(buildBody("cancelled", "Германия", "ru")).toBe("Соединение не установлено");
+    expect(buildBody("cancelled", "Germany", "en")).toBe("No connection was established");
 
     // Bodies interpolate the live config display name (never a hardcoded fixture, never a password).
     expect(buildBody("connected", "Германия — Frankfurt", "ru")).toContain("Германия — Frankfurt");

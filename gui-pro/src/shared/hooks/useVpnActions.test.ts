@@ -60,7 +60,13 @@ const CONFIG: VpnConfig = {
 // ping+origin push threaded into useVpnActions so handleReconnect can push the plate ping.
 function renderReconnectHarness(
   initialStatus: VpnStatus,
-  opts?: { pushPendingConnectPing?: (path: string) => Promise<void> },
+  opts?: {
+    pushPendingConnectPing?: (path: string) => Promise<void>;
+    // BUG-B (17-uat) B1: the post-teardown probe+push+SEED variant threaded from App. Wired the same
+    // way as pushPendingConnectPing so a test can assert the teardown paths (handleReconnect + a real
+    // switchTo) run it at the post-teardown/pre-connect point (honest, single probe, non-blocking).
+    pushPendingConnectPingSeeded?: (path: string) => Promise<void>;
+  },
 ) {
   const statusHistory: VpnStatus[] = [];
 
@@ -97,6 +103,7 @@ function renderReconnectHarness(
       reconnectResolve,
       manualReconnectActiveRef,
       pushPendingConnectPing: opts?.pushPendingConnectPing,
+      pushPendingConnectPingSeeded: opts?.pushPendingConnectPingSeeded,
     });
 
     return { status, actions, reconnectResolve, manualReconnectActiveRef };
@@ -408,6 +415,73 @@ describe("useVpnActions.handleReconnect (Plan 02-12 — no dwell on «Отклю
     expect(disconnectsAtPush).toBe(1);
     expect(connectsAtPush).toBe(0);
     // The reconnect itself still fired.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+      configPath: CONFIG.configPath,
+      logLevel: CONFIG.logLevel,
+    });
+  });
+
+  it("BUG-B B1: handleReconnect runs the SEEDED post-teardown push (single probe) AFTER the teardown wait and BEFORE the reconnect vpn_connect", async () => {
+    // The save-and-reconnect keeps the App status optimistically on «reconnecting» through the teardown,
+    // so the plain pushPendingConnectPing's seed (gated on disconnected/error) was skipped → the active
+    // card fell to «● —». The SEEDED variant seeds unconditionally on an ok reading. It must run at the
+    // same honest moment: AFTER the teardown wait (endpoint inactive → fresh probe reads a real number)
+    // and BEFORE handleConnect. It replaces the plain push on this path (no double-probe).
+    let disconnectsAtPush = -1;
+    let connectsAtPush = -1;
+    const seeded = vi.fn(async () => {
+      const names = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+      disconnectsAtPush = names.filter((n) => n === "vpn_disconnect").length;
+      connectsAtPush = names.filter((n) => n === "vpn_connect").length;
+    });
+    const plain = vi.fn(async () => {});
+    const { hook } = renderReconnectHarness("connected", {
+      pushPendingConnectPing: plain,
+      pushPendingConnectPingSeeded: seeded,
+    });
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+    // Mid-teardown neither push has run yet.
+    expect(seeded).not.toHaveBeenCalled();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise;
+    });
+
+    // The SEEDED variant ran exactly once for the active config, strictly between the teardown
+    // vpn_disconnect and the reconnect vpn_connect. The plain push did NOT run (the seeded variant
+    // supersedes it on the teardown path — single probe).
+    expect(seeded).toHaveBeenCalledTimes(1);
+    expect(seeded).toHaveBeenCalledWith(CONFIG.configPath);
+    expect(plain).not.toHaveBeenCalled();
+    expect(disconnectsAtPush).toBe(1);
+    expect(connectsAtPush).toBe(0);
+  });
+
+  it("BUG-B B1: a THROW inside the seeded push does NOT abort the reconnect (non-blocking)", async () => {
+    // The seeded variant catches every invoke internally, but harden the contract: even if it rejected,
+    // the reconnect must still reach vpn_connect (the seed is a UI nicety, never a gate on the connect).
+    const seeded = vi.fn(async () => {
+      throw new Error("probe blew up");
+    });
+    const { hook } = renderReconnectHarness("connected", { pushPendingConnectPingSeeded: seeded });
+
+    let reconnectPromise: Promise<void>;
+    await act(async () => {
+      reconnectPromise = hook.result.current.actions.handleReconnect();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await reconnectPromise.catch(() => {});
+    });
+
+    // Even though the seed threw, the reconnect still fired vpn_connect for the active config.
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
       configPath: CONFIG.configPath,
       logLevel: CONFIG.logLevel,
@@ -840,5 +914,89 @@ describe("useVpnActions.switchTo (Phase 11 — manual switch = disconnect→conn
     });
 
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_last_used", { id: "other-id" });
+  });
+
+  // ─── BUG-B (17-uat) B1: switchTo seeds the destination's active card POST-teardown ───
+  // A manual «Переключиться» from a LIVE tunnel used to push the destination's connect ping BEFORE the
+  // teardown (riding tunnel A → through-tunnel garbage) and never seeded the active card → the
+  // switched-to card fell to «● —». switchTo now runs the SEEDED probe+push once, AFTER teardownSettled
+  // (destination genuinely inactive → honest DIRECT probe) and BEFORE the destination vpn_connect, when
+  // the caller passes seedAfterTeardown:true (the MANUAL performSwitch path only).
+  it("BUG-B B1: from CONNECTED with seedAfterTeardown, runs the SEEDED push once between the teardown and the destination vpn_connect", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    let disconnectsAtPush = -1;
+    let connectsAtPush = -1;
+    const seeded = vi.fn(async () => {
+      const names = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+      disconnectsAtPush = names.filter((n) => n === "vpn_disconnect").length;
+      connectsAtPush = names.filter((n) => n === "vpn_connect").length;
+    });
+    const { hook } = renderReconnectHarness("connected", { pushPendingConnectPingSeeded: seeded });
+
+    let switchPromise: Promise<{ ok: boolean }>;
+    await act(async () => {
+      switchPromise = hook.result.current.actions.switchTo(OTHER_PATH, { seedAfterTeardown: true });
+      await Promise.resolve();
+    });
+    // Mid-teardown the seed has NOT run yet (it waits for the teardown-settled event).
+    expect(seeded).not.toHaveBeenCalled();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await switchPromise;
+    });
+
+    // The seed ran exactly once for the DESTINATION path, strictly between the teardown vpn_disconnect
+    // and the destination vpn_connect (single honest post-teardown probe).
+    expect(seeded).toHaveBeenCalledTimes(1);
+    expect(seeded).toHaveBeenCalledWith(OTHER_PATH);
+    expect(disconnectsAtPush).toBe(1);
+    expect(connectsAtPush).toBe(0);
+  });
+
+  it("BUG-B B1: WITHOUT seedAfterTeardown the seeded push does NOT run (auto-switch / non-seeding callers)", async () => {
+    // The auto-switch flows through switchTo too but stamps its own AutoSwitch origin inside the seam —
+    // it must NOT re-run the Manual seeded push. So a switchTo WITHOUT seedAfterTeardown never calls it.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const seeded = vi.fn(async () => {});
+    const { hook } = renderReconnectHarness("connected", { pushPendingConnectPingSeeded: seeded });
+
+    let switchPromise: Promise<{ ok: boolean }>;
+    await act(async () => {
+      switchPromise = hook.result.current.actions.switchTo(OTHER_PATH);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" });
+      await switchPromise;
+    });
+
+    expect(seeded).not.toHaveBeenCalled();
+  });
+
+  it("BUG-B B1: from DISCONNECTED (no teardown) the seeded push does NOT run even with seedAfterTeardown", async () => {
+    // A direct connect from disconnected has NO teardown — the seeded post-teardown push is inside the
+    // teardown block, so it never fires. The direct-connect path seeds via performSwitch's pre-switchTo
+    // pushPendingConnectPing instead (honest, since there is no tunnel). No double-probe.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_configs") return [{ id: "other-id", path: OTHER_PATH }];
+      return null;
+    });
+    const seeded = vi.fn(async () => {});
+    const { hook } = renderReconnectHarness("disconnected", { pushPendingConnectPingSeeded: seeded });
+
+    await act(async () => {
+      await hook.result.current.actions.switchTo(OTHER_PATH, { seedAfterTeardown: true });
+    });
+
+    // No teardown ran → the seeded push (inside the teardown block) was skipped.
+    expect(seeded).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("vpn_disconnect");
   });
 });

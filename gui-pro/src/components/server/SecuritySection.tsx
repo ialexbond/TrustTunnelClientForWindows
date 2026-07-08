@@ -8,7 +8,7 @@ import { Skeleton } from "../../shared/ui/Skeleton";
 import type { ServerState } from "./useServerState";
 import { useSecurityState, FAIL2BAN_PRESETS, type Fail2banPresetId } from "./useSecurityState";
 import { durationsEqual } from "./fail2banUtils";
-import { pluralRu } from "./certUtils";
+import { pluralRu } from "../../shared/lib/pluralRu";
 import { CertSection } from "./CertSection";
 import { FirewallModal } from "./FirewallModal";
 import { Fail2banModal } from "./Fail2banModal";

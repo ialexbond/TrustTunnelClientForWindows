@@ -598,8 +598,16 @@ fn update_toml_config(
         }
     }
 
-    std::fs::write(config_path, doc.to_string())
-        .map_err(|e| format!("Failed to write config: {e}"))?;
+    // F4 (17-review): atomic write — a crash / power-loss / ENOSPC mid-write must never leave
+    // this ACTIVE password-bearing config truncated (losing the endpoint host/login/password).
+    // This runs on the vpn_connect hot path (resolve_and_apply_inner), so a plain truncate-then-
+    // write here is the exact PP-1 data-loss surface, on the same file. temp → fsync → rename →
+    // parent-dir fsync swaps the file in whole or not at all. D-29: the writer never logs bytes.
+    crate::commands::manifest::write_bytes_atomic(
+        std::path::Path::new(config_path),
+        doc.to_string().as_bytes(),
+    )
+    .map_err(|e| format!("Failed to write config: {e}"))?;
 
     eprintln!(
         "[routing] TOML updated: vpn_mode={}, exclusions_file={}, blocked_file={}",
@@ -624,8 +632,15 @@ pub fn update_vpn_mode(config_path: String, mode: String) -> Result<(), String> 
 
     doc["vpn_mode"] = value(mode.as_str());
 
-    std::fs::write(&config_path, doc.to_string())
-        .map_err(|e| format!("Failed to write config: {e}"))?;
+    // F4 (17-review): atomic write — this Routing-tab entry point rewrites the ACTIVE
+    // password-bearing config; a truncate-then-write interrupted by ENOSPC / power loss would
+    // lose the endpoint host/login/password. Route through the same temp → fsync → rename → dir-
+    // fsync writer every other .toml save uses (PP-1). D-29: the writer never logs the bytes.
+    crate::commands::manifest::write_bytes_atomic(
+        std::path::Path::new(&config_path),
+        doc.to_string().as_bytes(),
+    )
+    .map_err(|e| format!("Failed to write config: {e}"))?;
 
     eprintln!("[routing] vpn_mode updated to: {}", mode);
     Ok(())
@@ -751,6 +766,103 @@ mod tests {
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── F4 (17-review): the password-bearing config writers go through the atomic writer ──
+    //
+    // `update_vpn_mode` (and its siblings `update_toml_config` / `save_exclusion_list`) rewrite
+    // the ACTIVE password-bearing config `.toml`. They MUST route through
+    // `manifest::write_bytes_atomic` (temp → fsync → rename → parent-dir fsync) so a crash /
+    // power-loss / ENOSPC mid-write can never truncate the file and lose the endpoint
+    // credentials (the PP-1 data-loss surface). A plain `std::fs::write` truncates-then-writes.
+    //
+    // The atomic writer's SIGNATURE is what we assert against: it writes `<name>.tmp` then
+    // renames it over `<name>`. A successful write therefore (a) updates the target and (b)
+    // leaves NO `<name>.tmp` sibling behind. A plain `std::fs::write` never creates a `.tmp` at
+    // all, so the "no leftover .tmp AND the swap happened" pair is a positive signal only the
+    // atomic path can satisfy — and it also proves the writer preserved the rest of the file
+    // (the endpoint credentials the data-loss regression was about).
+
+    fn f4_tempdir() -> std::path::PathBuf {
+        let base = std::env::temp_dir();
+        let unique = format!(
+            "tt_routing_f4_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let dir = base.join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A minimal password-bearing client config `.toml`.
+    fn f4_sample_config() -> &'static str {
+        "# TrustTunnel Client Configuration\n\
+         vpn_mode = \"general\"\n\n\
+         [endpoint]\n\
+         hostname = \"de1.example.com\"\n\
+         addresses = [\"203.0.113.10:443\"]\n\
+         username = \"swift-fox\"\n\
+         password = \"SUPER-SECRET-XYZ\"\n"
+    }
+
+    #[test]
+    fn update_vpn_mode_is_atomic_and_preserves_credentials() {
+        let dir = f4_tempdir();
+        let cfg = dir.join("TrustTunnel_swift-fox.toml");
+        std::fs::write(&cfg, f4_sample_config()).unwrap();
+
+        update_vpn_mode(cfg.to_string_lossy().to_string(), "selective".to_string())
+            .expect("update_vpn_mode must succeed on a valid config");
+
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        // (a) the mode was actually updated,
+        assert!(written.contains("vpn_mode = \"selective\""));
+        // (b) the endpoint credentials were preserved (the data-loss surface F4 guards),
+        assert!(written.contains("password = \"SUPER-SECRET-XYZ\""));
+        assert!(written.contains("username = \"swift-fox\""));
+        // (c) the atomic writer renamed its temp away — no `<name>.tmp` sibling is left behind,
+        //     which a plain std::fs::write could never have created in the first place. This is
+        //     the positive proof the write went through `write_bytes_atomic`.
+        let tmp = dir.join("TrustTunnel_swift-fox.toml.tmp");
+        assert!(
+            !tmp.exists(),
+            "atomic writer must leave no leftover .tmp after a successful rename"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_exclusion_list_is_atomic_and_preserves_credentials() {
+        let dir = f4_tempdir();
+        let cfg = dir.join("TrustTunnel_swift-fox.toml");
+        std::fs::write(&cfg, f4_sample_config()).unwrap();
+
+        // save_exclusion_list also best-effort backs up to exclusions.json under
+        // portable_data_dir(); that side write is non-secret + swallowed, so it does not affect
+        // this assertion on the config file itself.
+        crate::geodata::save_exclusion_list(
+            cfg.to_string_lossy().to_string(),
+            v(&["example.com", "10.0.0.0/8"]),
+        )
+        .expect("save_exclusion_list must succeed on a valid config");
+
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        assert!(written.contains("example.com"));
+        // Credentials preserved through the exclusions rewrite (data-loss surface).
+        assert!(written.contains("password = \"SUPER-SECRET-XYZ\""));
+        // No leftover temp → the write went through the atomic writer, not a plain truncate.
+        let tmp = dir.join("TrustTunnel_swift-fox.toml.tmp");
+        assert!(
+            !tmp.exists(),
+            "atomic writer must leave no leftover .tmp after a successful rename"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── IN-57: the shared routing-import cap (BOTH the drag door and the «Импорт» button) ──

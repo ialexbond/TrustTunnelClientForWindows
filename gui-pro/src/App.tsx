@@ -435,6 +435,16 @@ function App() {
   // at the start of every fresh switch (so a stale supersede never mutes a later real failure).
   const switchSupersededRef = useRef(false);
 
+  // BUG-A2 (17-uat, Fable F1): set by handleUserCancel when the user presses «Отмена» on an IN-FLIGHT
+  // connect/recovery. The status reducer reads it (via useVpnEvents guards) to route «Подключение
+  // отменено» on the terminal `disconnected` edge and CONSUMES it there (and on connected/error, so a
+  // cancel that races past the disconnect can never mislabel a LATER disconnect). It MUST be an explicit
+  // flag, NOT prev-based: handleDisconnect optimistically sets `disconnecting` BEFORE vpn_disconnect, so
+  // by the terminal `disconnected` edge `prev` is already `disconnecting` — a prev-based cancel test is
+  // unreachable from every real button (Fable F1). A ref (not state) — read synchronously in the event
+  // listener, no render needed.
+  const connectCancelledRef = useRef(false);
+
   // Phase 14 (FAB-02/FAB-03): the terminal-edge callback the vpn-status listener fires on
   // `connected`/`error`. Two jobs, in this order:
   //   1. Resolve the switch's settle-promise so performSwitch can act on the REAL terminal edge
@@ -490,6 +500,8 @@ function App() {
     onSettled: onSwitchSettle,
     switchSupersededRef,
     seamlessSwitchActiveRef,
+    // BUG-A2 F1: the connect-cancel one-shot flag — reducer routes «Подключение отменено» + consumes it.
+    connectCancelledRef,
   });
 
   // ─── App-level config-list + inactive-ping source (Phase 12, 12-07) ───
@@ -584,6 +596,55 @@ function App() {
     [configPingSource.configs, configPingSource.pings, seedRetainedPing],
   );
 
+  // BUG-B (17-uat) B1: the POST-TEARDOWN variant of pushPendingConnectPing — pushes the notification
+  // plate ping AND seeds the ACTIVE card's freeze cache from the SAME single probe. It is called by the
+  // useVpnActions teardown paths (handleReconnect + switchTo) at the ONE moment the destination endpoint
+  // is genuinely INACTIVE: AFTER `teardownSettled`/the reconnect teardown-wait, BEFORE the new
+  // vpn_connect. In that window the tunnel is DOWN, so the probe is an HONEST DIRECT measurement — unlike
+  // the pre-teardown push a manual A→B switch used to make (which rode tunnel A and read through-tunnel
+  // garbage, F24/F26). Because it is only ever called post-teardown, it seeds UNCONDITIONALLY on an ok
+  // reading — no `preConnect` status gate (the App status is still optimistically `reconnecting`/`connecting`
+  // there, so the gate in pushPendingConnectPing would wrongly skip the seed — that gate exists to block a
+  // PRE-teardown switch probe, which this variant never runs). Result: connect, switch, and
+  // save-and-reconnect ALL seed lastGoodByPath[dest] with a direct pre-connect number, so the active card
+  // shows the same honest value the notification shows on every path — never «● —» (unless genuinely
+  // unreachable → honest no-data). A bare number|null crosses (no config content / password — D-29).
+  const pushPendingConnectPingSeeded = useCallback(
+    async (path: string): Promise<void> => {
+      // Stamp origin=Manual (same belt as pushPendingConnectPing — both are manual initiators).
+      void invoke("set_pending_connect_origin", { origin: "manual" }).catch(() => {});
+
+      // FAST PATH: a cached numeric band from the App-level ping map (measured while the config was
+      // INACTIVE — the map never pings the active one) is already an honest direct value. Push it AND
+      // seed the freeze cache from it (so the active card resolves it while connected).
+      const match = configPingSource.configs.find((c) => samePath(c.path, path));
+      const ping = match ? configPingSource.pings[match.id] : undefined;
+      if (typeof ping?.valueMs === "number") {
+        void invoke("set_pending_connect_ping", { ms: ping.valueMs }).catch(() => {});
+        seedRetainedPing(path, ping.valueMs);
+        return;
+      }
+      // SLOW PATH: one fresh direct probe of the now-inactive destination. Match the MANUAL/LAUNCH
+      // 1500ms bound so it can never block/fail the (re)connect. On any non-ok result or throw: seed
+      // nothing (honest no-data) and proceed with a null push (the plate reads «—»).
+      let ms: number | null;
+      try {
+        const result = await invoke<PingResult>("ping_config_endpoint", {
+          configPath: path,
+          timeoutMs: MANUAL_PING_TIMEOUT_MS,
+        });
+        ms = result.status === "ok" ? result.ms : null;
+      } catch {
+        ms = null;
+      }
+      await invoke("set_pending_connect_ping", { ms }).catch(() => {});
+      // Post-teardown ⇒ the reading is an honest DIRECT measurement ⇒ seed unconditionally on ok. The
+      // probe MUST NOT block/fail the connect, so this is fire-and-forget beyond the awaited push above.
+      if (ms !== null) seedRetainedPing(path, ms);
+    },
+    [configPingSource.configs, configPingSource.pings, seedRetainedPing],
+  );
+
   // ─── VPN Actions ───
   // IN-32: moved ABOVE useConfigLifecycle so the lifecycle hook can receive handleDisconnect —
   // when the ACTIVE config file is deleted externally (file manager) while connected, the tunnel
@@ -600,6 +661,9 @@ function App() {
     reconnectResolve,
     manualReconnectActiveRef,
     pushPendingConnectPing,
+    // BUG-B (17-uat) B1: the post-teardown probe+push+SEED for the switch + save-and-reconnect paths, so
+    // the switched-to active card shows the same honest pre-connect number the notification shows.
+    pushPendingConnectPingSeeded,
   });
 
   // Phase 14 (CR-02, FAB-05): the SWITCH-GATED disconnect wrapper. A switch (or revert) legitimately
@@ -614,6 +678,58 @@ function App() {
   // an external delete of the active config mid-switch fired an ungated teardown that raced the swap).
   const handleDisconnectGuarded = useCallback(async (): Promise<void> => {
     if (isSwitching || connectInFlightRef.current) return;
+    await handleDisconnect();
+  }, [isSwitching, handleDisconnect]);
+
+  // BUG-A2 (17-uat): the RACE-SAFE user «Отмена» / «Отключить». This is the disconnect wired to every
+  // FE-reachable disconnect BUTTON (the Connection lead card, StatusPanel, RoutingPanel, VpnContext) —
+  // it REPLACES handleDisconnectGuarded at those sites (handleDisconnectGuarded now serves ONLY the
+  // useConfigLifecycle fs-watcher external-delete path).
+  //
+  // The gate is `isSwitching || reconnectResolve.current !== null`, NOT `connectInFlightRef.current`.
+  // WHY the difference matters — this is the whole point of BUG-A2:
+  //   • A prior naive fix ungated the disconnect (only isSwitching) and let a cancel land DURING a
+  //     switch / save-and-reconnect TEARDOWN, resolving the SHARED `reconnectResolve` latch early →
+  //     switchTo/handleReconnect proceeded to vpn_connect before the sidecar they were tearing down
+  //     was gone → double-spawn churn (connecting→sidecar-exit→respawn storm) + lock-up (BUG-A).
+  //   • But gating on connectInFlightRef (as handleDisconnectGuarded does) is TOO BROAD for a plain
+  //     connect: handleConnectActive holds connectInFlightRef for the WHOLE connect, so a cancel would
+  //     be inert for the entire «Подключение» — a DEAD button, exactly the F6 dead-window bug.
+  // `reconnectResolve.current` is the PRECISE signal: it is armed ONLY transiently during the teardown
+  // window of a switch / save-and-reconnect (handleReconnect ~:175 / switchTo ~:328), and nulled by
+  // useReconnectCompletionListener the instant the teardown's `disconnected` edge lands — BEFORE the
+  // flow proceeds to vpn_connect (status → "connecting"). So during a PLAIN connect ("connecting",
+  // connectInFlightRef held, reconnectResolve null) the cancel PROCEEDS and tears the connect down
+  // (Rust R-SERIAL + post-spawn cancel re-checks make a cancel-during-connect clean), while during a
+  // switch/save-and-reconnect teardown (reconnectResolve armed — and, for a seamless switch, isSwitching
+  // also true) it is INERT, so the shared latch can never be resolved early. The show-condition
+  // (ConfigCard/StatusPanel) is aligned to only offer a LIVE cancel in the reconnectResolve-null states
+  // (connecting/recovering) so this handler is never a dead-but-shown button.
+  //
+  // Fable F6 (cheap insurance): handleReconnect arms reconnectResolve AFTER its vpn_disconnect, so
+  // there is a brief window in the save-and-reconnect teardown where reconnectResolve is still null but
+  // a cancel would race the shared latch. manualReconnectActiveRef is raised SYNCHRONOUSLY at the very
+  // start of handleReconnect (before its first await), so adding it to the gate closes that window too.
+  //
+  // Fable F1: a CANCEL must be distinguished from a genuine live-tunnel «Отключить» by an EXPLICIT
+  // one-shot flag — NOT by the reducer's `prev` (handleDisconnect sets `disconnecting` first, so prev is
+  // never connecting/recovering at the terminal edge). Set connectCancelledRef ONLY when aborting an
+  // IN-FLIGHT connect/recovery (statusRef connecting/recovering); a connected «Отключить» leaves it
+  // false → the reducer routes the neutral «VPN отключён» as before. Read statusRef (live) so the
+  // decision is never one render stale.
+  const handleUserCancel = useCallback(async (): Promise<void> => {
+    if (isSwitching || reconnectResolve.current !== null || manualReconnectActiveRef.current) return;
+    if (statusRef.current === "connecting" || statusRef.current === "recovering") {
+      connectCancelledRef.current = true;
+      // Part B (cancel notification): mirror the SAME cancel-intent into Rust so the desktop plate
+      // (fired window-closed by notify::maybe_fire) shows «Подключение отменено», not «Отключено» — a
+      // cancel and a disconnect are DIFFERENT events. Set at the SAME point as connectCancelledRef
+      // (only when aborting an IN-FLIGHT connect/recovery), exactly as set_pending_connect_origin is
+      // invoked alongside its FE state. A genuine connected «Отключить» leaves statusRef=connected → this
+      // branch is skipped → the flag is NOT set → the plate stays «Отключено». Fire-and-forget (the
+      // notification is best-effort; a failed mirror must never block the disconnect).
+      void invoke("set_pending_cancel", { pending: true }).catch(() => {});
+    }
     await handleDisconnect();
   }, [isSwitching, handleDisconnect]);
 
@@ -675,6 +791,12 @@ function App() {
     setPendingConnectPath(config.configPath || null);
     // F30: a fresh manual connect is not a revert — drop any staged revert notice.
     pendingRevertNoticeRef.current = null;
+    // Fable F2: clear any STALE switch-superseded flag before a fresh connect. A cancelled fresh connect
+    // that Rust bailed as superseded (performSwitch set switchSupersededRef=true) leaves the flag armed —
+    // its consumer (the connecting→disconnected supersede arm) never fires because handleUserCancel sets
+    // `disconnecting` first, so the flag would survive and mute the NEXT genuine connect failure's red
+    // snackbar. performSwitch already clears on entry; do the same here so no non-switch initiator leaks it.
+    switchSupersededRef.current = false;
     try {
       if (config.configPath) await pushPendingConnectPing(config.configPath);
       await handleConnect();
@@ -689,15 +811,30 @@ function App() {
   // its own pushPendingConnectPing (threaded into useVpnActions) after the teardown, so it too has
   // an in-flight window a second activation must not re-enter. Every consumer (VpnContext /
   // ConnectionPanel / RoutingPanel) gets THIS wrapper, never the raw handleReconnect.
+  //
+  // F6 (17-review): raise `pendingConnectPath` for the SAME span the in-flight guard holds
+  // (connectInFlightRef). Without it, the reconnect's `reconnecting`→`connecting` status made the
+  // lead ConfigCard (and StatusPanel) render a LIVE «Отмена» whose onDisconnect is
+  // handleDisconnectGuarded — which early-returns for the WHOLE span while connectInFlightRef is
+  // held, so every click was a silent no-op. Setting pendingConnectPath flips both surfaces to the
+  // INERT spinner (they already consume `connectPending`/`pendingConnectPath`) so we never offer a
+  // cancel that cannot work. It is released in the SAME finally as connectInFlightRef, so the moment
+  // the guard drops (the final connect leg, where a cancel WOULD tear the connect down) the genuine
+  // live «Отмена» returns — the working cancel is deliberately NOT weakened, only the dead window is.
   const handleReconnectGuarded = useCallback(async (): Promise<void> => {
     if (connectInFlightRef.current) return;
     connectInFlightRef.current = true;
+    setPendingConnectPath(config.configPath || null);
+    // Fable F2: clear any stale switch-superseded flag before the save-and-reconnect (same reason as
+    // handleConnectActive — a leaked flag would mute this reconnect's own failure snackbar).
+    switchSupersededRef.current = false;
     try {
       await handleReconnect();
     } finally {
       connectInFlightRef.current = false;
+      setPendingConnectPath(null);
     }
-  }, [handleReconnect]);
+  }, [handleReconnect, config.configPath]);
 
   // Phase 14 (14-04, D-05/D-05-impl): the SHARED revert-to-previous — the silent return to the
   // previous server A when a switch to B fails. Both the manual switch (handleConnectConfig) and the
@@ -847,11 +984,18 @@ function App() {
           });
           localStorage.setItem("tt_config_path", path);
         }
-        // (e) manual path only: push the selected config's connect-time ping BEFORE switchTo. AWAITED
-        // (13-12) so a slow-path probe's push lands before the Rust Connected edge peeks the cell.
-        // pushPendingConnectPing never rejects. The auto path skips it (AutoSwitch stamps its own
-        // origin inside switchTo's seam).
-        if (pushPing && path) {
+        // (e) manual path only: push the selected config's connect-time ping. AWAITED (13-12) so a
+        // slow-path probe's push lands before the Rust Connected edge peeks the cell. The auto path
+        // skips it (AutoSwitch stamps its own origin inside switchTo's seam).
+        // BUG-B (17-uat) B1: split by whether a teardown will run. A DIRECT connect (no live tunnel →
+        // isRealSwitch false, switchTo does NO teardown) probes HONESTLY here BEFORE switchTo (the
+        // endpoint is already inactive) and pushPendingConnectPing seeds it (preConnect gate true). A
+        // REAL switch (isRealSwitch → switchTo tears A down first) must NOT probe here — tunnel A is
+        // still up, so a probe of B would ride A and read through-tunnel garbage (F24/F26), and seeding
+        // that is exactly what F26 forbids. Instead switchTo runs the SEEDED probe+push POST-teardown
+        // (seedAfterTeardown), where B is genuinely inactive → the notification AND the active card get
+        // the same honest number (the fix for the switched-to card showing «● —»).
+        if (pushPing && path && !isRealSwitch) {
           await pushPendingConnectPing(path);
         }
         // (g) FAB-02: run the switch for the SPAWN-ACCEPT. stampLastUsed:false — a vpn_connect accept
@@ -861,7 +1005,12 @@ function App() {
         // A real switch stamps last-used only AFTER the terminal `connected` edge (FAB-02, via the
         // markLastUsed in the park below); a fresh connect stamps on accept like the pre-Phase-14
         // plain connect (it has no terminal-edge park).
-        const result = await switchTo(path, { stampLastUsed: !isRealSwitch });
+        // BUG-B (17-uat) B1: seedAfterTeardown is passed for the MANUAL real switch (pushPing && a
+        // teardown will run) so switchTo probes+pushes+seeds the destination once, post-teardown.
+        const result = await switchTo(path, {
+          stampLastUsed: !isRealSwitch,
+          seedAfterTeardown: pushPing && isRealSwitch,
+        });
         // F28 (Fable NIT): clear the instant-feedback flag the moment switchTo returns — by now the live
         // status has flipped to `connecting`, so the card's status face (or the amber `switching` face on
         // a real switch) drives it. This stops a FAILED target from spinning `connectPending` through the
@@ -988,6 +1137,9 @@ function App() {
     checksN: autoModeSettings.checksN,
     status,
     activeConfigPath: config.configPath || undefined,
+    // PA-2 (17-02): the engine now decides on the ACTIVE config's FROZEN pre-connect band (the same
+    // honest number the card shows) instead of the retired through-tunnel `probe_tunnel_latency`.
+    activeReading: configPingSource.activeReading,
     candidates: configPingSource.candidates,
     switchTo: handleAutoSwitch,
     // Phase 14 (D-13 / Pitfall 5): belt-and-suspenders — the engine short-circuits before doSwitch
@@ -1175,12 +1327,13 @@ function App() {
       configPath: config.configPath,
       vpnMode,
       onConnect: handleConnectActive,
-      // Phase 14 (CR-02): the switch-gated disconnect so a Routing/Connection-panel disconnect cannot
-      // interleave mid-switch and race the shared reconnectResolve teardown.
-      onDisconnect: handleDisconnectGuarded,
+      // BUG-A2 (17-uat): the race-safe user «Отмена»/«Отключить» — gated on the reconnectResolve latch
+      // (armed only during a switch/save-and-reconnect teardown), NOT on connectInFlightRef, so a plain
+      // connect can be cancelled while a mid-teardown cancel stays inert (no early latch resolve).
+      onDisconnect: handleUserCancel,
       onReconnect: handleReconnectGuarded,
     }),
-    [status, connectedSince, config.configPath, vpnMode, handleConnectActive, handleDisconnectGuarded, handleReconnectGuarded],
+    [status, connectedSince, config.configPath, vpnMode, handleConnectActive, handleUserCancel, handleReconnectGuarded],
   );
 
   // IN-11 (06-review): the tabpanels stay MOUNTED (hidden via opacity/visibility, not
@@ -1196,14 +1349,18 @@ function App() {
       error={error}
       connectedSince={connectedSince}
       onConnect={handleConnectActive}
-      // Phase 14 (CR-02): the StatusPanel «Отключить»/«Отмена» button is live in `connected`/
-      // `connecting` — states a switch transiently passes through — so gate its disconnect on the
-      // in-flight switch (handleDisconnectGuarded) to keep it from racing the shared teardown.
-      onDisconnect={handleDisconnectGuarded}
+      // BUG-A2 (17-uat): the StatusPanel «Отключить»/«Отмена» uses the race-safe user cancel. It fires
+      // for a connected «Отключить» (isSwitching false, reconnectResolve null → proceeds) and a live
+      // «Отмена» during connecting/recovering; it is INERT only during a switch/save-and-reconnect
+      // teardown (reconnectResolve armed) so it can never resolve the shared latch early.
+      onDisconnect={handleUserCancel}
       reconnectProgress={reconnectProgress}
       // F28 (fix-all-paths): the StatusPanel «Подключить» (Settings/About tabs) also awaits the
       // pre-connect probe via handleConnectActive — show the instant spinner here too.
       connectPending={pendingConnectPath != null}
+      // BUG-A2 (17-uat): thread the FE-only switching flag so the live «Отмена» is hidden during a
+      // seamless switch's `connecting` leg (where handleUserCancel is inert) — no dead button.
+      switching={isSwitching}
     />
   ) : null;
   const statusPanelFor = (tab: AppTab) => (activeTab === tab ? statusPanelNode : null);
@@ -1344,10 +1501,11 @@ function App() {
               status={status}
               activeConfigPath={config.configPath}
               onConnect={handleConnectConfig}
-              // Phase 14 (CR-02): switch-gated disconnect (the lead card's «Отключить»). ConfigList
-              // already locks the card via `locked={isSwitching}`; this is defense-in-depth so the
-              // disconnect action itself is inert mid-switch and cannot race the shared teardown.
-              onDisconnect={handleDisconnectGuarded}
+              // BUG-A2 (17-uat): the lead card's «Отключить»/«Отмена» uses the race-safe user cancel.
+              // ConfigList already locks the card via `locked={isSwitching}`; this handler is the logic
+              // half — gated on the reconnectResolve latch so a plain connect's «Отмена» works while a
+              // switch/save-and-reconnect teardown cancel stays inert (never resolves the shared latch).
+              onDisconnect={handleUserCancel}
               onSwitchTo={handleConnectConfig}
               onReconnect={handleReconnectGuarded}
               // Phase 14 (D-12): thread the FE-only switching flag so ConfigList can OR it into the
@@ -1425,11 +1583,17 @@ function App() {
               connectedSince={connectedSince}
               vpnError={error}
               onConnect={handleConnectActive}
-              // Phase 14 (CR-02): switch-gated disconnect — the Routing tab's status controls must
-              // not issue a disconnect that races the shared teardown mid-switch.
-              onDisconnect={handleDisconnectGuarded}
+              // BUG-A2 (17-uat): the Routing tab's «Отключить»/«Отмена» uses the race-safe user cancel —
+              // gated on the reconnectResolve latch so it never resolves the shared switch/reconnect
+              // teardown latch early, while a plain connect/connected disconnect passes straight through.
+              onDisconnect={handleUserCancel}
               onReconnect={handleReconnectGuarded}
               onVpnModeChange={setVpnMode}
+              // Fable F4: thread the switch/pending flags so the Routing tab's own StatusPanel hides a
+              // dead live «Отмена» during a switch's connecting leg and keeps its branches mutually
+              // exclusive during the switch's transient disconnected window (matches the shell StatusPanel).
+              isSwitching={isSwitching}
+              connectPending={pendingConnectPath != null}
             />
           </PanelErrorBoundary>
         </div>

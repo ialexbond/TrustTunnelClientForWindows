@@ -9,7 +9,8 @@ import { Skeleton } from "../../shared/ui/Skeleton";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 import { useSecurityState } from "./useSecurityState";
-import { parseCertInfo, daysUntil, pluralRu } from "./certUtils";
+import { parseCertInfo, daysUntil } from "./certUtils";
+import { pluralRu } from "../../shared/lib/pluralRu";
 import { CertModal } from "./CertModal";
 
 /**

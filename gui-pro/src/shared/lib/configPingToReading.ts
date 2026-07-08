@@ -1,4 +1,4 @@
-import type { ConfigPing } from "../../components/connection/ConfigPingPill";
+import type { ConfigPing } from "../hooks/usePerConfigPing";
 import type { Reading } from "./decideAutoSwitch";
 
 /**

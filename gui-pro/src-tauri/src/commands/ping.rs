@@ -247,6 +247,104 @@ async fn probe_tcp(host: &str, port: u16, timeout_ms: u64) -> PingResult {
     }
 }
 
+// ─── D-04: truthful steady-state measurement (discard-first warm-up + min-of-2) ──────────
+
+/// D-04 (17-02): how many REAL (post-warm-up) samples the steady-state measurement takes.
+/// The recommendation (17-RESEARCH §Open-Q1) is «discard-first warm-up + min-of-2»: one
+/// throwaway connect to warm the OS DNS/TCP state, then the MIN of two real probes. Two is
+/// the cheapest count that survives a single unlucky sample (a stray GC/scheduler blip on
+/// one of the two reals is discarded by the min); a higher N buys little and costs a connect.
+const STEADY_STATE_REAL_SAMPLES: usize = 2;
+
+/// D-04 (17-02): pick the honest steady-state ms from a batch of per-probe samples where the
+/// FIRST entry is a cold / idle-inflated warm-up read.
+///
+/// Root cause (verified 17-RESEARCH §D-04): `probe_tcp` opens a FRESH `TcpStream::connect`
+/// every call with no pool. The first connect after idle pays cold OS DNS resolution + a cold
+/// TCP handshake, so a warm ~70 ms endpoint reads ~210 ms on the first «Обновить пинг». That
+/// cold-inflated number then poisons BOTH the displayed pill AND — critically — the frozen
+/// pre-connect band the auto-switch engine reads (PA-2), so an honest low endpoint could be
+/// judged "too slow" off one cold sample.
+///
+/// The fix is a MEASUREMENT strategy, not a connection pool (rejected — the sidecar owns the
+/// real connection; a pooled probe socket adds lifecycle complexity and still can't measure
+/// tunnel RTT): DISCARD the cold first sample, then report the MIN of the remaining REAL
+/// samples (min, not mean — a single stray slow real sample must not inflate the truth).
+///
+/// Contract (pinned by the 17-01 RED test):
+///   - `[cold, a, b]`   → `Some(min(a, b))`   (never the cold first, never the non-min real)
+///   - `[cold, only]`   → `Some(only)`        (one real sample after the warm-up)
+///   - `[cold]` / `[]`  → `None`              (no real sample → honest «—»/no-data, NEVER a
+///     cold-inflated number surfaced as truth)
+///
+/// Pure + total (no I/O), so it is unit-testable without the network.
+fn steady_state_ms(samples: &[u64]) -> Option<u64> {
+    // The first sample is the warm-up throwaway; the honest value is the min of the rest.
+    samples.get(1..).and_then(|real| real.iter().copied().min())
+}
+
+/// D-04 (17-02): the truthful per-endpoint measurement the card pill + the frozen pre-connect
+/// band (PA-2) both consume. Does ONE throwaway `probe_tcp` to warm the OS DNS/TCP state
+/// (result discarded, never banded), then takes `STEADY_STATE_REAL_SAMPLES` real probes and
+/// returns the MIN via `steady_state_ms`.
+///
+/// Non-`Ok` handling preserves the tri-state exactly:
+///   - if ANY real probe reads `Unreachable`/`NoData` (i.e. not every real sample is a numeric
+///     ms), the endpoint is not steadily reachable → return that first non-Ok result verbatim
+///     (a refused/filtered endpoint stays `Unreachable`, an unusable one stays `NoData`).
+///   - only when every real probe is `Ok` do we report the min steady-state ms.
+///
+/// TIMEOUT BUDGET (F8, 17-review): `timeout_ms` is the OVERALL budget, NOT a per-probe cap. The
+/// warm-up runs FIRST and its result is inspected: if it is non-`Ok` (the endpoint refused /
+/// filtered / timed out), we return it IMMEDIATELY without running the two real probes. An
+/// endpoint whose warm-up connect times out will not answer the reals either, so running them
+/// would only burn another 2× `timeout_ms` for the same verdict — that is the regression F8
+/// caught: a SYN-dropping / probe-hostile (D-02-class) endpoint made the AWAITED pre-connect
+/// probe paths (App.tsx manual-connect slow path, useAutoConnect launch, usePerConfigPing sweep)
+/// stall connect ~3× the timeout instead of ~1×. Early-returning on a non-Ok warm-up bounds a
+/// probe-hostile server to ~1× `timeout_ms` while a REACHABLE server's warm-up succeeds fast,
+/// leaving budget for the two reals — so the discard-first + min-of-2 honesty (D-04) is fully
+/// preserved for exactly the endpoints that can answer.
+///
+/// The warm-up connect adds ~1 extra connect of latency per card per MANUAL refresh for a
+/// reachable endpoint — acceptable because the refresh is manual (the «Обновить пинг» button),
+/// never an interval (17-RESEARCH §Open-Q1). SSRF invariant unchanged: `host`/`port` are still
+/// read Rust-side by the caller (`ping_config_endpoint` → `read_endpoint_host_port` +
+/// `validate_ping_host`); this fn never takes a frontend-supplied host. C++ core untouched — a
+/// plain outbound TCP connect.
+async fn probe_tcp_steady_state(host: &str, port: u16, timeout_ms: u64) -> PingResult {
+    // Warm-up: warms OS DNS + the TCP path so the cold-first inflation does not ride into the
+    // reported number. On a REACHABLE endpoint its numeric result is deliberately discarded (never
+    // banded — D-04). On a NON-reachable endpoint (Unreachable/NoData) we return that verdict
+    // straight away: the reals would only re-confirm it at another 2× the timeout (F8 budget fix).
+    match probe_tcp(host, port, timeout_ms).await {
+        PingResult::Ok { .. } => {} // warmed — fall through to the real samples (result discarded)
+        not_reachable => return not_reachable,
+    }
+
+    // Real samples. A non-Ok real sample means the endpoint is not steadily reachable — return
+    // it verbatim so a refused endpoint stays Unreachable (never a spurious min over a partial set).
+    let mut real_ms: Vec<u64> = Vec::with_capacity(STEADY_STATE_REAL_SAMPLES);
+    for _ in 0..STEADY_STATE_REAL_SAMPLES {
+        match probe_tcp(host, port, timeout_ms).await {
+            PingResult::Ok { ms } => real_ms.push(ms),
+            other => return other,
+        }
+    }
+
+    // Every real sample was Ok → the honest steady-state is their min (the warm-up is prefixed
+    // so `steady_state_ms` discards it consistently with the pure-fn contract the RED test pins).
+    let mut with_warmup = Vec::with_capacity(real_ms.len() + 1);
+    with_warmup.push(0); // placeholder for the discarded warm-up slot
+    with_warmup.extend_from_slice(&real_ms);
+    match steady_state_ms(&with_warmup) {
+        Some(ms) => PingResult::Ok { ms },
+        // Structurally unreachable (real_ms is non-empty when we reach here), but map to NoData
+        // rather than panic — the tri-state's honest «—» for "no measurement".
+        None => PingResult::NoData,
+    }
+}
+
 /// Phase 13 (13-08): the endpoint address as a DISPLAY string `"host:port"` from a config's TOML
 /// CONTENT — the value the CONNECT notification plate shows in its address row. Pure (content in,
 /// display string out) so it is unit-testable exactly like `read_endpoint_host_port`, without a real
@@ -303,54 +401,24 @@ pub async fn ping_config_endpoint(
         return Ok(PingResult::NoData);
     }
 
-    Ok(probe_tcp(&host, port, timeout_ms).await)
+    // D-04 (17-02): the truthful steady-state measurement (discard-first warm-up + min-of-2) so
+    // the first «Обновить пинг» after idle is not cold-inflated. The same honest number feeds
+    // both the displayed card pill and the frozen pre-connect band the auto-switch reads (PA-2).
+    Ok(probe_tcp_steady_state(&host, port, timeout_ms).await)
 }
 
-// ─── Tunnel-latency probe for the auto-switch engine (F23) ───────────────────
-
-/// F23 (14-UAT round 2): neutral reference hosts probed THROUGH the tunnel to measure the ACTIVE
-/// tunnel's REAL current latency for the auto-switch engine. While connected the endpoint itself can't
-/// be honestly probed — a direct connect to the endpoint (which IS the VPN server) rides the tunnel to
-/// the-server-and-back = the ~2× / «Недоступен» noise that caused the false switches. A NEUTRAL host
-/// reached via the tunnel (client → VPN server → reference) reflects the honest tunnel latency with no
-/// x2. Several hosts for robustness (one down/blocked → another answers); the probe rides the tunnel
-/// from the VPN server's egress, so a client-side geo-block (e.g. RU vs 1.1.1.1) does not apply.
-const TUNNEL_REFERENCE_HOSTS: &[(&str, u16)] = &[
-    ("8.8.8.8", 443),   // Google (Anycast, global)
-    ("1.1.1.1", 443),   // Cloudflare (Anycast, global)
-    ("77.88.8.8", 443), // Yandex (RU-friendly backup)
-];
-
-/// Pure: pick the FASTEST successful RTT from a set of probe results (the best-case tunnel latency,
-/// robust to one slow/blocked reference). All failed → `Unreachable` (the tunnel is dead or fully
-/// blocked → the engine treats it as a breach). Unit-tested without the network.
-fn best_reference_rtt(results: &[PingResult]) -> PingResult {
-    match results
-        .iter()
-        .filter_map(|r| match r {
-            PingResult::Ok { ms } => Some(*ms),
-            _ => None,
-        })
-        .min()
-    {
-        Some(ms) => PingResult::Ok { ms },
-        None => PingResult::Unreachable,
-    }
-}
-
-/// F23: probe the tunnel's real latency by TCP-connecting to the neutral reference hosts THROUGH the
-/// tunnel (in parallel) and returning the fastest successful RTT. This is the honest in-session health
-/// signal the auto-switch engine evaluates: a slow tunnel reads a high RTT (breach → switch), a dead
-/// tunnel reads `Unreachable` (breach → switch), and a healthy one reads a normal RTT (no switch off a
-/// good server). D-29: touches NO config content — only the fixed reference hosts above.
-#[tauri::command]
-pub async fn probe_tunnel_latency(timeout_ms: u64) -> Result<PingResult, String> {
-    let probes = TUNNEL_REFERENCE_HOSTS
-        .iter()
-        .map(|(host, port)| probe_tcp(host, *port, timeout_ms));
-    let results = futures_util::future::join_all(probes).await;
-    Ok(best_reference_rtt(&results))
-}
+// ─── Tunnel-latency probe (F23) — REMOVED (F11, 17-review) ───────────────────
+//
+// `probe_tunnel_latency` (F23), its `TUNNEL_REFERENCE_HOSTS` table and the `best_reference_rtt`
+// helper were DELETED here. PA-2 (17-02) removed the through-tunnel probe from the auto-switch
+// decision — the engine now evaluates the ACTIVE config's already-frozen pre-connect reading (a
+// direct RTT), never a live through-tunnel probe (F26 caught that reading dishonestly: 14 ms
+// through the tunnel while the direct RTT was ~69 ms). The command had ZERO frontend callers yet
+// stayed registered in lib.rs, so any webview `invoke("probe_tunnel_latency")` could still fire
+// outbound TCP probes to hardcoded hosts. F11 completes the dead-contract sweep the PA-4 scope
+// missed, mirroring the earlier `check_vpn_status` removal. The FE-side retirement comments
+// (useAutoSwitch.ts / useConfigPingSource.ts / App.tsx) are kept — they document WHY there is no
+// live tunnel ping — and the useAutoSwitch test still asserts the tick never invokes it.
 
 // ═══════════════════════════════════════════════════════════════
 //   Tests
@@ -447,6 +515,66 @@ mod tests {
             start.elapsed() < Duration::from_millis(1500) + Duration::from_millis(500),
             "the probe must return within the bounded timeout (never hang)"
         );
+    }
+
+    /// F8 (17-review): the steady-state probe treats `timeout_ms` as the OVERALL budget. On a
+    /// probe-hostile / unreachable endpoint the warm-up reads Unreachable and the fn RETURNS
+    /// immediately — it does NOT then run the two real probes (which would burn another 2× the
+    /// timeout for the same verdict). We prove the bound by measuring: a closed loopback port
+    /// (refused fast) must resolve well under 2× the timeout, i.e. the reals were skipped.
+    #[tokio::test]
+    async fn steady_state_early_returns_on_unreachable_warmup() {
+        // A closed loopback port → the warm-up connect is refused fast (Unreachable). If the fn
+        // still ran the 2 reals, the total would be ~3 refused connects; here it is ~1.
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+            // listener dropped here → port closed
+        };
+        // A generous per-probe timeout so that IF the reals ran, the wall time would visibly
+        // exceed the single-probe budget. A refused connect returns well before the timeout, so
+        // this bound is about the NUMBER of probes, not the timeout elapsing.
+        let timeout_ms = 1500;
+        let start = std::time::Instant::now();
+        let result = probe_tcp_steady_state("127.0.0.1", port, timeout_ms).await;
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            result,
+            PingResult::Unreachable,
+            "a closed endpoint's warm-up reads Unreachable and is returned verbatim"
+        );
+        // The early return means only the warm-up probe ran. Even allowing slack for a slow CI
+        // box, one refused connect must finish far under 2× the timeout (the old behavior ran
+        // warm-up + 2 reals = 3 connects, each bounded by the FULL timeout).
+        assert!(
+            elapsed < Duration::from_millis(timeout_ms) * 2,
+            "unreachable warm-up must short-circuit the reals (bounded to ~1× timeout), \
+             took {elapsed:?}"
+        );
+    }
+
+    /// F8 complement: a REACHABLE endpoint still gets the full D-04 treatment — the warm-up
+    /// succeeds (and is discarded), the two real probes run, and a numeric ms is returned. The
+    /// early-return path must NOT rob a reachable server of its honest min-of-2 measurement.
+    #[tokio::test]
+    async fn steady_state_measures_reachable_endpoint() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Keep accepting so the warm-up + both reals all connect successfully.
+        std::thread::spawn(move || {
+            for _ in 0..8 {
+                if listener.accept().is_err() {
+                    break;
+                }
+            }
+        });
+
+        let result = probe_tcp_steady_state("127.0.0.1", port, 2000).await;
+        match result {
+            PingResult::Ok { ms } => assert!(ms <= 2000, "a reachable endpoint reads a numeric ms"),
+            other => panic!("expected Ok for a reachable loopback listener, got {other:?}"),
+        }
     }
 
     /// Truth: a config with a shell-metachar host is rejected by the validator before any
@@ -641,24 +769,40 @@ mod tests {
         assert!(!host.contains(SECRET));
     }
 
-    /// F23 (14-UAT round 2): the tunnel-latency probe picks the FASTEST successful reference RTT
-    /// (robust to one slow/blocked host); if EVERY reference fails, the tunnel is dead/blocked →
-    /// Unreachable (which the engine treats as a breach → switch).
+    // F11 (17-review): the `best_reference_rtt_picks_fastest_ok_else_unreachable` test was
+    // removed here alongside the `best_reference_rtt` helper + `probe_tunnel_latency` command it
+    // was the only exerciser of (the through-tunnel probe is retired — see the F11 note above).
+}
+
+// ─── Phase 17 (17-02) — GREEN: the D-04 measurement pure fn ───────────────────────────────
+//
+// Was a 17-01 Wave-0 RED scaffold (gated behind `wave0_red`, referencing the not-yet-existing
+// `steady_state_ms`); 17-02 defines `steady_state_ms` above and deletes the gate so this runs
+// GREEN under the default `cargo test --lib`.
+//
+// D-04 contract (RESEARCH §Open-Q1 «discard-first warm-up + min-of-2»): given a batch of
+// per-probe samples where the FIRST is a cold/idle-inflated warm-up read, the reported
+// steady-state value is the MIN of the REAL (post-warm-up) samples — NEVER the cold first.
+// This is the honest number that must feed PA-2's frozen band (D-04 + PA-2 = one thread).
+#[cfg(test)]
+mod wave0_d04_measurement {
+    use super::*;
+
+    /// RED (GREEN by 17-02): `steady_state_ms(samples)` discards the cold first sample and
+    /// returns the MIN of the remaining real probes. Given `[cold=210, a=70, b=85]` the
+    /// reported value is `70` (never the cold 210, never the non-min 85).
     #[test]
-    fn best_reference_rtt_picks_fastest_ok_else_unreachable() {
-        use PingResult::*;
-        assert_eq!(
-            best_reference_rtt(&[Ok { ms: 120 }, Ok { ms: 45 }, Unreachable]),
-            Ok { ms: 45 }
-        );
-        assert_eq!(
-            best_reference_rtt(&[Unreachable, Ok { ms: 200 }, NoData]),
-            Ok { ms: 200 }
-        );
-        assert_eq!(
-            best_reference_rtt(&[Unreachable, Unreachable, Unreachable]),
-            Unreachable
-        );
-        assert_eq!(best_reference_rtt(&[]), Unreachable);
+    fn steady_state_discards_cold_first_and_takes_min_of_the_rest() {
+        // The cold first read (210) is a warm-up throwaway; the honest steady-state is the
+        // min of the two real probes (70).
+        assert_eq!(steady_state_ms(&[210, 70, 85]), Some(70));
+        // Order-independent: the min of the real samples wins regardless of position.
+        assert_eq!(steady_state_ms(&[300, 90, 40, 55]), Some(40));
+        // A single real sample after the warm-up throwaway → that sample.
+        assert_eq!(steady_state_ms(&[500, 120]), Some(120));
+        // Only the cold warm-up, no real sample → no honest measurement (None → «—»/no-data,
+        // never a cold-inflated number surfaced as truth).
+        assert_eq!(steady_state_ms(&[210]), None);
+        assert_eq!(steady_state_ms(&[]), None);
     }
 }
