@@ -29,6 +29,12 @@ interface ConfigListProps {
   pinging?: boolean;
   /** Per-card action callbacks (wired by ConnectionPanel). */
   onConnect?: (config: ConfigSummary) => void;
+  /**
+   * D-05 (17-07): abort the in-flight (re)connect from the LEAD card's connecting loader
+   * (reused `handleDisconnect` → `vpn_disconnect`). Only the live lead card ever reaches a
+   * cancelable state, so this is threaded to the lead ConfigCard only. No new backend command.
+   */
+  onDisconnect?: () => Promise<void> | void;
   onEdit?: (config: ConfigSummary) => void;
   /** Open the ConfigQr transfer modal for a config (D-09) — threaded to every card's «QR-код». */
   onQr?: (config: ConfigSummary) => void;
@@ -111,6 +117,7 @@ export function ConfigList({
   onRefreshPings,
   pinging = false,
   onConnect,
+  onDisconnect,
   onEdit,
   onQr,
   onDelete,
@@ -186,6 +193,45 @@ export function ConfigList({
     return [leadCfg, ...configs.filter((c) => c.id !== leadCfg.id)];
   }, [configs, activeMatchId, leadIsLive]);
 
+  // F13 (17-review): PP-8's `React.memo(ConfigCard)` only skips a render if the card's props keep
+  // STABLE identity. Previously each card got FRESH inline arrows (`() => onConnect(config)` …) and
+  // a freshly-mapped `existingNames` array on EVERY parent render, so the shallow compare always
+  // failed and every card re-rendered on every ping tick — the memo was a no-op. Stabilize the
+  // per-card zero-arg closures in ONE memoized id→handlers map, rebuilt ONLY when `configs` or the
+  // (already useCallback-stable, from ConnectionPanel) raw callbacks change — NOT when `pings`
+  // ticks. Each card then receives the SAME closure identities across a ping update, so an unchanged
+  // card's props shallow-compare equal and React.memo bails. The map is keyed by config id and holds
+  // the config captured at build time (fine — it rebuilds whenever `configs` changes identity).
+  const cardHandlers = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        onConnect?: () => void;
+        onEdit?: () => void;
+        onQr?: () => void;
+        onDelete?: () => void;
+        onDuplicate?: () => void;
+        onRename?: (newName: string) => Promise<string | void> | string | void;
+      }
+    >();
+    for (const config of configs) {
+      map.set(config.id, {
+        onConnect: onConnect ? () => onConnect(config) : undefined,
+        onEdit: onEdit ? () => onEdit(config) : undefined,
+        onQr: onQr ? () => onQr(config) : undefined,
+        onDelete: onDelete ? () => onDelete(config) : undefined,
+        onDuplicate: onDuplicate ? () => onDuplicate(config) : undefined,
+        onRename: onRename ? (newName: string) => onRename(config, newName) : undefined,
+      });
+    }
+    return map;
+  }, [configs, onConnect, onEdit, onQr, onDelete, onDuplicate, onRename]);
+
+  // F13: memoize the shared «all names» array too — a fresh `configs.map(...)` each render would be a
+  // new array identity per card per render (every card takes `existingNames`), defeating the memo.
+  // Rebuilt only when `configs` changes (NOT on a ping tick). Kept as ONE array shared by all cards.
+  const allNames = useMemo(() => configs.map((c) => c.name), [configs]);
+
   // IN-47: the skeleton may ONLY replace an EMPTY list (the genuine first load). It must never swap
   // out a populated list — doing so collapses the scroll container and clamps scrollTop to 0
   // (the scroll-reset-on-every-mutation bug). useConfigList only flips loading on the first load now;
@@ -249,10 +295,6 @@ export function ConfigList({
 
   const [lead, ...rest] = order;
 
-  // All config names — passed to each resting card so the inline rename can flag a name that
-  // collides with ANOTHER config (the card excludes its own current name).
-  const allNames = configs.map((c) => c.name);
-
   // A stable per-config view-transition-name lets the browser pair the SAME card's old and new
   // box across the reorder (cast: the property is newer than the TS DOM lib here).
   const vtName = (id: string): CSSProperties => ({ viewTransitionName: `cfg-${id}` }) as CSSProperties;
@@ -313,12 +355,19 @@ export function ConfigList({
                 activeElsewhere={false}
                 ping={pings[lead.id]}
                 existingNames={allNames}
-                onConnect={onConnect ? () => onConnect(lead) : undefined}
-                onEdit={onEdit ? () => onEdit(lead) : undefined}
-                onQr={onQr ? () => onQr(lead) : undefined}
-                onDelete={onDelete ? () => onDelete(lead) : undefined}
-                onDuplicate={onDuplicate ? () => onDuplicate(lead) : undefined}
-                onRename={onRename ? (newName) => onRename(lead, newName) : undefined}
+                // F13: stable per-card closures from the memoized handler map (see cardHandlers) so
+                // React.memo(ConfigCard) can actually skip an unchanged card on a ping tick.
+                onConnect={cardHandlers.get(lead.id)?.onConnect}
+                // D-05 (17-07): the «Отмена» button on the connecting loader aborts the in-flight
+                // (re)connect via the reused vpn_disconnect. Only the lead card reaches a cancelable
+                // state, so onDisconnect is threaded here (not to the resting rows). Already stable
+                // (a single useCallback from ConnectionPanel) → no per-card wrapping needed.
+                onDisconnect={onDisconnect}
+                onEdit={cardHandlers.get(lead.id)?.onEdit}
+                onQr={cardHandlers.get(lead.id)?.onQr}
+                onDelete={cardHandlers.get(lead.id)?.onDelete}
+                onDuplicate={cardHandlers.get(lead.id)?.onDuplicate}
+                onRename={cardHandlers.get(lead.id)?.onRename}
               />
             </div>
             {rest.map((config) => (
@@ -335,12 +384,13 @@ export function ConfigList({
                   locked={listLocked}
                   // F28: instant spinner if THIS resting card's «Переключиться»/connect was just clicked.
                   connectPending={pendingConnectPath != null && samePath(config.path, pendingConnectPath)}
-                  onConnect={onConnect ? () => onConnect(config) : undefined}
-                  onEdit={onEdit ? () => onEdit(config) : undefined}
-                  onQr={onQr ? () => onQr(config) : undefined}
-                  onDelete={onDelete ? () => onDelete(config) : undefined}
-                  onDuplicate={onDuplicate ? () => onDuplicate(config) : undefined}
-                  onRename={onRename ? (newName) => onRename(config, newName) : undefined}
+                  // F13: stable per-card closures from the memoized handler map.
+                  onConnect={cardHandlers.get(config.id)?.onConnect}
+                  onEdit={cardHandlers.get(config.id)?.onEdit}
+                  onQr={cardHandlers.get(config.id)?.onQr}
+                  onDelete={cardHandlers.get(config.id)?.onDelete}
+                  onDuplicate={cardHandlers.get(config.id)?.onDuplicate}
+                  onRename={cardHandlers.get(config.id)?.onRename}
                 />
               </div>
             ))}
@@ -363,15 +413,16 @@ export function ConfigList({
                 // F28: instant spinner if THIS card's «Подключить» was just clicked (the common fresh-
                 // connect path — the uniform not-connected list).
                 connectPending={pendingConnectPath != null && samePath(config.path, pendingConnectPath)}
-                onConnect={onConnect ? () => onConnect(config) : undefined}
-                onEdit={onEdit ? () => onEdit(config) : undefined}
-                // D-09: «QR-код» must reach EVERY card. This not-connected uniform list is the COMMON
-                // state (nothing connected, e.g. right after launch), so omitting onQr here made the
-                // card's «…»→«QR-код» a silent no-op in the app's default state (15-VERIFICATION gap).
-                onQr={onQr ? () => onQr(config) : undefined}
-                onDelete={onDelete ? () => onDelete(config) : undefined}
-                onDuplicate={onDuplicate ? () => onDuplicate(config) : undefined}
-                onRename={onRename ? (newName) => onRename(config, newName) : undefined}
+                // F13: stable per-card closures from the memoized handler map. `onQr` reaches EVERY
+                // card here too (D-09): this not-connected uniform list is the COMMON state (nothing
+                // connected, e.g. right after launch), so omitting it made «…»→«QR-код» a silent
+                // no-op in the app's default state (15-VERIFICATION gap).
+                onConnect={cardHandlers.get(config.id)?.onConnect}
+                onEdit={cardHandlers.get(config.id)?.onEdit}
+                onQr={cardHandlers.get(config.id)?.onQr}
+                onDelete={cardHandlers.get(config.id)?.onDelete}
+                onDuplicate={cardHandlers.get(config.id)?.onDuplicate}
+                onRename={cardHandlers.get(config.id)?.onRename}
               />
             </div>
           ))

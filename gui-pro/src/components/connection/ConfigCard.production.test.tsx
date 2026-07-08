@@ -14,6 +14,7 @@ const L = {
   connect: i18n.t("connection.card.connect"),
   disconnect: i18n.t("connection.card.disconnect"),
   connecting: i18n.t("status.connecting_short"),
+  disconnecting: i18n.t("status.disconnecting_short"),
   // Phase 14 (14-02): the switching-face badge label. Until the ru/en key lands, i18n.t returns
   // the key string itself ("status.switching_short") — the switching-face test asserts THIS resolved
   // value renders, so it flips GREEN automatically once 14-02 adds «Переключение» and forces it.
@@ -181,14 +182,17 @@ describe("ConfigCard", () => {
     expect(onRename).toHaveBeenCalledWith("Тестирование");
   });
 
-  // Truth: any in-flight lead state renders an icon-only SPINNER primary (no text label) —
-  // the action word lives in aria-label/title, not as visible button text (F24).
-  it("in-flight lead card renders an icon-only spinner primary (no text label)", () => {
-    renderWithProviders(<ConfigCard config={cfg} leadCard status="connecting" />);
-    const btn = screen.getByRole("button", { name: L.connecting });
+  // Truth: a NON-cancelable in-flight lead state renders an icon-only SPINNER primary (no text
+  // label) — the action word lives in aria-label/title, not as visible button text (F24). D-05
+  // (17-07) made the CANCELABLE states (connecting/reconnecting/recovering) render a live «Отмена»
+  // button instead (see ConfigCard.cancel.test.tsx), so the icon-only spinner now covers only the
+  // non-cancelable teardown («Отключение» / disconnecting) and the locked switch/pending legs.
+  it("non-cancelable in-flight lead card (disconnecting) renders an icon-only spinner primary (no text label)", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="disconnecting" />);
+    const btn = screen.getByRole("button", { name: L.disconnecting });
     // The accessible name is the state word, but there is no visible text content.
     expect(btn.textContent?.trim()).toBe("");
-    // Ping is HIDDEN during connecting (F03) — no ping pill text on the card.
+    // Ping is HIDDEN during the teardown (F03) — no ping pill text on the card.
     expect(screen.queryByText(L.no_data)).not.toBeInTheDocument();
     expect(screen.queryByText(L.unreachable)).not.toBeInTheDocument();
   });

@@ -477,6 +477,65 @@ describe("useVpnEvents", () => {
     expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
   });
 
+  it("F7: an armed reconnectResolve latch SUPPRESSES the neutral «VPN отключён» on the teardown leg", async () => {
+    // A manual «Сохранить и переподключить» / a manual switch arms `reconnectResolve` before its
+    // teardown vpn_disconnect. The teardown's `disconnected` (prev="connected"/"disconnecting") is
+    // owned by the SEPARATE reconnect-completion listener (it fulfils the promise) — it is NOT a
+    // user-visible disconnect, so the neutral snackbar must be suppressed. This is the restored
+    // pre-CA-1 `!reconnectResolve.current` gate (F7): without it the teardown half of every
+    // save-and-reconnect / switch flashed «VPN отключён» before the destination «VPN подключён».
+    //
+    // The status listener is registered BEFORE the reconnect-completion listener, and in production
+    // React runs the setStatus updater SYNCHRONOUSLY inside the first listener — so the latch is read
+    // while still armed, THEN the completion listener nulls it. Model that ordering faithfully with a
+    // setStatus mock that runs its updater synchronously against a held `prev` (a plain deferred mock
+    // would read the ref only after the completion listener already nulled it — a harness artifact,
+    // not the real ordering).
+    const { pushSuccess, reconnectResolve, params } = makeParams();
+    let prevStatus: VpnStatus = "connected";
+    const setStatusSync = vi.fn((updater: VpnStatus | ((p: VpnStatus) => VpnStatus)) => {
+      prevStatus = typeof updater === "function" ? (updater as (p: VpnStatus) => VpnStatus)(prevStatus) : updater;
+    });
+    const syncParams = { ...params, setStatus: setStatusSync };
+    await act(async () => {
+      renderHook(() => useVpnEvents(syncParams));
+    });
+    // Arm the latch exactly as useVpnActions does before the teardown vpn_disconnect.
+    reconnectResolve.current = () => {};
+    pushSuccess.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+    });
+    // reconnectPending=true was read while armed → the neutral snackbar is dropped …
+    expect(pushSuccess).not.toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+    // … the status still committed (only the snackbar is gated) …
+    expect(prevStatus).toBe("disconnected");
+    // … and the completion listener consumed + nulled the latch (its only job on this edge).
+    expect(reconnectResolve.current).toBeNull();
+  });
+
+  it("F7 parity: a genuine user disconnect (latch NOT armed) still fires «VPN отключён»", async () => {
+    // The mirror of the test above: with `reconnectResolve` null (a real user «Отключить», no
+    // reconnect in flight) the connected→disconnected edge still toasts the neutral snackbar —
+    // the restored gate must NOT suppress an ordinary disconnect.
+    const { pushSuccess, reconnectResolve, params } = makeParams();
+    let prevStatus: VpnStatus = "connected";
+    const setStatusSync = vi.fn((updater: VpnStatus | ((p: VpnStatus) => VpnStatus)) => {
+      prevStatus = typeof updater === "function" ? (updater as (p: VpnStatus) => VpnStatus)(prevStatus) : updater;
+    });
+    await act(async () => {
+      renderHook(() => useVpnEvents({ ...params, setStatus: setStatusSync }));
+    });
+    reconnectResolve.current = null; // no reconnect/switch in flight
+    pushSuccess.mockClear();
+
+    await act(async () => {
+      emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+    });
+    expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+  });
+
   it("AUDIT #8: with no manualReconnectActiveRef wired at all, 'disconnected' is never suppressed", async () => {
     // The ref param is optional (older call sites / tests). Absent ref must behave like
     // "no manual reconnect in flight" — the safe direction (never suppress).
@@ -919,7 +978,10 @@ describe("useVpnEvents", () => {
       },
     );
 
-    it("connecting → disconnected with NO error shows the localized generic, not English «Connection failed»", async () => {
+    it("connecting → disconnected with NO error and NO cancel flag shows neutral «VPN отключён» (backend settle, F1/F5)", async () => {
+      // Fable F1/F5: WITHOUT the explicit connectCancelledRef flag a connecting → disconnected (no
+      // error) edge is a BACKEND settle (e.g. sidecar-exit-0), NOT a user cancel — it shows the neutral
+      // «VPN отключён», never a false «Подключение отменено» and never the red «Connection failed».
       const { setStatus, pushSuccess, params } = makeParams();
       const switchSupersededRef = { current: false };
       await act(async () => {
@@ -932,8 +994,31 @@ describe("useVpnEvents", () => {
       const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
       if (typeof updater === "function") updater("connecting");
 
-      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("errors.connection_failed"), "error");
-      expect(pushSuccess).not.toHaveBeenCalledWith("Connection failed", "error");
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+      expect(pushSuccess).not.toHaveBeenCalledWith(i18n.t("messages.connect_cancelled", "Connection cancelled"));
+      expect(pushSuccess).not.toHaveBeenCalledWith(i18n.t("errors.connection_failed"), "error");
+    });
+
+    it("disconnected WITH the connectCancelledRef flag shows «Подключение отменено» + CONSUMES the flag (F1 real button path)", async () => {
+      // Fable F1: the REAL button path. handleUserCancel sets connectCancelledRef, then handleDisconnect
+      // sets `disconnecting` optimistically, so the terminal edge arrives with prev="disconnecting". The
+      // FLAG (not prev) carries the cancel → «Подключение отменено», and the listener CONSUMES the ref.
+      const { setStatus, pushSuccess, params } = makeParams();
+      const connectCancelledRef = { current: true };
+      await act(async () => {
+        renderHook(() => useVpnEvents({ ...params, connectCancelledRef }));
+      });
+      pushSuccess.mockClear();
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" as VpnStatus });
+      });
+      const updater = setStatus.mock.calls[setStatus.mock.calls.length - 1]?.[0];
+      if (typeof updater === "function") updater("disconnecting"); // handleDisconnect's optimistic prev
+
+      expect(pushSuccess).toHaveBeenCalledWith(i18n.t("messages.connect_cancelled", "Connection cancelled"));
+      expect(pushSuccess).not.toHaveBeenCalledWith(i18n.t("messages.vpn_disconnected", "VPN disconnected"));
+      // One-shot: the ref is drained so a LATER disconnect is not mislabelled as «отменено».
+      expect(connectCancelledRef.current).toBe(false);
     });
   });
 

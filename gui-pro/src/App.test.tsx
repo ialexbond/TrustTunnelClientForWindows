@@ -189,7 +189,6 @@ describe("App", () => {
 
     // Default Tauri mocks
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return null;
       if (cmd === "get_auto_connect") return false;
       if (cmd === "auto_detect_config") return null;
@@ -232,7 +231,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/some/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -525,7 +523,6 @@ describe("App", () => {
       localStorage.setItem("tt_config_path", "/config.json");
       localStorage.setItem("tt_active_page", "routing");
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "read_client_config") return { vpn_mode: "general" };
         if (cmd === "auto_detect_config") return null;
         return null;
@@ -556,7 +553,6 @@ describe("App", () => {
       localStorage.setItem("tt_config_path", "/config.json");
       localStorage.setItem("tt_active_page", "routing");
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "read_client_config") return { vpn_mode: "general" };
         if (cmd === "auto_detect_config") return null;
         return null;
@@ -714,7 +710,6 @@ describe("App", () => {
   it("vpn-status event updates status to connected", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -738,7 +733,6 @@ describe("App", () => {
   it("vpn-status event updates status to disconnected and clears connectedSince", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -765,7 +759,6 @@ describe("App", () => {
   it("vpn-status event with error sets error", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -788,7 +781,6 @@ describe("App", () => {
   it("vpn-status recovering → disconnected resolves to Disconnected (terminal NoConfig — F0)", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -830,7 +822,6 @@ describe("App", () => {
     // useVpnActions.test.ts; here no manual reconnect ran, so the event must land.
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -860,7 +851,6 @@ describe("App", () => {
     localStorage.setItem("tt_log_level", "debug");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") return null;
@@ -908,7 +898,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/my/config.json");
     localStorage.setItem("tt_log_level", "debug");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") return null;
@@ -957,7 +946,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_log_level", "info");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "list_configs")
@@ -1034,7 +1022,6 @@ describe("App", () => {
     // plate ping instead of «—».
     let probeResult: { status: string; ms?: number } = { status: "no-data" };
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "list_configs")
@@ -1091,7 +1078,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_log_level", "info");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "list_configs")
@@ -1143,7 +1129,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/my/config.json");
     localStorage.setItem("tt_log_level", "debug");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       // Older backend / non-Tauri env: the probe command itself rejects — the push must
@@ -1189,7 +1174,6 @@ describe("App", () => {
     // window the guard exists to close.
     let resolveProbe: ((v: unknown) => void) | undefined;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "ping_config_endpoint")
@@ -1238,7 +1222,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/my/config.json");
     localStorage.setItem("tt_log_level", "info");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "ping_config_endpoint") return { status: "ok", ms: 33 };
@@ -1297,7 +1280,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/my/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") throw new Error("VPN connect failed");
@@ -1321,7 +1303,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/my/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -1342,6 +1323,301 @@ describe("App", () => {
     expect(statusPanelProps.status).toBe("disconnecting");
   });
 
+  // ─── BUG-A2 (17-uat): the RACE-SAFE user «Отмена» / handleUserCancel ───
+  //
+  // handleUserCancel is the disconnect wired to every FE-reachable disconnect BUTTON (Connection lead
+  // card, StatusPanel, RoutingPanel, VpnContext). Its gate is `isSwitching || reconnectResolve.current
+  // !== null`, NOT `connectInFlightRef`. These tests are the exact regression guard for BUG-A: they
+  // must FAIL if the reconnectResolve gate is removed (the naive fix that ungated the disconnect and
+  // let a cancel resolve the SHARED reconnectResolve latch early → double-spawn storm + lock-up).
+  describe("BUG-A2 — race-safe user cancel (handleUserCancel)", () => {
+    it("PROCEEDS during a plain connect (status connecting, reconnectResolve null) → fires vpn_disconnect", async () => {
+      // A plain connect from disconnected: connectInFlightRef is held for the connect span but
+      // reconnectResolve is NEVER armed (no teardown), so the cancel MUST tear the connect down.
+      localStorage.setItem("tt_config_path", "/my/config.json");
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "ping_config_endpoint") return { status: "ok", ms: 20 };
+        if (cmd === "vpn_connect") return null;
+        if (cmd === "vpn_disconnect") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      await gotoSettings();
+
+      // Fire the connect (its finally releases connectInFlightRef once vpn_connect resolves).
+      await act(async () => {
+        await statusPanelProps.onConnect();
+      });
+      // The tunnel is coming up — the live status is «Подключение».
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connecting" });
+      });
+      expect(statusPanelProps.status).toBe("connecting");
+
+      const before = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_disconnect").length;
+      // The «Отмена» (StatusPanel onDisconnect === App handleUserCancel) — reconnectResolve is null,
+      // isSwitching false → it PROCEEDS and tears the connect down.
+      await act(async () => {
+        await statusPanelProps.onDisconnect();
+      });
+      const after = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_disconnect").length;
+      expect(after).toBe(before + 1); // exactly one vpn_disconnect fired by the cancel
+      expect(statusPanelProps.status).toBe("disconnecting");
+    });
+
+    it("is INERT while a save-and-reconnect teardown latch is armed (reconnectResolve !== null) — no double vpn_disconnect", async () => {
+      // THE core regression guard. A manual «Сохранить и переподключить» arms the SHARED
+      // reconnectResolve during its teardown wait (handleReconnect: after vpn_disconnect, before the
+      // `disconnected` event). A cancel landing in THAT window must be INERT — firing vpn_disconnect
+      // again (or resolving the latch) is exactly the BUG-A double-spawn storm. If the reconnectResolve
+      // gate is removed, a SECOND vpn_disconnect fires here and this test fails.
+      localStorage.setItem("tt_config_path", "/my/config.json");
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "ping_config_endpoint") return { status: "ok", ms: 33 };
+        if (cmd === "vpn_connect") return null;
+        if (cmd === "vpn_disconnect") return null;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      // A live session so the reconnect is reachable.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Fire the save-and-reconnect but DO NOT emit the teardown `disconnected` — the flow parks with
+      // reconnectResolve ARMED (the exact dangerous window).
+      let reconnectPromise: Promise<void> | undefined;
+      await act(async () => {
+        reconnectPromise = routingPanelProps.onReconnect();
+        // Let the teardown vpn_disconnect resolve so reconnectResolve.current is armed for the wait.
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const teardownCount = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_disconnect").length;
+      expect(teardownCount).toBe(1); // only the reconnect's own teardown so far
+
+      // A cancel in the armed window — MUST be inert (no extra vpn_disconnect, latch untouched).
+      await act(async () => {
+        await routingPanelProps.onDisconnect();
+      });
+      expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_disconnect").length).toBe(1);
+
+      // Release the latch so the reconnect completes cleanly (proves the latch was still intact).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await reconnectPromise!;
+      });
+      // The reconnect proceeded to its own vpn_connect (the flow was never derailed by the cancel).
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("vpn_connect", {
+        configPath: "/my/config.json",
+        logLevel: "info",
+      });
+    });
+
+    it("is INERT while a seamless switch is in flight (isSwitching) — no cancel-driven vpn_disconnect", async () => {
+      // During a seamless A→B switch isSwitching is true AND reconnectResolve is armed across the
+      // teardown; a cancel must be inert so it cannot race the swap. The switch does its OWN single
+      // teardown vpn_disconnect; a cancel in that window must add NO further vpn_disconnect.
+      const CFG_A = "/config-a.toml";
+      const CFG_B = "/config-b.toml";
+      localStorage.setItem("tt_config_path", CFG_A);
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "list_configs")
+          return [
+            { id: "id-a", name: "A", host: "a.example.com", user: "u", path: CFG_A, order: 0, last_used: true },
+            { id: "id-b", name: "B", host: "b.example.com", user: "u", path: CFG_B, order: 1, last_used: false },
+          ];
+        if (cmd === "ping_config_endpoint") return { status: "ok", ms: 30 };
+        if (cmd === "vpn_connect") return null;
+        if (cmd === "vpn_disconnect") return null;
+        void args;
+        return null;
+      });
+
+      await act(async () => {
+        render(<App />);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // Seed a LIVE tunnel on A so onSwitchTo(CFG_B) is a REAL switch (sets isSwitching).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+
+      // Fire the switch WITHOUT settling it — isSwitching is true, the teardown is in flight.
+      let switchPromise: Promise<unknown> | undefined;
+      await act(async () => {
+        switchPromise = connectionPanelProps.onSwitchTo(CFG_B);
+        await Promise.resolve();
+      });
+      expect(connectionPanelProps.isSwitching).toBe(true);
+
+      const before = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_disconnect").length;
+      // The lead card «Отмена» (connectionPanelProps.onDisconnect === App handleUserCancel) must be
+      // INERT mid-switch — no extra vpn_disconnect.
+      await act(async () => {
+        await connectionPanelProps.onDisconnect();
+      });
+      const after = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "vpn_disconnect").length;
+      expect(after).toBe(before); // cancel added nothing
+
+      // Let the switch settle so nothing dangles (teardown → B connects).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(5);
+        emitEvent("vpn-status", { status: "connected" });
+        await switchPromise;
+      });
+    });
+
+    it("Fable F1: a REAL button-click cancel (connecting → click «Отмена» → disconnected event) toasts «Подключение отменено»", async () => {
+      // The Fable F1 regression guard: this drives the ACTUAL button path, NOT a synthesized
+      // recovering→disconnected edge (which passed spuriously). handleUserCancel sets connectCancelledRef
+      // + handleDisconnect sets the optimistic `disconnecting`, so the terminal `disconnected` arrives
+      // with prev="disconnecting" — the FLAG (not prev) must carry the cancel to «Подключение отменено».
+      localStorage.setItem("tt_config_path", "/my/config.json");
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "ping_config_endpoint") return { status: "ok", ms: 20 };
+        if (cmd === "vpn_connect") return null;
+        if (cmd === "vpn_disconnect") return null;
+        return null;
+      });
+
+      const pushSpy = vi.spyOn(i18n, "t");
+      await act(async () => {
+        render(<App />);
+      });
+      await gotoSettings();
+
+      // Real connect → live status «Подключение».
+      await act(async () => {
+        await statusPanelProps.onConnect();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connecting" });
+      });
+      expect(statusPanelProps.status).toBe("connecting");
+
+      pushSpy.mockClear();
+      // Click «Отмена» — handleUserCancel sets connectCancelledRef, handleDisconnect sets optimistic
+      // `disconnecting` (status flips) and calls vpn_disconnect.
+      await act(async () => {
+        await statusPanelProps.onDisconnect();
+      });
+      expect(statusPanelProps.status).toBe("disconnecting");
+      // The Rust terminal `disconnected` edge lands (prev is now `disconnecting`).
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+      });
+
+      // The cancel snackbar copy was resolved (via the flag) — never the neutral «VPN отключён».
+      expect(pushSpy).toHaveBeenCalledWith("messages.connect_cancelled", "Connection cancelled");
+      expect(pushSpy).not.toHaveBeenCalledWith("messages.vpn_disconnected", "VPN disconnected");
+      // Part B (cancel notification): handleUserCancel ALSO mirrors the cancel intent into Rust so the
+      // desktop PLATE (window-closed) shows «Подключение отменено» not «Отключено». It is invoked at
+      // the SAME point as connectCancelledRef (in-flight connect/recovery cancel only).
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_pending_cancel", { pending: true });
+      pushSpy.mockRestore();
+    });
+
+    it("Fable F1: a connected «Отключить» (connectCancelledRef stays false) toasts the neutral «VPN отключён»", async () => {
+      // A genuine live-tunnel disconnect: handleUserCancel does NOT set connectCancelledRef (statusRef is
+      // `connected`, not connecting/recovering), so the terminal edge routes the neutral «VPN отключён».
+      localStorage.setItem("tt_config_path", "/my/config.json");
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "vpn_disconnect") return null;
+        return null;
+      });
+
+      const pushSpy = vi.spyOn(i18n, "t");
+      await act(async () => {
+        render(<App />);
+      });
+      await gotoSettings();
+      // Live tunnel.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connected" });
+      });
+      expect(statusPanelProps.status).toBe("connected");
+
+      pushSpy.mockClear();
+      // «Отключить» → handleUserCancel (statusRef=connected → flag NOT set) → handleDisconnect.
+      await act(async () => {
+        await statusPanelProps.onDisconnect();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "disconnected" });
+      });
+
+      expect(pushSpy).toHaveBeenCalledWith("messages.vpn_disconnected", "VPN disconnected");
+      expect(pushSpy).not.toHaveBeenCalledWith("messages.connect_cancelled", "Connection cancelled");
+      // Part B (cancel notification): a genuine connected «Отключить» must NOT raise the Rust cancel
+      // intent — statusRef is `connected`, so handleUserCancel skips the flag branch entirely and the
+      // desktop plate stays «Отключено», never «Подключение отменено».
+      expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("set_pending_cancel", { pending: true });
+      pushSpy.mockRestore();
+    });
+
+    it("Fable F1: a genuine connect FAILURE (error payload) toasts the red snack:error, not «отменено»", async () => {
+      // A real failure arrives as an `error` status with a reason; the connectCancelledRef is not set
+      // (no user cancel), so it routes the localized red error snackbar — never the cancel toast.
+      localStorage.setItem("tt_config_path", "/my/config.json");
+      localStorage.setItem("tt_log_level", "info");
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === "read_client_config") return { vpn_mode: "general" };
+        if (cmd === "auto_detect_config") return null;
+        if (cmd === "ping_config_endpoint") return { status: "ok", ms: 20 };
+        if (cmd === "vpn_connect") return null;
+        return null;
+      });
+
+      const pushSpy = vi.spyOn(i18n, "t");
+      await act(async () => {
+        render(<App />);
+      });
+      await gotoSettings();
+      await act(async () => {
+        await statusPanelProps.onConnect();
+      });
+      await act(async () => {
+        emitEvent("vpn-status", { status: "connecting" });
+      });
+      pushSpy.mockClear();
+      // The core fails the connect straight to `error` with a reason — no user cancel involved.
+      await act(async () => {
+        emitEvent("vpn-status", { status: "error", error: "connect-timeout" });
+      });
+
+      // Never the cancel toast; the status reflects the genuine failure.
+      expect(pushSpy).not.toHaveBeenCalledWith("messages.connect_cancelled", "Connection cancelled");
+      expect(statusPanelProps.status).toBe("error");
+      expect(statusPanelProps.error).toBe(i18n.t("errors.connect_timeout"));
+      pushSpy.mockRestore();
+    });
+  });
+
   // ─── Internet status (DISPLAY-ONLY — reconnect is driven in Rust) ───
   //
   // Plan 02-04 deleted the frontend-driven reconnect: the window-independent Rust
@@ -1357,7 +1633,6 @@ describe("App", () => {
   it("internet-status disconnect sets the recovering BANNER but NOT the status, and invokes no VPN commands (02-20: vpn-status owns status)", async () => {
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -1390,7 +1665,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
     localStorage.setItem("tt_log_level", "info");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") return null;
@@ -1417,7 +1691,6 @@ describe("App", () => {
     // carrying the `recovery-timeout` reason code (the single status owner, D-01).
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -1447,7 +1720,6 @@ describe("App", () => {
     localStorage.setItem("tt_log_level", "info");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") return null;
@@ -1481,7 +1753,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1503,7 +1774,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_connect") throw new Error("Auto-connect failed");
@@ -1540,7 +1810,6 @@ describe("App", () => {
     // and carries the candidate list the engine consumes.
     localStorage.setItem("tt_config_path", "/config.json");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "list_configs")
@@ -1573,7 +1842,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
     // tt_auto_switch_enabled is unset → masterOn defaults false. tt_auto_connect unset → no startup connect.
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "connected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "list_configs")
@@ -1609,7 +1877,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "proxy" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1629,7 +1896,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "settings");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") throw new Error("Config not found");
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1647,7 +1913,6 @@ describe("App", () => {
 
   it("auto-detect config when no saved path", async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "auto_detect_config") return "/detected/config.json";
       return null;
     });
@@ -1732,7 +1997,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "routing");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1761,7 +2025,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "about");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1779,7 +2042,6 @@ describe("App", () => {
     // No tt_active_page set
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1796,7 +2058,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1843,7 +2104,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "about");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1876,7 +2136,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "about");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -1934,7 +2193,6 @@ describe("App", () => {
       localStorage.setItem("tt_config_path", "/config.json");
 
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "read_client_config") return { vpn_mode: "general" };
         if (cmd === "auto_detect_config") return null;
         return null;
@@ -1962,7 +2220,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2004,7 +2261,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2029,7 +2285,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "connected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2054,7 +2309,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "routing");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2078,7 +2332,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "control");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2100,7 +2353,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_tab", "control");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2124,7 +2376,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "control");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2147,7 +2398,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2182,7 +2432,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "about");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2203,7 +2452,6 @@ describe("App", () => {
     localStorage.setItem("tt_config_path", "/config.json");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       if (cmd === "vpn_disconnect") return null;
@@ -2237,7 +2485,6 @@ describe("App", () => {
     localStorage.setItem("tt_active_page", "about");
 
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "check_vpn_status") return "disconnected";
       if (cmd === "read_client_config") return { vpn_mode: "general" };
       if (cmd === "auto_detect_config") return null;
       return null;
@@ -2348,7 +2595,6 @@ describe("App", () => {
     it("C-21/D-17: onboarding «Начать» с НЕТ конфига → вкладка «Панель управления» (control), не в петлю Подключения", async () => {
       localStorage.clear();
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "auto_detect_config") return null;
         return null;
       });
@@ -2372,7 +2618,6 @@ describe("App", () => {
       // absent, so the tour still shows; but completion must route to connection.
       localStorage.setItem("tt_config_path", "/config.json");
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "read_client_config") return { vpn_mode: "general" };
         if (cmd === "auto_detect_config") return null;
         return null;
@@ -2399,7 +2644,6 @@ describe("App", () => {
       localStorage.setItem("tt_config_path", "/config.json");
       localStorage.setItem("tt_ssh_last_host", "1.2.3.4"); // suppress the welcome tour
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "read_client_config") return { vpn_mode: "general" };
         if (cmd === "auto_detect_config") return null;
         return null;
@@ -2443,7 +2687,6 @@ describe("App", () => {
     // working — the second parameter is simply ignored by them.
     function twoConfigInvoke(extra?: (cmd: string, args?: unknown) => unknown) {
       return async (cmd: string, args?: unknown) => {
-        if (cmd === "check_vpn_status") return "disconnected";
         if (cmd === "read_client_config") return { vpn_mode: "general" };
         if (cmd === "auto_detect_config") return null;
         if (cmd === "list_configs")
@@ -2510,12 +2753,18 @@ describe("App", () => {
       });
       expect(connectionPanelProps.isSwitching).toBe(true);
 
-      // Let it settle: resolve the probe → switchTo tears down A (disconnected) → connects B → the
+      // Let it settle: switchTo tears down A (disconnected). BUG-B (17-uat) B1: the destination probe
+      // now runs POST-teardown (honest), so it fires AFTER the disconnected event — resolve any probe
+      // resolvers again after emitting disconnected so the seeded post-teardown probe is settled too
+      // (before the seeded probe existed, the pre-teardown probe was resolved up front). Then the
       // terminal connected edge it parks on (FAB-02) settles the switch.
       await act(async () => {
         probeResolvers.forEach((res) => res({ status: "ok", ms: 30 }));
         await vi.advanceTimersByTimeAsync(1);
         emitEvent("vpn-status", { status: "disconnected" });
+        await vi.advanceTimersByTimeAsync(1);
+        // The post-teardown seeded probe fired now — resolve it (and any A-reprobe) so switchTo proceeds.
+        probeResolvers.forEach((res) => res({ status: "ok", ms: 30 }));
         await vi.advanceTimersByTimeAsync(5);
         emitEvent("vpn-status", { status: "connected" });
         await switchPromise;

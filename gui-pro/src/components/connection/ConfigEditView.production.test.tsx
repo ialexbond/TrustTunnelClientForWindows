@@ -54,7 +54,6 @@ const L = {
   close: i18n.t("connection.editView.close"),
   loadError: i18n.t("connection.editView.load_error"),
   passwordAria: i18n.t("connection.editView.credentials_password_aria"),
-  retry: i18n.t("connection.import.retry_failed"),
 };
 
 function setup(props?: Partial<Parameters<typeof ConfigEditView>[0]>) {
@@ -161,8 +160,10 @@ describe("ConfigEditView (production)", () => {
     // accessible name but no text content) — query by the text node to disambiguate.
     const footerClose = screen.getByText(L.close, { selector: "button" });
     expect(footerClose).toBeInTheDocument();
-    // No retry button — re-reading a corrupt file changes nothing.
-    expect(screen.queryByRole("button", { name: L.retry })).not.toBeInTheDocument();
+    // No retry button — re-reading a corrupt file changes nothing. (The dead
+    // connection.import.retry_failed i18n key was removed in CA-5; assert the wording
+    // directly so the guard survives without leaning on a nonexistent key.)
+    expect(screen.queryByRole("button", { name: /Повторить/ })).not.toBeInTheDocument();
     // The form is NOT rendered (no password field in the error branch).
     expect(screen.queryByLabelText(L.passwordAria)).not.toBeInTheDocument();
   });

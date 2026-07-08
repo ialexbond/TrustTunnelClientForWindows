@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PING_TIMEOUT_MS } from "./usePerConfigPing";
 import {
   decideAutoSwitch,
   type Candidate,
@@ -23,10 +22,13 @@ import type { VpnStatus } from "../types";
  *     bug `useAutoConnect` was fixed for); it cancels cleanly on unmount, on status leaving
  *     "connected", and on master toggling off (the `cancelled` flag + `clearTimeout` cleanup,
  *     StrictMode-correct WITHOUT a separate once-guard — WR-06, same as `usePerConfigPing`).
- *   - Each tick pings the ACTIVE config via `ping_config_endpoint` (the SAME command the cards
- *     use), maps the result to a decision `Reading`, reads the latest prefs + priority-ordered
- *     candidates from refs, runs `decideAutoSwitch`, writes back the next `EngineState`, and on
- *     `action.kind === "switch"` awaits `switchTo(targetPath)` then re-arms the cooldown.
+ *   - PA-2 (17-02): each tick evaluates the ACTIVE config's FROZEN pre-connect reachability band
+ *     (`activeReading`, from `useConfigPingSource` — the SAME honest number the active card shows,
+ *     D-02), reads the latest prefs + priority-ordered candidates from refs, runs `decideAutoSwitch`,
+ *     writes back the next `EngineState`, and on `action.kind === "switch"` awaits `switchTo(targetPath)`
+ *     then re-arms the cooldown. It NO LONGER invokes `probe_tunnel_latency` — F26 caught that
+ *     through-tunnel probe reading dishonestly (a through-tunnel RTT is unmeasurable from this process),
+ *     so the decision now consumes only the frozen band. There is NO ping IPC in the tick.
  *   - It does NOT start a second inactive-ping loop: the caller (App wiring, 12-07) builds the
  *     `candidates` prop from the EXISTING `usePerConfigPing` map joined with manifest order; the
  *     hook only pings the single active config.
@@ -80,8 +82,17 @@ export interface UseAutoSwitchParams {
   checksN: number;
   /** Live VPN status — the loop runs ONLY while this is "connected". */
   status: VpnStatus;
-  /** The .toml path of the currently-active config (the one we ping). */
+  /** The .toml path of the currently-active config (the one being monitored). */
   activeConfigPath: string | undefined;
+  /**
+   * PA-2 (17-02): the ACTIVE config's FROZEN pre-connect reachability reading (from
+   * `useConfigPingSource.activeReading`) the engine evaluates for a breach each tick — REPLACING the
+   * dishonest through-tunnel `probe_tunnel_latency` invoke the tick used to make. It is the SAME frozen
+   * band the active card shows (D-02), so the card and the decision agree. Read live via `inputsRef`
+   * inside the tick (changing it does NOT re-seed the loop). A `no-data` reading is neutral (a transient
+   * "unknown", never a breach), exactly as the old failed-probe branch treated an IPC error.
+   */
+  activeReading: Reading;
   /**
    * Priority-ordered (manifest order) inactive configs WITH their latest reading — built by the
    * caller from the existing `usePerConfigPing` map. The hook does NOT ping these itself.
@@ -114,6 +125,7 @@ export function useAutoSwitch({
   checksN,
   status,
   activeConfigPath,
+  activeReading,
   candidates,
   switchTo,
   isSwitching = false,
@@ -136,9 +148,9 @@ export function useAutoSwitch({
   // Latest tunable inputs, read inside the loop WITHOUT restarting the interval on every render —
   // changing threshold/interval/checks/candidates just takes effect on the next tick (the same
   // targetsRef trick as usePerConfigPing). Written in an effect so the refs stay lint-clean.
-  const inputsRef = useRef({ thresholdMs, intervalSec, checksN, candidates, switchTo });
+  const inputsRef = useRef({ thresholdMs, intervalSec, checksN, candidates, switchTo, activeReading });
   useEffect(() => {
-    inputsRef.current = { thresholdMs, intervalSec, checksN, candidates, switchTo };
+    inputsRef.current = { thresholdMs, intervalSec, checksN, candidates, switchTo, activeReading };
   });
 
   // The effect keys on `[masterOn, status, activeConfigPath]` so a genuine connect/disconnect,
@@ -166,27 +178,24 @@ export function useAutoSwitch({
       if (cancelled) return;
       if (statusRef.current !== "connected" || !masterOnRef.current) return;
 
-      const { thresholdMs: thr, checksN: n, candidates: cands, switchTo: doSwitch } =
+      const { thresholdMs: thr, checksN: n, candidates: cands, switchTo: doSwitch, activeReading: reading } =
         inputsRef.current;
 
-      // (b) F23 (14-UAT round 2, owner-chosen design): measure the ACTIVE TUNNEL's REAL current
-      // latency by probing neutral reference hosts THROUGH the tunnel (client → VPN server →
-      // reference). The endpoint itself can't be honestly probed while connected — a direct connect to
-      // it (it IS the VPN server) rides the tunnel to the-server-and-back = the ~2× / «Недоступен»
-      // noise that caused the false switches. The reference probe reflects the honest in-session
-      // tunnel health: a slow tunnel → high ms (breach), a dead tunnel → Unreachable (breach), a
-      // healthy one → normal ms (no switch off a good server). A failed invoke reads no-data (neutral,
-      // handled below), never thrown.
-      const reading = await invoke<Reading>("probe_tunnel_latency", {
-        timeoutMs: PING_TIMEOUT_MS,
-      }).catch((): Reading => ({ status: "no-data" }));
+      // (b) PA-2 (17-02): evaluate the ACTIVE config's FROZEN pre-connect reachability band — the
+      // honest signal `useConfigPingSource.activeReading` derives from `lastGoodByPath` while connected
+      // (the SAME number the active card shows, D-02). This REPLACES the former per-tick
+      // `probe_tunnel_latency` invoke, which F26 caught reading dishonestly (14 ms while the direct RTT
+      // was 69 ms → it bypassed the tunnel, not measured it): a through-tunnel RTT is unmeasurable from
+      // this process (the C++ core owns routing), so the engine must not decide on it. No IPC in the
+      // tick now — the reading is read from `inputsRef` (live, no loop re-seed). A `no-data` reading is
+      // neutral (a transient "unknown" — never a breach), handled below.
 
       if (cancelled) return;
 
-      // (c) A `no-data` reading here means the IPC invoke itself failed (a transient error), NOT that
-      // the tunnel is failing (a dead tunnel reads `Unreachable`, which IS a breach). Treat the
-      // transient failure as neutral — reset the breach counter and wait for the next tick — so an IPC
-      // hiccup never accumulates toward a false switch off a healthy, user-chosen server.
+      // (c) A `no-data` reading here means the active config has no retained pre-connect band yet (never
+      // measured / transient), NOT that the server is bad. Treat it as neutral — reset the breach
+      // counter and wait for the next tick — so an unknown reading never accumulates toward a false
+      // switch off a healthy, user-chosen server.
       if (reading.status === "no-data") {
         engineStateRef.current = { ...engineStateRef.current, consecutiveBad: 0 };
         const intervalMs = Math.max(inputsRef.current.intervalSec, MIN_INTERVAL_SEC) * 1000;

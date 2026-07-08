@@ -118,8 +118,6 @@ describe("Connection flow (real wiring) — TA-2", () => {
       switch (cmd) {
         case "list_configs":
           return CONFIGS;
-        case "check_vpn_status":
-          return "disconnected";
         case "read_client_config":
           return { vpn_mode: "general" };
         case "get_auto_connect":

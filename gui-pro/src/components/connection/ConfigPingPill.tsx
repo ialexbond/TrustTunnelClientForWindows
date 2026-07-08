@@ -3,6 +3,11 @@ import { Badge } from "../../shared/ui/Badge";
 import { StatusIndicator } from "../../shared/ui/StatusIndicator";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { Tooltip } from "../../shared/ui/Tooltip";
+// PA-3 (17-02): `ConfigPing`/`PingBand` now live in the STATE module that produces them
+// (`usePerConfigPing`), not here in the presentation component. This pill imports them DOWNWARD; it
+// re-exports them for backward compatibility so existing `./ConfigPingPill` type importers keep working.
+import type { ConfigPing, PingBand } from "../../shared/hooks/usePerConfigPing";
+export type { ConfigPing, PingBand } from "../../shared/hooks/usePerConfigPing";
 
 /**
  * `ConfigPingPill` — the production per-config ping pill rendering the FIVE honest D-16
@@ -32,22 +37,6 @@ import { Tooltip } from "../../shared/ui/Tooltip";
  * The «Недоступен» / no-data / measuring strings reference the `connection.ping.*` i18n
  * keys added in Plan 02 Task 3 — no new key is introduced here.
  */
-
-/** Ping colour band — mirrors the Rust `PingResult` discriminant + the design's D-16
- *  unmeasurable states. `green`/`yellow`/`red` carry a numeric value; `timeout`/`no-data`/
- *  `measuring` deliberately do NOT (that distinction is the whole point of D-16). */
-export type PingBand = "green" | "yellow" | "red" | "timeout" | "no-data" | "measuring";
-
-/** The resolved ping state for one config, as `usePerConfigPing` produces it. */
-export interface ConfigPing {
-  band: PingBand;
-  /** Numeric round-trip in ms — present ONLY for green/yellow/red. */
-  valueMs?: number;
-  /** True while RE-measuring a config whose band is already known: the pill renders as a
-   *  coloured Skeleton tinted to `band` instead of the value, then resolves to the new
-   *  band. The standalone `measuring` band is the first-ever probe (grey skeleton). */
-  measuring?: boolean;
-}
 
 /** Shared ping-pill footprint (px). The measuring Skeleton renders at exactly this width,
  *  and the «—» (no-data) Badge takes it as its MIN width — so the pill keeps the same
@@ -139,10 +128,14 @@ export function ConfigPingPill({ ping }: { ping: ConfigPing }) {
   }
 
   if (ping.band === "timeout") {
+    // D-03 (17-02): the honest tooltip clarifies that «Недоступен» is about SERVER reachability (the
+    // direct connect was refused/timed out), NOT a verdict that the config is broken.
     return (
-      <Badge variant="danger" className={pillClass}>
-        {t("connection.ping.unreachable")}
-      </Badge>
+      <Tooltip text={t("connection.ping.unreachable_tooltip")}>
+        <Badge variant="danger" className={pillClass}>
+          {t("connection.ping.unreachable")}
+        </Badge>
+      </Tooltip>
     );
   }
 
@@ -164,9 +157,14 @@ export function ConfigPingPill({ ping }: { ping: ConfigPing }) {
     );
   }
   const label = `${ping.valueMs ?? 0} ${t("connection.ping.unit")}`;
+  // D-03 (17-02): the honest tooltip states the numeric value is the direct-connect latency = SERVER
+  // reachability, and explicitly NOT a promise that «этот конфиг рабочий / можно подключиться». The
+  // colour band and number are unchanged (TA-1 banding preserved) — only the meaning is labelled honestly.
   return (
-    <Badge variant={numericVariant[ping.band]} className={pillClass}>
-      {label}
-    </Badge>
+    <Tooltip text={t("connection.ping.reachable_tooltip")}>
+      <Badge variant={numericVariant[ping.band]} className={pillClass}>
+        {label}
+      </Badge>
+    </Tooltip>
   );
 }

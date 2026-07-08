@@ -541,7 +541,11 @@ pub fn start_monitor(
                 // later if the tunnel is really dead.
                 if online_now {
                     if !was_online {
-                        app.emit("internet-status", serde_json::json!({ "online": true })).ok();
+                        app.emit("internet-status", crate::commands::vpn::InternetStatusPayload {
+                            online: true,
+                            action: None,
+                            reason: None,
+                        }).ok();
                     }
                     was_online = true;
                 }
@@ -735,7 +739,11 @@ pub fn start_monitor(
                 if !was_online {
                     eprintln!("[connectivity] Tunnel restored");
                     log_app("INFO", "[connectivity] Tunnel restored");
-                    app.emit("internet-status", serde_json::json!({ "online": true })).ok();
+                    app.emit("internet-status", crate::commands::vpn::InternetStatusPayload {
+                        online: true,
+                        action: None,
+                        reason: None,
+                    }).ok();
                 }
                 consecutive_failures = 0;
                 was_online = true;
@@ -822,7 +830,9 @@ pub fn start_monitor(
                     // Reconnecting + «Попытка N/N». If the supervisor took over, reset
                     // monitor state and resume polling; do NOT also run the adapter-
                     // recovery wait below (that is the fallback the supervisor replaces).
-                    if declare_offline_and_handoff(&app, reason) {
+                    // The INTERNET-LOST branch above already `continue`d, so `reason` here is
+                    // always TUNNEL_LOST_REASON — pass the matching enum variant (F10).
+                    if declare_offline_and_handoff(&app, crate::commands::vpn::InternetStatusReason::TunnelLost) {
                         consecutive_failures = 0;
                         was_online = false;
                         was_connected = false;
@@ -1009,17 +1019,18 @@ where
 /// gets a recovery signal. This mirrors the former control flow precisely.
 fn declare_offline_and_handoff(
     app: &tauri::AppHandle,
-    reason: &'static str,
+    reason: crate::commands::vpn::InternetStatusReason,
 ) -> bool {
     // Tell frontend: disconnect VPN, then we'll monitor adapter recovery. The
     // `disconnect` action drives the UI (e.g. the recovering label); the `reconnect`
     // recovery is DRIVEN IN RUST by the supervisor below. `reason` is a STABLE ASCII
-    // code (Plan 02-09 maps it to a localized message) — never a Russian string.
-    app.emit("internet-status", serde_json::json!({
-        "online": false,
-        "action": "disconnect",
-        "reason": reason
-    })).ok();
+    // code (Plan 02-09 maps it to a localized message) — never a Russian string. F10:
+    // both fields are now closed enums so a value typo is a compile error.
+    app.emit("internet-status", crate::commands::vpn::InternetStatusPayload {
+        online: false,
+        action: Some(crate::commands::vpn::InternetStatusAction::Disconnect),
+        reason: Some(reason),
+    }).ok();
 
     // STATUS-05 / criterion 3 (Plan 04, trigger B — LIVE-SIDECAR DROP): the tunnel is
     // dead but the sidecar PROCESS is still alive (no Terminated event fires), so
@@ -1157,10 +1168,14 @@ async fn await_adapter_recovery(
             log_app("INFO", &format!("[connectivity] Adapter recovered after {} checks", adapter_wait));
             // Give adapter a moment to fully stabilize.
             tokio::time::sleep(Duration::from_secs(3)).await;
-            app.emit("internet-status", serde_json::json!({
-                "online": true,
-                "action": "reconnect"
-            })).ok();
+            // PA-4 tail (17-07): the sibling `internet-status { online:true, action:"reconnect" }`
+            // emit that used to fire here is REMOVED — a producer with no consumer. The FE listener
+            // deliberately IGNORES the `reconnect` action (useInternetStatusListener.ts: «Rust owns
+            // reconnect»); recovery progress rides the `vpn-status` event (Reconnecting + «Попытка
+            // N/N») the reconnect supervisor writes through the single status owner (D-01). This is
+            // the twin of the primary-site removal 17-04 did in the newer recovery flow (above);
+            // 17-04 left this legacy-fallback sibling in scope for 17-07 (its follow-up flag).
+            // Nothing else keys on this emit — the return value below drives `was_online`.
             return true;
         }
 
@@ -1168,10 +1183,11 @@ async fn await_adapter_recovery(
         if adapter_wait >= ADAPTER_RECOVERY_TIMEOUT_CHECKS {
             eprintln!("[connectivity] Gave up waiting for adapter after 5 minutes");
             log_app("WARN", "[connectivity] Gave up waiting for adapter after 5 minutes");
-            app.emit("internet-status", serde_json::json!({
-                "online": false,
-                "action": "give_up"
-            })).ok();
+            app.emit("internet-status", crate::commands::vpn::InternetStatusPayload {
+                online: false,
+                action: Some(crate::commands::vpn::InternetStatusAction::GiveUp),
+                reason: None,
+            }).ok();
             return false;
         }
     }
@@ -1268,11 +1284,11 @@ async fn run_recovery_flow(app: &tauri::AppHandle, vpn_status: &Arc<Mutex<VpnSta
     // borrow across an await.
     app.emit(
         "internet-status",
-        serde_json::json!({
-            "online": false,
-            "action": "disconnect",
-            "reason": INTERNET_LOST_REASON,
-        }),
+        crate::commands::vpn::InternetStatusPayload {
+            online: false,
+            action: Some(crate::commands::vpn::InternetStatusAction::Disconnect),
+            reason: Some(crate::commands::vpn::InternetStatusReason::InternetLost),
+        },
     )
     .ok();
 
@@ -1360,11 +1376,12 @@ async fn run_recovery_flow(app: &tauri::AppHandle, vpn_status: &Arc<Mutex<VpnSta
             );
             // Give the adapter a moment to fully stabilize (mirrors await_adapter_recovery).
             tokio::time::sleep(Duration::from_secs(3)).await;
-            app.emit(
-                "internet-status",
-                serde_json::json!({ "online": true, "action": "reconnect" }),
-            )
-            .ok();
+            // PA-4 (Phase 17): the `internet-status { action:"reconnect" }` emit that used to
+            // fire here is REMOVED — it was a producer with no consumer. The FE listener
+            // deliberately ignores the `reconnect` action (useVpnEvents.ts: «Rust owns
+            // reconnect»); recovery progress rides the `vpn-status` event (Reconnecting +
+            // «Попытка N/N») the supervisor below writes through the single status owner
+            // (D-01). Dropping the dead emit removes a silent-drift surface.
             // R1: release our recovery ownership so the re-establish supervisor can claim
             // it. A Terminated arm sneaking into the tiny gap would just start the same
             // supervisor we are about to start (and the handoff's own try_claim then
@@ -1453,7 +1470,11 @@ async fn run_recovery_flow(app: &tauri::AppHandle, vpn_status: &Arc<Mutex<VpnSta
             );
             app.emit(
                 "internet-status",
-                serde_json::json!({ "online": false, "action": "give_up" }),
+                crate::commands::vpn::InternetStatusPayload {
+                    online: false,
+                    action: Some(crate::commands::vpn::InternetStatusAction::GiveUp),
+                    reason: None,
+                },
             )
             .ok();
             // Terminal Error through the single mutator carrying the STABLE reason
@@ -1870,6 +1891,13 @@ async fn respawn_and_wait(
             return true;
         }
         if matches!(status, VpnStatus::Error | VpnStatus::Disconnected) {
+            // CA-4: name the branch so a post-mortem can tell a fatal marker / user-cancel
+            // supersede from a child that never reached Connected. PID-only elsewhere; here
+            // there is no child PID — the terminal status IS the signal (D-29: no secret).
+            log_app(
+                "WARN",
+                "[reconnect] respawn attempt ended: terminal status (fatal marker or user disconnect superseded)",
+            );
             return false; // fatal marker landed, or a user disconnect superseded the attempt
         }
         // Is the respawned child still alive? Read its PID from the shared slot and probe it.
@@ -1893,13 +1921,33 @@ async fn respawn_and_wait(
             // retries stay spaced (~10 attempts over a reboot-sized window). A spawn-FAILURE (no
             // child stored — a local problem, not a transient server drop) stays fast: nothing to
             // wait out.
-            Some(_) => {
+            Some(pid) => {
+                // CA-4: the child SPAWNED then DIED (connection refused / server rebooting) —
+                // «child dies (server down)». PID only (A2-approved — D-29: no secret).
+                log_app(
+                    "WARN",
+                    &format!("[reconnect] respawn attempt failed: child pid {pid} died (server down / connection refused)"),
+                );
                 tokio::time::sleep(crate::lifecycle::RECONNECT_INTERVAL).await;
                 return false;
             }
-            None => return false,
+            None => {
+                // CA-4: no child was stored (spawn FAILURE — a local problem, not a transient
+                // server drop) OR the slot was cleared by a newer session (disjoint death).
+                log_app(
+                    "WARN",
+                    "[reconnect] respawn attempt failed: no child stored (spawn failure or slot cleared by a newer session)",
+                );
+                return false;
+            }
         }
         if Instant::now() >= deadline {
+            // CA-4: the child is still ALIVE but never reached Connected within the
+            // per-attempt ceiling — «child alive but never Connected». No secret (D-29).
+            log_app(
+                "WARN",
+                "[reconnect] respawn attempt failed: wedged-but-alive backstop (child alive but never Connected within the window)",
+            );
             return false; // wedged-but-alive backstop
         }
         tokio::time::sleep(Duration::from_millis(250)).await;

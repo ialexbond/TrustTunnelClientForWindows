@@ -161,21 +161,7 @@ export function daysUntil(dateStr: string): number | null {
   }
 }
 
-/**
- * BUG-26 fix: extracted Russian pluralization helper from CertSection +
- * CertModal (was duplicated in two files). Used для cert days display
- * («1 день / 2 дня / 5 дней») и любого другого date/count formatting.
- *
- * Russian plural rules:
- *   - last digit 1 (except teens 11-19) → "one" form ("день")
- *   - last digit 2-4 (except teens) → "few" form ("дня")
- *   - last digit 0, 5-9, или teens 11-19 → "many" form ("дней")
- */
-export function pluralRu(n: number, one: string, few: string, many: string): string {
-  const abs = Math.abs(n) % 100;
-  const lastDigit = abs % 10;
-  if (abs >= 11 && abs <= 19) return `${n} ${many}`;
-  if (lastDigit === 1) return `${n} ${one}`;
-  if (lastDigit >= 2 && lastDigit <= 4) return `${n} ${few}`;
-  return `${n} ${many}`;
-}
+// PA-6: `pluralRu` moved to `shared/lib/pluralRu.ts` (a generic count-declension
+// primitive, not a cert concern) so «Подключение» stops reaching into the «Сервер»
+// feature. In-feature callers (CertModal / CertSection / SecuritySection) import it
+// from `shared/lib/pluralRu` directly — no re-export kept here (true relocation).

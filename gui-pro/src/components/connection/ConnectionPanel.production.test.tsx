@@ -52,7 +52,7 @@ function setup(props?: Partial<Parameters<typeof ConnectionPanel>[0]>) {
   const onDisconnect = vi.fn().mockResolvedValue(undefined);
   const onSwitchTo = vi.fn();
   const onReconnect = vi.fn().mockResolvedValue(undefined);
-  renderWithProviders(
+  const view = renderWithProviders(
     <ConnectionPanel
       onImport={onImport}
       status="disconnected"
@@ -64,7 +64,7 @@ function setup(props?: Partial<Parameters<typeof ConnectionPanel>[0]>) {
       {...props}
     />,
   );
-  return { onImport, onConnect, onDisconnect, onSwitchTo, onReconnect };
+  return { onImport, onConnect, onDisconnect, onSwitchTo, onReconnect, unmount: view.unmount };
 }
 
 describe("ConnectionPanel (production integration)", () => {
@@ -159,6 +159,44 @@ describe("ConnectionPanel (production integration)", () => {
     await waitFor(() => {
       expect(invokeMock.mock.calls.some((c) => c[0] === "duplicate_config" && (c[1] as { id: string }).id === "cfg-a")).toBe(true);
     });
+  });
+
+  // PP-9 (17-07, n-9): closing the edit modal starts a 200ms deferred setEditConfig(null) timer.
+  // Unmounting the panel BEFORE that timer fires must NOT leave a setState-on-unmounted warning —
+  // the unmount cleanup effect now clears editCloseTimer (it previously cleared only qrCloseTimer).
+  it("clears editCloseTimer on unmount (no setState-on-unmounted after closing edit)", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_configs") return Promise.resolve(ONE);
+      if (cmd === "read_client_config") return Promise.resolve({});
+      if (cmd === "ping_config_endpoint") return Promise.resolve({ status: "no-data" });
+      return Promise.resolve(null);
+    });
+    // Spy on console.error so a React "setState on unmounted component" warning would be caught.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = setup();
+    await screen.findByText("Германия — Frankfurt");
+
+    // Open «Изменить» → the ConfigEditView modal mounts.
+    const actions = screen.getByRole("button", { name: i18n.t("connection.card.actions_label") });
+    await user.click(actions);
+    const menu = screen.getByRole("menu");
+    await user.click(within(menu).getByText(i18n.t("connection.card.edit")));
+
+    // Close it via the Modal's corner × (present regardless of the edit form's load state) — this
+    // arms the 200ms deferred setEditConfig(null) timer.
+    const closeBtn = await screen.findByRole("button", { name: i18n.t("buttons.close") });
+    await user.click(closeBtn);
+
+    // Unmount BEFORE the 200ms timer fires, then let real time pass its window.
+    unmount();
+    await new Promise((r) => setTimeout(r, 250));
+
+    // No React setState-on-unmounted-component warning was emitted.
+    expect(
+      errorSpy.mock.calls.some((c) => String(c[0]).includes("unmounted component")),
+    ).toBe(false);
+    errorSpy.mockRestore();
   });
 
   // Truth: an active-config delete disconnects BEFORE deleting (disconnect-then-delete, D-03).

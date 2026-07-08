@@ -87,11 +87,20 @@ describe("StatusPanel", () => {
     expect(btn).toBeEnabled();
   });
 
-  it("renders reconnecting state with an ENABLED «Отмена» button", () => {
+  it("renders reconnecting state with an INERT spinner, not a live «Отмена» (BUG-A2)", () => {
+    // BUG-A2 (17-uat): `reconnecting` is AMBIGUOUS — it is set BOTH by the backend auto-retry
+    // supervisor (reconnectResolve null → the cancel would be safe) AND by a FE save-and-reconnect
+    // whose teardown ARMS the shared reconnectResolve latch (the cancel would be INERT — resolving
+    // that latch early is the BUG-A double-spawn storm). Since status alone can't tell them apart, the
+    // show-condition must NOT offer a live-but-dead cancel here — it renders the disabled spinner.
     render(<StatusPanel {...defaultProps} status="reconnecting" />);
-    expect(screen.getByText("Переподключение")).toBeInTheDocument();
-    const btn = screen.getByRole("button", { name: /Отмена/ });
-    expect(btn).toBeEnabled();
+    // The status badge still reads «Переподключение» (its dot carries the connecting variant) …
+    expect(screen.getByTestId("status-dot")).toBeInTheDocument();
+    // … but there is NO live «Отмена» button. The only action button is the DISABLED spinner (its
+    // accessible name is the status label «Переподключение», which the badge text also uses).
+    expect(screen.queryByRole("button", { name: /Отмена/ })).not.toBeInTheDocument();
+    const btn = screen.getByRole("button", { name: /Переподключение/ });
+    expect(btn).toBeDisabled();
   });
 
   it("shows ONLY the «Попытка N/3» counter (no «Связь с сервером потеряна» sub-text) during a server-lost reconnect", () => {
@@ -120,11 +129,66 @@ describe("StatusPanel", () => {
     expect(screen.queryByText(/Попытка/)).not.toBeInTheDocument();
   });
 
-  it("clicking «Отмена» during reconnecting calls onDisconnect (cancel/stop)", () => {
-    render(<StatusPanel {...defaultProps} status="reconnecting" />);
+  it("clicking «Отмена» during recovering calls onDisconnect (cancel/stop)", () => {
+    // BUG-A2: `recovering` is a reconnectResolve-null state, so it keeps the LIVE, working «Отмена».
+    // (`reconnecting` moved to the inert spinner — asserted above.)
+    render(<StatusPanel {...defaultProps} status="recovering" />);
     fireEvent.click(screen.getByRole("button", { name: /Отмена/ }));
     expect(defaultProps.onDisconnect).toHaveBeenCalledOnce();
   });
+
+  // BUG-A2 (17-uat): the live «Отмена» SHOWS during a plain connect EVEN WHILE connectPending is
+  // true. handleConnectActive raises pendingConnectPath (→ connectPending) for the WHOLE connecting
+  // span, and handleUserCancel is SAFE during connecting/recovering (reconnectResolve null), so
+  // hiding it there is the exact "нет кнопки отмены при обычном подключении" bug. This is the
+  // dead-window the old F6 tests missed (they only tested connectPending=false).
+  for (const status of ["connecting", "recovering"] as VpnStatus[]) {
+    it(`BUG-A2: shows a LIVE, working «Отмена» when connectPending + status = ${status} (plain connect)`, () => {
+      render(<StatusPanel {...defaultProps} status={status} connectPending />);
+      const cancel = screen.getByRole("button", { name: /Отмена/ });
+      expect(cancel).toBeEnabled();
+      fireEvent.click(cancel);
+      expect(defaultProps.onDisconnect).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("BUG-A2: shows a LIVE, working «Отмена» for an ordinary connecting (connectPending absent)", () => {
+    render(<StatusPanel {...defaultProps} status="connecting" />);
+    const btn = screen.getByRole("button", { name: /Отмена/ });
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(defaultProps.onDisconnect).toHaveBeenCalledOnce();
+  });
+
+  // BUG-A2: during a seamless switch's `connecting` leg isSwitching is held, and handleUserCancel is
+  // INERT then (isSwitching gate) — so the live «Отмена» must be HIDDEN (inert spinner), never a dead
+  // button. This is the StatusPanel dead-window guard the coordinator flagged.
+  it("BUG-A2: HIDES the live «Отмена» during a switch's connecting leg (switching=true → inert spinner)", () => {
+    render(<StatusPanel {...defaultProps} status="connecting" switching />);
+    expect(screen.queryByRole("button", { name: /Отмена/ })).not.toBeInTheDocument();
+    // The only action button is the disabled spinner.
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toBeDisabled();
+  });
+
+  // Fable F3: a seamless switch transiently passes through `disconnected` (the ~1.5s post-teardown
+  // probe window) and `connected` (A live during teardown / A reconnected on revert). Without the
+  // `!switching` gates, the connect/disconnect button AND the `switching` inert spinner both rendered
+  // → TWO buttons. Assert EXACTLY ONE action button (the inert spinner) for every switch-transient status.
+  for (const status of ["connected", "disconnected", "error", "connecting"] as VpnStatus[]) {
+    it(`F3: renders exactly ONE (inert) action button while switching + status = ${status} (no duplicate)`, () => {
+      render(<StatusPanel {...defaultProps} status={status} switching connectedSince={new Date()} />);
+      const buttons = screen.getAllByRole("button");
+      // Exactly one action button, and it is the disabled inert spinner (no live cancel, no connect,
+      // no disconnect — the switch owns the control face).
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]).toBeDisabled();
+      expect(screen.queryByRole("button", { name: /Отмена/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Подключить/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Отключить/ })).not.toBeInTheDocument();
+    });
+  }
 
   it("renders error state with error message", () => {
     render(

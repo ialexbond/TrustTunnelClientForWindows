@@ -46,6 +46,13 @@ pub enum NotifyKind {
     AutoConnectLaunch,
     /// The tunnel went down to `Disconnected` — «Отключено».
     Disconnected,
+    /// The user CANCELLED an in-flight connect (pressed «Отмена» while Connecting/Recovering) —
+    /// «Подключение отменено». This is a DIFFERENT event from `Disconnected` (owner requirement): a
+    /// cancel aborts a connect that never completed, so «Отключено» («the tunnel went down») would be
+    /// wrong copy. It is classified NEUTRAL exactly like `Disconnected` (not a success). Distinguished
+    /// from a plain `Disconnected` by the FE-raised `pending_cancel` intent the caller threads into
+    /// `decide_notification` — the sidecar/VpnStatus alone cannot tell a user-cancel from a teardown.
+    Cancelled,
 }
 
 impl NotifyKind {
@@ -62,6 +69,7 @@ impl NotifyKind {
             NotifyKind::AutoSwitched => "autoSwitched",
             NotifyKind::AutoConnectLaunch => "autoConnected",
             NotifyKind::Disconnected => "disconnected",
+            NotifyKind::Cancelled => "cancelled",
         }
     }
 
@@ -118,6 +126,13 @@ pub enum ConnectOrigin {
 /// The pure policy is unchanged: a `Disconnected` under this aggregate (or an error-acknowledge) is
 /// suppressed; a genuine user disconnect still fires «Отключено».
 ///
+/// Part B (cancel notification): `cancel_pending` (the FE-raised user-cancel intent the caller
+/// threads in) maps a `Disconnected` that ends an in-flight connect the user cancelled to
+/// `NotifyKind::Cancelled` («Подключение отменено») INSTEAD of `Disconnected` («Отключено») — a cancel
+/// and a disconnect are DIFFERENT events (owner requirement). It applies ONLY when neither existing
+/// suppression wins (`!switch_teardown_pending && prev != Error`), so a switch/reconnect teardown and
+/// an error-acknowledge still take precedence.
+///
 /// It reads NO I/O and touches NO window.
 pub fn decide_notification(
     prev: VpnStatus,
@@ -125,6 +140,7 @@ pub fn decide_notification(
     origin: ConnectOrigin,
     notifications_on: bool,
     switch_teardown_pending: bool,
+    cancel_pending: bool,
 ) -> Option<NotifyKind> {
     // The master gate dominates: with notifications off the plate never fires (D-04).
     if !notifications_on {
@@ -163,7 +179,20 @@ pub fn decide_notification(
         // destination plate, and dismissing an error banner popped a phantom «Отключено» — both
         // contradicting D-03 ("one plate reflecting the CURRENT state") and D-01 (fire on the OUTCOME).
         VpnStatus::Disconnected => {
-            if switch_teardown_pending || prev == VpnStatus::Error {
+            // Part B (cancel notification): a USER CANCEL of an in-flight connect must show
+            // «Подключение отменено» (Cancelled), NOT «Отключено» (Disconnected) — they are DIFFERENT
+            // events (owner requirement): a cancel aborts a connect that never completed. The FE raises
+            // `pending_cancel` when the user presses «Отмена» while Connecting/Recovering, and the caller
+            // threads it here. A cancel lands in THIS arm as Connecting→Disconnected OR
+            // Disconnecting→Disconnected (either teardown path of an aborted connect). It takes priority
+            // over the plain Disconnected copy, BUT NOT over the two existing suppressions:
+            //   - `switch_teardown_pending` still wins (a switch/reconnect teardown is not a cancel — its
+            //     real destination plate follows; guarding on it also means a seamless switch that somehow
+            //     set cancel_pending is treated as a teardown, never a phantom «Подключение отменено»),
+            //   - `prev == Error` still wins (an error-acknowledge is not a cancel — WR-02).
+            if cancel_pending && !switch_teardown_pending && prev != VpnStatus::Error {
+                Some(NotifyKind::Cancelled)
+            } else if switch_teardown_pending || prev == VpnStatus::Error {
                 None
             } else {
                 Some(NotifyKind::Disconnected)
@@ -217,6 +246,31 @@ fn origin_consumed_on(prev: VpnStatus, next: VpnStatus) -> bool {
 /// stale origin/ping. Kept pure so it is unit-testable without an AppHandle, like `origin_consumed_on`.
 fn origin_ping_consumed_on(prev: VpnStatus, next: VpnStatus, switch_teardown_pending: bool) -> bool {
     origin_consumed_on(prev, next) && !(next == VpnStatus::Disconnected && switch_teardown_pending)
+}
+
+/// Part A (visibility gate) — pure predicate: should the DESKTOP plate actually fire, given the
+/// main window's current visibility?
+///
+/// The owner rule: the custom desktop notification plate exists to inform the user when the app is
+/// NOT in front of them (minimized, hidden-to-tray, or closed-to-tray). When the main window IS
+/// visible on screen and not minimized, the user is looking at the app and the in-app FE snackbar
+/// already reports the same transition — a second desktop plate would be redundant noise. So the
+/// plate fires ONLY when the main window is hidden OR minimized:
+///   - visible AND not minimized → `false` (suppress — the FE snackbar covers it),
+///   - hidden (any reason) → `true`,
+///   - minimized → `true` (a minimized window is not "in front of the user" either).
+///
+/// This is the ONLY visibility policy Part A adds; it lives here (not in `decide_notification`,
+/// which stays a PURE status/origin/gate decider with no window concept) so it is unit-testable
+/// without a live window, mirroring the other pure predicates in this module. `maybe_fire` reads the
+/// live main-window visibility and calls this to decide whether to run the plate-fire tail. It gates
+/// ONLY the plate fire — every one-shot consume/reset step in `maybe_fire` (origin, ping,
+/// switch-pending clear) runs REGARDLESS of visibility, exactly like the notifications-off path still
+/// consumes.
+fn should_fire_when(main_visible: bool, main_minimized: bool) -> bool {
+    // Fire unless the window is genuinely in front of the user (visible AND not minimized).
+    // De Morgan of `!(main_visible && !main_minimized)`: hidden OR minimized → fire.
+    !main_visible || main_minimized
 }
 
 /// Pure predicate: does THIS transition CLEAR the `switch_or_reconnect_pending` intent?
@@ -450,6 +504,21 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
         })
         .unwrap_or(false);
 
+    // Part B (cancel notification): read the FE-raised user-cancel intent (peek — the consume/reset
+    // below is a SEPARATE, unconditional step on the terminal edge, so a stale cancel flag can never
+    // leak into a LATER disconnect). Set by `set_pending_cancel(true)` from the FE's `handleUserCancel`
+    // when the user presses «Отмена» on an IN-FLIGHT connect; the decider maps the resulting terminal
+    // `Disconnected` to `Cancelled` («Подключение отменено») instead of `Disconnected` («Отключено»).
+    // Missing state falls back to `false` (no cancel) so a lookup miss never mislabels a genuine
+    // disconnect as a cancel.
+    let cancel_pending = state
+        .as_ref()
+        .map(|s| {
+            s.pending_cancel
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
+        .unwrap_or(false);
+
     // Consume the origin on ANY terminal outcome of the attempt it was set for (Connected / Error /
     // Disconnected) — reset it to `Manual` so it marks only the one intended auto action (Pitfall 2
     // + CR-01: a FAILED auto attempt must not leave a stale origin for a later manual connect to
@@ -491,6 +560,23 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
         }
     }
 
+    // Part B (cancel notification): CONSUME the user-cancel intent on the SAME terminal edges the
+    // origin is consumed (a genuine `Connected` / `Error` / `Disconnected` transition — the pure
+    // `origin_consumed_on`), so a cancel flag can NEVER leak into a later disconnect (a cancel that
+    // ended a connect must not relabel the NEXT genuine «Отключить» as «Подключение отменено»). The
+    // peeked `cancel_pending` above still holds THIS edge's value for the decider below; this only
+    // clears the cell for the next attempt. Unlike the origin/ping (which must SURVIVE a switch
+    // teardown to reach the destination Connected), a cancel HAS no destination — its terminal
+    // `Disconnected` IS where it fires — so it uses the plain `origin_consumed_on` (consumes on ANY
+    // terminal edge, teardown included), which is strictly safer against a leak. Done BEFORE the gate
+    // check so a gate-off / visibility-suppressed cancel still spends its flag.
+    if origin_consumed_on(prev, next) {
+        if let Some(s) = state.as_ref() {
+            s.pending_cancel
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     // The pure decider owns the whole firing policy (edge-detect, gate, origin-map, Disconnected
     // suppression). It gets the real mirrored gate, the peeked origin (already consumed above for a
     // terminal edge), and the peeked teardown intent (used to suppress an intermediate «Отключено»).
@@ -500,6 +586,10 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
     // otherwise fire a phantom «Отключено» mid-seamless-switch; `seamless_switch_active` (mirrored
     // from the FE's isSwitching, held across the whole switch+revert) keeps them silent. The REAL
     // `switch_teardown_pending` value above is still used for the origin/ping consume + clear logic.
+    // Part B: `cancel_pending` (peeked above, consumed on this terminal edge) relabels a user-cancel
+    // Disconnected to «Подключение отменено» — but only when NOT a switch teardown (which
+    // `suppress_intermediate_disconnected` folds seamless_switch_active into: a seamless switch that
+    // somehow set the cancel intent is treated as a teardown, never a phantom cancel plate).
     let suppress_intermediate_disconnected = switch_teardown_pending || seamless_switch_active;
     let Some(kind) = decide_notification(
         prev,
@@ -507,9 +597,38 @@ pub fn maybe_fire(app: &tauri::AppHandle, prev: VpnStatus, next: VpnStatus) {
         origin,
         notifications_on,
         suppress_intermediate_disconnected,
+        cancel_pending,
     ) else {
         return;
     };
+
+    // Part A (visibility gate): fire the DESKTOP plate ONLY when the main window is NOT in front of
+    // the user (minimized / hidden-to-tray / closed-to-tray). When it is visible-and-not-minimized
+    // the user is looking at the app and the FE snackbar already reports this transition, so a second
+    // desktop plate is redundant — suppress it. CRITICAL: this gate is placed AFTER `decide_notification`
+    // AND after ALL the one-shot consume/reset steps above (pending_connect_origin, pending_connect_ping,
+    // switch_or_reconnect_pending clear) — those ran unconditionally and MUST NOT be skipped by
+    // visibility (exactly like the notifications-off path in `decide_notification` still lets them run).
+    // Only the plate FIRE itself is gated here.
+    //
+    // Lookup miss → default to FIRING (`main_hidden = true`): AppState/window may be absent in a unit
+    // test (the maybe_fire path uses no real window) or during a narrow startup window — never silently
+    // swallow a notification on a lookup miss. `is_visible()` / `is_minimized()` unwrap to the
+    // fire-safe side (visible-unknown → true so `should_fire_when` does not suppress on a read error;
+    // minimized-unknown → false). The pure `should_fire_when(visible, minimized)` owns the policy
+    // (visible AND not-minimized → suppress; hidden OR minimized → fire) so it is unit-tested without a
+    // live window; here we only read the two live bits and negate to the "should this fire?" answer.
+    let main_hidden = match app.get_webview_window("main") {
+        Some(w) => {
+            should_fire_when(w.is_visible().unwrap_or(true), w.is_minimized().unwrap_or(false))
+        }
+        None => true, // lookup miss → default to FIRING (never silently swallow a notification).
+    };
+    // Only fire the plate when the main window is hidden/minimized (or a lookup miss). A visible-and-
+    // not-minimized main window skips the fire — but NOT the consume/reset logic above.
+    if !main_hidden {
+        return;
+    }
 
     // Resolve the active config's PATH once (the source for the display name AND — for a connect kind
     // — the endpoint address + login). D-29: only display strings are ever derived from it.
@@ -882,6 +1001,29 @@ mod tests {
     }
 
     #[test]
+    fn should_fire_when_gates_the_plate_on_main_window_visibility() {
+        // Part A (visibility gate): the DESKTOP plate fires ONLY when the main window is NOT in front
+        // of the user. `should_fire_when(main_visible, main_minimized)` is the pure policy `maybe_fire`
+        // consults after the decider + all the one-shot consumes: a plate is redundant when the window
+        // is visible-and-not-minimized (the FE snackbar already reports the transition), so suppress
+        // ONLY that case; a hidden window (any reason) OR a minimized window still fires.
+        //
+        // visible + not minimized → the user is looking at the app → SUPPRESS (false).
+        assert!(!should_fire_when(true, false), "a visible, non-minimized main window suppresses the plate");
+        // hidden (not visible) → the user is not looking at the app → FIRE.
+        assert!(should_fire_when(false, false), "a hidden main window fires the plate");
+        // minimized (even if the OS still reports it 'visible') → not in front of the user → FIRE.
+        assert!(should_fire_when(true, true), "a minimized main window fires the plate");
+        // hidden AND minimized (belt and suspenders) → FIRE.
+        assert!(should_fire_when(false, true), "a hidden+minimized main window fires the plate");
+        // NOTE: a REAL visible main window suppresses the plate (the `true,false` case above); the
+        // full maybe_fire integration (reading the live window + the lookup-miss → fire default) is
+        // exercised in-app, since maybe_fire needs a live AppHandle/window the unit layer lacks. The
+        // one-shot consumes in maybe_fire are proven independent of this gate by the origin/ping
+        // consume tests, which model the exact peek→consume rule maybe_fire runs BEFORE this gate.
+    }
+
+    #[test]
     fn fires_on_seven_outcome_states() {
         // Truth: each of the 7 production outcome states maps to its NotifyKind when the
         // transition + origin match (D-01, D-25). Every case is a genuine edge (prev != next)
@@ -894,6 +1036,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             Some(NotifyKind::Connected),
         );
@@ -904,6 +1047,7 @@ mod tests {
                 VpnStatus::Connected,
                 ConnectOrigin::AutoSwitch,
                 true,
+                false,
                 false,
             ),
             Some(NotifyKind::AutoSwitched),
@@ -916,6 +1060,7 @@ mod tests {
                 ConnectOrigin::AutoConnectLaunch,
                 true,
                 false,
+                false,
             ),
             Some(NotifyKind::AutoConnectLaunch),
         );
@@ -926,6 +1071,7 @@ mod tests {
                 VpnStatus::Error,
                 ConnectOrigin::Manual,
                 true,
+                false,
                 false,
             ),
             Some(NotifyKind::ConnectionError),
@@ -938,6 +1084,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             Some(NotifyKind::Reconnecting),
         );
@@ -949,6 +1096,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             Some(NotifyKind::Recovering),
         );
@@ -959,6 +1107,7 @@ mod tests {
                 VpnStatus::Disconnected,
                 ConnectOrigin::Manual,
                 true,
+                false,
                 false,
             ),
             Some(NotifyKind::Disconnected),
@@ -979,6 +1128,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             None,
         );
@@ -988,6 +1138,7 @@ mod tests {
                 VpnStatus::Connecting,
                 ConnectOrigin::AutoSwitch,
                 true,
+                false,
                 false,
             ),
             None,
@@ -1003,15 +1154,15 @@ mod tests {
         let prev = VpnStatus::Connecting;
         let next = VpnStatus::Connected;
         assert_eq!(
-            decide_notification(prev, next, ConnectOrigin::Manual, true, false),
+            decide_notification(prev, next, ConnectOrigin::Manual, true, false, false),
             Some(NotifyKind::Connected),
         );
         assert_eq!(
-            decide_notification(prev, next, ConnectOrigin::AutoSwitch, true, false),
+            decide_notification(prev, next, ConnectOrigin::AutoSwitch, true, false, false),
             Some(NotifyKind::AutoSwitched),
         );
         assert_eq!(
-            decide_notification(prev, next, ConnectOrigin::AutoConnectLaunch, true, false),
+            decide_notification(prev, next, ConnectOrigin::AutoConnectLaunch, true, false, false),
             Some(NotifyKind::AutoConnectLaunch),
         );
     }
@@ -1028,6 +1179,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 false,
                 false,
+                false,
             ),
             None,
         );
@@ -1038,6 +1190,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 false,
                 false,
+                false,
             ),
             None,
         );
@@ -1046,6 +1199,7 @@ mod tests {
                 VpnStatus::Connected,
                 VpnStatus::Disconnected,
                 ConnectOrigin::AutoSwitch,
+                false,
                 false,
                 false,
             ),
@@ -1065,6 +1219,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             None,
         );
@@ -1075,6 +1230,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             None,
         );
@@ -1084,6 +1240,7 @@ mod tests {
                 VpnStatus::Connecting,
                 ConnectOrigin::Manual,
                 true,
+                false,
                 false,
             ),
             None,
@@ -1104,6 +1261,7 @@ mod tests {
                 ConnectOrigin::AutoSwitch,
                 true,
                 true, // switch_teardown_pending
+                false,
             ),
             None,
             "a switch/reconnect teardown Disconnected must not fire «Отключено»",
@@ -1116,6 +1274,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 true,
+                false,
             ),
             None,
         );
@@ -1128,9 +1287,159 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false, // no teardown in flight — a real user Disconnect
+                false,
             ),
             Some(NotifyKind::Disconnected),
             "a genuine user disconnect must still fire «Отключено» (no over-suppression)",
+        );
+    }
+
+    #[test]
+    fn user_cancel_disconnected_fires_cancelled_not_disconnected() {
+        // Part B (cancel notification): a USER CANCEL of an in-flight connect (the FE raised
+        // `cancel_pending`) must fire «Подключение отменено» (Cancelled), NOT «Отключено»
+        // (Disconnected) — they are DIFFERENT events (owner requirement). A cancel can arrive as
+        // Connecting→Disconnected OR Disconnecting→Disconnected (both teardown paths of an aborted
+        // connect); both land in the Disconnected arm and both map to Cancelled when cancel_pending is
+        // set and neither existing suppression applies.
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Connecting,
+                VpnStatus::Disconnected,
+                ConnectOrigin::Manual,
+                true,
+                false, // no switch teardown
+                true,  // cancel_pending — the user pressed «Отмена» on an in-flight connect
+            ),
+            Some(NotifyKind::Cancelled),
+            "a user-cancel Connecting→Disconnected must fire «Подключение отменено», not «Отключено»",
+        );
+        // The other teardown path of an aborted connect: Disconnecting→Disconnected.
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Disconnecting,
+                VpnStatus::Disconnected,
+                ConnectOrigin::Manual,
+                true,
+                false,
+                true,
+            ),
+            Some(NotifyKind::Cancelled),
+            "a user-cancel Disconnecting→Disconnected also fires «Подключение отменено»",
+        );
+        // REGRESSION GUARD: WITHOUT cancel_pending, the SAME edge is a plain «Отключено» — the cancel
+        // kind is opt-in via the FE-raised intent, never a default relabel of every disconnect.
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Connecting,
+                VpnStatus::Disconnected,
+                ConnectOrigin::Manual,
+                true,
+                false,
+                false, // no cancel intent
+            ),
+            Some(NotifyKind::Disconnected),
+            "without the cancel intent a Disconnected stays «Отключено» (no accidental relabel)",
+        );
+        // A genuine connected disconnect (Connected→Disconnected, no cancel intent) stays «Отключено».
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Connected,
+                VpnStatus::Disconnected,
+                ConnectOrigin::Manual,
+                true,
+                false,
+                false,
+            ),
+            Some(NotifyKind::Disconnected),
+        );
+    }
+
+    #[test]
+    fn cancel_pending_does_not_override_teardown_or_error_acknowledge() {
+        // Part B: the cancel relabel is subordinate to the two existing Disconnected suppressions —
+        // it applies ONLY when `!switch_teardown_pending && prev != Error`. A switch/reconnect teardown
+        // is NOT a cancel (its real destination plate follows) and an error-acknowledge is NOT a cancel
+        // (WR-02). Guarding on switch_teardown_pending ALSO means the maybe_fire aggregate
+        // (switch_or_reconnect_pending || seamless_switch_active) suppresses a phantom cancel plate if a
+        // seamless switch ever set cancel_pending — a cancel during a seamless switch is treated as a
+        // teardown, staying silent, exactly like «Отключено» is there.
+        // Switch teardown wins over cancel → suppressed (None), not Cancelled.
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Connected,
+                VpnStatus::Disconnected,
+                ConnectOrigin::AutoSwitch,
+                true,
+                true, // switch_teardown_pending (or the seamless aggregate) — wins over cancel
+                true, // cancel_pending also set
+            ),
+            None,
+            "a switch teardown must NOT fire a cancel plate even if cancel_pending is set",
+        );
+        // Error-acknowledge wins over cancel → suppressed (None), not Cancelled.
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Error,
+                VpnStatus::Disconnected,
+                ConnectOrigin::Manual,
+                true,
+                false,
+                true, // cancel_pending set, but prev == Error is an error-acknowledge, not a cancel
+            ),
+            None,
+            "an error-acknowledge must NOT fire a cancel plate even if cancel_pending is set (WR-02)",
+        );
+    }
+
+    #[test]
+    fn cancelled_kind_is_neutral_and_has_the_cancelled_wire_key() {
+        // Part B: Cancelled is a NEUTRAL kind (like Disconnected) — it is NOT a connect kind (no
+        // address/login/ping detail block) and its wire_key is the stable "cancelled" the FE copy map
+        // is keyed by.
+        assert_eq!(NotifyKind::Cancelled.wire_key(), "cancelled");
+        assert!(
+            !NotifyKind::Cancelled.is_connect(),
+            "Cancelled is neutral — it carries no connect detail block (mirrors Disconnected)",
+        );
+    }
+
+    #[test]
+    fn pending_cancel_is_consumed_on_the_terminal_edge_no_leak_into_next_disconnect() {
+        // Part B: the user-cancel intent is a ONE-SHOT the FE raises before an in-flight-connect
+        // cancel; maybe_fire consumes it (resets to false) on the SAME terminal edge the origin is
+        // consumed (`origin_consumed_on` — a genuine Connected / Error / Disconnected transition), so a
+        // cancel flag can NEVER leak into a LATER genuine disconnect (which must stay «Отключено», not
+        // relabel to «Подключение отменено»). Model the AppState AtomicBool cell as a local and run the
+        // exact maybe_fire consume rule (peek → consume-on-terminal-edge) so the round-trip is
+        // unit-testable without a live Tauri AppHandle/State.
+        let cell = std::sync::atomic::AtomicBool::new(true);
+
+        // (1) The cancel's own terminal Disconnected edge: the fire peeks the flag (true → Cancelled),
+        //     then consumes it.
+        let peeked = cell.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(peeked, "the cancel fire reads the raised intent");
+        if origin_consumed_on(VpnStatus::Connecting, VpnStatus::Disconnected) {
+            cell.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        assert!(
+            !cell.load(std::sync::atomic::Ordering::Relaxed),
+            "the cancel intent is consumed on its terminal Disconnected edge",
+        );
+
+        // (2) A LATER genuine connected disconnect reads the reset false → plain «Отключено».
+        let peeked2 = cell.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            decide_notification(
+                VpnStatus::Connected,
+                VpnStatus::Disconnected,
+                ConnectOrigin::Manual,
+                true,
+                false,
+                peeked2,
+            ),
+            Some(NotifyKind::Disconnected),
+            "after the cancel intent is consumed, the next genuine disconnect is «Отключено»",
         );
     }
 
@@ -1147,6 +1456,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false, // no teardown flag — clear_vpn_error does not raise it
+                false,
             ),
             None,
             "an Error → Disconnected error-acknowledge must fire no plate (WR-02)",
@@ -1160,6 +1470,7 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 true,
+                false,
             ),
             None,
         );
@@ -1256,7 +1567,7 @@ mod tests {
 
         // (2) A later MANUAL connect reaches Connected — reads the reset Manual → generic Connected.
         assert_eq!(
-            decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false),
+            decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false, false),
             Some(NotifyKind::Connected),
             "after a failed auto attempt consumes the origin, the next manual connect is Connected",
         );
@@ -1274,7 +1585,7 @@ mod tests {
         }
         assert_eq!(origin, ConnectOrigin::Manual, "a failed auto-switch must consume the origin");
         assert_eq!(
-            decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false),
+            decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false, false),
             Some(NotifyKind::Connected),
             "after a failed auto-switch consumes the origin, the next manual connect is Connected",
         );
@@ -1304,6 +1615,7 @@ mod tests {
                 peeked,
                 notifications_off,
                 false,
+                false,
             ),
             None,
             "gate-off must silence even the auto-connect-on-launch plate",
@@ -1325,6 +1637,7 @@ mod tests {
                 peeked2,
                 notifications_on,
                 false,
+                false,
             ),
             Some(NotifyKind::Connected),
             "after the auto origin is consumed, the next manual connect reads Manual → Connected",
@@ -1337,17 +1650,17 @@ mod tests {
         // Connecting). The genuine «Отключено» fires on the SETTLED Disconnecting → Disconnected edge
         // for a real user disconnect, and stays suppressed for a switch/reconnect teardown.
         assert_eq!(
-            decide_notification(VpnStatus::Connected, VpnStatus::Disconnecting, ConnectOrigin::Manual, true, false),
+            decide_notification(VpnStatus::Connected, VpnStatus::Disconnecting, ConnectOrigin::Manual, true, false, false),
             None,
             "a transition INTO Disconnecting is transient — fires nothing",
         );
         assert_eq!(
-            decide_notification(VpnStatus::Disconnecting, VpnStatus::Disconnected, ConnectOrigin::Manual, true, false),
+            decide_notification(VpnStatus::Disconnecting, VpnStatus::Disconnected, ConnectOrigin::Manual, true, false, false),
             Some(NotifyKind::Disconnected),
             "a real user disconnect fires «Отключено» on the settled Disconnecting → Disconnected edge",
         );
         assert_eq!(
-            decide_notification(VpnStatus::Disconnecting, VpnStatus::Disconnected, ConnectOrigin::Manual, true, true),
+            decide_notification(VpnStatus::Disconnecting, VpnStatus::Disconnected, ConnectOrigin::Manual, true, true, false),
             None,
             "the teardown half of a switch/reconnect must not flash «Отключено»",
         );
@@ -1371,6 +1684,7 @@ mod tests {
                 peeked,
                 true,
                 false,
+                false,
             ),
             Some(NotifyKind::AutoSwitched),
         );
@@ -1378,7 +1692,7 @@ mod tests {
 
         // A subsequent manual connect reads the reset Manual → generic Connected.
         assert_eq!(
-            decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false),
+            decide_notification(VpnStatus::Connecting, VpnStatus::Connected, origin, true, false, false),
             Some(NotifyKind::Connected),
         );
     }
@@ -1404,12 +1718,14 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             decide_notification(
                 VpnStatus::Reconnecting,
                 VpnStatus::Connected,
                 ConnectOrigin::AutoSwitch,
                 true,
+                false,
                 false,
             ),
             decide_notification(
@@ -1418,12 +1734,14 @@ mod tests {
                 ConnectOrigin::Manual,
                 true,
                 false,
+                false,
             ),
             decide_notification(
                 VpnStatus::Connected,
                 VpnStatus::Disconnected,
                 ConnectOrigin::Manual,
                 true,
+                false,
                 false,
             ),
         ];

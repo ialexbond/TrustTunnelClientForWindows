@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfigList, type ConfigSummary } from "./useConfigList";
-import { usePerConfigPing, toConfigPing, type PingTarget } from "./usePerConfigPing";
+import { usePerConfigPing, toConfigPing, type PingTarget, type ConfigPing } from "./usePerConfigPing";
 import { configPingToReading } from "../lib/configPingToReading";
-import type { ConfigPing } from "../../components/connection/ConfigPingPill";
-import type { Candidate } from "../lib/decideAutoSwitch";
-import { samePath } from "../utils/samePath";
+import type { Candidate, Reading } from "../lib/decideAutoSwitch";
+import { samePath, normalizePath } from "../utils/samePath";
 import { dedupeConfigsByIdentity } from "../utils/dedupeConfigsByIdentity";
 import type { VpnStatus } from "../types";
 
@@ -44,7 +43,9 @@ export interface ConfigPingSource {
   /**
    * Manually ping every visible config's endpoint ONCE (the «Обновить пинг» button next to «Добавить
    * конфиг»). There is no automatic ping — this is the ONLY way a fresh reachability reading lands.
-   * While a tunnel is up the target set is empty (F24), so a round is a harmless no-op then.
+   * While a tunnel is up the target set still includes every card (BUG-B B2 removed the active-exclusion),
+   * so a round DOES measure them — the active reading is then tunnel-routed (F26), display-only, and never
+   * drives an auto-switch (the engine reads the frozen pre-connect band).
    */
   refreshPings: () => Promise<void>;
   /** True while a manual ping round is in flight (drives the refresh button's spinner + disabled state). */
@@ -53,6 +54,15 @@ export interface ConfigPingSource {
   loading: boolean;
   /** Priority-ordered (manifest order) INACTIVE configs + their latest reading — for the engine. */
   candidates: Candidate[];
+  /**
+   * PA-2 (17-02): the ACTIVE config's FROZEN pre-connect reachability reading — the honest band the
+   * auto-switch engine evaluates for a breach, REPLACING the dishonest through-tunnel `probe_tunnel_latency`.
+   * While connected this is the retained `lastGoodByPath` band for `activeConfigPath` (the SAME number the
+   * active card shows AT REST — D-02; a manual «Обновить пинг» while connected can surface a live
+   * tunnel-routed number on the CARD, but the engine always reads THIS frozen band). While disconnected it
+   * is the live direct probe (the engine is inert then anyway). No config carries the password (D-29).
+   */
+  activeReading: Reading;
   /**
    * F29: seed a config's retained pre-connect band directly (path + numeric ms), bypassing the probe
    * loop. Used on AUTO-CONNECT-ON-LAUNCH (and a manual connect right after launch) where the VPN
@@ -114,14 +124,34 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // Owner (2026-07-05): ping is now MANUAL-only (the «Обновить пинг» button), so the old F24/F26
   // reason for targets=[] while connected (an AUTO loop pinging through the tunnel and flapping the
   // inactive cards) no longer applies — nothing pings unless the user explicitly clicks. So targets
-  // ALWAYS include every card, even while connected: a manual click measures all of them. The number
-  // is tunnel-routed when connected (still not an honest RTT — F26), but the owner asked to see a live
+  // include the INACTIVE cards even while connected: a manual click measures them. The number is
+  // tunnel-routed when connected (still not an honest RTT — F26), but the owner asked to see a live
   // measurement on demand. The engine still consumes the FROZEN pre-connect band (candidates below), so
   // this manual live number never drives an auto-switch decision.
+  //
+  // BUG-B (17-uat) B2: the ACTIVE endpoint is now IN the manual-refresh target set while connected too
+  // (the D-02 exclusion is REMOVED), so «Обновить пинг» measures it on demand like the inactive cards —
+  // the owner tested live and wants the active card to show a number on all paths AND be refreshable.
+  // The connected active probe rides the tunnel to itself, so it can read Unreachable/garbage (F26); the
+  // patchedPings CONNECTED branch below therefore FALLS BACK to the retained honest band whenever the
+  // active card's live reading is NOT a numeric value (Unreachable / no-data), so a connected server can
+  // NEVER regress to «Недоступен» (the original PING-IP tail bug). A NUMERIC live reading DOES show (the
+  // owner wants to see it). The auto-switch ENGINE still reads the FROZEN band (candidates/activeReading
+  // below), so this live active number never drives a switch decision. While DISCONNECTED every card is
+  // probed directly — the honest pre-connect RTT.
+  // Stable key for the visible set — extracted so the exhaustive-deps rule can statically check the
+  // memo's dep array (a complex expression inline trips the lint rule).
+  // PP-8 (17-07, n-8): memoized on `visibleConfigs` so the `.map().join()` over every config is NOT
+  // rebuilt on each render (a ping tick / a pure parent re-render). `visibleConfigs` is itself a
+  // useMemo, so this recomputes only when the config set (id/path) actually changes.
+  const visibleConfigsKey = useMemo(
+    () => visibleConfigs.map((c) => `${c.id}:${c.path}`).join("|"),
+    [visibleConfigs],
+  );
   const targets: PingTarget[] = useMemo(
     () => visibleConfigs.map((c) => ({ id: c.id, path: c.path })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the set changes
-    [visibleConfigs.map((c) => `${c.id}:${c.path}`).join("|")],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the visible set changes
+    [visibleConfigsKey],
   );
   // Manual ping: `usePerConfigPing` no longer pings automatically (no on-mount, no interval — owner's
   // decision). `refreshPings` runs ONE round over the current targets on demand (the «Обновить пинг»
@@ -133,8 +163,41 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // value is what EVERY inactive card shows (frozen pre-connect reachability) and what the active card
   // shows as a bridge until the first live tunnel-latency reading lands. Updated in an effect (no render
   // side-effect); the one-render lag is harmless because these values only serve while connected/bridging.
+  //
+  // F2 (17-REVIEW): the cache key is the NORMALIZED path (`normalizePath` — the SAME form `samePath`
+  // compares). The active-config path arrives from localStorage `tt_config_path` (tray adopt / deeplink /
+  // legacy writers) in a DIFFERENT string form than the manifest `c.path` (`\` vs `/`, drive-letter case)
+  // for the SAME file. Keying + reading raw let `activeReading`/`candidates` look up a form that never
+  // matched a write site → `undefined` → `no-data` every tick → the auto-switch engine returns before
+  // `decideAutoSwitch` (silently dead) while the UI claims it is armed. Normalizing every write + read
+  // guarantees the seed-path form and the manifest-path form can never diverge.
   const lastGoodByPath = useRef<Record<string, ConfigPing>>({});
+
+  // F1 (17-REVIEW): the through-tunnel POISON boundary. A manual «Обновить пинг» while CONNECTED probes
+  // the inactive endpoints THROUGH the tunnel (F26 — not an honest RTT), writing tunnel-routed values
+  // into `pings`. The cache-write effect's `if (!tunnelUp)` guard only checks the CURRENT status, so on
+  // the `tunnelUp true→false` flip it re-runs with the STALE connected-time `pings` still present, the
+  // guard now passes, and it would flush every through-tunnel value into `lastGoodByPath` as a fake
+  // "honest DIRECT" band — the exact 14-vs-69 fake-number class the phase retired. Ping is manual-only,
+  // so nothing overwrites the poison before a reconnect → the frozen card + the PA-2 candidate band show
+  // the fake number all session.
+  //
+  // Airtight fix: remember, by REFERENCE, each `pings[id]` object that was observed while `tunnelUp`.
+  // `usePerConfigPing` produces a FRESH object per resolved probe (`toConfigPing`), so on disconnect a
+  // genuinely new DIRECT probe yields a DIFFERENT reference while the lingering through-tunnel reading
+  // keeps its old one. The cache-write effect then skips any `pings[id]` whose reference still equals its
+  // tainted object (never cache the tunnel value), and drops the taint the moment a fresh honest object
+  // replaces it. This preserves the honest disconnected-state caching untouched.
+  const tunnelTaintedById = useRef<Map<string, ConfigPing>>(new Map());
   useEffect(() => {
+    if (tunnelUp) {
+      // While connected, any value in `pings` is a through-tunnel manual reading — mark it tainted by
+      // reference so the flip-time cache-write can recognise and refuse it.
+      for (const c of visibleConfigs) {
+        const p = pings[c.id];
+        if (p) tunnelTaintedById.current.set(c.id, p);
+      }
+    }
     // Record each config's latest numeric DIRECT band — but ONLY while DISCONNECTED. A manual ping
     // while connected (now possible — targets always include every card) travels through the tunnel
     // (F26), so it is NOT an honest pre-connect RTT; caching it would poison the frozen band the engine
@@ -143,9 +206,15 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     if (!tunnelUp) {
       for (const c of visibleConfigs) {
         const p = pings[c.id];
-        if (p && typeof p.valueMs === "number") {
-          lastGoodByPath.current[c.path] = { band: p.band, valueMs: p.valueMs };
-        }
+        if (!p || typeof p.valueMs !== "number") continue;
+        // F1: refuse to cache a value that is STILL the through-tunnel object recorded while connected
+        // (same reference). A fresh disconnected probe produces a NEW object → it is not tainted → cache
+        // it and clear the taint so future rounds for this id cache normally.
+        if (tunnelTaintedById.current.get(c.id) === p) continue;
+        tunnelTaintedById.current.delete(c.id);
+        // F2: key by NORMALIZED path so every read site (activeReading/candidates/patchedPings) —
+        // whichever path form it holds — resolves this entry.
+        lastGoodByPath.current[normalizePath(c.path)] = { band: p.band, valueMs: p.valueMs };
       }
     }
     // F23: invalidate entries whose path left the config list (deleted config), so a REUSED path
@@ -157,10 +226,20 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     // retained pre-connect RTT, which BRIDGES the card until the first live tunnel-latency reading lands
     // (and covers the connecting/reconnecting phases). An empty list is never a real "all configs
     // deleted" state worth pruning.
-    const live = new Set(visibleConfigs.map((c) => c.path));
+    // F2: the cache is keyed by normalized path, so compare against the normalized live set.
+    const live = new Set(visibleConfigs.map((c) => normalizePath(c.path)));
     if (live.size > 0) {
       for (const path of Object.keys(lastGoodByPath.current)) {
         if (!live.has(path)) delete lastGoodByPath.current[path];
+      }
+    }
+    // F1: keep the taint map bounded to the live id set (mirrors usePerConfigPing's WR-05 prune) so a
+    // removed config's tainted reference can never linger. Only when the list is non-empty (same
+    // transient-empty guard as above).
+    if (visibleConfigs.length > 0) {
+      const liveIds = new Set(visibleConfigs.map((c) => c.id));
+      for (const id of tunnelTaintedById.current.keys()) {
+        if (!liveIds.has(id)) tunnelTaintedById.current.delete(id);
       }
     }
   }, [pings, visibleConfigs, tunnelUp]);
@@ -180,44 +259,69 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
   // could have resolved after the tunnel started forming).
   const [seedVersion, setSeedVersion] = useState(0);
   const seedRetainedPing = useCallback((path: string, ms: number) => {
-    lastGoodByPath.current[path] = toConfigPing({ status: "ok", ms });
+    // F2: normalize the seed key so `useAutoConnect`'s path form (whatever it passes) lands under the
+    // SAME key the manifest-path read sites resolve — otherwise a seeded-but-unnormalized entry would be
+    // invisible to activeReading/candidates and the seeded card would still read «—».
+    lastGoodByPath.current[normalizePath(path)] = toConfigPing({ status: "ok", ms });
     setSeedVersion((v) => v + 1);
   }, []);
 
   // F24/F26 (14-UAT round 3): build the card ping map.
   //   - DISCONNECTED: `pings` already holds live DIRECT probes for every card — use as-is (bridged).
-  //   - CONNECTED (tunnel up): no honest probe is possible (every probe rides the tunnel or bypasses it —
-  //     see F26 above), so we probed nothing → `pings` is empty. FREEZE EVERY card (active included) at its
-  //     last pre-connect reachability (`lastGoodByPath`) so the list shows the same honest low numbers it
-  //     did before connecting, instead of a fake live tunnel number or fluctuating garbage. A config with
-  //     no retained value is simply absent → honest «—».
+  //   - CONNECTED (tunnel up): a manual «Обновить пинг» DOES probe every card now (BUG-B B2 removed the
+  //     active-exclusion), but a connected probe rides the tunnel (F26) so it is display-only. Show a
+  //     NUMERIC live reading when present; otherwise fall back to the retained pre-connect band
+  //     (`lastGoodByPath`) so the list keeps the same honest low numbers it had before connecting — and the
+  //     ACTIVE card never regresses to «Недоступен»/«—» while you are connected to it. A card with no live
+  //     and no retained value is simply absent → honest «—».
   const patchedPings = useMemo(() => {
     if (!tunnelUp) {
-      // DISCONNECTED. `pings` holds the live direct probes — but right after a disconnect they are all
-      // still empty (the connected-time freeze ran with targets=[] → usePerConfigPing pruned to {}), so
-      // without a bridge every card would flash «—» for 1–3 s until the first fresh probe lands (Fable R4
-      // MINOR). Seed each config that has no fresh reading YET from its retained pre-connect band, marked
-      // `measuring` so it reads as re-checking (a coloured shimmer at the prior band) rather than a stale
-      // final value; the live probe overwrites it the moment it resolves.
+      // DISCONNECTED. `pings` holds the live direct probes — but right after a disconnect a card may still
+      // have no fresh DIRECT reading yet (nothing was probed since connect, or its entry was pruned on a
+      // target-set change), so without a bridge such a card would flash «—» until the next reading lands.
+      // Seed any config that has no fresh reading YET from its retained pre-connect band.
+      //
+      // F3 (17-REVIEW): bridge it as a SETTLED value — `measuring:true` ONLY while a manual round is
+      // actually in flight (`pinging`). The former unconditional `measuring:true` assumed an auto-probe
+      // loop would overwrite it "the moment it resolves"; that loop is GONE (ping is manual-only), so the
+      // active card — pruned at connect, re-entering targets with no entry on disconnect — was left in an
+      // INDEFINITE shimmer (no number) after EVERY disconnect until the user manually refreshed. Gating on
+      // `pinging` shows the retained band as a settled number at rest and only shimmers during a real round,
+      // honouring D-02's own "no «—»/measuring flash" promise.
       let bridged: Record<string, ConfigPing> | null = null;
       for (const c of visibleConfigs) {
         if (pings[c.id]) continue;
-        const retained = lastGoodByPath.current[c.path];
+        const retained = lastGoodByPath.current[normalizePath(c.path)]; // F2: read the normalized key
         if (!retained) continue;
         if (!bridged) bridged = { ...pings };
-        bridged[c.id] = { ...retained, measuring: true };
+        bridged[c.id] = pinging ? { ...retained, measuring: true } : retained;
       }
       return bridged ?? pings;
     }
     // CONNECTED (tunnel up). Show a LIVE manual measurement when the user pressed «Обновить пинг»
     // (targets now include every card even connected, so a manual round populates `pings`) — the owner
     // wants to see a fresh number on demand. Otherwise (no manual refresh since connect) freeze the card
-    // at its retained pre-connect band, as before. The live connected number is tunnel-routed (F26) and
-    // is display-only — the engine still reads the frozen band (candidates below).
+    // at its retained pre-connect band. The live connected number is tunnel-routed (F26) and is
+    // display-only — the engine still reads the frozen band (candidates below).
     const next: Record<string, ConfigPing> = {};
+    const activeConfig = visibleConfigs.find((c) => samePath(c.path, activeConfigPath));
     for (const c of visibleConfigs) {
       const live = pings[c.id];
-      const retained = lastGoodByPath.current[c.path];
+      const retained = lastGoodByPath.current[normalizePath(c.path)]; // F2: read the normalized key
+      // BUG-B (17-uat) B2: the ACTIVE card is now IN targets, so a connected manual refresh CAN read it as
+      // Unreachable/garbage through its own tunnel (F26). The user is literally connected to this server,
+      // so the active card must NEVER regress to «Недоступен»/«—»: if the live reading is NOT a numeric
+      // value (Unreachable / no-data / absent), FALL BACK to the retained honest pre-connect band. A
+      // NUMERIC live reading DOES show (the owner wants to see a real on-demand number). Inactive cards
+      // keep the prior behaviour (live ?? retained). Matched by identity to the resolved active config.
+      const isActive = activeConfig !== undefined && c.id === activeConfig.id;
+      if (isActive) {
+        const liveNumeric = live && typeof live.valueMs === "number";
+        if (liveNumeric) next[c.id] = live;
+        else if (retained) next[c.id] = retained;
+        else if (live) next[c.id] = live; // no retained bridge yet → show whatever live we have (honest)
+        continue;
+      }
       if (live) next[c.id] = live;
       else if (retained) next[c.id] = retained;
     }
@@ -226,8 +330,10 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     // the other deps do not change on the connecting→connected transition, so without it the seeded active
     // card would stay «—». It is not read in the body, so exhaustive-deps calls it "unnecessary"; it is
     // exactly the intended recompute trigger, so the rule is disabled for this deps line.
+    // F3: `pinging` is read in the disconnected bridge (settle vs shimmer), so it is a genuine dep — the
+    // rest-state card must re-settle to a plain number the moment a manual round finishes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pings, visibleConfigs, tunnelUp, seedVersion]);
+  }, [pings, visibleConfigs, tunnelUp, seedVersion, pinging]);
 
   // D-02 candidate list: inactive configs in manifest order, each with its latest reading. The engine
   // consumes this only while connected+masterOn; when off it is harmlessly ignored.
@@ -245,13 +351,46 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
         .map((c) => ({
           path: c.path,
           order: c.order,
-          reading: configPingToReading(tunnelUp ? lastGoodByPath.current[c.path] : pings[c.id]),
+          // F2: read the frozen band under the normalized key.
+          reading: configPingToReading(
+            tunnelUp ? lastGoodByPath.current[normalizePath(c.path)] : pings[c.id],
+          ),
         })),
     // lastGoodByPath is a ref (frozen while connected); the tunnelUp flip + pings change re-derive this at
     // the connect boundary. F29: NO seedVersion here on purpose — a seeded path is always the ACTIVE
     // config, which is filtered OUT of candidates, so a seed never changes this list.
     [visibleConfigs, activeConfigPath, pings, tunnelUp],
   );
+
+  // PA-2 (17-02): the ACTIVE config's reading the auto-switch engine evaluates for a breach. This
+  // REPLACES the dishonest through-tunnel `probe_tunnel_latency` the engine used to invoke each tick
+  // (F26 caught it reading 14 ms while the direct RTT was 69 ms — it bypassed the tunnel). While
+  // CONNECTED we hand the engine the SAME frozen pre-connect band the active card shows (D-02 —
+  // `lastGoodByPath[activeConfigPath]`); the through-tunnel probe is retired entirely. While
+  // DISCONNECTED it is the live direct probe (the engine is inert then, so the value is moot). A config
+  // with no retained reading reads honest `no-data` (neutral — the engine treats a transient no-data as
+  // "wait", never a breach). One honesty thread: the D-04-truthful number feeds BOTH the card and this.
+  // seedVersion re-derives this after a post-freeze seedRetainedPing ref write (same reason patchedPings
+  // depends on it), so the connecting→connected transition surfaces the seeded active band to the engine.
+  const activeReading: Reading = useMemo(() => {
+    const activeConfig = visibleConfigs.find((c) => samePath(c.path, activeConfigPath));
+    // F2 (17-REVIEW): key the frozen-band lookup off the RESOLVED `activeConfig.path` (normalized), NOT
+    // the raw `activeConfigPath` prop. The prop comes from localStorage `tt_config_path` in a different
+    // string form (`\` vs `/`, drive-letter case) than the manifest `c.path` the cache is written under;
+    // indexing raw returned `undefined` on any such mismatch → `no-data` every tick → useAutoSwitch reset
+    // its breach counter and returned BEFORE decideAutoSwitch, so auto-switch was silently dead for the
+    // whole session while the UI claimed it was armed. `activeConfig` is already resolved via `samePath`
+    // just above, so its `path` is the canonical manifest form — normalize it to match the write key.
+    const source = tunnelUp
+      ? activeConfig
+        ? lastGoodByPath.current[normalizePath(activeConfig.path)]
+        : undefined
+      : activeConfig
+        ? pings[activeConfig.id]
+        : undefined;
+    return configPingToReading(source);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seedVersion forces re-derive post-freeze
+  }, [visibleConfigs, activeConfigPath, pings, tunnelUp, seedVersion]);
 
   return {
     configs: visibleConfigs,
@@ -262,6 +401,7 @@ export function useConfigPingSource(activeConfigPath: string, status: VpnStatus)
     pinging,
     loading,
     candidates,
+    activeReading,
     seedRetainedPing,
   };
 }

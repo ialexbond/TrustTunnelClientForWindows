@@ -124,8 +124,16 @@ pub fn save_exclusion_list(config_path: String, domains: Vec<String>) -> Result<
     }
     doc["exclusions"] = value(arr);
 
-    std::fs::write(&config_path, doc.to_string())
-        .map_err(|e| format!("Failed to write config: {e}"))?;
+    // F4 (17-review): atomic write — this rewrites the ACTIVE password-bearing config; a
+    // truncate-then-write cut short by ENOSPC / power loss would strand the endpoint
+    // host/login/password. Route through the same temp → fsync → rename → parent-dir fsync writer
+    // every other .toml save uses (PP-1), so the file is swapped in whole or not at all. D-29: the
+    // writer never logs the bytes (the eprintln below carries only the count + path, no content).
+    crate::commands::manifest::write_bytes_atomic(
+        std::path::Path::new(&config_path),
+        doc.to_string().as_bytes(),
+    )
+    .map_err(|e| format!("Failed to write config: {e}"))?;
     eprintln!("[exclusions] {} domains saved to {}", domains.len(), config_path);
 
     // Also backup to JSON for persistence across config deletions

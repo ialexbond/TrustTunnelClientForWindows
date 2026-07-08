@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Power,
+  Ban,
   type LucideIcon,
 } from "lucide-react";
 
@@ -52,7 +53,13 @@ export type NotifyKind =
   | "autoSwitched"
   | "autoConnected"
   | "disconnected"
-  | "switching";
+  | "switching"
+  // Part B (cancel notification): a USER CANCEL of an in-flight connect — «Подключение отменено». A
+  // DIFFERENT event from `disconnected` («Отключено») per the owner (a cancel aborts a connect that
+  // never completed). Fired by the pure Rust `decide_notification` (NotifyKind::Cancelled, wire key
+  // "cancelled") when the FE-raised `pending_cancel` intent is set on a terminal Disconnected. NEUTRAL
+  // (not-success, not-error) — Ban icon + muted colour, like `disconnected`.
+  | "cancelled";
 
 /** The two languages the plate copy supports — mirrors the app's ru-primary / en-mirror i18n.
  *  Threaded from Rust (`set_plate_language`, whitelisted to these two values). */
@@ -155,6 +162,21 @@ export const notificationCopy = {
       // No dup with the title «Отключено»/«отключён» — body states the consequence instead.
       ru: () => "Трафик идёт напрямую",
       en: () => "Traffic goes directly",
+    },
+  },
+  // Part B (cancel notification): a USER CANCEL of an in-flight connect — «Подключение отменено». A
+  // DIFFERENT event from «Отключено» (owner requirement): the connect never completed, so it is not a
+  // disconnect of a live tunnel. NEUTRAL like `disconnected` (Ban icon + muted colour — not-success,
+  // not-error). Name-independent body (no config-name interpolation) — the target connect was aborted,
+  // and «Соединение не установлено» reads honestly whether or not a config name is known.
+  cancelled: {
+    icon: Ban,
+    iconColor: TOK.muted,
+    title: { ru: "Подключение отменено", en: "Connection cancelled" },
+    body: {
+      // No title/body word-dup («подключение» would echo the title) — body states the outcome.
+      ru: () => "Соединение не установлено",
+      en: () => "No connection was established",
     },
   },
   // 13-10 (§A): the switch START plate — fired the moment a deliberate server switch begins (Rust

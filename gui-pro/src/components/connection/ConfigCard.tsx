@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Check, Clock, ClipboardList, Copy, Globe, Loader2, Pencil, QrCode, Settings, Trash2, X } from "lucide-react";
+import { Activity, Check, Clock, ClipboardList, Copy, Globe, Loader2, Pencil, Power, QrCode, Settings, Trash2, X } from "lucide-react";
 import { Card } from "../../shared/ui/Card";
 import { ErrorBanner } from "../../shared/ui/ErrorBanner";
 import { Button } from "../../shared/ui/Button";
@@ -149,6 +149,15 @@ export interface ConfigCardProps {
    */
   reconnectProgress?: ReconnectProgress | null;
   onConnect?: () => void;
+  /**
+   * D-05 (17-07): abort the in-flight (re)connect from the lead card's connecting loader.
+   * Wired to the SAME `useVpnActions.handleDisconnect` → `vpn_disconnect` the tray + StatusPanel
+   * already call (no new backend command). The action is idempotent against the fast-settle race:
+   * `vpn_disconnect` no-ops on an already-settled session (17-RESEARCH §Pitfall 5). Only the lead
+   * card's cancelable states (connecting / reconnecting / recovering) render the button; the
+   * non-cancelable `disconnecting` teardown keeps its inert spinner (mirrors StatusPanel:164-169).
+   */
+  onDisconnect?: () => void;
   onEdit?: () => void;
   /** Open the ConfigQr transfer modal for this config (D-09). Available for ANY config
    *  (active or inactive) — the «QR-код» overflow item is never state-gated. */
@@ -167,7 +176,7 @@ export interface ConfigCardProps {
   existingNames?: string[];
 }
 
-export function ConfigCard({
+function ConfigCardImpl({
   config,
   status = "disconnected",
   ping,
@@ -182,6 +191,7 @@ export function ConfigCard({
   onRevertDismiss,
   reconnectProgress,
   onConnect,
+  onDisconnect,
   onEdit,
   onQr,
   onDelete,
@@ -232,11 +242,14 @@ export function ConfigCard({
     setRenameError(null);
     setEditing(true);
   };
-  const cancelRename = () => {
+  // PP-8 (17-07): stable via useCallback so `runAction` (and thus the memoized `overflowItems`
+  // below) does not change identity on an unrelated re-render — it only re-creates when the
+  // config name it resets the draft to changes.
+  const cancelRename = useCallback(() => {
     setDraft(config.name);
     setRenameError(null);
     setEditing(false);
-  };
+  }, [config.name]);
   const commitRename = async () => {
     if (localError) return; // never commit a duplicate name (empty is a valid clear, IN-58)
     if (trimmed === config.name) {
@@ -256,10 +269,15 @@ export function ConfigCard({
   };
   // Any non-rename action on a card with an open rename cancels the rename first (D-14), so
   // an in-flight rename never hangs when the user clicks Connect / an overflow item.
-  const runAction = (fn?: () => void) => () => {
-    if (editing) cancelRename();
-    fn?.();
-  };
+  // PP-8 (17-07): useCallback so the memoized `overflowItems` below is stable across re-renders
+  // that don't change `editing` / `cancelRename`.
+  const runAction = useCallback(
+    (fn?: () => void) => () => {
+      if (editing) cancelRename();
+      fn?.();
+    },
+    [editing, cancelRename],
+  );
 
   // The inline name editor (InlineNameEdit + ✓/✗ + FieldError) — shared verbatim by the lead
   // card's centred hero name and the resting row, so both edit the title the same way.
@@ -368,33 +386,39 @@ export function ConfigCard({
   // the ConfigQr transfer modal — available for ANY config (active or inactive), NOT state-gated;
   // only the existing D-21 `locked` (another card connecting) disables it, matching the others.
   // D-21: locked while another card is connecting.
-  const overflowItems: OverflowMenuItem[] = [
-    {
-      label: t("connection.card.edit"),
-      onSelect: runAction(onEdit),
-      icon: <Settings className="w-3.5 h-3.5" />,
-      disabled: locked,
-    },
-    {
-      label: t("connection.card.duplicate"),
-      onSelect: runAction(onDuplicate),
-      icon: <Copy className="w-3.5 h-3.5" />,
-      disabled: locked,
-    },
-    {
-      label: t("connection.card.qr"),
-      onSelect: runAction(onQr),
-      icon: <QrCode className="w-3.5 h-3.5" />,
-      disabled: locked,
-    },
-    {
-      label: t("connection.card.delete"),
-      onSelect: runAction(onDelete),
-      icon: <Trash2 className="w-3.5 h-3.5" />,
-      destructive: true,
-      disabled: locked,
-    },
-  ];
+  // PP-8 (17-07, n-7): memoized so the array + its icon JSX is not rebuilt on every re-render
+  // (e.g. a ping/uptime tick, or the TruncatedText clip-measure state) — only when a dependency
+  // (the wrapped actions, the lock, or `t`) actually changes.
+  const overflowItems: OverflowMenuItem[] = useMemo(
+    () => [
+      {
+        label: t("connection.card.edit"),
+        onSelect: runAction(onEdit),
+        icon: <Settings className="w-3.5 h-3.5" />,
+        disabled: locked,
+      },
+      {
+        label: t("connection.card.duplicate"),
+        onSelect: runAction(onDuplicate),
+        icon: <Copy className="w-3.5 h-3.5" />,
+        disabled: locked,
+      },
+      {
+        label: t("connection.card.qr"),
+        onSelect: runAction(onQr),
+        icon: <QrCode className="w-3.5 h-3.5" />,
+        disabled: locked,
+      },
+      {
+        label: t("connection.card.delete"),
+        onSelect: runAction(onDelete),
+        icon: <Trash2 className="w-3.5 h-3.5" />,
+        destructive: true,
+        disabled: locked,
+      },
+    ],
+    [t, runAction, onEdit, onDuplicate, onQr, onDelete, locked],
+  );
 
   return (
     <Card
@@ -517,12 +541,47 @@ export function ConfigCard({
 
           {/* Right: primary + overflow. min-w-[9rem] fits the longest label «Переключиться». */}
           <div className="flex items-center justify-end gap-[var(--space-1)]">
-            {/* Phase 14 (D-12): `switching` forces the icon-only spinner primary so a switch is
-                NEVER a live «Отключить» text button — the switch is self-terminating and its
-                controls are locked. During the teardown/spawn legs `isInFlight(status)` is
-                already true; OR-ing `switching` keeps the spinner up across any transient
-                settled-status blip mid-switch. */}
-            {isInFlight(status) || switching || connectPending ? (
+            {/* D-05 (17-07) / BUG-A2 (17-uat): the loader carries a LIVE «Отмена» button so the user
+                can abort the wait — the SAME affordance StatusPanel offers (StatusPanel.tsx:169-175),
+                mounted here on the Connection tab's lead card. It calls the reused `onDisconnect`
+                (App's race-safe handleUserCancel → vpn_disconnect), idempotent against the fast-settle
+                race — vpn_disconnect no-ops on an already-settled session (Pitfall 5). No new backend
+                command, no new state.
+                BUG-A2: the LIVE cancel shows for `connecting` / `recovering` — the states where the
+                App's `reconnectResolve` latch is GUARANTEED null, so handleUserCancel PROCEEDS and the
+                cancel actually works. It shows EVEN WHILE `connectPending` is true: on a plain connect
+                handleConnectActive raises pendingConnectPath (→ connectPending) for the WHOLE connect
+                span, and the live status is `connecting` throughout — gating the cancel on
+                `!connectPending` would HIDE the «Отмена» for the entire normal connect (the exact
+                "нет кнопки отмены при обычном подключении" bug). Because handleUserCancel is safe during
+                connecting/recovering, there is no reason to hide it there. The FIRST branch (this one)
+                wins whenever the status is already `connecting`/`recovering`; the F28 pre-`connecting`
+                instant-feedback window (status still disconnected/error + connectPending) has NO
+                connecting status, so it falls to the inert-spinner branch below. It is NOT shown when:
+                  - `reconnecting` — AMBIGUOUS: it is set BOTH by the backend auto-retry supervisor
+                    (reconnectResolve null → safe) AND by a FE save-and-reconnect whose teardown ARMS
+                    reconnectResolve (→ handleUserCancel is inert). Since we cannot tell them apart from
+                    status alone, `reconnecting` gets the INERT spinner — never a live-but-dead cancel;
+                  - `disconnecting` — the teardown itself is non-cancelable (StatusPanel hides it too);
+                  - `switching` — a seamless A→B switch is self-terminating (isSwitching held across its
+                    `connecting` leg, during which handleUserCancel IS inert), so its controls are locked
+                    to the inert spinner (never a live-but-dead cancel — Phase 14 D-12).
+                The inert-spinner branch below (isInFlight covers reconnecting + disconnecting; plus
+                switching + the pre-connecting connectPending window) is mutually exclusive with this one,
+                so the show-condition matches the handler's works-condition — no dead button. */}
+            {(status === "connecting" || status === "recovering") &&
+            !switching ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDisconnect?.()}
+                aria-label={t("buttons.cancel")}
+                className="min-w-[9rem] justify-center"
+              >
+                <Power className="w-3.5 h-3.5" />
+                {t("buttons.cancel")}
+              </Button>
+            ) : isInFlight(status) || switching || connectPending ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -648,3 +707,21 @@ export function ConfigCard({
     </Card>
   );
 }
+
+/**
+ * PP-8 (17-07, n-7): `ConfigCard` is `React.memo`-wrapped so a re-render of the list (e.g. an
+ * unrelated card's ping update landing on the shared `pings` map, or a parent state tick) does not
+ * re-render every card — only the cards whose own props (id / status / ping / the flags / the
+ * action callbacks) actually changed. Default shallow comparison is correct here (no deep-equal
+ * needed): the list passes a stable `pings[id]` reference per card, so an unchanged card gets the
+ * same `ping` object.
+ *
+ * F13 (17-review): for the memo to ACTUALLY skip a render, every prop must keep stable identity
+ * across a ping tick. ConfigList used to build FRESH inline arrow callbacks (`() => onConnect(config)`
+ * …) and a freshly-mapped `existingNames` array on each render, so the shallow compare always failed
+ * and the memo was a no-op. ConfigList now hands each card the SAME closure identities from a
+ * memoized id→handlers map + a memoized shared `existingNames` array (rebuilt only when `configs` or
+ * the callbacks change, not on a ping tick), so an unchanged card's props compare equal and this memo
+ * genuinely bails — see ConfigList `cardHandlers`/`allNames`.
+ */
+export const ConfigCard = memo(ConfigCardImpl);

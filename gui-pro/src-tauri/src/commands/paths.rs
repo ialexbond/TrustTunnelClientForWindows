@@ -9,7 +9,7 @@
 //! for a not-yet-existing destination — and require it to start with the allowed dir); nothing
 //! is loosened.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::ssh::portable_data_dir;
 
@@ -19,6 +19,15 @@ pub fn validate_app_path(path: &str) -> Result<(), String> {
     validate_path_in_dir(path, &portable_data_dir())
 }
 
+/// F16 (Fable-5 review): the canonical-output variant of `validate_app_path`. Returns the
+/// SAME canonical `PathBuf` the confinement check ran against, so a caller can spawn/open
+/// exactly that path instead of re-canonicalizing the raw string — closing the CA-2 guard's
+/// check-then-use (TOCTOU) window where validate and spawn resolved the string twice. Same
+/// confinement semantics as `validate_app_path`; only the success value differs.
+pub fn validate_app_path_canonical(path: &str) -> Result<PathBuf, String> {
+    validate_path_in_dir_canonical(path, &portable_data_dir())
+}
+
 /// Generalized form: require `path` to canonicalize to a location inside `allowed_dir`.
 ///
 /// The final `file_name` is appended UN-canonicalized after canonicalizing the parent, but
@@ -26,6 +35,17 @@ pub fn validate_app_path(path: &str) -> Result<(), String> {
 /// `starts_with` is a lexical prefix check on the canonical buffer (both sides canonicalized,
 /// so it is symlink-free for the parent chain).
 pub fn validate_path_in_dir(path: &str, allowed_dir: &Path) -> Result<(), String> {
+    validate_path_in_dir_canonical(path, allowed_dir).map(|_| ())
+}
+
+/// F16: the canonical-output form of `validate_path_in_dir`. Confines `path` to `allowed_dir`
+/// EXACTLY like `validate_path_in_dir` (this is now the single implementation both share — the
+/// unit form just drops the returned path), but on success returns the canonical `PathBuf` the
+/// confinement was decided against. Returning it lets the caller use the same resolved path it
+/// just validated, so the validate and the subsequent use cannot resolve the raw string to two
+/// different targets (TOCTOU). The canonical value is ONLY produced on the Ok branch — the
+/// fail-closed Err branch (path + parent both non-existent) has no path to return.
+pub fn validate_path_in_dir_canonical(path: &str, allowed_dir: &Path) -> Result<PathBuf, String> {
     let allowed =
         std::fs::canonicalize(allowed_dir).unwrap_or_else(|_| allowed_dir.to_path_buf());
 
@@ -51,7 +71,7 @@ pub fn validate_path_in_dir(path: &str, allowed_dir: &Path) -> Result<(), String
                     "Access denied: path is outside the application data directory".into(),
                 );
             }
-            Ok(())
+            Ok(c)
         }
         // The path AND its parent are both non-existent, so we cannot canonicalize it
         // to compare symlink-free. Fail CLOSED: a security guard must not report a

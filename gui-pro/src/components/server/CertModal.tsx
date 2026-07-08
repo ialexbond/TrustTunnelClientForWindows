@@ -9,7 +9,8 @@ import { useConfirm } from "../../shared/ui/useConfirm";
 import { formatError } from "../../shared/utils/formatError";
 import type { ServerState } from "./useServerState";
 import type { useSecurityState } from "./useSecurityState";
-import { parseCertInfo, daysUntil, pluralRu, type CertInfo } from "./certUtils";
+import { parseCertInfo, daysUntil, type CertInfo } from "./certUtils";
+import { pluralRu } from "../../shared/lib/pluralRu";
 
 // P UAT 2026-05-04 — formatDateHuman + formatDaysHuman moved to module-level
 // helpers (used in JSX inline для validity period text).

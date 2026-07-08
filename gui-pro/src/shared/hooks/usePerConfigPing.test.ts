@@ -113,6 +113,54 @@ describe("usePerConfigPing — manual round + pinging flag", () => {
   });
 });
 
+describe("usePerConfigPing — PP-7 coalesced commit (render-count)", () => {
+  it("commits the WHOLE round's bands in ONE setPings, not per-target (N=4)", async () => {
+    // Four targets. The pre-PP-7 interval era wrote per-target on each resolution (2N+ pings-state
+    // commits per round). PP-7 merges the whole round into a single setPings. We assert that the
+    // `pings` object identity changes at most ONCE across the round — one merged commit, not four.
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ping_config_endpoint") return { status: "ok", ms: 42 };
+      return null;
+    });
+
+    const FOUR: PingTarget[] = [
+      { id: "a", path: "/a.toml" },
+      { id: "b", path: "/b.toml" },
+      { id: "c", path: "/c.toml" },
+      { id: "d", path: "/d.toml" },
+    ];
+
+    // Track every distinct `pings` object reference the hook exposes. A per-target commit path would
+    // produce a new reference per resolved target (4+); the coalesced path produces exactly one new
+    // reference for the whole round (on top of the initial empty map).
+    const seen: Array<Record<string, unknown>> = [];
+    const { result } = renderHook(() => {
+      const hook = usePerConfigPing(FOUR);
+      if (seen[seen.length - 1] !== hook.pings) seen.push(hook.pings);
+      return hook;
+    });
+
+    // Baseline: the initial empty map is the only reference so far.
+    expect(seen.length).toBe(1);
+    expect(result.current.pings).toEqual({});
+
+    await act(async () => {
+      await result.current.refreshPings();
+    });
+
+    // All four bands landed…
+    expect(result.current.pings.a?.band).toBe("green");
+    expect(result.current.pings.b?.band).toBe("green");
+    expect(result.current.pings.c?.band).toBe("green");
+    expect(result.current.pings.d?.band).toBe("green");
+
+    // …in a SINGLE new `pings` reference (the coalesced commit) — so exactly 2 distinct references
+    // total (initial empty + one merged round), regardless of the 4 targets. A per-target commit
+    // would have pushed 4+ references. This is the PP-7 render-count guarantee.
+    expect(seen.length).toBe(2);
+  });
+});
+
 describe("usePerConfigPing — cancel-on-re-seed + WR-05 prune", () => {
   it("discards a round's result if the target set changes mid-flight (cancel-on-re-seed)", async () => {
     let resolveProbe: ((v: { status: string; ms: number }) => void) | undefined;
