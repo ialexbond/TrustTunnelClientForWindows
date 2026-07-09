@@ -23,7 +23,15 @@ enum LogEntry {
 static LOG_TX: Mutex<Option<mpsc::Sender<LogEntry>>> = Mutex::new(None);
 
 /// Sensitive keys whose values must never appear in logs.
-const SENSITIVE_KEYS: &[&str] = &["password", "certificate", "username", "client_random", "host"];
+///
+/// C-01 (Phase 18): `secret` and `trusttunnel` were added so the MTProto (telemt)
+/// proxy secret line — `trusttunnel = "<32-hex>"` under `[access.users]`, or a bare
+/// `secret = "…"` — is redacted as belt-and-suspenders even if a telemt.toml body
+/// ever reaches the log echo channel (exec_command → emit_log → sanitize). The
+/// primary defence is that the uninstall paths now read ONLY the port (grep), never
+/// the whole file; this redactor is the second line.
+const SENSITIVE_KEYS: &[&str] =
+    &["password", "certificate", "username", "client_random", "host", "secret", "trusttunnel"];
 
 /// Replace values of sensitive keys with `***`.
 ///
@@ -474,8 +482,22 @@ mod tests {
 
     #[test]
     fn sanitize_case_insensitive() {
-        assert!(!sanitize(r#"PASSWORD = "secret""#).contains("secret"));
-        assert!(!sanitize(r#"Password = "secret""#).contains("secret"));
+        assert!(!sanitize(r#"PASSWORD = "hunter2""#).contains("hunter2"));
+        assert!(!sanitize(r#"Password = "hunter2""#).contains("hunter2"));
+    }
+
+    #[test]
+    fn sanitize_redacts_telemt_proxy_secret_line() {
+        // C-01: if a telemt.toml body ever reaches the log echo channel, the
+        // `[access.users] trusttunnel = "<hex>"` secret line must be redacted. Also
+        // a generic `secret = …` assignment.
+        let hex = "0123456789abcdef0123456789abcdef";
+        let input = format!("[access.users]\ntrusttunnel = \"{hex}\"");
+        let result = sanitize(&input);
+        assert!(!result.contains(hex), "telemt proxy secret leaked through sanitize: {result}");
+        assert!(!sanitize(r#"secret = "deadbeef""#).contains("deadbeef"), "bare secret= not redacted");
+        // The section header itself is harmless prose and must survive.
+        assert!(result.contains("[access.users]"));
     }
 
     #[test]

@@ -639,6 +639,12 @@ pub fn run() {
             // fire outbound TCP probes). Mirrors the earlier check_vpn_status removal.
             commands::ssh_commands::check_server_installation,
             commands::ssh_commands::uninstall_server,
+            // Phase 18 (UN-2, plan 18-05): pooled read of the pre-install snapshot evidence
+            // (D-06/D-07) so the uninstall dialog can gate the package-purge checkboxes.
+            commands::ssh_commands::read_server_snapshot,
+            // Phase 18 (18-10): pooled read of the install/enable ownership markers so the
+            // uninstall dialog can offer ufw/fail2ban-package + BBR removal on a LEGACY server.
+            commands::ssh_commands::read_server_ownership_markers,
             commands::ssh_commands::fetch_server_config,
             commands::ssh_commands::add_server_user,
             commands::ssh_commands::server_restart_service,

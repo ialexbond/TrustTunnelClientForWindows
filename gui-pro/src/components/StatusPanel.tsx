@@ -6,7 +6,7 @@ import type { VpnStatus, ReconnectProgress } from "../shared/types";
 import { Button } from "../shared/ui/Button";
 import { StatusBadge } from "../shared/ui/StatusBadge";
 import { ErrorBanner } from "../shared/ui/ErrorBanner";
-import { formatUptime } from "../shared/utils/uptime";
+import { UptimeCounter } from "../shared/ui/UptimeCounter";
 import { statusBadgeVariant } from "../shared/lib/statusBadgeVariant";
 
 interface StatusPanelProps {
@@ -35,14 +35,8 @@ interface StatusPanelProps {
   switching?: boolean;
 }
 
-function UptimeCounter({ since }: { since: Date }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(interval);
-  }, []);
-  return <span>{formatUptime(since)}</span>;
-}
+// UptimeCounter moved to shared/ui/UptimeCounter.tsx (imported above) so the connected lead
+// card on «Подключение» reuses the SAME 1s ticker.
 
 // statusBadgeVariant moved to shared/lib/statusBadgeVariant.ts (imported above) so the
 // Phase-11 ConfigCard lead card reuses the EXACT SAME mapping without StatusPanel having to

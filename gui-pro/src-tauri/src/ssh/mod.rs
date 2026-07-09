@@ -17,7 +17,7 @@ use tokio::sync::{oneshot, Semaphore};
 // Re-export everything that lib.rs uses
 pub use deploy::{deploy_server, diagnose_server};
 pub use server::{
-    check_server_installation, uninstall_server, fetch_server_config,
+    check_server_installation, uninstall_server, UninstallSelection, fetch_server_config,
     add_server_user, server_restart_service, server_stop_service,
     server_start_service, server_reboot, server_get_logs, server_remove_user,
     server_get_available_versions, server_upgrade, server_get_stats,
@@ -854,6 +854,46 @@ pub(crate) async fn exec_command(
                     }
                 }
                 stdout.push_str(&text);
+            }
+            ChannelMsg::ExitStatus { exit_status } => {
+                exit_code = exit_status as i32;
+            }
+            _ => {}
+        }
+    }
+
+    Ok((stdout, exit_code))
+}
+
+/// Like [`exec_command`], but NEVER echoes the command's stdout/stderr to the log
+/// channel (C-01 / D-INV-2 / D-29). Use this for reads of files that carry a secret
+/// — e.g. `/etc/telemt/telemt.toml`, whose `[access.users] trusttunnel = "<hex>"`
+/// line is the MTProto proxy secret. Plain `exec_command` line-echoes every stdout
+/// line through `emit_log` (→ stderr + `deploy-log` event + app.log); for a
+/// secret-bearing read that echo is a leak, even though `logging::sanitize` now
+/// redacts the known key shapes as belt-and-suspenders. The transport path is
+/// identical to `exec_command`; only the per-line `emit_log` is dropped.
+pub(crate) async fn exec_command_quiet(
+    handle: &client::Handle<SshHandler>,
+    command: &str,
+) -> Result<(String, i32), String> {
+    let mut channel = open_session_with_retry(handle)
+        .await
+        .map_err(|e| format!("SSH_CHANNEL_FAILED|{e}"))?;
+
+    channel
+        .exec(true, command.as_bytes())
+        .await
+        .map_err(|e| format!("SSH_EXEC_FAILED|{e}"))?;
+
+    let mut stdout = String::new();
+    let mut exit_code: i32 = -1;
+
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::Data { ref data } | ChannelMsg::ExtendedData { ref data, .. } => {
+                // NO emit_log here — the whole point of the quiet variant.
+                stdout.push_str(&String::from_utf8_lossy(data));
             }
             ChannelMsg::ExitStatus { exit_status } => {
                 exit_code = exit_status as i32;

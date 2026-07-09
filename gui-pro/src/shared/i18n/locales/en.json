@@ -1625,6 +1625,13 @@
           "start_error": "Failed to start MTProto Proxy: {{error}}",
           "stop_error": "Failed to stop MTProto Proxy: {{error}}"
         },
+        "errors": {
+          "TELEMT_DOWNLOAD_FAILED": "Could not download the protocol to the server. Check that the server has internet access (github.com) and try again.",
+          "TELEMT_START_FAILED": "The service failed to start. Please try again.",
+          "TELEMT_SECRET_INVALID": "Could not generate the key. Please try again.",
+          "MTPROTO_PORT_BUSY": "That port is used by another service. Pick a different port.",
+          "MTPROTO_INVALID_PORT": "Invalid port (must be 1024–65535)."
+        },
         "modal_title_install": "Install MTProto Proxy",
         "modal_title_configure": "Configure MTProto Proxy",
         "configure": "Configure",
@@ -1730,7 +1737,20 @@
       "reboot_message": "Server will reboot. This will take 1-2 minutes.",
       "delete_title": "Delete TrustTunnel?",
       "delete_message": "VPN will be completely removed from the server. This action is irreversible.",
-      "uninstalled": "VPN removed from server"
+      "uninstalled": "TrustTunnel removed"
+    },
+    "uninstall": {
+      "title": "Uninstall protocol",
+      "description": "By default everything TrustTunnel installed is removed — the server returns to its pre-install state. Uncheck items you want to keep.",
+      "detecting": "Checking the server…",
+      "confirm": "Remove",
+      "components": {
+        "protocol": "TrustTunnel protocol",
+        "ufw": "Firewall (ufw)",
+        "fail2ban": "Fail2ban",
+        "bbr": "BBR acceleration",
+        "mtproto": "MTProto Proxy"
+      }
     },
     "overview": {
       "version": "Version",

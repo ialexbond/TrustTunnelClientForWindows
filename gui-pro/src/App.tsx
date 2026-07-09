@@ -1499,6 +1499,9 @@ function App() {
               ref={connectionPanelRef}
               onImport={() => setImportOpen(true)}
               status={status}
+              // Session uptime for the connected lead card's live ticking counter (the wire that
+              // was missing since Phase 11 — the card slot + Storybook existed, the data did not).
+              connectedSince={connectedSince}
               activeConfigPath={config.configPath}
               onConnect={handleConnectConfig}
               // BUG-A2 (17-uat): the lead card's «Отключить»/«Отмена» uses the race-safe user cancel.
@@ -1749,34 +1752,32 @@ function App() {
               setWizardBusy(false);
               setWizardActive(false);
             }}
-            onSetupComplete={(configPath) => {
-              // UAT 2026-06-19 (R2/R3) — finishing the wizard used to
-              // UNCONDITIONALLY promote the freshly-created config to the active
-              // «Подключение» config (overwriting whatever was there, even mid-
-              // connection). The product owner reported this as a bug. Promote the
-              // new config ONLY when there is no active config AND the VPN is not
-              // connected; otherwise leave the existing active config/connection
-              // completely untouched (the new <username>.toml is still on disk).
-              // A future Connection-tab redesign adds a multi-config switcher (R5).
-              const hasActiveConfig = Boolean(config.configPath);
-              // Treat any non-idle status as "connected" so we never replace the
-              // active config while a session is live or being established (R4).
-              const vpnConnected = status !== "disconnected" && status !== "error";
-              const activate =
-                shouldActivateConfig({ hasActiveConfig, vpnConnected }) &&
-                Boolean(configPath);
-              if (activate) {
-                setConfig((prev) => ({ ...prev, configPath }));
-                localStorage.setItem("tt_config_path", configPath);
-              }
-              // 11-UAT IN-10: register the freshly-installed config in the manifest so it shows
-              // as a card in «Подключение». The wizard writes a branded
-              // «[<CC>_]TrustTunnel_<login>.toml» on disk but previously only set the legacy
-              // tt_config_path marker — never add_config — so the install config was missing from
-              // the multi-config list (and startup migrate_configs is idempotent, so it could not
-              // pick it up later). add_config dedups by canonical path (safe no-op if already
-              // tracked); then refresh the list so the new card appears immediately.
-              if (configPath) {
+            onSetupComplete={(configPath, register = false) => {
+              // BACKLOG auto-add-config fix (owner: «после установки протокола конфиг сам
+              // появляется карточкой во Подключении, если ничего не нажимаю»). Touching the
+              // Connection tab is now GATED on an EXPLICIT `register` flag: only the «Добавить
+              // конфиг» Done-step button and the manual import pass register=true. «Перейти к
+              // панели управления» / the × close pass false → the install finishes, the
+              // <username>.toml stays on disk, but NO card is auto-added and NO active config is
+              // touched. Previously add_config fired UNCONDITIONALLY here, so even leaving to the
+              // control panel dropped a card into «Подключение».
+              if (register && configPath) {
+                // UAT 2026-06-19 (R2/R3) — promote the freshly-created config to the active
+                // «Подключение» config ONLY when there is no active config AND the VPN is not
+                // connected (R4: any non-idle status counts as connected); otherwise leave the
+                // existing active config/connection completely untouched. A future Connection-tab
+                // redesign adds a multi-config switcher (R5).
+                const hasActiveConfig = Boolean(config.configPath);
+                const vpnConnected = status !== "disconnected" && status !== "error";
+                if (shouldActivateConfig({ hasActiveConfig, vpnConnected })) {
+                  setConfig((prev) => ({ ...prev, configPath }));
+                  localStorage.setItem("tt_config_path", configPath);
+                }
+                // 11-UAT IN-10: register the config in the manifest so it shows as a card in
+                // «Подключение». add_config dedups by canonical path (safe no-op if already
+                // tracked); then refresh the list so the new card appears immediately. The config
+                // is not "lost" when register=false — the .toml is on disk and «Добавить конфиг»
+                // is the primary Done-step CTA for exactly this.
                 void invoke("add_config", { path: configPath })
                   .then(() => connectionPanelRef.current?.reload())
                   .catch(() => {});

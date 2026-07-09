@@ -27,6 +27,8 @@ interface ConnectionPanelProps {
   onImport: () => void;
   /** Live VPN status (drives the lead card lifecycle + active-config delete copy). */
   status: VpnStatus;
+  /** When the current session connected — threaded to the lead card's live uptime counter. */
+  connectedSince?: Date | null;
   /** Path of the currently active/connected config (the lead card). Empty when none. */
   activeConfigPath: string;
   /** Connect a specific config by path (used when nothing is active yet). */
@@ -93,7 +95,7 @@ interface ConnectionPanelProps {
  */
 export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanelProps>(
   function ConnectionPanel(
-    { onImport, status, activeConfigPath, onConnect, onDisconnect, onSwitchTo, onReconnect, isSwitching, pendingConnectPath, revertNotice, onRevertDismiss, source, reconnectProgress },
+    { onImport, status, connectedSince, activeConfigPath, onConnect, onDisconnect, onSwitchTo, onReconnect, isSwitching, pendingConnectPath, revertNotice, onRevertDismiss, source, reconnectProgress },
     ref,
   ) {
     const { t } = useTranslation();
@@ -310,6 +312,7 @@ export const ConnectionPanel = forwardRef<ConnectionPanelHandle, ConnectionPanel
           onRefreshPings={refreshPings}
           pinging={pinging}
           status={status}
+          connectedSince={connectedSince}
           activeConfigPath={activeConfigPath}
           onConnect={handleCardConnect}
           // D-05 (17-07): the lead card's connecting-loader «Отмена» button reuses the SAME

@@ -38,6 +38,9 @@ describe("DoneStep", () => {
     const w = makeWizardState({ step: "done", configPath: "/tmp/c.toml", setWizardStep, onSetupComplete });
     render(<DoneStep {...w} />);
     fireEvent.click(screen.getByText(i18n.t("wizard.done.go_to_panel")));
+    // BACKLOG auto-add-config fix: leaving to the control panel must NOT register a card, so
+    // onSetupComplete is called with the path ONLY (no register=true). The exact-match arg check
+    // enforces the single-arg call — a stray register flag here would fail this test.
     expect(onSetupComplete).toHaveBeenCalledWith("/tmp/c.toml");
     expect(setWizardStep).not.toHaveBeenCalledWith("welcome");
   });
@@ -91,7 +94,9 @@ describe("DoneStep", () => {
     // rejected anything not in the union).
     expect(localStorage.getItem("tt_navigate_after_setup")).toBe("connection");
     // D-01 / A3: onSetupComplete closes the overlay; no dead welcome navigation.
-    expect(onSetupComplete).toHaveBeenCalledWith("/tmp/c.toml");
+    // BACKLOG auto-add-config fix: «Добавить конфиг» is the EXPLICIT add → register=true, so the
+    // config is carded in «Подключение» (contrast «Перейти к панели управления», which omits it).
+    expect(onSetupComplete).toHaveBeenCalledWith("/tmp/c.toml", true);
     expect(setWizardStep).not.toHaveBeenCalledWith("welcome");
   });
 

@@ -40,6 +40,22 @@ const cfg: ConfigSummary = {
 };
 
 describe("ConfigCard", () => {
+  // Session-uptime timer (re-wired: the lead card slot + Storybook existed since Phase 11 but the
+  // live data was never threaded). Connected + connectedSince → a ticking «HH:MM:SS» counter.
+  it("connected lead card shows a live HH:MM:SS uptime counter from connectedSince", () => {
+    const since = new Date(Date.now() - 65_000); // 65s ago → «00:01:0x»
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="connected" connectedSince={since} />);
+    const card = screen.getByTestId("config-card");
+    // Exact seconds may drift by test timing → assert the HH:MM:SS shape is rendered.
+    expect(within(card).getByText(/^\d{2}:\d{2}:\d{2}$/)).toBeInTheDocument();
+  });
+
+  it("connected lead card renders NO uptime when neither connectedSince nor uptime is given", () => {
+    renderWithProviders(<ConfigCard config={cfg} leadCard status="connected" />);
+    const card = screen.getByTestId("config-card");
+    expect(within(card).queryByText(/^\d{2}:\d{2}:\d{2}$/)).not.toBeInTheDocument();
+  });
+
   // Truth: the active (connected) lead card exposes a green-active marker (data-attr) and
   // does NOT render a left-accent-rail element (banned design artifact — active = green
   // tint + full ring).

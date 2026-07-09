@@ -1352,7 +1352,10 @@ pub async fn install_fail2ban(
 
     if we_installed_f2b {
         // WE apt-installed fail2ban (it was absent) → drop an ownership marker so a
-        // full uninstall purges the package. Never marked when the admin had it.
+        // full uninstall purges the package. Never marked when the admin had it. Do NOT
+        // clear on the else path: a re-run sees the package present because WE installed it,
+        // so an else-clear would erase a marker we own (fix-review REG-1). The stale-marker
+        // cycle is closed by consuming the marker in uninstall_fail2ban + the dir removal.
         let _ = exec_command(
             handle, app,
             &format!("{sudo}mkdir -p /opt/trusttunnel 2>/dev/null; {sudo}touch /opt/trusttunnel/.tt-installed-fail2ban 2>/dev/null; true"),
@@ -1388,10 +1391,18 @@ pub async fn uninstall_fail2ban(
         emit_step(app, "security", "error", "apt purge failed");
         return Err("SECURITY_F2B_PURGE_FAILED".into());
     }
-    let _ = exec_command(handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
+    // WR-4 (Phase-18 re-review): the bare system-wide `apt-get autoremove -y` cascade is GONE
+    // here too — M-01 removed it from the scripted uninstall for over-reaching (it removed EVERY
+    // apt-orphaned package, incl. the admin's own), but this standalone panel path still ran it.
+    // Purge only the named package; never cascade-remove system orphans.
     let _ = exec_command(handle, app, &format!("{sudo}rm -rf /etc/fail2ban")).await?;
     // Drop the persisted ban DB so a residual boot-time restore can't re-ban the admin.
     let _ = exec_command(handle, app, &format!("{sudo}rm -rf /var/lib/fail2ban 2>/dev/null; true")).await?;
+    // WR-3 (Phase-18 re-review): consume the ownership marker. 18-10 made
+    // `.tt-installed-fail2ban` AUTHORITATIVE proof for the full-uninstall package purge — but if
+    // this standalone remove leaves the marker behind, a later admin-installed fail2ban would be
+    // wrongly classified as ours and purged. Mirror build_telemt_teardown's marker cleanup.
+    let _ = exec_command(handle, app, &format!("{sudo}rm -f /opt/trusttunnel/.tt-installed-fail2ban 2>/dev/null; true")).await?;
     // Backend-agnostic orphan-DROP sweep (daemon is now gone → safe to flush f2b chains).
     let orphan_sweep = format!(
         "if command -v iptables >/dev/null 2>&1; then \
@@ -1605,6 +1616,118 @@ pub async fn fail2ban_tail_log(
 //   UFW — install / uninstall / rules / logs
 // ═══════════════════════════════════════════════════════════════
 
+/// Parse `ss -tulnH` output into the distinct, externally-reachable, non-ephemeral
+/// listening ports (pure fn — unit-testable, no live SSH). Generalizes the
+/// `ss -tlnp | grep ':80 '` authoritative-listen idiom used by the cert dry-run.
+///
+/// `-H` drops the header row; each line is a socket whose LOCAL address column is
+/// `ADDR:PORT` (IPv4 `0.0.0.0:8080`/`127.0.0.1:5432`, IPv6 `[::]:8080`). The peer
+/// column is always a wildcard (`*`) for listening sockets, so scanning every field
+/// for a numeric trailing `:PORT` matches ONLY the local column regardless of the
+/// tcp/udp column offset.
+///
+/// Filters, so we never pin the wrong thing into a `ufw allow`:
+/// - loopback binds (`127.*` / `::1`) — not reachable from outside, firewalling them
+///   off harms nothing, so they are excluded;
+/// - duplicates (a port bound on both IPv4 and IPv6) — folded once.
+///
+/// WR-6 (Phase-18 re-review): the former `>= 32768` "ephemeral" floor was DROPPED. The input
+/// is `ss -tulnH` — LISTENING/bound sockets ONLY (no established client connections), so a high
+/// port here is a genuine service, not a transient socket: a TCP LISTEN on 40000 (Docker
+/// publishes 32768+) or WireGuard's default `51820/udp` are real admin services. The floor
+/// silently excluded them from the D-05 pre-allow, so a fresh `ufw default deny incoming` +
+/// `--force enable` blackholed the admin's VPN/service. The cost of NOT flooring is at worst a
+/// few harmless unused `ufw allow` rules for a UDP source port that happened to be bound at
+/// snapshot time; the cost of flooring is a locked-out running service — a strictly worse
+/// failure, so reachability wins. (SSH + VPN ports are still excluded downstream by
+/// `ports_to_preallow`; loopback stays filtered here.)
+pub(crate) fn parse_listening_ports(ss_out: &str) -> Vec<u16> {
+    let mut ports: Vec<u16> = Vec::new();
+    for line in ss_out.lines() {
+        for field in line.split_whitespace() {
+            // The local-address column is `ADDR:PORT`; split on the LAST ':' so IPv6
+            // `[::]:8080` keeps its address intact. Peer columns end in `:*` and fail
+            // the numeric parse below, so only the local column is ever matched.
+            let Some(idx) = field.rfind(':') else { continue };
+            let (addr, port_str) = (&field[..idx], &field[idx + 1..]);
+            let Ok(port) = port_str.parse::<u16>() else { continue };
+
+            // Loopback-only binds are unreachable from outside — excluded so we never
+            // fold a rule for a service that no remote client could reach anyway.
+            let addr = addr.trim_start_matches('[').trim_end_matches(']');
+            if addr == "::1" || addr.starts_with("127.") {
+                continue;
+            }
+            if !ports.contains(&port) {
+                ports.push(port);
+            }
+        }
+    }
+    ports
+}
+
+/// Extract the admin-occupied ports from the pre-install snapshot JSON (pure,
+/// self-contained serde read — deliberately NOT dependent on 18-01's
+/// `PreInstallSnapshot` type, so this plan carries no cross-plan compile edge).
+///
+/// Returns:
+/// - `Some(ports)` when the input is valid snapshot JSON (the pre-mutation truth —
+///   an empty `occupiedPorts` legitimately yields `Some(vec![])`, meaning "snapshot
+///   present, nothing to fold" — the caller then folds nothing rather than falling
+///   back to a live read);
+/// - `None` when the input is absent (empty string) or malformed — the ONLY case in
+///   which the caller engages the live `ss -tulnH` fallback.
+pub(crate) fn snapshot_occupied_ports(snapshot_json: &str) -> Option<Vec<u16>> {
+    // A private minimal view over the snapshot JSON — only the one field we need.
+    // Kept local (not 18-01's `PreInstallSnapshot`) so this plan compiles without a
+    // dependency on the snapshot module's types. `default` tolerates a snapshot that
+    // predates the field; unknown extra fields are ignored by serde.
+    #[derive(serde::Deserialize)]
+    struct OccupiedPortsView {
+        #[serde(rename = "occupiedPorts", default)]
+        occupied_ports: Vec<u16>,
+    }
+    // Empty/malformed input → Err → None → caller uses the live-`ss` fallback.
+    serde_json::from_str::<OccupiedPortsView>(snapshot_json)
+        .ok()
+        .map(|v| v.occupied_ports)
+}
+
+/// Decide which occupied ports to pre-allow before a fresh `ufw --force enable`
+/// (pure fn — the unit-testable core of the D-05 fold). Drops the SSH port and the
+/// VPN port (both get their own explicit rules) and de-duplicates.
+fn ports_to_preallow(listening: &[u16], ssh_port: u16, vpn_port: Option<u16>) -> Vec<u16> {
+    let mut out: Vec<u16> = Vec::new();
+    for &port in listening {
+        // The SSH port (D-INV-1 SACRED) and the VPN port are already allowed by their
+        // own explicit rules — never re-fold them here. Dedup the rest.
+        if port != ssh_port && Some(port) != vpn_port && !out.contains(&port) {
+            out.push(port);
+        }
+    }
+    out
+}
+
+/// M-04: build the D-05 occupied-port pre-allow ufw commands. Emits BOTH `/tcp` AND
+/// `/udp` for each folded port. The snapshot records only the port NUMBER (not the
+/// protocol), and `ss -tulnH` captures TCP + UDP listeners alike — so an admin UDP
+/// service (DNS 53/udp, WireGuard on a sub-32768 port, a game server) would otherwise be
+/// silently blocked by `default deny incoming` while only its TCP twin was opened. Both
+/// protocols is slightly over-permissive but preserves reachability; the shared
+/// ownership comment lets the uninstall sweep spare BOTH rules (H-03). Only numeric u16
+/// ports reach the shell. Pure fn → unit-testable.
+fn preallow_ufw_commands(sudo: &str, ports: &[u16]) -> Vec<String> {
+    let mut cmds = Vec::new();
+    for &port in ports {
+        for proto in ["tcp", "udp"] {
+            cmds.push(format!(
+                "{sudo}ufw allow {port}/{proto} comment 'pre-existing admin service (TrustTunnel)'"
+            ));
+        }
+    }
+    cmds
+}
+
 pub async fn install_firewall(
     app: &tauri::AppHandle,
     handle: &client::Handle<SshHandler>,
@@ -1643,16 +1766,65 @@ pub async fn install_firewall(
     // CRITICAL: allow the current SSH port BEFORE any enable, so we don't lock ourselves out.
     let _ = exec_command(handle, app, &format!("{sudo}ufw allow {ssh_port}/tcp comment 'SSH (TrustTunnel)'")).await?;
 
+    // Read the VPN port once: reused both to EXCLUDE it from the occupied-ports fold
+    // below (it gets its own explicit rule) and to emit that explicit rule further down.
+    let vpn_port = read_vpn_port(handle, app, sudo).await;
+
     if !already_active {
         // Only set default policies on fresh install. On an already-enabled firewall the
         // admin's existing default policy is preserved.
         let _ = exec_command(handle, app, &format!("{sudo}ufw default deny incoming")).await?;
         let _ = exec_command(handle, app, &format!("{sudo}ufw default allow outgoing")).await?;
+
+        // D-05 / Pitfall 1 fix: on a FRESH ufw, `default deny incoming` + `--force enable`
+        // would silently cut off any admin service listening on another port. Before the
+        // enable, fold an `ufw allow` for each admin-occupied port so default-deny never
+        // firewalls off a running service the admin already had.
+        //
+        // SOURCE OF TRUTH (WARNING): take the port list from the PRE-INSTALL SNAPSHOT,
+        // captured before ANY mutation (18-01). By the time we reach `enable`, our own
+        // deploy has already started its listeners — a live read HERE would treat a
+        // service we just started as if it had always belonged to the admin and pin an
+        // allow for it. So we read the snapshot's occupied ports (the state as it was
+        // BEFORE we touched the server); a live `ss -tulnH` read is the fallback ONLY
+        // when no snapshot exists (a legacy server installed before the snapshot feature).
+        // Path mirrors snapshot::SNAPSHOT_PATH; kept as a literal so this plan stays free
+        // of a compile-time dependency on the snapshot module's types.
+        //
+        // fix-review REG-2: during THIS deploy the capture lives at the `.pending` path (WR-5
+        // promotes it to the authoritative name only after the deploy fully succeeds, which is
+        // AFTER this Step 6.5). So read the authoritative file first (re-deploys), then fall back
+        // to `.pending` (the in-flight first install) — that pending file IS this run's verified
+        // pre-mutation capture, exactly the D-05 source of truth. Only a genuine legacy server
+        // (neither file) drops to the forbidden live-`ss` read.
+        let (snap_raw, _) = exec_command(
+            handle, app,
+            &format!("{sudo}cat /opt/trusttunnel/.tt-preinstall-snapshot.json 2>/dev/null || {sudo}cat /opt/trusttunnel/.tt-preinstall-snapshot.json.pending 2>/dev/null || true"),
+        ).await?;
+        let occupied = match snapshot_occupied_ports(snap_raw.trim()) {
+            Some(ports) => ports,
+            None => {
+                // Legacy server: no snapshot → read the live listen map as a fallback.
+                let (ss_out, _) = exec_command(
+                    handle, app,
+                    &format!("{sudo}ss -tulnH 2>/dev/null || true"),
+                ).await?;
+                parse_listening_ports(&ss_out)
+            }
+        };
+        // Folded rules carry an ownership comment so the uninstall sweep (18-04) can
+        // identify and remove them by comment. M-04: emit BOTH /tcp and /udp per folded
+        // port so an admin UDP service is not silently blocked. Only numeric u16 ports
+        // reach the shell.
+        let preallow = ports_to_preallow(&occupied, ssh_port, vpn_port);
+        for cmd in preallow_ufw_commands(sudo, &preallow) {
+            let _ = exec_command(handle, app, &cmd).await?;
+        }
     } else {
         emit_log(app, "info", "UFW already active — appending TrustTunnel rules without resetting policies");
     }
 
-    if let Some(vpn) = read_vpn_port(handle, app, sudo).await {
+    if let Some(vpn) = vpn_port {
         let _ = exec_command(handle, app, &format!("{sudo}ufw allow {vpn}/tcp comment 'TrustTunnel VPN'")).await?;
         let _ = exec_command(handle, app, &format!("{sudo}ufw allow {vpn}/udp comment 'TrustTunnel QUIC'")).await?;
     } else {
@@ -1677,6 +1849,12 @@ pub async fn install_firewall(
     //   • `.tt-installed-ufw` — WE apt-installed the package (was absent) → purge it.
     //   • `.tt-enabled-ufw`   — ufw was INACTIVE and WE enabled it → disable it again
     //     on uninstall (back to its prior off state), keeping the package.
+    // Write the marker ONLY when WE own the action (package was absent / ufw was inactive). Do
+    // NOT clear a marker on the else path: on an idempotent re-deploy the package is present /
+    // ufw is active BECAUSE WE installed/enabled it last time, so an else-clear would erase a
+    // marker we legitimately own and permanently defeat the uninstall's in-shell purge/disable
+    // gate (fix-review REG-1). The stale-marker cycle WR-3 targeted is already closed by consuming
+    // the markers in uninstall_firewall/uninstall_fail2ban + the full uninstall's dir removal.
     let _ = exec_command(handle, app, &format!("{sudo}mkdir -p /opt/trusttunnel 2>/dev/null; true")).await?;
     if we_installed_ufw {
         let _ = exec_command(handle, app, &format!("{sudo}touch /opt/trusttunnel/.tt-installed-ufw 2>/dev/null; true")).await?;
@@ -1704,7 +1882,12 @@ pub async fn uninstall_firewall(
         emit_step(app, "security", "error", "apt purge failed");
         return Err("SECURITY_UFW_PURGE_FAILED".into());
     }
-    let _ = exec_command(handle, app, &format!("{sudo}DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null; true")).await?;
+    // WR-4 (Phase-18 re-review): the system-wide `apt-get autoremove -y` cascade is GONE here too
+    // (M-01 removed it from the scripted uninstall for over-reaching; this panel path kept it).
+    // WR-3: consume the ownership markers — 18-10 made `.tt-installed-ufw` AUTHORITATIVE proof for
+    // the full-uninstall purge, so a marker outliving the package would later authorize purging an
+    // admin's own re-installed ufw. Mirror build_telemt_teardown's marker cleanup.
+    let _ = exec_command(handle, app, &format!("{sudo}rm -f /opt/trusttunnel/.tt-installed-ufw /opt/trusttunnel/.tt-enabled-ufw 2>/dev/null; true")).await?;
     emit_step(app, "security", "ok", "Firewall removed");
     Ok(())
 }
@@ -1884,6 +2067,85 @@ pub async fn firewall_set_http_port(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── parse_listening_ports (occupied-ports live-fallback parser) ──
+
+    #[test]
+    fn parse_listening_ports_folds_external_and_high_ports_drops_loopback() {
+        // Representative `ss -tulnH` blob: an external admin service on 8080 (IPv4 +
+        // its IPv6 twin — must dedup), a loopback-only Postgres on 5432 (excluded), a
+        // high-port TCP LISTEN service on 51000 (Docker publishes 32768+ — MUST be kept,
+        // WR-6), WireGuard on 51820/udp (a real bound service — MUST be kept, WR-6), and
+        // sshd on :22 (external, kept — the caller, not this parser, excludes the SSH port).
+        let ss_out = "\
+tcp   LISTEN 0      128          0.0.0.0:8080        0.0.0.0:*
+tcp   LISTEN 0      128        127.0.0.1:5432        0.0.0.0:*
+tcp   LISTEN 0      128             [::]:8080           [::]:*
+tcp   LISTEN 0      128          0.0.0.0:51000       0.0.0.0:*
+udp   UNCONN 0      0            0.0.0.0:51820       0.0.0.0:*
+tcp   LISTEN 0      128          0.0.0.0:22          0.0.0.0:*
+udp   UNCONN 0      0            0.0.0.0:22          0.0.0.0:*
+";
+        let ports = parse_listening_ports(ss_out);
+        assert!(ports.contains(&8080), "external admin port must be folded: {ports:?}");
+        assert!(!ports.contains(&5432), "loopback-only bind must be excluded: {ports:?}");
+        // WR-6: high-port LISTEN services must NO LONGER be dropped (they are real services).
+        assert!(ports.contains(&51000), "high-port TCP LISTEN service must be kept (WR-6): {ports:?}");
+        assert!(ports.contains(&51820), "WireGuard 51820/udp must be kept (WR-6): {ports:?}");
+        // dedup: 8080 appears on IPv4 + IPv6 but must be listed once.
+        assert_eq!(ports.iter().filter(|&&p| p == 8080).count(), 1, "8080 not deduped: {ports:?}");
+    }
+
+    // ── ports_to_preallow (D-05 fold core) ──
+
+    #[test]
+    fn ports_to_preallow_excludes_ssh_and_vpn_keeps_admin_ports() {
+        // Given the admin's occupied set {22, 8080, 443}, ssh=22, vpn=443 → only the
+        // genuine admin service (8080) is folded; ssh + vpn get their own explicit rules.
+        let got = ports_to_preallow(&[22, 8080, 443], 22, Some(443));
+        assert_eq!(got, vec![8080]);
+    }
+
+    #[test]
+    fn ports_to_preallow_dedups_and_tolerates_absent_vpn() {
+        // No detected VPN port → nothing excluded on that axis; duplicates folded once.
+        let got = ports_to_preallow(&[8080, 8080, 22, 9000], 22, None);
+        assert_eq!(got, vec![8080, 9000]);
+    }
+
+    #[test]
+    fn preallow_ufw_commands_open_both_tcp_and_udp_m04() {
+        // M-04: each folded occupied port must be pre-allowed for BOTH /tcp AND /udp, so
+        // an admin UDP service is not silently blocked by `default deny incoming`.
+        let cmds = preallow_ufw_commands("sudo ", &[53, 8080]);
+        assert_eq!(cmds.len(), 4, "two protocols per port: {cmds:?}");
+        assert!(cmds.iter().any(|c| c.contains("ufw allow 53/tcp")), "53/tcp missing");
+        assert!(cmds.iter().any(|c| c.contains("ufw allow 53/udp")), "53/udp missing (the M-04 gap)");
+        assert!(cmds.iter().any(|c| c.contains("ufw allow 8080/tcp")), "8080/tcp missing");
+        assert!(cmds.iter().any(|c| c.contains("ufw allow 8080/udp")), "8080/udp missing");
+        // All carry the ownership comment so the uninstall sweep spares BOTH (H-03).
+        assert!(cmds.iter().all(|c| c.contains("pre-existing admin service (TrustTunnel)")));
+        // Empty input → no commands.
+        assert!(preallow_ufw_commands("sudo ", &[]).is_empty());
+    }
+
+    // ── snapshot_occupied_ports (snapshot-first source, live-ss fallback gate) ──
+
+    #[test]
+    fn snapshot_occupied_ports_reads_valid_snapshot() {
+        // A valid pre-install snapshot JSON (camelCase `occupiedPorts`, compact `v`) →
+        // Some(ports). Extra/unknown fields are ignored (self-contained view struct).
+        let json = r#"{"v":1,"occupiedPorts":[22,8080,443],"ufwPresent":true,"bbrValue":"bbr"}"#;
+        assert_eq!(snapshot_occupied_ports(json), Some(vec![22, 8080, 443]));
+    }
+
+    #[test]
+    fn snapshot_occupied_ports_none_on_absent_or_malformed() {
+        // Absent (empty — `cat ... || true` on a legacy server) and malformed both yield
+        // None, so ONLY then does install_firewall fall back to a live `ss -tulnH` read.
+        assert_eq!(snapshot_occupied_ports(""), None);
+        assert_eq!(snapshot_occupied_ports("not json {"), None);
+    }
 
     // ── ufw_rule_number_is_ssh_port (SACRED SSH PORT guard) ──
 

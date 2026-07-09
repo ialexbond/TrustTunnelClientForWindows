@@ -32,6 +32,13 @@ pub struct MtProtoStatus {
     pub port: u16,
     pub secret: String,
     pub proxy_link: String,
+    /// Phase 18 (18-09) — POSITIVE proof that OUR install created this telemt/MTProto
+    /// proxy (the `/opt/trusttunnel/.tt-installed-mtproto` marker is present). Lets the
+    /// frontend offer «Удалить протокол» → MTProto removal for a LEGACY server that has
+    /// no pre-install snapshot. An admin's own pre-existing telemt never carries the
+    /// marker, so it is never flagged as ours (D-05). serde camelCase → `managedByUs`.
+    #[serde(rename = "managedByUs")]
+    pub managed_by_us: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -138,7 +145,7 @@ trusttunnel = \"{secret}\"\n\
 /// Returns `(0, "")` on empty / malformed / missing fields — caller (Wave 2)
 /// interprets defaults as «генерировать новый secret + использовать дефолтный порт».
 #[allow(dead_code)] // Wave 2 (mtproto_install idempotency check) — foundation.
-fn parse_telemt_toml_minimal(raw: &str) -> (u16, String) {
+pub(crate) fn parse_telemt_toml_minimal(raw: &str) -> (u16, String) {
     let doc = match raw.parse::<toml::Value>() {
         Ok(d) => d,
         Err(_) => return (0, String::new()), // soft fail
@@ -160,6 +167,70 @@ fn parse_telemt_toml_minimal(raw: &str) -> (u16, String) {
         .to_string();
 
     (port, secret)
+}
+
+/// Phase 18 (18-09) — MTProto ownership MARKER path.
+///
+/// POSITIVE proof that OUR `mtproto_install` created this telemt/MTProto proxy,
+/// independent of the pre-install snapshot. Ownership becomes:
+///   `(this marker present) OR (snapshot proves telemt was ABSENT pre-install)`.
+///
+/// WHY: before this marker, MTProto ownership was gated ONLY on the snapshot proving
+/// telemt was absent. A LEGACY server (protocol installed before the snapshot feature)
+/// has no snapshot, so app-installed (genuinely ours) MTProto was mis-classified as
+/// not-ours and could never be removed via «Удалить протокол». Most of the
+/// servers are legacy — this closed a real hole.
+///
+/// SAFETY (D-05 «чужое не трогаем»): an admin's own pre-existing telemt never carries
+/// this marker (only OUR install writes it), so it is never offered/removed.
+///
+/// NON-SECRET: an empty marker file. The proxy secret is NEVER written here (it lives
+/// only in `/etc/telemt/telemt.toml` `[access.users]`). The detection probe is a bare
+/// `test -f` — no content is read/echoed, so nothing can leak to the log channel.
+pub(crate) const MTPROTO_MARKER_PATH: &str = "/opt/trusttunnel/.tt-installed-mtproto";
+
+/// Phase 18 (18-09) — build the idempotent marker-write command (run on a SUCCESSFUL
+/// install, after the service is confirmed active). `mkdir -p` guards a server where
+/// `/opt/trusttunnel` does not yet exist; `touch` is idempotent. Pure fn → unit-testable.
+pub(crate) fn build_mtproto_marker_write(sudo: &str) -> String {
+    format!("{sudo}mkdir -p /opt/trusttunnel && {sudo}touch {MTPROTO_MARKER_PATH}")
+}
+
+/// Phase 18 (18-09) — build the ownership probe (`test -f <marker>`). Emits a fixed
+/// `MARKER_PRESENT` / `MARKER_ABSENT` token — never the marker content (it is empty
+/// anyway) and never the secret. Pure fn → unit-testable.
+pub(crate) fn build_mtproto_marker_probe(sudo: &str) -> String {
+    format!("{sudo}test -f {MTPROTO_MARKER_PATH} && echo MARKER_PRESENT || echo MARKER_ABSENT")
+}
+
+/// C-01 (Phase 18) — server-side command that extracts ONLY the `[server] port`
+/// integer from telemt.toml, never the whole file.
+///
+/// WHY: `mtproto_uninstall` / `uninstall_server` need the proxy port to remove its ufw
+/// rule, but the file's `[access.users] trusttunnel = "<secret>"` line is the MTProto
+/// proxy secret. Reading the whole file with `cat` through `exec_command` echoes every
+/// stdout line into the log channel (stderr + `deploy-log` event + app.log), leaking
+/// the secret on EVERY uninstall. `grep -oP '…\K[0-9]+'` prints ONLY the port digits —
+/// the secret never leaves the server. `head -1` guards against a hypothetical second
+/// match; `|| echo ''` keeps a missing file a clean empty read (port → 0). The only
+/// top-level `port =` key in `render_telemt_toml` is the `[server]` port (the API
+/// block uses `listen = "127.0.0.1:9091"`), so the anchored match is unambiguous.
+pub(crate) fn build_telemt_port_read(sudo: &str) -> String {
+    format!(
+        "{sudo}grep -oP '^\\s*port\\s*=\\s*\\K[0-9]+' /etc/telemt/telemt.toml 2>/dev/null | head -1 || echo ''"
+    )
+}
+
+/// Parse the `build_telemt_port_read` output (bare digits, possibly with surrounding
+/// whitespace/newlines) into a `u16`. Returns 0 when absent/empty/unparsable — the
+/// same "no readable port → ufw block is a no-op" contract as
+/// `parse_telemt_toml_minimal`'s port. Pure fn → unit-testable.
+pub(crate) fn parse_telemt_port_line(raw: &str) -> u16 {
+    raw.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .and_then(|l| l.parse::<u16>().ok())
+        .unwrap_or(0)
 }
 
 /// Phase 17.1 post-UAT — extract `[censorship] tls_domain` value from telemt.toml.
@@ -426,8 +497,15 @@ pub async fn mtproto_get_status(
             port: 0,
             secret: String::new(),
             proxy_link: String::new(),
+            managed_by_us: false, // not installed → cannot be ours
         });
     }
+
+    // ─── Phase 18 (18-09) MTProto ownership probe ──────────────
+    // Bare `test -f <marker>` (no content read) → the secret never leaves the server.
+    // `managed_by_us` lets the frontend offer removal on a LEGACY server (no snapshot).
+    let (marker_out, _) = exec_command(handle, app, &build_mtproto_marker_probe(sudo)).await?;
+    let managed_by_us = marker_out.contains("MARKER_PRESENT");
 
     // ─── Service active check ──────────────────────────────────
     let (svc_out, _) = exec_command(
@@ -439,9 +517,17 @@ pub async fn mtproto_get_status(
     let active = svc_out.trim() == "active";
 
     // ─── Read telemt.toml для port + secret ────────────────────
-    let (toml_out, _) = exec_command(
+    // WR-9 (Phase-18 re-review) / D-29: read through the NON-echoing exec_command_quiet.
+    // Plain exec_command echoes every stdout line into the deploy-log channel, and
+    // telemt's `[access.users]` maps ARBITRARY usernames to secrets — a legacy/admin
+    // `alice = "<hex>"` line is not in the sanitize whitelist, so a full echoed read
+    // leaked a third-party proxy secret to stderr / the deploy-log event / app.log on
+    // EVERY status refresh (and this probe fires precisely on the legacy/foreign-telemt
+    // server the managed_by_us detection targets). The raw output is only parsed
+    // Rust-side (port/secret/tls_domain), nothing user-visible — same conversion C-01
+    // already applied to the install read at :1268.
+    let (toml_out, _) = exec_command_quiet(
         handle,
-        app,
         &format!("{sudo}cat /etc/telemt/telemt.toml 2>/dev/null || echo ''"),
     )
     .await?;
@@ -467,6 +553,7 @@ pub async fn mtproto_get_status(
         port,
         secret,
         proxy_link,
+        managed_by_us,
     })
 }
 
@@ -616,6 +703,9 @@ async fn cleanup_legacy_mtproxy(
     handle: &client::Handle<SshHandler>,
     app: &tauri::AppHandle,
     sudo: &str,
+    // H-04: the active SSH port so the legacy-port ufw cleanup can never enumerate the
+    // SSH allow-rule (a legacy `PORT=443` substring-colliding with an `8443` SSH line).
+    ssh_port: u16,
 ) -> Result<(), String> {
     // 1) Read old port for firewall cleanup.
     let (port_out, _) = exec_command(
@@ -640,20 +730,15 @@ async fn cleanup_legacy_mtproxy(
     );
     exec_command(handle, app, &cleanup_cmd).await.ok();
 
-    // 3) ufw cleanup-by-number если знаем старый порт.
+    // 3) ufw cleanup-by-number если знаем старый порт (H-04-hardened via the shared
+    //    builder — anchored port match + SACRED-SSH-port exclusion + `ufw --force delete`).
     if old_port > 0 {
         let delim = format!("UFWLEG_EOF_{}", uuid::Uuid::new_v4().simple());
         let ufw_cmd = format!(
-            "{sudo}bash <<'{delim}'\n\
-NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
-for N in $NUMBERS; do\n\
-  yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
-done\n\
-true\n\
-{delim}",
+            "{sudo}bash <<'{delim}'\n{block}true\n{delim}",
             sudo = sudo,
             delim = delim,
-            port = old_port,
+            block = build_ufw_delete_by_number(sudo, old_port, ssh_port),
         );
         exec_command(handle, app, &ufw_cmd).await.ok();
     }
@@ -681,7 +766,10 @@ async fn download_telemt(
         "{sudo}bash <<'{delim}'\n\
 set -e\n\
 URL=\"https://github.com/telemt/telemt/releases/latest/download/telemt-{arch}-linux-{libc}.tar.gz\"\n\
-wget -q -O /tmp/telemt.tar.gz \"$URL\"\n\
+# 18-UAT: bound the download so an unreachable/slow github FAILS FAST (≤ ~45s) instead of\n\
+# hanging for minutes on wget's defaults — `--timeout` covers dns/connect/read, `--tries=2`\n\
+# retries a transient blip once. A stuck download also blocked the cancel from being observed.\n\
+wget -q --timeout=20 --tries=2 -O /tmp/telemt.tar.gz \"$URL\"\n\
 test -s /tmp/telemt.tar.gz\n\
 SIZE=$(stat -c%s /tmp/telemt.tar.gz 2>/dev/null || echo 0)\n\
 if [ \"$SIZE\" -lt 1000000 ]; then\n\
@@ -989,9 +1077,15 @@ async fn fetch_proxy_link(
         }
 
         // Primary: telemt admin API.
-        let (api_out, _) = exec_command(
+        // C-01 residual (2026-07-08 review): the /v1/users JSON and the journalctl
+        // fallback below both embed the proxy link, which carries the MTProto secret
+        // (`secret=ee<hex>…`). The echoing exec_command emits every stdout line to the
+        // deploy-log channel, and sanitize() only redacts `key = value` assignment lines
+        // — NOT a URL-embedded secret. Use the non-echoing quiet variant so the secret
+        // never reaches the log; the parsed link is still returned to the UI (where it is
+        // meant to be shown/copied/shared). Closes the last same-value D-29 path (all paths).
+        let (api_out, _) = exec_command_quiet(
             handle,
-            app,
             &format!("{sudo}curl -fsS -m 5 http://127.0.0.1:9091/v1/users 2>/dev/null"),
         )
         .await
@@ -1001,9 +1095,10 @@ async fn fetch_proxy_link(
         }
 
         // Fallback: journalctl. Filtered by --since (timestamp) + expected_port.
-        let (log_out, _) = exec_command(
+        // Quiet variant — same C-01 residual reason as the /v1/users read above: the
+        // journal lines contain the secret-bearing proxy link; must not echo to the log.
+        let (log_out, _) = exec_command_quiet(
             handle,
-            app,
             &format!(
                 "{sudo}journalctl -u telemt{since} -n 200 --no-pager -o cat 2>/dev/null",
                 since = journal_since_arg
@@ -1040,6 +1135,9 @@ async fn rollback_telemt_install(
     app: &tauri::AppHandle,
     sudo: &str,
     port_opt: Option<u16>,
+    // H-04: the active SSH port so an install-cancel rollback can never enumerate the
+    // SSH allow-rule while cleaning up the (partial) telemt port rule.
+    ssh_port: u16,
 ) -> Result<(), String> {
     let cleanup_cmd = format!(
         "{sudo}systemctl stop telemt 2>/dev/null || true; \
@@ -1054,18 +1152,15 @@ async fn rollback_telemt_install(
     exec_command(handle, app, &cleanup_cmd).await.ok();
 
     if let Some(port) = port_opt {
+        // H-04-hardened via the shared builder (anchored match + SSH-port exclusion +
+        // `ufw --force delete`) — the Phase-17 form here could no-op (non-root) or, as
+        // root, delete the SSH allow-rule on a substring collision.
         let delim = format!("UFWRB_EOF_{}", uuid::Uuid::new_v4().simple());
         let ufw_cmd = format!(
-            "{sudo}bash <<'{delim}'\n\
-NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
-for N in $NUMBERS; do\n\
-  yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
-done\n\
-true\n\
-{delim}",
+            "{sudo}bash <<'{delim}'\n{block}true\n{delim}",
             sudo = sudo,
             delim = delim,
-            port = port,
+            block = build_ufw_delete_by_number(sudo, port, ssh_port),
         );
         exec_command(handle, app, &ufw_cmd).await.ok();
     }
@@ -1101,12 +1196,39 @@ pub async fn mtproto_install(
 
     // ── Async block для всей pipeline — ловит errors в `install_inner_result`,
     //    позволяет rollback path после блока. ──
-    let install_inner_result: Result<MtProtoStatus, String> = async {
+    //
+    // 18-UAT: PREEMPTIVE cancel. The old checkpoint-only cancel (check_cancel BETWEEN steps)
+    // could not react DURING a long step — a click at «Скачивание прокси» (a slow wget) sat on
+    // «Отменяем…» until the whole download returned. Now the pipeline is RACED against a
+    // cancel-watcher: while NOT yet `committed` (before start_service brings the service up), a
+    // cancel flag aborts the in-flight step IMMEDIATELY — the pipeline future is dropped, so its
+    // in-flight SSH channel await is abandoned — and the rollback below runs. Once `committed` is
+    // set (service up = point of no return) the watcher parks forever, so the finishing steps
+    // (open_firewall + fetch_link) always complete. The per-step `check_cancel(?)` calls stay as a
+    // clean boundary cancel; the watcher adds mid-step responsiveness.
+    let committed = Arc::new(AtomicBool::new(false));
+    let cancel_watch = cancel_flag.clone();
+    let committed_watch = committed.clone();
+    let install_inner_result: Result<MtProtoStatus, String> = tokio::select! {
+        biased;
+        _ = async {
+            loop {
+                if committed_watch.load(Ordering::SeqCst) {
+                    // Point of no return reached — never preempt from here on.
+                    std::future::pending::<()>().await;
+                }
+                if cancel_watch.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        } => Err("MTPROTO_INSTALL_CANCELLED".to_string()),
+        r = async {
         // ─── STEP 0: cleanup_legacy ───────────────────────────────
         emit_mtproto_step(app, "cleanup_legacy", "running", "");
         let has_legacy = detect_legacy_mtproxy(&handle, app, sudo).await;
         if has_legacy {
-            cleanup_legacy_mtproxy(&handle, app, sudo).await.ok();
+            cleanup_legacy_mtproxy(&handle, app, sudo, params.port).await.ok();
             emit_mtproto_step(
                 app,
                 "cleanup_legacy",
@@ -1176,9 +1298,13 @@ pub async fn mtproto_install(
             read_trusttunnel_hostname_or_ip(&handle, app, sudo, &host_for_link).await?;
 
         // Secret: reuse existing valid (D-3.6 idempotency / MTPROTO-07 pattern) либо generate new.
-        let (existing_toml, _) = exec_command(
+        // C-01: this read genuinely needs the secret (to reuse it), so it MUST use the
+        // non-echoing `exec_command_quiet` — plain `exec_command` would echo the
+        // `[access.users] trusttunnel = "<hex>"` line into the log channel. The secret
+        // is parsed, validated, and written back into the new telemt.toml via a heredoc
+        // (also not echoed); it never reaches a log call.
+        let (existing_toml, _) = exec_command_quiet(
             &handle,
-            app,
             &format!("{sudo}cat /etc/telemt/telemt.toml 2>/dev/null || echo ''"),
         )
         .await?;
@@ -1237,13 +1363,36 @@ pub async fn mtproto_install(
             return Err("TELEMT_START_FAILED".into());
         }
         emit_mtproto_step(app, "start_service", "done", "");
-        check_cancel(&cancel_flag)?;
+        // POINT OF NO RETURN (18-UAT owner decision): the telemt service is now UP and serving.
+        // Freeze the cancel-watcher so NOTHING (the preemptive watcher OR a boundary check_cancel)
+        // can abort from here — the finishing steps always complete and no rollback tears down a
+        // live proxy.
+        committed.store(true, Ordering::SeqCst);
+        // The LAST cancel checkpoint was BEFORE start_service (after configure_telemt) — once the
+        // service is running, cancel is no longer honored. STEP 5 (open_firewall) + STEP 6
+        // (fetch link) just finish an already-working proxy; the former last checkpoint sat AFTER
+        // this ~10s window, so a cancel clicked here USED TO be silently ignored while the proxy
+        // installed anyway (the «отменяем, и не отменяет» UAT bug). The frontend now disables the
+        // Cancel button + blocks the modal close from the start_service step on; to remove the
+        // proxy after this point the user uses «Отключить/Удалить». NO check_cancel below.
+
+        // ─── Phase 18 (18-09) / WR-8 F2: write the MTProto ownership marker HERE — at the point
+        //     of no return, the INSTANT the service is confirmed up (STEP 4 returned active) and
+        //     BEFORE the ~10s open_firewall + fetch_link window. After WR-8 the marker is the SOLE
+        //     removal authorization (the pre-install snapshot no longer authorizes the teardown),
+        //     so it must be minted together with the point of no return: if the SSH channel dropped
+        //     during STEP 5/6 with the marker written later (its former position), OUR proxy would
+        //     be left running and un-removable via the uninstall dialog (managed_by_us=false hides
+        //     the row). Idempotent + non-secret (empty file); one retry since it is now
+        //     ownership-critical. Removed on teardown by `build_telemt_teardown`.
+        if exec_command(&handle, app, &build_mtproto_marker_write(sudo)).await.is_err() {
+            exec_command(&handle, app, &build_mtproto_marker_write(sudo)).await.ok();
+        }
 
         // ─── STEP 5: open_firewall ────────────────────────────────
         emit_mtproto_step(app, "open_firewall", "running", "");
         open_telemt_firewall(&handle, app, sudo, port).await.ok();
         emit_mtproto_step(app, "open_firewall", "done", "");
-        check_cancel(&cancel_flag)?;
 
         // ─── STEP 6: complete (fetch proxy_link) ──────────────────
         //
@@ -1260,6 +1409,8 @@ pub async fn mtproto_install(
         // proxy_link = "", UI отрендерит «installed but link не извлечена»
         // (acceptable degradation per researcher §Open Q5). Следующий refresh
         // через `mtproto_get_status` подхватит ссылку когда telemt отдаст real IP.
+        // (The ownership marker was written above at the point of no return — WR-8 F2.)
+
         emit_mtproto_step(app, "complete", "done", "");
 
         Ok(MtProtoStatus {
@@ -1268,9 +1419,10 @@ pub async fn mtproto_install(
             port,
             secret,     // D-29: returns в Tauri response, но НЕ через emit_log/emit_mtproto_step
             proxy_link, // D-29: returns в response, но НЕ через emit_log/emit_mtproto_step
+            managed_by_us: true, // just wrote the marker — this proxy is ours
         })
-    }
-    .await;
+        } => r,
+    };
 
     // ─── Cancel/error rollback ────────────────────────────────────
     //
@@ -1295,7 +1447,7 @@ pub async fn mtproto_install(
     // surgical cleanup per D-3.7, Plan 04 переписывает под telemt).
     if let Err(ref err) = install_inner_result {
         if err == "MTPROTO_INSTALL_CANCELLED" {
-            rollback_telemt_install(&handle, app, sudo, Some(install_started_port))
+            rollback_telemt_install(&handle, app, sudo, Some(install_started_port), params.port)
                 .await
                 .ok();
         }
@@ -1368,6 +1520,112 @@ pub async fn mtproto_stop(
 //   mtproto_uninstall — direct connect, surgical telemt cleanup
 // ═══════════════════════════════════════════════════════════════
 
+/// Build the surgical telemt/MTProto teardown as a reusable shell fragment.
+///
+/// Phase 18 / D-02b: extracted from `mtproto_uninstall` so plan 18-04 can FOLD
+/// the same teardown into the SINGLE uninstall script (`build_uninstall_script`).
+/// The standalone `mtproto_uninstall` command interpolates this fragment into its
+/// own `{sudo}bash <<'UUID'` heredoc, so the surgical-cleanup lines carry no inner
+/// `sudo` (they run under the sudo-wrapped bash); only the ufw block keeps its
+/// explicit `{sudo}` prefixes exactly as before.
+///
+/// The fragment is BEST-EFFORT (matching the historical `|| true` semantics):
+///   - stop + disable + kill telemt, remove the systemd unit, `daemon-reload`
+///   - remove `/bin/telemt`, `rm -rf /etc/telemt /opt/telemt`, `userdel -r telemt`
+///     (`userdel -r` also removes the home dir; the extra `rm -rf /opt/telemt` is a
+///     race guard for when userdel has not finished or the home dir was moved).
+///
+/// When `port > 0` the fragment ALSO removes the telemt ufw rule BY NUMBER
+/// (enumerate `ufw status numbered` for the port, delete highest-number-first).
+/// It NEVER uses a broad `ufw delete allow <port>/tcp` port-spec — that could
+/// clobber an admin's own bare rule on the same port (T-18-09). When `port == 0`
+/// (telemt.toml carried no readable port) no ufw block is emitted.
+///
+/// H-04 — the ufw block carries three hardening fixes over the Phase-17 form:
+///   1. ANCHORED port match `(^|[^0-9]){port}/tcp([^0-9]|$)` (was a bare substring
+///      `grep '{port}/tcp'`): a bare match let `443/tcp` also match `8443/tcp`,
+///      `43/tcp` match `443/tcp`, etc. — over-deleting a NON-ours admin rule whose
+///      port string merely ends with the telemt port. Mirrors Step 5c's anchor.
+///   2. SSH-PORT EXCLUSION `grep -vE …{ssh_port}/tcp…`: the SSH allow can never be
+///      enumerated here even if it collides/substring-matches the telemt port —
+///      restoring the two-guard defence (exclusion + final re-assert) for D-INV-1.
+///   3. `{sudo}ufw --force delete "$N"` (was `yes | ufw delete $N`): in this russh
+///      exec env `yes` feeds SUDO's stdin, not ufw's, so the confirm is never
+///      answered and NOTHING was deleted — the telemt rule silently survived every
+///      uninstall. This is the same working form Step 5c uses.
+///
+/// Pure fn → unit-testable under `cargo test --lib` with no live server. The
+/// telemt secret never reaches here: callers read only the `port` for ufw cleanup.
+pub(crate) fn build_telemt_teardown(sudo: &str, port: u16, ssh_port: u16) -> String {
+    // Surgical cleanup body (best-effort). No inner `sudo`: the caller runs this
+    // inside a `{sudo}bash <<'UUID'` heredoc, so the whole body is already root.
+    // Phase 18 (18-09): `rm -f /opt/trusttunnel/.tt-installed-mtproto` clears OUR
+    // ownership marker so a re-install re-mints it and a future status probe reports
+    // managed_by_us=false. Runs in BOTH teardown paths (standalone mtproto_uninstall +
+    // the folded full-revert build_uninstall_script). Static path, no inner `sudo`
+    // (the whole fragment runs inside the caller's `{sudo}bash <<'UUID'` heredoc).
+    let mut fragment = String::from(
+        "systemctl stop telemt 2>/dev/null || true\n\
+systemctl disable telemt 2>/dev/null || true\n\
+pkill -f /bin/telemt 2>/dev/null || true\n\
+rm -f /etc/systemd/system/telemt.service 2>/dev/null\n\
+systemctl daemon-reload 2>/dev/null || true\n\
+rm -f /bin/telemt 2>/dev/null\n\
+rm -rf /etc/telemt /opt/telemt 2>/dev/null\n\
+rm -f /opt/trusttunnel/.tt-installed-mtproto 2>/dev/null\n\
+userdel -r telemt 2>/dev/null || true\n\
+echo TELEMT_CLEANUP_OK\n",
+    );
+
+    // ufw cleanup BY NUMBER (Phase 17 fix-marathon pattern, H-04-hardened). Enumerate
+    // every rule whose `to` column ANCHOR-matches `{port}/tcp` via `ufw status
+    // numbered` (catches the IPv4 + IPv6 pair + comment rules), EXCLUDE the SACRED SSH
+    // port, sort numbers DESCENDING (deleting renumbers everything below), and delete
+    // via `ufw --force delete` (the working non-interactive form).
+    //
+    // NO broad `ufw delete allow {port}/tcp` fallback (T-18-09 / no-broad-delete): a
+    // port-spec delete would also match an admin's bare rule on the same port. The
+    // by-number enumeration already removes OUR rule (incl. comment/v6 variants), so
+    // the ownership-safe path is by-number ONLY.
+    if port > 0 {
+        fragment.push_str(&build_ufw_delete_by_number(sudo, port, ssh_port));
+        fragment.push_str("echo FW_OK\n");
+    }
+
+    fragment
+}
+
+/// H-04 shared — the hardened ufw delete-by-number block used by EVERY MTProto/telemt
+/// teardown path: the surgical uninstall (`build_telemt_teardown`), the legacy-MTProxy
+/// cleanup (`cleanup_legacy_mtproxy`), and the install-cancel rollback
+/// (`rollback_telemt_install`). Phase 18's H-04 hardened only the first; the other two
+/// kept the Phase-17 form (unanchored substring grep + `yes | ufw delete`, no SSH-port
+/// exclusion), so a legacy-port cleanup or an install-cancel could enumerate — and, as
+/// root, DELETE — the active SSH allow-rule (a substring-collision like `443` vs the
+/// `8443` SSH line) with no re-assert on that path → SACRED-SSH-port brick. Folding all
+/// three onto this single builder removes the drift.
+///
+/// Three hardening properties (full rationale on `build_telemt_teardown`):
+///   1. ANCHORED port match `(^|[^0-9]){port}/tcp([^0-9]|$)` — never over-matches a
+///      superstring port (`443` must not match `8443`/`18443`).
+///   2. SACRED-SSH-PORT EXCLUSION `grep -vE …{ssh_port}/tcp…` — the active SSH allow
+///      can never be enumerated for deletion, even on a substring collision (D-INV-1).
+///   3. `{sudo}ufw --force delete "$N"` — the working non-interactive form; the old
+///      `yes | ufw delete $N` fed SUDO's stdin (not ufw's) → the confirm was never
+///      answered → a silent no-op that left the telemt rule behind forever.
+///
+/// Emitted inside the caller's `{sudo}bash <<'UUID'` heredoc; keeps the inner `{sudo}`
+/// so it is correct whether or not the outer shell already elevated. Pure → unit-tested.
+fn build_ufw_delete_by_number(sudo: &str, port: u16, ssh_port: u16) -> String {
+    format!(
+        "NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep -E '(^|[^0-9]){port}/tcp([^0-9]|$)' | grep -vE '(^|[^0-9]){ssh_port}/tcp([^0-9]|$)' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
+for N in $NUMBERS; do\n\
+  {sudo}ufw --force delete \"$N\" >/dev/null 2>&1 || true\n\
+done\n",
+        sudo = sudo, port = port, ssh_port = ssh_port,
+    )
+}
+
 /// Phase 17.1 — Surgical uninstall (D-3.7).
 ///
 /// Removes ONLY telemt-related files:
@@ -1401,81 +1659,42 @@ pub async fn mtproto_uninstall(
     let handle = params.connect_with_app(app.clone()).await?;
     let sudo = detect_sudo(&handle, app).await;
 
-    // ─── Read telemt.toml для port перед удалением config'а ────
-    // Нужен для ufw cleanup-by-number. _secret не используется и не
-    // передаётся ни в emit_log, ни в activity_log (D-29).
-    let (toml_out, _) = exec_command(
-        &handle,
-        app,
-        &format!("{sudo}cat /etc/telemt/telemt.toml 2>/dev/null || echo ''"),
-    )
-    .await?;
-    let (port, _secret) = parse_telemt_toml_minimal(&toml_out);
+    // ─── Read ONLY the port из telemt.toml перед удалением config'а ────
+    // C-01: раньше здесь `cat` всего файла через exec_command — а exec_command
+    // эхо-ит каждую stdout-строку в лог-канал, поэтому строка секрета
+    // `[access.users] trusttunnel = "<hex>"` утекала в лог на КАЖДОМ удалении.
+    // Теперь читаем grep'ом только целое число порта — секрет вообще не покидает
+    // сервер. Порт нужен для ufw cleanup-by-number.
+    let (port_out, _) =
+        exec_command(&handle, app, &build_telemt_port_read(sudo)).await?;
+    let port = parse_telemt_port_line(&port_out);
 
-    // ─── Surgical telemt cleanup (bulk, best-effort) ───────────
+    // ─── Surgical telemt teardown (bulk, best-effort) ──────────
     //
-    // UUID heredoc delimiter (S-04 invariant) — defence in depth, даже
-    // если содержимое статично, namespace UUID гарантирует невозможность
-    // содержимого-collision с EOF substring.
+    // The teardown body (surgical cleanup + ufw delete-by-number) is built by the
+    // pure, reusable `build_telemt_teardown` so plan 18-04 can fold the SAME
+    // teardown into the single uninstall script (D-02b). It is interpolated into a
+    // single `{sudo}bash <<'UUID'` heredoc here — the standalone command keeps its
+    // exact behavior (best-effort `|| true`, ufw delete-by-number, no broad
+    // port-spec delete).
     //
-    // `userdel -r telemt` удаляет также home dir (/opt/telemt) и mail
-    // spool — cleanup полный без отдельного `rm -rf /opt/telemt`. Но
-    // оставляем `rm -rf /opt/telemt` для случая когда userdel не успел
-    // отработать (race) либо home dir был изменён.
+    // UUID heredoc delimiter (S-04 / D-INV-3) — defence in depth: даже если
+    // содержимое статично, namespace UUID гарантирует невозможность collision
+    // содержимого с EOF substring. `_secret` from telemt.toml is never emitted to
+    // any log channel — only `port` is used, for the ufw cleanup (D-29).
+    // H-04: thread the active SSH port so the ufw delete can never enumerate the SSH
+    // allow (D-INV-1). `params.port` is the port THIS session is riding.
+    let teardown = build_telemt_teardown(sudo, port, params.port);
     let cleanup_delim = format!("CLEANEOF_{}", uuid::Uuid::new_v4().simple());
     exec_command(
         &handle,
         app,
         &format!(
-            "{sudo}bash <<'{cleanup_delim}'\n\
-systemctl stop telemt 2>/dev/null || true\n\
-systemctl disable telemt 2>/dev/null || true\n\
-pkill -f /bin/telemt 2>/dev/null || true\n\
-rm -f /etc/systemd/system/telemt.service 2>/dev/null\n\
-systemctl daemon-reload 2>/dev/null || true\n\
-rm -f /bin/telemt 2>/dev/null\n\
-rm -rf /etc/telemt /opt/telemt 2>/dev/null\n\
-userdel -r telemt 2>/dev/null || true\n\
-echo TELEMT_CLEANUP_OK\n\
-{cleanup_delim}",
-            sudo = sudo, cleanup_delim = cleanup_delim,
+            "{sudo}bash <<'{cleanup_delim}'\n{teardown}{cleanup_delim}",
+            sudo = sudo, cleanup_delim = cleanup_delim, teardown = teardown,
         ),
     )
     .await?;
-
-    // ─── ufw cleanup by-number (Phase 17 fix-marathon pattern) ──
-    //
-    // UAT 2026-05-20 — switched from `ufw delete allow {port}/tcp` to
-    // delete-by-number because the spec form silently fails when the rule
-    // carries comment metadata. Symptom: user uninstalls, reopens
-    // «Брандмауэр» modal, MTProto rule is still there.
-    //
-    // Approach:
-    //   1) Enumerate every rule whose `to` column matches `{port}/tcp` via
-    //      `ufw status numbered` (matches IPv4 + IPv6 pair + comment rules).
-    //   2) Sort numbers DESCENDING — deleting renumbers everything below.
-    //   3) `yes | ufw delete N` to bypass interactive confirm prompt.
-    //   4) Belt-and-suspenders: also try `ufw delete allow {port}/tcp` as
-    //      no-op fallback (covers edge cases where status output drifts).
-    if port > 0 {
-        let ufw_delim = format!("UFWEOF_{}", uuid::Uuid::new_v4().simple());
-        exec_command(
-            &handle,
-            app,
-            &format!(
-                "{sudo}bash <<'{ufw_delim}'\n\
-NUMBERS=$({sudo}ufw status numbered 2>/dev/null | grep '{port}/tcp' | sed -E 's/^\\[ *([0-9]+)\\].*/\\1/' | sort -rn)\n\
-for N in $NUMBERS; do\n\
-  yes | {sudo}ufw delete $N >/dev/null 2>&1 || true\n\
-done\n\
-{sudo}ufw delete allow {port}/tcp >/dev/null 2>&1 || true\n\
-echo FW_OK\n\
-{ufw_delim}",
-                sudo = sudo, ufw_delim = ufw_delim, port = port,
-            ),
-        )
-        .await?;
-    }
 
     // ─── Parallel migration cleanup — wipe MTProxy artifacts (D-3.7) ──
     //
@@ -1483,7 +1702,7 @@ echo FW_OK\n\
     // corrupted upgrade (например install сломался на step 3 без
     // успешного uninstall) zip'нет здесь, не блокирует uninstall flow.
     // Если MTProxy не installed — детект negative, helper rapidly no-op'нет.
-    cleanup_legacy_mtproxy(&handle, app, sudo).await.ok();
+    cleanup_legacy_mtproxy(&handle, app, sudo, params.port).await.ok();
 
     Ok(())
 }
@@ -1564,6 +1783,32 @@ mod tests {
         assert_eq!(modes["classic"].as_bool(), Some(false));
         assert_eq!(modes["secure"].as_bool(), Some(false));
         assert_eq!(modes["tls"].as_bool(), Some(true));
+    }
+
+    // ─── C-01: port-only telemt.toml read (never leaks the secret) ────
+
+    #[test]
+    fn telemt_port_read_greps_the_port_never_cats_the_whole_file() {
+        // C-01: the uninstall port read must grep the port integer, NEVER `cat` the
+        // whole telemt.toml — a full read is echoed by exec_command and would leak the
+        // `[access.users] trusttunnel = "<secret>"` line into the log channel.
+        let cmd = build_telemt_port_read("sudo ");
+        assert!(cmd.contains("grep"), "must grep: {cmd}");
+        assert!(!cmd.contains("cat "), "must not cat the file: {cmd}");
+        assert!(cmd.contains("/etc/telemt/telemt.toml"), "must target telemt.toml: {cmd}");
+        // Anchored to the `port` key so the API block's `listen = …` is never matched.
+        assert!(cmd.contains("port"), "must anchor on the port key: {cmd}");
+    }
+
+    #[test]
+    fn parse_telemt_port_line_reads_bare_digits() {
+        assert_eq!(parse_telemt_port_line("8443\n"), 8443);
+        assert_eq!(parse_telemt_port_line("  443  "), 443);
+        assert_eq!(parse_telemt_port_line(""), 0);
+        assert_eq!(parse_telemt_port_line("\n\n"), 0);
+        assert_eq!(parse_telemt_port_line("not-a-number"), 0);
+        // Only the first non-empty line is honored (head -1 already caps server-side).
+        assert_eq!(parse_telemt_port_line("8443\n9091"), 8443);
     }
 
     // ─── parse_telemt_toml_minimal ────────────────────────────
@@ -1914,5 +2159,153 @@ tls_domain = ""
     fn returns_none_when_no_users_block() {
         let line = "LISTEN 0 1024 *:8443 *:*";
         assert_eq!(extract_process_name_from_ss(line), None);
+    }
+
+    // ─── build_telemt_teardown (extracted pure fragment, plan 18-03 / D-02b) ──
+    //
+    // These pin the telemt teardown SURFACE so plan 18-04 can fold the fragment
+    // into the single uninstall script without regressing mtproto_uninstall.
+
+    #[test]
+    fn telemt_teardown_pins_surgical_cleanup_surface() {
+        let s = build_telemt_teardown("sudo ", 8443, 2222);
+        // systemd lifecycle stop/disable
+        assert!(s.contains("systemctl stop telemt"));
+        assert!(s.contains("systemctl disable telemt"));
+        // kill the running proxy
+        assert!(s.contains("pkill -f /bin/telemt"));
+        // unit-file removal + daemon-reload
+        assert!(s.contains("rm -f /etc/systemd/system/telemt.service"));
+        assert!(s.contains("systemctl daemon-reload"));
+        // binary + service user + config/home dirs
+        assert!(s.contains("rm -f /bin/telemt"));
+        assert!(s.contains("userdel -r telemt"));
+        assert!(s.contains("rm -rf /etc/telemt /opt/telemt"));
+        // best-effort semantics preserved (|| true guards)
+        assert!(s.contains("|| true"));
+    }
+
+    // ─── Phase 18 (18-09) MTProto ownership marker ────────────
+
+    #[test]
+    fn mtproto_marker_write_touches_the_ownership_marker() {
+        // 18-09: a SUCCESSFUL install writes the positive-ownership marker so a LEGACY
+        // server (no snapshot) can still have its app-installed MTProto removed.
+        let cmd = build_mtproto_marker_write("sudo ");
+        assert!(cmd.contains(MTPROTO_MARKER_PATH), "must touch the marker path: {cmd}");
+        assert!(cmd.contains("/opt/trusttunnel/.tt-installed-mtproto"), "marker path literal: {cmd}");
+        // mkdir -p guard so a server without /opt/trusttunnel yet still gets the marker.
+        assert!(cmd.contains("mkdir -p /opt/trusttunnel"), "mkdir -p guard present: {cmd}");
+        assert!(cmd.contains("touch"), "idempotent touch: {cmd}");
+        // NON-SECRET invariant — the write NEVER embeds the proxy secret.
+        assert!(!cmd.contains("secret"), "marker write must carry no secret: {cmd}");
+    }
+
+    #[test]
+    fn mtproto_marker_probe_is_a_bare_test_f_no_secret() {
+        // 18-09: managed_by_us is derived from a bare `test -f` — reads no file content,
+        // so the secret never leaves the server / never reaches the log channel.
+        let cmd = build_mtproto_marker_probe("sudo ");
+        assert!(cmd.contains(&format!("test -f {MTPROTO_MARKER_PATH}")), "bare test -f probe: {cmd}");
+        assert!(cmd.contains("MARKER_PRESENT"), "emits present token: {cmd}");
+        assert!(cmd.contains("MARKER_ABSENT"), "emits absent token: {cmd}");
+        // never `cat`s the marker (it is empty anyway) — no content read.
+        assert!(!cmd.contains("cat "), "probe must not cat the marker: {cmd}");
+    }
+
+    #[test]
+    fn telemt_teardown_removes_the_ownership_marker() {
+        // 18-09: BOTH teardown paths (standalone mtproto_uninstall + folded full-revert)
+        // clear OUR marker so a re-install re-mints it and status reports not-ours after.
+        let s = build_telemt_teardown("sudo ", 8443, 2222);
+        assert!(
+            s.contains("rm -f /opt/trusttunnel/.tt-installed-mtproto"),
+            "teardown must remove the MTProto ownership marker: {s}"
+        );
+        // Present even when there is no ufw block (port 0) — the marker is service state,
+        // not firewall state.
+        let s0 = build_telemt_teardown("sudo ", 0, 2222);
+        assert!(
+            s0.contains("rm -f /opt/trusttunnel/.tt-installed-mtproto"),
+            "marker removal must not depend on the ufw block: {s0}"
+        );
+    }
+
+    #[test]
+    fn telemt_teardown_deletes_ufw_by_number_not_by_broad_spec() {
+        let port = 8443u16;
+        let s = build_telemt_teardown("sudo ", port, 2222);
+        // by-number enumeration: read `ufw status numbered`, filter our port,
+        // delete each matched rule by its NUMBER (highest first).
+        assert!(s.contains("ufw status numbered"));
+        // NO-BROAD-DELETE property (T-18-09): a `ufw delete allow <port>/tcp`
+        // broad port-spec could clobber an admin's bare rule on the same port
+        // and is FORBIDDEN — the teardown removes OUR rule by number only.
+        let forbidden_broad_port_spec_delete = format!("delete allow {port}/tcp");
+        assert!(
+            !s.contains(&forbidden_broad_port_spec_delete),
+            "forbidden broad ufw port-spec delete present: {forbidden_broad_port_spec_delete}"
+        );
+    }
+
+    #[test]
+    fn telemt_teardown_ufw_delete_is_anchored_ssh_safe_and_noninteractive_h04() {
+        // H-04: three fixes over the Phase-17 form.
+        let port = 443u16;
+        let ssh_port = 2222u16;
+        let s = build_telemt_teardown("sudo ", port, ssh_port);
+        // (1) ANCHORED port match — never a bare `grep '443/tcp'` substring (which would
+        //     also match 8443/tcp). Mirrors the Step 5c anchor.
+        assert!(
+            s.contains(&format!("grep -E '(^|[^0-9]){port}/tcp([^0-9]|$)'")),
+            "telemt ufw match must be anchored, not a bare substring: {s}"
+        );
+        assert!(!s.contains(&format!("grep '{port}/tcp'")), "bare unanchored grep must be gone: {s}");
+        // (2) SSH-port EXCLUSION so the SACRED SSH allow can never be enumerated here.
+        assert!(
+            s.contains(&format!("grep -vE '(^|[^0-9]){ssh_port}/tcp([^0-9]|$)'")),
+            "telemt ufw delete must exclude the SSH port: {s}"
+        );
+        // (3) WORKING non-interactive delete — `yes | ufw delete` is a no-op in this env.
+        assert!(s.contains(r#"ufw --force delete "$N""#), "must use the working delete form: {s}");
+        assert!(!s.contains("yes | "), "the no-op `yes | ufw delete` trap must be gone: {s}");
+    }
+
+    #[test]
+    fn ufw_delete_by_number_is_hardened_for_all_three_teardown_paths_cr1() {
+        // CR-1 (Phase-18 re-review): the shared builder is the SINGLE source of the
+        // H-04 hardening now used by build_telemt_teardown AND the two paths that kept
+        // the Phase-17 form — cleanup_legacy_mtproxy + rollback_telemt_install. This
+        // pins the three properties on the builder itself so no path can regress.
+        //
+        // Substring-collision case: legacy/telemt port 443 with SSH moved to 8443 — the
+        // old bare `grep '443/tcp'` matched the `8443/tcp` SSH line and (as root) deleted
+        // it → server brick. The anchor + SSH exclusion must both defeat that.
+        let s = build_ufw_delete_by_number("sudo ", 443, 8443);
+        // (1) anchored, not a bare substring
+        assert!(
+            s.contains("grep -E '(^|[^0-9])443/tcp([^0-9]|$)'"),
+            "must be anchored: {s}"
+        );
+        assert!(!s.contains("grep '443/tcp'"), "bare unanchored grep must be gone: {s}");
+        // (2) SACRED SSH port excluded even though 443 is a substring of 8443
+        assert!(
+            s.contains("grep -vE '(^|[^0-9])8443/tcp([^0-9]|$)'"),
+            "must exclude the SSH port: {s}"
+        );
+        // (3) working non-interactive delete; the `yes | ufw delete` no-op trap is gone
+        assert!(s.contains(r#"ufw --force delete "$N""#), "must use the working delete form: {s}");
+        assert!(!s.contains("yes | "), "the `yes | ufw delete` trap must be gone: {s}");
+    }
+
+    #[test]
+    fn telemt_teardown_omits_ufw_block_when_port_zero() {
+        // port == 0 means telemt.toml carried no readable port → no ufw cleanup
+        // is emitted (mirrors the original `if port > 0` guard); the surgical
+        // service/binary/user cleanup is still present.
+        let s = build_telemt_teardown("sudo ", 0, 2222);
+        assert!(!s.contains("ufw status numbered"));
+        assert!(s.contains("systemctl stop telemt"));
+        assert!(s.contains("userdel -r telemt"));
     }
 }

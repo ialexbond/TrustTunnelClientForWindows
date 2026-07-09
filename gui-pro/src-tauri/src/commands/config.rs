@@ -357,10 +357,12 @@ fn json_scalar_to_toml_edit(v: &serde_json::Value) -> Option<toml_edit::Value> {
                     J::Number(n) => {
                         if let Some(i) = n.as_i64() {
                             out.push(i);
-                        } else if let Some(f) = n.as_f64() {
-                            out.push(f);
                         } else {
-                            return None;
+                            // clippy::question_mark (rust 1.97+): `?` short-circuits to
+                            // None when the JSON number is neither i64 nor f64 — same as
+                            // the former `else if let Some(f) … else { return None }`.
+                            let f = n.as_f64()?;
+                            out.push(f);
                         }
                     }
                     J::String(s) => out.push(s.as_str()),

@@ -6,6 +6,7 @@ export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { CIDRPicker, PREFIX_OPTIONS, type CIDRPickerProps } from "./CIDRPicker";
 export { CharCounter, type CharCounterProps } from "./CharCounter";
+export { Checkbox } from "./Checkbox";
 export { ConfirmDialog } from "./ConfirmDialog";
 export {
   ConfirmDialogProvider,
